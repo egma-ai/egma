@@ -68,39 +68,39 @@ platform, connection type, access variant, modality, and product-label model.
 
 ## Integrations
 
-**Retell** offers three simulation lanes: text, a web call Egma places over the
-internet, and a real phone number. The coding agent uses
-`egma connect --platform retell --show-context` so it can ground the first tests
-in the prompt and tools Retell actually runs. Production monitoring uses
-Retell's call-history APIs.
+**Retell** offers three simulation paths: text, a web call Egma places over the
+internet, and a real phone number. The coding agent registers the Egma Agent,
+reads Retell Agent IDs and phone numbers with `egma agent connection options`,
+then adds each requested Connection. Production monitoring uses Retell's
+call-history APIs.
 
-**LiveKit** uses room connections with project credentials or a customer token
+**LiveKit** uses room Connections with Project credentials or a customer token
 endpoint. The coding agent grounds setup in committed worker source. Python and
-JavaScript workers support simulation testing. For Python, `egma run` can own a
-repository-local worker. Production monitoring calls `monitor_livekit(ctx)` in
-Python or `monitorLiveKit(ctx)` in JavaScript before `AgentSession.start`.
+JavaScript workers support simulation testing. Production monitoring calls
+`monitor_livekit(ctx)` in Python or `monitorLiveKit(ctx)` in JavaScript before
+`AgentSession.start`.
 
 ## How setup works
 
-Install the CLI once, then install the public skills separately:
+Install the CLI once. The `write-egma-tests` skill is available separately:
 
 ```bash
 npm install --global egma-cli
 npx --yes skills add egma-ai/egma \
-  --skill integrate-egma \
   --skill write-egma-tests
 ```
 
-The coding agent uses the `integrate-egma` skill and named promptless commands.
-It starts `egma login`; you approve the request in a browser. It then performs
-read-only discovery, resolves the exact target from repository and CLI facts,
-authors and validates local files, publishes and runs when requested, and
-confirms monitoring status. It asks only for a missing human input, an unsafe
-conflict, or approval before a real phone run that can cost money.
+The public `integrate-egma` skill is still being authored, so the coding agent
+follows the documented CLI workflow directly. It starts `egma login`; you
+approve the request in a browser. It then performs read-only discovery,
+registers Agent identity, adds requested Connections, authors local files,
+pushes them, and creates a Run when requested. Monitoring is a separate
+Agent-scoped action. It asks only for missing human input, an unsafe conflict,
+or approval before a real phone Run that can cost money.
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Follow the complete skills-and-commands path to a first reviewed run.
+    Follow the complete command path to a first reviewed run.
   </Card>
   <Card title="Core concepts" icon="layer-group" href="/concepts/tests-and-runs">
     Learn the exact meanings of agents, suites, tests, runs, simulations, personas, metrics, and grades.

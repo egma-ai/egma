@@ -7,7 +7,6 @@ import {
   getAgent,
   listAgents,
   listConnectionOptions,
-  discoverMockTools,
   registerAgent,
   updateConnection,
   startMonitoring,
@@ -15,7 +14,6 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import {
   RadioCardIndicator,
   RadioGroup,
@@ -54,8 +52,6 @@ import {
   RETELL_LANES,
   RETELL_LANE_HELP,
   RETELL_LANE_LABELS,
-  retellLaneBranchesDraft,
-  retellLaneMocksTools,
   RETELL_LANE_QUESTION,
   stepAfterRetellLanes,
   type RetellLane,
@@ -104,18 +100,6 @@ export type RetellRecovery = {
 type ConnectionBody = NonNullable<
   Parameters<typeof registerAgent>[0]["connection"]
 >;
-
-/**
- * What the mock question knows, in the three shapes it can be in.
- *
- * `refused` carries the platform's own sentence rather than a code this screen
- * would have to translate: the same words the agent's own mock-tools read
- * shows, because they are the same fact about the same account.
- */
-type MockToolsRead =
-  | { readonly status: "loading" }
-  | { readonly status: "ready"; readonly tools: readonly string[] }
-  | { readonly status: "refused"; readonly message: string };
 
 type RetellSaveProgress = {
   readonly signature: string;
@@ -263,19 +247,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
    * flow, from the agent's own screen.
    */
   const [lane, setLane] = useState<RetellLane | "">("");
-  /**
-   * Whether runs over the new connection answer the agent's tools themselves.
-   *
-   * **Off unless it is turned on.** Mocking changes what a run is: the agent
-   * reaches Egma's test data instead of the customer's own backend, and for a
-   * web call it also means a temporary version on their Retell account. That is
-   * an explicit yes, never a default somebody meets afterwards — so the
-   * connection is written `false` and this switch is what changes it.
-   */
-  const [mockTools, setMockTools] = useState(false);
-  const [mockRead, setMockRead] = useState<MockToolsRead>({ status: "loading" });
-  /** The connection the mock question is about, once it has been written. */
-  const [mockTarget, setMockTarget] = useState<ConnectSheetResult | null>(null);
   const [discovering, setDiscovering] = useState(false);
 
   // This chooses which source instructions are visible. It is never written
@@ -396,50 +367,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       current = false;
     };
   }, [catalogAttempt]);
-
-  /**
-   * The agent's tools, read once the mock question has something to read.
-   *
-   * **The same discovery the agent's own mock-tools read uses.** A second path
-   * here would be a second opinion about one account, and the two would drift
-   * the first time one of them learned something. It runs after the connection
-   * is written because that is what gives Egma the agent, its sealed key and
-   * its platform identity to read with.
-   */
-  useEffect(() => {
-    const target = mockTarget;
-    if (step !== "retell-mocks" || target === null) return;
-    let alive = true;
-    setMockRead({ status: "loading" });
-    void platformAnswer(
-      discoverMockTools(
-        { agentId: target.agentId, projectId },
-        { client: platformClient },
-      ),
-    ).then((answer) => {
-      if (!alive) return;
-      if (answer.status === "signed-out") {
-        window.location.replace("/sign-in");
-        return;
-      }
-      if (answer.status !== "ready") {
-        setMockRead({ status: "refused", message: answer.refusal.message });
-        return;
-      }
-      const found = answer.value;
-      if (found.refusal !== null) {
-        setMockRead({ status: "refused", message: found.refusal.message });
-        return;
-      }
-      setMockRead({
-        status: "ready",
-        tools: found.tools.map((tool) => tool.name),
-      });
-    });
-    return () => {
-      alive = false;
-    };
-  }, [mockTarget, projectId, step]);
 
   useEffect(() => {
     const target =
@@ -596,17 +523,22 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   }
 
   /*
-   * Chat is offered on project credentials and nowhere else, because that is
-   * the access variant where Egma dispatches the worker and can tell it this
-   * simulation is typed. Choosing chat therefore settles the way in as well,
-   * and the screen that would have asked is not drawn.
+   * Each modality offers whichever ways in the catalog lists for it — today
+   * both variants speak both, because the telling that a simulation is typed
+   * is the room's name, which Egma asks an endpoint for exactly as it asks
+   * for a bare one. A way in the new modality does not offer falls back to
+   * project credentials, so the form never draws a connection type the
+   * server would refuse.
    */
   function chooseLiveKitModality(next: "chat" | "voice"): void {
     if (next !== livekitModality) {
       setLivekitConfig({});
       setLivekitCredentials({});
     }
-    if (next === "chat") setLivekitAccess(PROJECT_CREDENTIALS);
+    const offered = livekitOptions.some(
+      (one) => one.modality === next && one.accessVariant === livekitAccess,
+    );
+    if (!offered) setLivekitAccess(PROJECT_CREDENTIALS);
     setLivekitModality(next);
   }
 
@@ -679,9 +611,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
           ? {}
           : { credentials: { apiKey: apiKey.trim() } }),
         ...(pullProductionCalls ? { pullProductionCalls: true } : {}),
-        // Written off, whatever the lane's own default is, so mocking is only
-        // ever the explicit yes given on the step after this write.
-        mockToolsEnabled: false,
       };
     }
 
@@ -1106,52 +1035,8 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     }
     if (landed !== null) {
       setRetellProgress(null);
-      // **The mock question comes after the write, because it is about the
-      // agent's own tools** and Egma reads those through the agent it has just
-      // made. The connection is already `false`, so a person who closes the
-      // sheet here leaves with mocks off — the answer this flow defaults to.
-      if (laneToSave !== "" && retellLaneMocksTools(laneToSave)) {
-        setMockTarget(landed);
-        transition("retell-mocks");
-        return;
-      }
       onConnected(landed);
     }
-  }
-
-  /** Turn the switch's answer into the connection, then leave. */
-  async function finishMockQuestion(): Promise<void> {
-    const target = mockTarget;
-    if (target === null) return;
-    // Nothing to write when the answer is the one the connection already
-    // holds, which is the ordinary path: the switch starts off.
-    if (!mockTools || target.connectionId === null) {
-      onConnected(target);
-      return;
-    }
-    setSaving(true);
-    setRefused(null);
-    const answer = await platformAnswer(
-      updateConnection(
-        {
-          agentId: target.agentId,
-          connectionId: target.connectionId,
-          projectId,
-          mockToolsEnabled: true,
-        },
-        { client: platformClient },
-      ),
-    );
-    setSaving(false);
-    if (!finishAnswer(answer)) {
-      // **The control goes back to what the server holds.** The refusal is
-      // rendered above, and a switch left reading ON over a connection that is
-      // still off would be the screen disagreeing with the account — the one
-      // thing a state this file draws must never do.
-      setMockTools(false);
-      return;
-    }
-    onConnected(target);
   }
 
   async function finishLiveKit(): Promise<void> {
@@ -1208,9 +1093,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         transition(next);
         return;
       }
-      case "retell-mocks":
-        await finishMockQuestion();
-        return;
       case "retell-lanes": {
         if (lane === "") return;
         // The phone lane carries on to the number chooser; the other two have
@@ -1506,21 +1388,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             </RadioGroup>
           </div>
         );
-      case "retell-mocks":
-        return (
-          <div className="flex flex-col gap-5">
-            <StepIntro
-              title="Mock this agent's tools?"
-              description="Egma read these off the agent. With mocks on, runs answer them with your test data instead of your real backend."
-            />
-            <MockToolsStep
-              branchesDraft={laneToSave !== "" && retellLaneBranchesDraft(laneToSave)}
-              on={mockTools}
-              onChange={setMockTools}
-              read={mockRead}
-            />
-          </div>
-        );
       case "retell-phone":
         return (
           <div className="flex flex-col gap-5">
@@ -1651,31 +1518,27 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             : saving
               ? "Setting up…"
               : "Continue"
-          : step === "retell-mocks"
-            ? saving
-              ? "Finishing…"
-              : "Set up simulation"
-            : step === "retell-key"
-              ? discovering
-                ? "Finding agents…"
-                : "Find agents"
-              : step === "retell-phone"
-                ? // Monitoring never reaches the number chooser any more: it
-                  // finishes on the agent choice.
-                  saving
-                  ? "Finishing…"
-                  : goal === "simulation"
-                    ? "Set up simulation"
-                    : "Set up both"
-                : step === "livekit-simulation"
-                  ? saving
-                    ? "Saving…"
-                    : completed === null
-                      ? "Continue to testing"
-                      : "Continue"
-                  : step === "livekit-monitoring" && goal === "both"
-                    ? "Continue to simulation"
-                    : "Return to agents";
+          : step === "retell-key"
+            ? discovering
+              ? "Finding agents…"
+              : "Find agents"
+            : step === "retell-phone"
+              ? // Monitoring never reaches the number chooser any more: it
+                // finishes on the agent choice.
+                saving
+                ? "Finishing…"
+                : goal === "simulation"
+                  ? "Set up simulation"
+                  : "Set up both"
+              : step === "livekit-simulation"
+                ? saving
+                  ? "Saving…"
+                  : completed === null
+                    ? "Continue to testing"
+                    : "Continue"
+                : step === "livekit-monitoring" && goal === "both"
+                  ? "Continue to simulation"
+                  : "Return to agents";
 
   const primaryDisabled =
     saving ||
@@ -1838,102 +1701,6 @@ function ChoiceCard({
   );
 }
 
-/**
- * The mock question: what Egma would stand in front of, and one switch.
- *
- * **A refusal replaces the list, and the switch goes with it.** Every reason
- * discovery refuses is a fact about the agent that no answer on this screen can
- * change — a custom-LLM engine, two keys on two accounts, nothing published, or
- * Retell not answering — so offering a switch over it would be offering a
- * choice Egma cannot keep. The connection is already written with mocks off, so
- * a refusal costs a person the feature and never the setup.
- *
- * Names only, no per-tool labels: the question here is whether to mock, not
- * which. Which is what the agent's own mock-tools surface is for.
- */
-function MockToolsStep({
-  branchesDraft,
-  on,
-  onChange,
-  read,
-}: {
-  /** Whether turning this on branches a draft version on the agent. */
-  readonly branchesDraft: boolean;
-  readonly on: boolean;
-  readonly onChange: (next: boolean) => void;
-  readonly read: MockToolsRead;
-}) {
-  const askable = read.status === "ready" && read.tools.length > 0;
-  return (
-    <div className="flex min-w-0 flex-col gap-4">
-      {read.status === "loading" ? (
-        <Loading what="this agent's tools" />
-      ) : read.status === "refused" ? (
-        <InfoBox title="Egma cannot mock this agent's tools">
-          {read.message}
-        </InfoBox>
-      ) : read.tools.length === 0 ? (
-        <InfoBox>
-          This agent declares no tools Egma can stand in front of, so a mocked
-          run would answer nothing differently.
-        </InfoBox>
-      ) : (
-        <ul
-          className="m-0 flex list-none flex-col border border-border p-0"
-          data-slot="mock-tools-found"
-        >
-          {read.tools.map((tool) => (
-            <li
-              className="border-t border-border px-4 py-3 font-mono text-sm text-foreground first:border-t-0"
-              key={tool}
-            >
-              {tool}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {askable ? (
-        <div className="flex min-w-0 items-center justify-between gap-4 border border-border p-4">
-          <label
-            className="cursor-pointer text-sm text-foreground"
-            htmlFor="retell-mock-tools"
-          >
-            Mock tools on runs
-          </label>
-          <Switch
-            checked={on}
-            data-slot="mock-tools-switch"
-            id="retell-mock-tools"
-            onCheckedChange={onChange}
-          />
-        </div>
-      ) : null}
-
-      {/*
-        The web-call lane only, and only while the switch is on. A text run
-        carries its mocked answers on each request and writes nothing to the
-        Retell account, so there is no draft for a number or a tag to reach and
-        nothing here to warn about.
-      */}
-      {branchesDraft && on ? (
-        <p
-          className="m-0 border border-border p-4 text-sm text-faint"
-          data-slot="mock-tools-latest-created-note"
-          role="note"
-        >
-          Mocked runs create a temporary draft version on this agent and delete
-          it after each run. A draft counts as Latest Created — make sure no
-          phone number or tag sends real callers to Latest Created. Leaving a
-          number's version unset also means Latest Created. Retell keeps an
-          unused copy of the conversation flow behind each mocked run — Retell
-          has no way to delete one — but nothing can route callers to it.
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
 function InfoBox({
   title,
   children,
@@ -1989,10 +1756,9 @@ function LiveKitSimulationStep({
   /**
    * Whether the chosen modality has more than one way in.
    *
-   * Voice has two, and which one this is changes what the form asks for. Chat
-   * has one — Egma has to dispatch the worker to tell it the simulation is
-   * typed — so there is nothing to choose and no control that pretends there
-   * is.
+   * Voice and chat both have two today, and which one this is changes what
+   * the form asks for. A deployment whose catalog narrows a modality to one
+   * way in gets no control that pretends there is a choice.
    */
   readonly chooseAccess: boolean;
   readonly agentName: string;
@@ -2042,7 +1808,7 @@ function LiveKitSimulationStep({
         }
         description={
           endpoint
-            ? "Egma requests a short-lived room token from your endpoint for every simulation."
+            ? "For every simulation Egma asks your endpoint for a short-lived room token, your LiveKit server URL, and the dispatch of the worker named below."
             : undefined
         }
       />
@@ -2064,11 +1830,7 @@ function LiveKitSimulationStep({
       <Field
         label="LiveKit agent name*"
         htmlFor="livekit-agent-name"
-        hint={
-          endpoint
-            ? "This names the agent in Egma. Your token endpoint decides which deployed worker joins the room."
-            : "Enter the exact agent name shown in your LiveKit Cloud dashboard."
-        }
+        hint="Enter the exact agent name shown in your LiveKit Cloud dashboard."
       >
         <Input
           id="livekit-agent-name"
@@ -2093,7 +1855,6 @@ function LiveKitSimulationStep({
           configPlaceholders={{
             url: "wss://your-project.livekit.cloud",
             tokenEndpoint: "https://api.example.com/livekit/token",
-            metadata: '{"tenant":"acme"}',
           }}
           credentialPlaceholders={{
             headers: '{"Authorization":"Bearer your-token"}',

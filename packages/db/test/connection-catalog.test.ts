@@ -97,7 +97,7 @@ describe("what a browser is told about a simulation connection", () => {
     expect(phone?.credentialHelp).not.toBe("");
   });
 
-  it("marks an optional config key optional and a demanded one demanded", () => {
+  it("marks every config key a form must demand, and lists no other", () => {
     const keyPair = connectionOptionMetadata().find(
       (one) => one.accessVariant === "livekit_room.project_credentials",
     );
@@ -117,26 +117,23 @@ describe("what a browser is told about a simulation connection", () => {
       label: "LiveKit agent name",
       required: true,
     });
-    // The label and the help both name two channels, because the value rides
-    // on two: the room always, and — the agent name above being demanded —
-    // the dispatch always too. A string promising only the room would send a
-    // customer looking for their JSON in one of the two places it can be.
-    // Metadata is also the optional one, the case that proves a form can
-    // still be told a key may be left out.
-    expect(fields.get("metadata")).toMatchObject({
-      label: "Agent metadata",
-      required: false,
-      afterCredentials: true,
-    });
-    expect(fields.get("metadata")?.help).toContain("ctx.room.metadata");
-    expect(fields.get("metadata")?.help).toContain("ctx.job.metadata");
+    // And nothing else. The dispatch metadata that used to sit here as the
+    // optional third key is a test's own `env.job_dispatch_metadata` now, so a
+    // form drawn from this catalog must not ask a connection for it.
+    expect([...fields.keys()]).toEqual(["url", "agentName"]);
 
+    // The endpoint variant holds no server url — its endpoint answers with
+    // one — and asks for the same worker name and metadata the key pair does.
     const endpoint = connectionOptionMetadata().find(
       (one) => one.accessVariant === "livekit_room.customer_token_endpoint",
     );
-    expect(endpoint?.fields.find((field) => field.key === "url")?.label).toBe(
-      "LiveKit WebSocket URL",
-    );
+    expect(endpoint?.fields.map((field) => field.key)).toEqual([
+      "tokenEndpoint",
+      "agentName",
+    ]);
+    expect(
+      endpoint?.fields.find((field) => field.key === "agentName"),
+    ).toMatchObject({ label: "LiveKit agent name", required: true });
   });
 
   /**
@@ -160,11 +157,11 @@ describe("what a browser is told about a simulation connection", () => {
   });
 
   /**
-   * The chat lane's whole product surface, as the catalog says it: one more
-   * row on the variant where Egma dispatches the worker itself, and nothing
-   * new on the one where it cannot.
+   * The chat lane's whole product surface, as the catalog says it: one chat
+   * row on each of the two ways in, each with its own label so a person can
+   * tell the four LiveKit room options apart.
    */
-  it("offers LiveKit chat on project credentials and nowhere else", () => {
+  it("offers LiveKit chat on both access variants", () => {
     const livekit = connectionOptionMetadata().filter(
       (one) => one.connectionType === "livekit_room",
     );
@@ -175,6 +172,7 @@ describe("what a browser is told about a simulation connection", () => {
       "livekit_room.project_credentials/voice",
       "livekit_room.project_credentials/chat",
       "livekit_room.customer_token_endpoint/voice",
+      "livekit_room.customer_token_endpoint/chat",
     ]);
 
     expect(
@@ -191,12 +189,17 @@ describe("what a browser is told about a simulation connection", () => {
     });
 
     expect(
-      livekit.some(
+      livekit.find(
         (one) =>
           one.accessVariant === "livekit_room.customer_token_endpoint" &&
           one.modality === "chat",
       ),
-    ).toBe(false);
+    ).toMatchObject({
+      agentPlatform: "livekit",
+      productLabel: "LiveKit chat token endpoint",
+      topology: "agent-dials-out",
+      credentialRule: "required",
+    });
   });
 
   it("reads each explicit stored access variant without inferring from config", () => {
@@ -233,15 +236,51 @@ describe("what a browser is told about a simulation connection", () => {
           modality: "voice",
           productLabel: "Retell phone",
         }),
+      ]),
+    );
+    expect(connectionOptionMetadata()).not.toEqual(
+      expect.arrayContaining([
         expect.objectContaining({
           agentPlatform: null,
           connectionType: "phone_number",
-          accessVariant: "phone_number.public_e164",
-          modality: "voice",
-          productLabel: "Phone number",
         }),
       ]),
     );
+  });
+
+  it("keeps old phone rows readable without offering them for new connections", () => {
+    expect(
+      productLabelOf(
+        "livekit",
+        "phone_number",
+        "phone_number.public_e164",
+        "voice",
+      ),
+    ).toBe("Phone number");
+    expect(
+      productLabelOf(
+        null,
+        "phone_number",
+        "phone_number.public_e164",
+        "voice",
+      ),
+    ).toBe("Phone number");
+
+    const offered = connectionOptionMetadata();
+    expect(
+      offered.some(
+        (option) =>
+          option.agentPlatform === "livekit" &&
+          option.connectionType === "phone_number",
+      ),
+    ).toBe(false);
+    expect(
+      offered.some(
+        (option) =>
+          option.agentPlatform === null &&
+          option.connectionType === "phone_number",
+      ),
+    ).toBe(false);
   });
 
   it("refuses a platform that is not part of an explicit supported tuple", () => {

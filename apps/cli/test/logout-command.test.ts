@@ -93,8 +93,11 @@ describe("egma logout", () => {
       url: "https://other.egma.example",
       key: "egma_sk_other",
     });
-    expect(watched.out).toContain(`revoked_key_id: ${apiKeyId}`);
-    expect(watched.out).toContain("authentication: environment");
+    expect(watched.out).toContain(`Revoked saved login key ${apiKeyId}.`);
+    expect(watched.out).toContain(
+      "EGMA_API_KEY is still set for this process. Remove it from the shell or secret store to stop using it.",
+    );
+    expect(watched.out.join("\n")).not.toContain("status:");
   });
 
   it("removes the credentials file after the last login but leaves its folder", async () => {
@@ -136,7 +139,7 @@ describe("egma logout", () => {
 
     expect(code).toBe(LOGOUT_EXIT.revokeFailed);
     expect(await readCredentials(workspace.credentialsFile, URL)).toEqual(held);
-    expect(watched.out).toContain("status: revoke-failed");
+    expect(watched.out.join("\n")).not.toContain("status:");
     expect(watched.failed).toEqual(["try later"]);
   });
 
@@ -154,8 +157,10 @@ describe("egma logout", () => {
 
     expect(code).toBe(LOGOUT_EXIT.done);
     expect(requests).toBe(0);
-    expect(watched.out).toContain("status: no-stored-login");
-    expect(watched.out).toContain("authentication: environment");
+    expect(watched.out).toContain("There is no saved login to revoke.");
+    expect(watched.out).toContain(
+      "EGMA_API_KEY is still set for this process. Remove it from the shell or secret store to stop using it.",
+    );
   });
 
   it("removes a legacy local entry without guessing a remote key ID", async () => {
@@ -173,7 +178,9 @@ describe("egma logout", () => {
     expect(code).toBe(LOGOUT_EXIT.done);
     expect(requests).toBe(0);
     expect(await readCredentials(workspace.credentialsFile, URL)).toBeNull();
-    expect(watched.out).toContain("remote_key: unknown-not-revoked");
+    expect(watched.out).toContain(
+      "This login came from an older credentials file with no API key ID. Egma removed only its local record.",
+    );
     expect((await stat(workspace.egmaFolder)).isDirectory()).toBe(true);
   });
 });

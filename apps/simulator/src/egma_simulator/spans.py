@@ -345,9 +345,8 @@ class SpanEmitter:
 
         Where egma *answered* the call, the two ends are the moment the
         call arrived and the moment the answer went back — the round trip
-        plus whatever delay the mock tool declared — so a declared delay
-        is readable as the time it really took and no attribute repeats
-        the number for the two to disagree about.
+        — so the time it really took is the span's own duration and no
+        attribute repeats the number for the two to disagree about.
 
         **A result never rides without its provenance.** The rule that
         looks like an exception — never record half an exchange nobody

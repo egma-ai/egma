@@ -551,11 +551,13 @@ describe("a connection's stored credential", () => {
       "livekit_room.project_credentials/voice",
       "livekit_room.project_credentials/chat",
       "livekit_room.customer_token_endpoint/voice",
+      "livekit_room.customer_token_endpoint/chat",
     ]);
     expect(livekit.map((one) => one.productLabel)).toEqual([
       "LiveKit project credentials",
       "LiveKit chat",
       "LiveKit token endpoint",
+      "LiveKit chat token endpoint",
     ]);
 
     // The three credential rules the product's Restore is written against,
@@ -572,10 +574,18 @@ describe("a connection's stored credential", () => {
     expect(
       items.find(
         (one) =>
-          one.agentPlatform === null &&
+          one.agentPlatform === "retell" &&
           one.connectionType === "phone_number",
       )?.credentialRule,
     ).toBe("forbidden");
+    expect(
+      items.some(
+        (one) =>
+          one.agentPlatform === null ||
+          (one.agentPlatform === "livekit" &&
+            one.connectionType === "phone_number"),
+      ),
+    ).toBe(false);
     expect(
       livekit.find(
         (one) =>
@@ -674,8 +684,8 @@ describe("a connection's shape", () => {
       ada,
       {
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: { headers: '{"Authorization":"Bearer token-value"}' },
         expectedRevision: wiring.revision,
@@ -800,8 +810,8 @@ describe("restoring a connection", () => {
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
+        agentName: "front-desk",
       },
       credentials: { headers: '{"Authorization":"Bearer token-value"}' },
     });
@@ -986,7 +996,7 @@ describe("a key minted for the whole organization", () => {
 
     // `ada.secret` is minted for the whole customer and names no project. The
     // organization holds one project, so the API resolves it — the same rule
-    // the graders, personas and mock tools follow — and nothing in the group
+    // the graders, personas and tests follow — and nothing in the group
     // reaches the data layer's project guard as a fault.
     const withKey = async (
       method: "POST" | "PATCH",

@@ -226,6 +226,28 @@ function livekitServerOrigin(url: string): string {
   return parsed.port === "" ? host : `${host}:${parsed.port}`;
 }
 
+/**
+ * Which token endpoint a url names, as one comparable string: the whole
+ * route, not the origin alone, because one gateway commonly mints for several
+ * projects on several routes. Host case and a trailing root dot go the way
+ * they do for a server; path and query are kept as written. Copied from the
+ * registry for the reason above.
+ */
+function tokenEndpointIdentity(endpoint: string): string {
+  const written = endpoint.trim();
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(written);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed === undefined) return written;
+
+  const host = parsed.hostname.toLowerCase().replace(/\.$/u, "");
+  const origin = parsed.port === "" ? host : `${host}:${parsed.port}`;
+  return `${origin}${parsed.pathname}${parsed.search}`;
+}
+
 /** The last four of one field — only ever a credential's public half. */
 function lastFourOf(field: string): CredentialHint {
   return (sealed) => sealed[field]?.slice(-4) ?? "";
@@ -310,38 +332,6 @@ function authHeadersJson(what: string, field: string, value: unknown): string {
     throw new Refusal(
       `${what}'s credentials need ${field} to be a JSON object of header name to header value, ` +
         `written in a string, which looks like {"Authorization":"Bearer …"}`,
-    );
-  }
-  return candidate;
-}
-
-/**
- * What LiveKit accepts in one metadata field, which is the whole of what egma
- * accepts because egma adds nothing to it. Mirrored from the access layer so
- * the fixture refuses the oversize value the real platform refuses: a fixture
- * that admits what production rejects lets a CLI test register a connection
- * nobody could really have.
- */
-const METADATA_BYTES = 512 * 1024;
-
-/** A JSON object carried as the text it was written as, checked at create. */
-function jsonObjectText(key: string, value: unknown): string {
-  const candidate = typeof value === "string" ? value.trim() : "";
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(candidate);
-  } catch {
-    parsed = undefined;
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Refusal(
-      `the config's ${key} must be a JSON object written in a string, which looks like {"tenant":"acme"}`,
-    );
-  }
-  const bytes = Buffer.byteLength(candidate, "utf8");
-  if (bytes > METADATA_BYTES) {
-    throw new Refusal(
-      `the config's ${key} is ${bytes} bytes and egma admits at most ${METADATA_BYTES} on the room and the dispatch`,
     );
   }
   return candidate;
@@ -474,14 +464,12 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     // egma opens the room and the customer's agent joins it.
     topology: "agent-dials-out",
     /**
-     * Two access variants answer one question: who mints the
-     * token that opens the room. Nothing carries over between them — a
-     * connection that names an endpoint holds no key pair, so it can neither
-     * create the room that carries metadata nor dispatch the worker that is
-     * handed it, which is one power covering both of the channels a metadata
-     * value rides. `agentName` and `metadata` are therefore not among that
-     * variant's keys, and both are refused on it by name rather than silently
-     * ignored.
+     * Two access variants answer one question: who mints the token that opens
+     * the room. Both name the worker: the key-pair variant dispatches it
+     * itself, the endpoint variant asks its endpoint for it by name in
+     * LiveKit's standard token request, with the test's job dispatch metadata
+     * on that dispatch. Only the key-pair variant holds a server url — the
+     * endpoint's answer names the server.
      */
     accessVariants: [
       {
@@ -492,11 +480,6 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
           // Demanded: every egma dispatch is explicit, so the record names
           // the agent it graded.
           agentName: nonEmptyString,
-          // Handed to the agent exactly as written, on both of the channels
-          // LiveKit gives an agent to read its per-session context from: the
-          // room's metadata always, and the dispatch's metadata too — the
-          // demanded `agentName` above always names a worker to dispatch.
-          metadata: optional(jsonObjectText),
         },
         credentials: {
           required: true,
@@ -513,19 +496,9 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
       {
         id: "livekit_room.customer_token_endpoint",
         named: "a token-endpoint livekit connection",
-        // Voice only, on a kind that speaks both: egma joins a room this
-        // variant's endpoint let it into and never dispatches the worker, so
-        // it has nowhere to ask the agent to go text-only.
-        modalities: {
-          speaks: ["voice"],
-          refusal:
-            "a token-endpoint livekit connection speaks voice: Egma asks your " +
-            "endpoint for a token and never dispatches the worker itself, so " +
-            "it has no way to tell the agent to answer in text. Chat is " +
-            "offered on the LiveKit project credentials access variant, where " +
-            "Egma dispatches the named worker and sends the modality with it.",
-        },
-        config: { url: livekitServerUrl, tokenEndpoint: tokenEndpointUrl },
+        // Speaks both, like the key pair: a chat room is asked for under its
+        // marked name, which the endpoint's allowlist matches unchanged.
+        config: { tokenEndpoint: tokenEndpointUrl, agentName: nonEmptyString },
         credentials: {
           required: true,
           fields: ["headers"],
@@ -549,10 +522,13 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     reuse: {
       matchedKeys: ["agentName"],
       identityOf: (config) => {
-        const url = config["url"];
         const agentName = config["agentName"];
-        if (url === undefined || agentName === undefined) return undefined;
-        return `${livekitServerOrigin(url)}|${agentName}`;
+        if (agentName === undefined) return undefined;
+        const url = config["url"];
+        if (url !== undefined) return `${livekitServerOrigin(url)}|${agentName}`;
+        const endpoint = config["tokenEndpoint"];
+        if (endpoint === undefined) return undefined;
+        return `${tokenEndpointIdentity(endpoint)}|${agentName}`;
       },
     },
     simulatorAdapter: true,
@@ -613,17 +589,10 @@ const CONNECTION_OPTIONS = [
   },
   {
     agentPlatform: "livekit",
-    connectionType: "phone_number",
-    accessVariant: "phone_number.public_e164",
-    modality: "voice",
-    productLabel: "Phone number",
-  },
-  {
-    agentPlatform: null,
-    connectionType: "phone_number",
-    accessVariant: "phone_number.public_e164",
-    modality: "voice",
-    productLabel: "Phone number",
+    connectionType: "livekit_room",
+    accessVariant: "livekit_room.customer_token_endpoint",
+    modality: "chat",
+    productLabel: "LiveKit chat token endpoint",
   },
 ] as const;
 
@@ -1036,6 +1005,15 @@ const AGENT_PLATFORMS = ["retell", "livekit"] as const;
 
 type BoundPlatform = (typeof AGENT_PLATFORMS)[number];
 
+/** One Retell Agent on the provider account the fixture API can discover. */
+export type SeedRetellAgent = {
+  readonly id: string;
+  readonly name: string;
+  readonly modality: "chat" | "voice";
+  /** Public phone numbers currently routed to this Agent. */
+  readonly phoneNumbers?: readonly string[];
+};
+
 /** The binding a registration asked for — required, in the real thing's words. */
 function agentPlatformIn(value: unknown): BoundPlatform {
   if (
@@ -1139,6 +1117,8 @@ export type AgentControls = {
    * would put the secret somewhere a failing test prints.
    */
   readonly sealed: readonly string[];
+  /** Seed the Retell account one API key opens for Agent discovery. */
+  retellAccount(apiKey: string, agents: readonly SeedRetellAgent[]): void;
   /** The project a write named, or `null`, per write. */
   readonly projectsNamed: readonly (string | null)[];
 };
@@ -1189,6 +1169,8 @@ export function agentRoutes(options: {
    * one.
    */
   readonly projectId: string;
+  /** A test-only forward-compatibility catalog in place of the normal one. */
+  readonly connectionOptions?: readonly unknown[];
 }): {
   readonly group: RouteGroup;
   readonly controls: AgentControls;
@@ -1207,6 +1189,7 @@ export function agentRoutes(options: {
   const agents: StoredAgent[] = [];
   const connections: StoredConnection[] = [];
   const sealed: string[] = [];
+  const retellAccounts = new Map<string, readonly SeedRetellAgent[]>();
   const projectsNamed: (string | null)[] = [];
 
   /** The project everything lands in, named or not. */
@@ -1241,6 +1224,49 @@ export function agentRoutes(options: {
   const notAuthenticated: FixtureAnswer = {
     status: 401,
     body: NOT_AUTHENTICATED,
+  };
+
+  /** The public candidates the real Retell discovery route derives. */
+  const discoveredRetellAgent = (
+    agent: SeedRetellAgent,
+  ): Record<string, unknown> => {
+    const connectionCandidates: Record<string, unknown>[] = [];
+    if (agent.modality === "voice") {
+      connectionCandidates.push(
+        {
+          agentPlatform: "retell",
+          connectionType: "retell_text_mode",
+          accessVariant: "retell_text_mode.api_key",
+          modality: "chat",
+          productLabel: "Retell text mode",
+          config: { retellAgentId: agent.id },
+        },
+        {
+          agentPlatform: "retell",
+          connectionType: "retell_web_call",
+          accessVariant: "retell_web_call.api_key",
+          modality: "voice",
+          productLabel: "Retell web call",
+          config: { retellAgentId: agent.id },
+        },
+      );
+    }
+    for (const phoneNumber of agent.phoneNumbers ?? []) {
+      connectionCandidates.push({
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        productLabel: "Retell phone",
+        config: { phoneNumber },
+      });
+    }
+    return {
+      platformAgentId: agent.id,
+      name: agent.name,
+      modality: agent.modality,
+      connectionCandidates,
+    };
   };
 
   /**
@@ -1516,12 +1542,108 @@ export function agentRoutes(options: {
     name: "agents",
     routes: [
       {
+        /** Discover Retell Agents with a pasted key or one sealed on an Agent. */
+        method: "POST",
+        path: "/v1/agents:discover",
+        handle: (request) => {
+          if (!authorized(request.headers)) return notAuthenticated;
+          return answering(() => {
+            const body = request.body ?? {};
+            refuseUnknownKeyIn(
+              body,
+              ["agentPlatform", "credentials", "agentId"],
+              "an agent discovery",
+            );
+            if (body["agentPlatform"] !== "retell") {
+              throw new Refusal(
+                "Choose Retell as the agent platform, then try again.",
+                { status: 422, code: "unprocessable" },
+              );
+            }
+            projectNamed(
+              given(request.url.searchParams.get("projectId")),
+              "writes into",
+            );
+
+            const namedAgentId =
+              typeof body["agentId"] === "string"
+                ? body["agentId"].trim()
+                : "";
+            let pasted: string | undefined;
+            if (body["credentials"] !== undefined) {
+              const credentials = body["credentials"];
+              if (
+                typeof credentials !== "object" ||
+                credentials === null ||
+                Array.isArray(credentials)
+              ) {
+                throw new Refusal("Paste a Retell API key, then try again.", {
+                  status: 422,
+                  code: "unprocessable",
+                });
+              }
+              const values = credentials as Record<string, unknown>;
+              refuseUnknownKeyIn(values, ["apiKey"], "Retell account credentials");
+              const offered =
+                typeof values["apiKey"] === "string"
+                  ? values["apiKey"].trim()
+                  : "";
+              if (offered.length < SHORTEST_CREDENTIAL) {
+                throw new Refusal("Paste a Retell API key, then try again.", {
+                  status: 422,
+                  code: "unprocessable",
+                });
+              }
+              pasted = offered;
+            }
+            if (pasted !== undefined && namedAgentId !== "") {
+              throw new Refusal(
+                "a discovery carries a pasted key or names the agent whose stored key to spend, and not both",
+              );
+            }
+
+            const stored =
+              namedAgentId === ""
+                ? undefined
+                : agents.find(
+                    (agent) =>
+                      agent.id === namedAgentId &&
+                      agent.projectId === HOME_PROJECT,
+                  )?.monitoringApiKey ?? undefined;
+            const apiKey = pasted ?? stored;
+            if (apiKey === undefined) {
+              throw new Refusal("Paste a Retell API key, then try again.", {
+                status: 422,
+                code: "unprocessable",
+              });
+            }
+            const account = retellAccounts.get(apiKey);
+            if (account === undefined) {
+              throw new Refusal(
+                "Retell did not accept that API key. Copy it again from Retell, then try again.",
+                { status: 422, code: "unprocessable" },
+              );
+            }
+            return {
+              status: 200,
+              body: { agents: account.map(discoveredRetellAgent) },
+            };
+          });
+        },
+      },
+      {
         // The same server-owned form catalog the real platform exposes.
         method: "GET",
         path: "/v1/connection-options",
         handle: (request) =>
           authorized(request.headers)
-            ? { status: 200, body: { items: connectionOptionMetadata() } }
+            ? {
+                status: 200,
+                body: {
+                  items:
+                    options.connectionOptions ?? connectionOptionMetadata(),
+                },
+              }
             : notAuthenticated,
       },
       {
@@ -1554,10 +1676,17 @@ export function agentRoutes(options: {
                 ? undefined
                 : connectionIn(body["connection"]);
 
-            // A write may name a project in its body. It never names one in
-            // its address, and it never names an organization anywhere.
-            const named =
-              typeof body["projectId"] === "string" ? body["projectId"] : null;
+            // The generated client names the project in the query. The body
+            // spelling remains accepted because the public route accepts both,
+            // with the query winning. Neither spelling names an organization.
+            const inQuery = given(
+              request.url.searchParams.get("projectId"),
+            );
+            const inBody =
+              typeof body["projectId"] === "string"
+                ? body["projectId"]
+                : null;
+            const named = inQuery ?? inBody;
             projectsNamed.push(named);
             const projectId = projectNamed(given(named), "writes into");
 
@@ -1763,13 +1892,93 @@ export function agentRoutes(options: {
           return answering(() => {
             const envelope = connectionIn(request.body ?? {});
             const selectedAgentId = selectedPlatformAgentId(envelope);
-            const admitted = admitConnection(envelope);
+            let retellAccountKey: string | null = null;
+            if (agent.agentPlatform === "retell" && selectedAgentId !== null) {
+              const offered = envelope["credentials"];
+              if (offered === undefined) {
+                retellAccountKey = agent.monitoringApiKey;
+              } else {
+                if (
+                  typeof offered !== "object" ||
+                  offered === null ||
+                  Array.isArray(offered)
+                ) {
+                  throw new Refusal("Paste a Retell API key, then try again.");
+                }
+                const values = offered as Record<string, unknown>;
+                refuseUnknownKeyIn(
+                  values,
+                  ["apiKey"],
+                  "Retell account credentials",
+                );
+                retellAccountKey = credentialString(
+                  "Retell account",
+                  "apiKey",
+                  values["apiKey"],
+                );
+              }
+              if (retellAccountKey === null) {
+                throw new Refusal("Paste a Retell API key, then try again.");
+              }
+              const providerAgent = retellAccounts
+                .get(retellAccountKey)
+                ?.find((candidate) => candidate.id === selectedAgentId);
+              if (providerAgent === undefined) {
+                throw new Refusal(
+                  `Retell no longer lists Agent ${selectedAgentId}.`,
+                );
+              }
+              if (
+                envelope["connectionType"] === "phone_number" &&
+                !providerAgent.phoneNumbers?.includes(
+                  String(
+                    (envelope["config"] as
+                      | Record<string, unknown>
+                      | undefined)?.["phoneNumber"] ?? "",
+                  ),
+                )
+              ) {
+                throw new Refusal(
+                  "Retell no longer routes that phone number to the selected Agent.",
+                );
+              }
+            }
+
+            const isRetellPhone =
+              agent.agentPlatform === "retell" &&
+              envelope["connectionType"] === "phone_number" &&
+              envelope["accessVariant"] === "phone_number.public_e164" &&
+              envelope["modality"] === "voice";
+            const { credentials: _accountCredentials, ...withoutCredentials } =
+              envelope;
+            const admitted = admitConnection(
+              isRetellPhone
+                ? withoutCredentials
+                : envelope["credentials"] === undefined &&
+                    retellAccountKey !== null
+                  ? {
+                      ...envelope,
+                      credentials: { apiKey: retellAccountKey },
+                    }
+                  : envelope,
+            );
             if (agent.agentPlatform === "retell") {
               boundElsewhere(agent, selectedAgentId);
             }
             const written = writeConnection(agent, admitted);
             if (agent.agentPlatform === "retell" && selectedAgentId !== null) {
               agent.platformAgentId = selectedAgentId;
+              if (retellAccountKey !== null) {
+                if (
+                  admitted.credentials === null &&
+                  agent.monitoringApiKey !== retellAccountKey
+                ) {
+                  sealed.push(retellAccountKey);
+                }
+                agent.monitoringApiKey = retellAccountKey;
+                agent.monitoringApiKeyHint = retellAccountKey.slice(-4);
+                agent.updatedAt = new Date().toISOString();
+              }
             }
             return {
               status: 201,
@@ -1803,6 +2012,9 @@ export function agentRoutes(options: {
       agents,
       connections,
       sealed,
+      retellAccount(apiKey, seeded) {
+        retellAccounts.set(apiKey, seeded);
+      },
       projectsNamed,
       received(agentId, at = new Date()) {
         const held = agents.find((one) => one.id === agentId);

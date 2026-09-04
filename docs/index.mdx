@@ -14,10 +14,10 @@ behaviors you expect.
     Learn how simulations, monitoring, and grading fit together.
   </Card>
   <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Install the public skills and let your coding agent complete the first reviewed run with promptless CLI commands.
+    Let your coding agent complete the first reviewed run with promptless CLI commands.
   </Card>
   <Card title="CLI reference" icon="terminal" href="/cli/overview">
-    Understand the skills-and-commands workflow, then read every verb and flag.
+    Understand the command workflow, then read every verb and flag.
   </Card>
   <Card title="API reference" icon="code" href="/api/overview">
     Use the REST endpoints for projects, agents, traces, runs, and grades.
@@ -27,57 +27,66 @@ behaviors you expect.
 ## Get started
 
 <Steps>
-  <Step title="Install the CLI and public skills">
-    Install the npm package once. It provides the `egma` command.
+  <Step title="Install the CLI">
+    Install the npm package once. It provides the `egma` command. The current
+    integration skill is still being authored, so this guide gives the coding
+    agent the command workflow directly.
 
     ```bash
     npm install --global egma-cli
     npx --yes skills add egma-ai/egma \
-      --skill integrate-egma \
       --skill write-egma-tests
     ```
   </Step>
-  <Step title="Approve sign-in">
+  <Step title="Approve sign-in and initialize">
     Your coding agent runs `egma login`. Egma opens a device-approval page, and
-    you approve the request in the browser.
+    you approve the request in the browser. It then binds this repository to an
+    existing Project and pulls the current state.
 
     ```bash
     egma login
+    egma init
     ```
   </Step>
   <Step title="Connect and author">
-    For supported testing, the `integrate-egma` skill keeps discovery read-only,
-    resolves the exact setup from live facts, and uses named commands to connect
-    Retell or LiveKit. It lists valid personas, creates one suite, and writes the
-    smallest grounded test set.
+    The coding agent keeps discovery read-only, resolves the exact setup from
+    repository facts, and uses named commands to connect Retell or LiveKit. It
+    lists valid personas, creates one suite, and writes the smallest grounded
+    Test set.
 
     ```bash
-    egma personas
+    egma persona list
     egma suite create <directory> --name <name>
-    egma validate
+    egma push
     ```
   </Step>
   <Step title="Publish and run">
     For supported testing, your end-to-end prompt already asks the coding agent
-    to push the complete repository and follow one suite. A real phone run
-    includes a cost warning and waits for approval.
+    to create one Run. The command pushes first, then returns a web results URL.
+    Before a real phone Run, the coding agent must warn you that the calls can
+    cost money and obtain your approval. The CLI itself does not prompt for
+    approval.
 
     ```bash
-    egma push
-    egma run <suite-directory>
+    egma run create <suite-directory> \
+      --agent <Egma Agent ID> \
+      --connection <Connection ID>
     ```
   </Step>
 </Steps>
 
 Monitoring is a separate requested outcome. A monitoring-only integration skips
-connections, suites, tests, and runs. A Both integration finishes the reviewed
-run and confirms `egma monitoring status`.
+Connections, Suites, Tests, and Runs. The coding agent uses
+`egma agent monitoring setup` with an explicit Agent ID and platform.
 
 ## Key integrations
 
 <CardGroup cols={2}>
   <Card title="Retell" icon="phone" href="/integrations/retell">
     Test a Retell voice agent in text, over a web call, or on a real phone line, and import completed production conversations.
+  </Card>
+  <Card title="LiveKit token endpoint" icon="key" href="/integrations/livekit-token-endpoint">
+    Test a LiveKit agent without handing Egma your API secret. Your endpoint mints one scoped token per simulation, in LiveKit's standard format.
   </Card>
   <Card title="Python SDK" icon="python" href="/integrations/python-sdk">
     Connect LiveKit simulations to mock tools and send production spans to Monitoring.

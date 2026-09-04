@@ -1,5 +1,6 @@
 /** Build and apply one complete, atomic repository change set. */
 
+import { sameEnv } from "../folder/env.ts";
 import { sameMockTools } from "../folder/mock-tools.ts";
 import type {
   FileBehavior,
@@ -61,7 +62,6 @@ export type PushReport = {
   readonly tests: readonly PushedTest[];
   readonly turnedAway: readonly TurnedAway[];
   readonly suites: number;
-  readonly mockTools: number;
 };
 
 export type PushOptions = {
@@ -69,7 +69,31 @@ export type PushOptions = {
   readonly paths: FolderPaths;
   readonly fetchImpl?: Fetch;
   readonly signal?: AbortSignal;
+  /** Failure injection at the local pin-write boundary. */
+  readonly writeTestFile?: typeof writeTestFile;
 };
+
+/** The platform committed the whole change set, but local version pins did not. */
+export class PushMaterializationError extends Error {
+  public readonly tests: readonly PushedTest[];
+  public readonly file: string;
+  public readonly shown: string;
+
+  public constructor(
+    tests: readonly PushedTest[],
+    file: string,
+    shown: string,
+    cause: unknown,
+  ) {
+    super("Egma applied the repository, but its returned Test pins were not all written locally.", {
+      cause,
+    });
+    this.name = "PushMaterializationError";
+    this.tests = tests;
+    this.file = file;
+    this.shown = shown;
+  }
+}
 
 function inputFrom(test: TestFile): TestInput {
   return {
@@ -79,6 +103,7 @@ function inputFrom(test: TestFile): TestInput {
     expectedBehaviors: [...test.expectedBehaviors],
     personas: test.personas,
     mockTools: test.mockTools,
+    env: test.env,
   };
 }
 
@@ -112,7 +137,8 @@ export function sameAsPlatform(file: TestFile, test: PlatformTest): boolean {
     file.scenario === test.scenario &&
     sameBehaviors(file.expectedBehaviors, test.expectedBehaviors) &&
     samePersonas(file.personas, test.personas) &&
-    sameMockTools(file.mockTools, test.mockTools)
+    sameMockTools(file.mockTools, test.mockTools) &&
+    sameEnv(file.env, test.env)
   );
 }
 
@@ -142,7 +168,6 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
       tests: [],
       turnedAway,
       suites: repository.suites.length,
-      mockTools: repository.mockTools.length,
     };
   }
 
@@ -156,7 +181,6 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
       expectedVersionId: file.test.version,
       expectedRevision: file.test.identityRevision,
     })),
-    mockTools: repository.mockTools,
   };
 
   const answer = await applyRepositoryChangeSet(
@@ -171,7 +195,7 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
     const file = fileByRef.get(applied.clientRef);
     if (file === undefined) {
       throw new Error(
-        `Egma answered for ${applied.clientRef}, which was not in this repository. Pull to recover the applied change set.`,
+        `Egma answered for ${applied.clientRef}, which was not in this repository. Run egma pull to recover the applied change set.`,
       );
     }
     const before = file.test.version;
@@ -181,7 +205,6 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
         : before === applied.test.versionId && sameAsPlatform(file.test, applied.test)
           ? "unchanged"
           : "updated";
-    await writeTestFile(file.file, fileFromPlatform(applied.test));
     pushed.push({
       testId: applied.test.id,
       name: applied.test.name,
@@ -191,12 +214,23 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
     });
   }
 
+  const write = options.writeTestFile ?? writeTestFile;
+  // Keep the full receipt even when the first local write fails. The platform
+  // applied the complete change set atomically.
+  for (const applied of answer.tests) {
+    const file = fileByRef.get(applied.clientRef)!;
+    try {
+      await write(file.file, fileFromPlatform(applied.test));
+    } catch (cause) {
+      throw new PushMaterializationError(pushed, file.file, file.shown, cause);
+    }
+  }
+
   return {
     conflicts: [],
     uploadedNothing: false,
     tests: pushed,
     turnedAway: [],
     suites: repository.suites.length,
-    mockTools: repository.mockTools.length,
   };
 }

@@ -1,5 +1,13 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import TestsPage from "../app/projects/[projectId]/tests/page.tsx";
@@ -81,7 +89,7 @@ function testBody(overrides: Record<string, unknown> = {}) {
     expectedBehaviors: ["Offers an available time"],
     personas: [PERSONA],
     mockTools: [],
-    overrideCount: 0,
+    env: null,
     revision: "rev_1",
     createdAt: "2026-08-21T10:00:00.000Z",
     updatedAt: "2026-08-21T10:00:00.000Z",
@@ -157,6 +165,8 @@ function runBuilderAnswers(options: {
   readonly started?: Stub | readonly Stub[];
   /** The connections this agent holds when a walk needs named lanes. */
   readonly connections?: readonly Record<string, unknown>[];
+  /** The suite's tests, which is what the run note counts. */
+  readonly tests?: readonly Record<string, unknown>[];
 } = {}): void {
   const started = options.started ?? {
     status: 201,
@@ -202,7 +212,7 @@ function runBuilderAnswers(options: {
     },
     "/v1/tests": {
       status: 200,
-      body: { tests: [testBody()], nextPageToken: null },
+      body: { tests: options.tests ?? [testBody()], nextPageToken: null },
     },
     "/v1/runs": [
       { status: 200, body: { runs: [], nextPageToken: null } },
@@ -261,6 +271,9 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  // The `Saved` indicator's own wait is the only fake clock in this file, and
+  // a test that used one must not hand it to the next.
+  vi.useRealTimers();
 });
 
 describe("the suite-first Tests route", () => {
@@ -316,12 +329,13 @@ describe("the suite-first Tests route", () => {
     render(<TestSuitePage />);
 
     expect(await screen.findByRole("heading", { name: "Northside Ford" })).toBeTruthy();
-    // The trailing ⋮ lane is named out loud, like every other column.
+    // The trailing ⋮ lane is named out loud, like every other column, and the
+    // four mandatory columns say so in their own heading.
     for (const header of [
-      "Name",
-      "Scenario",
-      "Expected behaviors",
-      "Personas",
+      "Name, required",
+      "Scenario, required",
+      "Expected behaviors, required",
+      "Personas, required",
       "Actions",
     ]) {
       expect(screen.getByRole("columnheader", { name: header }), header).toBeTruthy();
@@ -496,12 +510,10 @@ describe("the suite-first Tests route", () => {
       .toBe(true);
   });
 
-  it("says which lane a Retell run takes, and says nothing about a LiveKit one", async () => {
-    // The note reads one connection's mock-tools switch. A LiveKit room can
-    // never hold that switch, so reading its blank one as "off" would tell a
-    // person their run reaches real tools — false, because a LiveKit run mocks
-    // through the in-room seam. The note speaks for the three Retell lanes and
-    // for nothing else.
+  it("says what the chosen connection will do with the suite's own test data", async () => {
+    // The note reads the tests, not the connection's own settings: mock tools
+    // and env belong to the test now. A web call that some test mocks makes
+    // one temporary version, and the note says so before the run starts.
     routed.pathname = "/projects/prj_1/runs/new";
     routed.params = { projectId: "prj_1" };
     runBuilderAnswers({
@@ -511,16 +523,26 @@ describe("the suite-first Tests route", () => {
           name: "Web call",
           productLabel: "Retell web call",
           connectionType: "retell_web_call",
+          accessVariant: "retell_web_call.api_key",
           modality: "voice",
-          mockToolsEnabled: false,
           environment: null,
           archived: false,
         },
+      ],
+      tests: [
+        testBody({
+          id: "tst_1",
+          mockTools: [{ tool: "get_availability", answer: { slots: [] } }],
+        }),
+        testBody({ id: "tst_2" }),
       ],
     });
 
     const { unmount } = render(<NewRunPage />);
     const sheet = await screen.findByRole("dialog", { name: "Create a run" });
+    fireEvent.change(within(sheet).getByLabelText("Test suite *"), {
+      target: { value: "ste_1" },
+    });
     fireEvent.change(within(sheet).getByLabelText("Agent *"), {
       target: { value: "agt_1" },
     });
@@ -528,9 +550,26 @@ describe("the suite-first Tests route", () => {
     fireEvent.change(within(sheet).getByLabelText("Connection *"), {
       target: { value: "con_1" },
     });
-    expect(
-      sheet.querySelector('[data-slot="run-lane-note"]')?.textContent,
-    ).toContain("Mock tools are off for this connection");
+
+    const note = await waitFor(() => {
+      const held = sheet.querySelector('[data-slot="run-note"]');
+      if (held === null) throw new Error("no run note yet");
+      return held;
+    });
+    expect([...note.querySelectorAll("p")].map((line) => line.textContent)).toEqual([
+      "This run creates one temporary version of your Retell agent and deletes it when the run ends. Your serving version is never changed.",
+      "1 of 2 tests carries mock tools. Tools a test does not mock reach your real backend.",
+    ]);
+    // One compact box under the Connection field, on the house hairline and
+    // the surface fill — not free-floating lines behind accent bars.
+    expect(note.getAttribute("data-accent")).toBe("brand");
+    expect(note.className).toContain("border-border");
+    expect(note.className).toContain("bg-surface");
+    for (const line of note.querySelectorAll("p")) {
+      expect(line.className).not.toContain("border-l");
+    }
+    // The old per-connection lane note is gone, switch and all.
+    expect(sheet.querySelector('[data-slot="run-lane-note"]')).toBeNull();
 
     unmount();
     cleanup();
@@ -541,6 +580,7 @@ describe("the suite-first Tests route", () => {
           name: "Room",
           productLabel: "LiveKit room",
           connectionType: "livekit_room",
+          accessVariant: "livekit_room.project_credentials",
           modality: "voice",
           environment: null,
           archived: false,
@@ -550,6 +590,9 @@ describe("the suite-first Tests route", () => {
 
     render(<NewRunPage />);
     const room = await screen.findByRole("dialog", { name: "Create a run" });
+    fireEvent.change(within(room).getByLabelText("Test suite *"), {
+      target: { value: "ste_1" },
+    });
     fireEvent.change(within(room).getByLabelText("Agent *"), {
       target: { value: "agt_1" },
     });
@@ -557,8 +600,173 @@ describe("the suite-first Tests route", () => {
     fireEvent.change(within(room).getByLabelText("Connection *"), {
       target: { value: "con_1" },
     });
-    expect(screen.getByLabelText("Run name [optional]")).toBeTruthy();
-    expect(room.querySelector('[data-slot="run-lane-note"]')).toBeNull();
+    // A suite whose tests carry nothing has nothing to be told about.
+    expect(await screen.findByLabelText("Run name [optional]")).toBeTruthy();
+    expect(room.querySelector('[data-slot="run-note"]')).toBeNull();
+  });
+
+  /**
+   * **The rest of the support table, one lane at a time.**
+   *
+   * The row above walks a Retell web call and a LiveKit room with nothing to
+   * say. What is left is the LiveKit SDK requirement for mock tools, proof that
+   * token-endpoint dispatch metadata needs no warning, and a Retell lane that
+   * quietly says LiveKit's word is not one it uses.
+   */
+  it("says what each remaining lane will and will not use", async () => {
+    routed.pathname = "/projects/prj_1/runs/new";
+    routed.params = { projectId: "prj_1" };
+
+    /** One lane, chosen in a fresh sheet, and the note it draws. */
+    async function noteOn(
+      connection: Record<string, unknown>,
+      tests: readonly Record<string, unknown>[],
+      expected: readonly string[],
+      /** The box's own volume, which its edge is the whole of. */
+      accent: "warning" | "brand" | "quiet" = "brand",
+    ): Promise<void> {
+      runBuilderAnswers({
+        connections: [
+          {
+            id: "con_1",
+            name: "Lane",
+            productLabel: "Lane",
+            modality: "voice",
+            environment: null,
+            archived: false,
+            ...connection,
+          },
+        ],
+        tests,
+      });
+      const { unmount } = render(<NewRunPage />);
+      const sheet = await screen.findByRole("dialog", { name: "Create a run" });
+      fireEvent.change(within(sheet).getByLabelText("Test suite *"), {
+        target: { value: "ste_1" },
+      });
+      fireEvent.change(within(sheet).getByLabelText("Agent *"), {
+        target: { value: "agt_1" },
+      });
+      await within(sheet).findByLabelText("Connection *");
+      fireEvent.change(within(sheet).getByLabelText("Connection *"), {
+        target: { value: "con_1" },
+      });
+      if (expected.length === 0) {
+        expect(await screen.findByLabelText("Run name [optional]")).toBeTruthy();
+        expect(sheet.querySelector('[data-slot="run-note"]')).toBeNull();
+      } else {
+        const note = await waitFor(() => {
+          const held = sheet.querySelector('[data-slot="run-note"]');
+          if (held === null) throw new Error("no run note yet");
+          expect(
+            [...held.querySelectorAll("p")].map((line) => line.textContent),
+          ).toEqual(expected);
+          return held;
+        });
+        // The warning colour rides the box where a lane cannot use what a test
+        // holds, and the house hairline everywhere else.
+        expect(note.getAttribute("data-accent")).toBe(accent);
+        expect(note.className).toContain(
+          accent === "warning" ? "border-warning" : "border-border",
+        );
+      }
+      unmount();
+      cleanup();
+    }
+
+    const MOCKING = testBody({
+      mockTools: [{ tool: "get_availability", answer: { slots: [] } }],
+    });
+    const PLAIN = testBody({
+      id: "tst_2",
+      versionId: "tstv_2",
+      name: "Cancels service",
+    });
+    const VARYING = testBody({
+      id: "tst_2",
+      versionId: "tstv_2",
+      name: "Cancels service",
+      env: { retell_dynamic_variables: { caller_name: "Margaret" } },
+    });
+    const DISPATCHING = testBody({
+      env: { job_dispatch_metadata: { tenant: "acme" } },
+    });
+    const ALSO_DISPATCHING = testBody({
+      id: "tst_2",
+      versionId: "tstv_2",
+      name: "Cancels service",
+      env: { job_dispatch_metadata: { tenant: "acme" } },
+    });
+
+    // A phone number is the customer's own published line, answered by Retell.
+    // It carries neither a mock nor a dynamic variable, and each line says
+    // "cannot" itself, so no summary sentence stands over them: the box's
+    // warning edge is the only other thing that says it.
+    await noteOn(
+      {
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+      },
+      [MOCKING, VARYING],
+      [
+        "1 of 2 tests carries mock tools. A Retell phone connection cannot mock tools, so those simulations reach your real tools.",
+        "1 of 2 tests carries Retell dynamic variables. A phone call is answered by Retell, not created by Egma, so they cannot be passed.",
+      ],
+      "warning",
+    );
+
+    // A key-pair room mocks through the customer's own agent, so the note
+    // names the one thing that agent must be running.
+    await noteOn(
+      {
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
+      },
+      [MOCKING, PLAIN],
+      [
+        "Mock tools on LiveKit need the Egma SDK in your agent.",
+        "1 of 2 tests carries mock tools. They are served only when your agent runs mockable(...). Tools a test does not mock run real.",
+      ],
+    );
+
+    // On a token endpoint the customer's own endpoint dispatches the worker,
+    // and Egma hands it the test's dispatch metadata inside the token
+    // request — so a suite that carries only that has nothing to be told.
+    await noteOn(
+      {
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.customer_token_endpoint",
+      },
+      [DISPATCHING, PLAIN],
+      [],
+    );
+
+    // A Retell lane says the same fact quietly: nothing is lost, because
+    // LiveKit's word was never for this platform in the first place.
+    await noteOn(
+      {
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
+        modality: "chat",
+      },
+      [DISPATCHING, ALSO_DISPATCHING],
+      [
+        "2 tests carry job_dispatch_metadata, which a Retell connection does not use.",
+      ],
+      "quiet",
+    );
+
+    // And text mode with mock tools has nothing to say at all: it serves them
+    // on the request, so no version is branched and nothing is left unused.
+    await noteOn(
+      {
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
+        modality: "chat",
+      },
+      [MOCKING, PLAIN],
+      [],
+    );
   });
 
   it("distinguishes legacy LiveKit chat and voice names in the run picker", async () => {
@@ -898,10 +1106,11 @@ describe("the suite-first Tests route", () => {
 
     expect(await screen.findByText("Books service")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Open the menu for Books service" }));
-    // The row offers one thing, and the four columns stay the test's content.
+    // Two items: the one that makes another test, and the one that takes this
+    // one away. The columns stay the test's own content.
     expect(
       (await screen.findAllByRole("menuitem")).map((item) => item.textContent),
-    ).toEqual(["Delete test"]);
+    ).toEqual(["Duplicate", "Delete test"]);
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete test" }));
     const asked = await screen.findByRole("dialog", { name: "Delete this test?" });
@@ -927,6 +1136,685 @@ describe("the suite-first Tests route", () => {
     await waitFor(() => {
       expect(screen.queryByText("Books service")).toBeNull();
     });
+  });
+
+  it("waits for an in-flight save and deletes against the guards it returned", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+    answers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
+      "/v1/tests": {
+        status: 200,
+        body: { tests: [testBody({ personas: [PERSONA] })], nextPageToken: null },
+      },
+      "/v1/tests/tst_1": [
+        {
+          status: 200,
+          body: testBody({
+            personas: [PERSONA],
+            scenario: "The caller books the next service slot.",
+            version: 2,
+            versionId: "tstv_2",
+            revision: "rev_2",
+          }),
+          waitFor: held,
+        },
+        { status: 204, body: null },
+      ],
+      "/v1/personas": {
+        status: 200,
+        body: { personas: [PERSONA], nextPageToken: null },
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByText("The caller books service."));
+    const scenario = screen.getByLabelText("Scenario");
+    fireEvent.change(scenario, {
+      target: { value: "The caller books the next service slot." },
+    });
+    fireEvent.keyDown(scenario, { key: "Enter" });
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toHaveLength(1);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open the menu for Books service" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete test" }));
+    const asked = await screen.findByRole("dialog", { name: "Delete this test?" });
+    fireEvent.click(within(asked).getByRole("button", { name: "Delete test" }));
+
+    expect(sent.some((request) => request.method === "DELETE")).toBe(false);
+    release();
+
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "DELETE")).toHaveLength(1);
+    });
+    const requests = await Promise.all(
+      vi.mocked(fetch).mock.calls.map(([input, init]) =>
+        observeRequest(input as FetchInput, init),
+      ),
+    );
+    expect(requests.find((request) => request.method === "DELETE")?.url).toBe(
+      "/v1/tests/tst_1?projectId=prj_1&expectedVersionId=tstv_2&expectedRevision=rev_2",
+    );
+  });
+
+  /**
+   * **The two JSON fields, in a table that has to stay scannable.**
+   *
+   * A mock tool's answer is arbitrary JSON and an env is two nested objects.
+   * Neither fits beside a scenario, so the cell carries one quiet summary and
+   * the writing happens in the smallest dialog that holds an editor, a reason
+   * and two buttons.
+   *
+   * A full Env cell says `View env variables` rather than naming its keys: the
+   * two platform key names are 47 characters of identifier and ran out through
+   * the narrowest lane in the grid (founder, 2026-09-04).
+   */
+  it("summarizes mock tools and env in their cells, and offers to fill an empty one", async () => {
+    gridAnswers({
+      tests: [
+        testBody({
+          personas: [PERSONA],
+          mockTools: [
+            { tool: "get_availability", answer: { slots: [] } },
+            { tool: "book", error: "calendar down" },
+          ],
+          env: {
+            retell_dynamic_variables: { caller_name: "Margaret" },
+            job_dispatch_metadata: { tenant: "acme" },
+          },
+        }),
+        testBody({
+          id: "tst_2",
+          versionId: "tstv_2",
+          name: "Cancels service",
+          personas: [PERSONA],
+          mockTools: [{ tool: "cancel", answer: true }],
+        }),
+      ],
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    /*
+     * **The four mandatory columns carry the product's star, and three do
+     * not.** The grid has no field labels — a cell is its own value and the
+     * heading is its only name — so the heading is where `DESIGN.md`'s label
+     * grammar has to be said. `(required)` is the same promise made to a
+     * screen reader, because a `<th>` takes no `aria-required`.
+     */
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers.map((header) => header.textContent)).toEqual([
+      "Name*",
+      "Scenario*",
+      "Expected behaviors*",
+      "Personas*",
+      "Mock tools",
+      "Env",
+      "Actions",
+    ]);
+    // The star is not only a picture: the four mandatory headings say the word
+    // as well, and the other three carry no mark and no word.
+    expect(headers.map((header) => header.getAttribute("aria-label"))).toEqual([
+      "Name, required",
+      "Scenario, required",
+      "Expected behaviors, required",
+      "Personas, required",
+      null,
+      null,
+      null,
+    ]);
+    expect(
+      headers.filter((header) => header.querySelector("[data-required-mark]") !== null),
+    ).toHaveLength(4);
+    /*
+     * And the star is the heading's own colour rather than the Ember a form's
+     * star wears: four brand marks across one heading row read as a state the
+     * table is in (founder, 2026-09-04).
+     */
+    const star = headers[0]?.querySelector("[data-required-mark]");
+    expect(star?.textContent).toBe("*");
+    expect(star?.className).not.toMatch(/text-(brand|primary)/);
+
+    expect(screen.getByText("2 mock tools")).toBeTruthy();
+    // The keys are not named in the lane; the way to read them is.
+    expect(screen.getByText("View env variables")).toBeTruthy();
+    expect(screen.queryByText(/retell_dynamic_variables/)).toBeNull();
+    // One is one.
+    expect(screen.getByText("1 mock tool")).toBeTruthy();
+
+    /*
+     * And the second row's empty Env cell says `None` rather than sitting
+     * blank — the truthful empty state, in the summary's own faint ink. The
+     * brand offer is in the cell too and hidden until a pointer or the
+     * keyboard reaches it, so a full suite is not a column of orange. The
+     * button's spoken name stays the verb either way, because `None` is the
+     * value rather than a name for the control.
+     */
+    const second = screen.getByRole("button", {
+      name: "Add env variables for Cancels service",
+    });
+    const resting = within(second).getByText("None");
+    expect(resting.className).toContain("text-faint");
+    expect(resting.className).toContain("group-pointer-hover/json:hidden");
+    expect(resting.className).toContain("group-focus-visible/json:hidden");
+    const offer = within(second).getByText("+ Add env variables");
+    expect(offer.className).toContain("text-primary");
+    expect(offer.className).toContain("hidden");
+    expect(offer.className).toContain("group-pointer-hover/json:inline");
+    expect(offer.className).toContain("group-focus-visible/json:inline");
+    // The cell is the group both of them read.
+    expect(second.className).toContain("group/json");
+
+    fireEvent.click(second);
+    expect(await screen.findByRole("dialog", { name: "Env" })).toBeTruthy();
+  });
+
+  /**
+   * **An empty JSON cell says how to fill it — quietly in a written row, and
+   * out loud in the row being written.**
+   *
+   * The cells used to be blank until a pointer went over them, so the only
+   * thing saying a mock tool or an env could be written here was the cursor
+   * changing shape. Offering in brand on every row was the other extreme: two
+   * orange lines down a suite of forty tests, in a table whose job is to be
+   * scanned. A written row rests on `None` and offers when it is reached for;
+   * the entry row offers always, because that row is the authoring (founder,
+   * 2026-09-04).
+   */
+  it("keeps the add line quiet in a written row and plain in the entry row, and each opens its dialog", async () => {
+    gridAnswers({ tests: [testBody({ personas: [PERSONA] })] });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+
+    // The written row holds neither, so both cells rest on `None`.
+    const rowMockTools = screen.getByRole("button", {
+      name: "Add mock tools for Books service",
+    });
+    expect(within(rowMockTools).getByText("None")).toBeTruthy();
+    expect(
+      within(rowMockTools).getByText("+ Add mock tools").className,
+    ).toContain("hidden");
+    // Pressing it opens the same dialog whichever word was showing.
+    fireEvent.click(rowMockTools);
+    const opened = await screen.findByRole("dialog", { name: "Mock tools" });
+    fireEvent.click(within(opened).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Mock tools" })).toBeNull();
+    });
+
+    // And the row being written offers the same two lines with nothing hiding
+    // them, and says no `None`: nothing about that row is settled yet.
+    fireEvent.click(screen.getByRole("button", { name: "+ Write a test" }));
+    const entry = await waitFor(() => {
+      const held = document.querySelector("tr[data-entry-row]");
+      if (held === null) throw new Error("no entry row yet");
+      return held as HTMLTableRowElement;
+    });
+    for (const line of ["+ Add mock tools", "+ Add env variables"]) {
+      const said = within(entry).getByText(line);
+      expect(said.className).toContain("text-primary");
+      expect(said.className).not.toContain("hidden");
+    }
+    expect(within(entry).queryByText("None")).toBeNull();
+
+    fireEvent.click(
+      within(entry).getByRole("button", { name: "Add env variables for the new test" }),
+    );
+    expect(await screen.findByRole("dialog", { name: "Env" })).toBeTruthy();
+    // Nothing is written by opening a dialog from a row that does not exist.
+    expect(sent.some((request) => request.method === "POST")).toBe(false);
+  });
+
+  it("shows a reader who cannot author the empty state and no offer at all", async () => {
+    gridAnswers({ role: "viewer", tests: [testBody({ personas: [PERSONA] })] });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    // Both JSON cells say the same true thing about the row they are in.
+    expect(screen.getAllByText("None")).toHaveLength(2);
+    /*
+     * And there is no offer in the cell, hidden or otherwise: a line inviting
+     * somebody to write what their role cannot write is an invitation to a
+     * refusal. The cell is not even a button.
+     */
+    expect(screen.queryByText("+ Add mock tools")).toBeNull();
+    expect(screen.queryByText("+ Add env variables")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /^(Add|Mock tools|Env)/ }),
+    ).toBeNull();
+  });
+
+  /**
+   * **The editor is pretty-printed, and so is the example in an empty one.**
+   *
+   * A stored value opens as `JSON.stringify(value, null, 2)`. A one-line
+   * example taught the shape in a grammar the field never writes back, so
+   * somebody who copied it, saved and reopened read a different-looking
+   * document (founder, 2026-09-04).
+   */
+  it("opens the JSON editors pretty-printed, example and stored value alike", async () => {
+    gridAnswers({
+      tests: [
+        testBody({
+          personas: [PERSONA],
+          mockTools: [{ tool: "book", error: "calendar down" }],
+          env: { retell_dynamic_variables: { caller_name: "Margaret" } },
+        }),
+      ],
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Mock tools for Books service" }),
+    );
+    const tools = await screen.findByRole("dialog", { name: "Mock tools" });
+    const toolsEditor = within(tools).getByLabelText(
+      "Mock tools",
+    ) as HTMLTextAreaElement;
+    expect(toolsEditor.value).toBe(
+      JSON.stringify([{ tool: "book", error: "calendar down" }], null, 2),
+    );
+    fireEvent.click(within(tools).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Mock tools" })).toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Env for Books service" }));
+    const env = await screen.findByRole("dialog", { name: "Env" });
+    const envEditor = within(env).getByLabelText("Env") as HTMLTextAreaElement;
+    expect(envEditor.value).toBe(
+      JSON.stringify(
+        { retell_dynamic_variables: { caller_name: "Margaret" } },
+        null,
+        2,
+      ),
+    );
+    /*
+     * The example an empty editor shows is the same call over a real value, so
+     * it is multi-line and indented the way a saved value comes back — never
+     * the one-line string it used to be.
+     */
+    expect(envEditor.getAttribute("placeholder")).toBe(
+      JSON.stringify(
+        {
+          retell_dynamic_variables: { caller_name: "Margaret" },
+          job_dispatch_metadata: { tenant: "acme" },
+        },
+        null,
+        2,
+      ),
+    );
+    // And the box is tall enough to hold the longer of the two examples whole.
+    expect(Number(envEditor.getAttribute("rows"))).toBeGreaterThanOrEqual(
+      JSON.stringify(
+        [
+          { tool: "get_availability", answer: { slots: [] } },
+          { tool: "book", error: "calendar down" },
+        ],
+        null,
+        2,
+      ).split("\n").length,
+    );
+  });
+
+  it("refuses bad JSON in place, keeps the dialog open, and saves what the platform takes", async () => {
+    gridAnswers({
+      saved: {
+        status: 200,
+        body: testBody({
+          personas: [PERSONA],
+          version: 2,
+          versionId: "tstv_2",
+          mockTools: [{ tool: "get_availability", answer: { slots: [] } }],
+        }),
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add mock tools for Books service" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Mock tools" });
+    const editor = within(dialog).getByLabelText("Mock tools");
+    /*
+     * The example is the empty editor's own placeholder, not a stored value —
+     * and it is pretty-printed, because that is the shape this editor writes
+     * back.
+     */
+    expect((editor as HTMLTextAreaElement).value).toBe("");
+    expect(editor.getAttribute("placeholder")).toBe(
+      JSON.stringify(
+        [
+          { tool: "get_availability", answer: { slots: [] } },
+          { tool: "book", error: "calendar down" },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    fireEvent.change(editor, { target: { value: "[{ tool: nope }]" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(
+      (await within(dialog).findByRole("alert")).textContent,
+    ).toContain("Not valid JSON:");
+    expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+    // The dialog stays, with what was typed still in it to fix.
+    expect(screen.getByRole("dialog", { name: "Mock tools" })).toBeTruthy();
+
+    // A shape the platform refuses is refused here too, in its own words.
+    fireEvent.change(editor, {
+      target: { value: '[{ "tool": "book", "answer": 1, "error": "x" }]' },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(
+      (await within(dialog).findByRole("alert")).textContent,
+    ).toBe(
+      'mock tool "book" answers with one thing: this one sent both answer and ' +
+        "error. Send whichever branch the test needs.",
+    );
+    expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+
+    fireEvent.change(editor, {
+      target: {
+        value: '[{ "tool": "get_availability", "answer": { "slots": [] } }]',
+      },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toEqual([
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          body: {
+            mockTools: [{ tool: "get_availability", answer: { slots: [] } }],
+            expectedVersionId: "tstv_1",
+          },
+        },
+      ]);
+    });
+    // The row shows what was saved, and the dialog is gone.
+    expect(await screen.findByText("1 mock tool")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Mock tools" })).toBeNull();
+  });
+
+  it("shows the platform's own refusal of an env in place", async () => {
+    const REFUSED =
+      'env.retell_dynamic_variables names "egma_caller", and Egma keeps every ' +
+      'variable beginning "egma_" for the facts it writes into the ' +
+      "conversation itself. Name the variable something else.";
+    gridAnswers({
+      saved: {
+        status: 422,
+        body: { error: "unprocessable", message: REFUSED },
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add env variables for Books service" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Env" });
+    // Read here first, in the platform's own sentence, so no round trip is
+    // needed to learn that the prefix is kept back.
+    fireEvent.change(within(dialog).getByLabelText("Env"), {
+      target: {
+        value: '{ "retell_dynamic_variables": { "egma_caller": "Margaret" } }',
+      },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(REFUSED);
+    expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+
+    // And a refusal that only the platform can make is shown in the same
+    // place, with the dialog and the words still standing.
+    fireEvent.change(within(dialog).getByLabelText("Env"), {
+      target: {
+        value: '{ "retell_dynamic_variables": { "caller_name": "Margaret" } }',
+      },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(sent.some((request) => request.method === "PATCH")).toBe(true);
+    });
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(REFUSED);
+    expect(screen.getByRole("dialog", { name: "Env" })).toBeTruthy();
+  });
+
+  /**
+   * **A press elsewhere is leaving the cell, and most of a page takes no
+   * focus.**
+   *
+   * Blur closed a woken cell only when the browser had somewhere else to put
+   * the caret. The canvas beside the table, the table's own headings and the
+   * page title take none, so a cell was left open over words nobody had saved
+   * (founder, 2026-09-04). The press runs the same commit the blur runs.
+   */
+  it("commits and closes a woken cell when the press lands on the page itself", async () => {
+    gridAnswers({
+      saved: {
+        status: 200,
+        body: testBody({
+          personas: [PERSONA],
+          version: 2,
+          versionId: "tstv_2",
+          scenario: "The caller books a service visit.",
+        }),
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByText("The caller books service."));
+    fireEvent.change(screen.getByLabelText("Scenario"), {
+      target: { value: "The caller books a service visit." },
+    });
+    expect(document.querySelector("[data-woken-cell]")).not.toBeNull();
+
+    // The page's own background takes no focus, so nothing here blurs.
+    fireEvent.pointerDown(document.body);
+
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toEqual([
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          body: {
+            scenario: "The caller books a service visit.",
+            expectedVersionId: "tstv_1",
+          },
+        },
+      ]);
+    });
+    // One request, one closed cell, and the row showing what was saved.
+    await waitFor(() => {
+      expect(document.querySelector("[data-woken-cell]")).toBeNull();
+    });
+    expect(screen.queryByLabelText("Scenario")).toBeNull();
+    expect(screen.getByText("The caller books a service visit.")).toBeTruthy();
+  });
+
+  /**
+   * **A grid that saves itself has to say when it did.**
+   *
+   * Every other write surface is a form whose Save button goes busy and then
+   * says so. A cell commits on blur with no button to change, so the word
+   * stands over the grid instead — muted, briefly, and gone (founder,
+   * 2026-09-04).
+   */
+  it("says Saved when a cell commit lands, and takes the word away again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    gridAnswers({
+      saved: {
+        status: 200,
+        body: testBody({
+          personas: [PERSONA],
+          version: 2,
+          versionId: "tstv_2",
+          name: "Books a service",
+        }),
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    // Nothing has been saved, so the header says nothing.
+    expect(screen.queryByText("Saved")).toBeNull();
+
+    fireEvent.click(screen.getByText("Books service"));
+    const name = screen.getByLabelText("Name");
+    fireEvent.change(name, { target: { value: "Books a service" } });
+    fireEvent.keyDown(name, { key: "Enter" });
+
+    const said = await screen.findByText("Saved");
+    expect(said.getAttribute("role")).toBe("status");
+    expect(said.getAttribute("data-slot")).toBe("save-indicator");
+
+    // It stands for a moment and then leaves on its own.
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.queryByText("Saved")).toBeNull();
+  });
+
+  it("says Saved when the entry row writes the test", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    gridAnswers({
+      tests: [],
+      created: {
+        status: 201,
+        body: testBody({ personas: [PERSONA], name: "Books service" }),
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Write a test" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Books service" },
+    });
+    fireEvent.change(screen.getByLabelText("Scenario"), {
+      target: { value: "The caller books service." },
+    });
+    fireEvent.change(screen.getByLabelText("Expected behavior 1"), {
+      target: { value: "Offers an available time" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a persona" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Impatient Rita" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save test" }));
+
+    expect(await screen.findByText("Saved")).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.queryByText("Saved")).toBeNull();
+  });
+
+  it("says nothing over the grid when a save is refused", async () => {
+    const REFUSED = "Somebody else moved this test. Read it again.";
+    gridAnswers({
+      saved: { status: 409, body: { error: "conflict", message: REFUSED } },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByText("Books service"));
+    const name = screen.getByLabelText("Name");
+    fireEvent.change(name, { target: { value: "Books a service" } });
+    fireEvent.keyDown(name, { key: "Enter" });
+
+    // The refusal is in the cell, where the person is looking, and the header
+    // says nothing at all: nothing was saved.
+    expect(await screen.findByText(REFUSED)).toBeTruthy();
+    expect(screen.queryByText("Saved")).toBeNull();
+    expect(document.querySelector("[data-slot='save-indicator']")).toBeNull();
+  });
+
+  it("duplicates a test into a prefilled entry row below it, and writes nothing until Save", async () => {
+    gridAnswers({
+      tests: [
+        testBody({
+          personas: [PERSONA],
+          mockTools: [{ tool: "book", error: "calendar down" }],
+          env: { job_dispatch_metadata: { tenant: "acme" } },
+        }),
+      ],
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open the menu for Books service" }),
+    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Duplicate" }));
+
+    const entry = await waitFor(() => {
+      const held = document.querySelector("tr[data-entry-row]");
+      if (held === null) throw new Error("no entry row yet");
+      return held as HTMLTableRowElement;
+    });
+    // Directly under the row it came from, so the copy appears where the eye
+    // already is rather than at the foot of the suite.
+    const rows = [...(entry.parentElement?.children ?? [])];
+    expect(rows.indexOf(entry)).toBe(1);
+
+    // And the caret is already in the copy's name, because renaming it is the
+    // first thing anybody does with a duplicate.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(within(entry).getByLabelText("Name"));
+    });
+
+    expect((within(entry).getByLabelText("Name") as HTMLInputElement).value).toBe(
+      "Books service (copy)",
+    );
+    expect(
+      (within(entry).getByLabelText("Scenario") as HTMLTextAreaElement).value,
+    ).toBe("The caller books service.");
+    expect(
+      (within(entry).getByLabelText("Expected behavior 1") as HTMLInputElement)
+        .value,
+    ).toBe("Offers an available time");
+    expect(within(entry).getByText("Impatient Rita")).toBeTruthy();
+    // The content the platform stores travels whole, mock tools and env too.
+    expect(within(entry).getByText("1 mock tool")).toBeTruthy();
+    expect(within(entry).getByText("View env variables")).toBeTruthy();
+
+    // Nothing has been written, and Cancel leaves the sheet exactly as it was.
+    expect(sent.some((request) => request.method === "POST")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const asked = await screen.findByRole("dialog", { name: "Discard this test?" });
+    fireEvent.click(within(asked).getByRole("button", { name: "Discard" }));
+    await waitFor(() => {
+      expect(document.querySelector("tr[data-entry-row]")).toBeNull();
+    });
+    expect(sent.some((request) => request.method === "POST")).toBe(false);
+    expect(screen.getByText("Books service")).toBeTruthy();
   });
 
   it("focuses the entry row from the ghost row and from the retired write address", async () => {
@@ -2020,7 +2908,15 @@ describe("the suite-first Tests route", () => {
       "/v1/tests": {
         status: 200,
         body: {
-          tests: [{ id: "tst_1", suiteId: "ste_1", versionId: "tv_1" }],
+          tests: [
+            {
+              id: "tst_1",
+              suiteId: "ste_1",
+              versionId: "tv_1",
+              mockTools: [],
+              env: null,
+            },
+          ],
           nextPageToken: null,
         },
       },

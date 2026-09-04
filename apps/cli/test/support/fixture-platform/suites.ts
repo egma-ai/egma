@@ -10,6 +10,7 @@ export type SuiteControls = {
   rename(id: string, name: string): SeededSuite;
   readonly suites: readonly SeededSuite[];
   byId(id: string): SeededSuite | null;
+  wasDeleted(id: string): boolean;
 };
 
 function bearer(request: FixtureRequest): string {
@@ -21,9 +22,10 @@ export function suiteRoutes(options: {
   readonly holdsKey: (key: string) => boolean;
   readonly projectId: string;
   readonly projectName: string;
-  readonly afterCreate?: (suite: SeededSuite) => void;
+  readonly afterDelete?: (suiteId: string) => void;
 }): { readonly group: RouteGroup; readonly controls: SuiteControls } {
   const suites: SeededSuite[] = [];
+  const deletedSuiteIds = new Set<string>();
   const behind = (request: FixtureRequest, action: () => FixtureAnswer): FixtureAnswer =>
     options.holdsKey(bearer(request)) ? action() : { status: 401, body: NOT_AUTHENTICATED };
   const projectGate = (id: string | undefined): FixtureAnswer | null =>
@@ -47,6 +49,9 @@ export function suiteRoutes(options: {
     },
     byId(id) {
       return suites.find((one) => one.id === id) ?? null;
+    },
+    wasDeleted(id) {
+      return deletedSuiteIds.has(id);
     },
   };
   const described = (suite: SeededSuite): Record<string, unknown> => ({
@@ -97,7 +102,6 @@ export function suiteRoutes(options: {
               const name = text(said.name);
               if (name === "") return refuse(422, "unprocessable", "a suite name is required");
               const created = controls.add(name);
-              options.afterCreate?.(created);
               return { status: 201, body: described(created) };
             }),
         },
@@ -129,9 +133,18 @@ export function suiteRoutes(options: {
           path: "/v1/test-suites/:suiteId",
           handle: (request) =>
             behind(request, () => {
+              const projectId = given(request.url.searchParams.get("projectId"));
+              if (projectId !== undefined) {
+                const gate = projectGate(projectId);
+                if (gate !== null) return gate;
+              }
               const at = suites.findIndex((one) => one.id === request.params.suiteId);
               if (at < 0) return refuse(404, "not_found", "there is no active test suite with that id");
-              suites.splice(at, 1);
+              const [deleted] = suites.splice(at, 1);
+              if (deleted !== undefined) {
+                deletedSuiteIds.add(deleted.id);
+                options.afterDelete?.(deleted.id);
+              }
               return { status: 204 };
             }),
         },

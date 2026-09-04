@@ -56,7 +56,7 @@ async function logInThrough(
   });
   child.stdout.on("data", (chunk: string) => {
     stdout += chunk;
-    const code = /^code: (?<code>.+)$/mu.exec(stdout)?.groups?.code;
+    const code = /^Code: (?<code>.+)$/mu.exec(stdout)?.groups?.code;
     if (code === undefined || approving !== undefined) return;
     approving = approve(instance, customer, code.trim());
   });
@@ -127,7 +127,10 @@ it("keeps one key per platform when a machine signs in to two of them", async ()
 
     const firstLogin = await logInThrough(first, onFirst, workspace);
     expect(firstLogin.code, firstLogin.stderr).toBe(0);
-    expect(firstLogin.stdout).toContain("status: stored");
+    expect(firstLogin.stdout).toContain(
+      `Login saved in ${workspace.credentialsFile}.`,
+    );
+    expect(firstLogin.stdout).not.toContain("status:");
 
     const heldForFirst = await readCredentials(workspace.credentialsFile, firstOrigin);
     expect(heldForFirst?.url).toBe(firstOrigin);
@@ -147,7 +150,10 @@ it("keeps one key per platform when a machine signs in to two of them", async ()
 
     const secondLogin = await logInThrough(second, onSecond, workspace);
     expect(secondLogin.code, secondLogin.stderr).toBe(0);
-    expect(secondLogin.stdout).toContain("status: stored");
+    expect(secondLogin.stdout).toContain(
+      `Login saved in ${workspace.credentialsFile}.`,
+    );
+    expect(secondLogin.stdout).not.toContain("status:");
 
     // The second login did not sign this machine out of the first platform.
     const stillFirst = await readCredentials(workspace.credentialsFile, firstOrigin);

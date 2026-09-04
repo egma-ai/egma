@@ -13,7 +13,6 @@ import {
   EMPTY_CONFIG,
   folderPathsIn,
   readRepository,
-  serializeMockToolsFile,
   serializeSuiteManifest,
 } from "../src/folder/egma-folder.ts";
 import { serializeTestFile } from "../src/folder/test-file.ts";
@@ -133,14 +132,10 @@ it("creates a suite first, pushes the complete folder atomically, and runs that 
           name: "Handles no slots",
           scenario: "No appointment is available.",
           expectedBehaviors: blocking("The agent offers a callback."),
+          mockTools: [{ tool: "calendar", answer: { slots: [] } }],
+          env: { job_dispatch_metadata: { tenant: "acme" } },
         }),
       ),
-    );
-    await writeFile(
-      folder.paths.mockTools,
-      serializeMockToolsFile([
-        { tool: "calendar", says: { answer: { slots: [] } } },
-      ]),
     );
 
     const beforeRun = platform.records.length;
@@ -162,9 +157,15 @@ it("creates a suite first, pushes the complete folder atomically, and runs that 
       .map((record) => `${record.method} ${record.path}`);
     expect(writes).toEqual(["POST /v1/repository/change-set", "POST /v1/runs"]);
     expect(platform.tests.tests).toHaveLength(2);
-    expect(platform.mocking.mockTools).toEqual([
-      expect.objectContaining({ tool: "calendar", answer: { answer: { slots: [] } } }),
-    ]);
+    // The world went up on the test that carries it, in the one change set.
+    expect(platform.tests.worldOf("Handles no slots")).toMatchObject({
+      mockTools: [{ tool: "calendar", answer: { slots: [] } }],
+      env: { job_dispatch_metadata: { tenant: "acme" } },
+    });
+    expect(platform.tests.worldOf("Books a visit")).toMatchObject({
+      mockTools: [],
+      env: null,
+    });
 
     const repository = await readRepository(folderPathsIn(workspace.dir));
     expect(repository.suites).toHaveLength(1);
@@ -205,7 +206,8 @@ it("creates a suite first, pushes the complete folder atomically, and runs that 
     ]);
     const runId = platform.running.runs[0]?.id;
     expect(started.stdout).toBe(
-      `run: ${runId}\nresults: ${platform.url}/projects/${registered.agent.projectId}/runs/${runId}\nstatus: started\n`,
+      `Started Run ${runId}.\n` +
+        `View its progress in Egma: ${platform.url}/projects/${registered.agent.projectId}/runs/${runId}\n`,
     );
   } finally {
     await Promise.all([platform.close(), workspace.remove()]);

@@ -33,15 +33,6 @@ export type EvidenceGradeAssertion = NonNullable<
 export type EvidencePlan = NonNullable<GetSimulationResponse["gradingPlan"]>;
 export type EvidencePlanItem = EvidencePlan["items"][number];
 
-/** One mocked answer this simulation used. */
-export type EvidenceMockTool =
-  GetSimulationResponse["mockTools"]["defaults"][number];
-
-/** Which agent tools Egma answered and which ran outside Egma. */
-export type EvidenceCoverage = NonNullable<
-  GetSimulationResponse["mockToolCoverage"]
->;
-
 /** One simulation and all evidence available for it. */
 export type SimulationEvidence = GetSimulationResponse;
 

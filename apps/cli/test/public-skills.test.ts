@@ -93,10 +93,12 @@ describe("the public skill source", () => {
     expect(examples).not.toHaveLength(0);
 
     const test = parseTestFile(examples[0] ?? "", "shown-in-skill.md", "fallback");
+    expect(test.format).toBe(5);
     expect(test.name).toBe("missed-appointment-reschedule");
     expect(test.scenario).not.toBe("");
     expect(test.expectedBehaviors.length).toBeGreaterThan(0);
     expect(test.mockTools.map((tool) => tool.tool)).toEqual(["check_availability"]);
+    expect(test.env).toEqual({ retell_dynamic_variables: { caller_name: "Margaret" } });
   });
 
   it("routes integration work through the selected public references", async () => {
@@ -136,9 +138,13 @@ describe("the public skill source", () => {
     expect(example).toBeDefined();
 
     const test = parseTestFile(example ?? "", "docs/cli/test-files.mdx", "fallback");
-    expect(test.format).toBe(4);
+    expect(test.format).toBe(5);
     expect(test.expectedBehaviors).toHaveLength(2);
-    expect(test.mockTools).toEqual([]);
+    expect(test.mockTools).toEqual([{ tool: "check_availability", answer: { slots: [] } }]);
+    expect(test.env).toEqual({
+      retell_dynamic_variables: { caller_name: "Margaret" },
+      job_dispatch_metadata: { tenant: "acme" },
+    });
   });
 });
 

@@ -13,9 +13,9 @@
  * with two of them — and honouring it costs nothing and is the difference
  * between a working login and a shrug.
  *
- * Failing to open a browser is not a failure of login. The address is on the
- * screen either way, and the whole point of the copy key and the paste-back is
- * that a machine with no browser still gets through.
+ * Failing to open a browser is not a failure of login. The address stays on
+ * the screen, can be opened on another machine, and the CLI keeps polling for
+ * approval.
  */
 
 import { spawn } from "node:child_process";

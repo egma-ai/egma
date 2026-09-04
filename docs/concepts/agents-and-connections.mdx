@@ -37,30 +37,12 @@ Current supported combinations include:
 | LiveKit | `livekit_room` | `livekit_room.project_credentials` | chat | LiveKit chat |
 | LiveKit | `livekit_room` | `livekit_room.project_credentials` | voice | LiveKit project credentials |
 | LiveKit | `livekit_room` | `livekit_room.customer_token_endpoint` | voice | LiveKit token endpoint |
-| LiveKit | `phone_number` | `phone_number.public_e164` | voice | Phone number |
-| Any or unknown | `phone_number` | `phone_number.public_e164` | voice | Phone number |
+| LiveKit | `livekit_room` | `livekit_room.customer_token_endpoint` | chat | LiveKit chat token endpoint |
 
-The current connection catalog supplies the LiveKit rows available on one
-deployment. The CLI reads it iteratively: the bare LiveKit connect call lists
-modalities, `--modality` adds access-variant choices, and `--modality` plus
-`--access-variant` adds required field and secret facts. These incomplete calls
-write nothing.
-
-## Platform and connection type are independent
-
-A LiveKit worker can answer a public phone number. In that case:
-
-- agent platform is LiveKit;
-- connection type is `phone_number`;
-- access variant is `phone_number.public_e164`; and
-- modality is voice.
-
-The phone adapter does not need to know that LiveKit runs the agent. It dials
-the number with Egma's telephony configuration. The same agent can also have a
-`livekit_room` connection that joins a room directly.
-
-This model allows future paths, such as WebSocket or WebRTC adapters, without
-changing the meaning of agent platform.
+The current platform catalog supplies these combinations, their required
+fields, and their credential fields. Read it with
+`egma agent connection options --platform <retell|livekit>`. The command writes
+nothing.
 
 ## Current connection types
 
@@ -70,8 +52,8 @@ changing the meaning of agent platform.
 places no call. The `retell_text_mode.api_key` variant stores the Retell agent
 ID and a sealed API key.
 
-Text-mode connections start with mock tools on. Answers ride on the request, so
-the lane writes nothing to the Retell account.
+A test's mock tools ride on every request Egma sends, so this lane writes
+nothing to the Retell account. Its `retell_dynamic_variables` ride with them.
 
 ### Retell web call
 
@@ -79,96 +61,130 @@ the lane writes nothing to the Retell account.
 `retell_web_call.api_key` variant stores the Retell agent ID and a sealed API
 key.
 
-Web-call connections start with mock tools off. Enabling them is a separate
-explicit platform action because a mocked run creates a temporary Retell
-version and restores the original state afterward.
+Where at least one test of a run names a mock tool, Egma creates one temporary
+version of the agent at run start, routes each mocked tool to Egma per call, and
+deletes that version when the run ends. Your serving version is never changed.
+See [Retell](/integrations/retell#how-a-mocked-web-call-reaches-egma).
 
 ### Phone number
 
-`phone_number` is platform-independent and voice-only. Its
+The current Retell catalog offers a voice-only public phone Connection. Its
 `phone_number.public_e164` variant stores a public number such as
 `+15551234567`. It stores no provider credential. Egma dials it with the
-deployment's telephony route. Phone simulations reach real tools and cannot use
-mock tools.
+deployment's telephony route. Phone simulations reach real tools: this lane
+never mocks, and it carries no dynamic variables.
 
 ### LiveKit room
 
-`livekit_room` joins a room in the customer's LiveKit project. Project
-credentials support chat and voice in the current catalog. A customer token
-endpoint supports voice.
+`livekit_room` joins a room in the customer's LiveKit project. Both access
+variants support chat and voice.
 
-- `livekit_room.project_credentials`: Egma stores the project key pair sealed,
-  mints a token, creates the room, and dispatches an exact worker name.
-- `livekit_room.customer_token_endpoint`: the customer keeps the signing key
-  and exposes a public HTTPS endpoint that returns a room token. Egma stores
-  only the endpoint authentication headers sealed.
+- `livekit_room.project_credentials`: the config names `url` and `agentName`.
+  Egma stores the project key pair sealed, mints a token, creates the room, and
+  dispatches that exact worker name.
+- `livekit_room.customer_token_endpoint`: the config names `tokenEndpoint` and
+  `agentName`. The customer keeps the signing key and exposes a public HTTPS
+  endpoint in LiveKit's standard token endpoint format. Egma asks it for a room
+  token and the server URL, and names the worker to dispatch in the request.
+  Egma stores the endpoint URL, the agent name, and the sealed auth headers. It
+  stores no server URL. See [LiveKit token endpoint](/integrations/livekit-token-endpoint).
 
 These are access variants of the same connection type, not different agent
-platforms.
+platforms. A connection carries no per-call data of its own: what a simulation
+starts with is the running test's `env`.
 
 #### What a LiveKit worker reads
 
-A project-credentials connection can store a `metadata` JSON object inside a
-string. Egma gives the same bytes to both LiveKit metadata channels:
+Egma writes the running test's `job_dispatch_metadata` to the agent dispatch,
+as one compact JSON string, byte for byte. On a key-pair connection Egma makes
+that dispatch itself. On a token-endpoint connection Egma sends the same
+string to the endpoint inside the request's `room_config`, and the endpoint
+copies it into the token it mints:
 
-| Channel | Worker path | When |
+| Channel | Worker path | What it carries |
 |---|---|---|
-| Room metadata | `ctx.room.metadata` | Every simulation |
-| Dispatch metadata | `ctx.job.metadata` | Every named-worker dispatch |
+| Dispatch metadata | `ctx.job.metadata` | The test's `job_dispatch_metadata`, and nothing of Egma's. A test that names none dispatches the empty string |
+| Room metadata | `ctx.room.metadata` | Nothing. Egma leaves it empty |
 
-Egma adds no scenario, persona, expected behavior, or mock-tool answer to this
-metadata. A worker must not receive the test script that defines its simulation.
+Egma adds no scenario, persona, expected behavior, or mock-tool answer to the
+dispatch. A worker must not receive the test script that defines its simulation.
 The room name tells the Egma SDK that the worker is in a simulation.
 
-The customer-token-endpoint variant takes no dispatch name or metadata. Without
-the project key pair, Egma cannot create the room or dispatch a named worker;
-the customer's endpoint owns those actions.
+On the customer-token-endpoint variant Egma cannot create the room, so only the
+dispatch channel carries anything. Egma names the worker and passes the test's
+`job_dispatch_metadata` inside the request's `room_config`. The endpoint copies
+that block into the token, and LiveKit dispatches the worker when the room is
+created.
 
-## Create connections with skills and the CLI
+## What each connection can use of a test
 
-The public `integrate-egma` skill keeps repository discovery read-only. The
-developer's end-to-end request authorizes normal connection setup after discovery.
+A test carries its own world: the **mock tools** it answers for itself, and the
+**env** the call starts with. Not every connection can carry all of it.
 
-Retell setup includes provider context for test grounding:
+| Connection | Mock tools | `retell_dynamic_variables` | `job_dispatch_metadata` |
+|---|---|---|---|
+| Retell text mode | Yes | Yes | Not used |
+| Retell web call | Yes | Yes | Not used |
+| Retell phone | No | No | Not used |
+| LiveKit key pair, chat or voice | Yes, with the Egma SDK in your worker | Not used | Yes |
+| LiveKit token endpoint | Yes, with the Egma SDK in your worker | Not used | Yes, inside the `room_config` your endpoint copies into the token |
+
+**A run proceeds whatever its connection can carry, and says what it could not
+use.** Egma reads the connection and the tests' pinned versions and shows a
+short note when a run picks up something this connection cannot carry, such as
+mock tools or Retell dynamic variables on a phone run. It appears under the
+connection picker when you start the run, and again on the run page. Nothing
+is refused for it, and nothing is stored: the note is computed from what the
+run holds.
+
+"Not used" means the key belongs to the other platform. One test can carry both
+keys and run on either agent; the key the lane does not use is simply not
+passed.
+
+## Create Connections with the CLI
+
+The coding agent keeps repository discovery read-only. The developer's
+end-to-end request authorizes normal Connection setup after discovery.
+
+Registering an Agent and adding a Connection are separate operations. Retell
+example:
 
 ```bash
-EGMA_RETELL_API_KEY=... egma connect \
-  --platform retell \
-  --show-context \
-  --retell-agent agent_... \
-  --lanes text
+egma agent register --platform retell --name order-line
+
+EGMA_RETELL_API_KEY=... \
+  egma agent connection add \
+  --agent agt_... \
+  --access retell-api-key \
+  --modality chat \
+  --retell-agent agent_...
 ```
 
-LiveKit setup first reads modalities, then access variants, then required
-fields and secrets. Each incomplete call writes nothing:
+Read the current LiveKit catalog once, then register an Agent identity:
 
 ```bash
-egma connect --platform livekit
-
-egma connect --platform livekit --modality voice
-
-egma connect --platform livekit \
-  --modality voice \
-  --access-variant livekit_room.project_credentials
+egma agent connection options --platform livekit
+egma agent register --platform livekit --name front-desk
 ```
 
 The coding agent supplies the exact public fields and existing secrets in one
-complete call; it asks only when a required value is missing or ambiguous:
+Connection command. Project credentials are the normal path:
 
 ```bash
 EGMA_LIVEKIT_API_KEY=... \
 EGMA_LIVEKIT_API_SECRET=... \
-egma connect \
-  --platform livekit \
-  --name front-desk \
+egma agent connection add \
+  --agent agt_... \
+  --access livekit-project-credentials \
   --modality voice \
-  --access-variant livekit_room.project_credentials \
   --livekit-url wss://acme.livekit.cloud \
-  --dispatch-name receptionist
+  --livekit-agent-name receptionist
 ```
 
-The CLI also records the connection receipt in `egma/config.yaml`. Provider
-secrets never enter that file.
+`agent register` owns only Agent identity. `agent connection add` owns Access,
+Modality, provider fields, and setup credentials. The CLI refreshes the Agent
+and Connection IDs in `egma/config.yaml`. Provider secrets never enter that
+file.
 
 ## Create a connection through the API
 
@@ -248,9 +264,12 @@ Monitoring credentials and simulation connection credentials are separate.
 Rotating or disabling one path does not change the other. Turning Retell
 monitoring on or off never creates or changes a simulation connection.
 
-The copied monitoring or both prompt already authorizes
-`egma monitoring enable`. The coding agent confirms the result with
-`egma monitoring status`. A monitoring-only integration stops there. A both
-integration completes the test run and the monitoring status.
+The monitoring or both prompt already authorizes Agent-scoped setup. For
+Retell, the coding agent runs `egma agent monitoring setup` with an explicit
+Agent ID and `--platform retell`. For LiveKit, that command prints the public
+`integrate-egma` skill handoff and exits incomplete because repository
+instrumentation and deployment remain coding-agent work. That public guide is
+still being authored; use the Python or JavaScript SDK monitoring guide
+directly for now. The CLI does not invent a monitoring health state.
 
 See [Production telemetry](/concepts/telemetry) for the evidence path.

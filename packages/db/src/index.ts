@@ -65,46 +65,27 @@ export {
   type SpeechSelection,
 } from "./models/selections.ts";
 /**
- * The mocked world a simulation runs in, worked out from what its run froze.
- * It is here beside other shared pure helpers for the same reason: it reaches no
- * store, takes no context, and is the one place a project default and a test
- * override are merged.
+ * The put-it-back note a mocked run leaves behind, and its serialization. Pure:
+ * it reads and writes no store.
  */
 export {
-  isErrorAnswer,
-  resolveMockTools,
-  NO_MOCK_TOOLS,
-  type MockToolAnswer,
-  type MockToolSnapshot,
-  type ResolvedMockTool,
-  type SnapshotDefault,
-  type SnapshotEntry,
-} from "./mock-tools/resolve.ts";
-/**
- * The coverage stamp's serialization and the put-it-back note a mocked run
- * leaves behind. Both are pure: they read and write no store.
- */
-export {
-  mockToolCoverageFrom,
-  mockToolCoverageRow,
-  NO_MOCK_TOOL_COVERAGE,
-} from "./mock-tools/coverage.ts";
-export {
+  mockMetadataAsPublished,
   mockMetadataFrom,
   mockMetadataRow,
   type MockEngineNote,
   type MockMetadata,
+  type MockToolVariable,
 } from "./mock-tools/record.ts";
 /**
- * Which connection lanes branch a temporary copy when they are mocked. The
- * gate beside them is not exported: it is a condition inside the claim, and
- * nothing outside this package has a query to put it in.
+ * Which connection lanes serve a test's mock tools, and which of them branch a
+ * temporary copy to do it. The gate beside them is not exported: it is a
+ * condition inside the claim, and nothing outside this package has a query to
+ * put it in.
  */
 export {
   connectionTypeBranchesMockDraft,
-  connectionTypeCarriesMockSwitch,
   DRAFT_MOCK_CONNECTION_TYPES,
-  MOCK_SWITCHED_CONNECTION_TYPES,
+  LANES_SERVING_MOCK_TOOLS,
   type DraftMockConnectionType,
 } from "./mock-tools/lanes.ts";
 /** Pure grader policy parsing and validation; no store is read or written. */
@@ -183,5 +164,23 @@ export {
   refuseUnstorableInstant,
   spanContentHash,
 } from "./access/spans.ts";
+/**
+ * What a test's own world may cost the wire that carries it, and the one
+ * serialization the dispatch is measured on.
+ *
+ * Here beside the span limits above for the span limits' own reason: none of
+ * them reaches a store, and each has to be said in a refusal by whoever
+ * enforces it. **The same rules are applied twice by design** — once at
+ * authoring time, where the person who can fix a refusal is reading, and once
+ * where the value is actually carried — so a second copy of a number, or a
+ * second serializer with different spacing, would be two caps measuring two
+ * different things and calling both the limit.
+ */
+export {
+  LARGEST_JOB_DISPATCH_METADATA_BYTES,
+  LARGEST_MOCK_TOOL_ANSWER_BYTES,
+  RESERVED_ENV_VARIABLE_PREFIX,
+  serializedJobDispatchMetadata,
+} from "./access/tests.ts";
 export * from "./access/index.ts";
 export * as schema from "./schema/index.ts";

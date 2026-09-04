@@ -1,10 +1,6 @@
 import { db } from "../client.ts";
 import type { AuthContext } from "./context.ts";
 import { ProjectOutsideOrganizationError } from "./errors.ts";
-import {
-  applyRepositoryMockToolsOn,
-  type RepositoryMockTool,
-} from "./mock-tools.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { lockRepositoryProject } from "./repository-lock.ts";
@@ -18,11 +14,17 @@ import {
   type RepositoryTest,
 } from "./tests.ts";
 
-/** The complete authored repository state for one project. */
+/**
+ * The complete authored repository state for one project.
+ *
+ * **Two lists, not three.** There was a third — the project's own mock
+ * tools — and it is gone with the project-owned mocked world: a test carries
+ * the tools it answers for itself, so what a repository declares about mocking
+ * arrives inside each test rather than beside them all.
+ */
 export type RepositoryChangeSet = {
   readonly suites: readonly RepositorySuite[];
   readonly tests: readonly RepositoryTest[];
-  readonly mockTools: readonly RepositoryMockTool[];
 };
 
 export type AppliedRepositoryChangeSet = {
@@ -55,7 +57,6 @@ export async function applyRepositoryChangeSet(
 
     await applyRepositorySuitesOn(tx, auth, changeSet.suites);
     const tests = await applyRepositoryTestsOn(tx, auth, changeSet.tests);
-    await applyRepositoryMockToolsOn(tx, auth, changeSet.mockTools);
     return { tests };
   });
 }

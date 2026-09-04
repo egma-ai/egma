@@ -58,7 +58,7 @@ export type ConnectionOptionCatalog = {
 
 export type ConnectionOptionCatalogResult =
   | { readonly kind: "catalog"; readonly catalog: ConnectionOptionCatalog }
-  | { readonly kind: "not-authenticated" }
+  | { readonly kind: "not-authenticated"; readonly reason: string }
   | { readonly kind: "refused"; readonly reason: string }
   | { readonly kind: "unreachable"; readonly reason: string };
 
@@ -114,15 +114,28 @@ export async function readConnectionOptions(
   if (answer.response === undefined) {
     return { kind: "unreachable", reason: platformUnreachableMessage(options.url) };
   }
-  if (answer.response.status === 401) return { kind: "not-authenticated" };
+  if (answer.response.status === 401) {
+    return {
+      kind: "not-authenticated",
+      reason: platformRefusalMessage(answer.error, answer.response.status),
+    };
+  }
   if (!answer.response.ok) {
     return {
       kind: "refused",
       reason: platformRefusalMessage(answer.error, answer.response.status),
     };
   }
+  const items = answer.data?.items;
+  if (!Array.isArray(items)) {
+    return {
+      kind: "refused",
+      reason:
+        "Egma answered with a Connection option catalog this CLI cannot read. Check that this Egma platform is up to date.",
+    };
+  }
   return {
     kind: "catalog",
-    catalog: { items: (answer.data?.items ?? []).map(cleanOption) },
+    catalog: { items: items.map(cleanOption) },
   };
 }

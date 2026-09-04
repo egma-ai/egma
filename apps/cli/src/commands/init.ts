@@ -14,6 +14,7 @@ import { PlatformRefusedError } from "../platform/refused.ts";
 import { notSignedInRefusal, signedInAt } from "../platform/signed-in.ts";
 import { pullRepository } from "../sync/pull.ts";
 import { readProjectTargets } from "../sync/targets.ts";
+import { oneLineFactText } from "../ui/fact-value.ts";
 import { FOLDER_EXIT, type FolderCommandOptions } from "./folder-verbs.ts";
 
 export type InitCommandOptions = FolderCommandOptions & {
@@ -41,7 +42,7 @@ async function existingConfig(file: string): Promise<FolderConfig | null> {
 
 function failRemote(
   result:
-    | { readonly kind: "not-authenticated" }
+    | { readonly kind: "not-authenticated"; readonly reason: string }
     | { readonly kind: "refused" | "unreachable"; readonly reason: string },
   url: string,
 ): never {
@@ -51,23 +52,29 @@ function failRemote(
   throw new PlatformRefusedError(
     result.kind === "not-authenticated" ? 401 : 400,
     result.kind === "not-authenticated"
-      ? "This Egma credential is not valid. Run egma login again."
+      ? `${result.reason}\nRun egma login again.`
       : result.reason,
   );
 }
 
 /** Initialize or refresh one repository without creating a Project. */
 export async function runInitCommand(options: InitCommandOptions): Promise<number> {
-  options.out(`url: ${options.binding.origin}`);
   const signedIn = await signedInAt(options.access);
   if (signedIn === null) {
-    options.out("status: not-signed-in");
     options.fail(notSignedInRefusal(options.access.url));
-    return FOLDER_EXIT.notSignedIn;
+    return FOLDER_EXIT.nothing;
   }
 
   const paths = folderPathsIn(options.cwd);
-  const held = await existingConfig(paths.config);
+  let held: FolderConfig | null;
+  try {
+    held = await existingConfig(paths.config);
+  } catch (cause) {
+    options.fail(
+      `Egma could not read egma/config.yaml: ${cause instanceof Error ? cause.message : String(cause)} Nothing was changed.`,
+    );
+    return FOLDER_EXIT.nothing;
+  }
   const askedProject = options.projectId?.trim() ?? "";
   const credentialProject = signedIn.projectId ?? "";
 
@@ -77,31 +84,43 @@ export async function runInitCommand(options: InitCommandOptions): Promise<numbe
     ((askedProject !== "" && askedProject !== held.project.id) ||
       (credentialProject !== "" && credentialProject !== held.project.id))
   ) {
-    options.out("status: different-project");
     options.fail(DIFFERENT_PROJECT);
     return FOLDER_EXIT.nothing;
   }
 
   if (credentialProject !== "" && askedProject !== "") {
-    options.out("status: project-option-not-used");
     options.fail(
       `This login already identifies Project ${credentialProject}. Remove --project and run egma init again. Nothing was changed.`,
     );
     return FOLDER_EXIT.nothing;
   }
 
-  const projectId = held?.project?.id ?? (credentialProject || askedProject);
+  let projectId = held?.project?.id ?? (credentialProject || askedProject);
   if (projectId === "") {
     const listed = await listProjects(signedIn, options.fetchImpl);
     if (listed.kind !== "projects") failRemote(listed, options.access.url);
-    for (const project of listed.projects) {
-      options.out(`project-option: ${project.id} ${project.name}`);
+
+    if (listed.projects.length === 0) {
+      options.fail(
+        "This Egma account has no Project. Create a Project in Egma, then run egma init again. Nothing was changed.",
+      );
+      return FOLDER_EXIT.nothing;
     }
-    options.out("status: project-required");
-    options.fail(
-      "This credential does not identify one Project. Run egma init --project <Project ID>.",
-    );
-    return FOLDER_EXIT.nothing;
+
+    if (listed.projects.length === 1) {
+      projectId = listed.projects[0]!.id;
+    } else {
+      options.out("Available Egma Projects:");
+      for (const project of listed.projects) {
+        options.out(
+          `- ${oneLineFactText(project.name, "Unnamed Project")} (${oneLineFactText(project.id, "unknown Project ID")})`,
+        );
+      }
+      options.fail(
+        "This credential does not identify one Project. Run egma init --project <Project ID>.",
+      );
+      return FOLDER_EXIT.nothing;
+    }
   }
 
   const project = await readProject(signedIn, projectId, options.fetchImpl);
@@ -136,11 +155,16 @@ export async function runInitCommand(options: InitCommandOptions): Promise<numbe
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
 
-  options.out(`folder: ${folder.paths.root}`);
-  options.out(`project: ${project.id} ${project.name}`);
-  options.out(`agents: ${targets.agents.length}`);
-  options.out(`suites: ${pulled.suites.length}`);
-  options.out(`tests: ${pulled.tests.length}`);
-  options.out(`status: ${folder.created ? "initialized" : "pulled"}`);
+  options.out(
+    folder.created
+      ? `Initialized Egma in ${oneLineFactText(folder.paths.root, "this repository")}.`
+      : `Refreshed ${oneLineFactText(folder.paths.root, "this repository")} from Egma.`,
+  );
+  options.out(
+    `Project: ${oneLineFactText(project.name, "Unnamed Project")} (${oneLineFactText(project.id, "unknown Project ID")})`,
+  );
+  options.out(`Agents: ${targets.agents.length}`);
+  options.out(`Suites: ${pulled.suites.length}`);
+  options.out(`Tests: ${pulled.tests.length}`);
   return FOLDER_EXIT.done;
 }

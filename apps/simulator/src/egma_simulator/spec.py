@@ -23,9 +23,8 @@ from .contract import ContractViolation, validate_spec
 class MockTool:
     """One tool name, and what egma answers when the agent calls it.
 
-    Already resolved when it arrives: the control plane worked the
-    project's defaults and the test's overrides into one answer per name
-    at run creation, so every simulation in one run sees one world and
+    Already resolved when it arrives: the answer is the test's own, one
+    per name, so a simulation mocks exactly the tools its test names and
     there is nothing left here to merge.
     """
 
@@ -38,10 +37,6 @@ class MockTool:
     with the value the tool returns, or ``{"error": …}`` with the failure
     it raises. Held whole rather than unpacked, so the bytes that go on
     the wire are the bytes that were authored."""
-
-    delay_milliseconds: int
-    """How long egma holds the answer back, so a mocked backend takes as
-    long as the real one would."""
 
     @property
     def fails(self) -> bool:
@@ -262,6 +257,18 @@ class SimulationSpec:
     value the agent under test never saw.
     """
 
+    job_dispatch_metadata: dict[str, Any] | None = None
+    """The metadata this one simulation's agent dispatch carries, exactly as
+    the test wrote it.
+
+    ``None`` is the ordinary case. Nothing here reads it: it is the LiveKit
+    agent's own channel, so it is carried to the plug and written to the
+    worker byte for byte, because a value the simulator tidied would be a
+    value the agent under test never saw. LiveKit Project credentials carry it
+    on Egma's dispatch. A LiveKit token endpoint carries it in the room
+    configuration that the endpoint copies into the token.
+    """
+
     mock_tools: tuple[MockTool, ...] = ()
     """What egma answers for while this simulation runs, already resolved.
 
@@ -287,6 +294,7 @@ class SimulationSpec:
         return cls(
             agent_version=document.get("agent_version"),
             dynamic_variables=dict(document.get("dynamic_variables") or {}),
+            job_dispatch_metadata=document.get("job_dispatch_metadata"),
             mock_tools=_mock_tools(document.get("mock_tools") or []),
             platform=WorkOrderPlatform.from_document(document.get("platform")),
             models=SelectedModels.from_document(document["models"]),
@@ -331,6 +339,5 @@ def _mock_tools(written: list[Any]) -> tuple[MockTool, ...]:
         named[tool_name] = MockTool(
             tool_name=tool_name,
             answer=entry["answer"],
-            delay_milliseconds=entry["delay_milliseconds"],
         )
     return tuple(named.values())

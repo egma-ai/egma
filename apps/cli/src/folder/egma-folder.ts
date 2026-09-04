@@ -4,7 +4,6 @@
  * ```
  * egma/
  *   config.yaml     one platform and project, with many agents and connections
- *   mock-tools.md   what egma answers for the agent's tools with
  *   tests/          one direct directory per test suite
  *     release/
  *       suite.yaml  stable suite identity and current display name
@@ -25,17 +24,11 @@
  * repository runs the same command as the first and loses nothing by it.
  */
 
+import { FolderProblem, namesItsPlace } from "./problem.ts";
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import {
-  MOCK_TOOLS_HEADING,
-  MOCK_TOOLS_LINE,
-  readMockTools,
-  writeMockTools,
-  type MockToolEntry,
-} from "./mock-tools.ts";
 import { normalizePlatformOrigin } from "../platform/url.ts";
 import { parseTestFile, serializeTestFile, type TestFile } from "./test-file.ts";
 import {
@@ -54,7 +47,6 @@ import {
 
 export const FOLDER_NAME = "egma";
 export const CONFIG_FILE_NAME = "config.yaml";
-export const MOCK_TOOLS_FILE_NAME = "mock-tools.md";
 export const TESTS_FOLDER_NAME = "tests";
 export const SUITE_MANIFEST_FILE_NAME = "suite.yaml";
 /** Reserved for per-agent memory files. Nothing creates it. */
@@ -64,8 +56,6 @@ export const MEMORY_FOLDER_NAME = "memory";
 export type FolderPaths = {
   readonly root: string;
   readonly config: string;
-  /** The project's own mock tools. A test's overrides live in the test. */
-  readonly mockTools: string;
   readonly tests: string;
 };
 
@@ -74,7 +64,6 @@ export function folderPathsIn(repository: string): FolderPaths {
   return {
     root,
     config: path.join(root, CONFIG_FILE_NAME),
-    mockTools: path.join(root, MOCK_TOOLS_FILE_NAME),
     tests: path.join(root, TESTS_FOLDER_NAME),
   };
 }
@@ -172,7 +161,7 @@ function unsupportedKeys(
 ): void {
   const unknown = Object.keys(mapping).filter((key) => !supported.includes(key));
   if (unknown.length > 0) {
-    throw new Error(
+    throw new FolderProblem(where, 
       `${where} has unsupported ${unknown.length === 1 ? "key" : "keys"}: ${unknown.join(", ")}.`,
     );
   }
@@ -187,10 +176,10 @@ function identifiedThing(
   const id = textAt(mapping, "id");
   const name = textAt(mapping, "name");
   if (id === null || name === null) {
-    throw new Error(`${where} must contain a nonblank id and name.`);
+    throw new FolderProblem(where, `${where} must contain a nonblank id and name.`);
   }
   if (id !== id.trim() || name !== name.trim()) {
-    throw new Error(`${where} has outer whitespace in its id or name.`);
+    throw new FolderProblem(where, `${where} has outer whitespace in its id or name.`);
   }
   return { id, name };
 }
@@ -231,7 +220,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
       typeof writtenFormat === "string" || typeof writtenFormat === "number"
         ? String(writtenFormat)
         : "none";
-    throw new Error(
+    throw new FolderProblem(where, 
       `${where} uses folder format ${said}. This Egma requires format ${String(CONFIG_FORMAT)} and has no legacy reader.`,
     );
   }
@@ -240,7 +229,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
     (key) => !Object.prototype.hasOwnProperty.call(mapping, key),
   );
   if (missing.length > 0) {
-    throw new Error(
+    throw new FolderProblem(where, 
       `${where} is missing required ${missing.length === 1 ? "key" : "keys"}: ${missing.join(", ")}.`,
     );
   }
@@ -250,7 +239,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
     platformMapping === null
       ? (() => {
           if (platformScalar !== null) {
-            throw new Error(
+            throw new FolderProblem(where, 
               `${where} has a platform value without an origin. Repair the repository binding, then run egma pull.`,
             );
           }
@@ -260,7 +249,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
           unsupportedKeys(platformMapping, ["origin"], `${where} platform`);
           const origin = textAt(platformMapping, "origin");
           if (origin === null) {
-            throw new Error(
+            throw new FolderProblem(where, 
               `${where} has a platform binding without an origin. Repair it, then run egma pull.`,
             );
           }
@@ -269,7 +258,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
 
   const projectMapping = mappingAtKey(mapping, "project");
   if (projectMapping === null && textAt(mapping, "project") !== null) {
-    throw new Error(`${where} has a project value without an id and name.`);
+    throw new FolderProblem(where, `${where} has a project value without an id and name.`);
   }
   const project =
     projectMapping === null
@@ -281,13 +270,13 @@ export function parseConfig(document: string, where: string): FolderConfig {
   const connectionOwners = new Map<string, string>();
   for (const [index, entry] of sequenceAt(mapping, "agents").entries()) {
     if (typeof entry !== "object") {
-      throw new Error(
+      throw new FolderProblem(where, 
         `${where} agent ${String(index + 1)} must contain id, name, and connections.`,
       );
     }
     unsupportedKeys(entry, AGENT_KEYS, `${where} agent ${String(index + 1)}`);
     if (!Object.prototype.hasOwnProperty.call(entry, "connections")) {
-      throw new Error(
+      throw new FolderProblem(where, 
         `${where} agent ${String(index + 1)} is missing required key: connections.`,
       );
     }
@@ -297,12 +286,12 @@ export function parseConfig(document: string, where: string): FolderConfig {
     );
     const platform = textAt(entry, "platform");
     if (platform !== "retell" && platform !== "livekit") {
-      throw new Error(
+      throw new FolderProblem(where, 
         `${where} agent ${String(index + 1)} must contain platform retell or livekit.`,
       );
     }
     if (agentIds.has(agent.id)) {
-      throw new Error(`${where} uses agent id ${agent.id} more than once.`);
+      throw new FolderProblem(where, `${where} uses agent id ${agent.id} more than once.`);
     }
     agentIds.add(agent.id);
 
@@ -312,7 +301,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
       "connections",
     ).entries()) {
       if (typeof connectionEntry !== "object") {
-        throw new Error(
+        throw new FolderProblem(where, 
           `${where} agent ${agent.id} connection ${String(connectionIndex + 1)} must contain id and name.`,
         );
       }
@@ -322,7 +311,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
       );
       const firstOwner = connectionOwners.get(connection.id);
       if (firstOwner !== undefined) {
-        throw new Error(
+        throw new FolderProblem(where, 
           `${where} uses connection id ${connection.id} under both agent ${firstOwner} and agent ${agent.id}.`,
         );
       }
@@ -341,7 +330,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
 }
 
 export async function readConfig(file: string): Promise<FolderConfig> {
-  return parseConfig(await readFile(file, "utf8"), path.basename(file));
+  return parseConfig(await readFile(file, "utf8"), `${FOLDER_NAME}/${CONFIG_FILE_NAME}`);
 }
 
 export async function writeConfig(file: string, config: FolderConfig): Promise<void> {
@@ -454,116 +443,6 @@ export async function bindRepositoryPlatform(
   return updateConfig(paths.config, { platform: binding });
 }
 
-/**
- * What `egma/mock-tools.md` opens with, above the mock tools themselves.
- *
- * It is prose rather than a comment because it is markdown a person reads in a
- * pull request, and it says the three things nothing else in the folder would
- * teach: that an answer belongs here, that this one authored thing is not
- * versioned and so the last write wins, and that neither verb removes one.
- */
-const MOCK_TOOLS_HEADER = [
-  // Deliberately not the section's own heading: the section is found by that
-  // heading, and a title saying the same words would be the one the reader
-  // stopped at, leaving every mock tool below it unread.
-  "# The mock tools this project answers with",
-  "",
-  "Each one answers for a tool of the voice agent while a simulation runs, so a",
-  "test never reaches the real backend and can ask for the branch it needs. An",
-  "answer may be a failure, and may hold Egma back a while so a mocked backend",
-  "takes as long as the real one.",
-  "",
-  "Committed like everything else in this folder: an answer is your own data, and",
-  "nothing here is secret.",
-  "",
-  "Egma writes this file from what it holds, and a mock tool is not versioned — so",
-  "`egma pull` writes Egma's answer over what is here, and `egma push` writes what",
-  "is here over Egma's. Whichever ran last, wins. A mock tool Egma has never heard",
-  "of is left exactly as it is until you push it.",
-  "",
-  "Neither verb removes one: a block taken out of this file comes back on the next",
-  "`egma pull`, exactly as deleting a test file does not delete the test.",
-  "",
-  "This prose is Egma's own. Either verb rewrites the whole file from what Egma",
-  "holds, so a note added up here does not survive the next one.",
-  "",
-  "A test that needs a different answer writes it under the same heading in its own",
-  "file. That override is the test's own content, and is versioned with the test.",
-  "",
-];
-
-export function serializeMockToolsFile(
-  entries: readonly MockToolEntry[],
-): string {
-  // The heading is written even with nothing under it, unlike a test's own
-  // section: this file is the mock tools, and one with none has to say where
-  // the first one goes.
-  const written = writeMockTools(entries);
-  const section = written.length === 0 ? [MOCK_TOOLS_HEADING] : written;
-  return [...MOCK_TOOLS_HEADER, ...section, ""].join("\n");
-}
-
-/**
- * The mock tools one file says, whatever prose somebody wrote above them.
- *
- * The *first* heading opens the section here, where a test file takes its last
- * one. The difference is the shape of the two documents rather than two minds
- * about one rule: everything above the heading in this file is the prose egma
- * writes at the top — whose own title deliberately does not read as the section
- * heading — and everything below it is mock tools, one of which could perfectly
- * well be a tool somebody named `mock tools`.
- *
- * A file with no heading at all is read as holding none rather than refused: a
- * folder somebody emptied on purpose is still a folder egma can push.
- */
-export function parseMockToolsFile(
-  document: string,
-  where: string,
-): readonly MockToolEntry[] {
-  const lines = document.split("\n");
-  const at = lines.findIndex((line) => MOCK_TOOLS_LINE.test(line.trim()));
-  return at === -1 ? [] : readMockTools(lines.slice(at + 1), where);
-}
-
-/**
- * The project's mock tools as they now stand on disk. A folder that has no such
- * file yet holds no mock tools, which is what a folder made before this file
- * existed says and what a folder somebody has not pulled into says too.
- */
-export async function readMockToolsFile(
-  file: string,
-): Promise<readonly MockToolEntry[]> {
-  let document: string;
-  try {
-    document = await readFile(file, "utf8");
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw cause;
-  }
-  return parseMockToolsFile(document, `${FOLDER_NAME}/${MOCK_TOOLS_FILE_NAME}`);
-}
-
-/**
- * Write the project's mock tools, and say whether that changed anything. The
- * comparison is on the bytes, for the reason `writeTestFile` compares bytes.
- */
-export async function writeMockToolsFile(
-  file: string,
-  entries: readonly MockToolEntry[],
-): Promise<{ readonly changed: boolean }> {
-  const document = serializeMockToolsFile(entries);
-  let held: string | null = null;
-  try {
-    held = await readFile(file, "utf8");
-  } catch {
-    held = null;
-  }
-  if (held === document) return { changed: false };
-
-  await writeFile(file, document, "utf8");
-  return { changed: true };
-}
-
 export type CreateFolderOptions = {
   /** The repository the folder goes in. */
   readonly repository: string;
@@ -594,8 +473,7 @@ async function exists(where: string): Promise<boolean> {
  * A file that already exists is never rewritten — it is somebody's committed
  * file, and the second developer to run this must not turn up in a diff having
  * changed it. Anything missing beside it is made, so a folder that lost its
- * `tests/` directory to a branch merge comes back whole, and a folder made
- * before mock tools existed grows the file the first time this runs again.
+ * `tests/` directory to a branch merge comes back whole.
  */
 export async function createEgmaFolder(
   options: CreateFolderOptions,
@@ -606,13 +484,6 @@ export async function createEgmaFolder(
   await mkdir(paths.tests, { recursive: true });
   if (!already) {
     await writeConfig(paths.config, options.config ?? EMPTY_CONFIG);
-  }
-  // Empty, and here from the start: the folder is what teaches a developer and
-  // a coding agent where a mock tool goes, and a file that is not there teaches
-  // nobody. Never rewritten, so mock tools somebody authored survive a second
-  // run of `egma init`.
-  if (!(await exists(paths.mockTools))) {
-    await writeMockToolsFile(paths.mockTools, []);
   }
 
   return { paths, created: !already, config: await readConfig(paths.config) };
@@ -626,6 +497,11 @@ export type SuiteManifest = {
 
 const SUITE_ID = /^ste_[0-9A-HJKMNP-TV-Z]{26}$/u;
 const SUITE_MANIFEST_KEYS = ["id", "name"] as const;
+
+/** Whether a value can be stored as one platform-issued Suite identity. */
+export function isSuiteId(value: string): boolean {
+  return SUITE_ID.test(value);
+}
 
 export function serializeSuiteManifest(manifest: SuiteManifest): string {
   return `id: ${yamlScalar(manifest.id)}\nname: ${yamlScalar(manifest.name)}\n`;
@@ -646,26 +522,27 @@ export function parseSuiteManifest(
       ...(missing.length === 0 ? [] : [`missing ${missing.join(", ")}`]),
       ...(unknown.length === 0 ? [] : [`unsupported ${unknown.join(", ")}`]),
     ].join("; ");
-    throw new Error(
+    throw new FolderProblem(where, 
       `${where} must contain exactly id and name${details === "" ? "" : ` (${details})`}.`,
     );
   }
   const id = textAt(mapping, "id");
   const writtenName = mapping["name"];
   const name = typeof writtenName === "string" ? writtenName : null;
-  if (id === null || !SUITE_ID.test(id)) {
-    throw new Error(
+  if (id === null || !isSuiteId(id)) {
+    throw new FolderProblem(
+      where,
       `${where} has an invalid suite id. Expected ste_ followed by 26 Crockford base32 characters.`,
     );
   }
   if (name === null) {
-    throw new Error(`${where} has a non-string suite name.`);
+    throw new FolderProblem(where, `${where} has a non-string suite name.`);
   }
   if (name.trim() === "") {
-    throw new Error(`${where} has a blank suite name.`);
+    throw new FolderProblem(where, `${where} has a blank suite name.`);
   }
   if (name !== name.trim()) {
-    throw new Error(`${where} has outer whitespace in its suite name.`);
+    throw new FolderProblem(where, `${where} has outer whitespace in its suite name.`);
   }
   return { id, name };
 }
@@ -735,7 +612,6 @@ export type FolderSuite = {
 /** One complete validated repository value. */
 export type RepositoryContents = {
   readonly config: FolderConfig;
-  readonly mockTools: readonly MockToolEntry[];
   readonly suites: readonly FolderSuite[];
 };
 
@@ -759,6 +635,15 @@ function reasonOf(problem: unknown): string {
   return problem instanceof Error ? problem.message : String(problem);
 }
 
+/**
+ * One issue line. A parser's own refusal already names its file, so it is
+ * taken as written; anything else — the file system, a JSON parser — is given
+ * the place the reporter was reading when it happened.
+ */
+function issueAt(place: string, problem: unknown): string {
+  return namesItsPlace(problem) ? problem.message : `${place}: ${reasonOf(problem)}`;
+}
+
 function shown(...parts: readonly string[]): string {
   return path.posix.join(FOLDER_NAME, TESTS_FOLDER_NAME, ...parts);
 }
@@ -773,24 +658,18 @@ function shown(...parts: readonly string[]): string {
 export async function readRepository(paths: FolderPaths): Promise<RepositoryContents> {
   const issues: string[] = [];
   let config: FolderConfig = EMPTY_CONFIG;
-  let mockTools: readonly MockToolEntry[] = [];
 
   try {
     config = await readConfig(paths.config);
   } catch (problem) {
-    issues.push(`${FOLDER_NAME}/${CONFIG_FILE_NAME}: ${reasonOf(problem)}`);
-  }
-  try {
-    mockTools = await readMockToolsFile(paths.mockTools);
-  } catch (problem) {
-    issues.push(`${FOLDER_NAME}/${MOCK_TOOLS_FILE_NAME}: ${reasonOf(problem)}`);
+    issues.push(issueAt(`${FOLDER_NAME}/${CONFIG_FILE_NAME}`, problem));
   }
 
   let entries: Dirent[] = [];
   try {
     entries = await readdir(paths.tests, { withFileTypes: true });
   } catch (problem) {
-    issues.push(`${FOLDER_NAME}/${TESTS_FOLDER_NAME}: ${reasonOf(problem)}`);
+    issues.push(issueAt(`${FOLDER_NAME}/${TESTS_FOLDER_NAME}`, problem));
   }
 
   const suites: FolderSuite[] = [];
@@ -820,16 +699,14 @@ export async function readRepository(paths: FolderPaths): Promise<RepositoryCont
         shown(entry.name, SUITE_MANIFEST_FILE_NAME),
       );
     } catch (problem) {
-      issues.push(
-        `${shown(entry.name, SUITE_MANIFEST_FILE_NAME)}: ${reasonOf(problem)}`,
-      );
+      issues.push(issueAt(shown(entry.name, SUITE_MANIFEST_FILE_NAME), problem));
     }
 
     let children: Dirent[] = [];
     try {
       children = await readdir(suiteRoot, { withFileTypes: true });
     } catch (problem) {
-      issues.push(`${shown(entry.name)}: ${reasonOf(problem)}`);
+      issues.push(issueAt(shown(entry.name), problem));
     }
 
     const tests: FolderTest[] = [];
@@ -865,7 +742,7 @@ export async function readRepository(paths: FolderPaths): Promise<RepositoryCont
           test: parseTestFile(document, shown(entry.name, child.name), child.name.replace(/\.md$/u, "")),
         });
       } catch (problem) {
-        issues.push(`${shown(entry.name, child.name)}: ${reasonOf(problem)}`);
+        issues.push(issueAt(shown(entry.name, child.name), problem));
       }
     }
 
@@ -905,7 +782,7 @@ export async function readRepository(paths: FolderPaths): Promise<RepositoryCont
   }
 
   if (issues.length > 0) throw new RepositoryValidationError(issues);
-  return { config, mockTools, suites };
+  return { config, suites };
 }
 
 /**

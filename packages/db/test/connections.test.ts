@@ -84,8 +84,8 @@ function retellConnection(overrides: Partial<NewConnection> = {}): NewConnection
  * hint, an envelope and a resolved pair can each be told apart at a glance.
  *
  * The agent name rides here rather than in each caller because every livekit
- * connection holds one: egma dispatches explicitly, always, so that dispatch
- * metadata reaches the worker at all.
+ * connection holds one: egma dispatches explicitly, always, so that a test's
+ * own dispatch metadata reaches the worker at all.
  */
 function livekitConnection(overrides: Partial<NewConnection> = {}): NewConnection {
   return {
@@ -635,26 +635,25 @@ describe("a livekit connection", () => {
     expect(fetched).not.toHaveProperty("credentials");
   });
 
-  it("lands with an agent name and metadata too, both read back whole", async () => {
+  it("refuses a config key the lane no longer holds, naming it", async () => {
     const agentId = await agentNamed("LiveKit Dispatched");
 
-    const added = await addConnection(
-      actingAsAcme(),
-      agentId,
-      livekitConnection({
-        config: {
-          url: "wss://acme.livekit.cloud",
-          agentName: "front-desk",
-          metadata: '{"tenant":"acme"}',
-        },
-      }),
-    );
-
-    expect(added?.config).toEqual({
-      url: "wss://acme.livekit.cloud",
-      agentName: "front-desk",
-      metadata: '{"tenant":"acme"}',
-    });
+    // The dispatch metadata that used to live here is a test's own
+    // `env.job_dispatch_metadata` now, so a connection carrying one is a
+    // request Egma would silently ignore — refused by name instead.
+    await expect(
+      addConnection(
+        actingAsAcme(),
+        agentId,
+        livekitConnection({
+          config: {
+            url: "wss://acme.livekit.cloud",
+            agentName: "front-desk",
+            metadata: '{"tenant":"acme"}',
+          },
+        }),
+      ),
+    ).rejects.toThrow(/has no key "metadata"/u);
   });
 
   it("defaults LiveKit names from the modality and leaves explicit names alone", async () => {
@@ -740,8 +739,8 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
+        agentName: "front-desk",
       },
       credentials: { headers: HEADERS },
       ...overrides,
@@ -760,8 +759,8 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
       productLabel: "LiveKit token endpoint",
       topology: "agent-dials-out",
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
+        agentName: "front-desk",
       },
       // The name of the header and no part of its value: a bearer token has
       // no public half whose tail would be safe to print.
@@ -824,8 +823,8 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
     await expect(
       updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
       }),
     ).rejects.toThrow('config has no key "tokenEndpoint"');
@@ -843,8 +842,8 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
     await expect(
       updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: { headers: HEADERS },
       }),

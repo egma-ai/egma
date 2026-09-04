@@ -38,13 +38,18 @@
  *    serving version's. A branch that still shares the serving engine version
  *    is refused **before the swap**, because writing mocked tools onto a shared
  *    engine version is writing them onto production.
- * 6. **Swap** — the transform's tools, onto the draft's engine version, naming
- *    that version explicitly, and Retell must answer that it wrote that version
- *    and no other.
- * 7. **Verify** — read the serving version's tools back and compare them to the
+ * 6. **Swap** — the transform's tools and routing defaults, onto the draft's
+ *    engine version in one PATCH, naming that version explicitly, and Retell
+ *    must answer that it wrote that version and no other.
+ * 7. **The read-back guard** — read the draft's own engine back and refuse the
+ *    run if any routing default is no longer exactly one space. Retell stores
+ *    an empty default as absent, and an absent one leaves the braces literal —
+ *    so a trimmed default is every unmocked tool call of the run failing on a
+ *    URL that is not a URL, found here rather than mid-conversation.
+ * 8. **Verify** — read the serving version's tools back and compare them to the
  *    capture. A difference means the swap landed somewhere it should not have;
  *    the capture is written back and the run fails loudly.
- * 8. **Teardown** — `finishMockedWorld` again: delete the copy, and **prove the
+ * 9. **Teardown** — `finishMockedWorld` again: delete the copy, and **prove the
  *    delete**. The proof is a read of the agent's versions, because the
  *    delete's own answer cannot be one: a malformed delete and a version that
  *    was never there both answer 404.
@@ -76,35 +81,27 @@
  * draft the moment run one deletes. Refusing the overlap is what keeps every
  * delete in this file a delete of something this run made.
  *
- * ## One draft per run, and the fallback if that ever stops being true
+ * ## One draft per run, and what tells its calls apart
  *
  * A run is one suite against one agent over one connection, so its simulations
- * share one temporary version and the run's frozen snapshot is the one world
- * they all see. What tells them apart is the URL: the transform writes
- * `{{egma_simulation}}` into the path, and Retell renders it per call from the
- * variables call creation was given.
+ * share one temporary version — and each of them mocks exactly the tools its
+ * own test names, which are not the same tools. What tells them apart is not
+ * the version and not the URL written on it: **every custom tool's URL carries
+ * its own per-call variable**, and Egma decides per call, in the claim, which
+ * of them point at Egma and which render to nothing and reach the customer's
+ * own backend (ADR-0022).
  *
- * **The one empirical check left is the developer's**, and it is that same
- * rendering on a live *voice* call. Per-call rendering into a custom-function
- * URL is proven on a real agent in text mode (2026-08-27); the response engine
- * is what renders, so voice is expected to be identical, and a mock request
- * arriving at the simulation-id path during the live proof is the whole of the
- * evidence needed.
- *
- * **If it ever says no, the fallback costs this file nothing.** Write the
- * simulation's identifier into the URL at transform time rather than as a
- * variable, and branch one draft per simulation instead of one per run. Every
- * step above keeps its exact shape and its exact order — capture, branch, fork
- * guard, swap, verify, delete and prove — with `buildMockedWorld` called
- * once per simulation instead of once per run, and the record growing a list of
- * temporary versions where it holds one. It is written down here rather than
- * built, because building it would be paying for a branch nobody expects to
- * take.
+ * So this file writes one shape for everybody and never rewrites it: the
+ * version is written once, before any call of the run exists, and is never
+ * touched again while calls are in flight. That is what makes the undocumented
+ * question — whether a running call re-reads its version — one this design
+ * does not have to answer.
  */
 
 import {
   mockedToolsFor,
-  type MockEndpointTarget,
+  trimmedEgmaDefaults,
+  type MockToolVariable,
 } from "./mock-draft.ts";
 import {
   bindingsFor,
@@ -115,7 +112,7 @@ import {
   type NumberBinding,
   type RoutedNumber,
 } from "./numbers.ts";
-import { toolsOf, type ToolCoverage } from "./tools.ts";
+import { toolsOf } from "./tools.ts";
 import type { RetellCredential, RetellFailure, RetellReach } from "./transport.ts";
 import {
   branchAgentVersion,
@@ -218,6 +215,19 @@ export type MockEngineNote = {
 /** The put-it-back note, and nothing else lives in it. */
 export type MockMetadataRecord = {
   readonly engine: MockEngineNote;
+  /**
+   * Which per-call variable routes which tool on the temporary version.
+   *
+   * **Written down because the claim cannot work it out.** The claim passes
+   * every one of these on every call it creates — the mock URL for a tool the
+   * simulation's test names, the empty string for every other — and it knows
+   * the test's tools but not the agent's. The map is the whole of what the
+   * build learned about the agent that the claim needs, so it rides on the
+   * run's own note rather than being read from Retell a second time.
+   *
+   * Absent on a note written by a run that branched nothing.
+   */
+  readonly urlVariables?: readonly MockToolVariable[];
   /**
    * Whether the temporary version has been deleted **and the deletion proved**.
    *
@@ -341,8 +351,6 @@ export type MockedWorldBuild = {
    * by `versionReferenceIn` above.
    */
   readonly versionReference?: VersionReference | undefined;
-  /** Where the swapped tool URLs point. */
-  readonly target: MockEndpointTarget;
   readonly record: RecordMockRun;
 };
 
@@ -352,8 +360,8 @@ export type BuiltMockedWorld =
       readonly state: MockRunRecord;
       /** The serving version every request of this run names. */
       readonly agentVersion: number;
-      /** The three classes of that version's tools, read before any turn. */
-      readonly coverage: ToolCoverage;
+      /** Which variable routes which tool on the copy this run just wrote. */
+      readonly urlVariables: readonly MockToolVariable[];
     }
   /**
    * The world could not be built. `state` is what egma owes the account and is
@@ -427,6 +435,8 @@ function stateOf(
   engine: EngineReference,
   /** What that engine declared when this run captured it. */
   capturedPrint: string,
+  /** Which variable routes which tool on the copy this run is writing. */
+  urlVariables: readonly MockToolVariable[],
   /** The branch's own version of that engine, once there is a branch. */
   draftVersion?: number,
 ): MockRunRecord {
@@ -444,6 +454,11 @@ function stateOf(
         toolPrint: capturedPrint,
         ...(draftVersion === undefined ? {} : { draftVersion }),
       },
+      // Written from the first record, beside the debt it belongs to: it is
+      // what Egma is about to put on the copy, and a crash between here and
+      // the write leaves a note about a copy that turns out not to exist,
+      // which a sweep answers harmlessly.
+      ...(urlVariables.length === 0 ? {} : { urlVariables }),
     },
   };
 }
@@ -555,16 +570,24 @@ export async function buildMockedWorld(
     );
   }
   const before = toolPrint(captured.engine);
-  // The transform runs once, here, and both halves of its answer are used: the
-  // coverage classes go back to the caller and the tools go onto the copy below.
-  // Running it twice would be two chances to read one configuration and write
-  // another.
-  const mocked = mockedToolsFor(captured.engine, build.target);
-  const { coverage } = mocked;
+  // The transform runs once, here, and every part of its answer is used: the
+  // tools and the routing defaults go onto the copy below, and the variable map
+  // goes onto the record so the claim can pass every variable. Running it twice
+  // would be two chances to read one configuration and write another.
+  const mocked = mockedToolsFor(captured.engine);
+  // **Refused before anything is written**, and this is why the transform is
+  // run before the first record rather than after the branch: two tools that
+  // would share one routing variable, or a variable the customer already
+  // fills, is a tool call that lands somewhere nobody chose — and nothing has
+  // been made yet, so there is nothing to give back.
+  if (mocked.kind === "refused") {
+    return { kind: "refused", reason: mocked.reason, state: null };
+  }
+  const { variables } = mocked;
 
   // 3c. Written down before a single write goes out. The record is an
   // obligation, and from this line on egma owes the account a deletion.
-  let state = stateOf(null, servingEngine, before);
+  let state = stateOf(null, servingEngine, before, variables);
   await record(state);
 
   // 4. Branch. Retell forks the engine document itself, which is why this is a
@@ -585,6 +608,7 @@ export async function buildMockedWorld(
     draft.version,
     servingEngine,
     before,
+    variables,
     // Read from the branch's own response, never derived. It is what the
     // teardown names as the flow version Retell keeps behind.
     draft.engine.version ?? undefined,
@@ -628,13 +652,16 @@ export async function buildMockedWorld(
 
   // 6. Swap, naming the target version explicitly. The transform is a pure
   // function of the captured configuration, so what is written is what was
-  // read with exactly three fields moved per intercepted tool.
+  // read with one prefix grown on each intercepted tool's URL — and the
+  // routing defaults beside them, in the same PATCH, because a version whose
+  // tools name a variable it has no default for is a call with nowhere to go.
   const written = await writeEngineTools(
     key,
     {
       reference: draft.engine,
       version: draft.engine.version,
       tools: mocked.tools,
+      defaults: mocked.defaults,
     },
     reach,
   );
@@ -688,6 +715,48 @@ export async function buildMockedWorld(
     };
   }
 
+  // 6c. **The read-back guard.** The routing defaults are read off the copy
+  // Retell now holds, not off the request Egma sent.
+  //
+  // Everything turns on each of them being exactly one space. Retell stores an
+  // empty default as *absent*, and an absent variable renders as the literal
+  // `{{egma_url_book}}` — so a default that was trimmed on the way in makes
+  // every call this run does **not** mock fail on a URL that is not a URL,
+  // silently, one conversation at a time. The whole run is refused here
+  // instead, before a single simulation is conducted. Skipped where there is
+  // nothing to route: an agent with no custom tool wrote no defaults.
+  if (variables.length > 0) {
+    const readBack = await readEngineConfiguration(key, draft.engine, reach);
+    if (readBack.kind === "not-held") {
+      return { kind: "refused", reason: readBack.reason, state };
+    }
+    if (readBack.kind !== "engine") {
+      return {
+        kind: "refused",
+        reason: sentenceOf(
+          readBack,
+          `reading version ${draft.version} back to prove its routing ` +
+            "variables were stored as Egma wrote them",
+        ),
+        state,
+      };
+    }
+    const trimmed = trimmedEgmaDefaults(readBack.engine, variables);
+    if (trimmed.length > 0) {
+      return {
+        kind: "refused",
+        reason:
+          `Egma wrote ${String(variables.length)} routing variables onto the ` +
+          `temporary version, each defaulted to a single space, and Retell ` +
+          `read ${String(trimmed.length)} of them back as something else ` +
+          `(${trimmed.join(", ")}). A routing default that is not exactly one ` +
+          "space is a tool call with nowhere to go on every test that does " +
+          "not mock it, so Egma failed the run rather than conduct it.",
+        state,
+      };
+    }
+  }
+
   // 7. Verify. The one check that answers the question a developer actually
   // asks — "is my live agent still exactly as it was?" — by reading the engine
   // the note captured rather than by trusting the request that was just sent.
@@ -736,7 +805,12 @@ export async function buildMockedWorld(
     };
   }
 
-  return { kind: "built", state, agentVersion: servingVersion, coverage };
+  return {
+    kind: "built",
+    state,
+    agentVersion: servingVersion,
+    urlVariables: variables,
+  };
 }
 
 /**

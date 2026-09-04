@@ -2,18 +2,35 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import {
   branchAgentVersion,
+  isIntercepted,
   deleteAgentVersion,
+  EGMA_URL_VARIABLE_DEFAULT,
   LATEST_PUBLISHED,
   listAgentVersions,
+  mockedToolsFor,
+  mockToolUrl,
+  mockToolVariable,
   readEngineConfiguration,
   resolveAgentVersion,
   resolveServingAgentVersion,
   RETELL_API,
+  toolsOf,
+  writeEngineTools,
   type RetellCredential,
 } from "../src/index.ts";
 
 /**
  * Two questions this package answers against a live account, and nowhere else.
+ *
+ * **Three: does the per-call routing work on a Retell LLM engine?** The
+ * founder's live proof of it (2026-09-03) was on a **conversation-flow** agent,
+ * and Retell documents neither engine's behaviour here — so ADR-0022 left the
+ * LLM half owed. It is answered below, on the scratch agent this file already
+ * creates and deletes: the transform is written onto the branched version, read
+ * back, and two web calls are created against it. Retell validates a tool's
+ * *rendered* URL as it creates a call — an unrendered `{{…}}` is refused with
+ * `Got invalid url` — so a call it accepts is a call whose routing variables
+ * rendered.
  *
  * **One: does branching an agent version fork a Retell LLM** the way it
  * provably forks a conversation flow? The flow half is observed behaviour:
@@ -109,6 +126,27 @@ async function scratch(
     document = {};
   }
   return { status: response.status, document };
+}
+
+/**
+ * One web call against a named version of the scratch agent.
+ *
+ * Here rather than in the client for the same reason the scaffolding above is:
+ * Egma's own web-call lane lives in the simulator, and this check needs only
+ * the one request. Retell validates each tool's rendered URL as it creates the
+ * call, so the status code is the answer.
+ */
+async function webCall(
+  agentId: string,
+  agentVersion: number,
+  variables: Record<string, string>,
+): Promise<{ status: number; document: Record<string, unknown> }> {
+  const answer = await scratch("POST", "/v2/create-web-call", {
+    agent_id: agentId,
+    agent_version: agentVersion,
+    retell_llm_dynamic_variables: variables,
+  });
+  return answer;
 }
 
 afterAll(async () => {
@@ -224,6 +262,111 @@ live("branching a live Retell-LLM agent", () => {
     expect(serving.reason).toContain("no published version");
     expect(serving.reason).toContain("Publish in Retell the version you want tested");
     expect(serving.reason).toContain("pin a Retell phone number that routes to this agent");
+  });
+
+  it("routes its tools per call, exactly as a conversation flow does", async () => {
+    const agentId = made.agentId;
+    const branched = made.branchedVersion;
+    expect(agentId, "the fork check above must have made the agent").not.toBe(
+      null,
+    );
+    if (agentId === null || branched === null) return;
+
+    const draft = await resolveAgentVersion(key, agentId, branched);
+    expect(draft.kind).toBe("version");
+    if (draft.kind !== "version") return;
+    const engine = draft.agentVersion.engine;
+    const engineVersion = engine.version;
+    expect(engineVersion, "the branch names no engine version").not.toBeNull();
+    if (engineVersion === null) return;
+
+    const captured = await readEngineConfiguration(key, engine);
+    expect(captured.kind, JSON.stringify(captured)).toBe("engine");
+    if (captured.kind !== "engine") return;
+
+    const transform = mockedToolsFor(captured.engine);
+    expect(
+      transform.kind,
+      transform.kind === "refused" ? transform.reason : "",
+    ).toBe("mocked");
+    if (transform.kind !== "mocked") return;
+    expect(transform.variables.length).toBeGreaterThan(0);
+
+    const written = await writeEngineTools(key, {
+      reference: engine,
+      version: engineVersion,
+      tools: transform.tools,
+      defaults: transform.defaults,
+    });
+    expect(written, JSON.stringify(written)).toEqual({
+      kind: "written",
+      version: engineVersion,
+    });
+
+    // Read back off Retell's own answer: the prefix in front of the URL that
+    // was there, and the single-space default Retell must have kept as a space.
+    const after = await readEngineConfiguration(key, engine);
+    expect(after.kind).toBe("engine");
+    if (after.kind !== "engine") return;
+    const before = new Map(
+      toolsOf(captured.engine).map((tool) => [tool.name, tool.verbatim]),
+    );
+    for (const tool of toolsOf(after.engine)) {
+      if (!isIntercepted(tool)) continue;
+      expect(String(tool.verbatim["url"]), `${tool.name}'s URL`).toBe(
+        `{{${mockToolVariable(tool.name)}}}` +
+          String(before.get(tool.name)?.["url"] ?? ""),
+      );
+    }
+    const defaults = (after.engine.document["default_dynamic_variables"] ??
+      {}) as Record<string, unknown>;
+    for (const { variable } of transform.variables) {
+      expect(
+        defaults[variable],
+        `Retell did not keep ${variable}'s default as a single space`,
+      ).toBe(EGMA_URL_VARIABLE_DEFAULT);
+    }
+
+    // **The owed check.** Both shapes a run really sends, on this engine type.
+    // Nothing joins either call: a web call nobody joins carries no media and
+    // expires on its own.
+    const empty = Object.fromEntries(
+      transform.variables.map(({ variable }) => [variable, ""]),
+    );
+    const allReal = await webCall(agentId, branched, empty);
+    expect(
+      allReal.status,
+      `Retell refused a Retell-LLM call whose routing variables were all "": ` +
+        JSON.stringify(allReal.document),
+    ).toBeLessThan(300);
+
+    const one = transform.variables[0];
+    if (one === undefined) return;
+    const routed = await webCall(agentId, branched, {
+      ...empty,
+      [one.variable]: mockToolUrl(
+        {
+          base: "https://live-fork-check.egma.invalid/mock-tools",
+          simulationId: `sim_live_fork_${Date.now()}`,
+        },
+        one.tool,
+      ),
+    });
+    expect(
+      routed.status,
+      "Retell refused a Retell-LLM call routing one tool at Egma: " +
+        JSON.stringify(routed.document),
+    ).toBeLessThan(300);
+
+    console.log(
+      `[retell llm routing check] create-web-call accepted version ` +
+        `${branched} on a retell-llm agent with every routing variable "" ` +
+        `(call ${String(allReal.document["call_id"])}) and with ` +
+        `${one.variable} = the mock address (call ` +
+        `${String(routed.document["call_id"])}). Retell validates a rendered ` +
+        "tool URL at call creation, so both rendered — the same answer the " +
+        "conversation-flow agent gave on 2026-09-03.",
+    );
   });
 
   it("deletes a version by the query parameter, and proves it with the listing", async () => {

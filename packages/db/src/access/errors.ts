@@ -379,7 +379,7 @@ export class TestMovedOnError extends Error {
     readonly current: string;
   }) {
     super(
-      `this edit was written against version ${versions.expected}, and test ${test.id} has moved on to ${versions.current}`,
+      `this write was based on version ${versions.expected}, and test ${test.id} has moved on to ${versions.current}`,
     );
     this.name = "TestMovedOnError";
     this.testId = test.id;
@@ -412,49 +412,6 @@ export class ProjectSlugTakenError extends Error {
     );
     this.name = "ProjectSlugTakenError";
     this.slug = slug;
-  }
-}
-
-/**
- * A mock tool was written for a tool this project already answers for.
- *
- * Matching is by tool name and strictly by it — no arguments are read — so two
- * rows answering for one tool would be two answers with no rule to choose
- * between them, and whichever egma picked would be a mocked world nobody
- * authored. The refusal names the row already standing there, because the two
- * things worth doing next are both about that row: edit it, or leave it alone
- * and override the name on the one test that needs the other branch.
- *
- * Its own class rather than an `UnprocessableInputError`, because the answer is
- * different in kind: nothing about the body is wrong, and something is already
- * there.
- *
- * **The row is named when it can be, and the sentence says so either way.** The
- * factory checks before it writes and names what it found; the database's own
- * unique index catches the two writes that arrived at the same instant, and by
- * the time that loser asks which row won, the winner may already have been
- * deleted. Naming a row that is not there any more would be worse than not
- * naming one, so the two states get the two sentences they need — the shape the
- * invitation refusal above already uses for the same reason.
- */
-export class MockToolTakenError extends Error {
-  readonly toolName: string;
-  /** The living mock tool that already answers for it, when one was found. */
-  readonly mockToolId: string | undefined;
-
-  constructor(toolName: string, mockToolId: string | undefined) {
-    super(
-      mockToolId === undefined
-        ? `this project already answers for "${toolName}". One answer per ` +
-            `tool: edit the mock tool that answers for it, or override it on ` +
-            `the test that needs a different branch.`
-        : `this project already answers for "${toolName}", with mock tool ` +
-            `${mockToolId}. One answer per tool: edit that one, or override ` +
-            `it on the test that needs a different branch.`,
-    );
-    this.name = "MockToolTakenError";
-    this.toolName = toolName;
-    this.mockToolId = mockToolId;
   }
 }
 

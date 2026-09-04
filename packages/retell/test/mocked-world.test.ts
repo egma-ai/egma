@@ -6,8 +6,7 @@ import {
   buildMockedWorld,
   finishMockedWorld,
   mockRunIsSettled,
-  mockToolUrl,
-  SIMULATION_VARIABLE,
+  mockToolVariable,
   versionReferenceIn,
   type MockRunRecord,
   type RetellCredential,
@@ -41,8 +40,6 @@ const FLOW_DOCUMENT = JSON.parse(
 const LLM_DOCUMENT = JSON.parse(
   readFileSync(new URL("./fixtures/retell-llm.json", import.meta.url), "utf8"),
 ) as Record<string, unknown>;
-
-const TARGET = { base: "https://mock.egma.test/mock-tools", runId: "run_01HZ" };
 
 type Seen = { readonly method: string; readonly url: string };
 
@@ -86,6 +83,18 @@ type AccountOptions = {
    * the accident that would leave litter Retell has no endpoint to remove.
    */
   readonly writeMints?: boolean;
+  /**
+   * The write stores every default it is given as the empty string — exactly
+   * what Retell does when it treats an empty default as absent, and the one
+   * thing the read-back guard exists to catch.
+   */
+  readonly writeTrimsDefaults?: boolean;
+  /**
+   * Edits the serving engine document before the account holds it, so a test
+   * can give the agent the shapes the fixtures do not have — two tools of one
+   * name, or a default variable of Egma's own.
+   */
+  readonly editServingEngine?: (document: Record<string, unknown>) => void;
 };
 
 type Account = {
@@ -118,7 +127,9 @@ function account(options: AccountOptions = {}): Account {
   const numbers = new Map<string, Record<string, unknown>>();
 
   const engineKey = (id: string, version: number) => `${id}@${version}`;
-  engines.set(engineKey(engineId, 105), structuredClone(source));
+  const serving = structuredClone(source);
+  options.editServingEngine?.(serving);
+  engines.set(engineKey(engineId, 105), serving);
   const servingEngineRef =
     kind === "conversation-flow"
       ? {
@@ -302,6 +313,14 @@ function account(options: AccountOptions = {}): Account {
         return json({ version: minted });
       }
       Object.assign(document, structuredClone(body ?? {}));
+      if (options.writeTrimsDefaults) {
+        const defaults = document["default_dynamic_variables"];
+        if (typeof defaults === "object" && defaults !== null) {
+          for (const name of Object.keys(defaults)) {
+            (defaults as Record<string, unknown>)[name] = "";
+          }
+        }
+      }
       return json({ ...document, version: asked });
     }
 
@@ -567,7 +586,6 @@ describe("building the world over a conversation flow", () => {
       {
         agentId: AGENT,
         versionReference: "prod",
-        target: TARGET,
         record: kept.record,
       },
       REACH(retell.fetchImpl),
@@ -578,21 +596,49 @@ describe("building the world over a conversation flow", () => {
     expect(built.agentVersion).toBe(105);
     expect(built.state.tempMockAgentVersion).toBe(106);
 
-    // The draft's custom tools point at Egma, carrying the run and the
-    // simulation variable Retell fills per call.
+    // The draft's custom tools carry their own per-call variable in front of
+    // the customer's own URL, which is still there byte for byte — so the same
+    // version reaches Egma or the customer's backend depending only on what
+    // each call is given.
     const draftTools = retell.toolsAt(106);
     const availability = draftTools.find((tool) => tool["name"] === "get_availability");
     expect(availability?.["url"]).toBe(
-      mockToolUrl(TARGET, "get_availability"),
+      "{{egma_url_get_availability}}" +
+        "https://backend.example.com/emrs/boulevard/tools/get_availability",
     );
-    expect(String(availability?.["url"])).toContain(`{{${SIMULATION_VARIABLE}}}`);
-    // The credentials never travelled.
-    expect(availability?.["headers"]).toEqual({});
-    expect(JSON.stringify(draftTools)).not.toContain("FIXTURESECRET");
+    // Their headers and query params are untouched: this version serves the
+    // tools a test does not mock, and those calls authenticate as production.
+    expect(availability?.["headers"]).toEqual({
+      Authorization: "Bearer sk_live_FIXTURESECRET_availability_9f2b1c",
+      "X-Tenant-Key": "tenant_FIXTURESECRET_remedy_4a71de",
+    });
     // The contract the model reads is byte-identical.
     expect(availability?.["description"]).toBe(
       "Look up open appointment slots for a service on a date.",
     );
+
+    // Every routing variable is declared on the version, defaulted to one
+    // space, beside the customer's own default.
+    const defaults = (retell.engines.get(`${FLOW}@106`) ?? {})[
+      "default_dynamic_variables"
+    ] as Record<string, unknown>;
+    expect(defaults).toEqual({
+      clinic_name: "Remedy",
+      egma_url_get_availability: " ",
+      egma_url_book_appointment: " ",
+      [mockToolVariable("price list/lookup?v=2")]: " ",
+    });
+
+    // And the map the claim fills is on the record, tool by tool.
+    expect(built.urlVariables).toEqual([
+      { tool: "get_availability", variable: "egma_url_get_availability" },
+      { tool: "book_appointment", variable: "egma_url_book_appointment" },
+      {
+        tool: "price list/lookup?v=2",
+        variable: mockToolVariable("price list/lookup?v=2"),
+      },
+    ]);
+    expect(kept.last().mockMetadata?.urlVariables).toEqual(built.urlVariables);
 
     // And the version the customer's callers are served from did not move.
     const serving = retell.toolsAt(105);
@@ -600,24 +646,18 @@ describe("building the world over a conversation flow", () => {
       "https://backend.example.com/emrs/boulevard/tools/get_availability",
     );
 
-    // The stamp is honest about all three classes.
-    expect(built.coverage).toEqual({
-      mocked: ["get_availability", "book_appointment", "price list/lookup?v=2"],
-      notInterceptable: [
-        "normalise_phone",
-        "transfer_to_front_desk",
-        "text_directions",
-        "end_call",
-      ],
-      notInThisVersion: ["inventory"],
-    });
+    // **Nothing else is on the record.** Egma used to stamp all three classes
+    // of the agent's tools onto the run; a simulation is answered for exactly
+    // the tools its own test names now, and every answered call is on the
+    // transcript, so a second summarised copy of the same fact is gone.
+    expect("coverage" in built).toBe(false);
   });
 
   it("never lets Retell choose the version it writes to", async () => {
     const retell = account({ tags: { prod: 105 } });
     await buildMockedWorld(
       key,
-      { agentId: AGENT, versionReference: "prod", target: TARGET, record: recorder().record },
+      { agentId: AGENT, versionReference: "prod", record: recorder().record },
       REACH(retell.fetchImpl),
     );
 
@@ -635,7 +675,7 @@ describe("building the world over a conversation flow", () => {
     const retell = account({ engine: "retell-llm" });
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, versionReference: 105, target: TARGET, record: recorder().record },
+      { agentId: AGENT, versionReference: 105, record: recorder().record },
       REACH(retell.fetchImpl),
     );
 
@@ -650,7 +690,22 @@ describe("building the world over a conversation flow", () => {
     expect(stateTools.length).toBeGreaterThan(0);
     for (const tool of stateTools) {
       if (tool["type"] !== "custom") continue;
-      expect(String(tool["url"])).toContain("https://mock.egma.test/mock-tools/run_01HZ");
+      expect(
+        String(tool["url"]).startsWith(
+          `{{${mockToolVariable(String(tool["name"]))}}}`,
+        ),
+        String(tool["url"]),
+      ).toBe(true);
+    }
+    // Every one of them is declared on the version's defaults, so a call that
+    // does not mock a state's tool still has somewhere to go.
+    const defaults = (draft["default_dynamic_variables"] ?? {}) as Record<
+      string,
+      unknown
+    >;
+    for (const tool of stateTools) {
+      if (tool["type"] !== "custom") continue;
+      expect(defaults[mockToolVariable(String(tool["name"]))]).toBe(" ");
     }
   });
 });
@@ -666,7 +721,7 @@ describe("the version a run is conducted against", () => {
 
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, target: TARGET, record: recorder().record },
+      { agentId: AGENT, record: recorder().record },
       REACH(retell.fetchImpl),
     );
 
@@ -687,7 +742,7 @@ describe("the version a run is conducted against", () => {
 
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, target: TARGET, record: recorder().record },
+      { agentId: AGENT, record: recorder().record },
       REACH(retell.fetchImpl),
     );
 
@@ -709,7 +764,7 @@ describe("the version a run is conducted against", () => {
 
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, versionReference: 106, target: TARGET, record: recorder().record },
+      { agentId: AGENT, versionReference: 106, record: recorder().record },
       REACH(retell.fetchImpl),
     );
 
@@ -731,7 +786,7 @@ describe("the write that must edit rather than mint", () => {
 
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, target: TARGET, record: kept.record },
+      { agentId: AGENT, record: kept.record },
       REACH(retell.fetchImpl),
     );
 
@@ -748,6 +803,121 @@ describe("the write that must edit rather than mint", () => {
   });
 });
 
+describe("the routing variables, and the guard over their defaults", () => {
+  it("refuses the run before any request when two tools would share one variable", async () => {
+    const retell = account({
+      editServingEngine: (document) => {
+        // A second tool of the same name. Egma answers a call by the tool's
+        // name, so one variable cannot decide for two of them.
+        (document["tools"] as Record<string, unknown>[]).push({
+          tool_id: "tool-get_availability-again",
+          type: "custom",
+          name: "get_availability",
+          url: "https://backend.example.com/other/get_availability",
+        });
+      },
+    });
+    const kept = recorder();
+
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, versionReference: 105, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+
+    expect(built.kind).toBe("refused");
+    if (built.kind !== "refused") return;
+    expect(built.reason).toContain("egma_url_get_availability");
+    // **Nothing was made.** The transform runs before the first record, so a
+    // refusal here leaves no debt and no version to give back.
+    expect(built.state).toBeNull();
+    expect(kept.written).toEqual([]);
+    expect(retell.versions.has(106)).toBe(false);
+    expect(
+      retell.seen.some((one) => one.method === "POST" || one.method === "PATCH"),
+    ).toBe(false);
+  });
+
+  it("refuses the run when the customer already fills a variable Egma routes with", async () => {
+    const retell = account({
+      editServingEngine: (document) => {
+        document["default_dynamic_variables"] = {
+          clinic_name: "Remedy",
+          egma_url_book_appointment: "https://the-customers-own.example",
+        };
+      },
+    });
+    const kept = recorder();
+
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, versionReference: 105, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+
+    expect(built.kind).toBe("refused");
+    if (built.kind !== "refused") return;
+    expect(built.reason).toContain("egma_url_book_appointment");
+    expect(built.state).toBeNull();
+    expect(retell.versions.has(106)).toBe(false);
+  });
+
+  it("refuses the run when the copy reads back with a routing default that is not one space", async () => {
+    // What Retell does with an empty default: it stores it as absent, and an
+    // absent variable leaves the braces literal — so every call of the run
+    // that does not mock that tool would post to `{{egma_url_…}}`.
+    const retell = account({ writeTrimsDefaults: true });
+    const kept = recorder();
+
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, versionReference: 105, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+
+    expect(built.kind).toBe("refused");
+    if (built.kind !== "refused") return;
+    expect(built.reason).toContain("single space");
+    expect(built.reason).toContain("egma_url_get_availability");
+    // The copy exists and is owed back — the caller tears it down — and the
+    // version real callers reach was never written to.
+    expect(built.state?.tempMockAgentVersion).toBe(106);
+    expect(retell.toolsAt(105)[0]?.["url"]).toBe(
+      "https://backend.example.com/emrs/boulevard/tools/get_availability",
+    );
+  });
+
+  it("writes no defaults at all for an agent with no tool to route", async () => {
+    const retell = account({
+      editServingEngine: (document) => {
+        document["tools"] = [
+          {
+            tool_id: "tool-end_call",
+            type: "end_call",
+            name: "end_call",
+            description: "Ends the conversation.",
+          },
+        ];
+      },
+    });
+
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, versionReference: 105, record: recorder().record },
+      REACH(retell.fetchImpl),
+    );
+
+    expect(built.kind, JSON.stringify(built)).toBe("built");
+    if (built.kind !== "built") return;
+    expect(built.urlVariables).toEqual([]);
+    // The customer's own defaults are exactly as they were: a version with
+    // nothing to route has no business having its defaults rewritten.
+    expect(
+      (retell.engines.get(`${FLOW}@106`) ?? {})["default_dynamic_variables"],
+    ).toEqual({ clinic_name: "Remedy" });
+  });
+});
+
 describe("the fork guard", () => {
   it("refuses a branch that still shares the serving engine version, before any write", async () => {
     const retell = account({ branching: "share" });
@@ -755,7 +925,7 @@ describe("the fork guard", () => {
 
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, versionReference: 105, target: TARGET, record: kept.record },
+      { agentId: AGENT, versionReference: 105, record: kept.record },
       REACH(retell.fetchImpl),
     );
 
@@ -788,7 +958,7 @@ describe("the fork guard", () => {
     const retell = account({ branching: "unversioned" });
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, versionReference: 105, target: TARGET, record: recorder().record },
+      { agentId: AGENT, versionReference: 105, record: recorder().record },
       REACH(retell.fetchImpl),
     );
 
@@ -811,7 +981,7 @@ describe("the serving-version guard", () => {
 
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, versionReference: 105, target: TARGET, record: recorder().record },
+      { agentId: AGENT, versionReference: 105, record: recorder().record },
       REACH(retell.fetchImpl),
     );
 
@@ -850,7 +1020,7 @@ describe("the serving-version read-back", () => {
 
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, versionReference: 105, target: TARGET, record: recorder().record },
+      { agentId: AGENT, versionReference: 105, record: recorder().record },
       REACH(retell.fetchImpl),
     );
 
@@ -879,7 +1049,7 @@ describe("the custom-LLM refusal", () => {
 
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, versionReference: 105, target: TARGET, record: recorder().record },
+      { agentId: AGENT, versionReference: 105, record: recorder().record },
       REACH(retell.fetchImpl),
     );
 
@@ -900,7 +1070,7 @@ describe("the teardown, and the sweep that finishes it", () => {
     const kept = recorder();
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, versionReference: "latest", target: TARGET, record: kept.record },
+      { agentId: AGENT, versionReference: "latest", record: kept.record },
       REACH(retell.fetchImpl),
     );
     expect(built.kind).toBe("built");
@@ -961,7 +1131,7 @@ describe("the proof that the delete happened", () => {
     const kept = recorder();
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, target: TARGET, record: kept.record },
+      { agentId: AGENT, record: kept.record },
       REACH(retell.fetchImpl),
     );
     expect(built.kind, JSON.stringify(built)).toBe("built");
@@ -986,7 +1156,7 @@ describe("the proof that the delete happened", () => {
     const retell = account({ deletePretends: "deleted" });
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, target: TARGET, record: recorder().record },
+      { agentId: AGENT, record: recorder().record },
       REACH(retell.fetchImpl),
     );
     expect(built.kind).toBe("built");
@@ -1010,7 +1180,7 @@ describe("the proof that the delete happened", () => {
       const retell = account({ refuse: { "/list-agent-versions/": status } });
       const built = await buildMockedWorld(
         key,
-        { agentId: AGENT, target: TARGET, record: recorder().record },
+        { agentId: AGENT, record: recorder().record },
         REACH(retell.fetchImpl),
       );
       expect(built.kind).toBe("built");
@@ -1037,7 +1207,7 @@ describe("the proof that the delete happened", () => {
     const kept = recorder();
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, target: TARGET, record: kept.record },
+      { agentId: AGENT, record: kept.record },
       REACH(retell.fetchImpl),
     );
     expect(built.kind, JSON.stringify(built)).toBe("built");
@@ -1076,7 +1246,7 @@ describe("the proof that the delete happened", () => {
     const kept = recorder();
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, target: TARGET, record: kept.record },
+      { agentId: AGENT, record: kept.record },
       REACH(retell.fetchImpl),
     );
     expect(built.kind, JSON.stringify(built)).toBe("built");
@@ -1139,7 +1309,7 @@ describe("the proof that the delete happened", () => {
     const retell = account();
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, target: TARGET, record: recorder().record },
+      { agentId: AGENT, record: recorder().record },
       REACH(retell.fetchImpl),
     );
     expect(built.kind).toBe("built");

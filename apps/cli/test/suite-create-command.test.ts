@@ -77,7 +77,7 @@ describe("egma suite create", () => {
       fetchImpl: platform(calls),
     });
 
-    expect(code).not.toBe(0);
+    expect(code).toBe(1);
     expect(calls).toEqual([]);
     expect(failed.join("\n")).toMatch(/Windows device name|at most 120/i);
   });
@@ -103,8 +103,9 @@ describe("egma suite create", () => {
       `POST ${URL}/v1/test-suites?projectId=${PROJECT_ID}`,
       'body {"name":"Release contract"}',
     ]);
-    expect(out).toContain(`suite: ${SUITE_ID}`);
-    expect(out).toContain("directory: release-contract");
+    expect(out.join("\n")).toContain(SUITE_ID);
+    expect(out.join("\n")).toContain("egma/tests/release-contract");
+    expect(out.join("\n")).not.toMatch(/^(?:suite|name|directory|status):/mu);
     expect(
       await readFile(
         path.join(folderPathsIn(workspace.dir).tests, "release-contract", "suite.yaml"),
@@ -130,7 +131,7 @@ describe("egma suite create", () => {
       fetchImpl: platform(calls),
     });
 
-    expect(code).not.toBe(0);
+    expect(code).toBe(1);
     expect(calls.filter((call) => call.startsWith("POST "))).toEqual([]);
     expect(failed.join("\n")).toMatch(/repository is invalid/i);
   });
@@ -154,15 +155,17 @@ describe("egma suite create", () => {
       },
     });
 
-    expect(code, `${failed.join("\n")}\n${calls.join("\n")}`).toBe(8);
+    expect(code, `${failed.join("\n")}\n${calls.join("\n")}`).toBe(1);
     expect(calls).toEqual([
       `POST ${URL}/v1/test-suites?projectId=${PROJECT_ID}`,
       'body {"name":"Release contract"}',
     ]);
-    expect(out).toContain(`suite: ${SUITE_ID}`);
-    expect(out).toContain("status: local-write-failed");
+    expect(out.join("\n")).toContain(SUITE_ID);
+    expect(out.join("\n")).not.toMatch(/^(?:suite|name|directory|status):/mu);
     expect(failed.join("\n")).toContain(`Egma created suite ${SUITE_ID}`);
-    expect(failed.join("\n")).toContain("Pull to recover this remote-only suite.");
+    expect(failed.join("\n")).toContain(
+      "Run egma pull to recover this remote-only Suite.",
+    );
     await expect(readFile(path.join(root, "suite.yaml"), "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });

@@ -100,20 +100,6 @@ const connection = {
     config: { type: "object", additionalProperties: { type: "string" } },
     credentialPresent: { type: "boolean" },
     credentialsHint: nullable({ type: "string" }),
-    /**
-     * The switch: a run over this connection is conducted with Egma's mock
-     * tools in front of the agent's own.
-     *
-     * It sits on the connection because the lane is what decides whether a
-     * mocked run is a thing Egma can conduct. A `retell_text_mode` connection
-     * is created with it on — that lane carries its answers on each request and
-     * writes nothing to the customer's account. A `retell_web_call` connection
-     * turns it on through the consent screen, and only where the agent holds
-     * the platform identity and key a temporary copy needs. A `phone_number`
-     * connection can never hold true: the phone lane is the real carrier leg,
-     * with real tools, and is never dialled for a mocked run.
-     */
-    mockToolsEnabled: { type: "boolean" },
     archived: { type: "boolean" },
     archivedAt: nullable(dateTimeSchema),
     createdAt: dateTimeSchema,
@@ -134,7 +120,6 @@ const connection = {
     "config",
     "credentialPresent",
     "credentialsHint",
-    "mockToolsEnabled",
     "archived",
     "archivedAt",
     "createdAt",
@@ -229,14 +214,6 @@ const connectionInput = {
         "Start pulling this agent's production calls with the same save. Off " +
         "unless the request says otherwise; the first switch-on imports the " +
         "fixed 30-day history.",
-    },
-    mockToolsEnabled: {
-      type: "boolean",
-      description:
-        "Whether runs over this connection answer the agent's tools with " +
-        "your test data. Sent by the setup flow so mocking is always an " +
-        "explicit yes; absent leaves the lane's own default. Never true for " +
-        "a phone_number connection, which reaches your real tools.",
     },
     agentPlatformSelection,
   },
@@ -657,146 +634,6 @@ export const agentOperations = {
     },
   }),
 
-  /**
-   * What ticking the box would find, and — when asked — what it seeds.
-   *
-   * The consent screen's whole read: which response engine the agent runs on,
-   * every tool in its three honest classes, the answer Egma would seed for each
-   * one it can stand in front of, the tools that act outside the call and will
-   * really act, and every telephone number's binding with what Egma would do
-   * about it. It also carries the refusal, where there is one, so a person
-   * reads *why* the tick is unavailable rather than finding a disabled control.
-   *
-   * `seed` is the re-discovery: it adds a mock tool for every interceptable
-   * tool this project does not already answer for, and never overwrites an
-   * authored answer.
-   */
-  discoverMockTools: defineOperation({
-    operationId: "discoverMockTools",
-    method: "POST",
-    path: "/v1/agents/{agentId}/mock-tools:discover",
-    summary: "Discover the tools a mocked run would stand in front of",
-    tag: "Agents",
-    security: "credentialed",
-    request: {
-      params: agentParams,
-      query: projectQuery,
-      body: {
-        type: "object",
-        properties: {
-          seed: {
-            type: "boolean",
-            description:
-              "Also seed a mock tool for every interceptable tool this " +
-              "project does not answer for yet. Never overwrites an authored " +
-              "answer: a known name keeps its row. Absent is a read.",
-          },
-        },
-        additionalProperties: false,
-      },
-    },
-    responses: {
-      200: {
-        description: "What a mocked run over this agent would cover.",
-        schema: {
-          type: "object",
-          properties: {
-            /**
-             * Whether anything about this agent stops mocking outright. False
-             * carries a `refusal` naming which reason it is.
-             *
-             * `numbers` below carries every number a mocked run would have to
-             * pin, which is one of the four promises the single consent screen
-             * makes. There is no second per-number checkbox and so no refusal
-             * for declining one.
-             */
-            mockable: { type: "boolean" },
-            refusal: nullable({
-              type: "object",
-              properties: {
-                reason: {
-                  type: "string",
-                  enum: [
-                    "custom_llm_engine",
-                    "keys_disagree",
-                    "platform_unavailable",
-                    "never_published",
-                  ],
-                },
-                message: { type: "string" },
-              },
-              required: ["reason", "message"],
-              additionalProperties: false,
-            }),
-            engine: nullable({
-              type: "string",
-              enum: ["retell-llm", "conversation-flow", "custom-llm"],
-            }),
-            /** The version a mocked run would branch from, when it is known. */
-            servingVersion: nullable({ type: "integer" }),
-            tools: arrayOf({
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                type: { type: "string" },
-                coverage: {
-                  type: "string",
-                  enum: ["mocked", "notInterceptable", "notInThisVersion"],
-                },
-                /** Whether this project already answers for it. */
-                answered: { type: "boolean" },
-              },
-              required: ["name", "type", "coverage", "answered"],
-              additionalProperties: false,
-            }),
-            warnings: arrayOf({
-              type: "object",
-              properties: {
-                toolName: { type: "string" },
-                toolType: { type: "string" },
-                effect: { type: "string" },
-              },
-              required: ["toolName", "toolType", "effect"],
-              additionalProperties: false,
-            }),
-            numbers: arrayOf({
-              type: "object",
-              properties: {
-                number: { type: "string" },
-                label: { type: "string" },
-                verdicts: arrayOf({
-                  type: "string",
-                  enum: [
-                    "numeric",
-                    "environment-tag",
-                    "latest-published",
-                    "hijackable",
-                  ],
-                }),
-              },
-              required: ["number", "label", "verdicts"],
-              additionalProperties: false,
-            }),
-            /** The tool names seeded by this request. Empty on a read. */
-            seeded: arrayOf({ type: "string" }),
-          },
-          required: [
-            "mockable",
-            "refusal",
-            "engine",
-            "servingVersion",
-            "tools",
-            "warnings",
-            "numbers",
-            "seeded",
-          ],
-          additionalProperties: false,
-        },
-      },
-      ...mutatingRefusals,
-    },
-  }),
-
   archiveAgent: defineOperation({
     operationId: "archiveAgent",
     method: "POST",
@@ -892,17 +729,6 @@ export const agentOperations = {
           environment: nullable({ type: "string" }),
           config: { type: "object", additionalProperties: true },
           credentials: { type: "object", additionalProperties: true },
-          mockToolsEnabled: {
-            type: "boolean",
-            description:
-              "Turn mock tools on or off for runs over this connection. " +
-              "Absent leaves it as it is, so renaming a connection never " +
-              "changes the world its next run meets. Turning it on for a " +
-              "retell_web_call connection is refused where the agent holds no " +
-              "platform identity and key, because Egma would have nothing to " +
-              "branch a temporary copy with; a phone_number connection can " +
-              "never hold true.",
-          },
         },
         additionalProperties: false,
       },

@@ -622,6 +622,7 @@ def a_spec(
     platform: dict | None = None,
     agent_version: object = None,
     dynamic_variables: dict[str, str] | None = None,
+    job_dispatch_metadata: dict | None = None,
 ) -> dict:
     """The envelope every spec shares: one persona, one scenario, one set of
     walls, one exchange. What differs between two specs is the connection
@@ -656,6 +657,10 @@ def a_spec(
         spec["agent_version"] = agent_version
     if dynamic_variables:
         spec["dynamic_variables"] = dynamic_variables
+    if job_dispatch_metadata is not None:
+        # Present rather than truthy: an empty object is a test that wrote
+        # one, and it reaches the dispatch as the empty object it is.
+        spec["job_dispatch_metadata"] = job_dispatch_metadata
     if mock_tools:
         spec["mock_tools"] = mock_tools
     if platform:

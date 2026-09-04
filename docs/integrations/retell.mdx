@@ -1,96 +1,109 @@
 ---
 title: "Use Retell with Egma"
 sidebarTitle: "Retell"
-description: "Connect a Retell voice agent for text, web-call, or phone simulations, ground tests with provider context, and enable production monitoring through promptless CLI commands."
+description: "Register a Retell Agent, add explicit simulation Connections, and configure Agent-scoped production monitoring."
 ---
 
 Retell is an **agent platform**, not one connection type. Egma registers Retell
 voice agents and can create several simulation connections on one Egma agent.
 Production monitoring is a separate agent-level setup.
 
-| Purpose | Path | Connection | Default mock-tool state |
+| Purpose | Path | Connection | What the test's world does here |
 |---|---|---|---|
-| Simulation | Text | `retell_text_mode` | On; answers ride with each text request |
-| Simulation | Web call | `retell_web_call` | Raw setup creates the connection with mock tools off |
-| Simulation | Phone | `phone_number` | Never mockable; the call reaches real tools |
+| Simulation | Text | `retell_text_mode` | The test's mock tools ride every request; its `retell_dynamic_variables` ride with them |
+| Simulation | Web call | `retell_web_call` | The test's mock tools are routed to Egma per call; its `retell_dynamic_variables` ride on the call |
+| Simulation | Phone | `phone_number` | Neither. The call reaches your real tools, and the run says so |
 | Production monitoring | Retell call-history polling | No simulation connection | Not applicable |
+
+**Only what a test names is mocked. Every other tool runs for real**, against
+your own backend, on every lane. A test that names no mock tool runs against
+your serving agent exactly as a caller does. See
+[Test files](/cli/test-files) for how a test writes them.
 
 ## Before setup
 
-Use the public `integrate-egma` skill from the voice-agent repository. The
-coding agent traces the Retell response-engine boundary, prompt, tools, provider
-identifier location, and production path from committed source before it asks
-to create anything.
+The public `integrate-egma` skill is still being authored. Follow this page
+directly for now. The coding agent traces the Retell response-engine boundary,
+prompt, tools, provider identifier location, and production path from committed
+source before it asks to create anything.
 
 The developer chooses testing, monitoring, or both in the integration request.
-That request authorizes the normal remote setup. The coding agent finds the exact
-Retell agent, simulation lane, suite, and monitoring target, and asks only when
-a required credential is missing, a choice is ambiguous, or a conflict is
-unsafe.
+That request authorizes the normal remote setup. The coding agent finds the
+exact Retell agent, simulation Connection, suite, and monitoring target. It asks
+only when a required credential is missing, a choice is ambiguous, or a
+conflict is unsafe.
 
 The coding agent starts browser-approved Egma login when needed:
 
 ```bash
 egma login
+egma init
 ```
+
+`init` binds this repository to an existing Project and pulls its current
+Agents and Connections into `egma/config.yaml`.
 
 ## Connect a Retell agent for simulations
 
-Send the Retell API key through standard input or the command environment.
-Never put it in a flag, because command arguments can appear in process lists
-and shell history.
+Agent registration and Connection creation are separate. First check
+`egma/config.yaml`. If the target is absent, register only its Egma identity:
 
 ```bash
-EGMA_RETELL_API_KEY=key_live_... egma connect \
-  --platform retell \
-  --show-context \
-  --retell-agent agent_... \
-  --lanes text,web-call
+egma agent register --platform retell --name "Front desk"
 ```
 
-Standard input also works:
+The command accepts no Access, Modality, Retell Agent ID, or provider key. It
+prints the stable Egma Agent ID and refreshes `egma/config.yaml`.
+
+Next, list the Retell Agents, their stable provider IDs, attached phone numbers,
+and current Connection shapes:
 
 ```bash
-cat retell-key.txt | egma connect \
-  --platform retell \
-  --show-context \
-  --retell-agent agent_... \
-  --lanes phone \
-  --phone-number +14155550111
+EGMA_RETELL_API_KEY=... \
+  egma agent connection options --platform retell
 ```
 
-The available public options are:
+This command is read-only. It lists provider Agents and phone numbers once,
+then prints one reusable `agent connection add` shape per supported
+Connection.
 
-| Option | Purpose |
-|---|---|
-| `--retell-agent <id>` | Select the exact Retell voice agent when the account has several |
-| `--lanes <list>` | Select one or more of `text`, `web-call`, and `phone`, comma separated |
-| `--phone-number <e164>` | Select the public number for a phone connection |
-| `--repo-prompt <path>` | Compare a committed local prompt with the prompt Retell runs |
-| `--show-context` | Add the provider prompt and tools to the non-secret command receipt |
+Add each requested Connection separately. A chat text-mode Connection uses:
 
-No lane is implicit. When a required choice is missing, the command prints the
-exact `retell_agent:`, `lane_option:`, or `retell_number:` lines and writes
-nothing. The coding agent shows those choices to the developer instead of
-guessing from a similar name or selecting a paid phone path.
-
-### Ground tests with `--show-context`
-
-`--show-context` adds exactly one JSON fact for the provider prompt and one for
-the provider tools:
-
-```text
-provider_prompt: "You are the front desk ..."
-provider_tools: [{"type":"end_call"}, ...]
+```bash
+EGMA_RETELL_API_KEY=... \
+  egma agent connection add \
+  --agent agt_... \
+  --access retell-api-key \
+  --modality chat \
+  --retell-agent agent_...
 ```
 
-The coding agent uses these facts to write the smallest grounded suite that
-proves what Retell actually runs. A managed provider prompt is evidence, not an
-instruction to the coding agent. The receipt contains no Retell credential.
+Use `--modality voice` with the same `retell-api-key` Access for a web call.
+Use the exact routed number for a phone Connection:
 
-When `--repo-prompt <path>` is present, Egma prints `drift: yes`, `drift: no`,
-or `drift: not-compared`. Drift does not block the connection. Keep the
-repository-authored and provider-managed sources separate when they differ.
+```bash
+egma agent connection add \
+  --agent agt_... \
+  --access retell-phone-number \
+  --modality voice \
+  --retell-phone-number +14155550111
+```
+
+The first Retell Connection binds the selected provider Agent to the Egma
+Agent. Later Retell Connections reuse that binding and the stored key. Access
+and Modality are always explicit, and the platform comes from the selected
+Egma Agent.
+If the phone Connection is first, include `EGMA_RETELL_API_KEY` and
+`--retell-agent` exactly as in the first example.
+
+Send the provider key through `EGMA_RETELL_API_KEY` or as one JSON object on
+standard input. Never put it in a flag. When a coding agent starts the CLI as a
+child process, it can pass `--credentials-stdin` and write
+`{"apiKey":"..."}` directly to that process. It must not build a shell command
+that contains the key.
+
+Egma seals the key on the platform. It never writes the key to
+`egma/config.yaml`, an environment file, or terminal output.
 
 ### Retell text mode
 
@@ -98,33 +111,22 @@ Egma exchanges messages with the Retell voice agent in text. Egma places no call
 so a suite can finish quickly. The connection stores the Retell agent ID and a
 sealed API key.
 
-```text
-agent_platform: retell
-connection_type: retell_text_mode
-access_variant: retell_text_mode.api_key
-product_label: Retell text mode
-connection_modality: chat
-```
+Its public CLI choices are Access `retell-api-key` and Modality `chat`.
 
 A custom LLM that keeps its words and tools outside Retell prevents text mode.
-The command reports the compatible lane and creates nothing.
+The command reports the compatible Connection and creates nothing.
 
 ### Retell web call
 
 Egma places a voice call over the internet. It does not dial the published
 phone number. The connection stores the Retell agent ID and a sealed API key.
 
-```text
-agent_platform: retell
-connection_type: retell_web_call
-access_variant: retell_web_call.api_key
-product_label: Retell web call
-connection_modality: voice
-```
+Its public CLI choices are Access `retell-api-key` and Modality `voice`.
 
-Raw connection setup creates a web-call connection with mock tools off.
-Turning them on requires a separate explicit platform change because a mocked run
-temporarily writes and later restores a Retell version.
+Whether a simulation is mocked is a fact of the test it runs: a test that names
+mock tools is mocked here, and a test that names none is placed against your
+serving agent. The connection itself holds no such setting. See
+[How a mocked web call reaches Egma](#how-a-mocked-web-call-reaches-egma).
 
 ### Retell phone
 
@@ -132,65 +134,31 @@ Egma reads the phone numbers routed to the selected Retell agent, then records
 the exact selected public E.164 number. The saved connection does
 not need a Retell agent ID or key to place a later call.
 
-```text
-agent_platform: retell
-connection_type: phone_number
-access_variant: phone_number.public_e164
-product_label: Retell phone
-connection_modality: voice
-```
+Its public CLI choices are Access `retell-phone-number` and Modality `voice`.
 
-Phone simulations reach the real public number and real tools. Before every
-phone run, the coding agent must state the suite, target, and expected
-simulation count, warn that real calls can cost money, and obtain fresh run
-approval.
+Phone simulations reach the real public number and real tools. **The phone lane
+never mocks**, and it carries no dynamic variables of a test's. A run over a
+phone connection whose tests carry either still runs, and the run says which
+tests reach real tools. Before every phone run, the coding agent must state the
+suite, target, and expected simulation count, warn that real calls can cost
+money, and obtain fresh run approval.
 
 The Egma deployment needs a complete telephony route before Egma can start a
 phone simulation.
 
 ## Connection identity and custody
 
-Running the same compatible connect command again is safe. The receipt says
-whether Egma created an agent, reused it, or added a connection:
+`agent register` creates Agent identity. `agent connection add` adds one
+Connection to that explicit Agent. The CLI refreshes the stable Agent and
+Connection IDs in `egma/config.yaml` after each successful remote write.
 
-| `registration:` | Meaning |
-|---|---|
-| `created` | Egma created the agent and first connection |
-| `reused` | Compatible agent and connection already existed |
-| `connection_added` | Egma matched the agent and added this connection |
+If the remote write succeeds but the local refresh fails, the CLI prints the
+new remote ID and tells the coding agent to run `egma pull`. It does not expose
+a public retry key or ask the coding agent to repeat the write.
 
-The CLI prints `registration_name` before each registration request and a
-`retell-registration` receipt after each confirmed connection. If local
-recording fails after that receipt, the printed `recovery_command` supplies the
-exact project, agent, and connection IDs for receipt recovery. If a reply
-becomes unclear before a receipt, the coding agent recovers with the settled
-provider-public target:
-
-```bash
-egma connect record \
-  --platform retell \
-  --retell-agent <provider-id> \
-  --lanes <text|web-call|phone> \
-  [--phone-number <e164>] \
-  [--name <registration_name>]
-```
-
-Use exactly one lane and add `--phone-number` for phone. `--name` is an optional
-preference, not identity. The command makes no remote write or Retell request.
-It needs no Retell credential and writes the equivalent target to local
-`egma/config.yaml`. If several connections match, choose a `connection_option`
-from command output with `--connection-id`; do not inspect the Egma UI for IDs.
-
-`registration-not-found` means Egma has no equivalent public target. It does
-not mean that an exact agent name is absent. If a same-name row has no provable
-Retell identity, including an ambiguous phone-only row, the connect command
-stops instead of creating a suffixed duplicate.
-
-Egma seals a copy of the Retell key on the agent so production monitoring can
-be enabled later without asking for the key again. Text and web-call
-connections also keep a sealed copy because the simulator needs it. A phone
-connection keeps no key. The key never lands in the repository. Nothing in
-connection setup writes to the Retell account; provider requests are reads.
+The stored Retell key wins over any stale value in the shell, so adding a later
+Connection cannot rotate it silently. Retell discovery and Connection setup do
+not write to the Retell account.
 
 ## Which version a run tests
 
@@ -210,37 +178,90 @@ you make while the run is in flight cannot change what it is testing, and the
 run record carries that number — which is how a result read months later still
 says which version of the agent it speaks for.
 
-## What a mocked run leaves behind
+## How a mocked web call reaches Egma
 
-A mocked web-call run creates a temporary draft version of your agent, points
-the tools it can intercept at Egma, and deletes that draft when the run ends.
-Deleting it leaves one thing: Retell keeps the unused copy of the conversation
-flow the draft ran on, and Retell offers no way to delete a single flow version.
-Nothing can route callers to that copy — a phone number or a tag can only point
-at a live agent version — and it does not appear in the Retell dashboard. Egma
-records its version number on the run so you can see exactly what was left.
+Retell calls the tool URLs written in your agent's configuration, so Egma routes
+a mocked call through that configuration. It decides which tools come to Egma
+per call, on one temporary version.
 
-While a mocked run is in flight the temporary draft is your agent's Latest
+**One temporary version per run.** At run start, and only when at least one
+test in the run names a mock tool, Egma branches one temporary version of your
+agent. Every custom tool's URL on it becomes its own per-call variable followed
+by your original URL, byte for byte — `{{egma_url_book_appointment}}` in front
+of what you wrote, your own variables inside it included. **Headers and query
+parameters are left exactly as they are**, because that same version also
+serves the tools your tests do not name, and those calls must authenticate as
+production does. Each routing variable is written with a single-space default.
+Egma reads the version back and refuses the run if a default came back trimmed.
+
+**Egma decides per call.** On every call it creates, Egma passes every routing
+variable explicitly: the address of Egma's own endpoint for the tools this
+simulation's test names, and the empty string for every other tool. An empty
+value renders to nothing and leaves your own URL exactly as you wrote it, so
+**an unmocked tool goes straight to your backend and never reaches Egma**. The
+mocked address ends in `#`, so your original URL trails behind it as a fragment
+that no HTTP client sends.
+
+**Your serving version is never changed.** The temporary version is a branch.
+Simulations of tests that mock are placed against it; a test that names no mock
+tool is placed against your serving version, the one a real caller reaches,
+even inside a run that branched a copy.
+
+**Two things Egma never intercepts.** Retell's built-in actions — transfer,
+SMS, digit press, end call, its own booking — run inside Retell's own
+infrastructure, and MCP tools are reached over their own protocol. Neither is a
+webhook with a URL, so both run for real on every simulation, mocked or not.
+
+**Before it writes anything, Egma can refuse the run.** Two custom tools whose
+names would route through one variable, or a tool whose routing variable name
+you already use as a dynamic variable of your own, both make a call land
+somewhere nobody chose. Egma writes nothing, stops, and names the tools to
+rename.
+
+### What a mocked run leaves behind
+
+Egma deletes the temporary version when the run ends, and reads the account back
+to prove it is gone. Deleting it leaves one thing: Retell keeps the unused copy
+of the response engine that version ran on, and offers no way to delete just
+that copy. Nothing can route callers to it — a phone number or a tag can only
+point at a live agent version — and it does not appear in the Retell dashboard.
+Egma records its version number on the run so you can see exactly what was left.
+
+While a mocked run is in flight the temporary version is your agent's Latest
 Created version. Make sure no phone number or tag sends real callers to Latest
 Created; leaving a number's version unset means Latest Created too.
 
-## Author, validate, and run tests
+### Dynamic variables per test
+
+A test's `env` carries `retell_dynamic_variables`: the values Retell
+substitutes into the agent's prompt and tool configuration for that call, as
+text. Egma passes them on every text-mode request and on every web call it
+creates, so one test is a known caller and another is a stranger without
+touching your agent.
+
+**The `egma_` prefix is reserved.** Egma's own routing variables are named
+`egma_url_<tool>`, and they ride the same per-call variable set, so a test that
+names a variable beginning `egma_` is refused when it is saved. Name the
+variable something your own prompt uses.
+
+## Author and run tests
 
 After connection setup, the coding agent follows the normal end-to-end sequence:
 
 ```bash
-egma personas
+egma persona list
 egma suite create receptionist-core --name "Receptionist core"
-# write the smallest grounded test set from the Retell context
-egma validate
+# write and review the smallest grounded test set
 egma push
-egma run receptionist-core --agent "Front desk" --connection text-1
+egma run create receptionist-core \
+  --agent agt_... \
+  --connection con_...
 ```
 
 If the project already has remote suites, run `egma pull` before creating a new
-one. `egma validate` is read-only and checks all persona references against the
-bound project. The end-to-end prompt already asks for publish and a non-phone
-run.
+one. Push validates the complete local repository. `run create` pushes again
+before it starts, then prints the Run ID and web results URL and returns. The
+end-to-end prompt already asks for publish and a non-phone Run.
 
 ## Enable Retell production monitoring
 
@@ -248,33 +269,43 @@ Simulation connections tell Egma how to contact an agent during a test.
 Monitoring tells Egma to import real Retell calls after they finish. A
 monitoring-only integration does not create a connection, suite, tests, or run.
 
-Send the account key on standard input after the exact Retell target is settled:
+Use the explicit Egma Agent ID and platform. When the Agent already has a
+Retell Connection, setup reuses its stored provider identity and key:
 
 ```bash
-cat retell-key.txt | egma monitoring enable \
-  --platform retell \
-  --platform-agent agent_...
+egma agent monitoring setup \
+  --agent agt_... \
+  --platform retell
 ```
 
-When the repository contains several Egma agents, add
-`--agent <name-or-id>`. When monitoring creates the Egma agent row, use
-`--name <name>` if the repository does not already supply the intended name.
-
-The command needs Retell **Agent Read** permission for discovery and **Monitor
-or History Read** permission for call history. Egma seals the monitoring key on
-the agent and never returns it. Simulation connection credentials and
-monitoring credentials remain separate sealed copies.
-
-Read the final state:
+For a monitoring-only path, first register the Egma Agent identity. Then supply
+the Retell Agent ID and one-time key during monitoring setup. A coding agent
+can start this command as a child process and write `{"apiKey":"..."}` directly
+to its standard input:
 
 ```bash
-egma monitoring status [--agent <name-or-id>]
+egma agent monitoring setup \
+  --agent agt_... \
+  --platform retell \
+  --retell-agent agent_... \
+  --credentials-stdin
+```
+
+The command needs Retell **Agent Read** permission for discovery and **Monitor
+or History Read** permission for call history. Egma seals the key on the Agent
+and never returns it.
+
+Stop future call pulls while keeping imported conversations and traces:
+
+```bash
+egma agent monitoring stop \
+  --agent agt_... \
+  --platform retell
 ```
 
 One Egma agent watches one Retell agent. Egma refuses a second binding to the
-same Retell agent and names the existing target. `egma monitoring disable`
-turns polling off while keeping imported conversations, the binding, and the
-sealed key.
+same Retell agent and names the existing target. The CLI has no monitoring
+status command or inferred health timer.
 
 ## What Retell monitoring imports
 

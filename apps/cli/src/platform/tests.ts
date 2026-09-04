@@ -2,6 +2,7 @@
 
 import {
   createTest as createTestRequest,
+  deleteTest as deleteTestRequest,
   getTest as getTestRequest,
   getTestVersion as getTestVersionRequest,
   listTests as listTestsRequest,
@@ -11,16 +12,21 @@ import {
 } from "@egma/platform-api/client";
 
 type CreateTestParameters = Parameters<typeof createTestRequest>[0];
-type TestMockTool = NonNullable<CreateTestParameters["mockTools"]>[number];
+type WireMockTool = NonNullable<CreateTestParameters["mockTools"]>[number];
+type WireEnv = NonNullable<CreateTestParameters["env"]>;
 type TestWriteParameters = {
   readonly name: string;
   readonly description: string;
   readonly scenario: string;
   readonly expectedBehaviors: string[];
   readonly personas: string[];
-  readonly mockTools: TestMockTool[];
+  /** Always sent, and empty where the test mocks nothing. */
+  readonly mockTools: WireMockTool[];
+  /** Always sent, and null where the test names no world. */
+  readonly env: WireEnv | null;
 };
 
+import type { TestEnv } from "../folder/env.ts";
 import type { MockToolEntry } from "../folder/mock-tools.ts";
 import type { ExpectedBehavior, FilePersona } from "../folder/test-file.ts";
 import {
@@ -30,7 +36,6 @@ import {
   platformText,
 } from "./client.ts";
 import type { Fetch } from "./device-flow.ts";
-import { overrideFrom } from "./mock-tools.ts";
 import { PlatformRefusedError } from "./refused.ts";
 import type { SignedIn } from "./signed-in.ts";
 
@@ -39,10 +44,12 @@ export type PlatformContent = {
   readonly expectedBehaviors: readonly ExpectedBehavior[];
   readonly personas: readonly FilePersona[];
   readonly mockTools: readonly MockToolEntry[];
+  readonly env: TestEnv | null;
 };
 
 export type PlatformTest = PlatformContent & {
   readonly id: string;
+  readonly projectId: string;
   readonly suiteId: string;
   readonly name: string;
   readonly description: string;
@@ -59,6 +66,10 @@ export type PlatformTestVersion = PlatformContent & {
   readonly version: number;
   readonly current: boolean;
 };
+
+export type GetProjectTestVersionAnswer =
+  | { readonly kind: "version"; readonly version: PlatformTestVersion }
+  | { readonly kind: "not-found"; readonly reason: string };
 
 export type WriteAnswer =
   | { readonly kind: "written"; readonly test: PlatformTest }
@@ -87,21 +98,45 @@ function behaviorsIn(
   return value.map(platformText).filter((entry) => entry !== "");
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function mockToolsIn(value: GetTestResponse["mockTools"]): readonly MockToolEntry[] {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) =>
-    typeof entry === "object" && entry !== null && !Array.isArray(entry)
-      ? [
-          overrideFrom({
-            tool: platformText(entry.tool),
-            ...("error" in entry
-              ? { error: entry.error }
-              : { answer: entry.answer }),
-            delayMs: typeof entry.delayMs === "number" ? entry.delayMs : 0,
-          }),
-        ]
-      : [],
-  );
+  return value.flatMap((entry): readonly MockToolEntry[] => {
+    if (!isRecord(entry)) return [];
+    const tool = platformText(entry["tool"]);
+    if ("error" in entry) return [{ tool, error: platformText(entry["error"]) }];
+    // JSON has no undefined, so a missing answer is a test the platform could
+    // not have stored. Reading it as null keeps the file writable rather than
+    // writing a block that would not read back.
+    return [{ tool, answer: entry["answer"] ?? null }];
+  });
+}
+
+/**
+ * The env as the folder holds it, with the two halves in the format's order.
+ *
+ * Written here rather than passed through, so the bytes a file ends up with are
+ * decided by the value and not by the order the platform happened to answer in.
+ */
+function envIn(value: GetTestResponse["env"]): TestEnv | null {
+  if (!isRecord(value)) return null;
+  // A half with nothing in it says what an absent half says, and egma stores
+  // both the same way. Reading them the same way is what keeps a pull straight
+  // after a push finding nothing to write.
+  const said = (held: unknown): Record<string, unknown> | null =>
+    isRecord(held) && Object.keys(held).length > 0 ? held : null;
+  const variables = said(value.retell_dynamic_variables);
+  const dispatch = said(value.job_dispatch_metadata);
+  const env: TestEnv = {
+    ...(variables === null
+      ? {}
+      : { retell_dynamic_variables: variables as Record<string, string> }),
+    ...(dispatch === null ? {} : { job_dispatch_metadata: dispatch }),
+  };
+  return Object.keys(env).length === 0 ? null : env;
 }
 
 function contentFrom(body: GetTestResponse | GetTestVersionResponse): PlatformContent {
@@ -110,14 +145,23 @@ function contentFrom(body: GetTestResponse | GetTestVersionResponse): PlatformCo
     expectedBehaviors: behaviorsIn(body.expectedBehaviors),
     personas: personasIn(body.personas),
     mockTools: mockToolsIn(body.mockTools),
+    env: envIn(body.env),
   };
 }
 
 export function platformTestFrom(value: GetTestResponse): PlatformTest | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  if (
+    !Array.isArray(value.expectedBehaviors) ||
+    !Array.isArray(value.personas) ||
+    !Array.isArray(value.mockTools)
+  ) {
+    return null;
+  }
   const test: PlatformTest = {
     ...contentFrom(value),
     id: platformText(value.id),
+    projectId: platformText(value.projectId),
     suiteId: platformText(value.suiteId),
     name: platformText(value.name),
     description: platformText(value.description),
@@ -125,7 +169,19 @@ export function platformTestFrom(value: GetTestResponse): PlatformTest | null {
     version: typeof value.version === "number" ? value.version : 0,
     revision: platformText(value.revision),
   };
-  return test.id === "" || test.suiteId === "" || test.versionId === "" ? null : test;
+  return test.id === "" ||
+    test.projectId === "" ||
+    test.suiteId === "" ||
+    test.name === "" ||
+    test.versionId === "" ||
+    !Number.isInteger(test.version) ||
+    test.version < 1 ||
+    test.revision === "" ||
+    test.expectedBehaviors.length !== value.expectedBehaviors.length ||
+    test.personas.length !== value.personas.length ||
+    test.mockTools.length !== value.mockTools.length
+    ? null
+    : test;
 }
 
 export type ListOptions = {
@@ -162,7 +218,18 @@ export async function listTests(
         platformRefusalMessage(answer.error, response.status),
       );
     }
-    for (const entry of answer.data?.tests ?? []) {
+    const values = answer.data?.tests;
+    const next = answer.data?.nextPageToken;
+    if (
+      !Array.isArray(values) ||
+      (next !== null && typeof next !== "string")
+    ) {
+      throw new PlatformRefusedError(
+        response.status,
+        "Egma answered with a Test collection this CLI cannot read. Check that this Egma platform is up to date.",
+      );
+    }
+    for (const entry of values) {
       const test = platformTestFrom(entry);
       if (test === null) {
         throw new PlatformRefusedError(
@@ -172,7 +239,6 @@ export async function listTests(
       }
       found.push(test);
     }
-    const next = answer.data?.nextPageToken ?? null;
     if (next === null || next === "") return found;
     pageToken = next;
   }
@@ -205,6 +271,21 @@ export async function getTest(
   return test;
 }
 
+function testVersionFrom(body: GetTestVersionResponse): PlatformTestVersion | null {
+  const version: PlatformTestVersion = {
+    ...contentFrom(body),
+    id: platformText(body.id),
+    testId: platformText(body.testId),
+    suiteId: platformText(body.suiteId),
+    testName: platformText(body.testName),
+    version: typeof body.version === "number" ? body.version : 0,
+    current: body.current === true,
+  };
+  return version.id === "" || version.testId === "" || version.suiteId === ""
+    ? null
+    : version;
+}
+
 export async function getTestVersion(
   signedIn: SignedIn,
   versionId: string,
@@ -226,19 +307,77 @@ export async function getTestVersion(
       platformRefusalMessage(answer.error, response.status),
     );
   }
-  const body: GetTestVersionResponse = answer.data;
-  const version: PlatformTestVersion = {
-    ...contentFrom(body),
-    id: platformText(body.id),
-    testId: platformText(body.testId),
-    suiteId: platformText(body.suiteId),
-    testName: platformText(body.testName),
-    version: typeof body.version === "number" ? body.version : 0,
-    current: body.current === true,
-  };
-  return version.id === "" || version.testId === "" || version.suiteId === ""
-    ? null
-    : version;
+  return testVersionFrom(answer.data);
+}
+
+/** Resolve one committed local version inside its repository Project. */
+export async function getProjectTestVersion(
+  signedIn: SignedIn,
+  input: { readonly projectId: string; readonly versionId: string },
+  fetchImpl?: Fetch,
+  signal?: AbortSignal,
+): Promise<GetProjectTestVersionAnswer> {
+  const answer = await getTestVersionRequest(
+    { versionId: input.versionId, projectId: input.projectId },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
+  );
+  const response = platformResponse(answer, signedIn.url);
+  if (response.status === 404) {
+    return {
+      kind: "not-found",
+      reason: platformRefusalMessage(answer.error, 404),
+    };
+  }
+  if (!response.ok || answer.data === undefined) {
+    throw new PlatformRefusedError(
+      response.status,
+      platformRefusalMessage(answer.error, response.status),
+    );
+  }
+  const version = testVersionFrom(answer.data);
+  if (version === null) {
+    throw new PlatformRefusedError(
+      response.status,
+      "Egma answered with a test version this CLI cannot read. Check that this Egma platform is up to date.",
+    );
+  }
+  return { kind: "version", version };
+}
+
+/** Permanently remove one project-owned test from authoring. */
+export async function deleteTest(
+  signedIn: SignedIn,
+  input: {
+    readonly projectId: string;
+    readonly testId: string;
+    readonly expectedVersionId: string;
+    readonly expectedRevision: string;
+  },
+  fetchImpl?: Fetch,
+  signal?: AbortSignal,
+): Promise<void> {
+  const answer = await deleteTestRequest(
+    {
+      testId: input.testId,
+      projectId: input.projectId,
+      expectedVersionId: input.expectedVersionId,
+      expectedRevision: input.expectedRevision,
+    },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
+  );
+  const response = platformResponse(answer, signedIn.url);
+  if (response.status !== 204) {
+    throw new PlatformRefusedError(
+      response.status,
+      platformRefusalMessage(answer.error, response.status),
+    );
+  }
 }
 
 export type TestInput = PlatformContent & {
@@ -262,14 +401,12 @@ export function testWriteBody(input: TestInput): TestWriteParameters {
     scenario: input.scenario,
     expectedBehaviors: [...input.expectedBehaviors],
     personas: input.personas.map(personaFor),
-    mockTools: input.mockTools.map((entry): TestMockTool => {
-      const { delay_ms: delayMs, ...says } = entry.says;
-      return {
-        ...says,
-        tool: entry.tool,
-        ...(typeof delayMs === "number" ? { delayMs } : {}),
-      } as TestMockTool;
-    }),
+    mockTools: input.mockTools.map((entry): WireMockTool =>
+      "error" in entry
+        ? { tool: entry.tool, error: entry.error }
+        : { tool: entry.tool, answer: entry.answer },
+    ),
+    env: input.env === null ? null : { ...input.env },
   };
 }
 

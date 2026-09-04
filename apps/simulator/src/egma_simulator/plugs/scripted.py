@@ -64,16 +64,18 @@ class ScriptedCounterpart:
         simulation_id: str | None = None,
         agent_version: object = None,
         dynamic_variables: object = None,
+        job_dispatch_metadata: object = None,
         mock_tools: object = None,
         media: object = None,
     ) -> None:
         # The scripted counterpart takes no credentials; anything handed
         # over is ignored unread, the way a sentinel-planting test expects.
         # It has nobody to tell which simulation this is, either, nobody's
-        # tools to stand in front of, no telephone network to reach, and no
-        # platform keeping versions or rendering variables.
+        # tools to stand in front of, no telephone network to reach, no
+        # worker to dispatch, and no platform keeping versions or rendering
+        # variables.
         del access_variant, credentials, simulation_id, mock_tools, media
-        del agent_version, dynamic_variables
+        del agent_version, dynamic_variables, job_dispatch_metadata
 
         if modality != "chat":
             raise PlugError(

@@ -122,15 +122,21 @@ agents die in production, and none of them can be ordered up from a real
 backend on demand.
 
 A **mock tool** answers for one of your agent's tools during a
-simulation. It is authored in your Egma project, matched strictly by tool
-name, and its answer may be a value, an error, or either one after a
-declared delay so a mocked backend takes as long as the real one. This
-package is the piece that lives in your own agent's process and lets Egma
-answer.
+simulation. It is written on the test itself, beside that test's scenario
+and expected behaviors, and matched strictly by tool name: one answer, or
+one error, per tool per test. This package is the piece that lives in your
+own agent's process and lets Egma answer.
 
-Tools no mock tool covers run their real implementations, untouched.
-Egma's record names which of your tools were covered and which were not,
-so you always know whether a simulation was fully isolated.
+**Egma answers for exactly the tools the running test names. Every other
+tool runs its real implementation, untouched, and Egma is not in that
+path.** A test that names none runs your agent against your real backend
+from end to end. The record shows the calls Egma answered and nothing
+about the rest, because Egma never saw them.
+
+A mock tool whose name never matches one of your agent's tools runs
+nothing and leaves no trace: the model never calls that name, and the
+record shows no call and no warning. Spell each tool exactly as your agent
+registers it.
 
 ### Use
 
@@ -184,11 +190,12 @@ inventory is not sent to either of them.
 
 Then `mockable` reports your agent's tools to Egma — names and schemas,
 read off the agent object, so mock authoring starts from your real tool
-names instead of your memory of them — and learns which of them this
-simulation answers for. Calls to those tools go to Egma and come back with
-the authored answer. Every one of them lands on the simulation's record
-with its arguments, its answer, how long it took, and which mock tool
-answered.
+names instead of your memory of them — and asks which tools this
+simulation answers for. Egma replies with exactly the names the running
+test wrote, and couriers go in front of those names only. Calls to them
+go to Egma and come back with the authored answer. Every one of them
+lands on the simulation's record with its arguments, its answer, how long
+it took, and which mock tool answered.
 
 **In every other room it does nothing at all.** A room your own system
 named — which is every production room — is a room where `mockable`
@@ -198,24 +205,27 @@ them and the model. Zero added latency, by construction rather than by
 care. That property is a test in this package (`tests/test_inert.py`),
 not a promise in this file.
 
-Your job's **dispatch metadata is yours**. This SDK writes nothing into it
-and reads nothing out of it — not one key, in any room, for any purpose.
-Neither does Egma: on every dispatch path, both the room's metadata and
-the dispatch's carry the string configured on the connection, byte for
-byte. `json.loads(ctx.job.metadata)["your_key"]` reads the same thing in a
-simulation that it reads in production.
+Your job's **dispatch metadata carries the test's own env**. This SDK
+writes nothing into it and reads nothing out of it — not one key, in any
+room, for any purpose. With Project credentials, Egma writes the running
+test's `job_dispatch_metadata` directly to the dispatch. With a token
+endpoint, Egma sends the same value in `room_config` and the endpoint copies
+that configuration into the token it mints. Either way, the worker receives
+one compact JSON string, key for key, and nothing of Egma's beside it;
+`json.loads(ctx.job.metadata)["tenant"]` reads the value that scenario
+meant it to read. A test that names no env dispatches the empty string. The
+room's metadata Egma always leaves empty.
 
 ### Where to call it
 
 After the agent object exists and before `session.start`. The report of
 your tools is the first thing said, so an Egma that is not in the room is
-discovered before any tool call rather than half way through a test.
+found before any tool call rather than half way through a test.
 
 Keep one `mockable` call for the initial agent. The SDK follows LiveKit's
 public handoff events and installs the same simulation couriers for each
-selected `Agent` or `AgentTask` before that activity starts. Each handoff
-also extends one cumulative tool census, so Egma's coverage record keeps
-the tools found on earlier agents.
+selected `Agent` or `AgentTask` before that activity starts, so a tool the
+test names is answered whichever agent holds it.
 
 ### What a call to a mocked tool does
 
@@ -239,10 +249,11 @@ you can see it.
 
 Everything this package says goes to the `egma` logger. It is worth
 having on at `INFO` the first time you wire an agent up: the line after
-the census names how many tools you have and how many Egma answers for.
+the tool report names how many tools you have and how many Egma answers
+for.
 
-`ERROR` is reserved for a simulation that could not be isolated and can
-be acted on — no Egma participant arrived in a simulation room, two
+`ERROR` is reserved for a simulation whose tools could not be wrapped and
+can be acted on — no Egma participant arrived in a simulation room, two
 participants claimed to be Egma, or the two halves do not speak the same
 version of the exchange. None of those lines is reachable in a production
 room.
@@ -286,17 +297,16 @@ production tokens, or a production room named to look like a simulation
 runs your canned answers against a live caller.
 
 **Write the guard on the room name, and not on `egmaIdentity` in
-`ctx.job.metadata`.** That key is in no simulation room at all: your
-dispatch metadata is yours, and Egma writes nothing into it on any
-dispatch path. A guard on it does not raise — it quietly fails to fire,
-and every real tool it was meant to hold back runs inside a simulation.
+`ctx.job.metadata`.** That key is in no simulation room at all: the
+dispatch carries the test's own env and no key of Egma's. A guard on it
+does not raise — it quietly fails to fire, and every real tool it was
+meant to hold back runs inside a simulation.
 
 What it cannot do is the rest of the job. One canned world for every
 test, so you cannot write "the calendar is full" as a *test* — you would
 be editing your agent's source to change a test's data. Nothing about
 those calls reaches Egma's record: no arguments, no answers, no timings,
-no coverage stamp, so graders that read tool facts have nothing to read.
-No declared delay, so latency numbers from a mocked run flatter you.
+so graders that read tool facts have nothing to read.
 
 **And the honest caveat: that guard couples your agent's source to how
 Egma announces itself.** The room-name prefix is a stated contract rather

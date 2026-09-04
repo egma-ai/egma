@@ -43,6 +43,7 @@
             "group": "Integrations",
             "pages": [
               "integrations/retell",
+              "integrations/livekit-token-endpoint",
               "integrations/python-sdk",
               "integrations/javascript-sdk"
             ]
@@ -80,7 +81,6 @@
               "api/agents",
               "api/test-suites",
               "api/tests",
-              "api/mock-tools",
               "api/runs"
             ]
           },

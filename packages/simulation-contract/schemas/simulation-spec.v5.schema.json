@@ -137,6 +137,10 @@
       "additionalProperties": { "type": "string" },
       "propertyNames": { "minLength": 1, "pattern": "\\S" }
     },
+    "job_dispatch_metadata": {
+      "description": "The metadata this one simulation's agent dispatch carries, exactly as the test wrote it. It is the LiveKit agent's own channel — what `json.loads(ctx.job.metadata)` reads on the far side — so the simulator passes it to the worker byte for byte and reads none of it: a value the simulator tidied would be a value the agent under test never saw. LiveKit Project credentials carry it on Egma's dispatch. A LiveKit token endpoint carries it in the room configuration that the endpoint copies into the token. Absent is the ordinary case.",
+      "type": "object"
+    },
     "mock_tools": {
       "description": "Resolved mock-tool answers for this simulation.",
       "type": "array",
@@ -242,18 +246,13 @@
       "description": "One mock tool name and its resolved answer.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["tool_name", "answer", "delay_milliseconds"],
+      "required": ["tool_name", "answer"],
       "properties": {
         "tool_name": {
           "type": "string",
           "minLength": 1
         },
-        "answer": { "$ref": "#/$defs/mock_tool_answer" },
-        "delay_milliseconds": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 30000
-        }
+        "answer": { "$ref": "#/$defs/mock_tool_answer" }
       }
     },
     "mock_tool_answer": {

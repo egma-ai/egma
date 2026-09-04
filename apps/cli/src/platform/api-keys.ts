@@ -25,7 +25,11 @@ import {
   type CommonFailure,
   type RegisterOptions,
 } from "./agents.ts";
-import { platformText, platformUnreachableMessage } from "./client.ts";
+import {
+  platformRefusalMessage,
+  platformText,
+  platformUnreachableMessage,
+} from "./client.ts";
 
 /** What anything that is not `reveal` gets. */
 export const MASKED = "<an Egma key>";
@@ -88,6 +92,7 @@ export type Minted =
 /** A generic Project key created for the developer, not for a CLI-owned job. */
 export type CreatedProjectKey =
   | { readonly kind: "created"; readonly key: MintedKey }
+  | { readonly kind: "uncertain"; readonly reason: string }
   | CommonFailure;
 
 export type Revoked = { readonly kind: "revoked" } | CommonFailure;
@@ -126,6 +131,26 @@ export async function createProjectKey(
     requestOptions(options),
   );
 
+  const retryWarning =
+    `Project API key ${JSON.stringify(input.name)} may still have been created. ` +
+    "Inspect the Project's API keys in Egma and revoke that named key before you retry.";
+
+  if (answer.response === undefined) {
+    return {
+      kind: "uncertain",
+      reason: `${platformUnreachableMessage(options.url)} ${retryWarning}`,
+    };
+  }
+
+  if (answer.response.status >= 500) {
+    return {
+      kind: "uncertain",
+      reason:
+        `${platformRefusalMessage(answer.error, answer.response.status)} ` +
+        retryWarning,
+    };
+  }
+
   const failed = commonFailure(answer, options);
   if (failed !== null) return failed;
 
@@ -133,6 +158,7 @@ export async function createProjectKey(
   const name = answer.data?.name === null ? null : platformText(answer.data?.name);
   const projectId =
     answer.data?.projectId === null ? null : platformText(answer.data?.projectId);
+  const scope = platformText(answer.data?.scope);
   const secret =
     typeof answer.data?.secret === "string" ? answer.data.secret.trim() : "";
   if (
@@ -140,14 +166,18 @@ export async function createProjectKey(
     id === "" ||
     name === null ||
     name === "" ||
+    name !== input.name ||
     projectId === null ||
     projectId === "" ||
+    projectId !== input.projectId ||
+    scope !== "project" ||
     secret === ""
   ) {
     return {
-      kind: "refused",
+      kind: "uncertain",
       reason:
-        "Egma answered without the complete Project API-key receipt. Check the Project's API keys before retrying.",
+        "Egma answered without a complete matching Project API-key receipt. " +
+        retryWarning,
     };
   }
 

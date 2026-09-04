@@ -22,7 +22,6 @@ const SUITE_ID = "ste_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const TEST_ID = "tst_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const VERSION_ID = "tstv_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const REVISION = "rev_01K3XQ7M4E8YB2FVN0H9TZQWER";
-const MOCK_TOOL_ID = "mck_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const NOW = "2026-09-03T00:00:00.000Z";
 
 const PROJECT = { id: PROJECT_ID, name: "Northside" } as const;
@@ -92,8 +91,8 @@ function remoteRepository(): typeof fetch {
             scenario: "The caller asks for Tuesday.",
             expectedBehaviors: ["The agent books Tuesday."],
             personas: [],
-            mockTools: [],
-            overrideCount: 0,
+            mockTools: [{ tool: "calendar", answer: { open: true } }],
+            env: { retell_dynamic_variables: { caller_name: "Margaret" } },
             revision: REVISION,
             createdAt: NOW,
             updatedAt: NOW,
@@ -102,23 +101,6 @@ function remoteRepository(): typeof fetch {
         nextPageToken: null,
       });
     }
-    if (request.method === "GET" && requested.pathname === "/v1/mock-tools") {
-      return json({
-        mockTools: [
-          {
-            id: MOCK_TOOL_ID,
-            tool: "calendar",
-            delayMs: 0,
-            agents: [],
-            createdAt: NOW,
-            updatedAt: NOW,
-            answer: { open: true },
-          },
-        ],
-        nextPageToken: null,
-      });
-    }
-
     throw new Error(`Unexpected request: ${request.method} ${request.url}`);
   };
 }
@@ -133,7 +115,7 @@ beforeEach(async () => {
 afterEach(async () => workspace.remove());
 
 describe("atomic pull target refresh", () => {
-  it("applies targets, suites, tests, and Mock Tools from one staged transaction", async () => {
+  it("applies targets, suites, and tests from one staged transaction", async () => {
     const paths = folderPathsIn(workspace.dir);
     const applied: { readonly staged: string; readonly destination: string }[] = [];
 
@@ -152,7 +134,6 @@ describe("atomic pull target refresh", () => {
     expect(applied.map(({ destination }) => destination)).toEqual([
       path.join(release, "suite.yaml"),
       path.join(release, "books-a-visit.md"),
-      paths.mockTools,
       paths.config,
     ]);
     expect(new Set(applied.map(({ staged }) => path.dirname(staged)))).toHaveLength(1);
@@ -161,16 +142,18 @@ describe("atomic pull target refresh", () => {
     expect(await readFile(path.join(release, "suite.yaml"), "utf8")).toContain(
       "name: Release",
     );
-    expect(await readFile(path.join(release, "books-a-visit.md"), "utf8")).toContain(
-      "name: Books a visit",
-    );
-    expect(await readFile(paths.mockTools, "utf8")).toContain("### calendar");
+    // The world the test carries travels down with the test, in its own file.
+    const pulled = await readFile(path.join(release, "books-a-visit.md"), "utf8");
+    expect(pulled).toContain("name: Books a visit");
+    expect(pulled).toContain("## Mock tools");
+    expect(pulled).toContain("### calendar");
+    expect(pulled).toContain("## Env");
+    expect(pulled).toContain('"caller_name": "Margaret"');
   });
 
   it("restores the old config and every earlier write when the final apply fails", async () => {
     const paths = folderPathsIn(workspace.dir);
     const oldConfig = await readFile(paths.config, "utf8");
-    const oldMockTools = await readFile(paths.mockTools, "utf8");
     const applied: string[] = [];
 
     await expect(
@@ -189,7 +172,6 @@ describe("atomic pull target refresh", () => {
 
     expect(applied.at(-1)).toBe(paths.config);
     expect(await readFile(paths.config, "utf8")).toBe(oldConfig);
-    expect(await readFile(paths.mockTools, "utf8")).toBe(oldMockTools);
     await expect(stat(path.join(paths.tests, "release"))).rejects.toMatchObject({
       code: "ENOENT",
     });

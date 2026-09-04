@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { Readable } from "node:stream";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -50,7 +51,12 @@ function configFor(platform: "retell" | "livekit") {
   } as const;
 }
 
-function retellAgent() {
+function retellAgent(
+  overrides: Partial<{
+    platformAgentId: string | null;
+    monitoringApiKeyHint: string | null;
+  }> = {},
+) {
   return {
     agent: {
       id: AGENT_ID,
@@ -62,6 +68,7 @@ function retellAgent() {
       pullProductionCalls: false,
       lastReceivedAt: null,
       archived: false,
+      ...overrides,
     },
     connections: [],
   };
@@ -118,14 +125,17 @@ describe("Project API-key resource command", () => {
       name: "Local release",
       projectId: PROJECT_ID,
     });
-    expect(out).toContain("api_key_name: Local release");
-    expect(out).toContain("status: created");
+    expect(out).toContain("Created Project API key Local release.");
+    expect(out).toContain("Key ID: key_01K3XQ7M4E8YB2FVN0H9TZQWER");
+    expect(out).toContain("Copy this key now. Egma CLI does not save it.");
+    expect(out.join("\n")).not.toContain("status:");
     expect(out.join("\n").split(secret)).toHaveLength(2);
     expect(
       await readFile(folderPathsIn(workspace.dir).config, "utf8"),
     ).not.toContain(secret);
     expect(await readFile(workspace.credentialsFile, "utf8")).not.toContain(secret);
   });
+
 });
 
 describe("Agent monitoring resource commands", () => {
@@ -138,6 +148,8 @@ describe("Agent monitoring resource commands", () => {
       cwd: workspace.dir,
       agent: AGENT_ID,
       platform: "retell",
+      // Ambient credentials cannot replace the Agent's stored key.
+      env: { EGMA_RETELL_API_KEY: "retell_key_that_must_not_be_sent" },
       out: (line) => out.push(line),
       fail: (line) => out.push(`failure: ${line}`),
       fetchImpl: async (input, init) => {
@@ -171,7 +183,62 @@ describe("Agent monitoring resource commands", () => {
         watch: [{ agentId: AGENT_ID, platformAgentId: RETELL_AGENT_ID }],
       },
     ]);
-    expect(out).toContain("status: monitoring-setup");
+    expect(out).toContain(
+      `Retell monitoring is set up for Egma Agent ${AGENT_ID}.`,
+    );
+    expect(out).toContain(`Retell Agent: ${RETELL_AGENT_ID}`);
+  });
+
+  it("binds a bare Retell Agent with a one-time key on standard input", async () => {
+    const config = configFor("retell");
+    await writeConfig(folderPathsIn(workspace.dir).config, {
+      ...config,
+      agents: config.agents.map((agent) => ({ ...agent, connections: [] })),
+    });
+    const oneTimeKey = "retell_key_from_standard_input";
+    const bodies: unknown[] = [];
+    const code = await runAgentMonitoringSetupCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile },
+      cwd: workspace.dir,
+      agent: AGENT_ID,
+      platform: "retell",
+      retellAgentId: RETELL_AGENT_ID,
+      credentialsStdin: true,
+      stdin: Readable.from([JSON.stringify({ apiKey: oneTimeKey })]),
+      env: {},
+      out: () => undefined,
+      fail: () => undefined,
+      fetchImpl: async (input, init) => {
+        const request = new Request(input, init);
+        if (request.method === "GET") {
+          return new JsonResponse(
+            retellAgent({ platformAgentId: null, monitoringApiKeyHint: null }),
+          );
+        }
+        bodies.push(await request.json());
+        return new JsonResponse({
+          watching: [
+            {
+              agentId: AGENT_ID,
+              agentName: "Receptionist",
+              platformAgentId: RETELL_AGENT_ID,
+              created: false,
+              pullProductionCalls: true,
+            },
+          ],
+          refused: [],
+        });
+      },
+    });
+
+    expect(code).toBe(AGENT_MONITORING_EXIT.done);
+    expect(bodies).toEqual([
+      {
+        agentPlatform: "retell",
+        apiKey: oneTimeKey,
+        watch: [{ agentId: AGENT_ID, platformAgentId: RETELL_AGENT_ID }],
+      },
+    ]);
   });
 
   it("stops Retell monitoring in the bound Project", async () => {
@@ -181,6 +248,7 @@ describe("Agent monitoring resource commands", () => {
       access: { url: URL, credentialsFile: workspace.credentialsFile },
       cwd: workspace.dir,
       agent: AGENT_ID,
+      platform: "retell",
       out: (line) => out.push(line),
       fail: (line) => out.push(`failure: ${line}`),
       fetchImpl: async (input, init) => {
@@ -203,7 +271,9 @@ describe("Agent monitoring resource commands", () => {
     expect(requests.map((one) => `${one.method} ${one.url}`)).toEqual([
       `POST ${URL}/v1/monitoring/agents/${AGENT_ID}/stop?projectId=${PROJECT_ID}`,
     ]);
-    expect(out).toContain("status: monitoring-stopped");
+    expect(out).toContain(
+      `Stopped pulling future Retell calls for Egma Agent ${AGENT_ID}. Existing traces were kept.`,
+    );
   });
 
   it("hands LiveKit setup and removal to the integration skill without a request", async () => {
@@ -230,21 +300,51 @@ describe("Agent monitoring resource commands", () => {
         platform: "livekit",
         out: (line) => setup.push(line),
       }),
-    ).toBe(AGENT_MONITORING_EXIT.done);
+    ).toBe(AGENT_MONITORING_EXIT.failed);
     expect(
       await runAgentMonitoringStopCommand({
         ...shared,
+        platform: "livekit",
         out: (line) => stop.push(line),
         fail: (line) => stop.push(`failure: ${line}`),
       }),
-    ).toBe(AGENT_MONITORING_EXIT.done);
+    ).toBe(AGENT_MONITORING_EXIT.failed);
 
     expect(requests).toBe(0);
     expect(setup).toContain(
-      "command: npx --yes skills add egma-ai/egma --skill integrate-egma",
+      "  npx --yes skills add egma-ai/egma --skill integrate-egma",
     );
     expect(setup.join("\n")).toContain("LiveKit monitoring setup");
     expect(stop.join("\n")).toContain("LiveKit monitoring removal");
     expect(await readConfig(configFile)).toEqual(before);
+  });
+
+  it("refuses a platform that does not match the selected Agent", async () => {
+    let requests = 0;
+    const output: string[] = [];
+    const shared = {
+      access: { url: URL, credentialsFile: workspace.credentialsFile },
+      cwd: workspace.dir,
+      agent: AGENT_ID,
+      platform: "livekit",
+      out: (line: string) => output.push(line),
+      fail: (line: string) => output.push(`failure: ${line}`),
+      fetchImpl: async () => {
+        requests += 1;
+        throw new Error("A platform mismatch must not contact Egma");
+      },
+    };
+
+    expect(await runAgentMonitoringSetupCommand(shared)).toBe(1);
+    expect(await runAgentMonitoringStopCommand(shared)).toBe(1);
+    expect(requests).toBe(0);
+    expect(
+      output.filter(
+        (line) =>
+          line ===
+          `failure: Agent ${AGENT_ID} uses retell, not livekit. Nothing was changed.`,
+      ),
+    ).toHaveLength(2);
+    expect(output.join("\n")).not.toContain("status:");
   });
 });

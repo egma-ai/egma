@@ -77,8 +77,8 @@ export type ConfigFieldMetadata = {
   /**
    * Keep a supporting config field after the credential fields when that is
    * the order a person needs to fill the form in. Most config comes first;
-   * this is only for a field such as the agent metadata that completes the
-   * setup.
+   * this is only for a field that completes the setup once the credential is
+   * in, and no shipped field asks for it today.
    */
   readonly afterCredentials?: true;
 };
@@ -577,10 +577,18 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
   },
   {
     agentPlatform: "livekit",
+    connectionType: "livekit_room",
+    accessVariant: "livekit_room.customer_token_endpoint",
+    modality: "chat",
+    productLabel: "LiveKit chat token endpoint",
+  },
+  {
+    agentPlatform: "livekit",
     connectionType: "phone_number",
     accessVariant: "phone_number.public_e164",
     modality: "voice",
     productLabel: "Phone number",
+    dormant: true,
   },
   {
     agentPlatform: null,
@@ -588,6 +596,7 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
     accessVariant: "phone_number.public_e164",
     modality: "voice",
     productLabel: "Phone number",
+    dormant: true,
   },
 ] as const;
 
@@ -823,60 +832,49 @@ export function livekitServerOrigin(url: string): string {
 }
 
 /**
- * What LiveKit accepts in any one metadata field, and so what egma accepts.
+ * Which token endpoint a url names, as one comparable string.
  *
- * The same 512 KiB ceiling covers room metadata, participant metadata and the
- * metadata a job is dispatched with. egma carries the stored string onto two
- * of those channels and adds nothing to either, so one number measures both
- * copies and this gate is exactly LiveKit's own.
+ * The whole address, where `livekitServerOrigin` keeps only host and port. A
+ * LiveKit server is one host and a path on it means nothing; a token endpoint
+ * is a route on a service the customer wrote, and one service commonly mints
+ * for several projects on several routes — `/staging/token` beside
+ * `/production/token`, or a tenant named in the query — so the origin alone
+ * would fold two workers behind one gateway into one agent. Host case and a
+ * trailing root dot go the way they do for a server. The path and query are
+ * kept as written, because a route is case-sensitive and the query is the
+ * customer's to shape. The scheme is dropped for the reason it is dropped
+ * there: a stored endpoint is https, admitted or refused at the gate above.
+ *
+ * A comparison key and never a value anybody requests: the endpoint is stored
+ * as it was written. An unparseable one answers with what it was given, as a
+ * server url does, and compares equal only to itself.
  */
-const METADATA_BYTES = 512 * 1024;
-
-/**
- * A JSON object, carried as the text it was written as.
- *
- * Text rather than a parsed object because both channels it rides carry it
- * verbatim: the room's metadata and the dispatch's are this string exactly as
- * it arrives, and re-serialising it here would hand the agent something the
- * customer never wrote. Checked all the same, and checked at create: a stray
- * comma refused here is a person looking at their own mistake, while the same
- * comma refused at dispatch is a run that has already started and an agent
- * left to make sense of it.
- *
- * Size is checked here for that same reason. A string LiveKit will not carry
- * is a connection that opens a room, bills for it, and then fails every
- * simulation on it at the dispatch — a refusal nobody can act on from the
- * record it leaves. Measured in UTF-8 bytes, because that is what goes on the
- * wire and not what a character count would suggest.
- */
-function jsonObjectText(key: string, value: unknown): string {
-  const candidate = typeof value === "string" ? value.trim() : "";
-  let parsed: unknown;
+export function tokenEndpointIdentity(endpoint: string): string {
+  const written = endpoint.trim();
+  let parsed: URL | undefined;
   try {
-    parsed = JSON.parse(candidate);
+    parsed = new URL(written);
   } catch {
     parsed = undefined;
   }
+  if (parsed === undefined) return written;
 
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new AgentWriteRefusedError(
-      "not_admitted",
-      `the config's ${key} must be a JSON object written in a string, which ` +
-        `looks like {"tenant":"acme"}`,
-    );
-  }
-
-  const bytes = Buffer.byteLength(candidate, "utf8");
-  if (bytes > METADATA_BYTES) {
-    throw new AgentWriteRefusedError(
-      "not_admitted",
-      `the config's ${key} is ${bytes} bytes and livekit carries at most ` +
-        `${METADATA_BYTES} on the room and the dispatch; hold a large value ` +
-        `in your own store and put its id here instead`,
-    );
-  }
-  return candidate;
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  const origin = parsed.port === "" ? host : `${host}:${parsed.port}`;
+  return `${origin}${parsed.pathname}${parsed.search}`;
 }
+
+/*
+ * **There is no dispatch-metadata config key here.** There was one: a LiveKit
+ * connection carried a JSON object that rode the room's metadata and the
+ * dispatch's, and every run over that connection carried the same one.
+ *
+ * A test asks for its own now — `env.job_dispatch_metadata` — because what a
+ * worker should be told is a fact about the scenario rather than about the
+ * wiring, and one object per connection could not say two things for two tests.
+ * LiveKit's own 512 KiB ceiling moved with it, to
+ * `LARGEST_JOB_DISPATCH_METADATA_BYTES` beside the test that authors the value.
+ */
 
 /**
  * Where egma asks the customer for a token, per simulation.
@@ -1287,25 +1285,23 @@ export const CONNECTION_REGISTRY: Readonly<
      * second is an advanced, customer-operated integration for a team that
      * must keep the token-signing secret on its side.
      *
-     * Nothing carries over between them. A connection that names an endpoint
-     * holds no key pair, so it cannot create a room, cannot dispatch a worker
-     * and cannot delete anything — which is why `agentName` and `metadata` are
-     * not among its keys. Both are powers a key pair buys, and a config key
-     * egma would silently ignore is worse than one it refuses by name. That
-     * holds for `metadata` on both of the channels it rides: creating the
-     * room that carries it and dispatching the worker that is handed it are
-     * the same one power, and the token-endpoint access variant has
-     * neither. Where a customer on that variant wants their agent to read
-     * something, their own
-     * endpoint is what puts it there — it is the side minting the token and
-     * dispatching the worker.
+     * Both variants name the worker, and on both a test's
+     * `env.job_dispatch_metadata` reaches it. On the key-pair variant egma
+     * dispatches the worker itself and writes the string on that dispatch. On
+     * the endpoint variant it asks the endpoint for that worker by name, in
+     * the `room_config` block of LiveKit's standard token request, with the
+     * test's string as that dispatch's metadata; the endpoint copies the
+     * block into the token it mints — which is how every LiveKit frontend
+     * dispatches a named agent without holding the key pair. What the
+     * endpoint variant does not hold is a server url: the endpoint's answer
+     * names the server, exactly as LiveKit's standard token endpoint answers
+     * `server_url` beside `participant_token`.
      *
-     * That same missing power is why the two variants no longer speak the
-     * same modalities. Chat needs the agent told, before its session opens,
-     * that it is in a chat — and the telling is the name of the room, which
-     * only the side minting the room controls. Egma can ask a customer's
-     * endpoint for a name; it can guarantee one, and dispatch the worker
-     * that must read it, only where it holds the key pair.
+     * What egma still cannot do on the endpoint variant is create or delete
+     * a room. Both variants speak both modalities: the telling that a
+     * simulation is typed is the room's name, and on the endpoint variant
+     * egma asks the endpoint for the marked name exactly as it asks for the
+     * bare one.
      */
     accessVariants: [
       {
@@ -1321,21 +1317,12 @@ export const CONNECTION_REGISTRY: Readonly<
           // Every egma dispatch is explicit. Automatic dispatch — the state a
           // blank name would leave the worker in — hands the room to
           // whichever workers are listening, so the record could never say
-          // which agent it graded, and no dispatch would exist for the
-          // configured metadata below to ride on. The name is also how egma
+          // which agent it graded, and no dispatch would exist for a test's
+          // own env to ride on. The name is also how egma
           // knows this worker again: one agent per server and name, however
           // many modalities it is tested in. Asked for once at create instead
           // of missed at run time.
           agentName: nonEmptyString,
-          // Handed to the agent on both of the channels LiveKit gives it to
-          // read its per-session context from, and byte for byte on each:
-          // this string is the room's metadata, and it is the metadata of the
-          // dispatch that names the worker above. egma adds nothing to either
-          // and writes neither out again, so an agent parsing `ctx.job.metadata`
-          // and an agent parsing `ctx.room.metadata` read the same object the
-          // customer configured — and read in a simulation exactly what they
-          // read in production.
-          metadata: optional(jsonObjectText),
         },
         fields: [
           {
@@ -1349,13 +1336,6 @@ export const CONNECTION_REGISTRY: Readonly<
             label: "LiveKit agent name",
             kind: "text",
             help: "The name your worker registers under. Egma dispatches that worker by name for every simulation, so the record names the agent it graded.",
-          },
-          {
-            key: "metadata",
-            label: "Agent metadata",
-            kind: "json",
-            help: 'A JSON object handed to your agent, like {"tenant":"acme"}. The room metadata at ctx.room.metadata carries your string byte for byte, and the dispatch metadata at ctx.job.metadata carries your keys unchanged as well. Egma writes nothing of its own over your keys.',
-            afterCredentials: true,
           },
         ],
         credentialHelp:
@@ -1394,38 +1374,35 @@ export const CONNECTION_REGISTRY: Readonly<
         named: "a token-endpoint livekit connection",
         id: "livekit_room.customer_token_endpoint",
         label: "Customer token endpoint [Advanced]",
-        // Voice only, on a kind that speaks both. Egma joins a room this
-        // variant's endpoint let it into; it never dispatches the worker, so
-        // there is no dispatch metadata of egma's on the job and nowhere to
-        // ask the agent to go text-only. Offering chat here would be egma
-        // promising a text simulation and then running a spoken one.
-        modalities: {
-          speaks: ["voice"],
-          refusal:
-            "a token-endpoint livekit connection speaks voice: Egma asks your " +
-            "endpoint for a token and never dispatches the worker itself, so " +
-            "it has no way to tell the agent to answer in text. Chat is " +
-            "offered on the LiveKit project credentials access variant, where " +
-            "Egma dispatches the named worker and sends the modality with it.",
-        },
+        // Speaks both, like the key pair. A chat simulation's room is asked
+        // for under its marked name, `egma-sim-chat-…`, which the endpoint's
+        // `egma-sim-` allowlist matches unchanged and the worker reads
+        // however the token was minted.
         config: {
-          // Where the join goes, unless the endpoint's answer names another.
-          url: livekitServerUrl,
-          // Where egma asks for a token, once per simulation.
+          // Where egma asks for a token, once per simulation. The answer names
+          // the LiveKit server to join, so no url is held here.
           tokenEndpoint: tokenEndpointUrl,
+          // Which worker to dispatch. Egma asks the endpoint for it by name,
+          // in the `room_config` of LiveKit's standard token request — with
+          // the test's `env.job_dispatch_metadata` as that dispatch's
+          // metadata — and the endpoint copies that block into the token it
+          // mints, so a named dispatch needs no key pair on egma's side.
+          // Demanded for the same reason as on the key-pair variant: the
+          // record names the agent it graded.
+          agentName: nonEmptyString,
         },
         fields: [
-          {
-            key: "url",
-            label: "LiveKit WebSocket URL",
-            kind: "url",
-            help: "Your LiveKit project or self-hosted server, like wss://example.livekit.cloud.",
-          },
           {
             key: "tokenEndpoint",
             label: "Token endpoint",
             kind: "url",
-            help: "The public HTTPS URL where Egma asks for one room token per simulation. Private network addresses are refused.",
+            help: "The public HTTPS URL where Egma asks for one room token per simulation. It answers with the token and your LiveKit server URL. Private network addresses are refused.",
+          },
+          {
+            key: "agentName",
+            label: "LiveKit agent name",
+            kind: "text",
+            help: "The name your worker registers under. Egma asks your endpoint to dispatch that worker by name for every simulation, so the record names the agent it graded.",
           },
         ],
         credentialHelp:
@@ -1469,15 +1446,24 @@ export const CONNECTION_REGISTRY: Readonly<
     // accumulate somewhere they can be read side by side.
     //
     // `agentName` is what the query narrows on because it is the half SQL can
-    // compare honestly. The origin is settled afterwards, in `identityOf`,
+    // compare honestly. The address is settled afterwards, in `identityOf`,
     // where two spellings of one server can be seen for what they are.
     reuse: {
       matchedKeys: ["agentName"],
       identityOf: (config) => {
-        const url = config["url"];
         const agentName = config["agentName"];
-        if (url === undefined || agentName === undefined) return undefined;
-        return `${livekitServerOrigin(url)}|${agentName}`;
+        if (agentName === undefined) return undefined;
+        const url = config["url"];
+        if (url !== undefined) return `${livekitServerOrigin(url)}|${agentName}`;
+        // On the token-endpoint variant the endpoint stands in for the
+        // server: it is the one address the connection holds, and the server
+        // it answers with is not known until a simulation asks it. The whole
+        // route counts, not the origin alone, because one gateway mints for
+        // many projects — and an identity that always carries a path can
+        // never compare equal to a server's, which never does.
+        const endpoint = config["tokenEndpoint"];
+        if (endpoint === undefined) return undefined;
+        return `${tokenEndpointIdentity(endpoint)}|${agentName}`;
       },
     },
   },

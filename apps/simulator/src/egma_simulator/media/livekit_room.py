@@ -14,7 +14,7 @@ verbs every media driver has (see :mod:`egma_simulator.media`):
    own, and egma deliberately does not lean on that: **a room filled
    automatically is a room where the record cannot say which agent it
    graded** — whichever workers were listening took it — and where the
-   customer's configured metadata has no dispatch of egma's to ride.
+   test's job dispatch metadata has no dispatch of egma's to ride.
    The simulation's own signals need no dispatch to travel: the room's
    name carries them (``egma-sim-`` says simulation, ``egma-sim-chat-``
    says which kind), and egma is found among the room's participants by
@@ -42,9 +42,12 @@ question: who mints the token that opens the room.
 - **The customer mints it.** The connection names a ``tokenEndpoint``
   instead, and the secret that signs tokens for their whole project never
   leaves their side. egma invents the room and participant names, POSTs
-  them, and joins with the token that comes back. It holds no key pair, so
-  it cannot dispatch — that is the endpoint's job, and the reason a room
-  nobody joined gives says so — and it cannot delete, so it leaves the
+  them in LiveKit's standard token request — with a ``room_config`` naming
+  the worker to dispatch and carrying the test's job dispatch metadata —
+  and joins the server the answer names with the token that comes back.
+  It holds no key pair, so the dispatch is the endpoint's to perform, by
+  copying that block into the token it mints, and the reason a room
+  nobody joined gives says so; and it cannot delete, so it leaves the
   room for the customer's own empty timeout to close.
 - **A platform minted it, opening the room itself.** The caller was handed
   a ``given_token`` and the platform's own server URL — what a call created
@@ -88,34 +91,41 @@ Neither is written beside the other: a second copy of the room
 lifecycle would drift from the first, and the first anybody would know
 is a customer's simulation.
 
-## The two metadata channels are the customer's
+## The one metadata channel egma writes on
 
-Platform integrations have taught agents to expect two, and both of them
-belong to the customer:
+A room carries two, and egma writes on exactly one:
 
-- **Room metadata** is the connection's own configured JSON, verbatim.
-- **Dispatch metadata** is the same configured JSON. It is the channel
-  LiveKit's own documentation teaches agents to read for per-session
-  context, so an agent that reads it finds its own object there and not
-  somebody else's — which is what an agent doing
-  ``json.loads(ctx.job.metadata)["their_key"]`` needs in order to survive
-  being put under test.
+- **Dispatch metadata** is the test's own ``job_dispatch_metadata``,
+  written as one compact JSON string. It is the channel LiveKit's own
+  documentation teaches agents to read for per-session context, so an
+  agent doing ``json.loads(ctx.job.metadata)["their_key"]`` finds the
+  keys this scenario meant it to find. A test that wrote none dispatches
+  the empty string, which is what that agent meets in its own production
+  rooms. Where a customer's endpoint mints the token, the same string goes
+  to that endpoint inside ``room_config``, as the metadata of the dispatch
+  egma asks it for, and the endpoint copies it into the token.
+- **Room metadata** is left empty, always. The value belongs to one
+  simulation and the dispatch is what carries one simulation's worker
+  into the room, so writing it in a second place would be a second thing
+  to keep true.
 
-Neither carries **anything of the test's content** — no scenario text, no
-persona, no expected behavior, and no mock answer — because an agent that
-reads its script stops being under test.
+Neither carries **anything else of the test's content** — no scenario
+text, no persona, no expected behavior, and no mock answer — because an
+agent that reads its script stops being under test. What a test does put
+here it wrote key by key, as the world its worker starts in: a tenant, a
+caller id, the account the scenario is about.
 
 **Where egma's own signal lives instead.** Not in either of these. An
 agent learns it is in a simulation from the room's name, which begins
 ``egma-sim-`` on every way into a room, and it addresses egma by the
 persona's participant identity — see :mod:`egma_simulator.media.room`,
 where both are declared as the published contracts they are. Dispatch
-metadata cannot carry that signal: it reaches the agent only where egma
-dispatches by name, which is one of the three ways in. On the other two
-the customer's own endpoint dispatches and egma writes no metadata at
-all, so an agent reading that channel for egma's context would find
-nothing and conclude it was in production while a simulation ran around
-it.
+metadata cannot carry that signal: where a platform opened the room egma
+writes no metadata at all, and on the endpoint shape the test's string
+rides only as far as the request — the customer's endpoint decides what
+the token it mints carries — so an agent reading that channel for egma's
+context could find nothing and conclude it was in production while a
+simulation ran around it.
 
 ## Answering for the agent's tools
 
@@ -123,9 +133,9 @@ A room driver is also where egma stands in the agent's tool path, for the
 simulations that mock anything. The two methods are registered on egma's
 participant the moment the room is joined, and what answers them knows
 nothing about rooms — see :mod:`egma_simulator.mock_tools`, which owns
-the exchange, the record it leaves, and the coverage stamp. Room
-membership is the whole of the authorisation, which is why a room with no
-egma participant leaves the agent's tools untouched by construction.
+the exchange and the record it leaves. Room membership is the whole of the
+authorisation, which is why a room with no egma participant leaves the
+agent's tools untouched by construction.
 
 ## Which failed ending a refusal deserves
 
@@ -179,6 +189,7 @@ from .room import (
     JoinedRoom,
     RpcMethod,
     answering,
+    chat_room_name_for,
     delete_room,
     first_of,
     fresh_chat_room_name,
@@ -190,23 +201,37 @@ from .room import (
 
 logger = logging.getLogger(__name__)
 
-KNOWN_CONFIG_KEYS = frozenset({"url", "agentName", "metadata"})
+KNOWN_CONFIG_KEYS = frozenset({"url", "agentName"})
 KNOWN_CREDENTIAL_KEYS = frozenset({"apiKey", "apiSecret"})
 URL_SCHEMES = ("ws://", "wss://", "http://", "https://")
 
-ENDPOINT_CONFIG_KEYS = frozenset({"url", "tokenEndpoint"})
+SERVER_URL_SCHEMES = ("wss://", "https://")
+"""What a server named by a token endpoint's answer may start with.
+
+Narrower than :data:`URL_SCHEMES` on purpose. A stored ``url`` is the
+customer's own, written by someone who can see their server, and a
+self-hosted LiveKit on a private ``ws://`` address is theirs to name. A
+``server_url`` arrives at simulation time from whatever answered the
+endpoint, and it decides where the just-minted token is sent next — so it
+crosses the network under TLS or not at all.
+"""
+
+ENDPOINT_CONFIG_KEYS = frozenset({"tokenEndpoint", "agentName"})
 """What the token-endpoint access variant's config holds — and what it
 does not.
 
-No agent name and no metadata, because both are powers a key pair buys.
-Metadata rides two channels and this access variant reaches neither:
-creating the room that carries the room copy and dispatching the worker
-that is handed the dispatch copy are the same one power, held by whoever
-holds the key pair. A key the driver would read and quietly do nothing
-with is worse than one it refuses by name. Where a customer on this
-access variant wants their agent to read something, their own endpoint is
-the side minting the token and dispatching the worker, so their own
-endpoint is what puts it there.
+The worker's name is here because egma can ask for the dispatch without a
+key pair: LiveKit's standard token request carries a ``room_config`` block
+naming the agents to dispatch, the endpoint copies it into the token it
+mints, and LiveKit dispatches them when the room is created. The test's
+``job_dispatch_metadata`` rides that same block, as the dispatch's
+metadata, and arrives with the simulation rather than with the connection
+— on this variant as on the other. What is *not* here is a server url. The
+endpoint's answer names the server — ``server_url`` beside
+``participant_token``, exactly as LiveKit's own token endpoints answer —
+so a url held on the connection would be a second answer to a question the
+endpoint settles, and a key the driver would read and quietly prefer one
+way or the other is worse than one it refuses by name.
 """
 
 ENDPOINT_CREDENTIAL_KEYS = frozenset({"headers"})
@@ -225,14 +250,27 @@ the provider reference.
 
 ENDPOINT_SCHEME = "https://"
 
-TOKEN_ALIASES = ("token", "participantToken", "accessToken")
-"""The three names a minted token comes back under.
+TOKEN_ALIASES = (
+    "participant_token",
+    "participantToken",
+    "token",
+    "accessToken",
+    "access_token",
+)
+"""The names a minted token comes back under.
 
-All three are accepted because all three are in the wild: teams that
+``participant_token`` is LiveKit's own: the standard token endpoint answers
+``server_url`` and ``participant_token``, and every LiveKit client SDK reads
+those. The rest are accepted because they are in the wild — teams that
 already run a token endpoint for their own web client should be able to
 point egma at the one they have rather than write a second one for egma.
 The first of these that carries a string is the token.
 """
+
+SERVER_URL_ALIASES = ("server_url", "serverUrl")
+"""The names the LiveKit server comes back under: LiveKit's own, and the
+lowerCamelCase spelling its protobuf JSON also admits. One of them is
+required — the connection holds no server of its own to fall back on."""
 
 TOKEN_SECONDS = 20.0
 """How long the endpoint has to answer before it counts as unreachable.
@@ -459,7 +497,12 @@ class RoomSettings:
     """
 
     url: str
-    """The customer's LiveKit, ``ws``/``wss`` or ``http``/``https``."""
+    """The customer's LiveKit, ``ws``/``wss`` or ``http``/``https``.
+
+    Empty on the shape that asks an endpoint for its token: that shape
+    learns the server from the endpoint's answer, once per simulation, and
+    holds no address of its own to prefer over it.
+    """
 
     api_key: str = ""
     api_secret: str = field(default="", repr=False)
@@ -467,22 +510,12 @@ class RoomSettings:
     agent_name: str = ""
     """Which agent to dispatch, by the name its worker registered under.
 
-    Empty only on the shape that asks an endpoint for its token: that
-    shape holds no key pair, so it could not dispatch anybody whatever it
-    were told, and it refuses the key outright. Every connection that
-    *can* dispatch must carry a name — see :meth:`from_connection`.
-    """
-
-    metadata: str | None = None
-    """The connection's configured JSON, as both metadata channels carry
-    it.
-
-    One field for two channels, because the customer configured one
-    value and both carry it byte for byte: :meth:`_create_room` sets it as
-    the room's metadata and :meth:`_dispatch` sends the same string as the
-    dispatch's. Neither writes it out again, so what an agent reads on
-    either channel is what was configured. ``None`` where the connection
-    configured none.
+    Demanded on both shapes that come by their own token. Where egma holds
+    the key pair it dispatches this worker itself; where it asks an endpoint
+    it names this worker in the request's ``room_config``, and the endpoint
+    dispatches by minting a token that carries it. Empty only on the shape
+    that was handed a token for a room somebody else opened — see
+    :meth:`from_connection`.
     """
 
     token_endpoint: str = ""
@@ -568,8 +601,8 @@ class RoomSettings:
         # connection nobody can dispatch is a sentence before any request
         # leaves egma. Every egma dispatch is explicit: a room filled by
         # automatic dispatch goes to whichever workers are listening, so
-        # the record could never say which agent it graded, and the
-        # customer's configured metadata would have no dispatch to ride.
+        # the record could never say which agent it graded, and the test's
+        # job dispatch metadata would have no dispatch to ride.
         agent_name = config.get("agentName")
         if not isinstance(agent_name, str) or not agent_name.strip():
             raise MediaBackendError(
@@ -605,7 +638,6 @@ class RoomSettings:
             api_key=pair["apiKey"],
             api_secret=pair["apiSecret"],
             agent_name=agent_name.strip(),
-            metadata=_configured_json(config.get("metadata")),
         )
 
     @classmethod
@@ -621,15 +653,13 @@ class RoomSettings:
         unknown = set(config) - ENDPOINT_CONFIG_KEYS
         if unknown:
             raise MediaBackendError(
-                f"a livekit connection that names a tokenEndpoint holds no "
-                f"key pair, so it can neither dispatch an agent nor carry "
-                f"room metadata; config key(s) {sorted(unknown)} are read by "
-                f"nobody. It knows {sorted(ENDPOINT_CONFIG_KEYS)}"
+                f"a livekit connection that names a tokenEndpoint learns the "
+                f"server from that endpoint's answer and asks it to dispatch "
+                f"the worker by name; config key(s) {sorted(unknown)} are read "
+                f"by nobody. It knows {sorted(ENDPOINT_CONFIG_KEYS)}"
             )
 
-        url = _server_url(config)
-
-        endpoint = config["tokenEndpoint"]
+        endpoint = config.get("tokenEndpoint")
         if not isinstance(endpoint, str) or not endpoint.strip():
             raise MediaBackendError(
                 "livekit config: tokenEndpoint must be a non-empty string — "
@@ -637,8 +667,21 @@ class RoomSettings:
             )
         endpoint = _token_endpoint_url(endpoint.strip())
 
+        # Demanded for the same reason as on the key-pair shape, and here the
+        # name is also what egma puts in the request: the endpoint is asked
+        # for this worker, by name, in the token it mints.
+        agent_name = config.get("agentName")
+        if not isinstance(agent_name, str) or not agent_name.strip():
+            raise MediaBackendError(
+                "livekit config: agentName must be a non-empty string — the "
+                "name the agent's worker registered under, because Egma asks "
+                "your token endpoint to dispatch that worker by name for "
+                "every simulation"
+            )
+
         return cls(
-            url=url,
+            url="",
+            agent_name=agent_name.strip(),
             token_endpoint=endpoint,
             endpoint_headers=_endpoint_headers(credentials),
         )
@@ -694,6 +737,43 @@ def _token_endpoint_url(endpoint: str) -> str:
     return endpoint
 
 
+def _server_host(server_url: str) -> tuple[str, int] | None:
+    """The host and port a server url names, or None for one egma will not join.
+
+    A TLS scheme, a hostname, no credentials in the url, and a port that
+    parses: the reading :func:`_token_endpoint_url` gives a stored endpoint,
+    applied to an address that arrived in an answer. Parsing is not
+    permission to reach the host; that is decided against the addresses
+    the host stands for, in :meth:`RoomLifecycle._joinable_server`.
+    """
+    try:
+        parsed = urlsplit(server_url)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        not server_url.lower().startswith(SERVER_URL_SCHEMES)
+        or parsed.scheme not in ("wss", "https")
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return None
+    return hostname, port if port is not None else 443
+
+
+def _unjoinable(endpoint: str, named: str) -> MediaBackendError:
+    """The refusal for a server url egma will not send a token to."""
+    return MediaBackendError(
+        f"the token endpoint at {endpoint} answered a {named} Egma cannot "
+        f"join: it must be a {' or '.join(SERVER_URL_SCHEMES)} URL naming a "
+        f"host, because the token is sent there next and Egma sends it over "
+        f"TLS only",
+        ending=ERROR,
+    )
+
+
 def _endpoint_headers(credentials: Any) -> dict[str, str]:
     """What egma sends to authenticate itself to a token endpoint.
 
@@ -741,24 +821,6 @@ def _endpoint_headers(credentials: Any) -> dict[str, str]:
     return {name.strip(): value.strip() for name, value in held.items()}
 
 
-def _configured_json(configured: object) -> str | None:
-    """The connection's configured metadata, passed through byte for byte.
-
-    The control plane only ever stores this as a JSON object in a string,
-    so a string is the customer's own JSON and rides through verbatim.
-    Anything else never came through the door, and is a mistake worth
-    naming rather than passing on.
-    """
-    if configured is None:
-        return None
-    if isinstance(configured, str):
-        return configured
-    raise MediaBackendError(
-        "livekit config: metadata rides to the agent exactly as configured, "
-        "and it is configured as a JSON object in a string"
-    )
-
-
 @dataclass(frozen=True)
 class WayIn:
     """A token and the server it opens — everything a join needs.
@@ -802,11 +864,25 @@ class RoomLifecycle:
         settings: RoomSettings,
         simulation_id: str,
         mock_tools: MockToolSeam | None = None,
+        job_dispatch_metadata: dict[str, Any] | None = None,
         endpoint_resolver: Any = None,
     ) -> None:
         self._settings = settings
         self._mock_tools = mock_tools
         self._endpoint_resolver = endpoint_resolver
+        # Written out once, here, rather than at the dispatch: the string
+        # is what goes on the wire, and one serialisation means there is
+        # no second spelling of the test's object to disagree with the
+        # first. Compact and not ASCII-escaped, which is the same form the
+        # control plane measured the platform's 512 KiB ceiling on, so a
+        # value that saved cannot fail here for being too large.
+        self._dispatch_metadata = (
+            ""
+            if job_dispatch_metadata is None
+            else json.dumps(
+                job_dispatch_metadata, separators=(",", ":"), ensure_ascii=False
+            )
+        )
         # One registry per driver, so what this driver quotes from the
         # platform goes through the same scrubbing a log line does rather
         # than through a second implementation of it.
@@ -817,7 +893,9 @@ class RoomLifecycle:
         # modality mark the customer's worker reads. A room egma asks for
         # a token into is named after the simulation, because the endpoint
         # being asked has to be able to check the name against its own
-        # rules. A room a platform opened is **not named here at all**: it
+        # rules — and it carries the same mark, because the worker reads
+        # the name however the token was minted. A room a platform opened
+        # is **not named here at all**: it
         # has a name already, egma is never told it, and inventing one
         # would put a string in every log line that exists in nobody's
         # telemetry.
@@ -826,10 +904,13 @@ class RoomLifecycle:
             if settings.given_token
             else self._fresh_room_name()
             if settings.mints_its_own
-            else room_name_for(simulation_id)
+            else self._room_name_for(simulation_id)
         )
         self._participant_name = persona_name_for(simulation_id)
         self._room: Any = None
+        self._server_url = ""
+        """The server the join went to, once there was one: the connection's
+        own url, or the one an endpoint's answer named."""
         self._asked_for_a_room = False
         self._offered = False
 
@@ -848,6 +929,11 @@ class RoomLifecycle:
         overrides this with the marked form, because the name is where a
         worker reads the modality from."""
         return fresh_room_name()
+
+    def _room_name_for(self, simulation_id: str) -> str:
+        """The room named after the simulation, where an endpoint is asked
+        for a token into it: the bare form, which says voice."""
+        return room_name_for(simulation_id)
 
     def _answer_for_mocked_tools(self) -> None:
         """Stand ready to answer for the agent's tools, in the room.
@@ -904,7 +990,6 @@ class RoomLifecycle:
             )
             return
         self._offered = True
-        self._mock_tools.standing_ready()
 
     async def _way_in(self) -> WayIn:
         """A token and a room, however this connection comes by them.
@@ -942,14 +1027,16 @@ class RoomLifecycle:
         name the connection carries. Nothing here falls back on LiveKit's
         automatic dispatch: a room filled that way goes to whichever
         workers are listening, so the record could not name the agent it
-        graded, and the customer's configured metadata would have no
+        graded, and the test's job dispatch metadata would have no
         dispatch to ride.
 
         A connection that did not mint its own token asks for nothing here
         at all. Dispatching takes the key pair egma deliberately was not
         given, so putting a worker in the room is somebody else's job —
-        the token endpoint's, or the platform's that opened the room — and
-        egma's part is to be in the room when it arrives.
+        the token endpoint's, which was asked for the worker by name in
+        the token request and dispatches by minting a token that carries
+        it, or the platform's that opened the room — and egma's part is to
+        be in the room when it arrives.
 
         On two of the three ways in the agent may have arrived already,
         so the room is asked who is in it before anybody starts waiting
@@ -1014,28 +1101,34 @@ class RoomLifecycle:
     # is proved about the code, over a socket, rather than about a mock.
 
     async def _create_room(self) -> None:
-        """One `CreateRoom`, carrying the connection's own metadata."""
+        """One `CreateRoom`, and it carries a name and nothing else.
+
+        No metadata: what a simulation's agent is given belongs to the
+        dispatch that puts that agent in this room, and a second copy on
+        the room would be a second value to keep equal to the first.
+        """
         from livekit import api
 
-        request = api.CreateRoomRequest(name=self._room_name)
-        if self._settings.metadata is not None:
-            request.metadata = self._settings.metadata
-        await self._asked(request, "the room could not be created")
+        await self._asked(
+            api.CreateRoomRequest(name=self._room_name),
+            "the room could not be created",
+        )
 
     async def _dispatch(self) -> None:
-        """One `CreateAgentDispatch`, carrying the connection's own JSON."""
+        """One `CreateAgentDispatch`, carrying the test's own JSON."""
         from livekit import api
 
         request = api.CreateAgentDispatchRequest(
             room=self._room_name,
             agent_name=self._settings.agent_name,
-            # The connection's own JSON, exactly as it was configured and
-            # exactly as the room carries it. Nothing of egma's is added:
-            # an agent reading its per-session context out of the channel
-            # LiveKit teaches it to read finds its own object there and
-            # nothing else, and the two channels carry the same bytes
-            # because neither is written out again.
-            metadata=self._settings.metadata or "",
+            # The test's own ``job_dispatch_metadata``, and nothing of
+            # egma's beside it: an agent reading its per-session context
+            # out of the channel LiveKit teaches it to read finds the keys
+            # this scenario wrote, so a worker doing
+            # ``json.loads(ctx.job.metadata)["tenant"]`` keeps working
+            # under test and reads a different tenant per scenario. Empty
+            # where the test wrote none.
+            metadata=self._dispatch_metadata,
         )
         await self._asked(
             request,
@@ -1056,14 +1149,51 @@ class RoomLifecycle:
         )
         return guarded, connector
 
+    def _token_request(self) -> dict[str, Any]:
+        """The body egma POSTs: LiveKit's standard token request, filled in.
+
+        The same JSON every LiveKit client SDK sends to a token endpoint —
+        ``room_name``, ``participant_identity``, ``participant_name`` and a
+        ``room_config`` naming the agent to dispatch — so an endpoint written
+        for the customer's own frontend serves egma unchanged. Two of egma's
+        own rules ride on it: the room is always a fresh ``egma-sim-`` name,
+        and the identity is always the persona's.
+
+        ``participant_name`` carries the identity again on purpose. LiveKit
+        keeps identity and display name apart, and endpoints written against
+        egma's earlier contract read the display-name key as the identity;
+        sending both keeps those working, and a standard endpoint gets a
+        harmless display name out of it.
+
+        ``room_config`` is always there, because the name is always demanded:
+        one dispatch entry, the worker's name, and the test's own
+        ``job_dispatch_metadata`` as that dispatch's metadata where the test
+        wrote one — the same string the key-pair shape writes on the dispatch
+        it makes itself. Nothing else of the simulation's — no scenario, no
+        persona, no participant metadata or attributes — because an agent
+        that reads its script stops being under test; the room's name is the
+        whole of egma's signal.
+        """
+        dispatch: dict[str, str] = {"agent_name": self._settings.agent_name}
+        if self._dispatch_metadata:
+            dispatch["metadata"] = self._dispatch_metadata
+        return {
+            "room_name": self._room_name,
+            "participant_identity": self._participant_name,
+            "participant_name": self._participant_name,
+            "room_config": {"agents": [dispatch]},
+        }
+
     async def _token_from_endpoint(self) -> WayIn:
         """Ask the customer's endpoint for a way into the room.
 
         One POST, one JSON object, and the answer read against the
-        contract the docs publish: the token under any of three names the
-        wild already uses, and an optional ``serverUrl`` that overrides
-        where the join goes — for the deployment whose endpoint knows
-        which of several LiveKit projects this agent lives in.
+        contract the docs publish — LiveKit's own: the token and the server
+        under the names LiveKit's standard endpoint answers with, or the
+        spellings the wild already uses. The server is required, because the
+        endpoint is the one side that knows which of the customer's LiveKit
+        projects this agent lives in, and the connection holds no address of
+        its own.
 
         egma invents both names and sends them, so the endpoint can mint a
         token for exactly the identity egma will join as and exactly the
@@ -1075,10 +1205,7 @@ class RoomLifecycle:
         import aiohttp
 
         endpoint = self._settings.token_endpoint
-        asked = {
-            "room_name": self._room_name,
-            "participant_name": self._participant_name,
-        }
+        asked = self._token_request()
 
         resolver = self._endpoint_resolver or aiohttp.resolver.DefaultResolver()
         try:
@@ -1138,18 +1265,23 @@ class RoomLifecycle:
                 ending=ERROR,
             )
 
-        token, server_url = self._minted(endpoint, said)
-        # The endpoint's own answer wins where it names one: it knows which
-        # of the customer's projects this agent lives in, and the config's
-        # url is what egma falls back on when it says nothing.
-        return WayIn(url=server_url or self._settings.url, token=token)
+        token, named, server_url = self._minted(endpoint, said)
+        # The endpoint's answer is the only place the server is named: it
+        # knows which of the customer's projects this agent lives in, and the
+        # connection holds no url of its own to prefer over it. It is also an
+        # address chosen by whoever answered, so it is held to the rule the
+        # endpoint was held to before the token goes there.
+        await self._joinable_server(endpoint, named, server_url)
+        return WayIn(url=server_url, token=token)
 
-    def _minted(self, endpoint: str, said: bytes) -> tuple[str, str]:
+    def _minted(self, endpoint: str, said: bytes) -> tuple[str, str, str]:
         """The token and the server URL out of one answer, or a refusal.
 
         The refusal names the broken part of the published contract, never
         bytes from the endpoint. Those bytes may have come from an internal
-        service and are not safe customer-visible diagnostic text.
+        service and are not safe customer-visible diagnostic text. The key
+        the server came under is answered beside the two, so the check that
+        follows on the server itself can say which spelling it is refusing.
         """
         try:
             held = json.loads(said)
@@ -1185,22 +1317,112 @@ class RoomLifecycle:
         # future diagnostic path added below.
         self._secrets.register([token])
 
-        server_url = held.get("serverUrl", "")
+        named = next(
+            (alias for alias in SERVER_URL_ALIASES if alias in held), None
+        )
+        server_url = held.get(named, "") if named is not None else ""
         if not isinstance(server_url, str):
             raise MediaBackendError(
-                f"the token endpoint at {endpoint} answered a serverUrl that "
+                f"the token endpoint at {endpoint} answered a {named} that "
                 f"is not a string",
                 ending=ERROR,
             )
         server_url = server_url.strip()
-        if server_url and not server_url.startswith(URL_SCHEMES):
+        if named is None or not server_url:
             raise MediaBackendError(
-                f"the token endpoint at {endpoint} answered a serverUrl Egma "
-                f"cannot join: it must start with one of "
-                f"{', '.join(URL_SCHEMES)}",
+                f"the token endpoint at {endpoint} answered no server_url: "
+                f"Egma joins the LiveKit server the answer names, under "
+                f"{' or '.join(SERVER_URL_ALIASES)}",
                 ending=ERROR,
             )
-        return token.strip(), server_url
+        return token.strip(), named, server_url
+
+    async def _joinable_server(
+        self, endpoint: str, named: str, server_url: str
+    ) -> None:
+        """Refuse a server the endpoint named that egma must not join.
+
+        The answer decides where the simulator opens its next connection and
+        sends the token it was just handed, so it is held to the rule the
+        endpoint itself was held to. TLS, first: a ``ws://`` or ``http://``
+        server would carry the token in the clear. Then nothing that
+        resolves inside the deployment: a literal address is judged as
+        written; a name is resolved through the resolver the token request
+        went through, and every answer must be public — because an endpoint
+        that is wrong, or compromised, or simply pointed at a staging server
+        on the office network must not make egma a client of that network.
+
+        The join itself is made by the LiveKit SDK on a socket of its own,
+        so unlike the token request there is no socket factory here to hold
+        the connected address to the checked one, and the SDK cannot be
+        handed the checked address in place of the name: under TLS the name
+        is what the server's certificate is checked against. So a name that
+        moves between this lookup and the SDK's is not closed by pinning.
+
+        What it is closed by, as far as this process can close it, is the
+        scheme rule above. The token rides the WebSocket upgrade, which the
+        SDK sends only once the peer has shown a certificate for the
+        answered name. A host inside the deployment holds one only if it
+        already holds a key for a name the endpoint chose, or if the
+        operator's own trust store mints for any name, and in both cases
+        the host was the operator's or the attacker's before this check
+        ran. The token itself was minted by the endpoint that answered, so
+        a moved name discloses nothing to it. What a moved name can reach
+        is one TCP connect and one TLS handshake against an address of its
+        choosing, and a join refusal that says how that went. That residue
+        is accepted here, said rather than implied away, and the layer that
+        closes it is the deployment's egress policy on this process: a
+        socket the SDK owns is guarded where sockets are, not here.
+        """
+        located = _server_host(server_url)
+        if located is None:
+            raise _unjoinable(endpoint, named)
+        hostname, port = located
+        try:
+            for address in await self._server_addresses(hostname, port):
+                _public_endpoint_address(address)
+        except _UnsafeEndpointAddress as unsafe:
+            raise MediaBackendError(
+                f"the token endpoint at {endpoint} answered a {named} on a "
+                f"non-public network address; Egma joins only a LiveKit "
+                f"server on the public internet",
+                ending=ERROR,
+            ) from unsafe
+        except OSError as unresolved:
+            raise MediaBackendError(
+                f"the token endpoint at {endpoint} answered a {named} whose "
+                f"host could not be resolved",
+                ending=ERROR,
+            ) from unresolved
+
+    async def _server_addresses(self, hostname: str, port: int) -> list[str]:
+        """Every address a server name stands for, or the literal it is.
+
+        A literal address stands for itself and is not looked up. A name
+        goes to the resolver a system-boundary test supplied, or to the
+        default one, with every address family asked for: the SDK may
+        connect over either, so both must pass the policy.
+        """
+        try:
+            ipaddress.ip_address(hostname)
+        except ValueError:
+            pass
+        else:
+            return [hostname]
+
+        import aiohttp
+
+        resolver = self._endpoint_resolver or aiohttp.resolver.DefaultResolver()
+        try:
+            answers = await resolver.resolve(hostname, port, socket.AF_UNSPEC)
+        finally:
+            if resolver is not self._endpoint_resolver:
+                with contextlib.suppress(Exception):
+                    await resolver.close()
+        addresses = [answer.get("host") for answer in answers]
+        if not addresses:
+            raise OSError(f"{hostname} resolved to no address")
+        return addresses
 
     async def _delete_room(self) -> None:
         """Delete the room. Never raises — see :func:`delete_room`."""
@@ -1266,12 +1488,15 @@ class RoomLifecycle:
             # joined with it; it holds no key pair, so it could not have
             # dispatched anybody and is not what went wrong here.
             return (
-                f"no agent joined {self._room_name} within {seconds:.0f}s — the "
-                f"token endpoint minted a token and Egma joined the room with "
-                f"it, but nothing dispatched the agent. A connection that "
-                f"names a token endpoint hands Egma no key pair, so Egma "
-                f"cannot dispatch: putting a worker in the room it was asked "
-                f"for a token into is the endpoint's own job"
+                f"no agent named {self._settings.agent_name!r} joined "
+                f"{self._room_name} within {seconds:.0f}s — the token endpoint "
+                f"minted a token and Egma joined the room with it, but nothing "
+                f"dispatched the agent. Egma asked for that worker in the "
+                f"request's room_config; a connection that names a token "
+                f"endpoint hands Egma no key pair, so dispatching is the "
+                f"endpoint's own job: copy room_config into the token it "
+                f"mints, or dispatch that worker itself, and check that a "
+                f"worker registered under that name is running"
             )
         # There is only one arm left here now that the name is demanded:
         # every connection that mints its own token dispatches by name, so
@@ -1306,6 +1531,7 @@ class LiveKitRoomBackend(RoomLifecycle):
     async def create_transport(self) -> VoiceMedia:
         """Get a way into the room and build its Pipecat transport."""
         way_in = await self._way_in()
+        self._server_url = way_in.url
         self._room = self._joined_room(way_in)
         self._room.answer_when_joined(self._answer_for_mocked_tools)
         return self._room.create_transport()
@@ -1938,9 +2164,19 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         options before it has connected to anything."""
         return fresh_chat_room_name()
 
+    def _room_name_for(self, simulation_id: str) -> str:
+        """The marked form again, for the room an endpoint is asked for.
+
+        The worker reads ``egma-sim-chat-`` off the name however the token
+        was minted, and the endpoint's ``egma-sim-`` allowlist still
+        matches: the bare prefix is inside the marked one.
+        """
+        return chat_room_name_for(simulation_id)
+
     async def open_room(self) -> None:
         """Get a way into the room and join it, publishing nothing."""
         way_in = await self._way_in()
+        self._server_url = way_in.url
         self._room = self._joined_room(way_in)
         await self._room.join()
         # The offer goes on at the join itself, exactly as the voice room
@@ -2204,7 +2440,7 @@ class LiveKitChatRoomBackend(RoomLifecycle):
             left_to_drain = drain
         if room.failed.is_set():
             raise MediaBackendError(
-                f"the livekit server at {self._settings.url} closed "
+                f"the livekit server at {self._server_url} closed "
                 f"{self._room_name} while the exchange was under way",
                 ending=ERROR,
             )

@@ -15,7 +15,7 @@
   },
   "agent_version": 106,
   "dynamic_variables": {
-    "egma_simulation": "sim_01K5T4P2QW7H3NDXB8ZM6VYJRE",
+    "account_id": "sim_01K5T4P2QW7H3NDXB8ZM6VYJRE",
     "is_existing": "true",
     "caller_name": ""
   },
@@ -54,13 +54,11 @@
   "mock_tools": [
     {
       "tool_name": "get_availability",
-      "answer": { "answer": { "slots": ["2026-09-03T14:30:00Z"] } },
-      "delay_milliseconds": 250
+      "answer": { "answer": { "slots": ["2026-09-03T14:30:00Z"] } }
     },
     {
       "tool_name": "book_appointment",
-      "answer": { "error": "the booking service is unavailable" },
-      "delay_milliseconds": 0
+      "answer": { "error": "the booking service is unavailable" }
     }
   ]
 }

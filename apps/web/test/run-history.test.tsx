@@ -167,7 +167,6 @@ function simulation(overrides: Record<string, unknown> = {}) {
     endedAt: "2026-08-21T10:01:00.000Z",
     modality: "chat",
     hasRecording: false,
-    mockToolCoverage: { discovered: [], covered: [], uncovered: [] },
     ...overrides,
   };
 }
@@ -285,8 +284,6 @@ function simulationEvidence(overrides: Record<string, unknown> = {}) {
       environment: "staging",
       config: {},
     },
-    mockToolCoverage: { discovered: [], covered: [], uncovered: [] },
-    mockTools: { defaults: [], overrides: [] },
     gradingPlan: {
       state: "run_start",
       capturedAt: "2026-08-21T10:00:00.000Z",

@@ -61,7 +61,7 @@ own default is whatever version is newest, which on a mocked run is exactly
 the draft nobody may be at the mercy of."""
 
 THE_VARIABLES = {
-    "egma_simulation": A_SIMULATION,
+    "account_id": A_SIMULATION,
     "is_existing": "false",
     "caller_name": "",
 }
@@ -372,9 +372,9 @@ async def test_egma_never_stands_in_this_agents_tool_path(
 ):
     """A mocked Retell world answers from egma's own endpoint, which the
     agent reaches over the internet and not across the room. So this plug
-    offers nothing in the room even for a simulation that resolved mock
-    answers, and the record claims nothing about tools — which is the
-    truth, because egma never stood in their path to learn anything."""
+    offers nothing in the room even for a simulation whose test names mock
+    tools, so no call of the agent's ever reaches the seam — which is the
+    truth, because egma never stood in their path in this room."""
     running = await start_retell_stub(api_key=SENTINEL_KEY)
     room = RoomStub(greeting="Remedy after hours.", replies=["Noted."])
     _conducted, _turns, assembled = await web_call_walk(
@@ -387,12 +387,10 @@ async def test_egma_never_stands_in_this_agents_tool_path(
             {
                 "tool_name": "get_availability",
                 "answer": {"answer": {"slots": []}},
-                "delay_milliseconds": 0,
             }
         ],
     )
 
-    assert assembled.mock_tool_coverage is None
     assert assembled.tool_calls() == []
     # Nothing was offered in the room, so there is nothing there to call.
     assert not room.standing_ready.is_set()

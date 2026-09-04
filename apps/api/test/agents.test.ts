@@ -165,7 +165,7 @@ describe("discovering simulation agents", () => {
     expect(response.statusCode).toBe(404);
   });
 
-  it("returns normalized text-mode, web-call and phone candidates for voice agents only, never provider data or the key", async () => {
+  it("returns every Retell Agent and adds connection candidates only where Egma supports them", async () => {
     api = await createApi("retell_agent_discovery");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const retellKey = "retell-secret-never-returned-WXYZ";
@@ -268,6 +268,14 @@ describe("discovering simulation agents", () => {
               config: { phoneNumber: "+14155550100" },
             },
           ],
+        },
+        {
+          platformAgentId: "agent_chat_1",
+          name: "Chat only",
+          modality: "chat",
+          // Account discovery remains complete even though Egma does not
+          // currently offer a new Connection for this Retell product shape.
+          connectionCandidates: [],
         },
         {
           platformAgentId: "agent_voice_without_number",
@@ -1062,19 +1070,19 @@ describe("discovering simulation agents", () => {
   });
 
   /**
-   * The mint the mock-tools consent screen makes, over the API seam and with
-   * no browser in it.
+   * The mint the connect flow makes, over the API seam and with no browser in
+   * it.
    *
-   * **This is the body that surface sends, key for key.** The screen mints the
-   * web-call lane for an agent that has none, so that turning mock tools on can
-   * never refuse a person with a step the product cannot perform. It carries no
+   * **This is the body that surface sends, key for key.** It mints the web-call
+   * lane for an agent that has none, so a person who wants a mocked run is
+   * never refused with a step the product cannot perform. It carries no
    * credential and no config: the agent already holds its sealed key, the route
    * lends that copy to the confirmation, and Retell's own answer is what the
    * connection's config is written from. A payload that named neither the
    * Retell agent nor a key shipped once and could only ever be refused, so the
    * round trip is proven here rather than assumed.
    */
-  it("mints the web-call lane from the consent screen's own body, with no key and no config", async () => {
+  it("mints the web-call lane from the connect flow's own body, with no key and no config", async () => {
     api = await createApi("retell_web_call_minted_by_consent");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const created = await post("/v1/agents", withKey(ada.secret), {
@@ -1122,16 +1130,19 @@ describe("discovering simulation agents", () => {
     // open the call — the copy the route lent, never one the browser sent.
     expect(lane.config).toEqual({ retellAgentId: "agent_voice_1" });
     expect(lane.credentialPresent).toBe(true);
-    // Off until the switch is written, which is the second half of the one yes.
-    expect(lane.mockToolsEnabled).toBe(false);
+    // A connection holds no mock switch any more: what a run mocks comes off
+    // the tests it conducts, so a lane has nothing to say about it.
+    expect(lane.mockToolsEnabled).toBeUndefined();
 
     const switched = await patch(
       `/v1/agents/${agentId}/connections/${String(lane.id)}?projectId=${ada.projectId}`,
       withKey(ada.secret),
       { mockToolsEnabled: true },
     );
-    expect(switched.status, JSON.stringify(switched.body)).toBe(200);
-    expect(connectionOf(switched).mockToolsEnabled).toBe(true);
+    expect(switched.status, JSON.stringify(switched.body)).toBe(400);
+    expect(String((switched.body as { message?: unknown }).message)).toContain(
+      'a connection edit has no key "mockToolsEnabled"',
+    );
 
     const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
     expect(
@@ -1579,40 +1590,6 @@ describe("a livekit connection", () => {
     expect(connectionOf(registered)).not.toHaveProperty("credentials");
   });
 
-  it("is registered with room metadata too, and reads it back verbatim", async () => {
-    api = await createApi("agents_livekit_dispatched");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const registered = await post("/v1/agents", withKey(ada.secret), {
-      agentPlatform: "livekit",
-      name: "Dispatched agent",
-      connection: livekitPayload({
-        config: {
-          url: "wss://acme.livekit.cloud",
-          agentName: "front-desk",
-          metadata: '{"tenant":"acme"}',
-        },
-      }),
-    });
-
-    expect(registered.status).toBe(201);
-
-    const one = await get(
-      `/v1/agents/${String(agentOf(registered).id)}`,
-      withKey(ada.secret),
-    );
-    const [reached] = one.body.connections as Record<string, unknown>[];
-    expect(reached).toMatchObject({
-      config: {
-        url: "wss://acme.livekit.cloud",
-        agentName: "front-desk",
-        metadata: '{"tenant":"acme"}',
-      },
-      credentialsHint: "WXYZ",
-    });
-    expect(reached).not.toHaveProperty("credentials");
-  });
-
   /**
    * The chat lane through the same door, which is one field of the payload.
    *
@@ -1710,8 +1687,8 @@ describe("a livekit connection", () => {
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: { headers: '{"Authorization":"Bearer not-a-real-token"}' },
       },
@@ -1726,12 +1703,46 @@ describe("a livekit connection", () => {
       modality: "voice",
       topology: "agent-dials-out",
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
+        agentName: "front-desk",
       },
       credentialsHint: "Authorization",
     });
     expect(connectionOf(registered)).not.toHaveProperty("credentials");
+  });
+
+  /**
+   * The chat lane on the other way in: the same four facts, `chat` for the
+   * modality, and its own label so the two token-endpoint options can be
+   * told apart wherever the label is shown.
+   */
+  it("is registered for chat through a token endpoint", async () => {
+    api = await createApi("agents_livekit_endpoint_chat");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const registered = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "livekit",
+      name: "Typed agent",
+      connection: {
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.customer_token_endpoint",
+        modality: "chat",
+        config: {
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
+        },
+        credentials: { headers: '{"Authorization":"Bearer not-a-real-token"}' },
+      },
+    });
+
+    expect(registered.status).toBe(201);
+    expect(connectionOf(registered)).toMatchObject({
+      accessVariant: "livekit_room.customer_token_endpoint",
+      productLabel: "LiveKit chat token endpoint",
+      modality: "chat",
+      credentialsHint: "Authorization",
+    });
   });
 
   it("refuses a literal private token endpoint", async () => {
@@ -1747,8 +1758,8 @@ describe("a livekit connection", () => {
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
-          url: "ws://livekit.internal:7880",
           tokenEndpoint: "https://127.0.0.1/egma",
+          agentName: "front-desk",
         },
         credentials: { headers: '{"Authorization":"Bearer not-real"}' },
       },
@@ -1776,28 +1787,6 @@ describe("a livekit connection", () => {
     readonly message: string;
   }[] = [
     {
-      // The kind speaks chat; this way of reaching it cannot. Egma asks the
-      // customer's endpoint for a token and never dispatches the worker, so
-      // there is nowhere to tell the agent to answer in text.
-      named: "chat on the access variant Egma cannot dispatch through",
-      slug: "chat_on_endpoint",
-      payload: {
-        accessVariant: "livekit_room.customer_token_endpoint",
-        modality: "chat",
-        config: {
-          url: "wss://acme.livekit.cloud",
-          tokenEndpoint: "https://acme.example/egma/livekit-token",
-        },
-        credentials: { headers: '{"Authorization":"Bearer not-real"}' },
-      },
-      message:
-        "a token-endpoint livekit connection speaks voice: Egma asks your " +
-        "endpoint for a token and never dispatches the worker itself, so " +
-        "it has no way to tell the agent to answer in text. Chat is " +
-        "offered on the LiveKit project credentials access variant, where " +
-        "Egma dispatches the named worker and sends the modality with it.",
-    },
-    {
       named: "a word that is not a modality at all",
       slug: "not_a_modality",
       payload: { modality: "telepathy" },
@@ -1811,8 +1800,8 @@ describe("a livekit connection", () => {
       message: "a LiveKit room connection's config needs url",
     },
     {
-      // Every egma dispatch is explicit, because dispatch metadata is the only
-      // channel that carries the modality and the mock-tool address.
+      // Every egma dispatch is explicit: the worker is named on the job, and
+      // the modality and the mock-tool address ride with it.
       named: "no worker to dispatch",
       slug: "no_agent_name",
       payload: { config: { url: "wss://acme.livekit.cloud" } },
@@ -1837,20 +1826,6 @@ describe("a livekit connection", () => {
       message: "the config's agentName must be a non-empty string",
     },
     {
-      named: "metadata that is not a JSON object",
-      slug: "bad_metadata",
-      payload: {
-        config: {
-          url: "wss://acme.livekit.cloud",
-          agentName: "front-desk",
-          metadata: "tenant=acme",
-        },
-      },
-      message:
-        "the config's metadata must be a JSON object written in a string, " +
-        'which looks like {"tenant":"acme"}',
-    },
-    {
       named: "a config key a livekit connection has no place for",
       slug: "unknown_config_key",
       payload: {
@@ -1861,8 +1836,8 @@ describe("a livekit connection", () => {
         },
       },
       message:
-        'a LiveKit room connection\'s config has no key "roomName"; it holds url, ' +
-        "agentName, metadata (optional)",
+        'a LiveKit room connection\'s config has no key "roomName"; it holds ' +
+        "url, agentName",
     },
     {
       // Neither access variant: no key pair, and no endpoint to ask for a
@@ -1885,8 +1860,8 @@ describe("a livekit connection", () => {
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
       },
       message:
@@ -1902,8 +1877,8 @@ describe("a livekit connection", () => {
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: undefined,
       },
@@ -1934,8 +1909,8 @@ describe("a livekit connection", () => {
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "wss://acme.livekit.cloud",
+          agentName: "front-desk",
         },
         credentials: { headers: '{"Authorization":"Bearer not-real"}' },
       },
@@ -1944,21 +1919,22 @@ describe("a livekit connection", () => {
         "looks like https://example.com/egma/livekit-token",
     },
     {
-      // Dispatching is a power a key pair buys, and this shape has none.
-      named: "an agent to dispatch on a connection that cannot dispatch",
-      slug: "agent_name_with_endpoint",
+      // The endpoint's answer names the server, so a url here would be a
+      // second answer to a question the endpoint settles.
+      named: "a server url on a connection whose endpoint names the server",
+      slug: "url_with_endpoint",
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
           agentName: "front-desk",
+          url: "wss://acme.livekit.cloud",
         },
         credentials: { headers: '{"Authorization":"Bearer not-real"}' },
       },
       message:
-        'a token-endpoint livekit connection\'s config has no key "agentName"; ' +
-        "it holds url, tokenEndpoint",
+        'a token-endpoint livekit connection\'s config has no key "url"; ' +
+        "it holds tokenEndpoint, agentName",
     },
     {
       named: "headers that are not a JSON object of name to value",
@@ -1966,8 +1942,8 @@ describe("a livekit connection", () => {
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: { headers: "Authorization: Bearer not-real" },
       },
@@ -1998,7 +1974,7 @@ describe("a livekit connection", () => {
       payload: { topology: "agent-dials-out" },
       message:
         'a connection has no key "topology"; it holds name, agentPlatform, ' +
-        "connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, mockToolsEnabled, agentPlatformSelection",
+        "connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection",
     },
     {
       named: "a credential key that does not belong",
@@ -2127,8 +2103,8 @@ describe("a livekit connection", () => {
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
+        agentName: "front-desk",
       },
       credentials: { headers },
       ...overrides,
@@ -2161,8 +2137,14 @@ describe("a livekit connection", () => {
       }),
       await post("/v1/agents", withKey(ada.secret), {
         agentPlatform: "livekit",
-        name: "Refused for a modality it does not speak",
-        connection: endpointPayload({ modality: "chat" }),
+        name: "Refused for a server url the endpoint answers with",
+        connection: endpointPayload({
+          config: {
+            tokenEndpoint: "https://acme.example/egma/livekit-token",
+            agentName: "front-desk",
+            url: "wss://acme.livekit.cloud",
+          },
+        }),
       }),
       await post("/v1/agents", withKey(ada.secret), {
         agentPlatform: "livekit",
@@ -2384,7 +2366,7 @@ describe("the vendor payload egma no longer keeps", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'connection has no "pulled" key. Drop it and send name, agentPlatform, ' +
-        "connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, mockToolsEnabled, agentPlatformSelection; the agent's content " +
+        "connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection; the agent's content " +
         "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
     });
@@ -2422,7 +2404,7 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, agentPlatform, connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, mockToolsEnabled, agentPlatformSelection',
+        'a connection has no key "topology"; it holds name, agentPlatform, connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection',
     });
   });
 });

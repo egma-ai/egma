@@ -55,11 +55,37 @@ export async function refreshProjectTargets(
   input: {
     readonly paths: FolderPaths;
     readonly project: IdentifiedThing;
+    /** A resource the preceding write said now exists. */
+    readonly expected?: {
+      readonly agentId: string;
+      readonly connectionId?: string;
+    };
   },
   options: RegisterOptions,
 ): Promise<TargetSyncResult> {
   const loaded = await readProjectTargets(input.project.id, options);
   if (loaded.kind !== "synced") return loaded;
+
+  if (input.expected !== undefined) {
+    const agent = loaded.agents.find(
+      (candidate) => candidate.id === input.expected?.agentId,
+    );
+    if (agent === undefined) {
+      throw new Error(
+        `Egma's refreshed Agent list did not contain Agent ${input.expected.agentId}`,
+      );
+    }
+    if (
+      input.expected.connectionId !== undefined &&
+      !agent.connections.some(
+        (connection) => connection.id === input.expected?.connectionId,
+      )
+    ) {
+      throw new Error(
+        `Egma's refreshed Agent list did not contain Connection ${input.expected.connectionId} under Agent ${input.expected.agentId}`,
+      );
+    }
+  }
 
   const held = await readConfig(input.paths.config);
   if (held.project !== null && held.project.id !== input.project.id) {

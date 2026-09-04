@@ -18,7 +18,6 @@ import {
   testSuite,
   testVersion,
 } from "../schema/tests.ts";
-import type { MockToolAnswer } from "../mock-tools/resolve.ts";
 import type { AuthContext } from "./context.ts";
 import {
   IdentityConflictError,
@@ -27,13 +26,6 @@ import {
   UnprocessableInputError,
   type TestNamingPersona,
 } from "./errors.ts";
-import {
-  answerFromRow,
-  validAnswer,
-  validDelay,
-  validToolName,
-  type MockToolAnswerInput,
-} from "./mock-tools.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { personaAvailableToProject } from "./persona-availability.ts";
 import { authorize, here } from "./permissions.ts";
@@ -59,8 +51,8 @@ import { within } from "./within.ts";
  *
  * **A test names no graders.** Which project graders grade a simulation is
  * resolved from each project grader's scope and never through test
- * content — so a version's content is the scenario, the behaviors and the mock
- * overrides, and there is nothing else in here for a writer to name.
+ * content — so a version is the scenario, the behaviors, the mock tools and the
+ * env, and there is nothing else in here for a writer to name.
  */
 
 /**
@@ -80,54 +72,122 @@ import { within } from "./within.ts";
 export type ExpectedBehavior = string;
 
 /**
- * One tool this test answers for itself, instead of however the project
- * answers for it.
+ * One tool this test answers for itself: the value it returns, or the failure
+ * it raises.
  *
- * **An override is test content and has no identity of its own.** It is not a
- * mock tool sitting somewhere else that the test points at — it is a sentence
- * in the test, versioned with the test exactly as an expected behavior is. That
- * is what buys override history for nothing: project mock tools are
- * deliberately unversioned, and this half of the mocked world versions anyway,
- * because tests already version.
+ * **A mock tool is test content and has no identity of its own.** It is not a
+ * row sitting somewhere else that the test points at — it is a sentence in the
+ * test, versioned with the test exactly as an expected behavior is. There is no
+ * project-level half any more, and that is the whole shape of the decision: the
+ * world a scenario needs is written where the scenario is, so a test carries
+ * everything a run needs to reproduce it and nothing outside it can move.
  *
  * Forcing a branch is what these are for. "The calendar has no free slots" is
- * this test with one tool overridden, and the project's other agents go on
- * seeing the calendar the project describes.
+ * this test with `get_availability` answering an empty list, and no other test
+ * in the project is touched by saying so.
+ *
+ * Two shapes rather than one with a nullable failure, because `null` is a
+ * perfectly good answer for a tool to give and a shape that could not tell it
+ * from "no answer" would make an authored `null` unserveable.
  */
-export type MockOverride = {
-  /** The agent's own name for the tool, verbatim — matching is by this. */
-  readonly toolName: string;
-  readonly answer: MockToolAnswer;
-  readonly delayMilliseconds: number;
+export type TestMockTool =
+  | { tool: string; answer: unknown }
+  | { tool: string; error: string };
+
+/**
+ * The world outside the conversation, as this test asks for it.
+ *
+ * Both keys are the platforms' own words, kept in the platforms' own spelling
+ * all the way down: `retell_dynamic_variables` are the template variables
+ * Retell substitutes into a prompt, and `job_dispatch_metadata` is what LiveKit
+ * hands the worker it dispatches. Renaming either into egma's house style would
+ * make a person holding the platform's documentation guess which of ours is
+ * which of theirs.
+ */
+export type TestEnv = {
+  retell_dynamic_variables?: Record<string, string>;
+  job_dispatch_metadata?: Record<string, unknown>;
 };
 
 /**
- * An override as it is written down. The delay is what a writer may leave out,
- * and the answer arrives unjudged for the reason a project mock tool's does:
- * whether the two keys add up to one branch is one rule, decided in one place,
- * for both halves of the mocked world.
+ * How large one mock tool's answer may be once serialized, in bytes.
+ *
+ * The exchange carrying it holds 15 KiB, so this is the transport's limit
+ * written down where an author meets it rather than discovered at call time by
+ * a simulation that fails halfway through. An answer that needs more than this
+ * is a document rather than a tool answer.
+ *
+ * Counted against the **tagged** message the wire carries — `{"answer":…}` or
+ * `{"error":…}` — because that is what the simulator measures, and a cap
+ * measured two ways is two caps. The contract's seam fixture holds the copies
+ * of this number to one value.
  */
-export type MockOverrideInput = {
-  readonly toolName: unknown;
-  readonly answer: MockToolAnswerInput;
-  readonly delayMilliseconds?: number | undefined;
-};
+export const LARGEST_MOCK_TOOL_ANSWER_BYTES = 15 * 1024;
+
+/**
+ * How large the dispatch metadata may be, in bytes.
+ *
+ * LiveKit accepts 512 KiB in any one metadata field, and egma writes the string
+ * onto the dispatch verbatim, so this gate is exactly LiveKit's own. Measured
+ * on the UTF-8 bytes of `serializedJobDispatchMetadata`, which is the one string
+ * egma will actually send — measuring anything else here would admit a value
+ * the dispatch then refuses, on a run that has already started.
+ */
+export const LARGEST_JOB_DISPATCH_METADATA_BYTES = 512 * 1024;
+
+/**
+ * The prefix egma keeps for itself among the dynamic variables.
+ *
+ * Egma writes its own variables into every mocked conversation — the run and
+ * the simulation a tool call belongs to, among them — so a test that could
+ * author one would be a test able to rewrite the identifiers its own record is
+ * filed under. Refused at authoring time, where the person who can rename it is
+ * reading.
+ */
+export const RESERVED_ENV_VARIABLE_PREFIX = "egma_";
+
+/**
+ * The dispatch metadata as one compact JSON string — the exact bytes egma hands
+ * LiveKit.
+ *
+ * **One serialization, used at save and again at dispatch.** The cap is
+ * measured on this string's UTF-8 bytes, so what is admitted here is always a
+ * value the dispatch can carry; a second serializer somewhere else, with
+ * spacing or sorted keys, would measure a different number of bytes for the
+ * same object and the two gates would disagree.
+ */
+export function serializedJobDispatchMetadata(
+  value: Record<string, unknown>,
+): string {
+  const written = JSON.stringify(value);
+  if (written === undefined) {
+    throw new UnprocessableInputError(
+      "env.job_dispatch_metadata has to be something Egma can serialize and " +
+        "hand to LiveKit, and this one is not.",
+    );
+  }
+  return written;
+}
 
 /**
  * What a version of a test says. The scenario is the situation as free text —
  * what the persona wants, and the circumstances. The expected behaviors are
  * statements about what should happen, in the order they were authored, and at
- * least one of them always exists. The mock overrides are the tools this
- * scenario answers for itself, and there are usually none.
+ * least one of them always exists. The mock tools are the tools this scenario
+ * answers for itself, and the env is the world outside the conversation; there
+ * are usually neither.
  *
  * Internal, because the exported API is flat: a caller hands the fields to
  * `createTest` beside the name, and reads them back off a `Test` the same way.
- * The pairing matters only to the version row that stores them together.
+ * The pairing matters to the version row that stores them together and to the
+ * comparator that decides whether an edit mints a version — the three columns
+ * are one versioned statement however many columns hold it.
  */
 type TestContent = {
   readonly scenario: string;
   readonly expectedBehaviors: readonly ExpectedBehavior[];
-  readonly mockOverrides: readonly MockOverride[];
+  readonly mockTools: readonly TestMockTool[];
+  readonly env: TestEnv | null;
 };
 
 export type NewTest = {
@@ -143,12 +203,15 @@ export type NewTest = {
    */
   readonly personaIds?: readonly string[] | undefined;
   /**
-   * The tools this scenario answers for itself, on top of however the project
-   * answers for them. Naming none is the ordinary case: the project's mock
-   * tools are the world, and a test overrides one only when the branch it is
-   * written for needs a different answer.
+   * The tools this scenario answers for itself. Naming none is the ordinary
+   * case: a test that mocks nothing reaches the agent's real tools.
    */
-  readonly mockOverrides?: readonly MockOverrideInput[] | undefined;
+  readonly mockTools?: readonly TestMockTool[] | undefined;
+  /**
+   * The world outside the conversation this scenario asks for. Absent and
+   * `null` both mean it asks for none.
+   */
+  readonly env?: TestEnv | null | undefined;
 };
 
 /**
@@ -178,7 +241,9 @@ export type Test = {
   /** In the order they were authored. */
   readonly personas: readonly TestPersona[];
   /** The tools this scenario answers for itself; usually none. */
-  readonly mockOverrides: readonly MockOverride[];
+  readonly mockTools: readonly TestMockTool[];
+  /** The world outside the conversation; null when it asks for none. */
+  readonly env: TestEnv | null;
   /**
    * The opaque token an identity write or a lifecycle change has to name. It
    * changes on every one of them and means nothing on its own.
@@ -214,12 +279,19 @@ export type TestChanges = {
   /**
    * The tools the next version should answer for itself.
    *
-   * An empty list means here what it means on a create — override nothing —
-   * because overriding nothing is a state a test can be in and is the one most
-   * tests are in. So `[]` clears the overrides, and leaving the field out keeps
-   * them.
+   * An empty list means here what it means on a create — mock nothing — because
+   * mocking nothing is a state a test can be in and is the one most tests are
+   * in. So `[]` clears the mock tools, and leaving the field out keeps them.
    */
-  readonly mockOverrides?: readonly MockOverrideInput[];
+  readonly mockTools?: readonly TestMockTool[];
+  /**
+   * The world the next version should ask for.
+   *
+   * `null` clears it, for the same reason `[]` clears the mock tools: asking
+   * for nothing is a state a test can be in. Leaving the field out keeps what
+   * the current version asks for.
+   */
+  readonly env?: TestEnv | null;
   /**
    * The version this edit was written against, when the writer knows it.
    *
@@ -266,7 +338,9 @@ export type TestVersion = {
   /** By identity, in the order they were authored. */
   readonly personas: readonly TestPersona[];
   /** The tools this version answers for itself, as it was frozen. */
-  readonly mockOverrides: readonly MockOverride[];
+  readonly mockTools: readonly TestMockTool[];
+  /** The world this version asks for, as it was frozen; null for none. */
+  readonly env: TestEnv | null;
   readonly createdAt: Date;
 };
 
@@ -284,7 +358,8 @@ export type TestExecutionContent = {
   readonly testName: string;
   readonly scenario: string;
   readonly expectedBehaviors: readonly ExpectedBehavior[];
-  readonly mockOverrides: readonly MockOverride[];
+  readonly mockTools: readonly TestMockTool[];
+  readonly env: TestEnv | null;
 };
 
 const notDeleted: SQL = isNull(test.deletedAt);
@@ -325,7 +400,8 @@ function validName(name: string): string {
 function validContent(input: {
   readonly scenario: string;
   readonly expectedBehaviors: readonly ExpectedBehavior[];
-  readonly mockOverrides: readonly MockOverrideInput[];
+  readonly mockTools: readonly TestMockTool[];
+  readonly env: TestEnv | null;
 }): TestContent {
   const scenario = input.scenario.trim();
   if (scenario === "") {
@@ -361,51 +437,291 @@ function validContent(input: {
   return {
     scenario,
     expectedBehaviors,
-    mockOverrides: validOverrides(input.mockOverrides),
+    mockTools: validMockTools(input.mockTools),
+    env: validEnv(input.env),
   };
 }
 
+/** How many bytes one answer takes on the wire, as the exchange counts it. */
+function servedBytes(value: unknown, key: "answer" | "error"): number {
+  let written: string | undefined;
+  try {
+    written = JSON.stringify(value);
+  } catch {
+    written = undefined;
+  }
+  if (written === undefined) {
+    throw new UnprocessableInputError(
+      `${key} has to be something Egma can serialize and hand to the agent, ` +
+        `and this one is not.`,
+    );
+  }
+  // The envelope written out rather than stringified a second time: this is
+  // byte for byte what `JSON.stringify({ [key]: value })` produces, and the
+  // customer's value is not serialized twice to count it once.
+  return Buffer.byteLength(`{"${key}":${written}}`, "utf8");
+}
+
 /**
- * The overrides as they will be stored.
+ * The mock tools as they will be stored: one entry per tool, each answering
+ * exactly one way, within the size the exchange can carry.
  *
- * Every gate a project mock tool passes is applied here from the same
- * functions — a blank tool name, a delay past the budget, an answer past what
- * the exchange carries — because an override is served the same way over the
- * same exchange, and a rule enforced in one of the two places would be a rule
- * a test could walk around.
- *
- * **One override per tool name**, for the reason a project holds one answer per
- * tool: matching is by name alone, so two entries for one tool would be two
+ * **One entry per tool name.** Matching is by the name and by nothing
+ * else — no arguments are read — so two entries for one tool would be two
  * answers with no rule to choose between them.
+ *
+ * The size is checked here rather than at the transport, because an answer too
+ * large is a fact about what somebody wrote and the person who can fix it is
+ * reading this refusal — not the simulation that would otherwise have
+ * discovered it mid-conversation.
  */
-function validOverrides(
-  written: readonly MockOverrideInput[],
-): readonly MockOverride[] {
-  const overrides: MockOverride[] = [];
+function validMockTools(
+  written: readonly TestMockTool[],
+): readonly TestMockTool[] {
+  const mockTools: TestMockTool[] = [];
   const seen = new Set<string>();
 
-  for (const entry of written) {
-    if (typeof entry !== "object" || entry === null) {
+  for (const authored of written) {
+    const entry = authored as unknown;
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
       throw new UnprocessableInputError(
-        "each mock tool a test overrides is an object naming the tool and " +
-          "what it answers with",
+        "each mock tool is an object naming the tool and what it answers " +
+          "with, which looks like " +
+          '{"tool": "get_availability", "answer": {"slots": []}}',
       );
     }
-    const toolName = validToolName(entry.toolName);
-    if (seen.has(toolName)) {
+    const held = entry as Record<string, unknown>;
+    const tool = held.tool;
+    if (typeof tool !== "string") {
       throw new UnprocessableInputError(
-        `this test overrides "${toolName}" twice; override each tool once`,
+        "tool is the name of the agent's tool this mock tool answers for, " +
+          `written as text, and this request sent ${typeof tool}.`,
       );
     }
-    seen.add(toolName);
-    overrides.push({
-      toolName,
-      answer: validAnswer(entry.answer),
-      delayMilliseconds: validDelay(entry.delayMilliseconds),
-    });
+    const named = tool.trim();
+    if (named === "") {
+      throw new UnprocessableInputError(
+        "tool is the name of the agent's tool this mock tool answers for, and " +
+          "this one is blank. Send the tool's name exactly as the agent " +
+          "registers it.",
+      );
+    }
+    if (seen.has(named)) {
+      throw new UnprocessableInputError(
+        `this test answers for "${named}" twice; mock each tool once`,
+      );
+    }
+    seen.add(named);
+
+    // A key that is there *and* says something. `answer: null` is an answer a
+    // tool can perfectly well give and counts; `answer: undefined` is a key
+    // carrying nothing and does not, which is what lets the union's own
+    // `error: string` shape reach the failure branch instead of being refused
+    // for saying two things.
+    const gives = "answer" in held && held.answer !== undefined;
+    const fails = "error" in held && held.error !== undefined;
+    if (gives && fails) {
+      throw new UnprocessableInputError(
+        `mock tool "${named}" answers with one thing: this one sent both ` +
+          "answer and error. Send whichever branch the test needs.",
+      );
+    }
+    if (!gives && !fails) {
+      throw new UnprocessableInputError(
+        `mock tool "${named}" answers with something: send answer with what ` +
+          "the tool returns, or error with the failure it raises. This one " +
+          "sent neither.",
+      );
+    }
+
+    if (fails) {
+      const message = held.error;
+      if (typeof message !== "string") {
+        throw new UnprocessableInputError(
+          `error is the failure mock tool "${named}" raises, written as text, ` +
+            `and this request sent ${typeof message}.`,
+        );
+      }
+      if (message.trim() === "") {
+        throw new UnprocessableInputError(
+          `error is the failure mock tool "${named}" raises, and this one is ` +
+            "blank. Say what the agent's backend would have said.",
+        );
+      }
+      const bytes = servedBytes(message, "error");
+      if (bytes > LARGEST_MOCK_TOOL_ANSWER_BYTES) {
+        throw new UnprocessableInputError(tooLarge(named, "error", bytes));
+      }
+      mockTools.push({ tool: named, error: message });
+      continue;
+    }
+
+    const bytes = servedBytes(held.answer, "answer");
+    if (bytes > LARGEST_MOCK_TOOL_ANSWER_BYTES) {
+      throw new UnprocessableInputError(tooLarge(named, "answer", bytes));
+    }
+    mockTools.push({ tool: named, answer: held.answer });
   }
 
-  return overrides;
+  return mockTools;
+}
+
+/**
+ * The one sentence both branches are refused with, written once.
+ *
+ * The number names the whole message, tag included, because that is the number
+ * the exchange measures — an author told the size of their bare value would
+ * count to the cap themselves and still be refused.
+ */
+function tooLarge(tool: string, key: "answer" | "error", bytes: number): string {
+  return (
+    `mock tool "${tool}": ${key} is ${bytes} bytes once serialized and tagged ` +
+    `for the wire, and the exchange that carries it holds at most ` +
+    `${LARGEST_MOCK_TOOL_ANSWER_BYTES}. An answer that needs more than that ` +
+    `is a document rather than a tool answer.`
+  );
+}
+
+/** The two keys an env may carry, and nothing else. */
+const ENV_KEYS = ["retell_dynamic_variables", "job_dispatch_metadata"] as const;
+
+/**
+ * The env as it will be stored, or null where the test asks for nothing.
+ *
+ * **An empty env is null.** `{}`, `{"retell_dynamic_variables": {}}` and an
+ * absent field all say the same thing — this test asks for nothing — so they
+ * are all stored the same way, and no reader has to know three spellings of one
+ * state.
+ *
+ * An unknown top-level key is refused rather than dropped. Every key here is a
+ * platform's own word for something egma hands that platform, so a key nobody
+ * recognises is a request egma is not going to carry out, and dropping it
+ * silently would let a test claim a world it never got.
+ */
+function validEnv(written: TestEnv | null | undefined): TestEnv | null {
+  if (written === null || written === undefined) return null;
+  const value = written as unknown;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new UnprocessableInputError(
+      "env is an object with at most retell_dynamic_variables and " +
+        "job_dispatch_metadata in it",
+    );
+  }
+  const held = value as Record<string, unknown>;
+  for (const key of Object.keys(held)) {
+    if (!(ENV_KEYS as readonly string[]).includes(key)) {
+      throw new UnprocessableInputError(
+        `env has no ${JSON.stringify(key)} in it. An env carries ` +
+          `${ENV_KEYS.join(" and ")}, and nothing else.`,
+      );
+    }
+  }
+
+  const env: TestEnv = {};
+  const variables = held.retell_dynamic_variables;
+  if (variables !== undefined && variables !== null) {
+    const checked = validDynamicVariables(variables);
+    if (Object.keys(checked).length > 0) env.retell_dynamic_variables = checked;
+  }
+  const dispatch = held.job_dispatch_metadata;
+  if (dispatch !== undefined && dispatch !== null) {
+    const checked = validJobDispatchMetadata(dispatch);
+    if (Object.keys(checked).length > 0) env.job_dispatch_metadata = checked;
+  }
+
+  return Object.keys(env).length === 0 ? null : env;
+}
+
+/**
+ * The dynamic variables as they will be stored: text to text, with egma's own
+ * prefix kept back.
+ *
+ * Text values only, because that is what the platform substitutes: a number or
+ * an object here would be stringified by somebody downstream, and which
+ * somebody decided the spelling would be a question nobody could answer from
+ * the record.
+ */
+function validDynamicVariables(value: unknown): Record<string, string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new UnprocessableInputError(
+      "env.retell_dynamic_variables is an object of text values, which looks " +
+        'like {"caller_name": "Margaret"}',
+    );
+  }
+  const variables: Record<string, string> = {};
+  for (const [name, held] of Object.entries(value as Record<string, unknown>)) {
+    if (name.startsWith(RESERVED_ENV_VARIABLE_PREFIX)) {
+      throw new UnprocessableInputError(
+        `env.retell_dynamic_variables names ${JSON.stringify(name)}, and ` +
+          `Egma keeps every variable beginning ` +
+          `"${RESERVED_ENV_VARIABLE_PREFIX}" for the facts it writes into the ` +
+          `conversation itself. Name the variable something else.`,
+      );
+    }
+    if (typeof held !== "string") {
+      throw new UnprocessableInputError(
+        `env.retell_dynamic_variables.${name} is the text Retell substitutes ` +
+          `into the prompt, and this request sent ${typeof held}.`,
+      );
+    }
+    variables[name] = held;
+  }
+  return variables;
+}
+
+/**
+ * A lone surrogate: half of a UTF-16 pair with no partner. Valid JSON, and
+ * JavaScript keeps it, but it has no UTF-8 form, so the dispatch that carries
+ * the metadata to LiveKit could not encode it. Refused at save, because a value
+ * that saves must never fail at dispatch.
+ */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** Every string a JSON value holds, keys included, in document order. */
+function* stringsIn(value: unknown): Generator<string> {
+  if (typeof value === "string") {
+    yield value;
+  } else if (Array.isArray(value)) {
+    for (const item of value) yield* stringsIn(item);
+  } else if (typeof value === "object" && value !== null) {
+    for (const [key, held] of Object.entries(value)) {
+      yield key;
+      yield* stringsIn(held);
+    }
+  }
+}
+
+/** The dispatch metadata as it will be stored: an object, within LiveKit's cap. */
+function validJobDispatchMetadata(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new UnprocessableInputError(
+      "env.job_dispatch_metadata is a JSON object handed to your worker, " +
+        'which looks like {"tenant": "acme"}',
+    );
+  }
+  const metadata = value as Record<string, unknown>;
+  for (const text of stringsIn(metadata)) {
+    if (LONE_SURROGATE.test(text)) {
+      throw new UnprocessableInputError(
+        "env.job_dispatch_metadata holds a lone surrogate, which is valid " +
+          "JSON but has no UTF-8 form, so LiveKit could not carry it on the " +
+          "dispatch. Send well-formed text.",
+      );
+    }
+  }
+  const bytes = Buffer.byteLength(
+    serializedJobDispatchMetadata(metadata),
+    "utf8",
+  );
+  if (bytes > LARGEST_JOB_DISPATCH_METADATA_BYTES) {
+    throw new UnprocessableInputError(
+      `env.job_dispatch_metadata is ${bytes} bytes once serialized, and ` +
+        `LiveKit carries at most ${LARGEST_JOB_DISPATCH_METADATA_BYTES} on ` +
+        `the dispatch; hold a large value in your own store and put its id ` +
+        `here instead.`,
+    );
+  }
+  return metadata;
 }
 
 /**
@@ -455,49 +771,26 @@ function validatePersonaIds(ids: readonly string[]): void {
  * it, and rewriting one to tidy a retired field would be exactly the edit the
  * whole versioning exists to make impossible.
  */
-function contentFromRow(value: unknown, versionId: string): TestContent {
+function contentFromRow(
+  value: unknown,
+  mockTools: unknown,
+  env: unknown,
+  versionId: string,
+): TestContent {
   const malformed = () =>
     new Error(
       `version ${versionId} holds content in a shape Egma never writes; the row needs repairing before anybody can read it`,
     );
 
   if (typeof value !== "object" || value === null) throw malformed();
-  const { scenario, expectedBehaviors, mockOverrides } = value as Record<
-    string,
-    unknown
-  >;
+  const { scenario, expectedBehaviors } = value as Record<string, unknown>;
   if (typeof scenario !== "string" || scenario.trim() === "") throw malformed();
   if (!Array.isArray(expectedBehaviors) || expectedBehaviors.length === 0) {
     throw malformed();
   }
-  // Absent on every version written before a test could override a tool, and
-  // absent means what it meant then: this test overrides nothing. Reading it as
-  // an empty list is therefore not a default applied to old rows but the
-  // meaning they already had, which is what lets overrides arrive as an
-  // additive change with no rewrite.
-  if (mockOverrides !== undefined && !Array.isArray(mockOverrides)) {
-    throw malformed();
-  }
   return {
-    mockOverrides: (mockOverrides ?? []).map((entry: unknown): MockOverride => {
-      if (typeof entry !== "object" || entry === null) throw malformed();
-      const { toolName, answer, delayMilliseconds } = entry as Record<
-        string,
-        unknown
-      >;
-      if (typeof toolName !== "string" || toolName.trim() === "") {
-        throw malformed();
-      }
-      if (typeof delayMilliseconds !== "number") throw malformed();
-      return {
-        toolName,
-        // The mock-tool factory's own guard, so a hand-edited answer fails the
-        // same way on both halves of the mocked world — naming the version it
-        // is actually stored on, because there is no mock tool with this id.
-        answer: answerFromRow(answer, versionId, "test version"),
-        delayMilliseconds,
-      };
-    }),
+    mockTools: mockToolsFromRow(mockTools, malformed),
+    env: envFromRow(env, malformed),
     scenario,
     expectedBehaviors: expectedBehaviors.map((entry): ExpectedBehavior => {
       if (typeof entry === "string") {
@@ -512,6 +805,159 @@ function contentFromRow(value: unknown, versionId: string): TestContent {
       return behavior;
     }),
   };
+}
+
+/**
+ * The stored mock tools of one version, by that version's id.
+ *
+ * **Exported to the module, not from the package**, exactly as the two "which
+ * tests name this" reads beside it are. The mock endpoint reads this column off
+ * its own one-statement join rather than paying for a second read, and what a
+ * version says is this file's business: a second reader of the same jsonb would
+ * be a second opinion about its shape.
+ */
+export function mockToolsOfVersion(
+  value: unknown,
+  versionId: string,
+): readonly TestMockTool[] {
+  return mockToolsFromRow(
+    value,
+    () =>
+      new Error(
+        `version ${versionId} holds mock tools in a shape Egma never writes; the row needs repairing before anybody can read it`,
+      ),
+  );
+}
+
+/**
+ * The stored mock tools, or the empty list for a test that mocks nothing.
+ *
+ * Shape only, deliberately, and the size cap is not re-applied: an answer
+ * written when the cap was larger has to stay readable exactly as it was
+ * written. A version row is frozen the moment a run can pin it.
+ */
+function mockToolsFromRow(
+  value: unknown,
+  malformed: () => Error,
+): readonly TestMockTool[] {
+  if (value === null || value === undefined) return [];
+  if (!Array.isArray(value)) throw malformed();
+  return value.map((entry: unknown): TestMockTool => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw malformed();
+    }
+    const held = entry as Record<string, unknown>;
+    if (typeof held.tool !== "string" || held.tool.trim() === "") {
+      throw malformed();
+    }
+    if ("error" in held) {
+      if (typeof held.error !== "string" || held.error === "") throw malformed();
+      return { tool: held.tool, error: held.error };
+    }
+    if (!("answer" in held)) throw malformed();
+    return { tool: held.tool, answer: held.answer };
+  });
+}
+
+/** The stored env, or null for a test that asks for nothing. */
+function envFromRow(value: unknown, malformed: () => Error): TestEnv | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object" || Array.isArray(value)) throw malformed();
+  const held = value as Record<string, unknown>;
+  const env: TestEnv = {};
+
+  const variables = held.retell_dynamic_variables;
+  if (variables !== undefined && variables !== null) {
+    if (
+      typeof variables !== "object" ||
+      Array.isArray(variables) ||
+      Object.values(variables as Record<string, unknown>).some(
+        (one) => typeof one !== "string",
+      )
+    ) {
+      throw malformed();
+    }
+    env.retell_dynamic_variables = variables as Record<string, string>;
+  }
+
+  const dispatch = held.job_dispatch_metadata;
+  if (dispatch !== undefined && dispatch !== null) {
+    if (typeof dispatch !== "object" || Array.isArray(dispatch)) {
+      throw malformed();
+    }
+    env.job_dispatch_metadata = dispatch as Record<string, unknown>;
+  }
+
+  return Object.keys(env).length === 0 ? null : env;
+}
+
+/**
+ * One version's content as the three columns that hold it.
+ *
+ * **An empty list and an empty env are stored as null**, so the state "this
+ * test mocks nothing" has exactly one spelling in the table — which is what
+ * lets the claim gate ask `mock_tools is not null` and get a true answer
+ * without reading the value.
+ */
+function storedColumns(content: TestContent): {
+  content: Record<string, unknown>;
+  mockTools: readonly TestMockTool[] | null;
+  env: TestEnv | null;
+} {
+  return {
+    content: {
+      scenario: content.scenario,
+      expectedBehaviors: [...content.expectedBehaviors],
+    },
+    mockTools: content.mockTools.length === 0 ? null : [...content.mockTools],
+    env: content.env,
+  };
+}
+
+/**
+ * The three stored columns one read selects, written once so two readers can
+ * never drift.
+ */
+const VERSION_CONTENT_COLUMNS = {
+  content: testVersion.content,
+  mockTools: testVersion.mockTools,
+  env: testVersion.env,
+} as const;
+
+/** The read shape those three columns come back in. */
+type StoredContentRow = {
+  readonly content: unknown;
+  readonly mockTools: unknown;
+  readonly env: unknown;
+};
+
+/** The three columns of one row, read through this file's own guard. */
+function contentOf(row: StoredContentRow, versionId: string): TestContent {
+  return contentFromRow(row.content, row.mockTools, row.env, versionId);
+}
+
+/**
+ * One value written out with every object's keys in one fixed order — the
+ * comparison a stored jsonb has to be made through.
+ *
+ * Postgres re-orders a jsonb object's keys as it pleases, so a value read back
+ * is almost never key-for-key what was written. Comparing the two as written
+ * would call every edit a change and mint a version for typing the same thing
+ * twice; comparing them canonically calls exactly the changes changes.
+ */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((one) => canonicalJson(one)).join(",")}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    const held = value as Record<string, unknown>;
+    const written = Object.keys(held)
+      .filter((key) => held[key] !== undefined)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(held[key])}`);
+    return `{${written.join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
 }
 
 /**
@@ -562,35 +1008,32 @@ const sameContentField: {
   scenario: (a, b) => a.scenario === b.scenario,
   expectedBehaviors: (a, b) =>
     sameBehaviors(a.expectedBehaviors, b.expectedBehaviors),
-  mockOverrides: (a, b) => sameOverrides(a.mockOverrides, b.mockOverrides),
+  mockTools: (a, b) => sameMockTools(a.mockTools, b.mockTools),
+  env: (a, b) => canonicalJson(a.env) === canonicalJson(b.env),
 };
 
 /**
- * The overrides, compared as written: the same tools, in the same order, each
- * answering the same way after the same delay.
+ * The mock tools, compared as canonical JSON: the same tools, in the same
+ * order, each answering the same way.
  *
- * The answer is compared by its serialization rather than field by field,
- * because a tool's answer is whatever shape that tool's own contract has and
- * there is no fixed set of fields to hold a comparator exhaustive over. The
- * value went through `JSON.parse` on its way in, so key order is the order it
- * arrived in and two answers that differ only in key order compare as
- * different — which mints one extra version and loses nothing, where the
- * opposite mistake would lose an edit.
+ * An answer is compared whole rather than field by field, because a tool's
+ * answer is whatever shape that tool's own contract has and there is no fixed
+ * set of fields to hold a comparator exhaustive over. Canonically, because the
+ * stored value came back through jsonb, which re-orders keys — so two answers
+ * that differ only in key order are the same answer and must not mint a version.
+ *
+ * Order between entries is content, though: a test that answers for two tools
+ * offers them in the order it named them, so moving one says something.
  */
-function sameOverrides(
-  a: readonly MockOverride[],
-  b: readonly MockOverride[],
+function sameMockTools(
+  a: readonly TestMockTool[],
+  b: readonly TestMockTool[],
 ): boolean {
   return (
     a.length === b.length &&
     a.every((entry, index) => {
       const other = b[index];
-      return (
-        other !== undefined &&
-        entry.toolName === other.toolName &&
-        entry.delayMilliseconds === other.delayMilliseconds &&
-        JSON.stringify(entry.answer) === JSON.stringify(other.answer)
-      );
+      return other !== undefined && canonicalJson(entry) === canonicalJson(other);
     })
   );
 }
@@ -756,7 +1199,8 @@ export async function createTest(
   const name = validName(input.name);
   const content = validContent({
     ...input,
-    mockOverrides: input.mockOverrides ?? [],
+    mockTools: input.mockTools ?? [],
+    env: input.env ?? null,
   });
   const named = input.personaIds ?? [];
   validatePersonaIds(named);
@@ -787,7 +1231,8 @@ async function createTestOn(
   const name = validName(input.name);
   const content = validContent({
     ...input,
-    mockOverrides: input.mockOverrides ?? [],
+    mockTools: input.mockTools ?? [],
+    env: input.env ?? null,
   });
   const named = input.personaIds ?? [];
   validatePersonaIds(named);
@@ -840,7 +1285,7 @@ async function createTestOn(
     id: versionId,
     testId: id,
     version: 1,
-    content,
+    ...storedColumns(content),
     createdBy: auth.userId,
   });
 
@@ -914,7 +1359,7 @@ function selectWithCurrentVersion(on: Queryable = db()) {
       ...COLUMNS,
       version: testVersion.version,
       versionId: testVersion.id,
-      content: testVersion.content,
+      ...VERSION_CONTENT_COLUMNS,
     })
     .from(test)
     .innerJoin(testVersion, eq(test.currentVersionId, testVersion.id));
@@ -954,10 +1399,12 @@ async function readTestOn(
 
   if (row === undefined) return undefined;
 
-  const { content, ...rest } = row;
+  // The three stored columns come off the row here so they cannot ride into
+  // the answer raw; the guard below is the one thing that reads them.
+  const { content: _content, mockTools: _mockTools, env: _env, ...rest } = row;
   return {
     ...rest,
-    ...contentFromRow(content, row.versionId),
+    ...contentOf(row, row.versionId),
     personas: await personasOf(on, row.versionId),
   };
 }
@@ -1021,7 +1468,8 @@ async function editTestOn(
     changes.scenario !== undefined ||
     changes.expectedBehaviors !== undefined ||
     changes.personaIds !== undefined ||
-    changes.mockOverrides !== undefined;
+    changes.mockTools !== undefined ||
+    changes.env !== undefined;
   if (changesContent && changes.expectedVersionId === undefined) {
     throw new UnprocessableInputError(
       "a test content edit needs expected_version_id from the version it read",
@@ -1094,7 +1542,7 @@ async function editTestOn(
       .select({
         id: testVersion.id,
         version: testVersion.version,
-        content: testVersion.content,
+        ...VERSION_CONTENT_COLUMNS,
       })
       .from(testVersion)
       .where(eq(testVersion.id, currentVersionId))
@@ -1103,7 +1551,7 @@ async function editTestOn(
     throw new Error("the test's current version is missing");
   }
 
-  const storedContent = contentFromRow(currentVersion.content, currentVersion.id);
+  const storedContent = contentOf(currentVersion, currentVersion.id);
   const storedPersonas = await personasOf(on, currentVersion.id);
   const storedIds = storedPersonas.map((named) => named.id);
 
@@ -1121,7 +1569,10 @@ async function editTestOn(
     scenario: changes.scenario ?? storedContent.scenario,
     expectedBehaviors:
       changes.expectedBehaviors ?? storedContent.expectedBehaviors,
-    mockOverrides: changes.mockOverrides ?? storedContent.mockOverrides,
+    mockTools: changes.mockTools ?? storedContent.mockTools,
+    // `null` clears, so absent is the only thing that keeps: `?? stored` would
+    // read a deliberate clearing as an omission and carry the old env forward.
+    env: changes.env === undefined ? storedContent.env : changes.env,
   });
   const personaIds = await personaIdsFor(
     on,
@@ -1157,7 +1608,7 @@ async function editTestOn(
       id: versionId,
       testId: current.id,
       version,
-      content,
+      ...storedColumns(content),
       createdBy: auth.userId,
     });
     await namePersonasOn(on, versionId, personaIds);
@@ -1341,7 +1792,8 @@ export async function applyRepositoryTestsOn(
       scenario: entry.scenario,
       expectedBehaviors: entry.expectedBehaviors,
       personaIds: entry.personaIds ?? [],
-      mockOverrides: entry.mockOverrides ?? [],
+      mockTools: entry.mockTools ?? [],
+      env: entry.env ?? null,
       ...(entry.expectedVersionId === undefined
         ? {}
         : { expectedVersionId: entry.expectedVersionId }),
@@ -1406,7 +1858,7 @@ export async function getTestVersion(
       testName: test.name,
       currentVersionId: test.currentVersionId,
       version: testVersion.version,
-      content: testVersion.content,
+      ...VERSION_CONTENT_COLUMNS,
       createdAt: testVersion.createdAt,
     })
     .from(testVersion)
@@ -1422,11 +1874,17 @@ export async function getTestVersion(
 
   if (row === undefined) return undefined;
 
-  const { content, currentVersionId, ...rest } = row;
+  const {
+    content: _content,
+    mockTools: _mockTools,
+    env: _env,
+    currentVersionId,
+    ...rest
+  } = row;
   return {
     ...rest,
     current: currentVersionId === row.id,
-    ...contentFromRow(content, row.id),
+    ...contentOf(row, row.id),
     personas: await personasOf(db(), row.id),
   };
 }
@@ -1443,7 +1901,7 @@ export async function getTestVersionExecutionContent(
       testId: testVersion.testId,
       suiteId: test.suiteId,
       testName: test.name,
-      content: testVersion.content,
+      ...VERSION_CONTENT_COLUMNS,
     })
     .from(testVersion)
     .innerJoin(test, eq(testVersion.testId, test.id))
@@ -1456,8 +1914,13 @@ export async function getTestVersionExecutionContent(
     )
     .limit(1);
   if (row === undefined) return undefined;
-  const { content, ...identity } = row;
-  return { ...identity, ...contentFromRow(content, row.id) };
+  const {
+    content: _content,
+    mockTools: _mockTools,
+    env: _env,
+    ...identity
+  } = row;
+  return { ...identity, ...contentOf(row, row.id) };
 }
 
 /**
@@ -1537,9 +2000,9 @@ export async function listTests(
     wanted.map((row) => row.versionId),
   );
   return {
-    items: wanted.map(({ content, ...rest }) => ({
+    items: wanted.map(({ content, mockTools, env, ...rest }) => ({
       ...rest,
-      ...contentFromRow(content, rest.versionId),
+      ...contentFromRow(content, mockTools, env, rest.versionId),
       personas: personasByVersion.get(rest.versionId) ?? [],
     })),
     nextCursor,
@@ -1547,44 +2010,30 @@ export async function listTests(
 }
 
 /**
- * What each of several versions overrides, keyed by version — the read a run
- * takes before it freezes the world it will execute in.
+ * Permanently remove a test from authoring while retaining its evidence.
  *
- * The content column is parsed by this file's own guard rather than by the run
- * factory, because what a version says is this file's business and a second
- * reader of the same jsonb is a second opinion about its shape.
- *
- * The `where` starts from a bare `inArray`: the caller hands it version ids
- * that have already come off tenancy-checked rows, so the predicate cannot
- * reach further than that check already did.
- *
- * Exported to the module, not from the package, exactly as the two
- * "which tests name this" reads beside it are.
+ * The expected version and identity revision are compared after the Test row
+ * is locked and before it is tombstoned. A caller cannot delete content or
+ * identity work that arrived after the Test it reviewed, even when that edit
+ * lands between the caller's read and delete.
  */
-export async function mockOverridesOfVersions(
-  on: Queryable,
-  versionIds: readonly string[],
-): Promise<Map<string, readonly MockOverride[]>> {
-  const byVersion = new Map<string, readonly MockOverride[]>();
-  if (versionIds.length === 0) return byVersion;
-
-  const rows = await on
-    .select({ id: testVersion.id, content: testVersion.content })
-    .from(testVersion)
-    .where(inArray(testVersion.id, [...versionIds]));
-
-  for (const row of rows) {
-    byVersion.set(row.id, contentFromRow(row.content, row.id).mockOverrides);
-  }
-  return byVersion;
-}
-
-/** Permanently remove a test from authoring while retaining its evidence. */
 export async function deleteTest(
   auth: AuthContext,
   id: string,
+  expectedVersionId: string,
+  expectedRevision: string,
 ): Promise<boolean> {
   authorize(auth, "author_definitions", here(auth));
+  if (!isId("tstv", expectedVersionId)) {
+    throw new UnprocessableInputError(
+      `"${expectedVersionId}" is not a test version id`,
+    );
+  }
+  if (!isId("rev", expectedRevision)) {
+    throw new UnprocessableInputError(
+      `"${expectedRevision}" is not a revision id`,
+    );
+  }
   const projectId = auth.projectId;
   if (projectId === undefined) {
     throw new Error("deleting a test happens inside its project");
@@ -1607,12 +2056,24 @@ export async function deleteTest(
       .for("update");
 
     const [locked] = await tx
-      .select({ id: test.id })
+      .select({
+        id: test.id,
+        name: test.name,
+        currentVersionId: test.currentVersionId,
+        revision: test.revision,
+      })
       .from(test)
       .where(theTest(auth, id))
       .limit(1)
       .for("update");
     if (locked === undefined) return false;
+    expectRevision(locked, expectedRevision);
+    if (locked.currentVersionId !== expectedVersionId) {
+      throw new TestMovedOnError(locked, {
+        expected: expectedVersionId,
+        current: locked.currentVersionId,
+      });
+    }
 
     await tx
       .update(test)
@@ -1669,7 +2130,7 @@ export async function listTestVersions(
       id: testVersion.id,
       testId: testVersion.testId,
       version: testVersion.version,
-      content: testVersion.content,
+      ...VERSION_CONTENT_COLUMNS,
       createdAt: testVersion.createdAt,
     })
     .from(testVersion)
@@ -1687,12 +2148,12 @@ export async function listTestVersions(
   const personasByVersion = await personasOfVersions(db(), versionIds);
 
   return {
-    items: items.map(({ content, ...row }) => ({
+    items: items.map(({ content, mockTools, env, ...row }) => ({
       ...row,
       suiteId: found.suiteId,
       testName: found.name,
       current: row.id === found.currentVersionId,
-      ...contentFromRow(content, row.id),
+      ...contentFromRow(content, mockTools, env, row.id),
       personas: personasByVersion.get(row.id) ?? [],
     })),
     nextCursor,

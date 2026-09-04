@@ -32,11 +32,19 @@ export type Collection =
   | {
       readonly kind: "key";
       readonly key: string;
-      /** Present on current platforms; absent only for an older server. */
-      readonly login?: {
+      readonly login: {
         readonly apiKeyId: string;
         readonly projectId: string;
       };
+    }
+  | {
+      /**
+       * The server minted a bearer key but omitted part of the receipt needed
+       * to store and later revoke it safely.
+       */
+      readonly kind: "incomplete-key";
+      readonly key: string;
+      readonly apiKeyId: string | null;
     }
   | { readonly kind: "waiting" }
   | { readonly kind: "slow-down" }
@@ -115,6 +123,7 @@ function seconds(value: unknown, fallback: number): number {
 export async function startDeviceAuthorization(
   url: string,
   fetchImpl: Fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<DeviceGrant> {
   let response: Response;
   try {
@@ -122,6 +131,7 @@ export async function startDeviceAuthorization(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ client_id: DEVICE_CLIENT_ID }),
+      ...(signal === undefined ? {} : { signal }),
     });
   } catch (cause) {
     throw new PlatformUnreachableError(url, cause);
@@ -167,6 +177,7 @@ export async function collectKey(
   url: string,
   deviceCode: string,
   fetchImpl: Fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<Collection> {
   let response: Response;
   try {
@@ -178,6 +189,7 @@ export async function collectKey(
         device_code: deviceCode,
         client_id: DEVICE_CLIENT_ID,
       }).toString(),
+      ...(signal === undefined ? {} : { signal }),
     });
   } catch (cause) {
     throw new PlatformUnreachableError(url, cause);
@@ -195,12 +207,17 @@ export async function collectKey(
     }
     const apiKeyId = text(body.api_key_id);
     const projectId = text(body.project_id);
+    if (apiKeyId === "" || projectId === "") {
+      return {
+        kind: "incomplete-key",
+        key,
+        apiKeyId: apiKeyId === "" ? null : apiKeyId,
+      };
+    }
     return {
       kind: "key",
       key,
-      ...(apiKeyId === "" || projectId === ""
-        ? {}
-        : { login: { apiKeyId, projectId } }),
+      login: { apiKeyId, projectId },
     };
   }
 
@@ -216,49 +233,4 @@ export async function collectKey(
     default:
       return { kind: "refused", reason: refusalFor(text(body.error)) };
   }
-}
-
-/**
- * A code as the instance stored it.
- *
- * People read these off one screen and type or paste them into another, so a
- * hyphen, a space or a lower-case letter is a thing that happens rather than a
- * thing to refuse. This is the edge that takes the typing, so this is where it
- * is tidied up.
- */
-export function normalizeUserCode(userCode: string): string {
-  return userCode.replaceAll(/[^0-9A-Za-z]/gu, "").toUpperCase();
-}
-
-/**
- * The code inside whatever somebody pasted back, or `null` when there is none.
- *
- * On a machine with no browser of its own — a devbox, anything over SSH — the
- * address goes to a browser elsewhere, and what comes back to the terminal is
- * whatever was easiest to select over there. That is a whole address, or the
- * query part of one, or the eight characters read off the screen. All three
- * carry the same fact, so all three are accepted rather than one being called
- * the right one.
- */
-export function codeFromPaste(pasted: string): string | null {
-  const trimmed = pasted.trim();
-  if (trimmed === "") return null;
-
-  const query = trimmed.includes("?")
-    ? trimmed.slice(trimmed.indexOf("?") + 1)
-    : trimmed;
-  const named = new URLSearchParams(query).get("user_code");
-  if (named !== null) {
-    const code = normalizeUserCode(named);
-    return code === "" ? null : code;
-  }
-
-  // Nothing named a code, so what is left has to be the code itself: a few
-  // groups of letters and digits, split the way a code is written down or read
-  // out. An address that carried no code is not a code, and neither is a
-  // sentence — both reach here, and both have to be turned away.
-  if (!/^[0-9A-Za-z]{2,10}(?:[- ][0-9A-Za-z]{2,10}){0,3}$/u.test(trimmed)) return null;
-
-  const code = normalizeUserCode(trimmed);
-  return code.length < 4 || code.length > 32 ? null : code;
 }

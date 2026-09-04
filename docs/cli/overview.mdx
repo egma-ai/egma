@@ -1,285 +1,241 @@
 ---
-title: "Egma CLI: Skills and promptless commands"
+title: "Egma CLI: Promptless commands"
 sidebarTitle: "Overview"
-description: "Use Egma's public Agent Skills for repository work and named CLI commands for sign-in, connection setup, validation, synchronization, runs, and monitoring."
+description: "Use small promptless CLI commands for each local or platform operation."
 ---
 
-The Egma CLI is a deterministic command surface for coding agents. Public
-Agent Skills explain how to discover a voice agent, author grounded tests, and
-pause only for a required human action. Named commands perform each local or
-remote action.
+The Egma CLI is a promptless command surface for developers and coding agents.
+It is designed so an Agent Skill can contain the workflow while the CLI
+performs each named operation. The public `integrate-egma` skill is still being
+authored, so use the complete command workflow on this page directly for now.
 
-Every named command asks no terminal questions. It prints one fact per line and
-uses its exit code as the next branch. This workflow needs no private agent
-driver.
+The CLI does not store a goal or run a setup wizard. The developer puts the goal
+and platform in the prompt they give their coding agent.
 
-## Requirements
+## Install the CLI
 
-- Node.js 22 or newer
-- a coding agent that can use Agent Skills and run shell commands
-- a browser where the developer can approve sign-in
-
-The npm package is `egma-cli`. Install it once; it provides the `egma`
-executable:
+The npm package is `egma-cli`. It installs the `egma` executable and requires
+Node.js 22 or newer.
 
 ```bash
 npm install --global egma-cli
 ```
 
-## Bootstrap a repository
-
-Install the public skills separately:
+The `write-egma-tests` skill is available separately for Test authoring:
 
 ```bash
 npx --yes skills add egma-ai/egma \
-  --skill integrate-egma \
   --skill write-egma-tests
 ```
 
-Give your coding agent this handoff:
+Then give your coding agent a clear outcome, for example:
 
-> Use the integrate-egma skill to complete the requested Egma simulation
-> testing, production monitoring, or both for this repository's voice agent end
-> to end.
+> Set up simulation testing and production monitoring for the Retell agent in
+> this repository. Follow the Egma CLI workflow in its documentation.
 
-The two skills divide the work by purpose:
+The goal and platform live in that prompt, not in CLI state. The coding agent
+uses the repository and this workflow to decide which command comes next.
 
-| Skill | Responsibility |
+## How the work is divided
+
+| Work | Owner |
 |---|---|
-| `integrate-egma` | First-time repository discovery, Retell or LiveKit setup, human-only pauses, the first suite, a first run, and monitoring |
-| `write-egma-tests` | Egma Markdown test authoring, personas, expected behaviors, and test-level mock tools |
+| State the platform and desired outcome | Developer prompt |
+| Inspect the repository and find the exact voice agent | Coding agent |
+| Approve browser login | Developer |
+| Decide when evidence is unclear or a choice is material | Coding agent, then developer when needed |
+| Read or change Egma platform resources | One named CLI command |
+| Change voice-agent source or runtime configuration | Coding agent |
+| Validate and synchronize the repository | `egma pull`, `egma push`, and `egma run create` |
 
-## Human and command boundaries
+Every named command asks no terminal questions. Login may wait for browser
+approval. Provider credentials come from the environment or one JSON object on
+standard input; they never enter CLI arguments or repository files.
 
-The coding agent performs repository work. Egma performs platform operations.
-The developer's end-to-end request authorizes its normal local and remote work.
-
-| Boundary | Owner |
-|---|---|
-| Inspect committed source and propose one target | Coding agent using `integrate-egma` |
-| Approve login request | Developer in the browser |
-| State testing, monitoring, or both in the integration request | Developer |
-| Resolve the exact resource plan | Coding agent |
-| Create or read platform resources | Named Egma command |
-| Author and validate local files | Coding agent plus `egma validate` |
-| Upload the repository | `egma push` |
-| Approve a real phone run and its cost | Developer |
-| Start and follow a run | `egma run` |
-
-The coding agent asks only for browser authorization, a missing credential, a
-choice it cannot safely infer, an unsafe conflict, or a real phone run that can
-cost money.
-
-## Full onboarding flow
+## First repository flow
 
 <Steps>
   <Step title="Sign in">
-    The coding agent runs `egma login`. Egma prints a code and approval URL and
-    opens the browser when possible. The developer approves the request there.
+    Run `egma login`. Egma prints a code and approval URL. The developer
+    approves the request in a browser.
   </Step>
-  <Step title="Discover one voice agent">
-    The coding agent inspects committed source without changing it. It traces
-    the platform, prompt, tools, entrypoint, dispatch name, production path, and
-    provider identifier boundary.
+  <Step title="Initialize the repository">
+    Run `egma init`. It selects the Project attached to the login, or the only
+    available Project, and pulls its current Agents, Connections, suites, and
+    tests. It does not create an empty Project or folder before login.
   </Step>
-  <Step title="Read the requested outcome">
-    The integration request says testing, monitoring, or both. Monitoring-only skips
-    the simulation connection, suite, tests, publish, and run.
+  <Step title="Inspect the voice agent">
+    The coding agent reads committed source and identifies one Retell or LiveKit
+    agent. This repository judgment stays with the coding agent, not the CLI.
   </Step>
-  <Step title="Resolve remote setup">
-    The coding agent uses repository evidence and live CLI facts to resolve the
-    exact platform, voice agent, provider target, connection, and monitoring
-    target. It asks only when those facts leave a material choice.
+  <Step title="Register the Egma Agent">
+    If `egma/config.yaml` does not already list the target, run
+    `egma agent register --platform <retell|livekit>`. This creates only Agent
+    identity. It does not add Access, Modality, provider configuration, or
+    credentials.
   </Step>
-  <Step title="Connect for testing">
-    The coding agent runs `egma connect --platform retell --show-context` so the
-    test author receives the provider-managed prompt and tools. For LiveKit, it
-    reads modalities first, repeats the command with `--modality` to read access
-    variants, and repeats it with `--modality` plus `--access-variant` to read
-    required fields and secrets. These incomplete calls write nothing. The
-    complete command prints `registration_name` before its remote request and
-    a registration receipt after Egma confirms the write. If the response is
-    unclear or the local record fails, the coding agent runs
-    `egma connect record`. It either proves exact receipt IDs or matches the
-    settled provider-public identity. Retell recovery uses the provider agent,
-    exactly one lane, and a phone number for phone. LiveKit recovery uses the
-    server URL and exactly one dispatch name or token endpoint. It also matches
-    the settled metadata exactly; omission means the setup had none. The
-    attempted `registration_name` is only an optional preference. The command makes no
-    remote write and writes the proven or equivalent target to local
-    `egma/config.yaml`. `registration-not-found` means no equivalent public
-    target exists, not that an exact name is absent. The coding agent uses
-    `connection_option` output for ambiguous matches instead of inspecting the
-    Egma UI for IDs.
+  <Step title="Add simulation access">
+    Read current choices with `egma agent connection options`. Supply an
+    explicit Retell or LiveKit platform. Then add one Connection with an
+    explicit Egma Agent ID, Access, and Modality. `agent connection add` owns
+    all provider fields and setup credentials.
   </Step>
-  <Step title="Create the first suite">
-    `egma personas` supplies the only valid persona names and IDs. If remote
-    suites already exist, the coding agent pulls first. It then creates one
-    suite and writes the smallest grounded test set. After an unreachable create
-    response or a local manifest failure, it pulls before any new create.
+  <Step title="Author and synchronize tests">
+    List personas with `egma persona list`, create a Suite, and write its
+    Markdown Tests. `egma push` validates and uploads the complete repository.
+    There is no separate public validation command.
   </Step>
-  <Step title="Integrate the LiveKit test path">
-    For a Python or JavaScript LiveKit worker, the coding agent adds the matching
-    Egma SDK testing entry and writes grounded answers for external-dependency
-    tools. Retell does not need this source integration.
+  <Step title="Create a Run">
+    Run `egma run create` with a Suite directory, Agent ID, and Connection ID.
+    It pushes first, creates no Run if the push fails, and returns the Run ID
+    and web results URL. Follow progress in the web product.
   </Step>
-  <Step title="Validate and review">
-    The coding agent runs focused repository checks and `egma validate`, reads
-    every changed file back, and publishes it as part of the end-to-end request.
-  </Step>
-  <Step title="Run the suite">
-    The coding agent names the suite, agent, connection, modality, and expected
-    simulation count. A real phone run includes a cost warning and waits for
-    approval. `egma run` follows the complete run; its worker flags can own a
-    repository-local LiveKit worker for the same command. The command prints an
-    idempotency key before the start request. A replay of the exact same unclear
-    start uses that key without creating a second run.
-  </Step>
-  <Step title="Enable monitoring">
-    `egma monitoring enable` configures the selected Retell or LiveKit
-    production path. For LiveKit, the coding agent installs the latest unpinned
-    Egma SDK for the detected language and adds `monitor_livekit(ctx)` in
-    Python or `monitorLiveKit(ctx)` in JavaScript. See the
-    [Python SDK](/integrations/python-sdk) and
-    [JavaScript SDK](/integrations/javascript-sdk). LiveKit enable writes its
-    new secret only to a regular `.env` that Git ignores; it never prints that
-    secret. The coding agent runs `egma monitoring status` to read the final
-    state.
+  <Step title="Set up monitoring when requested">
+    Use `egma agent monitoring setup` with an explicit Agent ID and platform.
+    The CLI configures Retell polling. For LiveKit, it prints the future skill
+    handoff and exits incomplete because source and deployment work does not
+    belong in the CLI. Until that skill guide is complete, follow the Python or
+    JavaScript SDK monitoring guide directly.
   </Step>
 </Steps>
+
+## Agent and Connection boundaries
+
+An Egma Agent is the stable identity of the voice agent. A Connection is one
+way a simulation reaches it.
+
+```text
+Egma Agent
+└── Connection
+    ├── Access
+    ├── Modality
+    ├── provider fields
+    └── optional credential
+```
+
+`egma agent register` accepts only Agent Platform and an optional Agent name.
+`egma agent connection add` accepts Access, Modality, provider fields, an
+optional Connection name, and any one-time credential. The selected Agent
+already supplies its platform, so Connection creation has no `--platform`
+flag.
+
+The public Access names are self-identifying:
+
+- `retell-api-key`
+- `retell-phone-number`
+- `livekit-project-credentials`
+- `livekit-token-endpoint`
+
+The platform API supplies the supported combinations and required fields. The
+CLI does not keep a second catalog.
+
+## The `egma/` folder
+
+`egma init` creates the folder only after it identifies and reads an existing
+Project:
+
+```text
+egma/
+  config.yaml
+  tests/
+    receptionist-core/
+      suite.yaml
+      *.md
+```
+
+`egma/config.yaml` contains only the platform origin, Project ID and name,
+Agent IDs, names and platforms, and Connection IDs and names. Provider IDs,
+Access, Modality, Connection type, provider configuration, credentials, and
+workflow state stay on the platform.
+
+Each Test is one Markdown file. It carries the complete scenario, personas,
+expected behaviors, Mock Tools, and env that the simulation uses. See
+[Test files](/cli/test-files) for the format.
+
+## Connection examples
+
+Register a Retell Agent identity, then add a chat Connection:
+
+```bash
+egma agent register --platform retell --name Receptionist
+
+EGMA_RETELL_API_KEY=... \
+  egma agent connection add \
+  --agent agt_... \
+  --access retell-api-key \
+  --modality chat \
+  --retell-agent agent_...
+```
+
+Register a LiveKit Agent identity, then add the recommended
+Project-credentials voice Connection:
+
+```bash
+egma agent register --platform livekit --name Receptionist
+
+EGMA_LIVEKIT_API_KEY=... \
+EGMA_LIVEKIT_API_SECRET=... \
+  egma agent connection add \
+  --agent agt_... \
+  --access livekit-project-credentials \
+  --modality voice \
+  --livekit-url wss://example.livekit.cloud \
+  --livekit-agent-name receptionist
+```
+
+Credentials are needed only while the platform stores a credential-backed
+Connection or configures Retell monitoring. Later Runs use the stored sealed
+credential.
 
 ## Available commands
 
 | Command | What it does |
 |---|---|
-| `egma` | Prints command help |
-| `egma login` | Starts browser-approved device login for this machine |
-| `egma connect` | Registers a Retell or LiveKit agent and simulation connection |
-| `egma connect record` | Proves receipt IDs or matches provider-public identity, then writes the target to local `egma/config.yaml` without a remote write |
-| `egma init` | Creates an empty committable `egma/` folder; `--url` can bind it without contacting the platform |
-| `egma personas` | Lists machine-readable valid persona IDs and names for the bound project |
-| `egma suite create <directory> --name <name>` | Creates a suite and writes its local manifest |
-| `egma validate` | Reads and validates the complete folder, including platform persona references |
-| `egma pull` | Pulls remote suites, tests, and project mock tools |
-| `egma push` | Uploads the complete validated repository as one change |
-| `egma run <suite-directory>` | Runs and follows one complete suite |
-| `egma monitoring enable` | Enables Retell polling or wires LiveKit push monitoring |
-| `egma monitoring status` | Reads the monitoring binding and latest arrival state |
-| `egma monitoring disable` | Stops Retell polling while keeping stored evidence and binding |
-| `egma monitoring record` | Recovers only a failed local record after remote setup succeeded |
-| `egma livekit` | Prints the current LiveKit SDK and worker source contract without signing in |
+| `egma login` | Starts browser-approved device login |
+| `egma logout` | Revokes one saved device login and removes its local entry |
+| `egma init` | Binds an existing Project and pulls its repository state |
+| `egma pull` | Pulls Agents, Connections, suites, and tests |
+| `egma push` | Validates and uploads the complete local authoring state |
+| `egma agent register` | Registers only an Egma Agent identity |
+| `egma agent connection options` | Lists server-owned Connection choices and Retell provider Agents |
+| `egma agent connection add` | Adds one Connection to an existing Egma Agent |
+| `egma agent monitoring setup` | Sets up Retell monitoring or prints the LiveKit skill handoff |
+| `egma agent monitoring stop` | Stops Retell pulls or prints the LiveKit skill handoff |
+| `egma project api-key create` | Creates and prints a Project API key once |
+| `egma persona list` | Lists the Project's personas |
+| `egma suite create` | Creates a remote Suite and local manifest |
+| `egma suite delete` | Deletes a remote Suite, then its exact local directory |
+| `egma test delete` | Deletes a remote Test, then its exact local Markdown file |
+| `egma run create` | Pushes, starts one Run, and prints its web URL |
+| `egma run cancel` | Cancels one explicit Run ID |
 | `egma self-host up` | Starts a complete local Egma platform |
 
-See [Commands](/cli/commands) for exact flags, environment variables, output,
-and exit codes.
+See [Commands](/cli/commands) for exact flags and credential forms.
 
-## The `egma/` folder
+## Use a self-hosted instance
 
-Connection setup or `egma init` creates a committable folder in the voice-agent
-repository:
-
-```text
-egma/
-  config.yaml      format 3 platform, project, agents, and connections
-  mock-tools.md    project-wide simulation answers
-  tests/
-    receptionist-core/
-      suite.yaml   stable suite ID and current display name
-      *.md         tests in this suite
-```
-
-No provider secret belongs in this folder. Tests are ordinary Markdown files,
-so the team can review and version them with the voice-agent source. See
-[Test files](/cli/test-files) for the format.
-
-## LiveKit catalog and local worker runs
-
-The platform's current connection catalog drives LiveKit setup. Read it through
-three iterative, read-only calls. Start with the modality list:
-
-```bash
-egma connect --platform livekit
-```
-
-Then list the access variants for one modality:
-
-```bash
-egma connect --platform livekit --modality voice
-```
-
-Then list the required public fields and environment secrets for one access
-variant:
-
-```bash
-egma connect --platform livekit \
-  --modality voice \
-  --access-variant livekit_room.project_credentials
-```
-
-The three calls print `modality_option`, `access_variant_option`, then
-`required_field` and `required_secret` facts in that order. They exit on the
-missing input and write nothing. The coding agent uses existing credentials and
-the public fields that the chosen catalog entry requests:
-
-- `--name <name>`
-- `--modality <chat|voice>`
-- `--access-variant <id>`
-- `--livekit-url <wss-url>`
-- `--dispatch-name <name>`
-- `--token-endpoint <https-url>`
-- `--metadata <json>`
-
-Connection secrets come only from `EGMA_LIVEKIT_API_KEY`,
-`EGMA_LIVEKIT_API_SECRET`, or `EGMA_LIVEKIT_TOKEN_HEADERS`.
-
-A local worker run adds all three flags to one followed run:
-
-```bash
-LIVEKIT_URL=wss://acme.livekit.cloud \
-LIVEKIT_API_KEY=... \
-LIVEKIT_API_SECRET=... \
-egma run receptionist-core \
-  --worker-entrypoint src/agent.py \
-  --worker-dependency-manifest pyproject.toml \
-  --worker-dispatch-name receptionist
-```
-
-The CLI starts the worker, waits for registration, starts the remote run, and
-always stops the worker. It refuses `--no-follow` when it owns the worker.
-
-The developer's end-to-end request authorizes normal worker preparation. The
-integration skill adds the latest unpinned Egma Python SDK through the
-repository's package manager. The CLI may install or upgrade LiveKit CLI,
-create the worker project's `.venv`, and install the declared dependencies with
-`uv` or Python `pip`. The coding agent pauses only for an unsafe conflict.
-
-Every run prints `idempotency-key:` before the start `POST`. Use that key only
-to replay the exact same start after an unclear response. Ask again first only
-for a real phone run. Never reuse it after changing inputs or for a new run.
-
-## Point at a self-hosted instance
-
-Run platform commands from the Egma platform workspace:
+Run the platform command from the Egma source checkout:
 
 ```bash
 egma self-host up
 ```
 
-Run repository commands from the separate voice-agent repository. Pass the URL
-to login and the first setup command, or bind it once with `init`:
+Run repository commands from the voice-agent repository. Bind the platform
+through login and init:
 
 ```bash
 egma login --url http://localhost:3101
 egma init --url http://localhost:3101
 ```
 
-`init --url` only writes the normalized platform origin. It does not contact
-the instance. Later commands resolve the URL from `egma/config.yaml`.
+Later repository commands read that origin from `egma/config.yaml`.
 
-## Use in automation
+## Output and exit codes
 
-Named commands already have plain output and no terminal questions. Supply all
-required choices as flags or environment variables, branch on the exit code,
-and read the `status:` line. Login still needs a developer to approve the
-device request in a browser. The developer's end-to-end request authorizes normal
-repository and remote writes; a real phone run still needs immediate approval.
+The CLI prints normal text, headings, lists, and copyable IDs. It has no
+`--json` mode and no stable `key: value` output protocol.
+
+- Exit `0`: the requested work completed or was already complete.
+- Exit `1`: the requested work did not complete; read the message for the next
+  action.
+- Exit `130`: the command was interrupted.

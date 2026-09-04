@@ -355,16 +355,25 @@
    * That grid is the one table in the product with no narrow layout: its cells
    * are edited in place, so the stacked label-and-value form every list uses
    * on a phone is a screen of its own rather than a variant, and it is not
-   * written yet. Until it is, four percentage columns and a 96px lane share
-   * whatever width there is, and below about 660px the last of them stops
-   * holding a readable word.
+   * written yet. Until it is, six percentage columns and a 96px lane share
+   * whatever width there is, and each floor below is the width at which the
+   * narrowest of them stops holding its own heading on one line.
    *
-   * 720px is the floor and it is chosen to be under the 768px tablet width, so
-   * every screen from a tablet upwards draws the whole grid and only a phone
-   * scrolls it. A table that scrolls inside its own panel is the honest
-   * failure here; columns squeezed to two letters each are not.
+   * **900px, and it is no longer under the tablet width.** The floor was 720
+   * for four columns, chosen to sit under 768 so only a phone scrolled. Mock
+   * tools and Env are two more columns of the test's own content, and six
+   * columns plus the lane do not hold their headings inside a tablet — the
+   * arithmetic is `Mock tools` at 14px inside `--row-padding-x` either side,
+   * which wants about 100px, and `Personas` about 90. A tablet scrolls the
+   * grid now. A table that scrolls inside its own panel is the honest failure
+   * here; headings broken across two lines are not.
+   *
+   * The proportions moved on 2026-09-04, when the two JSON cells started
+   * saying sentences rather than counts, and the floor did not have to move
+   * with them: `Personas` at 12% is 108px here and is now the tightest
+   * heading of the six.
    */
-  --tests-grid-min-width: 720px;
+  --tests-grid-min-width: 900px;
 
   /*
    * How wide each surface is. Every one of these lived in a class list as a

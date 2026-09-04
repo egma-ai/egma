@@ -32,7 +32,11 @@ const TEST_BODY = {
   // Every test names at least one persona from birth; the project's
   // Egma-provided caller is the one every project already has.
   personas: ["Everyday caller"],
+  // The world this test carries. Both are content, and a repository test names
+  // both every time — the change set is the complete authored state, so a
+  // silent absence would be a field the push had no opinion about.
   mockTools: [],
+  env: null,
 } as const;
 
 async function customer(label: string, traceStore = false) {
@@ -268,7 +272,7 @@ describe("the Test Suites cutover", () => {
     expect(read.body.versionId).toBe(written.body.versionId);
   });
 
-  it("applies suites, tests, and Mock Tools atomically without creating suite identities", async () => {
+  it("applies suites and their tests' own worlds atomically without creating suite identities", async () => {
     const { key } = await customer("repository_change_set");
     const suite = await createSuite(key, "Northside Ford");
     const suiteId = String(suite.body.id);
@@ -284,8 +288,9 @@ describe("the Test Suites cutover", () => {
           clientRef: "egma/tests/northside/books.md",
           suiteId: suiteId,
           ...TEST_BODY,
+          mockTools: [{ tool: "check_availability", answer: { slots: [] } }],
+          env: { retell_dynamic_variables: { caller_name: "Margaret" } },
         }],
-        mockTools: [{ tool: "check_availability", answer: { slots: [] } }],
       },
     );
     expect(applied.statusCode, JSON.stringify(applied.body)).toBe(200);
@@ -293,6 +298,12 @@ describe("the Test Suites cutover", () => {
     expect(written?.clientRef).toBe("egma/tests/northside/books.md");
     const test = written?.test as Record<string, unknown>;
     expect(test.suiteId).toBe(suiteId);
+    expect(test.mockTools).toEqual([
+      { tool: "check_availability", answer: { slots: [] } },
+    ]);
+    expect(test.env).toEqual({
+      retell_dynamic_variables: { caller_name: "Margaret" },
+    });
 
     const unknownSuiteId = newId("ste");
     const refused = await request(
@@ -309,10 +320,10 @@ describe("the Test Suites cutover", () => {
           clientRef: "egma/tests/northside/books.md",
           suiteId: suiteId,
           ...TEST_BODY,
+          mockTools: [{ tool: "check_availability", answer: { slots: ["noon"] } }],
           expectedVersionId: test.versionId,
           expectedRevision: test.revision,
         }],
-        mockTools: [{ tool: "check_availability", answer: { slots: ["noon"] } }],
       },
     );
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
@@ -326,9 +337,18 @@ describe("the Test Suites cutover", () => {
     expect((suites.body.testSuites as Array<Record<string, unknown>>)
       .some((entry) => entry.id === unknownSuiteId)).toBe(false);
 
-    const mockTools = await request(api.app, "GET", "/v1/mock-tools", key);
-    expect((mockTools.body.mockTools as Array<Record<string, unknown>>)[0]?.answer)
-      .toEqual({ slots: [] });
+    // The test's own world rolled back with everything else: the whole change
+    // set is one write, so a refused push leaves the mock tools the version
+    // already carried.
+    const afterRefusal = await request(
+      api.app,
+      "GET",
+      `/v1/tests/${String(test.id)}`,
+      key,
+    );
+    expect(afterRefusal.body.mockTools).toEqual([
+      { tool: "check_availability", answer: { slots: [] } },
+    ]);
 
     const missingRevision = await request(
       api.app,
@@ -341,18 +361,24 @@ describe("the Test Suites cutover", () => {
           clientRef: "egma/tests/northside/books.md",
           suiteId: suiteId,
           ...TEST_BODY,
+          mockTools: [{ tool: "check_availability", answer: { slots: ["late"] } }],
           expectedVersionId: test.versionId,
         }],
-        mockTools: [{ tool: "check_availability", answer: { slots: ["late"] } }],
       },
     );
     expect(missingRevision.statusCode, JSON.stringify(missingRevision.body)).toBe(422);
     const afterMissingPin = await request(api.app, "GET", "/v1/test-suites", key);
     expect((afterMissingPin.body.testSuites as Array<Record<string, unknown>>)
       .find((entry) => entry.id === suiteId)?.name).toBe("Northside Ford");
-    const toolsAfterMissingPin = await request(api.app, "GET", "/v1/mock-tools", key);
-    expect((toolsAfterMissingPin.body.mockTools as Array<Record<string, unknown>>)[0]?.answer)
-      .toEqual({ slots: [] });
+    const worldAfterMissingPin = await request(
+      api.app,
+      "GET",
+      `/v1/tests/${String(test.id)}`,
+      key,
+    );
+    expect(worldAfterMissingPin.body.mockTools).toEqual([
+      { tool: "check_availability", answer: { slots: [] } },
+    ]);
 
     const retiredRepositoryAgent = await request(
       api.app,
@@ -369,7 +395,6 @@ describe("the Test Suites cutover", () => {
           expectedRevision: test.revision,
           repository_agent: "Front desk",
         }],
-        mockTools: [{ tool: "check_availability", answer: { slots: [] } }],
       },
     );
     expect(
@@ -382,7 +407,7 @@ describe("the Test Suites cutover", () => {
       "POST",
       "/v1/repository/change-set",
       key,
-      { suites: [], tests: [], mockTools: [] },
+      { suites: [], tests: [] },
     );
     expect(omitted.statusCode, JSON.stringify(omitted.body)).toBe(422);
 
@@ -391,7 +416,7 @@ describe("the Test Suites cutover", () => {
       "POST",
       "/v1/repository/change-set?agentId=agt_retired",
       key,
-      { suites: [], tests: [], mockTools: [] },
+      { suites: [], tests: [] },
     );
     expect(unknownQuery.statusCode, JSON.stringify(unknownQuery.body)).toBe(422);
   });

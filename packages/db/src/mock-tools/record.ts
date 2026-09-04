@@ -1,26 +1,22 @@
 /**
  * The put-it-back note one mocked run leaves behind, and nothing else.
  *
- * It exists so that **a teardown restores rather than reconstructs**, and so
- * that a run which never reached its own teardown can still be finished by
- * somebody else. Two things live in it, both written before the thing they
- * describe is changed:
+ * It exists so that **a teardown gives back rather than guesses**, and so that
+ * a run which never reached its own teardown can still be finished by somebody
+ * else. Two things live in it, both written before the thing they describe is
+ * changed:
  *
  * - `engine` — the serving engine capture: which document it is, and what its
  *   tools looked like, which is what the verify step reads back and compares
  *   against once the mocked tools are on the copy — and what a teardown
  *   resumed by somebody else compares against before it deletes anything.
- * - `numbers` — one entry per number Egma actually pinned: where this agent's
- *   binding pointed before (`was`), and the numeric version Egma pinned it to
- *   (`pinned_to`).
+ * - `urlVariables` — which per-call variable routes which tool on the copy,
+ *   which is what the claim fills on every call the run creates.
  *
- * **A restore never writes blind.** It reads where the number points now and
- * writes only where it still points at `pinned_to` — so a late retry of a
- * failed teardown can never move a binding the customer has since changed, and
- * can never put a `latest` binding back onto a newer run's temporary copy.
- * That is why the note holds the two values rather than the whole
- * `inbound_agents` array: the array is re-read at restore time anyway, and
- * writing back a stale copy of it would delete whatever changed in between.
+ * **Egma writes to nothing of the customer's**, so there is nothing of theirs
+ * to promise back: no number binding, no tag, no version they made. The one
+ * thing a mocked run makes is its own temporary copy, and the two cleanup
+ * fields beside this note are what say whether it is still standing.
  */
 
 /** Which engine document the serving version ran on when it was captured. */
@@ -62,8 +58,29 @@ export type MockEngineNote = {
   readonly toolPrint?: string;
 };
 
+/** One tool of the temporary copy, and the per-call variable that routes it. */
+export type MockToolVariable = {
+  /** The tool's own name, as the model calls it and as a test names it. */
+  readonly tool: string;
+  /** The variable the platform renders per call in front of that tool's URL. */
+  readonly variable: string;
+};
+
 export type MockMetadata = {
   readonly engine: MockEngineNote;
+  /**
+   * Which per-call variable routes which tool on the temporary copy.
+   *
+   * **Kept because the claim reads it.** A run's copy points every one of the
+   * agent's own tools at a variable, and each call the run creates fills every
+   * one of them: Egma's address for the tools that simulation's test names,
+   * and the empty string for the rest, which renders to nothing and leaves the
+   * customer's own URL. The test says which tools; only this says which
+   * variables the agent has at all.
+   *
+   * Absent on a note whose run branched no copy.
+   */
+  readonly urlVariables?: readonly MockToolVariable[];
   /**
    * Whether the temporary version was deleted **and the deletion proved**.
    *
@@ -106,6 +123,7 @@ export function mockMetadataFrom(
   const engine = row["engine"];
   const gone = row["temporary_version_gone"];
   const stray = row["stray_flow_version"];
+  const variables = urlVariablesFrom(row["url_variables"], malformed);
   if (
     typeof engine !== "object" ||
     engine === null ||
@@ -137,9 +155,40 @@ export function mockMetadataFrom(
       ...(typeof print === "string" ? { toolPrint: print } : {}),
       ...(typeof draft === "number" ? { draftVersion: draft } : {}),
     },
+    ...(variables === undefined ? {} : { urlVariables: variables }),
     ...(gone === true ? { temporaryVersionGone: true } : {}),
     ...(typeof stray === "number" ? { strayFlowVersion: stray } : {}),
   };
+}
+
+/**
+ * The variable map a stored row holds, refused rather than repaired.
+ *
+ * A half-read map is worse than none: the claim would pass the variables it
+ * could read and leave the rest to their defaults, so a run would mock some of
+ * what its tests named and quietly reach the customer's backend for the rest.
+ * So a row that does not read as a whole map is malformed, like every other
+ * field here.
+ */
+function urlVariablesFrom(
+  value: unknown,
+  malformed: () => Error,
+): readonly MockToolVariable[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw malformed();
+  return value.map((row) => {
+    if (typeof row !== "object" || row === null || Array.isArray(row)) {
+      throw malformed();
+    }
+    const held = row as Record<string, unknown>;
+    if (
+      typeof held["tool"] !== "string" ||
+      typeof held["variable"] !== "string"
+    ) {
+      throw malformed();
+    }
+    return { tool: held["tool"], variable: held["variable"] };
+  });
 }
 
 /**
@@ -156,6 +205,13 @@ export function mockMetadataFrom(
  * whether the account is back, and the cleanup flag beside the note says that.
  * So the sweep's read keeps all four and the run's read drops all four, which
  * is also why the published shape of the note names none of them.
+ *
+ * **The variable map is the one working note this read keeps**, because the
+ * claim is a reader of the run and cannot conduct a simulation without it: it
+ * fills every one of those variables on every call it creates. It is not part
+ * of the note's **published** shape — see `mockMetadataAsPublished` below,
+ * which is what the API answers with — because a map of variable names is
+ * machinery rather than anything a person can act on.
  */
 export function mockMetadataAsRead(
   metadata: MockMetadata | null,
@@ -166,7 +222,34 @@ export function mockMetadataAsRead(
     draftVersion: _draft,
     ...engine
   } = metadata.engine;
-  return { engine };
+  return {
+    engine,
+    ...(metadata.urlVariables === undefined
+      ? {}
+      : { urlVariables: metadata.urlVariables }),
+  };
+}
+
+/**
+ * The note as the **API publishes** it: the engine capture and nothing else.
+ *
+ * A second projection rather than a narrower `mockMetadataAsRead`, because the
+ * two readers want two different things. The claim is a reader of the run and
+ * needs the variable map to conduct a simulation at all; a person reading a
+ * run header wants to know which engine this run's copy was built from, and a
+ * list of generated variable names is machinery to them.
+ *
+ * **The published shape is a contract**, and it names `engine` alone: a field
+ * outside it is not a field the wire drops quietly — the response serializer
+ * refuses the whole document — so the narrowing happens here, once, rather
+ * than at each route that answers with a run.
+ */
+export function mockMetadataAsPublished(
+  metadata: MockMetadata | null,
+): MockMetadata | null {
+  if (metadata === null) return null;
+  const { urlVariables: _variables, ...published } = metadata;
+  return published;
 }
 
 /** The note as a row stores it. Copied, so no caller holds the stored value. */
@@ -188,6 +271,14 @@ export function mockMetadataRow(
     },
     // The row's own spelling again. Each is written only when it is there, so a
     // note from before these facts existed reads back exactly as written.
+    ...(metadata.urlVariables === undefined
+      ? {}
+      : {
+          url_variables: metadata.urlVariables.map((one) => ({
+            tool: one.tool,
+            variable: one.variable,
+          })),
+        }),
     ...(metadata.temporaryVersionGone === true
       ? { temporary_version_gone: true }
       : {}),

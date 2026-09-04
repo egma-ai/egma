@@ -117,6 +117,21 @@ class LocalEndpointBackend(LiveKitRoomBackend):
         )
         return resolver, connector
 
+    async def _joinable_server(
+        self, endpoint: str, named: str, server_url: str
+    ) -> None:
+        """Let a real transport be pointed at a closed loopback port.
+
+        The test-only exception to the rule on the answered server — the
+        TLS scheme and the public address both — beside the one above on
+        the endpoint. What this driver proves is that a real join refusal
+        reaches the running pipeline, and the one server guaranteed to
+        refuse, at once and without a retry, is a plaintext port on this
+        machine that nothing listens on. The rule itself is proved on the
+        stubbed driver, which excepts nothing here.
+        """
+        del endpoint, named, server_url
+
 
 FAILED_ENDINGS = frozenset(
     json.loads(
@@ -1304,7 +1319,7 @@ def livekit_spec(
     *,
     url: str = A_URL,
     agent_name: str | None = AN_AGENT,
-    metadata: object = None,
+    job_dispatch_metadata: dict | None = None,
     scenario: str = A_SCENARIO,
     max_turns: int = 60,
     max_duration_seconds: int = 600,
@@ -1313,16 +1328,17 @@ def livekit_spec(
 
     Deliberately the same shape as the phone and loopback builders: a room
     simulation differs from every other voice one by its connection block
-    and by nothing else.
+    and by nothing else. ``job_dispatch_metadata`` is the test's own half
+    of the spec rather than the connection's, which is why it goes beside
+    the scenario and not inside ``config``.
     """
     config: dict = {"url": url}
     if agent_name is not None:
         config["agentName"] = agent_name
-    if metadata is not None:
-        config["metadata"] = metadata
     return a_spec(
         simulation_id,
         modality="voice",
+        job_dispatch_metadata=job_dispatch_metadata,
         connection={
             "agent_platform": "livekit",
             "connection_type": "livekit_room",
@@ -1348,27 +1364,32 @@ AN_AUTH_HEADER = f'{{"Authorization":"Bearer {A_HEADER_SECRET}"}}'
 def livekit_endpoint_spec(
     simulation_id: str = A_SIMULATION,
     *,
-    url: str = A_URL,
     token_endpoint: str = "https://acme.example/egma/livekit-token",
+    agent_name: str = AN_AGENT,
     credentials: object = None,
+    job_dispatch_metadata: dict | None = None,
     scenario: str = A_SCENARIO,
     max_turns: int = 60,
     max_duration_seconds: int = 600,
 ) -> dict:
     """One voice spec whose connection asks an endpoint for its token.
 
-    The same shape as the builder above and different in one key, which is
-    the whole of the difference between the two ways a livekit connection
-    is reached.
+    The same shape as the builder above, with the endpoint in place of the
+    server and the key pair — the whole of the difference between the two
+    ways a livekit connection is reached. It takes the test's dispatch
+    metadata for the same reason a test may write one on any spec: here it
+    rides the token request, inside the ``room_config`` the endpoint copies
+    into the token.
     """
     return a_spec(
         simulation_id,
         modality="voice",
+        job_dispatch_metadata=job_dispatch_metadata,
         connection={
             "agent_platform": "livekit",
             "connection_type": "livekit_room",
             "access_variant": "livekit_room.customer_token_endpoint",
-            "config": {"url": url, "tokenEndpoint": token_endpoint},
+            "config": {"tokenEndpoint": token_endpoint, "agentName": agent_name},
             "credentials": (
                 {"headers": AN_AUTH_HEADER} if credentials is None else credentials
             ),
@@ -1396,14 +1417,15 @@ def endpoint_room(
     stub: RoomStub,
     token_endpoint: str,
     *,
-    url: str = A_URL,
     credentials: object = None,
+    job_dispatch_metadata: dict | None = None,
 ) -> LiveKitRoom:
     """One livekit plug that asks an endpoint for its way into the room."""
     return LiveKitRoom(
         modality="voice",
         access_variant="livekit_room.customer_token_endpoint",
-        config={"url": url, "tokenEndpoint": token_endpoint},
+        config={"tokenEndpoint": token_endpoint, "agentName": AN_AGENT},
+        job_dispatch_metadata=job_dispatch_metadata,
         credentials=(
             {"headers": AN_AUTH_HEADER} if credentials is None else credentials
         ),
@@ -1753,7 +1775,7 @@ async def test_the_mock_tool_methods_are_offered_at_the_join():
         config={"url": A_URL, "agentName": AN_AGENT},
         credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
         simulation_id=A_SIMULATION,
-        mock_tools=MockToolSeam((MockTool("check_calendar", {"answer": {}}, 0),)),
+        mock_tools=MockToolSeam((MockTool("check_calendar", {"answer": {}}),)),
         driver=stub.driver,
     )
 
@@ -1794,7 +1816,7 @@ async def test_a_refusal_at_the_join_leaves_the_second_offer_its_chance():
         config={"url": A_URL, "agentName": AN_AGENT},
         credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
         simulation_id=A_SIMULATION,
-        mock_tools=MockToolSeam((MockTool("check_calendar", {"answer": {}}, 0),)),
+        mock_tools=MockToolSeam((MockTool("check_calendar", {"answer": {}}),)),
         driver=stub.driver,
     )
 
@@ -1817,16 +1839,18 @@ async def test_a_refusal_at_the_join_leaves_the_second_offer_its_chance():
         await plug.close()
 
 
-async def test_the_dispatch_carries_the_customers_own_keys_untouched(
+async def test_the_dispatch_carries_the_tests_own_keys_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """The whole point of the channel: an agent reading its per-session
-    context out of the dispatch finds its own object there.
+    context out of the dispatch finds the keys this test wrote.
 
     LiveKit's own documentation sends agents to this channel for exactly
     that, so an agent doing ``json.loads(ctx.job.metadata)["clinic"]``
-    reads what its own deployment configured rather than breaking the
-    moment somebody puts it under test.
+    reads the world its scenario ordered up rather than breaking the
+    moment somebody puts it under test — and two tests of one suite can
+    order up two different worlds, which one value on the connection could
+    never do.
     """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
     await room_walk(
@@ -1834,38 +1858,57 @@ async def test_the_dispatch_carries_the_customers_own_keys_untouched(
         stub,
         monkeypatch,
         agent_name="front-desk",
-        metadata='{"clinic":"lakeside","locale":"en-GB"}',
+        job_dispatch_metadata={"clinic": "lakeside", "locale": "en-GB"},
         scenario="One point.",
     )
 
     # Read the way an agent reads it, because that is the claim: the
     # bytes are pinned next door, and what is pinned here is that parsing
-    # them gets the agent to its own keys.
+    # them gets the agent to the test's own keys.
     carried = json.loads(stub.dispatches[0].metadata)
     assert carried == {"clinic": "lakeside", "locale": "en-GB"}
 
 
 @pytest.mark.parametrize(
-    "configured",
+    ("written", "carried"),
     [
-        '{"clinic":"lakeside","locale":"en-GB"}',
-        '{"tenant":"caf\u00e9","city":"\u6771\u4eac"}',
-        '{"label":"\\ud800"}',
+        pytest.param(
+            {"clinic": "lakeside", "locale": "en-GB"},
+            '{"clinic":"lakeside","locale":"en-GB"}',
+            id="plain ascii",
+        ),
+        pytest.param(
+            {"tenant": "caf\u00e9", "city": "\u6771\u4eac"},
+            '{"tenant":"caf\u00e9","city":"\u6771\u4eac"}',
+            id="characters outside ascii",
+        ),
+        pytest.param(
+            {"caller": {"name": "Margaret", "ids": [1, 2]}, "retries": 0},
+            '{"caller":{"name":"Margaret","ids":[1,2]},"retries":0}',
+            id="nested values",
+        ),
+        pytest.param({}, "{}", id="an object the test wrote empty"),
     ],
 )
-async def test_the_two_channels_carry_the_same_bytes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, configured: str
+async def test_the_dispatch_carries_the_tests_metadata_byte_for_byte(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    written: dict,
+    carried: str,
 ):
-    """One value, two channels, and the same bytes on both.
+    """One serialisation, and these are its bytes.
 
-    egma writes the configured string out on neither channel, so there is
-    no second spelling of it to go wrong. That is worth pinning against
-    three shapes a re-serialising driver would have handled differently:
-    plain ASCII, characters outside it, and ``\\ud800`` — a lone surrogate,
-    which is legal JSON the door admits and a character with no UTF-8 form
-    at all. Written out again, the third one is a string that cannot go on
-    the wire, and the simulation would be dead at the dispatch over a value
-    the other channel carried without complaint.
+    A test writes an object and egma writes a string, so the shape of that
+    string is a contract rather than an implementation detail: compact,
+    key order as written, and **not** ASCII-escaped, which is the same
+    form the control plane measured the platform's size ceiling on. A
+    driver that re-serialised some other way would pass a value that
+    saved and then be refused on the wire for being too large.
+
+    Four shapes, because four things could differ: plain ASCII, characters
+    outside it, nesting, and an object a test deliberately wrote empty —
+    which is a test that wrote one, and reaches the dispatch as the empty
+    object it is rather than as no metadata at all.
     """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
     await room_walk(
@@ -1873,19 +1916,51 @@ async def test_the_two_channels_carry_the_same_bytes(
         stub,
         monkeypatch,
         agent_name="front-desk",
-        metadata=configured,
+        job_dispatch_metadata=written,
         scenario="One point.",
     )
 
-    assert stub.dispatches[0].metadata == configured
-    assert stub.rooms[0].metadata == configured
+    assert stub.dispatches[0].metadata == carried
+    # And the agent gets its own object back, which is the claim the bytes
+    # above exist to serve.
+    assert json.loads(stub.dispatches[0].metadata) == written
 
 
-async def test_the_dispatch_carries_none_of_the_test(
+async def test_the_room_carries_no_metadata_even_when_the_test_wrote_some(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Nothing whatever about what the agent is going to be asked,
-    because an agent that reads its script stops being under test."""
+    """One value, written in one place.
+
+    The room used to carry a copy of the same string. It does not: what a
+    test writes belongs to one simulation, the dispatch is what puts one
+    simulation's worker into the room, and a second copy on the room would
+    be a second value to keep equal to the first. So the room is created
+    with a name and nothing else, whatever the test wrote.
+    """
+    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
+    await room_walk(
+        tmp_path,
+        stub,
+        monkeypatch,
+        agent_name="front-desk",
+        job_dispatch_metadata={"clinic": "lakeside"},
+        scenario="One point.",
+    )
+
+    assert stub.rooms[0].metadata == ""
+    assert stub.dispatches[0].metadata == '{"clinic":"lakeside"}'
+
+
+async def test_the_dispatch_carries_none_of_the_tests_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The test writes the dispatch metadata now, so the rule is worth
+    saying again: what it writes is the *world*, never the *script*.
+
+    Nothing about what the agent is going to be asked reaches the channel
+    it can read, because an agent that reads its script stops being under
+    test. Only the keys the test wrote by hand go there.
+    """
     scenario = "Ask to move the Tuesday cleaning to Thursday. Say you are Margaret."
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
     await room_walk(
@@ -1893,7 +1968,7 @@ async def test_the_dispatch_carries_none_of_the_test(
         stub,
         monkeypatch,
         agent_name="front-desk",
-        metadata='{"clinic":"lakeside"}',
+        job_dispatch_metadata={"clinic": "lakeside"},
         scenario=scenario,
     )
 
@@ -1901,13 +1976,13 @@ async def test_the_dispatch_carries_none_of_the_test(
         assert word not in stub.dispatches[0].metadata
 
 
-async def test_a_connection_that_configured_nothing_dispatches_nothing(
+async def test_a_test_that_wrote_no_env_dispatches_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """No metadata configured, so no metadata sent — on either channel.
+    """No metadata written, so no metadata sent — on either channel.
 
     There is nothing of egma's to put in an empty message. An agent that
-    reads ``ctx.job.metadata`` on a connection that configured none finds
+    reads ``ctx.job.metadata`` in a simulation whose test wrote none finds
     exactly what it finds in its own production rooms.
     """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
@@ -1919,48 +1994,44 @@ async def test_a_connection_that_configured_nothing_dispatches_nothing(
     assert stub.rooms[0].metadata == ""
 
 
-@pytest.mark.parametrize(
-    ("configured", "carried"),
-    [
-        (
-            '{"clinic":"lakeside","locale":"en-GB"}',
-            '{"clinic":"lakeside","locale":"en-GB"}',
-        ),
-        ('{"already":"json"}', '{"already":"json"}'),
-        (None, ""),
-    ],
-)
-async def test_the_room_carries_the_connections_own_json(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    configured: object,
-    carried: str,
+async def test_the_room_is_created_with_a_name_and_nothing_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The customer's metadata channel: theirs to write, egma's to pass
-    through untouched, and it never carries anything of egma's.
-
-    The door only ever stores metadata as a JSON object in a string, so a
-    string is the whole product shape: it rides byte for byte."""
+    """Room metadata is nobody's channel now, so it stays empty — and
+    nothing of egma's ever went there either."""
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
-    await room_walk(
-        tmp_path, stub, monkeypatch, metadata=configured, scenario="One point."
-    )
+    await room_walk(tmp_path, stub, monkeypatch, scenario="One point.")
 
-    assert stub.rooms[0].metadata == carried
+    assert stub.rooms[0].metadata == ""
     assert A_SIMULATION not in stub.rooms[0].metadata
 
 
-@pytest.mark.parametrize("configured", [{"clinic": "lakeside"}, [1, 2], 7])
-def test_metadata_that_is_not_the_doors_own_string_is_refused(configured: object):
-    """A spec is the door's word, and the door stores metadata as a JSON
-    object in a string. Anything else never came through it, and the
-    driver names the mistake rather than papering over it."""
-    from egma_simulator.media.livekit_room import _configured_json
+def test_a_connection_that_configures_metadata_is_refused_by_name():
+    """The key is gone from the connection, and gone means refused.
 
-    with pytest.raises(MediaBackendError) as refused:
-        _configured_json(configured)
+    Metadata used to be a connection's to configure, one value for every
+    test. It is the test's now. A connection still carrying the old key is
+    a connection whose author expects their agent to be told something,
+    and quietly reading past it would leave them debugging a worker for a
+    value egma never sent — so it is refused the way every other unknown
+    key is, before any request leaves egma.
+    """
+    with pytest.raises(PlugError) as refused:
+        LiveKitRoom(
+            modality="voice",
+            access_variant="livekit_room.project_credentials",
+            config={
+                "url": A_URL,
+                "agentName": AN_AGENT,
+                "metadata": '{"clinic":"lakeside"}',
+            },
+            credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
+            simulation_id=A_SIMULATION,
+        )
 
-    assert "a JSON object in a string" in str(refused.value)
+    told = str(refused.value)
+    assert "metadata" in told, "the key nobody reads has to be named"
+    assert "agentName" in told and "url" in told, "and the ones that are"
 
 
 # -- Every way a room fails to become a simulation ---------------------------
@@ -2170,7 +2241,6 @@ async def test_a_real_transport_join_refusal_reaches_the_running_pipeline(
         monkeypatch.setattr(livekit_plug, "LiveKitRoomBackend", local_driver)
         spec = SimulationSpec.from_document(
             livekit_endpoint_spec(
-                url="ws://127.0.0.1:1",
                 token_endpoint=endpoint.url,
                 scenario="One point.",
                 max_duration_seconds=30,
@@ -2349,10 +2419,6 @@ async def test_closing_a_simulation_that_never_opened_asks_for_nothing():
         ({"url": 7}, {"apiKey": A_KEY, "apiSecret": A_SECRET}),
         ({"url": "livekit.cloud"}, {"apiKey": A_KEY, "apiSecret": A_SECRET}),
         ({"url": A_URL, "agentName": 7}, {"apiKey": A_KEY, "apiSecret": A_SECRET}),
-        (
-            {"url": A_URL, "agentName": AN_AGENT, "metadata": 7},
-            {"apiKey": A_KEY, "apiSecret": A_SECRET},
-        ),
         (
             {"url": A_URL, "agentName": AN_AGENT, "urls": A_URL},
             {"apiKey": A_KEY, "apiSecret": A_SECRET},
@@ -2576,7 +2642,7 @@ async def test_an_unsafe_token_endpoint_is_refused_before_a_request_leaves_egma(
     plug = LiveKitRoom(
         modality="voice",
         access_variant="livekit_room.customer_token_endpoint",
-        config={"url": A_URL, "tokenEndpoint": token_endpoint},
+        config={"tokenEndpoint": token_endpoint, "agentName": AN_AGENT},
         credentials={"headers": AN_AUTH_HEADER},
         simulation_id=A_SIMULATION,
     )
@@ -2594,8 +2660,8 @@ def test_a_saved_http_token_endpoint_is_refused_before_auth_headers_leave_egma()
         RoomSettings.from_connection(
             "livekit_room.customer_token_endpoint",
             {
-                "url": A_URL,
                 "tokenEndpoint": "http://tokens.example/egma/livekit-token",
+                "agentName": AN_AGENT,
             },
             {"headers": AN_AUTH_HEADER},
         )
@@ -2642,7 +2708,7 @@ async def test_a_token_endpoint_name_must_resolve_only_to_public_addresses(
 
     settings = RoomSettings.from_connection(
         "livekit_room.customer_token_endpoint",
-        {"url": A_URL, "tokenEndpoint": "https://tokens.example/token"},
+        {"tokenEndpoint": "https://tokens.example/token", "agentName": AN_AGENT},
         {"headers": AN_AUTH_HEADER},
     )
     driver = LiveKitRoomBackend(
@@ -2682,7 +2748,7 @@ async def test_an_unexpected_endpoint_client_bug_is_not_hidden_as_customer_fault
 
     settings = RoomSettings.from_connection(
         "livekit_room.customer_token_endpoint",
-        {"url": A_URL, "tokenEndpoint": "https://tokens.example/token"},
+        {"tokenEndpoint": "https://tokens.example/token", "agentName": AN_AGENT},
         {"headers": AN_AUTH_HEADER},
     )
     driver = LiveKitRoomBackend(
@@ -2748,6 +2814,39 @@ async def test_a_token_endpoint_spec_conducts_a_whole_simulation(
     assert_one_speaker_to_a_channel(recording, turns)
 
 
+async def test_a_test_env_rides_the_token_request_on_the_endpoint_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A test may write job dispatch metadata whatever its connection is,
+    and on this shape the token request carries it.
+
+    Egma holds no key pair here, so it dispatches nobody and makes no room
+    to write anything on. What it does send is the one request this shape
+    makes, and LiveKit's standard token request has the place for exactly
+    this: the metadata of the dispatch named in ``room_config``, which the
+    endpoint copies into the token and LiveKit hands to the worker as its
+    job metadata — the same string, byte for byte, the key-pair shape
+    writes on the dispatch it makes itself.
+    """
+    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
+    with serving() as endpoint:
+        _conducted, _turns, _measures, _assembled = await room_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            built_by=livekit_endpoint_spec,
+            token_endpoint=endpoint.url,
+            job_dispatch_metadata={"tenant": "acme"},
+            scenario="One point.",
+        )
+
+    assert stub.dispatches == [], "egma dispatches nobody on this shape"
+    assert stub.rooms == [], "and makes no room to write anything on either"
+    assert endpoint.asked[0].body["room_config"] == {
+        "agents": [{"agent_name": AN_AGENT, "metadata": '{"tenant":"acme"}'}]
+    }
+
+
 async def test_the_endpoint_is_asked_for_the_room_and_identity_egma_will_use(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -2774,14 +2873,60 @@ async def test_the_endpoint_is_asked_for_the_room_and_identity_egma_will_use(
     asked = endpoint.asked[0]
     assert asked.body == {
         "room_name": f"{ROOM_PREFIX}-{A_SIMULATION}",
+        "participant_identity": f"{PERSONA_IDENTITY}-{A_SIMULATION}",
         "participant_name": f"{PERSONA_IDENTITY}-{A_SIMULATION}",
+        "room_config": {"agents": [{"agent_name": AN_AGENT}]},
     }
     assert asked.body["room_name"].startswith(f"{ROOM_PREFIX}-")
     assert asked.header("content-type") == "application/json"
 
     # The identity egma joins with is the one it asked a token for, and it
-    # is never the agent's.
-    assert asked.body["participant_name"] != AGENT_IDENTITY
+    # is never the agent's — the agent is the one it asked the endpoint to
+    # dispatch, by name, in LiveKit's own room_config block.
+    assert asked.body["participant_identity"] != AGENT_IDENTITY
+
+
+async def test_the_tests_dispatch_metadata_rides_the_dispatch_egma_asks_for():
+    """The test's ``job_dispatch_metadata`` goes to the worker the way the
+    key-pair shape sends it — as the dispatch's metadata, one compact JSON
+    string — here inside the ``room_config`` the endpoint copies into the
+    token."""
+    stub = RoomStub(greeting="Front desk.")
+    with serving() as endpoint:
+        plug = endpoint_room(
+            stub, endpoint.url, job_dispatch_metadata={"tenant": "acme"}
+        )
+        await plug.prepare()
+        await plug.open()
+        await plug.close()
+
+    assert endpoint.asked[0].body["room_config"] == {
+        "agents": [{"agent_name": AN_AGENT, "metadata": '{"tenant":"acme"}'}]
+    }
+
+
+def test_the_endpoint_shape_holds_no_server_url_and_demands_the_worker():
+    """The endpoint's answer names the server, and egma names the worker."""
+    with pytest.raises(MediaBackendError) as held_a_url:
+        RoomSettings.from_connection(
+            "livekit_room.customer_token_endpoint",
+            {
+                "url": A_URL,
+                "tokenEndpoint": "https://tokens.example/token",
+                "agentName": AN_AGENT,
+            },
+            {"headers": AN_AUTH_HEADER},
+        )
+    assert "'url'" in str(held_a_url.value)
+
+    for agent_name in ({}, {"agentName": ""}, {"agentName": "   "}):
+        with pytest.raises(MediaBackendError) as nameless:
+            RoomSettings.from_connection(
+                "livekit_room.customer_token_endpoint",
+                {"tokenEndpoint": "https://tokens.example/token", **agent_name},
+                {"headers": AN_AUTH_HEADER},
+            )
+        assert "agentName" in str(nameless.value)
 
 
 async def test_the_endpoints_auth_headers_are_sent_and_go_nowhere_else(
@@ -2812,7 +2957,7 @@ def test_a_token_endpoint_without_auth_headers_is_refused_before_a_request(
             LiveKitRoom(
                 modality="voice",
                 access_variant="livekit_room.customer_token_endpoint",
-                config={"url": A_URL, "tokenEndpoint": endpoint.url},
+                config={"tokenEndpoint": endpoint.url, "agentName": AN_AGENT},
                 credentials=credentials,
                 simulation_id=A_SIMULATION,
                 driver=RoomStub().driver,
@@ -2822,9 +2967,13 @@ def test_a_token_endpoint_without_auth_headers_is_refused_before_a_request(
     assert "headers" in str(refused.value)
 
 
-@pytest.mark.parametrize("alias", ["token", "participantToken", "accessToken"])
-async def test_a_token_under_any_of_the_three_names_is_taken(alias: str):
-    """Accepting the spread is what makes the endpoints already out there
+@pytest.mark.parametrize(
+    "alias",
+    ["participant_token", "participantToken", "token", "accessToken", "access_token"],
+)
+async def test_a_token_under_any_of_the_accepted_names_is_taken(alias: str):
+    """LiveKit's own name first, and the spread the wild uses beside it:
+    accepting all of them is what makes the endpoints already out there
     reusable as they are, rather than each team writing a second handler
     for egma."""
     stub = RoomStub(greeting="Front desk.")
@@ -2837,11 +2986,15 @@ async def test_a_token_under_any_of_the_three_names_is_taken(alias: str):
     assert stub.joined_with[0].token == "under.this.name"
 
 
-async def test_the_endpoints_own_server_url_is_where_egma_joins():
-    """The override: an endpoint that knows which of several LiveKit
-    projects this agent lives in says so, and egma goes there."""
+@pytest.mark.parametrize("server_url_key", ["server_url", "serverUrl"])
+async def test_the_endpoints_server_url_is_where_egma_joins(server_url_key: str):
+    """The endpoint is the one side that knows which of the customer's
+    LiveKit projects this agent lives in, so its answer names the server —
+    under LiveKit's own key, or the camelCase its protobuf JSON admits."""
     stub = RoomStub(greeting="Front desk.")
-    with serving(server_url="wss://elsewhere.livekit.cloud") as endpoint:
+    with serving(
+        server_url="wss://elsewhere.livekit.cloud", server_url_key=server_url_key
+    ) as endpoint:
         plug = endpoint_room(stub, endpoint.url)
         await plug.prepare()
         await plug.open()
@@ -2850,16 +3003,20 @@ async def test_the_endpoints_own_server_url_is_where_egma_joins():
     assert stub.joined_with[0].url == "wss://elsewhere.livekit.cloud"
 
 
-async def test_the_connections_own_url_is_where_egma_joins_without_one():
-    """And where the answer names none, the connection's url stands."""
+async def test_an_answer_that_names_no_server_is_a_fault_naming_the_contract():
+    """The connection holds no url of its own, so an answer without one is
+    an endpoint outside the contract, and the reason says which key."""
     stub = RoomStub(greeting="Front desk.")
-    with serving() as endpoint:
+    with serving(server_url=None) as endpoint:
         plug = endpoint_room(stub, endpoint.url)
-        await plug.prepare()
-        await plug.open()
+        with pytest.raises(PlugError) as refused:
+            await plug.prepare()
         await plug.close()
 
-    assert stub.joined_with[0].url == A_URL
+    told = str(refused.value)
+    assert failed_ending(refused.value) == ERROR
+    assert "answered no server_url" in told
+    assert stub.joined_with == []
 
 
 # -- Every way an endpoint answers badly -------------------------------------
@@ -2932,6 +3089,23 @@ async def test_a_token_endpoint_response_is_bounded_before_json_parsing():
             "SENTINEL blank token",
         ),
         (
+            "an answer that names no server",
+            {
+                "body": {
+                    "participant_token": "fine.token.here",
+                    "detail": "SENTINEL no server",
+                }
+            },
+            "answered no server_url",
+            "SENTINEL no server",
+        ),
+        (
+            "a server_url that is not a string",
+            {"body": {"participant_token": "fine.token.here", "server_url": 7}},
+            "server_url that is not a string",
+            "fine.token.here",
+        ),
+        (
             "a serverUrl that is not a string",
             {"body": {"token": "fine.token.here", "serverUrl": 7}},
             "serverUrl that is not a string",
@@ -2963,6 +3137,115 @@ async def test_an_endpoint_that_answers_badly_names_the_contract_not_its_body(
     assert diagnosis in told, f"{named}: the broken contract part is the diagnosis"
     assert private_text not in told, f"{named}: response text reached the error"
     assert A_HEADER_SECRET not in told
+
+
+@pytest.mark.parametrize(
+    ("server_url", "diagnosis"),
+    [
+        ("ws://acme.livekit.cloud", "Egma cannot join"),
+        ("http://acme.livekit.cloud", "Egma cannot join"),
+        ("wss://egma:secret@acme.livekit.cloud", "Egma cannot join"),
+        ("wss://", "Egma cannot join"),
+        ("wss://10.0.0.4", "non-public network address"),
+        ("wss://127.0.0.1:7880", "non-public network address"),
+        ("wss://[::1]:7880", "non-public network address"),
+        ("wss://[::ffff:127.0.0.1]", "non-public network address"),
+        ("wss://169.254.169.254", "non-public network address"),
+        ("wss://224.0.0.1", "non-public network address"),
+        ("wss://0.0.0.0", "non-public network address"),
+    ],
+)
+async def test_a_server_the_endpoint_names_is_held_to_the_endpoints_own_rule(
+    server_url: str, diagnosis: str
+):
+    """A minted token goes only to a public LiveKit server, over TLS.
+
+    The endpoint's answer decides where egma connects next. A cleartext
+    scheme would carry the token in the clear; a private, loopback,
+    link-local or multicast address would make egma a client of whatever
+    network it runs in. Both are refused with the contract part named,
+    nothing is joined, and the token is not quoted.
+    """
+    stub = RoomStub()
+    with serving(token="fine.token.here", server_url=server_url) as endpoint:
+        plug = endpoint_room(stub, endpoint.url)
+        with pytest.raises(PlugError) as refused:
+            await plug.prepare()
+        await plug.close()
+        served = endpoint.wire_url
+
+    told = str(refused.value)
+    assert failed_ending(refused.value) == ERROR
+    assert served in told, "the reason has to name what was asked"
+    assert diagnosis in told, f"{server_url}: the broken contract part is the reason"
+    assert stub.joined_rooms == []
+    assert "fine.token.here" not in told
+
+
+@pytest.mark.parametrize(
+    ("addresses", "joins"),
+    [
+        (["127.0.0.1"], False),
+        (["10.0.0.4"], False),
+        (["::1"], False),
+        (["::ffff:10.0.0.4"], False),
+        (["93.184.216.34", "10.0.0.4"], False),
+        (["93.184.216.34"], True),
+    ],
+)
+async def test_a_server_name_the_endpoint_answers_must_stand_only_on_public_addresses(
+    addresses: list[str], joins: bool
+):
+    """The name is looked up before the token goes anywhere near it.
+
+    The endpoint answers the public-looking name every real endpoint
+    answers; where that name stands is the resolver's to say. One private
+    address among the answers is enough to refuse, because the SDK's own
+    lookup may pick any of them.
+    """
+
+    class Resolver:
+        async def resolve(
+            self, host: str, port: int = 0, family: int = socket.AF_UNSPEC
+        ) -> list[dict[str, object]]:
+            del family
+            return [
+                {
+                    "hostname": host,
+                    "host": address,
+                    "port": port,
+                    "family": socket.AF_INET6 if ":" in address else socket.AF_INET,
+                    "proto": socket.IPPROTO_TCP,
+                    "flags": socket.AI_NUMERICHOST,
+                }
+                for address in addresses
+            ]
+
+        async def close(self) -> None:
+            return None
+
+    stub = RoomStub()
+    with serving(token="fine.token.here") as endpoint:
+        settings = RoomSettings.from_connection(
+            "livekit_room.customer_token_endpoint",
+            {"tokenEndpoint": endpoint.url, "agentName": AN_AGENT},
+            {"headers": AN_AUTH_HEADER},
+        )
+        driver = stub.driver(
+            settings=settings,
+            simulation_id=A_SIMULATION,
+            endpoint_resolver=Resolver(),
+        )
+        if joins:
+            await driver.create_transport()
+            assert len(stub.joined_rooms) == 1
+            assert stub.joined_with[0].token == "fine.token.here"
+        else:
+            with pytest.raises(MediaBackendError) as refused:
+                await driver.create_transport()
+            assert "non-public network address" in str(refused.value)
+            assert stub.joined_rooms == []
+        assert len(endpoint.asked) == 1
 
 
 async def test_a_token_the_endpoint_minted_is_never_quoted_back():
@@ -3067,7 +3350,7 @@ async def test_an_endpoint_that_answers_nowhere_is_a_fault_naming_it(
     endpoint = "https://tokens.example:443/egma/livekit-token"
     settings = RoomSettings.from_connection(
         "livekit_room.customer_token_endpoint",
-        {"url": A_URL, "tokenEndpoint": endpoint},
+        {"tokenEndpoint": endpoint, "agentName": AN_AGENT},
         {"headers": AN_AUTH_HEADER},
     )
     driver = LiveKitRoomBackend(
@@ -3251,7 +3534,7 @@ def test_the_settings_never_show_the_endpoints_headers_when_printed():
     credential, so this one does not carry one either."""
     settings = RoomSettings.from_connection(
         "livekit_room.customer_token_endpoint",
-        {"url": A_URL, "tokenEndpoint": "https://acme.example/token"},
+        {"tokenEndpoint": "https://acme.example/token", "agentName": AN_AGENT},
         {"headers": AN_AUTH_HEADER},
     )
     assert A_HEADER_SECRET not in repr(settings)
@@ -3266,26 +3549,30 @@ def test_the_settings_never_show_the_endpoints_headers_when_printed():
 @pytest.mark.parametrize(
     "connection",
     [
-        # An endpoint egma cannot post to: the two url keys the wrong way
-        # round, which is the mistake this shape invites.
-        ({"url": A_URL, "tokenEndpoint": "wss://acme.livekit.cloud"}, None),
-        ({"url": A_URL, "tokenEndpoint": "acme.example/token"}, None),
-        ({"url": A_URL, "tokenEndpoint": "   "}, None),
-        # No server to join, whatever the endpoint mints.
+        # An endpoint egma cannot post to: a server url pasted where the
+        # endpoint goes, which is the mistake this shape invites.
+        ({"tokenEndpoint": "wss://acme.livekit.cloud", "agentName": AN_AGENT}, None),
+        ({"tokenEndpoint": "acme.example/token", "agentName": AN_AGENT}, None),
+        ({"tokenEndpoint": "   ", "agentName": AN_AGENT}, None),
+        # No worker to ask the endpoint for.
         ({"tokenEndpoint": "https://acme.example/token"}, None),
-        # Powers this shape does not have, refused rather than ignored.
+        ({"tokenEndpoint": "https://acme.example/token", "agentName": "  "}, None),
+        # A server url is the endpoint's to answer: refused rather than
+        # quietly preferred one way or the other.
         (
             {
                 "url": A_URL,
                 "tokenEndpoint": "https://acme.example/token",
-                "agentName": "front-desk",
+                "agentName": AN_AGENT,
             },
             None,
         ),
+        # A key no shape has any more: what a worker reads belongs to the
+        # test, not to the connection.
         (
             {
-                "url": A_URL,
                 "tokenEndpoint": "https://acme.example/token",
+                "agentName": AN_AGENT,
                 "metadata": '{"tenant":"acme"}',
             },
             None,
@@ -3293,19 +3580,19 @@ def test_the_settings_never_show_the_endpoints_headers_when_printed():
         # A key pair has no place on it, and headers that egma cannot send
         # are a connection nobody can use.
         (
-            {"url": A_URL, "tokenEndpoint": "https://acme.example/token"},
+            {"tokenEndpoint": "https://acme.example/token", "agentName": AN_AGENT},
             {"apiKey": A_KEY, "apiSecret": A_SECRET},
         ),
         (
-            {"url": A_URL, "tokenEndpoint": "https://acme.example/token"},
+            {"tokenEndpoint": "https://acme.example/token", "agentName": AN_AGENT},
             {"headers": "Authorization: Bearer x"},
         ),
         (
-            {"url": A_URL, "tokenEndpoint": "https://acme.example/token"},
+            {"tokenEndpoint": "https://acme.example/token", "agentName": AN_AGENT},
             {"headers": '{"Authorization":""}'},
         ),
         (
-            {"url": A_URL, "tokenEndpoint": "https://acme.example/token"},
+            {"tokenEndpoint": "https://acme.example/token", "agentName": AN_AGENT},
             {"headers": "{}"},
         ),
     ],
@@ -3333,7 +3620,10 @@ def test_a_refusal_about_the_endpoints_headers_never_quotes_one():
         LiveKitRoom(
             modality="voice",
             access_variant="livekit_room.customer_token_endpoint",
-            config={"url": A_URL, "tokenEndpoint": "https://acme.example/token"},
+            config={
+                "tokenEndpoint": "https://acme.example/token",
+                "agentName": AN_AGENT,
+            },
             credentials={"headers": f"Bearer {A_HEADER_SECRET}"},
             simulation_id=A_SIMULATION,
         )

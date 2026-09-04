@@ -17,6 +17,7 @@ import {
   getSimulationExecutionEvidence,
   getTest,
   getTestSuite,
+  IdentityConflictError,
   IdempotencyConflictError,
   latestRunEventSequence,
   listRunEvents,
@@ -150,7 +151,6 @@ describe("suite identity and membership", () => {
           { id: newId("ste"), name: "Hand authored" },
         ],
         tests: [],
-        mockTools: [],
       }),
     ).rejects.toThrow(/create the suite first/u);
     expect((await getTestSuite(outbound, acme.outboundSuite))?.name).toBe(
@@ -168,7 +168,6 @@ describe("suite identity and membership", () => {
         ...authored,
         personaIds: [world.rita],
       }],
-      mockTools: [],
     });
     const written = created.tests[0]?.test;
     if (written === undefined) throw new Error("repository test was not created");
@@ -184,7 +183,6 @@ describe("suite identity and membership", () => {
           personaIds: [world.rita],
           expectedVersionId: written.versionId,
         }],
-        mockTools: [],
       }),
     ).rejects.toThrow(/both expected_version_id and expected_revision/u);
 
@@ -204,7 +202,6 @@ describe("suite identity and membership", () => {
       const push = applyRepositoryChangeSet(outbound, {
         suites: [{ id: acme.outboundSuite, name: "Repository rename" }],
         tests: [],
-        mockTools: [],
       });
       const browser = renameTestSuite(outbound, acme.outboundSuite, {
         name: "Browser rename",
@@ -321,11 +318,58 @@ describe("permanent deletion", () => {
     expect(rows).toEqual([{ deleted: true }, { deleted: true }]);
   });
 
-  it("deleting one test leaves its suite active", async () => {
+  it("deletes only the Test content and identity the caller reviewed", async () => {
     const suite = await createTestSuite(actingAsAcme(), { name: "Keep container" });
     const created = await testIn(suite.id, "Delete only me");
+    const renamed = await editTest(actingAsAcme(), created.id, {
+      name: "Delete only this renamed Test",
+      expectedRevision: created.revision,
+    });
+    if (renamed === undefined) throw new Error("the Test disappeared before rename");
 
-    expect(await deleteTest(actingAsAcme(), created.id)).toBe(true);
+    await expect(
+      deleteTest(
+        actingAsAcme(),
+        created.id,
+        created.versionId,
+        created.revision,
+      ),
+    ).rejects.toThrow(IdentityConflictError);
+    expect(await getTest(actingAsAcme(), created.id)).toMatchObject({
+      id: created.id,
+      name: renamed.name,
+      revision: renamed.revision,
+      versionId: created.versionId,
+    });
+
+    const edited = await editTest(actingAsAcme(), created.id, {
+      scenario: "The Test moved after the caller read it.",
+      expectedVersionId: created.versionId,
+      expectedRevision: renamed.revision,
+    });
+    if (edited === undefined) throw new Error("the Test disappeared before deletion");
+
+    await expect(
+      deleteTest(
+        actingAsAcme(),
+        created.id,
+        created.versionId,
+        edited.revision,
+      ),
+    ).rejects.toThrow(TestMovedOnError);
+    expect(await getTest(actingAsAcme(), created.id)).toMatchObject({
+      id: created.id,
+      versionId: edited.versionId,
+    });
+
+    expect(
+      await deleteTest(
+        actingAsAcme(),
+        created.id,
+        edited.versionId,
+        edited.revision,
+      ),
+    ).toBe(true);
     expect(await getTestSuite(actingAsAcme(), suite.id)).toMatchObject({ id: suite.id });
     expect(await listTests(actingAsAcme(), suite.id)).toEqual({
       items: [],
@@ -581,7 +625,6 @@ async function seedManyTests(
         JSON.stringify({
           scenario: authored.scenario,
           expectedBehaviors: authored.expectedBehaviors,
-          mockOverrides: [],
         }),
         ids.map((row) => row.versionId),
         ids.map((row) => row.testId),

@@ -50,6 +50,13 @@
       "when": 1788222232543,
       "tag": "0006_archived_agents_release_pull",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788480128555,
+      "tag": "0007_test_owned_mock_tools",
+      "breakpoints": true
     }
   ]
 }

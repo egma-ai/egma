@@ -7,8 +7,8 @@
     "connection_type": "livekit_room",
     "access_variant": "livekit_room.customer_token_endpoint",
     "config": {
-      "url": "wss://lakeside-dental.livekit.cloud",
-      "tokenEndpoint": "https://lakeside-dental.example/egma/livekit-token"
+      "tokenEndpoint": "https://lakeside-dental.example/egma/livekit-token",
+      "agentName": "front-desk"
     },
     "credentials": {
       "headers": "{\"Authorization\":\"Bearer example0endpoint0token0not0a0real0one\"}"

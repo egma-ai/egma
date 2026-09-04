@@ -1,5 +1,6 @@
 "use client";
 
+import { CheckIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -31,6 +32,66 @@ import {
   useShellSession,
 } from "../../../../ui/shell.tsx";
 import { TestsGrid } from "./tests-grid.tsx";
+
+/** How long the word `Saved` stands before it goes, in milliseconds. */
+const SAVED_FOR = 1500;
+
+/**
+ * The one word a finished save says, over the grid the save happened in.
+ *
+ * **This grid saves itself, so it has to say when it did** (founder,
+ * 2026-09-04). Every other write surface in the product is a form with a Save
+ * button that goes busy and then says `Saved.` beside itself; a cell that
+ * commits on blur has no button to change, so a person who typed a scenario
+ * and clicked away had nothing at all telling them egma had taken it.
+ * `DESIGN.md`: "Save state is truthful: unchanged, saving, saved, or failed."
+ *
+ * **A word, muted, and no colour** — `DESIGN.md` gives every state a word and
+ * makes the mark beside it optional supporting information, so the check is
+ * `aria-hidden` and the sentence is the whole message. It is not a chip: a
+ * chip is a standing fact about a record, and this is a thing that just
+ * happened.
+ *
+ * **And no motion.** "Do not animate actions used many times each day" — a
+ * cell commit is the most repeated action on this screen, and a word that
+ * faded in and out under every one of them would be decoration on routine
+ * work. It appears, it stands, it goes.
+ *
+ * A refused save says nothing here. The refusal is already written in the cell
+ * or in the dialog it was refused in, which is where the person is looking.
+ *
+ * It lives in this file rather than `ui/` because one screen saves this way.
+ * The moment a second one does, this is what moves.
+ */
+function SaveIndicator({ save }: { readonly save: number }) {
+  const [showing, setShowing] = useState(false);
+  /*
+   * Keyed on the count, so a save while the word is up restarts the wait
+   * rather than stacking a second one behind it: the cleanup clears the timer
+   * standing and the new one starts from now.
+   */
+  useEffect(() => {
+    if (save === 0) {
+      setShowing(false);
+      return undefined;
+    }
+    setShowing(true);
+    const timer = window.setTimeout(() => setShowing(false), SAVED_FOR);
+    return () => window.clearTimeout(timer);
+  }, [save]);
+
+  if (!showing) return null;
+  return (
+    <span
+      className="flex items-center gap-1 text-sm text-muted-foreground"
+      data-slot="save-indicator"
+      role="status"
+    >
+      <CheckIcon className="size-4" aria-hidden="true" strokeWidth={1.75} />
+      Saved
+    </span>
+  );
+}
 
 /**
  * One suite, and the tests inside it, as a spreadsheet grid.
@@ -91,6 +152,20 @@ export function SuiteScreen({
   /** Rows that left, so a delete does not wait on a re-read of the page. */
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [shownSuite, setShownSuite] = useState<TestSuite | null>(null);
+  /**
+   * How many saves this screen has watched land, which is all the indicator
+   * needs to know.
+   *
+   * A count rather than a timestamp: two saves inside one millisecond are two
+   * saves, and `Date.now()` would call them one — the word would keep the
+   * first one's remaining time instead of starting again.
+   *
+   * **The seam is the two callbacks the grid already has.** `onSaved` is every
+   * landed cell commit and every landed dialog Save; `onCreated` is the entry
+   * row's. Both fire only on a ready answer, so there is nothing for the grid
+   * to tell this screen that it was not already telling it.
+   */
+  const [saves, setSaves] = useState(0);
   const [search, setSearch] = useState("");
   const [entryOpen, setEntryOpen] = useState(writing);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -106,6 +181,8 @@ export function SuiteScreen({
     setMoreRefused(null);
     setShownSuite(null);
     setSearch("");
+    // A save on the suite just left is not a fact about the one arriving.
+    setSaves(0);
   }, [projectId, suiteId]);
 
   useEffect(() => {
@@ -207,10 +284,14 @@ export function SuiteScreen({
              */
             if (!open && writing) router.push(suitePagePath(projectId, suiteId));
           }}
-          onCreated={(test) => setWritten((held) => [...held, test])}
-          onSaved={(test) =>
-            setEdited((held) => new Map(held).set(test.id, test))
-          }
+          onCreated={(test) => {
+            setWritten((held) => [...held, test]);
+            setSaves((held) => held + 1);
+          }}
+          onSaved={(test) => {
+            setEdited((held) => new Map(held).set(test.id, test));
+            setSaves((held) => held + 1);
+          }}
           onDeleted={(test) =>
             setRemoved((held) => new Set(held).add(test.id))
           }
@@ -260,9 +341,18 @@ export function SuiteScreen({
           />
         }
         action={
-          <Button asChild>
-            <Link href={runSuitePath(projectId, suiteId)}>Run suite</Link>
-          </Button>
+          <>
+            {/*
+              Beside Run suite rather than over the grid: the toolbar's action
+              slot is already a right-aligned row with the strip's own gap, so
+              the word arrives where a person's eye goes for this page's
+              controls and nothing in the table moves to make room for it.
+            */}
+            <SaveIndicator save={saves} />
+            <Button asChild>
+              <Link href={runSuitePath(projectId, suiteId)}>Run suite</Link>
+            </Button>
+          </>
         }
       />
       <PageBody>{body()}</PageBody>

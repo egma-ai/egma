@@ -3,8 +3,8 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   createClient,
   listAgents,
-  type CreateMockToolData,
-  type UpdateMockToolData,
+  type CreateTestData,
+  type DeleteTestData,
 } from "@egma/platform-api/client";
 import { platformOperations } from "../src/contract/index.ts";
 import { buildPlatformOpenApi } from "../src/openapi.ts";
@@ -57,9 +57,9 @@ function pointerIn(document: unknown, pointer: string): unknown {
 }
 
 describe("the platform API operation registry", () => {
-  it("contains one unique definition for each of the 77 current operations", () => {
+  it("contains one unique definition for each of the 72 current operations", () => {
     const operations = Object.values(platformOperations);
-    expect(operations).toHaveLength(77);
+    expect(operations).toHaveLength(72);
     expect(new Set(operations.map((operation) => operation.operationId)).size).toBe(
       operations.length,
     );
@@ -101,6 +101,105 @@ describe("the platform API operation registry", () => {
     expect(
       platformOperations.createCustomGrader.request.body.properties,
     ).not.toHaveProperty("sourceCode");
+  });
+
+  it("gives every test its own mock tools and env, and keeps no project set", () => {
+    const test = platformOperations.getTest.responses[200].schema;
+    const version = platformOperations.getTestVersion.responses[200].schema;
+    const changeSetTest =
+      platformOperations.applyRepositoryChangeSet.request.body.properties.tests
+        .items;
+
+    for (const shape of [test, version, changeSetTest] as const) {
+      expect(shape.properties).toHaveProperty("mockTools");
+      expect(shape.properties).toHaveProperty("env");
+      expect(shape.properties).not.toHaveProperty("overrideCount");
+      expect(shape.required).toContain("mockTools");
+      expect(shape.required).toContain("env");
+    }
+
+    expect(test.properties.mockTools.items).toEqual({
+      oneOf: [
+        {
+          type: "object",
+          properties: {
+            tool: { type: "string" },
+            answer: {},
+            error: { not: {} },
+          },
+          required: ["tool", "answer"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            tool: { type: "string" },
+            answer: { not: {} },
+            error: { type: "string" },
+          },
+          required: ["tool", "error"],
+          additionalProperties: false,
+        },
+      ],
+    });
+    expect(test.properties.env).toEqual({
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            retell_dynamic_variables: {
+              type: "object",
+              additionalProperties: { type: "string" },
+            },
+            job_dispatch_metadata: {
+              type: "object",
+              additionalProperties: true,
+            },
+          },
+          additionalProperties: false,
+        },
+        { type: "null" },
+      ],
+    });
+
+    for (const gone of [
+      "listMockTools",
+      "createMockTool",
+      "updateMockTool",
+      "deleteMockTool",
+      "discoverMockTools",
+    ] as const) {
+      expect(platformOperations).not.toHaveProperty(gone);
+    }
+    expect(
+      platformOperations.applyRepositoryChangeSet.request.body.properties,
+    ).not.toHaveProperty("mockTools");
+    expect(
+      platformOperations.getConnection.responses[200].schema.properties
+        .connection.properties,
+    ).not.toHaveProperty("mockToolsEnabled");
+    expect(
+      platformOperations.getRun.responses[200].schema.properties,
+    ).not.toHaveProperty("mockToolsEnabled");
+    for (const field of ["mockToolCoverage", "mockTools"] as const) {
+      expect(
+        platformOperations.getSimulation.responses[200].schema.properties,
+      ).not.toHaveProperty(field);
+    }
+  });
+
+  it("requires the version and identity revision a Test deletion was based on", () => {
+    expect(platformOperations.deleteTest.request.query).toMatchObject({
+      properties: {
+        projectId: { type: "string", minLength: 1 },
+        expectedVersionId: { type: "string", minLength: 1 },
+        expectedRevision: { type: "string", minLength: 1 },
+      },
+      required: ["expectedVersionId", "expectedRevision"],
+    });
+    expect(platformOperations.deleteTest.responses[409]).toEqual(
+      platformOperations.updateTest.responses[409],
+    );
   });
 
   it("lets a customer change one project grader's policy", () => {
@@ -285,7 +384,17 @@ describe("the platform API operation registry", () => {
       if (typeof name === "string" && name.includes("_")) underscored.add(name);
     });
 
-    expect([...underscored].sort()).toEqual([]);
+    /*
+     * The two env keys are the platforms' own words — Retell calls them
+     * `retell_dynamic_variables` and LiveKit calls its blob
+     * `job_dispatch_metadata` — so a reader who knows either platform reads a
+     * test's env without a translation table. They are the only underscored
+     * names on the wire.
+     */
+    expect([...underscored].sort()).toEqual([
+      "job_dispatch_metadata",
+      "retell_dynamic_variables",
+    ]);
   });
 
   it("uses one grade shape for simulation and production trace reads", () => {
@@ -442,15 +551,23 @@ describe("the platform API operation registry", () => {
 });
 
 describe("the generated platform client", () => {
-  it("makes a mock-tool answer and error mutually exclusive", () => {
-    type Both = { tool: string; answer: unknown; error: string };
-    type CreateBody = CreateMockToolData["body"];
-    type UpdateBody = NonNullable<UpdateMockToolData["body"]>;
+  it("makes the expected Test Version and identity revision required for deletion", () => {
+    expectTypeOf<DeleteTestData["query"]>().toEqualTypeOf<{
+      projectId?: string;
+      expectedVersionId: string;
+      expectedRevision: string;
+    }>();
+  });
 
-    expectTypeOf<Both>().not.toExtend<CreateBody>();
-    expectTypeOf<Both>().not.toExtend<UpdateBody>();
-    expectTypeOf<{ tool: string; answer: unknown }>().toExtend<CreateBody>();
-    expectTypeOf<{ tool?: string }>().toExtend<UpdateBody>();
+  it("makes a test mock tool's answer and error mutually exclusive", () => {
+    type MockTool = NonNullable<CreateTestData["body"]["mockTools"]>[number];
+
+    expectTypeOf<{ tool: string; answer: unknown; error: string }>()
+      .not.toExtend<MockTool>();
+    expectTypeOf<{ tool: string }>().not.toExtend<MockTool>();
+    expectTypeOf<{ tool: string; answer: unknown }>().toExtend<MockTool>();
+    expectTypeOf<{ tool: string; error: string }>().toExtend<MockTool>();
+    expectTypeOf<MockTool>().not.toHaveProperty("delayMs");
   });
 
   it("uses a scalar API key only as a bearer credential", async () => {

@@ -1,12 +1,5 @@
 /**
- * What `init`, `pull` and `push` answer with, and what they need before they
- * run.
- *
- * The numbers are the branch. A coding agent that reads nothing at all still
- * knows whether the work happened, whether it has to sign in, whether the
- * platform has moved on and a pull is owed, and whether egma turned one of its
- * tests away. Every one of those wants a different next action, so every one of
- * them is a different number.
+ * What `init`, `pull` and `push` need before they run.
  */
 
 import { readConfig, folderPathsIn, type FolderPaths } from "../folder/egma-folder.ts";
@@ -20,15 +13,15 @@ export const FOLDER_EXIT = {
   /** There was nothing here to work with, or the command was not one. */
   nothing: 1,
   /** This machine holds no key for this egma. */
-  notSignedIn: 2,
+  notSignedIn: 1,
   /** egma did not answer, or answered and would not do it. */
-  unreachable: 4,
+  unreachable: 1,
   /** Refused: the platform has moved, and a pull is owed first. */
-  moved: 5,
+  moved: 1,
   /** egma turned a test away at its door. */
-  turnedAway: 6,
+  turnedAway: 1,
   /** The platform write succeeded, but this attempt could not materialize it locally. */
-  localWriteFailed: 8,
+  localWriteFailed: 1,
   /** Stopped part way through. */
   interrupted: 130,
 } as const;
@@ -61,17 +54,23 @@ export async function readyToSync(options: FolderCommandOptions): Promise<Ready>
 
   try {
     await readConfig(paths.config);
-  } catch {
-    options.out("status: no-folder");
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {
+      options.fail(
+        `There is no egma/config.yaml in ${options.cwd}. Run egma init here, or run this from the folder your repository is in.`,
+      );
+      return { kind: "stop", code: FOLDER_EXIT.nothing };
+    }
     options.fail(
-      `There is no egma folder in ${options.cwd}. Run egma init here, or run this from the folder your repository is in.`,
+      cause instanceof Error
+        ? cause.message
+        : "Egma could not read egma/config.yaml. Fix the file and run this again.",
     );
     return { kind: "stop", code: FOLDER_EXIT.nothing };
   }
 
   const signedIn = await signedInAt(options.access);
   if (signedIn === null) {
-    options.out("status: not-signed-in");
     options.fail(notSignedInRefusal(options.access.url));
     return { kind: "stop", code: FOLDER_EXIT.notSignedIn };
   }

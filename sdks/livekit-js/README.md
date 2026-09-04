@@ -65,9 +65,21 @@ Keep independent audio publishers off in that branch too. Other room names use
 the worker's normal voice settings.
 
 In an `egma-sim-` room, the helper connects if needed, reports the agent's tool
-names and schemas, and uses LiveKit's own mock-tool hook for the names Egma will
-answer. It follows agent handoffs in the same session. Tools without a mock keep
-their real implementation.
+names and schemas, and asks Egma which tools this simulation answers for. Egma
+replies with exactly the tool names the running test writes under `## Mock
+tools`, and the helper uses LiveKit's own mock-tool hook for those names only.
+It follows agent handoffs in the same session.
+
+Egma wraps exactly the tools the running test names. Every other tool runs its
+real implementation, and Egma is not in that path. A mock tool whose name never
+matches one of the agent's tools runs nothing and leaves no trace.
+
+The worker reads the running test's `job_dispatch_metadata` at
+`ctx.job.metadata`, as one compact JSON string. With Project credentials, Egma
+writes it directly to the dispatch. With a token endpoint, Egma sends it in the
+request's `room_config` and the endpoint copies that configuration into the
+token it mints. Egma adds no key of its own there and leaves the room's metadata
+empty.
 
 In every other room, `mockable` returns before it connects, sends a message, or
 wraps a tool. That is the production safety boundary.
@@ -75,8 +87,8 @@ wraps a tool. That is the production safety boundary.
 | Situation | Result |
 |---|---|
 | Production room | Nothing changes |
-| Simulation tool has a mock | Egma answers |
-| Simulation tool has no mock | The real tool runs |
+| Simulation tool the test names | Egma answers |
+| Simulation tool the test does not name | The real tool runs |
 | Egma cannot be reached during a call | The real tool runs |
 | Egma receives the call and refuses it | The tool raises `ToolError` |
 

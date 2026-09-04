@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import process from "node:process";
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
@@ -20,15 +17,6 @@ import {
   PYTHON_VOICE_SETUP_PROMPT,
   PYTHON_VOICE_SETUP_SNIPPET,
 } from "../app/projects/[projectId]/agents/livekit-testing-instructions.tsx";
-
-/**
- * The code root, read off the runner rather than off this file's own URL.
- *
- * A jsdom test's `import.meta.url` is an `http:` address, which
- * `fileURLToPath` refuses; Vitest still runs from the repository root, so that
- * is what names the path here.
- */
-const CODE_ROOT = process.cwd();
 
 afterEach(() => {
   cleanup();
@@ -110,8 +98,8 @@ describe("LiveKit testing instructions", () => {
     // what puts the one agent under test in the marked room.
     expect(copy).toContain("agent_name in its WorkerOptions");
     expect(copy).toContain(PYTHON_TESTING_SETUP_INSTALL);
-    expect(copy).toContain("npm install --global egma-cli");
-    expect(copy).toContain("egma livekit");
+    expect(copy).not.toContain("integrate-egma");
+    expect(copy).not.toContain("egma livekit");
     expect(copy).not.toMatch(/egma[>=~^]/);
 
     // The mirror of the monitoring surface's promise: the web explains work it
@@ -219,44 +207,7 @@ describe("LiveKit testing instructions", () => {
     expect(copy).not.toContain("inputOptions");
   });
 
-  /**
-   * The reference and this surface are one piece of knowledge in two places.
-   *
-   * A coding agent reads the reference and a person reads this panel, and the
-   * day the two blocks differ is the day one of them puts the wrong lines in a
-   * worker. This is the only assertion in the web tests that reads a source
-   * file, and it is here rather than beside the sheet's tests for that reason.
-   */
-  it("follows the versioned LiveKit source contract", () => {
-    const contract = readFileSync(
-      path.join(
-        CODE_ROOT,
-        "apps",
-        "cli",
-        "src",
-        "commands",
-        "livekit.ts",
-      ),
-      "utf8",
-    );
-
-    expect(contract).toContain('chat_room_prefix: egma-sim-chat-');
-    expect(contract).toContain("python_testing_import: from egma import mockable");
-    expect(contract).toContain(
-      "python_testing_call: await mockable(agent, ctx, session)",
-    );
-    expect(contract).toContain(
-      "disable AgentSession audio input, audio output, and transcription sync",
-    );
-    expect(contract).toContain("do not start any independent audio publisher");
-    expect(contract).toContain("dispatch_name:");
-    expect(contract).toContain("javascript_testing: supported");
-    expect(contract).toContain(
-      'javascript_testing_import: import { mockable } from "@egma/livekit"',
-    );
-    expect(contract).toContain(
-      "javascript_testing_call: await mockable(agent, ctx, session)",
-    );
+  it("keeps the language-specific testing rules in its copied prompts", () => {
     expect(PYTHON_CHAT_SETUP_SNIPPET).toContain(
       'ctx.job.room.name.startswith("egma-sim-chat-")',
     );

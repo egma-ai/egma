@@ -10,12 +10,12 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { runPushCommand } from "../src/commands/push.ts";
 import {
   EMPTY_CONFIG,
   createEgmaFolder,
   folderPathsIn,
   readRepository,
-  serializeMockToolsFile,
   serializeSuiteManifest,
 } from "../src/folder/egma-folder.ts";
 import {
@@ -41,6 +41,8 @@ const EMPTY_SUITE_ID = "ste_01K3XQ7M4E8YB2FVN0H9TZQWES";
 const THIRD_SUITE_ID = "ste_01K3XQ7M4E8YB2FVN0H9TZQWET";
 const TEST_ID = "tst_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const VERSION_ID = "tstv_01K3XQ7M4E8YB2FVN0H9TZQWER";
+const SECOND_TEST_ID = "tst_01K3XQ7M4E8YB2FVN0H9TZQWES";
+const SECOND_VERSION_ID = "tstv_01K3XQ7M4E8YB2FVN0H9TZQWES";
 const REVISION = "rev_01K3XQ7M4E8YB2FVN0H9TZQWER";
 let workspace: Workspace;
 
@@ -112,30 +114,37 @@ async function pullFixture(
 }
 
 function testBody(input: {
+  readonly projectId?: string;
   readonly suiteId?: string;
   readonly id?: string;
   readonly versionId?: string;
   readonly revision?: string;
   readonly name?: string;
+  readonly scenario?: string;
+  readonly expectedBehaviors?: readonly string[];
+  readonly mockTools?: readonly unknown[];
+  readonly env?: unknown;
+  readonly version?: number;
 } = {}): Record<string, unknown> {
   return {
     id: input.id ?? TEST_ID,
-    projectId: PROJECT_ID,
+    projectId: input.projectId ?? PROJECT_ID,
     suiteId: input.suiteId ?? SUITE_ID,
     name: input.name ?? "Books a visit",
     description: "",
-    scenario: "The caller asks for Tuesday.",
-    expectedBehaviors: ["The agent books Tuesday."],
+    scenario: input.scenario ?? "The caller asks for Tuesday.",
+    expectedBehaviors: input.expectedBehaviors ?? ["The agent books Tuesday."],
     personas: [],
-    mockTools: [],
+    mockTools: input.mockTools ?? [],
+    env: input.env ?? null,
     versionId: input.versionId ?? VERSION_ID,
-    version: 1,
+    version: input.version ?? 1,
     revision: input.revision ?? REVISION,
   };
 }
 
 describe("complete repository suite commands", () => {
-  it("pushes all suites, tests, and Mock Tools in one atomic call", async () => {
+  it("pushes every suite and every test's own world in one atomic call", async () => {
     const release = await suite("release", SUITE_ID, "Release");
     await suite("empty", EMPTY_SUITE_ID, "Empty");
     await writeFile(
@@ -145,12 +154,10 @@ describe("complete repository suite commands", () => {
           name: "Books a visit",
           scenario: "The caller asks for Tuesday.",
           expectedBehaviors: blocking("The agent books Tuesday."),
+          mockTools: [{ tool: "calendar", answer: { open: true } }],
+          env: { retell_dynamic_variables: { caller_name: "Margaret" } },
         }),
       ),
-    );
-    await writeFile(
-      folderPathsIn(workspace.dir).mockTools,
-      serializeMockToolsFile([{ tool: "calendar", says: { answer: { open: true } } }]),
     );
 
     const calls: { readonly url: string; readonly body: Record<string, unknown> }[] = [];
@@ -160,7 +167,16 @@ describe("complete repository suite commands", () => {
       const written = (body.tests as Record<string, unknown>[])[0]!;
       return new JsonResponse(
         JSON.stringify({
-          tests: [{ clientRef: written.clientRef, test: testBody() }],
+          tests: [
+            {
+              clientRef: written.clientRef,
+              test: {
+                ...testBody(),
+                mockTools: written.mockTools,
+                env: written.env,
+              },
+            },
+          ],
         }),
         { status: 200 },
       );
@@ -180,13 +196,98 @@ describe("complete repository suite commands", () => {
       { id: EMPTY_SUITE_ID, name: "Empty" },
       { id: SUITE_ID, name: "Release" },
     ]);
-    expect(calls[0]?.body.mockTools).toEqual([
-      { tool: "calendar", answer: { open: true } },
+    // Both halves of the world ride the test entry, and every entry says both
+    // even when it has nothing to say: the change set has no optional halves.
+    expect(calls[0]?.body.tests).toEqual([
+      expect.objectContaining({
+        suiteId: SUITE_ID,
+        mockTools: [{ tool: "calendar", answer: { open: true } }],
+        env: { retell_dynamic_variables: { caller_name: "Margaret" } },
+      }),
     ]);
+    expect(calls[0]?.body).not.toHaveProperty("mockTools");
     expect(report.tests[0]).toMatchObject({ testId: TEST_ID, versionId: VERSION_ID });
     expect(await readFile(path.join(release, "books-a-visit.md"), "utf8")).toContain(
       `version: ${VERSION_ID}`,
     );
+  });
+
+  it("prints every durable Test receipt and pull recovery when local pinning fails", async () => {
+    const release = await suite("release", SUITE_ID, "Release");
+    for (const [file, name] of [
+      ["books-a-visit.md", "Books a visit"],
+      ["cancels-a-visit.md", "Cancels a visit"],
+    ] as const) {
+      await writeFile(
+        path.join(release, file),
+        serializeTestFile(
+          aTestFile({
+            name,
+            scenario: "The caller asks about a visit.",
+            expectedBehaviors: blocking("The agent handles the visit."),
+          }),
+        ),
+      );
+    }
+    const calls: string[] = [];
+    const output: string[] = [];
+    const failed: string[] = [];
+    let writes = 0;
+    const command = {
+      access: { url: URL, credentialsFile: workspace.credentialsFile },
+      cwd: workspace.dir,
+      out: (line: string) => output.push(line),
+      fail: (line: string) => failed.push(line),
+      fetchImpl: async (input: string | URL | Request, init?: RequestInit) => {
+        calls.push(`${init?.method ?? "GET"} ${String(input)}`);
+        const body = JSON.parse(String(init?.body)) as {
+          readonly tests: readonly { readonly clientRef: string }[];
+        };
+        return new JsonResponse(
+          JSON.stringify({
+            tests: body.tests.map((test, index) => ({
+              clientRef: test.clientRef,
+              test: testBody(
+                index === 0
+                  ? {
+                      id: TEST_ID,
+                      versionId: VERSION_ID,
+                      name: "Books a visit",
+                      scenario: "The caller asks about a visit.",
+                      expectedBehaviors: ["The agent handles the visit."],
+                    }
+                  : {
+                      id: SECOND_TEST_ID,
+                      versionId: SECOND_VERSION_ID,
+                      name: "Cancels a visit",
+                      scenario: "The caller asks about a visit.",
+                      expectedBehaviors: ["The agent handles the visit."],
+                    },
+              ),
+            })),
+          }),
+        );
+      },
+      writeTestFile: async () => {
+        writes += 1;
+        throw new Error("the disk is read-only");
+      },
+    } as Parameters<typeof runPushCommand>[0] & {
+      readonly writeTestFile: () => Promise<never>;
+    };
+
+    const code = await runPushCommand(command);
+
+    expect(code).toBe(1);
+    expect(calls).toEqual([`POST ${URL}/v1/repository/change-set?projectId=${PROJECT_ID}`]);
+    expect(writes).toBe(1);
+    expect(output.join("\n")).toContain(TEST_ID);
+    expect(output.join("\n")).toContain(VERSION_ID);
+    expect(output.join("\n")).toContain(SECOND_TEST_ID);
+    expect(output.join("\n")).toContain(SECOND_VERSION_ID);
+    expect(failed.join("\n")).toContain("egma/tests/release/books-a-visit.md");
+    expect(failed.join("\n")).toContain("the disk is read-only");
+    expect(failed).toContain("Run egma pull.");
   });
 
   it("treats a local suite-directory rename as local only", async () => {
@@ -345,10 +446,15 @@ describe("complete repository suite commands", () => {
       ]);
       const headers = { authorization: `Bearer ${key}` };
       expect(
-        (await fetch(`${platform.url}/v1/tests/${deletedTest.id}`, {
-          method: "DELETE",
-          headers,
-        })).status,
+        (await fetch(
+          `${platform.url}/v1/tests/${deletedTest.id}` +
+            `?expectedVersionId=${deletedTest.versionId}` +
+            `&expectedRevision=${deletedTest.revision}`,
+          {
+            method: "DELETE",
+            headers,
+          },
+        )).status,
       ).toBe(204);
       expect(
         (await fetch(`${platform.url}/v1/test-suites/${deletedSuite.id}`, {
@@ -416,7 +522,7 @@ describe("complete repository suite commands", () => {
 
   it("rolls back every new path when a staged pull write fails", async () => {
     const paths = folderPathsIn(workspace.dir);
-    const beforeMockTools = await readFile(paths.mockTools, "utf8");
+    const beforeConfig = await readFile(paths.config, "utf8");
     const fetchImpl: typeof fetch = async (input) => {
       const url = String(input);
       if (url === `${URL}/v1/test-suites?projectId=${PROJECT_ID}`) {
@@ -429,9 +535,6 @@ describe("complete repository suite commands", () => {
       }
       if (url.includes("/v1/tests?")) {
         return new JsonResponse(JSON.stringify({ tests: [testBody()], nextPageToken: null }));
-      }
-      if (url === `${URL}/v1/mock-tools`) {
-        return new JsonResponse(JSON.stringify({ mockTools: [], nextPageToken: null }));
       }
       return new JsonResponse(JSON.stringify({ message: "unexpected" }), { status: 404 });
     };
@@ -449,7 +552,7 @@ describe("complete repository suite commands", () => {
     ).rejects.toThrow("disk stopped");
 
     await expect(stat(path.join(paths.tests, "release"))).rejects.toMatchObject({ code: "ENOENT" });
-    expect(await readFile(paths.mockTools, "utf8")).toEqual(beforeMockTools);
+    expect(await readFile(paths.config, "utf8")).toEqual(beforeConfig);
   });
 
   it("finds a free suite directory after both normal collision names are taken", async () => {
@@ -471,9 +574,6 @@ describe("complete repository suite commands", () => {
         testFeeds += 1;
         return new JsonResponse(JSON.stringify({ tests: [], nextPageToken: null }));
       }
-      if (url === `${URL}/v1/mock-tools`) {
-        return new JsonResponse(JSON.stringify({ mockTools: [], nextPageToken: null }));
-      }
       return new JsonResponse(JSON.stringify({ message: "unexpected" }), { status: 404 });
     };
 
@@ -492,6 +592,208 @@ describe("complete repository suite commands", () => {
     ).toBe(serializeSuiteManifest({ id: SUITE_ID, name: "Release" }));
     expect(testFeeds).toBe(1);
   });
+
+  it("carries a test's own world down, back up, and down again with zero byte change", async () => {
+    const platform = await startPlatform();
+    const repository = await makeWorkspace();
+    const key = "egma_sk_test-owned-world";
+    try {
+      platform.signedInWith(key);
+      const release = platform.suites.add("Release");
+      platform.tests.add({
+        suiteId: release.id,
+        name: "Books a visit",
+        scenario: "The caller asks for Tuesday.",
+        expectedBehaviors: ["The agent books Tuesday."],
+        mockTools: [
+          { tool: "check_availability", answer: { slots: ["Tuesday 15:00"] } },
+          { tool: "book", error: "the calendar is unreachable" },
+        ],
+        env: {
+          retell_dynamic_variables: { caller_name: "Margaret" },
+          job_dispatch_metadata: { tenant: "acme" },
+        },
+      });
+      await createEgmaFolder({
+        repository: repository.dir,
+        config: {
+          ...EMPTY_CONFIG,
+          platform: { origin: platform.url },
+          project: { id: release.projectId, name: "Fixture project" },
+        },
+      });
+      const paths = folderPathsIn(repository.dir);
+
+      await pullRepository({ signedIn: { url: platform.url, key }, paths });
+
+      // Pull writes both sections into the one file, and reading it back gives
+      // exactly what the platform holds.
+      const pulled = await readRepository(paths);
+      const file = pulled.suites[0]?.tests[0]!;
+      expect(file.test.mockTools).toEqual([
+        { tool: "check_availability", answer: { slots: ["Tuesday 15:00"] } },
+        { tool: "book", error: "the calendar is unreachable" },
+      ]);
+      expect(file.test.env).toEqual({
+        retell_dynamic_variables: { caller_name: "Margaret" },
+        job_dispatch_metadata: { tenant: "acme" },
+      });
+      const afterPull = await readFile(file.file, "utf8");
+      expect(afterPull).toContain("## Mock tools");
+      expect(afterPull).toContain("## Env");
+
+      // Push sends both, unchanged, so the platform mints no new version...
+      const versionBeforePush = platform.tests.worldOf("Books a visit").versionId;
+      await pushTests({ signedIn: { url: platform.url, key }, paths });
+      const world = platform.tests.worldOf("Books a visit");
+      expect(world.versionId).toBe(versionBeforePush);
+      expect(world.mockTools).toEqual(file.test.mockTools);
+      expect(world.env).toEqual(file.test.env);
+
+      // ...and a pull straight afterwards writes nothing at all.
+      expect(await readFile(file.file, "utf8")).toBe(afterPull);
+      await pullRepository({ signedIn: { url: platform.url, key }, paths });
+      expect(await readFile(file.file, "utf8")).toBe(afterPull);
+    } finally {
+      await platform.close();
+      await repository.remove();
+    }
+  });
+
+  it("mints a new version when only the env changed, and refuses a bad one", async () => {
+    const platform = await startPlatform();
+    const repository = await makeWorkspace();
+    const key = "egma_sk_world-edits";
+    try {
+      platform.signedInWith(key);
+      const release = platform.suites.add("Release");
+      platform.tests.add({
+        suiteId: release.id,
+        name: "Books a visit",
+        scenario: "The caller asks for Tuesday.",
+        expectedBehaviors: ["The agent books Tuesday."],
+      });
+      await createEgmaFolder({
+        repository: repository.dir,
+        config: {
+          ...EMPTY_CONFIG,
+          platform: { origin: platform.url },
+          project: { id: release.projectId, name: "Fixture project" },
+        },
+      });
+      const paths = folderPathsIn(repository.dir);
+      await pullRepository({ signedIn: { url: platform.url, key }, paths });
+      const file = (await readRepository(paths)).suites[0]?.tests[0]!;
+
+      await writeFile(
+        file.file,
+        serializeTestFile({
+          ...file.test,
+          env: { retell_dynamic_variables: { caller_name: "Margaret" } },
+        }),
+      );
+      await pushTests({ signedIn: { url: platform.url, key }, paths });
+
+      // The env is versioned content: changing it alone mints a version.
+      expect(platform.tests.versionsOf("Books a visit")).toBe(2);
+      expect(platform.tests.worldOf("Books a visit").env).toEqual({
+        retell_dynamic_variables: { caller_name: "Margaret" },
+      });
+
+      // A variable Egma keeps for itself is refused at Egma's door, in Egma's
+      // own words, because the file said nothing this end could judge.
+      await writeFile(
+        file.file,
+        serializeTestFile({
+          ...file.test,
+          version: platform.tests.worldOf("Books a visit").versionId,
+          identityRevision: platform.tests.seeded("Books a visit").revision,
+          env: { retell_dynamic_variables: { egma_run_id: "r1" } },
+        }),
+      );
+      await expect(
+        pushTests({ signedIn: { url: platform.url, key }, paths }),
+      ).rejects.toThrow(/egma_run_id/u);
+      expect(platform.tests.versionsOf("Books a visit")).toBe(2);
+    } finally {
+      await platform.close();
+      await repository.remove();
+    }
+  });
+
+  it.each([
+    [
+      "a mock tool that holds delay_ms",
+      [
+        "## Mock tools",
+        "### book",
+        "```json",
+        '{"answer": {"booked": true}, "delay_ms": 250}',
+        "```",
+      ].join("\n"),
+      "delay_ms.*take the line out",
+    ],
+    [
+      "a mock tool that holds agents",
+      [
+        "## Mock tools",
+        "### book",
+        "```json",
+        '{"answer": {"booked": true}, "agents": ["front-desk"]}',
+        "```",
+      ].join("\n"),
+      "agents.*belongs to the test that writes it",
+    ],
+    [
+      "an Env key the format does not hold",
+      ["## Env", "```json", '{"webhooks": {"url": "https://hooks.test"}}', "```"].join("\n"),
+      '"webhooks".*nothing else',
+    ],
+  ])(
+    "turns the whole push away for %s, naming the file and the reason",
+    async (_name, section, reason) => {
+      const platform = await startPlatform();
+      const key = "egma_sk_world-refusals";
+      const release = platform.suites.add("Release");
+      platform.tests.add({
+        suiteId: release.id,
+        name: "Books a visit",
+        scenario: "The caller asks for Tuesday.",
+        expectedBehaviors: ["The agent books Tuesday."],
+      });
+      const repository = await fixtureRepository(platform, release, key);
+      try {
+        await pullFixture(platform, repository, key);
+        const paths = folderPathsIn(repository.dir);
+        const file = (await readRepository(paths)).suites[0]?.tests[0]!;
+        // The section is typed under the file Egma wrote, which is where an
+        // author working from an older Egma would have left it.
+        const typed = `${(await readFile(file.file, "utf8")).trimEnd()}\n${section}\n`;
+        await writeFile(file.file, typed);
+        const firstRecord = platform.records.length;
+
+        // The sentence names the file rather than the section, because a
+        // repository of a hundred tests has to say which one to open.
+        const refusal = await pushTests({ signedIn: { url: platform.url, key }, paths }).then(
+          () => "",
+          (problem: unknown) => (problem instanceof Error ? problem.message : String(problem)),
+        );
+        expect(refusal).toMatch(new RegExp(reason, "su"));
+        // Exactly once: the parser names its file, and the reporter adds no
+        // second copy in front of it.
+        expect(refusal.split(file.shown).length - 1).toBe(1);
+
+        // A push is one change set, so a file Egma cannot read stops it before
+        // the platform is asked for anything at all: nothing lands, and the
+        // file on disk is still the one the author has open.
+        expect(platform.records.slice(firstRecord)).toEqual([]);
+        expect(platform.tests.versionsOf("Books a visit")).toBe(1);
+        expect(await readFile(file.file, "utf8")).toBe(typed);
+      } finally {
+        await Promise.all([platform.close(), repository.remove()]);
+      }
+    },
+  );
 
   it("pulls every suite through the suite-scoped HTTP test-list contract", async () => {
     const platform = await startPlatform();
@@ -670,9 +972,6 @@ describe("complete repository suite commands", () => {
       }
       if (url.startsWith(`${URL}/v1/tests?`)) {
         return new JsonResponse(JSON.stringify({ tests: [testBody()], nextPageToken: null }));
-      }
-      if (url === `${URL}/v1/mock-tools`) {
-        return new JsonResponse(JSON.stringify({ mockTools: [], nextPageToken: null }));
       }
       return new JsonResponse(JSON.stringify({ message: "unexpected" }), { status: 404 });
     };

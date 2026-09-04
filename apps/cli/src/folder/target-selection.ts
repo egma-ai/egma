@@ -97,7 +97,7 @@ function chooseAgent(
   if (selected === null && runnable.length === 0 && agents.length !== 1) {
     return refused(
       "not-connected",
-      "This folder does not name any Agent with a Connection. Run egma agent register first. Nothing was started.",
+      "This folder has no registered Agent. Run egma agent register, then run egma agent connection add. Nothing was started.",
       agents,
     );
   }
@@ -127,7 +127,7 @@ function chooseAgent(
     case "none":
       return refused(
         "not-connected",
-        "This folder does not name any Agent with a Connection. Run egma agent register first. Nothing was started.",
+        "This folder has no registered Agent. Run egma agent register, then run egma agent connection add. Nothing was started.",
         agents,
       );
   }
@@ -184,6 +184,13 @@ export function selectTarget(
   selectors: TargetSelectors = {},
 ): TargetSelection {
   if (selector(selectors.agent) === null) {
+    if (config.agents.length === 0) {
+      return refused(
+        "not-connected",
+        "This folder has no registered Agent. Run egma agent register, then run egma agent connection add. Nothing was started.",
+        config.agents,
+      );
+    }
     return refused(
       "unchosen-agent",
       "Choose an Egma Agent with --agent <Agent ID>. Nothing was started.",
@@ -194,6 +201,13 @@ export function selectTarget(
   if ("kind" in agent) return agent;
 
   if (selector(selectors.connection) === null) {
+    if (agent.connections.length === 0) {
+      return refused(
+        "not-connected",
+        `Agent ${JSON.stringify(agent.name)} has no configured Connection. Run egma agent connection add to add one. Nothing was started.`,
+        [agent],
+      );
+    }
     return refused(
       "unchosen-connection",
       `Choose a Connection under Agent ${agent.id} with --connection <Connection ID>. Nothing was started.`,

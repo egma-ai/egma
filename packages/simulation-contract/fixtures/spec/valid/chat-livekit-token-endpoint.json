@@ -1,0 +1,53 @@
+{
+  "contract_version": 5,
+  "simulation_id": "sim_01K7MZ4T8P6QA3XDBW9NHF2SVL",
+  "modality": "chat",
+  "connection": {
+    "agent_platform": "livekit",
+    "connection_type": "livekit_room",
+    "access_variant": "livekit_room.customer_token_endpoint",
+    "config": {
+      "tokenEndpoint": "https://lakeside-dental.example/egma/livekit-token",
+      "agentName": "front-desk"
+    },
+    "credentials": {
+      "headers": "{\"Authorization\":\"Bearer example0endpoint0token0not0a0real0one\"}"
+    }
+  },
+  "job_dispatch_metadata": {
+    "clinic": "lakeside",
+    "locale": "en-GB"
+  },
+  "persona": {
+    "name": "Eleanor",
+    "personality": "Retired teacher, 68. Polite and thorough, and types the way she speaks: full sentences, and she repeats details back to be sure she has them right.",
+    "language": "en-US"
+  },
+  "scenario": {
+    "instructions": "Your six-month check-up is on Tuesday and you now have to be somewhere else that morning. You want it moved to any Thursday in the next month, and you want the new date read back to you before you finish."
+  },
+  "limits": {
+    "max_duration_seconds": 300,
+    "max_turns": 40
+  },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "adapter": "openai_chat_completions",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": {
+      "provider": "deepgram",
+      "model": "nova-3-general",
+      "adapter": "deepgram"
+    },
+    "tts": {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "adapter": "cartesia",
+      "voice_id": "measured-alto-3",
+      "speed": 0.95
+    }
+  }
+}

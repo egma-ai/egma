@@ -1689,6 +1689,17 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
               failed && "text-failure",
             )}
           >
+            {/*
+              **Who answered, beside what happened.** Egma stamps the span it
+              files for a call it served itself, so a reader knows the answer in
+              front of them came from the test rather than from their own
+              backend. One muted word at the same size — no chip and no colour
+              of its own, because a real call is the ordinary case and says
+              nothing extra.
+            */}
+            {step.toolProvenance === "mocked" ? (
+              <span className="text-muted-foreground">mocked · </span>
+            ) : null}
             {statusLabel} · {howLong(step.durationNs)}
           </span>
           <ChevronRightIcon
