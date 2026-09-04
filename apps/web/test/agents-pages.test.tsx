@@ -466,20 +466,28 @@ const TYPES = {
       simulatorAdapter: true,
       fields: [
         {
-          key: "url",
-          label: "LiveKit WebSocket URL",
-          kind: "url",
-          required: true,
-          help: "Your LiveKit project or self-hosted server.",
-          afterCredentials: false,
-        },
-        {
           key: "tokenEndpoint",
           label: "Token endpoint",
           kind: "url",
           required: true,
           help: "The service that creates room tokens.",
           afterCredentials: false,
+        },
+        {
+          key: "agentName",
+          label: "LiveKit agent name",
+          kind: "text",
+          required: true,
+          help: "The worker Egma asks your endpoint to dispatch.",
+          afterCredentials: false,
+        },
+        {
+          key: "metadata",
+          label: "Agent metadata",
+          kind: "json",
+          required: false,
+          help: "Optional JSON handed to the worker as job metadata.",
+          afterCredentials: true,
         },
       ],
       credentialRule: "required",
@@ -3241,8 +3249,8 @@ describe("goal-first agent setup", () => {
               accessVariant: "livekit_room.customer_token_endpoint",
               productLabel: "LiveKit token endpoint",
               config: {
-                url: "wss://rooms.example.test",
                 tokenEndpoint: "https://tokens.example.test/livekit",
+                agentName: "front-desk",
               },
             },
           },
@@ -3274,13 +3282,16 @@ describe("goal-first agent setup", () => {
     expect(screen.getByLabelText("LiveKit agent name*")).toBeDefined();
     expect(
       screen.getByText(
-        "This names the agent in Egma. Your token endpoint decides which deployed worker joins the room.",
+        "Enter the exact agent name shown in your LiveKit Cloud dashboard.",
       ),
     ).toBeDefined();
     expect(screen.queryByLabelText("API secret*")).toBeNull();
+    // The endpoint answers with the server, so the form never asks for it.
+    expect(screen.queryByLabelText("WebSocket URL*")).toBeNull();
     expect(
-      screen.getByPlaceholderText("wss://your-project.livekit.cloud"),
-    ).toBeDefined();
+      screen.queryByPlaceholderText("wss://your-project.livekit.cloud"),
+    ).toBeNull();
+    expect(screen.getByLabelText("Agent metadata [optional]")).toBeDefined();
     expect(
       screen.getByPlaceholderText("https://api.example.com/livekit/token"),
     ).toBeDefined();
@@ -3293,9 +3304,6 @@ describe("goal-first agent setup", () => {
       ),
     ).toBeDefined();
 
-    fireEvent.change(screen.getByLabelText("WebSocket URL*"), {
-      target: { value: "wss://rooms.example.test" },
-    });
     fireEvent.change(screen.getByLabelText("LiveKit agent name*"), {
       target: { value: "appointment-scheduling-langsmith" },
     });
@@ -3326,8 +3334,8 @@ describe("goal-first agent setup", () => {
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
-          url: "wss://rooms.example.test",
           tokenEndpoint: "https://tokens.example.test/livekit",
+          agentName: "appointment-scheduling-langsmith",
         },
         credentials: {
           headers: '{"Authorization":"Bearer token"}',
@@ -3765,8 +3773,8 @@ describe("one connection's page", () => {
         productLabel: "LiveKit token endpoint",
         modality: "voice",
         config: {
-          url: "wss://example.livekit.cloud",
           tokenEndpoint: "https://example.test/livekit-token",
+          agentName: "front-desk",
         },
       },
     ]) {

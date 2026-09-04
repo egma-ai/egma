@@ -1654,8 +1654,8 @@ def test_chat_is_refused_on_the_connection_that_names_a_token_endpoint():
             modality="chat",
             access_variant="livekit_room.customer_token_endpoint",
             config={
-                "url": A_URL,
                 "tokenEndpoint": "https://acme.example/egma/livekit-token",
+                "agentName": "front-desk",
             },
             credentials={"headers": '{"Authorization":"Bearer nothing"}'},
             simulation_id=A_SIMULATION,

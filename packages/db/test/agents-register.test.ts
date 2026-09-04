@@ -640,37 +640,56 @@ describe("one LiveKit worker tested over chat and over voice", () => {
 });
 
 /**
- * The token-endpoint shape holds no agent name at all, so the rule finds no
- * identity in it and every registration through it creates. That is the whole
- * job of an identity that may answer nothing.
+ * The token-endpoint shape holds no server url, so the endpoint stands in for
+ * the server in the identity: one worker behind one endpoint is one agent,
+ * however many times it is registered, and a different worker behind the same
+ * endpoint is another.
  */
-describe("a LiveKit connection that names no worker", () => {
-  it("creates every time, because nothing in it stands for one agent", async () => {
-    const endpoint = {
+describe("a LiveKit connection that names a worker behind a token endpoint", () => {
+  const endpoint = (agentName: string) =>
+    ({
       agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
+        agentName,
       },
       credentials: { headers: '{"Authorization":"Bearer not-a-real-token"}' },
-    } as const;
+    }) as const;
 
+  it("lands on one agent when the same worker is registered twice", async () => {
     const first = await registerAgent(actingIn(acme.project), {
       agentPlatform: "livekit",
       name: "Endpoint worker",
-      connection: endpoint,
+      connection: endpoint("front-desk"),
     });
     const again = await registerAgent(actingIn(acme.project), {
       agentPlatform: "livekit",
       name: "Endpoint worker, second team",
-      connection: endpoint,
+      connection: endpoint("front-desk"),
     });
 
     expect(first.result).toBe("created");
-    expect(again.result).toBe("created");
-    expect(again.agent.id).not.toBe(first.agent.id);
+    expect(again.result).toBe("reused");
+    expect(again.agent.id).toBe(first.agent.id);
+  });
+
+  it("creates for another worker behind the same endpoint", async () => {
+    const first = await registerAgent(actingIn(acme.project), {
+      agentPlatform: "livekit",
+      name: "Endpoint day shift",
+      connection: endpoint("day-shift"),
+    });
+    const other = await registerAgent(actingIn(acme.project), {
+      agentPlatform: "livekit",
+      name: "Endpoint night shift",
+      connection: endpoint("night-shift"),
+    });
+
+    expect(first.result).toBe("created");
+    expect(other.result).toBe("created");
+    expect(other.agent.id).not.toBe(first.agent.id);
   });
 });

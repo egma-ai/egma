@@ -100,29 +100,34 @@ endpoint supports voice.
 - `livekit_room.project_credentials`: Egma stores the project key pair sealed,
   mints a token, creates the room, and dispatches an exact worker name.
 - `livekit_room.customer_token_endpoint`: the customer keeps the signing key
-  and exposes a public HTTPS endpoint that returns a room token. Egma stores
-  only the endpoint authentication headers sealed.
+  and exposes a public HTTPS endpoint in LiveKit's standard token endpoint
+  format. Egma asks it for a room token and the server URL, and names the
+  worker to dispatch in the request. Egma stores the endpoint URL, the agent
+  name, optional metadata, and the sealed auth headers. It stores no server
+  URL. See [LiveKit token endpoint](/integrations/livekit-token-endpoint).
 
 These are access variants of the same connection type, not different agent
 platforms.
 
 #### What a LiveKit worker reads
 
-A project-credentials connection can store a `metadata` JSON object inside a
-string. Egma gives the same bytes to both LiveKit metadata channels:
+A LiveKit connection can store a `metadata` JSON object inside a string. Egma
+gives the same bytes to the LiveKit metadata channels it can reach:
 
 | Channel | Worker path | When |
 |---|---|---|
-| Room metadata | `ctx.room.metadata` | Every simulation |
-| Dispatch metadata | `ctx.job.metadata` | Every named-worker dispatch |
+| Room metadata | `ctx.room.metadata` | Every project-credentials simulation |
+| Dispatch metadata | `ctx.job.metadata` | Every simulation, on both variants |
 
 Egma adds no scenario, persona, expected behavior, or mock-tool answer to this
 metadata. A worker must not receive the test script that defines its simulation.
 The room name tells the Egma SDK that the worker is in a simulation.
 
-The customer-token-endpoint variant takes no dispatch name or metadata. Without
-the project key pair, Egma cannot create the room or dispatch a named worker;
-the customer's endpoint owns those actions.
+On the customer-token-endpoint variant Egma cannot create the room, so only the
+dispatch channel carries the metadata. Egma sends the agent name and the
+metadata to the endpoint inside the request's `room_config`, and the endpoint
+copies that block into the token it mints. LiveKit then dispatches the worker
+when the room is created.
 
 ## Create connections with skills and the CLI
 

@@ -283,15 +283,32 @@ describe("what a livekit connection is made of", () => {
   });
 
   /**
-   * The token-endpoint shape holds no agent name at all, so it stands for no
-   * vendor agent and every registration through it creates. That is the whole
-   * job of an identity that may answer `undefined`.
+   * A config with no agent name stands for no vendor agent, so every
+   * registration through it creates. That is the whole job of an identity
+   * that may answer `undefined`.
    */
   it("finds no identity in a config that carries no agent name", () => {
     const reuse = descriptorOf("livekit_room").reuse;
     expect(
-      reuse?.identityOf({ url: A_URL, tokenEndpoint: AN_ENDPOINT }),
+      reuse?.identityOf({ tokenEndpoint: AN_ENDPOINT }),
     ).toBeUndefined();
+  });
+
+  /**
+   * The token-endpoint shape holds no server url — the endpoint's answer
+   * names the server — so the endpoint stands in for it: one worker behind
+   * one endpoint is one agent, registered from the UI or the CLI alike.
+   */
+  it("reads a token-endpoint identity off the endpoint and the agent name", () => {
+    const reuse = descriptorOf("livekit_room").reuse;
+    const one = reuse?.identityOf({ tokenEndpoint: AN_ENDPOINT, agentName: "front-desk" });
+    expect(one).toBeDefined();
+    expect(
+      reuse?.identityOf({ tokenEndpoint: AN_ENDPOINT, agentName: "front-desk" }),
+    ).toBe(one);
+    expect(
+      reuse?.identityOf({ tokenEndpoint: AN_ENDPOINT, agentName: "night-shift" }),
+    ).not.toBe(one);
   });
 });
 
@@ -545,11 +562,9 @@ describe("a LiveKit room connection's modality", () => {
         "chat",
       ),
     ).toThrow(
-      "a token-endpoint livekit connection speaks voice: Egma asks your " +
-        "endpoint for a token and never dispatches the worker itself, so " +
-        "it has no way to tell the agent to answer in text. Chat is " +
-        "offered on the LiveKit project credentials access variant, where " +
-        "Egma dispatches the named worker and sends the modality with it.",
+      "a token-endpoint livekit connection speaks voice: chat is offered " +
+        "on the LiveKit project credentials access variant, where Egma " +
+        "mints the room whose name tells the worker it is in a chat.",
     );
   });
 
@@ -649,14 +664,49 @@ describe("a LiveKit room connection's credentials", () => {
  * and what it will not hold because it has no power to use it.
  */
 describe("a livekit connection that names a token endpoint", () => {
-  const AT = { url: A_URL, tokenEndpoint: AN_ENDPOINT };
+  const AT = { tokenEndpoint: AN_ENDPOINT, agentName: "front-desk" };
   const HEADERS = { headers: '{"Authorization":"Bearer sentinel-not-real"}' };
 
-  it("holds a url and an endpoint, both stored as they were written", () => {
+  it("holds an endpoint and an agent name, both stored as they were written", () => {
     expect(validConfig("livekit_room", "livekit_room.customer_token_endpoint", AT)).toEqual(AT);
     expect(
-      validConfig("livekit_room", "livekit_room.customer_token_endpoint", { url: A_URL, tokenEndpoint: `  ${AN_ENDPOINT}  ` }),
+      validConfig("livekit_room", "livekit_room.customer_token_endpoint", { tokenEndpoint: `  ${AN_ENDPOINT}  `, agentName: "front-desk" }),
     ).toEqual(AT);
+  });
+
+  /**
+   * The endpoint's answer names the LiveKit server — `server_url` beside the
+   * token, as LiveKit's own token endpoints answer — so a url held here would
+   * be a second answer to a question the endpoint already settles.
+   */
+  it("holds no server url, and says which keys it holds", () => {
+    expect(() => validConfig("livekit_room", "livekit_room.customer_token_endpoint", { ...AT, url: A_URL })).toThrow(
+      'a token-endpoint livekit connection\'s config has no key "url"; ' +
+        "it holds tokenEndpoint, agentName, metadata (optional)",
+    );
+  });
+
+  /**
+   * Demanded here for the reason it is demanded on the key-pair shape: egma
+   * asks the endpoint for this worker by name, so the record names the agent
+   * it graded.
+   */
+  it("demands the worker's name", () => {
+    expect(() => validConfig("livekit_room", "livekit_room.customer_token_endpoint", { tokenEndpoint: AN_ENDPOINT })).toThrow(
+      /agentName/,
+    );
+    expect(() => validConfig("livekit_room", "livekit_room.customer_token_endpoint", { tokenEndpoint: AN_ENDPOINT, agentName: "  " })).toThrow(
+      /agentName/,
+    );
+  });
+
+  it("carries the worker's metadata when given, as a JSON object in a string", () => {
+    expect(
+      validConfig("livekit_room", "livekit_room.customer_token_endpoint", { ...AT, metadata: '{"tenant":"acme"}' }),
+    ).toEqual({ ...AT, metadata: '{"tenant":"acme"}' });
+    expect(() => validConfig("livekit_room", "livekit_room.customer_token_endpoint", { ...AT, metadata: "tenant=acme" })).toThrow(
+      "the config's metadata must be a JSON object written in a string",
+    );
   });
 
   it("takes only a public https endpoint", () => {
@@ -684,24 +734,9 @@ describe("a livekit connection that names a token endpoint", () => {
       "https:acme.example",
       "",
     ]) {
-      expect(() => validConfig("livekit_room", "livekit_room.customer_token_endpoint", { url: A_URL, tokenEndpoint })).toThrow(
+      expect(() => validConfig("livekit_room", "livekit_room.customer_token_endpoint", { ...AT, tokenEndpoint })).toThrow(
         "the config's tokenEndpoint must be a public https URL, which " +
           "looks like https://example.com/egma/livekit-token",
-      );
-    }
-  });
-
-  /**
-   * Both are powers a key pair buys, and this shape has no key pair: it cannot
-   * create the room that would carry the metadata, and cannot dispatch the
-   * agent that would be named. A key egma would silently ignore is worse than
-   * one it refuses by name.
-   */
-  it("has no place for an agent name or metadata, and says which keys it holds", () => {
-    for (const key of ["agentName", "metadata"]) {
-      expect(() => validConfig("livekit_room", "livekit_room.customer_token_endpoint", { ...AT, [key]: "front-desk" })).toThrow(
-        `a token-endpoint livekit connection's config has no key "${key}"; ` +
-          "it holds url, tokenEndpoint",
       );
     }
   });
@@ -778,7 +813,7 @@ describe("a livekit connection that names a token endpoint", () => {
  * them looking for a typo that is not there.
  */
 describe("a LiveKit connection that is half of each access variant", () => {
-  const AT = { url: A_URL, tokenEndpoint: AN_ENDPOINT };
+  const AT = { tokenEndpoint: AN_ENDPOINT, agentName: "front-desk" };
   const KEYS = { apiKey: "APIhx4bmvHnLcWXYZ", apiSecret: "livekit-secret-9f2c1d" };
   const HEADERS = { headers: '{"Authorization":"Bearer sentinel-not-real"}' };
 

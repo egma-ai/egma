@@ -2042,7 +2042,7 @@ function LiveKitSimulationStep({
         }
         description={
           endpoint
-            ? "Egma requests a short-lived room token from your endpoint for every simulation."
+            ? "For every simulation Egma asks your endpoint for a short-lived room token, your LiveKit server URL, and the dispatch of the worker named below."
             : undefined
         }
       />
@@ -2064,11 +2064,7 @@ function LiveKitSimulationStep({
       <Field
         label="LiveKit agent name*"
         htmlFor="livekit-agent-name"
-        hint={
-          endpoint
-            ? "This names the agent in Egma. Your token endpoint decides which deployed worker joins the room."
-            : "Enter the exact agent name shown in your LiveKit Cloud dashboard."
-        }
+        hint="Enter the exact agent name shown in your LiveKit Cloud dashboard."
       >
         <Input
           id="livekit-agent-name"

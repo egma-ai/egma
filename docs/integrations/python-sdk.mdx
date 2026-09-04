@@ -105,7 +105,7 @@ Monitoring stays empty until a trace reaches Egma, then lists each production co
 
 Both functions ask one question, and they read the answer off the same place: **the name of the room the job was given.**
 
-Every room Egma holds a simulation in is named with the prefix `egma-sim-`. That prefix is a fixed, published contract. It does not change between releases, and it is the same on a self-hosted Egma as on the hosted one. Egma names the room before anything is dispatched into it, so the prefix is there on every one of the three dispatch paths that can put your worker in that room — Egma dispatching it by name where it holds your project keys, or your own token endpoint dispatching it, whether by an API call of its own or by a `RoomConfiguration` inside the token it mints.
+Every room Egma holds a simulation in is named with the prefix `egma-sim-`. That prefix is a fixed, published contract. It does not change between releases, and it is the same on a self-hosted Egma as on the hosted one. Egma names the room before anything is dispatched into it, so the prefix is there on every one of the three dispatch paths that can put your worker in that room — Egma dispatching it by name where it holds your project keys, or your own token endpoint dispatching the worker Egma asks for by name, whether by the `RoomConfiguration` Egma sends for the token it mints or by an API call of its own.
 
 Egma joins that room as a participant named `egma-persona`, or `egma-persona-<simulation id>` where your own endpoint minted the token. That identity is the address `mockable` sends mock-tool calls to. It is published for the same reason and is fixed in the same way.
 

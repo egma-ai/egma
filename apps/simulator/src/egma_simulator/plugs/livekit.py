@@ -46,16 +46,23 @@ it comes from the environment.
 and the secret that signs tokens for the whole project never leaves the
 customer's side:
 
-- ``url`` (string, required) — as above, and what the join falls back on
-  where the endpoint's answer names no server of its own.
 - ``tokenEndpoint`` (string, required) — the public ``https`` address egma
-  POSTs to, once per simulation. The simulator repeats the HTTPS check before an
-  auth header or room token can cross the network.
+  POSTs to, once per simulation, in LiveKit's standard token request. The
+  simulator repeats the HTTPS check before an auth header or room token can
+  cross the network. The answer names the LiveKit server to join, so this
+  shape holds no ``url`` of its own.
+- ``agentName`` (string, required) — as above. egma cannot dispatch here, so
+  it asks the endpoint for this worker by name, in the request's
+  ``room_config``; the endpoint copies that block into the token it mints and
+  LiveKit dispatches the worker when the room is created.
+- ``metadata`` (a JSON object in a string, optional) — as above, carried in
+  the same ``room_config`` as that dispatch's metadata. The job channel only:
+  egma does not create this room, so the room's own metadata is the
+  endpoint's.
 
-Its credentials are that endpoint's auth ``headers``. They are required. There
-is no agent name and no metadata, because both are powers a key pair buys: this
-shape holds none, so **dispatching is the endpoint's job** — and a room nobody
-joined says exactly that.
+Its credentials are that endpoint's auth ``headers``. They are required.
+**Dispatching is the endpoint's job** — egma names the worker, the endpoint
+puts it in the room — and a room nobody joined says exactly that.
 
 ## Media
 

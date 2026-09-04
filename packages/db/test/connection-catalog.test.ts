@@ -131,12 +131,29 @@ describe("what a browser is told about a simulation connection", () => {
     expect(fields.get("metadata")?.help).toContain("ctx.room.metadata");
     expect(fields.get("metadata")?.help).toContain("ctx.job.metadata");
 
+    // The endpoint variant holds no server url — its endpoint answers with
+    // one — and asks for the same worker name and metadata the key pair does.
     const endpoint = connectionOptionMetadata().find(
       (one) => one.accessVariant === "livekit_room.customer_token_endpoint",
     );
-    expect(endpoint?.fields.find((field) => field.key === "url")?.label).toBe(
-      "LiveKit WebSocket URL",
-    );
+    expect(endpoint?.fields.map((field) => field.key)).toEqual([
+      "tokenEndpoint",
+      "agentName",
+      "metadata",
+    ]);
+    expect(
+      endpoint?.fields.find((field) => field.key === "agentName"),
+    ).toMatchObject({ label: "LiveKit agent name", required: true });
+    expect(
+      endpoint?.fields.find((field) => field.key === "metadata"),
+    ).toMatchObject({
+      label: "Agent metadata",
+      required: false,
+      afterCredentials: true,
+    });
+    expect(
+      endpoint?.fields.find((field) => field.key === "metadata")?.help,
+    ).toContain("ctx.job.metadata");
   });
 
   /**

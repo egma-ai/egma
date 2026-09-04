@@ -474,14 +474,11 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     // egma opens the room and the customer's agent joins it.
     topology: "agent-dials-out",
     /**
-     * Two access variants answer one question: who mints the
-     * token that opens the room. Nothing carries over between them — a
-     * connection that names an endpoint holds no key pair, so it can neither
-     * create the room that carries metadata nor dispatch the worker that is
-     * handed it, which is one power covering both of the channels a metadata
-     * value rides. `agentName` and `metadata` are therefore not among that
-     * variant's keys, and both are refused on it by name rather than silently
-     * ignored.
+     * Two access variants answer one question: who mints the token that opens
+     * the room. Both name the worker and may carry its metadata: the key-pair
+     * variant dispatches it itself, the endpoint variant asks its endpoint for
+     * it by name in LiveKit's standard token request. Only the key-pair
+     * variant holds a server url — the endpoint's answer names the server.
      */
     accessVariants: [
       {
@@ -513,19 +510,21 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
       {
         id: "livekit_room.customer_token_endpoint",
         named: "a token-endpoint livekit connection",
-        // Voice only, on a kind that speaks both: egma joins a room this
-        // variant's endpoint let it into and never dispatches the worker, so
-        // it has nowhere to ask the agent to go text-only.
+        // Voice only, on a kind that speaks both: the chat lane is proven
+        // where egma mints the room whose name tells the worker it is in a
+        // chat, and that is the key-pair variant.
         modalities: {
           speaks: ["voice"],
           refusal:
-            "a token-endpoint livekit connection speaks voice: Egma asks your " +
-            "endpoint for a token and never dispatches the worker itself, so " +
-            "it has no way to tell the agent to answer in text. Chat is " +
+            "a token-endpoint livekit connection speaks voice: chat is " +
             "offered on the LiveKit project credentials access variant, where " +
-            "Egma dispatches the named worker and sends the modality with it.",
+            "Egma mints the room whose name tells the worker it is in a chat.",
         },
-        config: { url: livekitServerUrl, tokenEndpoint: tokenEndpointUrl },
+        config: {
+          tokenEndpoint: tokenEndpointUrl,
+          agentName: nonEmptyString,
+          metadata: optional(jsonObjectText),
+        },
         credentials: {
           required: true,
           fields: ["headers"],
@@ -549,10 +548,10 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     reuse: {
       matchedKeys: ["agentName"],
       identityOf: (config) => {
-        const url = config["url"];
+        const server = config["url"] ?? config["tokenEndpoint"];
         const agentName = config["agentName"];
-        if (url === undefined || agentName === undefined) return undefined;
-        return `${livekitServerOrigin(url)}|${agentName}`;
+        if (server === undefined || agentName === undefined) return undefined;
+        return `${livekitServerOrigin(server)}|${agentName}`;
       },
     },
     simulatorAdapter: true,

@@ -1710,8 +1710,8 @@ describe("a livekit connection", () => {
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: { headers: '{"Authorization":"Bearer not-a-real-token"}' },
       },
@@ -1726,8 +1726,8 @@ describe("a livekit connection", () => {
       modality: "voice",
       topology: "agent-dials-out",
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
+        agentName: "front-desk",
       },
       credentialsHint: "Authorization",
     });
@@ -1747,8 +1747,8 @@ describe("a livekit connection", () => {
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
-          url: "ws://livekit.internal:7880",
           tokenEndpoint: "https://127.0.0.1/egma",
+          agentName: "front-desk",
         },
         credentials: { headers: '{"Authorization":"Bearer not-real"}' },
       },
@@ -1776,26 +1776,25 @@ describe("a livekit connection", () => {
     readonly message: string;
   }[] = [
     {
-      // The kind speaks chat; this way of reaching it cannot. Egma asks the
-      // customer's endpoint for a token and never dispatches the worker, so
-      // there is nowhere to tell the agent to answer in text.
-      named: "chat on the access variant Egma cannot dispatch through",
+      // The kind speaks chat; this way of reaching it does not yet. The room
+      // whose name tells the worker it is in a chat is minted by the
+      // customer's endpoint here, and the chat lane is proven only where Egma
+      // mints it.
+      named: "chat on the access variant the chat lane is not proven on",
       slug: "chat_on_endpoint",
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "chat",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: { headers: '{"Authorization":"Bearer not-real"}' },
       },
       message:
-        "a token-endpoint livekit connection speaks voice: Egma asks your " +
-        "endpoint for a token and never dispatches the worker itself, so " +
-        "it has no way to tell the agent to answer in text. Chat is " +
-        "offered on the LiveKit project credentials access variant, where " +
-        "Egma dispatches the named worker and sends the modality with it.",
+        "a token-endpoint livekit connection speaks voice: chat is offered " +
+        "on the LiveKit project credentials access variant, where Egma mints " +
+        "the room whose name tells the worker it is in a chat.",
     },
     {
       named: "a word that is not a modality at all",
@@ -1885,8 +1884,8 @@ describe("a livekit connection", () => {
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
       },
       message:
@@ -1902,8 +1901,8 @@ describe("a livekit connection", () => {
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: undefined,
       },
@@ -1934,8 +1933,8 @@ describe("a livekit connection", () => {
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "wss://acme.livekit.cloud",
+          agentName: "front-desk",
         },
         credentials: { headers: '{"Authorization":"Bearer not-real"}' },
       },
@@ -1944,21 +1943,22 @@ describe("a livekit connection", () => {
         "looks like https://example.com/egma/livekit-token",
     },
     {
-      // Dispatching is a power a key pair buys, and this shape has none.
-      named: "an agent to dispatch on a connection that cannot dispatch",
-      slug: "agent_name_with_endpoint",
+      // The endpoint's answer names the server, so a url here would be a
+      // second answer to a question the endpoint settles.
+      named: "a server url on a connection whose endpoint names the server",
+      slug: "url_with_endpoint",
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
           agentName: "front-desk",
+          url: "wss://acme.livekit.cloud",
         },
         credentials: { headers: '{"Authorization":"Bearer not-real"}' },
       },
       message:
-        'a token-endpoint livekit connection\'s config has no key "agentName"; ' +
-        "it holds url, tokenEndpoint",
+        'a token-endpoint livekit connection\'s config has no key "url"; ' +
+        "it holds tokenEndpoint, agentName, metadata (optional)",
     },
     {
       named: "headers that are not a JSON object of name to value",
@@ -1966,8 +1966,8 @@ describe("a livekit connection", () => {
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: { headers: "Authorization: Bearer not-real" },
       },
@@ -2127,8 +2127,8 @@ describe("a livekit connection", () => {
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
+        agentName: "front-desk",
       },
       credentials: { headers },
       ...overrides,

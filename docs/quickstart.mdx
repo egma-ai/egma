@@ -184,8 +184,9 @@ egma connect \
 
 Egma passes the optional `--metadata <json>` value as room and dispatch metadata
 on this variant. For a customer token endpoint, the coding agent uses the
-catalog's voice option, `--token-endpoint <https-url>`, and supplies the JSON
-auth headers through `EGMA_LIVEKIT_TOKEN_HEADERS`.
+catalog's voice option with `--dispatch-name` and `--token-endpoint <https-url>`,
+no `--livekit-url`, and supplies the JSON auth headers through
+`EGMA_LIVEKIT_TOKEN_HEADERS`. The endpoint answers with the server URL.
 
 The CLI accepts LiveKit secrets only from these environment variables:
 

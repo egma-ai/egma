@@ -481,16 +481,18 @@ function providerFacts(
   );
   const liveKitAgentName = sharedConnectionValue(
     rooms.map(
-      (connection) =>
-        connection.config["agentName"] ??
-        (connection.accessVariant === "livekit_room.customer_token_endpoint"
-          ? "Provided by token endpoint"
-          : "Not set"),
+      (connection) => connection.config["agentName"] ?? "Not set",
     ),
     "Not set",
   );
   const webSocketUrl = sharedConnectionValue(
-    rooms.map((connection) => connection.config["url"] ?? "Not saved"),
+    rooms.map(
+      (connection) =>
+        connection.config["url"] ??
+        (connection.accessVariant === "livekit_room.customer_token_endpoint"
+          ? "Answered by your token endpoint"
+          : "Not saved"),
+    ),
     "Not saved",
   );
   return [

@@ -740,8 +740,8 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
+        agentName: "front-desk",
       },
       credentials: { headers: HEADERS },
       ...overrides,
@@ -760,8 +760,8 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
       productLabel: "LiveKit token endpoint",
       topology: "agent-dials-out",
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
+        agentName: "front-desk",
       },
       // The name of the header and no part of its value: a bearer token has
       // no public half whose tail would be safe to print.
@@ -824,8 +824,8 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
     await expect(
       updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
       }),
     ).rejects.toThrow('config has no key "tokenEndpoint"');
@@ -843,8 +843,8 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
     await expect(
       updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: { headers: HEADERS },
       }),

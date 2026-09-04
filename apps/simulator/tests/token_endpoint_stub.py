@@ -11,9 +11,12 @@ docs a thing that is tested rather than a thing that was written.
 
 What it can be told to do:
 
-- ``token`` — what it mints, and ``alias`` is which of the three names the
-  contract accepts it comes back under.
-- ``server_url`` — the optional override, sent only when it is set.
+- ``token`` — what it mints, and ``alias`` is which of the names the
+  contract accepts it comes back under. LiveKit's own ``participant_token``
+  unless a test says otherwise.
+- ``server_url`` — the server the answer names, under ``server_url_key``:
+  LiveKit's own ``server_url`` unless a test says otherwise. ``None`` is an
+  answer that names no server, which the contract refuses.
 - ``status`` — anything outside 2xx is an endpoint saying no.
 - ``body`` — a whole JSON body of its own, for the answers that are
   well-formed JSON and still outside the contract.
@@ -35,6 +38,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 TOKEN_PATH = "/egma/livekit-token"
+DEFAULT_SERVER_URL = "wss://acme.livekit.cloud"
+"""The server a scripted answer names unless a test says otherwise."""
 """Where the fake serves. A path rather than the root, because a real one
 sits beside whatever else the customer's service does."""
 
@@ -63,8 +68,9 @@ class FakeTokenEndpoint:
         self,
         *,
         token: str = "fake.token.for.tests",
-        alias: str = "token",
-        server_url: str | None = None,
+        alias: str = "participant_token",
+        server_url: str | None = DEFAULT_SERVER_URL,
+        server_url_key: str = "server_url",
         status: int = 200,
         body: dict[str, Any] | None = None,
         raw: str | None = None,
@@ -73,6 +79,7 @@ class FakeTokenEndpoint:
         self.token = token
         self.alias = alias
         self.server_url = server_url
+        self.server_url_key = server_url_key
         self.status = status
         self.body = body
         self.raw = raw
@@ -109,7 +116,7 @@ class FakeTokenEndpoint:
             else {self.alias: self.token}
         )
         if self.server_url is not None and self.body is None:
-            held["serverUrl"] = self.server_url
+            held[self.server_url_key] = self.server_url
         return (
             self.status,
             json.dumps(held).encode("utf-8"),

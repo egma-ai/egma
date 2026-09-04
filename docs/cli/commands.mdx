@@ -199,9 +199,12 @@ egma connect \
   --name front-desk \
   --modality voice \
   --access-variant livekit_room.customer_token_endpoint \
-  --livekit-url wss://acme.livekit.cloud \
+  --dispatch-name receptionist \
   --token-endpoint https://tokens.example/livekit
 ```
+
+A token-endpoint connection takes no `--livekit-url`. The endpoint answers
+with the server URL. See [LiveKit token endpoint](/integrations/livekit-token-endpoint).
 
 | Option | Meaning |
 |---|---|
@@ -209,10 +212,10 @@ egma connect \
 | `--name <name>` | Name the Egma agent |
 | `--modality <chat\|voice>` | Exact offered modality |
 | `--access-variant <id>` | Exact offered connection method |
-| `--livekit-url <wss-url>` | LiveKit project WebSocket URL |
-| `--dispatch-name <name>` | Exact registered worker name for project credentials |
+| `--livekit-url <wss-url>` | LiveKit project WebSocket URL, project credentials only |
+| `--dispatch-name <name>` | Exact registered worker name, on both variants |
 | `--token-endpoint <https-url>` | Customer-owned token endpoint for the token-endpoint variant |
-| `--metadata <json>` | Optional JSON object for variants that offer metadata |
+| `--metadata <json>` | Optional JSON object handed to the worker as job metadata |
 
 The current built-in access variants are
 `livekit_room.project_credentials` and
@@ -285,8 +288,9 @@ egma connect record \
   [--name <registration_name>]
 ```
 
-For a token-endpoint target, replace `--dispatch-name` with
-`--token-endpoint <https-url>`; provide exactly one of those flags. Pass
+For a token-endpoint target, replace `--livekit-url` with
+`--token-endpoint <https-url>` and keep `--dispatch-name`; provide exactly one
+of the two URL flags. Pass
 `--metadata` when the settled setup included it; omission requires a target
 with no metadata. `--modality`, `--access-variant`, and `--name` narrow or
 prefer a match but do not replace the required provider-public identity. If several equivalent
