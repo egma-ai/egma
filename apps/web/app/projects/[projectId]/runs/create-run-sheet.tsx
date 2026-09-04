@@ -544,16 +544,21 @@ export function CreateRunSheet({
             ) : agentDetail.status === "signed-out" ? null : (
               <Failure message={agentDetail.refusal.message} />
             )}
+            {/*
+              * The note about what this connection will do with the suite's
+              * own test data, in the connection's own group and 12px under
+              * the field that decides it. It draws nothing when there is
+              * nothing to say, so the group closes up behind it.
+              */}
+            {chosenConnection === undefined ||
+            suiteTests?.status !== "ready" ||
+            laterSuiteTests === null ? null : (
+              <RunNote
+                connection={chosenConnection}
+                tests={[...suiteTests.value.tests, ...laterSuiteTests]}
+              />
+            )}
           </div>
-        )}
-
-        {chosenConnection === undefined ||
-        suiteTests?.status !== "ready" ||
-        laterSuiteTests === null ? null : (
-          <RunNote
-            connection={chosenConnection}
-            tests={[...suiteTests.value.tests, ...laterSuiteTests]}
-          />
         )}
 
         {connectionId === "" ? null : (

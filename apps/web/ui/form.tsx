@@ -28,7 +28,13 @@ import { FieldHintContext } from "./field-hint.ts";
  * `DESIGN.md` sets one label grammar for the whole product: a mandatory
  * field's label ends in `*` and an optional one ends in `[optional]`. The
  * colour of that star is Ember, and it is decided here rather than by each
- * screen, so one star cannot be a different colour from the next.
+ * screen, so no two form labels can wear a different one.
+ *
+ * The tests grid's column headings are the one place outside a form that draws
+ * the star, and they draw it in the heading's own muted colour: a heading row
+ * carries four of them side by side, and four Ember marks across it read as a
+ * state the table is in (founder, 2026-09-04). That is a heading rather than a
+ * label, and it does not come through here.
  *
  * **The star stays inside the label's own text.** It is a `<span>` for its
  * colour and its 4px of air, not a separate element beside the label, so the
