@@ -205,6 +205,17 @@ KNOWN_CONFIG_KEYS = frozenset({"url", "agentName"})
 KNOWN_CREDENTIAL_KEYS = frozenset({"apiKey", "apiSecret"})
 URL_SCHEMES = ("ws://", "wss://", "http://", "https://")
 
+SERVER_URL_SCHEMES = ("wss://", "https://")
+"""What a server named by a token endpoint's answer may start with.
+
+Narrower than :data:`URL_SCHEMES` on purpose. A stored ``url`` is the
+customer's own, written by someone who can see their server, and a
+self-hosted LiveKit on a private ``ws://`` address is theirs to name. A
+``server_url`` arrives at simulation time from whatever answered the
+endpoint, and it decides where the just-minted token is sent next — so it
+crosses the network under TLS or not at all.
+"""
+
 ENDPOINT_CONFIG_KEYS = frozenset({"tokenEndpoint", "agentName"})
 """What the token-endpoint access variant's config holds — and what it
 does not.
@@ -726,6 +737,43 @@ def _token_endpoint_url(endpoint: str) -> str:
     return endpoint
 
 
+def _server_host(server_url: str) -> tuple[str, int] | None:
+    """The host and port a server url names, or None for one egma will not join.
+
+    A TLS scheme, a hostname, no credentials in the url, and a port that
+    parses: the reading :func:`_token_endpoint_url` gives a stored endpoint,
+    applied to an address that arrived in an answer. Parsing is not
+    permission to reach the host; that is decided against the addresses
+    the host stands for, in :meth:`RoomLifecycle._joinable_server`.
+    """
+    try:
+        parsed = urlsplit(server_url)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        not server_url.lower().startswith(SERVER_URL_SCHEMES)
+        or parsed.scheme not in ("wss", "https")
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return None
+    return hostname, port if port is not None else 443
+
+
+def _unjoinable(endpoint: str, named: str) -> MediaBackendError:
+    """The refusal for a server url egma will not send a token to."""
+    return MediaBackendError(
+        f"the token endpoint at {endpoint} answered a {named} Egma cannot "
+        f"join: it must be a {' or '.join(SERVER_URL_SCHEMES)} URL naming a "
+        f"host, because the token is sent there next and Egma sends it over "
+        f"TLS only",
+        ending=ERROR,
+    )
+
+
 def _endpoint_headers(credentials: Any) -> dict[str, str]:
     """What egma sends to authenticate itself to a token endpoint.
 
@@ -1217,18 +1265,23 @@ class RoomLifecycle:
                 ending=ERROR,
             )
 
-        token, server_url = self._minted(endpoint, said)
+        token, named, server_url = self._minted(endpoint, said)
         # The endpoint's answer is the only place the server is named: it
         # knows which of the customer's projects this agent lives in, and the
-        # connection holds no url of its own to prefer over it.
+        # connection holds no url of its own to prefer over it. It is also an
+        # address chosen by whoever answered, so it is held to the rule the
+        # endpoint was held to before the token goes there.
+        await self._joinable_server(endpoint, named, server_url)
         return WayIn(url=server_url, token=token)
 
-    def _minted(self, endpoint: str, said: bytes) -> tuple[str, str]:
+    def _minted(self, endpoint: str, said: bytes) -> tuple[str, str, str]:
         """The token and the server URL out of one answer, or a refusal.
 
         The refusal names the broken part of the published contract, never
         bytes from the endpoint. Those bytes may have come from an internal
-        service and are not safe customer-visible diagnostic text.
+        service and are not safe customer-visible diagnostic text. The key
+        the server came under is answered beside the two, so the check that
+        follows on the server itself can say which spelling it is refusing.
         """
         try:
             held = json.loads(said)
@@ -1275,21 +1328,86 @@ class RoomLifecycle:
                 ending=ERROR,
             )
         server_url = server_url.strip()
-        if not server_url:
+        if named is None or not server_url:
             raise MediaBackendError(
                 f"the token endpoint at {endpoint} answered no server_url: "
                 f"Egma joins the LiveKit server the answer names, under "
                 f"{' or '.join(SERVER_URL_ALIASES)}",
                 ending=ERROR,
             )
-        if not server_url.startswith(URL_SCHEMES):
+        return token.strip(), named, server_url
+
+    async def _joinable_server(
+        self, endpoint: str, named: str, server_url: str
+    ) -> None:
+        """Refuse a server the endpoint named that egma must not join.
+
+        The answer decides where the simulator opens its next connection and
+        sends the token it was just handed, so it is held to the rule the
+        endpoint itself was held to. TLS, first: a ``ws://`` or ``http://``
+        server would carry the token in the clear. Then nothing that
+        resolves inside the deployment: a literal address is judged as
+        written; a name is resolved through the resolver the token request
+        went through, and every answer must be public — because an endpoint
+        that is wrong, or compromised, or simply pointed at a staging server
+        on the office network must not make egma a client of that network.
+
+        The join itself is made by the LiveKit SDK on a socket of its own,
+        so unlike the token request there is no socket factory here to hold
+        the connected address to the checked one. What this enforces is the
+        answer as read; a name that moves between this lookup and the SDK's
+        is the gap that remains, and it is said here rather than implied
+        away.
+        """
+        located = _server_host(server_url)
+        if located is None:
+            raise _unjoinable(endpoint, named)
+        hostname, port = located
+        try:
+            for address in await self._server_addresses(hostname, port):
+                _public_endpoint_address(address)
+        except _UnsafeEndpointAddress as unsafe:
             raise MediaBackendError(
-                f"the token endpoint at {endpoint} answered a {named} Egma "
-                f"cannot join: it must start with one of "
-                f"{', '.join(URL_SCHEMES)}",
+                f"the token endpoint at {endpoint} answered a {named} on a "
+                f"non-public network address; Egma joins only a LiveKit "
+                f"server on the public internet",
                 ending=ERROR,
-            )
-        return token.strip(), server_url
+            ) from unsafe
+        except OSError as unresolved:
+            raise MediaBackendError(
+                f"the token endpoint at {endpoint} answered a {named} whose "
+                f"host could not be resolved",
+                ending=ERROR,
+            ) from unresolved
+
+    async def _server_addresses(self, hostname: str, port: int) -> list[str]:
+        """Every address a server name stands for, or the literal it is.
+
+        A literal address stands for itself and is not looked up. A name
+        goes to the resolver a system-boundary test supplied, or to the
+        default one, with every address family asked for: the SDK may
+        connect over either, so both must pass the policy.
+        """
+        try:
+            ipaddress.ip_address(hostname)
+        except ValueError:
+            pass
+        else:
+            return [hostname]
+
+        import aiohttp
+
+        resolver = self._endpoint_resolver or aiohttp.resolver.DefaultResolver()
+        try:
+            answers = await resolver.resolve(hostname, port, socket.AF_UNSPEC)
+        finally:
+            if resolver is not self._endpoint_resolver:
+                with contextlib.suppress(Exception):
+                    await resolver.close()
+        addresses = [answer.get("host") for answer in answers]
+        if not addresses:
+            raise OSError(f"{hostname} resolved to no address")
+        return addresses
 
     async def _delete_room(self) -> None:
         """Delete the room. Never raises — see :func:`delete_room`."""

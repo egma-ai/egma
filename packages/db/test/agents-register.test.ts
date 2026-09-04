@@ -643,19 +643,21 @@ describe("one LiveKit worker tested over chat and over voice", () => {
  * The token-endpoint shape holds no server url, so the endpoint stands in for
  * the server in the identity: one worker behind one endpoint is one agent,
  * however many times it is registered, and a different worker behind the same
- * endpoint is another.
+ * endpoint is another. The whole route is the endpoint, not its origin: one
+ * gateway commonly mints for a staging project on one path and a production
+ * project on another, and the same worker name behind each is two workers.
  */
 describe("a LiveKit connection that names a worker behind a token endpoint", () => {
-  const endpoint = (agentName: string) =>
+  const endpoint = (
+    agentName: string,
+    tokenEndpoint = "https://acme.example/egma/livekit-token",
+  ) =>
     ({
       agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
-      config: {
-        tokenEndpoint: "https://acme.example/egma/livekit-token",
-        agentName,
-      },
+      config: { tokenEndpoint, agentName },
       credentials: { headers: '{"Authorization":"Bearer not-a-real-token"}' },
     }) as const;
 
@@ -674,6 +676,23 @@ describe("a LiveKit connection that names a worker behind a token endpoint", () 
     expect(first.result).toBe("created");
     expect(again.result).toBe("reused");
     expect(again.agent.id).toBe(first.agent.id);
+  });
+
+  it("creates for the same worker behind another route of one gateway", async () => {
+    const staging = await registerAgent(actingIn(acme.project), {
+      agentPlatform: "livekit",
+      name: "Front desk, staging",
+      connection: endpoint("front-desk", "https://acme.example/staging/token"),
+    });
+    const production = await registerAgent(actingIn(acme.project), {
+      agentPlatform: "livekit",
+      name: "Front desk, production",
+      connection: endpoint("front-desk", "https://acme.example/production/token"),
+    });
+
+    expect(staging.result).toBe("created");
+    expect(production.result).toBe("created");
+    expect(production.agent.id).not.toBe(staging.agent.id);
   });
 
   it("creates for another worker behind the same endpoint", async () => {

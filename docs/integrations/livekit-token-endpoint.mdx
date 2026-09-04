@@ -77,9 +77,12 @@ What you can hold Egma to:
 - **HTTPS to a public host only.** Egma resolves the host again at request time
   and refuses private addresses. It waits 20 seconds for an answer and reads at
   most 64 KiB of it.
-- **One join.** Egma joins once, as that identity, to that room, at the server
-  URL you return. It publishes and subscribes audio. It waits 30 seconds for your
-  worker to join and speak, then ends the simulation as `agent_never_joined`.
+- **One join, over TLS, to a public server.** Egma joins once, as that
+  identity, to that room, at the server URL you return. It holds that URL to the
+  rule it holds your endpoint to: `wss://` or `https://`, and a host that
+  resolves to a public address. It publishes and subscribes audio. It waits 30
+  seconds for your worker to join and speak, then ends the simulation as
+  `agent_never_joined`.
 - **Leave, never delete.** Egma leaves when the conversation ends. It never
   deletes the room, and it never uses the token again.
 
@@ -97,7 +100,7 @@ Any 2xx status with a JSON object. LiveKit's format says `201 Created`. A
 
 | Field | Required | Rule |
 |---|---|---|
-| `server_url` | yes | The LiveKit server Egma connects to. `wss://` or `https://`. Also read under `serverUrl`. |
+| `server_url` | yes | The LiveKit server Egma connects to. `wss://` or `https://` to a public host. Egma refuses a cleartext scheme, credentials in the URL, and a private, loopback, or link-local address. Also read under `serverUrl`. |
 | `participant_token` | yes | The join token. Also read under `participantToken`, `token`, `accessToken`, and `access_token`. |
 | anything else | ignored | LiveKit's development token server returns extra keys. Extra keys never fail. |
 
@@ -294,6 +297,12 @@ tells you which line to look at.
   `participant_token` or one of the other accepted names.
 - **"answered no server_url"**: the body carried a token but no server. Add
   `server_url` to the answer.
+- **"answered a server_url Egma cannot join"**: the server URL is not `wss://`
+  or `https://`, or carries credentials. Egma sends the token over TLS only.
+- **"answered a server_url on a non-public network address"**: the server
+  resolves inside a private network. Egma refuses it, as it refuses the
+  endpoint itself. A self-hosted LiveKit on a private network uses project
+  credentials instead.
 - **"no agent named … joined … nothing dispatched the agent"**: the whole path
   worked and the room stayed empty. Your endpoint did not copy `room_config` into
   the token, or nothing else dispatched that worker, or no worker registered

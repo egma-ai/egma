@@ -371,6 +371,37 @@ def _test_endpoint_socket(addr_info: tuple[object, ...]) -> socket.socket:
     return socket.socket(family=family, type=kind, proto=protocol)  # type: ignore[arg-type]
 
 
+class PublicNameResolver:
+    """The fake's network edge for names: every hostname stands on one
+    public address.
+
+    The token request never asks it — the fake endpoint is a literal
+    loopback address, and aiohttp connects to a literal without a lookup.
+    The server an endpoint answers with is a name, and the driver looks
+    that name up before it sends the token there; this is what says where
+    the name stands, so the production check runs and passes, and a test
+    that wants it to refuse hands the driver a resolver of its own.
+    """
+
+    async def resolve(
+        self, host: str, port: int = 0, family: int = socket.AF_UNSPEC
+    ) -> list[dict[str, object]]:
+        del family
+        return [
+            {
+                "hostname": host,
+                "host": "93.184.216.34",
+                "port": port,
+                "family": socket.AF_INET,
+                "proto": socket.IPPROTO_TCP,
+                "flags": socket.AI_NUMERICHOST,
+            }
+        ]
+
+    async def close(self) -> None:
+        return None
+
+
 class RoomStubBackend(LiveKitRoomBackend):
     """The real room driver, with the calls it makes of a LiveKit answered
     here: making the room, dispatching into it, joining it, deleting it.
@@ -393,6 +424,8 @@ class RoomStubBackend(LiveKitRoomBackend):
                     "https://", "http://", 1
                 ),
             )
+        if built.get("endpoint_resolver") is None:
+            built["endpoint_resolver"] = PublicNameResolver()
         super().__init__(**built)
         self.stub = stub
         self.agent_is_coming = False
@@ -977,6 +1010,8 @@ class ChatRoomStubBackend(LiveKitChatRoomBackend):
                     "https://", "http://", 1
                 ),
             )
+        if built.get("endpoint_resolver") is None:
+            built["endpoint_resolver"] = PublicNameResolver()
         super().__init__(**built)
         self.stub = stub
         self.agent_is_coming = False

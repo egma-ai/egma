@@ -7,6 +7,7 @@ import {
   descriptorOf,
   gatedConfig,
   livekitServerOrigin,
+  tokenEndpointIdentity,
   modalitiesOf,
   noSimulatorAdapterMessage,
   optional,
@@ -309,6 +310,73 @@ describe("what a livekit connection is made of", () => {
     expect(
       reuse?.identityOf({ tokenEndpoint: AN_ENDPOINT, agentName: "night-shift" }),
     ).not.toBe(one);
+  });
+
+  /**
+   * One gateway mints for many projects, on routes it chooses: the same worker
+   * name behind `/staging/token` and behind `/production/token` is two workers,
+   * and so is one told apart by a query. The origin alone would fold them.
+   */
+  it("keeps two routes of one endpoint apart, and one route's spellings together", () => {
+    const reuse = descriptorOf("livekit_room").reuse;
+    const staging = reuse?.identityOf({
+      tokenEndpoint: "https://tokens.acme.example/staging/token",
+      agentName: "front-desk",
+    });
+    expect(staging).toBeDefined();
+    expect(
+      reuse?.identityOf({
+        tokenEndpoint: "https://tokens.acme.example/production/token",
+        agentName: "front-desk",
+      }),
+    ).not.toBe(staging);
+    expect(
+      reuse?.identityOf({
+        tokenEndpoint: "https://tokens.acme.example/staging/token?tenant=b",
+        agentName: "front-desk",
+      }),
+    ).not.toBe(staging);
+    expect(
+      reuse?.identityOf({
+        tokenEndpoint: "https://TOKENS.Acme.example.:443/staging/token",
+        agentName: "front-desk",
+      }),
+    ).toBe(staging);
+  });
+
+  /**
+   * A worker reached through a key pair and one reached through an endpoint
+   * are two registrations egma cannot know to be one worker, so they never
+   * compare equal — even where the endpoint and the server share a host.
+   */
+  it("never reads a server url and a token endpoint as one identity", () => {
+    const reuse = descriptorOf("livekit_room").reuse;
+    expect(
+      reuse?.identityOf({ url: "wss://acme.example", agentName: "front-desk" }),
+    ).not.toBe(
+      reuse?.identityOf({ tokenEndpoint: "https://acme.example", agentName: "front-desk" }),
+    );
+  });
+});
+
+describe("a token endpoint read as an identity", () => {
+  it.each([
+    { written: "https://acme.example/egma/livekit-token", identity: "acme.example/egma/livekit-token" },
+    { written: "https://acme.example:443/egma/livekit-token", identity: "acme.example/egma/livekit-token" },
+    { written: "https://ACME.Example./egma/livekit-token", identity: "acme.example/egma/livekit-token" },
+    { written: "  https://acme.example/egma/livekit-token  ", identity: "acme.example/egma/livekit-token" },
+    { written: "https://acme.example:8443/token", identity: "acme.example:8443/token" },
+    { written: "https://acme.example", identity: "acme.example/" },
+    { written: "https://acme.example/", identity: "acme.example/" },
+    { written: "https://acme.example/Token", identity: "acme.example/Token" },
+    { written: "https://acme.example/token?tenant=a", identity: "acme.example/token?tenant=a" },
+    { written: "https://acme.example/token#dev", identity: "acme.example/token" },
+  ])("reads $written as $identity", ({ written, identity }) => {
+    expect(tokenEndpointIdentity(written)).toBe(identity);
+  });
+
+  it("answers an unparseable endpoint with itself", () => {
+    expect(tokenEndpointIdentity("acme.example/token")).toBe("acme.example/token");
   });
 });
 

@@ -226,6 +226,28 @@ function livekitServerOrigin(url: string): string {
   return parsed.port === "" ? host : `${host}:${parsed.port}`;
 }
 
+/**
+ * Which token endpoint a url names, as one comparable string: the whole
+ * route, not the origin alone, because one gateway commonly mints for several
+ * projects on several routes. Host case and a trailing root dot go the way
+ * they do for a server; path and query are kept as written. Copied from the
+ * registry for the reason above.
+ */
+function tokenEndpointIdentity(endpoint: string): string {
+  const written = endpoint.trim();
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(written);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed === undefined) return written;
+
+  const host = parsed.hostname.toLowerCase().replace(/\.$/u, "");
+  const origin = parsed.port === "" ? host : `${host}:${parsed.port}`;
+  return `${origin}${parsed.pathname}${parsed.search}`;
+}
+
 /** The last four of one field — only ever a credential's public half. */
 function lastFourOf(field: string): CredentialHint {
   return (sealed) => sealed[field]?.slice(-4) ?? "";
@@ -500,10 +522,13 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     reuse: {
       matchedKeys: ["agentName"],
       identityOf: (config) => {
-        const server = config["url"] ?? config["tokenEndpoint"];
         const agentName = config["agentName"];
-        if (server === undefined || agentName === undefined) return undefined;
-        return `${livekitServerOrigin(server)}|${agentName}`;
+        if (agentName === undefined) return undefined;
+        const url = config["url"];
+        if (url !== undefined) return `${livekitServerOrigin(url)}|${agentName}`;
+        const endpoint = config["tokenEndpoint"];
+        if (endpoint === undefined) return undefined;
+        return `${tokenEndpointIdentity(endpoint)}|${agentName}`;
       },
     },
     simulatorAdapter: true,

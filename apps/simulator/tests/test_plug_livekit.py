@@ -117,6 +117,21 @@ class LocalEndpointBackend(LiveKitRoomBackend):
         )
         return resolver, connector
 
+    async def _joinable_server(
+        self, endpoint: str, named: str, server_url: str
+    ) -> None:
+        """Let a real transport be pointed at a closed loopback port.
+
+        The test-only exception to the rule on the answered server — the
+        TLS scheme and the public address both — beside the one above on
+        the endpoint. What this driver proves is that a real join refusal
+        reaches the running pipeline, and the one server guaranteed to
+        refuse, at once and without a retry, is a plaintext port on this
+        machine that nothing listens on. The rule itself is proved on the
+        stubbed driver, which excepts nothing here.
+        """
+        del endpoint, named, server_url
+
 
 FAILED_ENDINGS = frozenset(
     json.loads(
@@ -3122,6 +3137,115 @@ async def test_an_endpoint_that_answers_badly_names_the_contract_not_its_body(
     assert diagnosis in told, f"{named}: the broken contract part is the diagnosis"
     assert private_text not in told, f"{named}: response text reached the error"
     assert A_HEADER_SECRET not in told
+
+
+@pytest.mark.parametrize(
+    ("server_url", "diagnosis"),
+    [
+        ("ws://acme.livekit.cloud", "Egma cannot join"),
+        ("http://acme.livekit.cloud", "Egma cannot join"),
+        ("wss://egma:secret@acme.livekit.cloud", "Egma cannot join"),
+        ("wss://", "Egma cannot join"),
+        ("wss://10.0.0.4", "non-public network address"),
+        ("wss://127.0.0.1:7880", "non-public network address"),
+        ("wss://[::1]:7880", "non-public network address"),
+        ("wss://[::ffff:127.0.0.1]", "non-public network address"),
+        ("wss://169.254.169.254", "non-public network address"),
+        ("wss://224.0.0.1", "non-public network address"),
+        ("wss://0.0.0.0", "non-public network address"),
+    ],
+)
+async def test_a_server_the_endpoint_names_is_held_to_the_endpoints_own_rule(
+    server_url: str, diagnosis: str
+):
+    """A minted token goes only to a public LiveKit server, over TLS.
+
+    The endpoint's answer decides where egma connects next. A cleartext
+    scheme would carry the token in the clear; a private, loopback,
+    link-local or multicast address would make egma a client of whatever
+    network it runs in. Both are refused with the contract part named,
+    nothing is joined, and the token is not quoted.
+    """
+    stub = RoomStub()
+    with serving(token="fine.token.here", server_url=server_url) as endpoint:
+        plug = endpoint_room(stub, endpoint.url)
+        with pytest.raises(PlugError) as refused:
+            await plug.prepare()
+        await plug.close()
+        served = endpoint.wire_url
+
+    told = str(refused.value)
+    assert failed_ending(refused.value) == ERROR
+    assert served in told, "the reason has to name what was asked"
+    assert diagnosis in told, f"{server_url}: the broken contract part is the reason"
+    assert stub.joined_rooms == []
+    assert "fine.token.here" not in told
+
+
+@pytest.mark.parametrize(
+    ("addresses", "joins"),
+    [
+        (["127.0.0.1"], False),
+        (["10.0.0.4"], False),
+        (["::1"], False),
+        (["::ffff:10.0.0.4"], False),
+        (["93.184.216.34", "10.0.0.4"], False),
+        (["93.184.216.34"], True),
+    ],
+)
+async def test_a_server_name_the_endpoint_answers_must_stand_only_on_public_addresses(
+    addresses: list[str], joins: bool
+):
+    """The name is looked up before the token goes anywhere near it.
+
+    The endpoint answers the public-looking name every real endpoint
+    answers; where that name stands is the resolver's to say. One private
+    address among the answers is enough to refuse, because the SDK's own
+    lookup may pick any of them.
+    """
+
+    class Resolver:
+        async def resolve(
+            self, host: str, port: int = 0, family: int = socket.AF_UNSPEC
+        ) -> list[dict[str, object]]:
+            del family
+            return [
+                {
+                    "hostname": host,
+                    "host": address,
+                    "port": port,
+                    "family": socket.AF_INET6 if ":" in address else socket.AF_INET,
+                    "proto": socket.IPPROTO_TCP,
+                    "flags": socket.AI_NUMERICHOST,
+                }
+                for address in addresses
+            ]
+
+        async def close(self) -> None:
+            return None
+
+    stub = RoomStub()
+    with serving(token="fine.token.here") as endpoint:
+        settings = RoomSettings.from_connection(
+            "livekit_room.customer_token_endpoint",
+            {"tokenEndpoint": endpoint.url, "agentName": AN_AGENT},
+            {"headers": AN_AUTH_HEADER},
+        )
+        driver = stub.driver(
+            settings=settings,
+            simulation_id=A_SIMULATION,
+            endpoint_resolver=Resolver(),
+        )
+        if joins:
+            await driver.create_transport()
+            assert len(stub.joined_rooms) == 1
+            assert stub.joined_with[0].token == "fine.token.here"
+        else:
+            with pytest.raises(MediaBackendError) as refused:
+                await driver.create_transport()
+            assert "non-public network address" in str(refused.value)
+            assert stub.joined_rooms == []
+        assert len(endpoint.asked) == 1
 
 
 async def test_a_token_the_endpoint_minted_is_never_quoted_back():

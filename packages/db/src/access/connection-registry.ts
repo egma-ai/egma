@@ -829,6 +829,39 @@ export function livekitServerOrigin(url: string): string {
   return parsed.port === "" ? host : `${host}:${parsed.port}`;
 }
 
+/**
+ * Which token endpoint a url names, as one comparable string.
+ *
+ * The whole address, where `livekitServerOrigin` keeps only host and port. A
+ * LiveKit server is one host and a path on it means nothing; a token endpoint
+ * is a route on a service the customer wrote, and one service commonly mints
+ * for several projects on several routes — `/staging/token` beside
+ * `/production/token`, or a tenant named in the query — so the origin alone
+ * would fold two workers behind one gateway into one agent. Host case and a
+ * trailing root dot go the way they do for a server. The path and query are
+ * kept as written, because a route is case-sensitive and the query is the
+ * customer's to shape. The scheme is dropped for the reason it is dropped
+ * there: a stored endpoint is https, admitted or refused at the gate above.
+ *
+ * A comparison key and never a value anybody requests: the endpoint is stored
+ * as it was written. An unparseable one answers with what it was given, as a
+ * server url does, and compares equal only to itself.
+ */
+export function tokenEndpointIdentity(endpoint: string): string {
+  const written = endpoint.trim();
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(written);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed === undefined) return written;
+
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  const origin = parsed.port === "" ? host : `${host}:${parsed.port}`;
+  return `${origin}${parsed.pathname}${parsed.search}`;
+}
+
 /*
  * **There is no dispatch-metadata config key here.** There was one: a LiveKit
  * connection carried a JSON object that rode the room's metadata and the
@@ -1411,18 +1444,24 @@ export const CONNECTION_REGISTRY: Readonly<
     // accumulate somewhere they can be read side by side.
     //
     // `agentName` is what the query narrows on because it is the half SQL can
-    // compare honestly. The origin is settled afterwards, in `identityOf`,
+    // compare honestly. The address is settled afterwards, in `identityOf`,
     // where two spellings of one server can be seen for what they are.
     reuse: {
       matchedKeys: ["agentName"],
       identityOf: (config) => {
+        const agentName = config["agentName"];
+        if (agentName === undefined) return undefined;
+        const url = config["url"];
+        if (url !== undefined) return `${livekitServerOrigin(url)}|${agentName}`;
         // On the token-endpoint variant the endpoint stands in for the
         // server: it is the one address the connection holds, and the server
-        // it answers with is not known until a simulation asks it.
-        const server = config["url"] ?? config["tokenEndpoint"];
-        const agentName = config["agentName"];
-        if (server === undefined || agentName === undefined) return undefined;
-        return `${livekitServerOrigin(server)}|${agentName}`;
+        // it answers with is not known until a simulation asks it. The whole
+        // route counts, not the origin alone, because one gateway mints for
+        // many projects — and an identity that always carries a path can
+        // never compare equal to a server's, which never does.
+        const endpoint = config["tokenEndpoint"];
+        if (endpoint === undefined) return undefined;
+        return `${tokenEndpointIdentity(endpoint)}|${agentName}`;
       },
     },
   },
