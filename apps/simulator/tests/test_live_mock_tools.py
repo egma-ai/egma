@@ -50,7 +50,7 @@ and hands back the transcript; by hand it is::
     TEST_LIVEKIT_URL=wss://... \\
     TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \\
     TEST_LIVEKIT_AGENT_NAME=front-desk \\
-    TEST_DEEPGRAM_API_KEY=... TEST_CARTESIA_API_KEY=... \\
+    [TEST_DEEPGRAM_API_KEY=...] [TEST_CARTESIA_API_KEY=...] \\
     TEST_MODEL_API_KEY=... \\
     uv run pytest tests/test_live_mock_tools.py -v -s
 
@@ -103,8 +103,6 @@ REQUIRED = {
     "TEST_LIVEKIT_API_KEY": LIVEKIT_API_KEY,
     "TEST_LIVEKIT_API_SECRET": LIVEKIT_API_SECRET,
     "TEST_LIVEKIT_AGENT_NAME": AGENT_NAME,
-    "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
-    "TEST_CARTESIA_API_KEY": CARTESIA_API_KEY,
     "TEST_MODEL_API_KEY": MODEL_API_KEY,
 }
 MISSING = sorted(name for name, value in REQUIRED.items() if not value)
@@ -156,6 +154,20 @@ SECRETS = tuple(
         MODEL_API_KEY,
     )
     if secret
+)
+
+# The persona's mouth and ears. Cartesia and Deepgram when the machine holds
+# keys for them, else the model provider's own voice and transcription, so
+# fewer vendors stand between a developer and this proof; the mock-tool seam
+# under test does not care who speaks or who listens.
+PERSONA_VOICE = (
+    {
+        "provider": "cartesia",
+        "voice_id": "794f9389-aac1-45b6-b726-9d9369183238",
+        "speed": 1.0,
+    }
+    if CARTESIA_API_KEY
+    else {"provider": "openai", "voice_id": "alloy", "speed": 1.0}
 )
 
 SIMULATION = "sim-livekit-mock-tools-live-001"
@@ -307,14 +319,11 @@ def mocked_spec() -> dict:
         job_dispatch_metadata=DISPATCHED_WORLD,
         models=direct_models(
             modality="voice",
-            voice={
-                "provider": "cartesia",
-                "voice_id": "794f9389-aac1-45b6-b726-9d9369183238",
-                "speed": 1.0,
-            },
+            voice=PERSONA_VOICE,
+            stt_provider="deepgram" if DEEPGRAM_API_KEY else "openai",
             llm_key=MODEL_API_KEY,
-            stt_key=DEEPGRAM_API_KEY,
-            tts_key=CARTESIA_API_KEY,
+            stt_key=DEEPGRAM_API_KEY or MODEL_API_KEY,
+            tts_key=CARTESIA_API_KEY or MODEL_API_KEY,
         ),
     )
 
