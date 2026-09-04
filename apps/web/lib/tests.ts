@@ -42,6 +42,14 @@ export type Read<T> =
  * `packages/db/src/access/tests.ts` is where the same rules are kept for the
  * write itself, and it is the authority. What is here is a copy of the cheap
  * half of it, and it must say the same words.
+ *
+ * **The envelope has its own authority**, and it is
+ * `apps/api/src/routes/tests.ts`: the door owns the shape of what arrives — a
+ * list, of objects, with no key the shape has no place for — and the access
+ * layer owns everything inside it. So the two sentences about the envelope are
+ * copied from the door and the rest from the access layer, and a person who
+ * writes the same mistake into the dialog and into a request reads one
+ * sentence either way.
  */
 
 /** The two keys an env may carry, and nothing else. */
@@ -71,12 +79,7 @@ export function readMockTools(text: string): Read<readonly TestMockTool[]> {
   const held = parsed(text);
   if (!held.ok) return held;
   if (!Array.isArray(held.value)) {
-    return {
-      ok: false,
-      why:
-        "mock tools are a list of entries, which looks like " +
-        '[{"tool": "get_availability", "answer": {"slots": []}}]',
-    };
+    return { ok: false, why: "mockTools must be a list" };
   }
 
   const mockTools: TestMockTool[] = [];
@@ -90,6 +93,13 @@ export function readMockTools(text: string): Read<readonly TestMockTool[]> {
           "with, which looks like " +
           '{"tool": "get_availability", "answer": {"slots": []}}',
       };
+    }
+    // The envelope first, the way the door reads it: a key the shape has no
+    // place for is answered before anything inside the entry is looked at, so
+    // one entry with two mistakes is refused for the same one at both ends.
+    for (const key of Object.keys(entry)) {
+      if (key === "tool" || key === "answer" || key === "error") continue;
+      return { ok: false, why: `a mock tool has no key "${key}"` };
     }
     const tool = entry.tool;
     if (typeof tool !== "string") {
@@ -117,15 +127,6 @@ export function readMockTools(text: string): Read<readonly TestMockTool[]> {
       };
     }
     seen.add(named);
-    for (const key of Object.keys(entry)) {
-      if (key === "tool" || key === "answer" || key === "error") continue;
-      return {
-        ok: false,
-        why:
-          `mock tool "${named}" carries ${JSON.stringify(key)}, and a mock ` +
-          "tool has tool and one of answer or error in it, and nothing else.",
-      };
-    }
     // A key that is there *and* says something. `answer: null` is an answer a
     // tool can give and counts; a key carrying nothing does not.
     const gives = "answer" in entry && entry.answer !== undefined;

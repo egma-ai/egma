@@ -27,9 +27,9 @@ import {
  * authored and in the new shape. The delay does not survive, deliberately: the
  * new shape has no room for one and the header says so.
  *
- * **Everything else is really gone**, tables, columns, checks and the two JSON
- * keys — asserted against the live catalog rather than against the file, so a
- * statement that ran and did nothing would still fail here.
+ * **Everything else is really gone**, tables, columns, checks and the three
+ * JSON keys — asserted against the live catalog rather than against the file,
+ * so a statement that ran and did nothing would still fail here.
  */
 
 const UNDER_TEST = "0007_test_owned_mock_tools.sql";
@@ -45,6 +45,7 @@ const acme = {
 };
 const agentId = newId("agt");
 const connectionId = newId("con");
+const livekitConnectionId = newId("con");
 const personaId = newId("prs");
 const personaVersionId = newId("prsv");
 const testId = newId("tst");
@@ -97,6 +98,28 @@ async function seedExistingWork(): Promise<void> {
        'retell_text_mode.api_key', 'chat', 'hosted-broker',
        '{"retellAgentId": "agent_1"}'::jsonb, true)`,
     [connectionId, acme.organization, acme.project, agentId],
+  );
+  // A LiveKit room from the same project, holding the one dispatch metadata
+  // every run over it carried. The key leaves the registry in this change, and
+  // a config key the registry does not hold is refused by name at read.
+  await store.sql(
+    `insert into connection
+       (id, organization_id, project_id, agent_id, name, connection_type,
+        access_variant, modality, topology, config)
+     values ($1, $2, $3, $4, 'Room', 'livekit_room',
+       'livekit_room.project_credentials', 'voice', 'agent-dials-out',
+       $5::jsonb)`,
+    [
+      livekitConnectionId,
+      acme.organization,
+      acme.project,
+      agentId,
+      JSON.stringify({
+        url: "wss://acme.livekit.cloud",
+        agentName: "front-desk",
+        metadata: '{"tenant":"acme"}',
+      }),
+    ],
   );
   // The project's own answer for a tool, scoped to the one agent.
   await store.sql(
@@ -328,6 +351,27 @@ describe("the test-owned mock tools migration over a populated database", () => 
       .then(() => undefined)
       .catch((error: unknown) => error);
     expect(String(refused)).toMatch(/written once/u);
+  });
+
+  it("strips the dispatch metadata from a livekit connection's config", async () => {
+    const { rows } = await store.sql<{ config: Record<string, unknown> }>(
+      "select config from connection where id = $1",
+      [livekitConnectionId],
+    );
+    // The wiring the lane still needs, and nothing a reader would refuse: a
+    // test carries its own `env.job_dispatch_metadata` now.
+    expect(rows[0]?.config).toEqual({
+      url: "wss://acme.livekit.cloud",
+      agentName: "front-desk",
+    });
+  });
+
+  it("leaves a connection on another lane holding every key it had", async () => {
+    const { rows } = await store.sql<{ config: Record<string, unknown> }>(
+      "select config from connection where id = $1",
+      [connectionId],
+    );
+    expect(rows[0]?.config).toEqual({ retellAgentId: "agent_1" });
   });
 
   it("drops the project's own mocked world, tables and all", async () => {

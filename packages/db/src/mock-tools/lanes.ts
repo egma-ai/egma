@@ -1,8 +1,13 @@
 /**
- * Which lanes branch a temporary version, and the one gate that keeps a mocked
- * run honest.
+ * Which lanes serve a mocked world, which of them branch a temporary version,
+ * and the one gate that keeps a mocked run honest.
  *
  * ## The lanes
+ *
+ * Two lists, and they answer two different questions. **Serving** a mock tool
+ * is Egma standing in the tool path at all; **branching** is the one lane that
+ * needs a temporary copy of the customer's agent to stand there. Every lane
+ * that branches serves, and not every lane that serves branches.
  *
  * A **temporary copy** of the customer's agent is branched for one lane only:
  * `retell_web_call`. A web call is a conversation Egma creates against a named
@@ -47,6 +52,27 @@ import { testVersion } from "../schema/tests.ts";
  */
 const mockedSimulation = alias(simulation, "mocked_simulation");
 const mockedVersion = alias(testVersion, "mocked_test_version");
+
+/**
+ * The lanes on which Egma stands in front of the agent's own tools.
+ *
+ * A named list rather than a fact worked out from something else, because what
+ * it decides is narrow: on these three lanes Egma is in the tool path and can
+ * answer for a name the test wrote down — text mode carries its answers on the
+ * request, a web call reaches Egma's own endpoint, and the LiveKit seam is in
+ * the room by construction. A phone call reaches the customer's real backend by
+ * design and is never on this list; the Retell chat API has no place to put an
+ * answer either.
+ *
+ * Written against `ConnectionType` so that a lane added to the product is a
+ * decision made here as well: a new kind that belongs on this list is added by
+ * hand, and a name that is not a connection type at all does not compile.
+ */
+export const LANES_SERVING_MOCK_TOOLS = [
+  "retell_text_mode",
+  "retell_web_call",
+  "livekit_room",
+] as const satisfies readonly ConnectionType[];
 
 /**
  * The connection types a run over which branches a temporary copy of the

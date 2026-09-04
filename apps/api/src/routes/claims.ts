@@ -9,6 +9,7 @@ import {
   getPersonaVersion,
   getRun,
   getSimulationExecutionEvidence,
+  LANES_SERVING_MOCK_TOOLS,
   markSimulationCanceled,
   releaseSimulationClaim,
   resolveSimulationConnection,
@@ -251,23 +252,6 @@ async function modelsBlock(
 }
 
 /**
- * The lanes on which Egma stands in front of the agent's own tools.
- *
- * A named list rather than a fact worked out from something else, because what
- * it decides is narrow: on these three lanes Egma is in the tool path and can
- * answer for a name the test wrote down — text mode carries its answers on the
- * request, a web call reaches Egma's own endpoint, and the LiveKit seam is in
- * the room by construction. A phone call reaches the customer's real backend by
- * design and is never on this list; the Retell chat API has no place to put an
- * answer either.
- */
-const LANES_SERVING_MOCK_TOOLS: readonly string[] = [
-  "retell_text_mode",
-  "retell_web_call",
-  "livekit_room",
-];
-
-/**
  * The version this simulation is placed against and the variables it carries —
  * one code path for both lanes that name a version, or nothing at all.
  *
@@ -295,8 +279,11 @@ const LANES_SERVING_MOCK_TOOLS: readonly string[] = [
  * The two travel differently, because they are for different things. The
  * test's own variables go wherever the platform renders variables at all,
  * named version or not: the test asked for them. Egma's routing variables go
- * only where a temporary version was branched, which is the same thing as
- * saying only where Egma is in the tool path.
+ * only on the call that is placed against the temporary version, because that
+ * is the only version their names exist on. A simulation conducted against the
+ * serving version carries the test's own variables and nothing else — passing
+ * the routing names there would put a row of empty egma variables on the
+ * customer's own call record, naming variables that version never declared.
  *
  * **Egma's are written last**, so no authored name can take a routing
  * variable's place; the save door refuses an `egma_` name anyway, and the two
@@ -313,16 +300,19 @@ function runVersionSpecOf(
   baseUrl: string,
 ): Record<string, unknown> {
   const routing = urlVariablesFor(run, connectionType, simulationId, mockTools, baseUrl);
+  // The temporary version is what carries the routing variables, so it is
+  // named exactly where there are routing values to render on it — and the
+  // variables are passed exactly there too. One answer, read twice: the call
+  // that is not on the copy has no name for them and is given none.
+  const onTemporaryVersion =
+    Object.keys(routing).length > 0 && mockTools.length > 0;
+  const version = onTemporaryVersion
+    ? (run.tempMockAgentVersion ?? run.agentVersion)
+    : run.agentVersion;
   const variables = {
     ...authoredVariables(agentPlatform, env),
-    ...routing,
+    ...(onTemporaryVersion ? routing : {}),
   };
-  // The temporary version is what carries the routing variables, so it is
-  // named exactly where there are routing values to render on it.
-  const version =
-    Object.keys(routing).length > 0 && mockTools.length > 0
-      ? (run.tempMockAgentVersion ?? run.agentVersion)
-      : run.agentVersion;
 
   if (version === null || version === undefined) {
     return Object.keys(variables).length === 0
@@ -587,7 +577,9 @@ async function assembledSpec(
   // The simulator receives the answers already decided, exactly as it receives
   // everything else: flattened, with nothing left to look up and nothing left
   // to choose between.
-  const mockTools = LANES_SERVING_MOCK_TOOLS.includes(connection.connectionType)
+  const mockTools = (LANES_SERVING_MOCK_TOOLS as readonly string[]).includes(
+    connection.connectionType,
+  )
     ? evidence.mockTools.map((entry) => ({
         tool_name: entry.tool,
         answer:

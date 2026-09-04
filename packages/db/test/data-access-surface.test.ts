@@ -530,6 +530,11 @@ const VALUES = [
   "connectionTypeReadsPlatformAtRunStart",
   "connectionTypeBranchesMockDraft",
   "DRAFT_MOCK_CONNECTION_TYPES",
+  // The lanes on which Egma is in the tool path at all, so the claim that
+  // hands a simulator its answers and the package that decides who branches a
+  // copy read one list. A list of connection types, never a config or a
+  // credential.
+  "LANES_SERVING_MOCK_TOOLS",
   "connectionTypeUsesPlatformCarrier",
   // Which connection lanes a run over them builds a mocked world for. Two
   // names and no gate: the gate itself is a condition inside the claim, where

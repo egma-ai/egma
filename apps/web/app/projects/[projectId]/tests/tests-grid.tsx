@@ -122,8 +122,6 @@ type Field =
  */
 type JsonField = "mockTools" | "env";
 
-const JSON_FIELDS: readonly JsonField[] = ["mockTools", "env"];
-
 function isJsonField(field: Field): field is JsonField {
   return field === "mockTools" || field === "env";
 }
@@ -1640,6 +1638,9 @@ export function TestsGrid(props: GridProps) {
    * It is a button rather than a woken cell because there is nothing to type
    * here — the value is JSON and it is written in the dialog. A row a reader
    * cannot author draws the same summary with nothing to press.
+   *
+   * Focus is the product's own two-pixel indicator, drawn on every button by
+   * the unlayered rule in `globals.css`. The cell adds none of its own.
    */
   function jsonCell(test: ListedTest, field: JsonField): ReactNode {
     return (
@@ -1649,8 +1650,6 @@ export function TestsGrid(props: GridProps) {
             className={cn(
               PAD,
               "block w-full cursor-pointer bg-transparent text-left",
-              "focus-visible:outline-2 focus-visible:outline-offset-[-2px]",
-              "focus-visible:outline-ring",
             )}
             type="button"
             aria-label={`${JSON_FIELD[field].title} for ${test.name}`}
@@ -1786,8 +1785,6 @@ export function TestsGrid(props: GridProps) {
             className={cn(
               PAD,
               "block w-full cursor-pointer bg-transparent text-left",
-              "focus-visible:outline-2 focus-visible:outline-offset-[-2px]",
-              "focus-visible:outline-ring",
             )}
             type="button"
             aria-label={`${JSON_FIELD[field].title} for the new test`}

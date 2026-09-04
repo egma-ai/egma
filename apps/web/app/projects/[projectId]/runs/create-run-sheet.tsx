@@ -214,7 +214,6 @@ export function CreateRunSheet({
       return undefined;
     }
     let live = true;
-    const PAGES_AT_MOST = 20;
     setLaterSuiteTests(null);
     /*
      * The read is its own function so the loop below cannot make the answer's
@@ -229,7 +228,14 @@ export function CreateRunSheet({
     void (async () => {
       const held: RunNoteTest[] = [];
       let pageToken: string | null = first;
-      for (let page = 0; page < PAGES_AT_MOST && pageToken !== null; page += 1) {
+      /*
+       * Every page there is, and no cap on how many. The note counts tests and
+       * says the total out loud, so a suite read halfway would put a wrong
+       * number in front of somebody quietly. A page that is refused leaves the
+       * held value null and the note undrawn, which says nothing rather than
+       * something untrue.
+       */
+      while (pageToken !== null) {
         const next = await readPage(pageToken);
         if (!live) return;
         if (next.status !== "ready") return;

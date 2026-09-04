@@ -128,10 +128,11 @@ point of the stamp, and a refusal that read as a pass-through would undo it.
 
 **Why the tool's name and the mock tool's name are both written down.**
 `egma.tool.name` is the agent's word — what the platform reported being called.
-`egma.tool.mock_tool` is Egma's own — the authored thing that answered. Today
-they always match, because a mock tool is matched to a call by name and by
-nothing else; writing both is what makes the day they stop matching visible on
-the record instead of assumed away.
+`egma.tool.mock_tool` is Egma's own — the name of the mock tool that answered,
+which is the tool's own name, because a mock tool is matched to a call by name
+and by nothing else. So the two always match today, and writing both is what
+makes the day they stop matching visible on the record instead of assumed
+away.
 
 **What `late_attached` owns.** When a simulation starts, the agent reports the
 tools it has. Answers are then held ready for every tool name this simulation

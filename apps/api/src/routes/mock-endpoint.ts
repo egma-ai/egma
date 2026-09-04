@@ -101,9 +101,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
  *
  * Every exchange is written onto the simulation's own record by the control
  * plane: the arguments as they arrived in the body, the answer served, the
- * elapsed time
- * bracketed by the span itself, and the provenance `mocked` naming the tool
- * that answered. A refused call for a simulation this endpoint could identify
+ * elapsed time bracketed by the span itself, and the provenance `mocked`
+ * naming the tool that answered. A refused call for a simulation this endpoint could identify
  * lands as `refused` — no answer and no mock tool, but egma was in the path and
  * said no, and a span with no stamp would say the opposite: that the call went
  * past egma to a real backend.

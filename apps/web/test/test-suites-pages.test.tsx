@@ -546,8 +546,8 @@ describe("the suite-first Tests route", () => {
     });
     expect([...note.querySelectorAll("p")].map((line) => line.textContent)).toEqual([
       "This run creates one temporary version of your Retell agent.",
-      "egma makes it at run start, points only the mocked tools at egma, and deletes it when the run ends. Your serving version is never changed.",
-      "1 of 2 tests carry mock tools. In those simulations, tools the test does not mock reach your real backend. The other 1 tests run on your serving version with all real tools.",
+      "Egma makes it at run start, points only the mocked tools at Egma, and deletes it when the run ends. Your serving version is never changed.",
+      "1 of 2 tests carries mock tools. In those simulations, tools the test does not mock reach your real backend. The other test runs on your serving version with all real tools.",
     ]);
     // The old per-connection lane note is gone, switch and all.
     expect(sheet.querySelector('[data-slot="run-lane-note"]')).toBeNull();
@@ -584,6 +584,140 @@ describe("the suite-first Tests route", () => {
     // A suite whose tests carry nothing has nothing to be told about.
     expect(await screen.findByLabelText("Run name [optional]")).toBeTruthy();
     expect(room.querySelector('[data-slot="run-note"]')).toBeNull();
+  });
+
+  /**
+   * **The rest of the support table, one lane at a time.**
+   *
+   * The row above walks a Retell web call and a LiveKit room with nothing to
+   * say. What is left is the LiveKit key pair that serves mocks through the
+   * customer's own SDK, the token endpoint that cannot pass a dispatch it
+   * never makes, and a Retell lane that quietly says LiveKit's word is not one
+   * it uses.
+   */
+  it("says what each remaining lane will and will not use", async () => {
+    routed.pathname = "/projects/prj_1/runs/new";
+    routed.params = { projectId: "prj_1" };
+
+    /** One lane, chosen in a fresh sheet, and the note it draws. */
+    async function noteOn(
+      connection: Record<string, unknown>,
+      tests: readonly Record<string, unknown>[],
+      expected: readonly string[],
+    ): Promise<void> {
+      runBuilderAnswers({
+        connections: [
+          {
+            id: "con_1",
+            name: "Lane",
+            productLabel: "Lane",
+            modality: "voice",
+            environment: null,
+            archived: false,
+            ...connection,
+          },
+        ],
+        tests,
+      });
+      const { unmount } = render(<NewRunPage />);
+      const sheet = await screen.findByRole("dialog", { name: "Create a run" });
+      fireEvent.change(within(sheet).getByLabelText("Test suite *"), {
+        target: { value: "ste_1" },
+      });
+      fireEvent.change(within(sheet).getByLabelText("Agent *"), {
+        target: { value: "agt_1" },
+      });
+      await within(sheet).findByLabelText("Connection *");
+      fireEvent.change(within(sheet).getByLabelText("Connection *"), {
+        target: { value: "con_1" },
+      });
+      if (expected.length === 0) {
+        expect(await screen.findByLabelText("Run name [optional]")).toBeTruthy();
+        expect(sheet.querySelector('[data-slot="run-note"]')).toBeNull();
+      } else {
+        await waitFor(() => {
+          const note = sheet.querySelector('[data-slot="run-note"]');
+          if (note === null) throw new Error("no run note yet");
+          expect(
+            [...note.querySelectorAll("p")].map((line) => line.textContent),
+          ).toEqual(expected);
+        });
+      }
+      unmount();
+      cleanup();
+    }
+
+    const MOCKING = testBody({
+      mockTools: [{ tool: "get_availability", answer: { slots: [] } }],
+    });
+    const PLAIN = testBody({
+      id: "tst_2",
+      versionId: "tstv_2",
+      name: "Cancels service",
+    });
+    const DISPATCHING = testBody({
+      env: { job_dispatch_metadata: { tenant: "acme" } },
+    });
+    const ALSO_DISPATCHING = testBody({
+      id: "tst_2",
+      versionId: "tstv_2",
+      name: "Cancels service",
+      env: { job_dispatch_metadata: { tenant: "acme" } },
+    });
+
+    // A key-pair room mocks through the customer's own agent, so the note
+    // names the one thing that agent must be running.
+    await noteOn(
+      {
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
+      },
+      [MOCKING, PLAIN],
+      [
+        "Mock tools on LiveKit need the Egma SDK in your agent.",
+        "1 of 2 tests carries mock tools. They are served only when your agent runs mockable(...). Tools a test does not mock run real.",
+      ],
+    );
+
+    // On a token endpoint the customer's own endpoint dispatches the worker,
+    // so a dispatch metadata Egma never writes cannot be passed.
+    await noteOn(
+      {
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.customer_token_endpoint",
+      },
+      [DISPATCHING, PLAIN],
+      [
+        "Some test data will not be used on this connection.",
+        "1 of 2 tests carries job_dispatch_metadata. On a token-endpoint connection your endpoint dispatches the agent, so Egma cannot pass it.",
+      ],
+    );
+
+    // A Retell lane says the same fact quietly: nothing is lost, because
+    // LiveKit's word was never for this platform in the first place.
+    await noteOn(
+      {
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
+        modality: "chat",
+      },
+      [DISPATCHING, ALSO_DISPATCHING],
+      [
+        "2 tests carry job_dispatch_metadata, which a Retell connection does not use.",
+      ],
+    );
+
+    // And text mode with mock tools has nothing to say at all: it serves them
+    // on the request, so no version is branched and nothing is left unused.
+    await noteOn(
+      {
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
+        modality: "chat",
+      },
+      [MOCKING, PLAIN],
+      [],
+    );
   });
 
   it("distinguishes legacy LiveKit chat and voice names in the run picker", async () => {
@@ -1153,6 +1287,12 @@ describe("the suite-first Tests route", () => {
     // already is rather than at the foot of the suite.
     const rows = [...(entry.parentElement?.children ?? [])];
     expect(rows.indexOf(entry)).toBe(1);
+
+    // And the caret is already in the copy's name, because renaming it is the
+    // first thing anybody does with a duplicate.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(within(entry).getByLabelText("Name"));
+    });
 
     expect((within(entry).getByLabelText("Name") as HTMLInputElement).value).toBe(
       "Books service (copy)",

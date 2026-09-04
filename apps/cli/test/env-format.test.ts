@@ -139,17 +139,6 @@ describe("the env in a file", () => {
     expect(() => readWorld(document)).toThrow(reason);
   });
 
-  it("refuses dispatch metadata past what one dispatch carries", () => {
-    const document = [
-      "## Env",
-      "```json",
-      JSON.stringify({ job_dispatch_metadata: { note: "a".repeat(600 * 1024) } }),
-      "```",
-    ].join("\n");
-
-    expect(() => readWorld(document)).toThrow(/carries at most 524288/u);
-  });
-
   it("refuses an Env heading with nothing under it", () => {
     expect(() => readWorld("## Env")).toThrow(/no JSON block under it/u);
   });

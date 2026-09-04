@@ -26,6 +26,14 @@
  * **A variable whose name begins `egma_` is refused.** Those are egma's own
  * words to the simulator, and a test that overwrote one would be changing what
  * egma said about itself rather than what the caller's world holds.
+ *
+ * **How large the dispatch metadata may be is egma's to say, and is said
+ * there.** The ceiling is measured on the one compact JSON string that travels,
+ * and the platform writes that string itself — once when the test is saved and
+ * again when the job is dispatched. A second serialization here would count its
+ * own bytes and could turn away a blob the dispatch would have carried, so this
+ * end judges the shape of a world and leaves its size alone. The mock tool
+ * answer ceiling is left to the platform for the same reason.
  */
 
 import { sameJsonValue } from "./json-value.ts";
@@ -59,13 +67,6 @@ const ENV_KEYS = ["retell_dynamic_variables", "job_dispatch_metadata"] as const;
  * platform in reach.
  */
 export const RESERVED_ENV_VARIABLE_PREFIX = "egma_";
-
-/**
- * How much dispatch metadata one job may carry, in UTF-8 bytes of the compact
- * JSON egma writes into the dispatch. Measured on exactly the string that
- * travels, so what passes here is what the dispatch can hold.
- */
-export const LARGEST_JOB_DISPATCH_METADATA_BYTES = 512 * 1024;
 
 /** A file egma could not read, said with enough to go and fix it. */
 export class EnvProblem extends Error {
@@ -145,15 +146,6 @@ function dispatchMetadataIn(
       `job_dispatch_metadata says ${JSON.stringify(value)}. It is the blob ` +
         `LiveKit hands the worker when the job is dispatched, written as an ` +
         `object — like {"tenant": "acme"}.`,
-    );
-  }
-  const bytes = Buffer.byteLength(JSON.stringify(value), "utf8");
-  if (bytes > LARGEST_JOB_DISPATCH_METADATA_BYTES) {
-    throw new EnvProblem(
-      where,
-      `job_dispatch_metadata is ${String(bytes)} bytes once serialized for the ` +
-        `dispatch, and a dispatch carries at most ` +
-        `${String(LARGEST_JOB_DISPATCH_METADATA_BYTES)}.`,
     );
   }
   return value;

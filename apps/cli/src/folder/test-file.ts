@@ -237,11 +237,6 @@ function partsOf(body: string): {
  * empty list and never as a failure: a test with nothing to check is refused at
  * egma's door, in egma's own words, and reading it here is what lets it get
  * there to be refused.
- *
- * **A `[P0]` marker is stripped and the sentence behind it kept.** Format 2
- * wrote one on every line; nothing writes one now, and a file that still has
- * them is a file somebody's repository already holds. Reading it as the
- * sentence it always was is what lets that folder go on working.
  */
 function behaviorsIn(text: string): readonly FileBehavior[] {
   const behaviors: string[] = [];

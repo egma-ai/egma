@@ -481,8 +481,8 @@ function validMockTools(
   const mockTools: TestMockTool[] = [];
   const seen = new Set<string>();
 
-  for (const written_entry of written) {
-    const entry = written_entry as unknown;
+  for (const authored of written) {
+    const entry = authored as unknown;
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
       throw new UnprocessableInputError(
         "each mock tool is an object naming the tool and what it answers " +

@@ -692,11 +692,13 @@ describe("two tests of one run, mocking different tools", () => {
     // **A test that mocks nothing is conducted against the serving version**,
     // even inside a run that branched a copy: it has nothing to route, so
     // there is no reason to put it on a version the customer did not make.
+    //
+    // And it is handed none of Egma's routing variables. They are names the
+    // temporary version declares and the serving version never did, so passing
+    // them here would leave a row of empty `egma_url_…` on the customer's own
+    // call record saying nothing true about that call.
     expect(real["agent_version"]).toBe(105);
-    expect(real["dynamic_variables"]).toEqual({
-      egma_url_get_availability: "",
-      egma_url_book_appointment: "",
-    });
+    expect("dynamic_variables" in real).toBe(false);
     expect("mock_tools" in real).toBe(false);
 
     // And the endpoint agrees with the addresses: each simulation answers for

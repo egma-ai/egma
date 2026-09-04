@@ -77,13 +77,15 @@ export {
   type MockToolVariable,
 } from "./mock-tools/record.ts";
 /**
- * Which connection lanes branch a temporary copy when the tests they conduct
- * carry mock tools. The gate beside them is not exported: it is a condition
- * inside the claim, and nothing outside this package has a query to put it in.
+ * Which connection lanes serve a test's mock tools, and which of them branch a
+ * temporary copy to do it. The gate beside them is not exported: it is a
+ * condition inside the claim, and nothing outside this package has a query to
+ * put it in.
  */
 export {
   connectionTypeBranchesMockDraft,
   DRAFT_MOCK_CONNECTION_TYPES,
+  LANES_SERVING_MOCK_TOOLS,
   type DraftMockConnectionType,
 } from "./mock-tools/lanes.ts";
 /** Pure grader policy parsing and validation; no store is read or written. */

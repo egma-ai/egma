@@ -22,6 +22,12 @@ import { cn } from "@/lib/utils";
  * agreed title in that same muted text rather than a heading, because a
  * heading would make a quiet note into a section of the page.
  *
+ * **A fact is a title and the lines that explain it, and the three-line
+ * ceiling drops a fact whole.** More facts than fit is the ordinary case on a
+ * LiveKit token endpoint, and cutting the list at three lines wherever three
+ * lines fell left the last title standing with its explanation gone — a note
+ * that names a rule and never says what the rule is.
+ *
  * **Nothing here is stored.** The lines are computed from the connection and
  * the tests every time they are drawn: on the run-start sheet from the suite's
  * current tests, on the run page from the versions its simulations pinned. Two
@@ -55,6 +61,18 @@ export type RunNoteConnection = {
 /** At most this many lines, however many facts apply. */
 const LINES_AT_MOST = 3;
 
+/**
+ * One fact: the title that opens it, and the lines that explain it.
+ *
+ * A group is kept or dropped whole. The alternative — cutting at three lines
+ * wherever three lines fall — leaves a title standing over nothing, so the
+ * note names a rule and never says what the rule is.
+ */
+type RunNoteGroup = {
+  readonly accent: RunNoteAccent;
+  readonly lines: readonly ReactNode[];
+};
+
 /** Warning first, then information, then the quiet not-used facts. */
 const VOLUME: Readonly<Record<RunNoteAccent, number>> = {
   warning: 0,
@@ -76,6 +94,25 @@ function Key({ children }: { readonly children: string }) {
 /** `1 test carries`, `2 tests carry` — the quiet lines' own opening. */
 function carry(count: number): string {
   return count === 1 ? "1 test carries" : `${String(count)} tests carry`;
+}
+
+/**
+ * `1 of 3 tests carries`, `2 of 3 tests carry` — the counted lines' opening.
+ *
+ * The subject is the count, not the suite, so one test carries and two carry.
+ */
+function carryOf(count: number, total: number): string {
+  return (
+    `${String(count)} of ${String(total)} tests ` +
+    (count === 1 ? "carries" : "carry")
+  );
+}
+
+/** What the tests that mock nothing do, said about one or about many. */
+function theOthers(rest: number): string {
+  return rest === 1
+    ? "The other test runs on your serving version with all real tools."
+    : `The other ${String(rest)} tests run on your serving version with all real tools.`;
 }
 
 /**
@@ -116,8 +153,7 @@ export function runNoteLines(
 ): readonly RunNoteLine[] {
   const { total, mocks, retellVars, dispatch } = counted(tests);
   if (total === 0) return [];
-  const many = String(total);
-  const lines: RunNoteLine[] = [];
+  const groups: RunNoteGroup[] = [];
 
   const retell =
     connection.connectionType === "retell_text_mode" ||
@@ -129,121 +165,122 @@ export function runNoteLines(
     connection.accessVariant === "livekit_room.customer_token_endpoint";
 
   /* A phone call is the customer's own published number answered by Retell. */
-  if (connection.connectionType === "phone_number") {
-    if (mocks > 0 || retellVars > 0) {
-      lines.push({
-        accent: "warning",
-        text: "Some test data will not be used on this connection.",
-      });
-    }
-    if (mocks > 0) {
-      lines.push({
-        accent: "warning",
-        text: `${String(mocks)} of ${many} tests carry mock tools. A Retell phone connection cannot mock tools, so those simulations reach your real tools.`,
-      });
-    }
-    if (retellVars > 0) {
-      lines.push({
-        accent: "warning",
-        text: `${String(retellVars)} of ${many} tests carry Retell dynamic variables. A phone call is answered by Retell, not created by egma, so they cannot be passed.`,
-      });
-    }
+  if (
+    connection.connectionType === "phone_number" &&
+    (mocks > 0 || retellVars > 0)
+  ) {
+    groups.push({
+      accent: "warning",
+      lines: [
+        "Some test data will not be used on this connection.",
+        ...(mocks > 0
+          ? [
+              `${carryOf(mocks, total)} mock tools. A Retell phone connection cannot mock tools, so those simulations reach your real tools.`,
+            ]
+          : []),
+        ...(retellVars > 0
+          ? [
+              `${carryOf(retellVars, total)} Retell dynamic variables. A phone call is answered by Retell, not created by Egma, so they cannot be passed.`,
+            ]
+          : []),
+      ],
+    });
   }
 
   /* One temporary version per run, and only when some test mocks. */
   if (connection.connectionType === "retell_web_call" && mocks > 0) {
     const rest = total - mocks;
-    lines.push({
+    groups.push({
       accent: "brand",
-      text: "This run creates one temporary version of your Retell agent.",
-    });
-    lines.push({
-      accent: "brand",
-      text: "egma makes it at run start, points only the mocked tools at egma, and deletes it when the run ends. Your serving version is never changed.",
-    });
-    lines.push({
-      accent: "brand",
-      text:
-        `${String(mocks)} of ${many} tests carry mock tools. In those simulations, tools the test does not mock reach your real backend.` +
-        // Said only when there are other tests to say it about. Every test in
-        // the run mocking is not a case for "The other 0 tests".
-        (rest > 0
-          ? ` The other ${String(rest)} tests run on your serving version with all real tools.`
-          : ""),
+      lines: [
+        "This run creates one temporary version of your Retell agent.",
+        "Egma makes it at run start, points only the mocked tools at Egma, and deletes it when the run ends. Your serving version is never changed.",
+        `${carryOf(mocks, total)} mock tools. In those simulations, tools the test does not mock reach your real backend.` +
+          // Said only when there are other tests to say it about. Every test in
+          // the run mocking is not a case for "The other 0 tests".
+          (rest > 0 ? ` ${theOthers(rest)}` : ""),
+      ],
     });
   }
 
   /* On LiveKit the customer's own agent serves the mock, through the SDK. */
   if (livekit && mocks > 0) {
-    lines.push({
+    groups.push({
       accent: "brand",
-      text: "Mock tools on LiveKit need the egma SDK in your agent.",
-    });
-    lines.push({
-      accent: "brand",
-      text: (
+      lines: [
+        "Mock tools on LiveKit need the Egma SDK in your agent.",
         <>
-          {`${String(mocks)} of ${many} tests carry mock tools. They are served only when your agent runs `}
+          {`${carryOf(mocks, total)} mock tools. They are served only when your agent runs `}
           <Key>mockable(...)</Key>
           {". Tools a test does not mock run real."}
-        </>
-      ),
+        </>,
+      ],
     });
   }
 
   /* The endpoint dispatches the agent, so egma never writes the dispatch. */
   if (livekit && tokenEndpoint && dispatch > 0) {
-    lines.push({
+    groups.push({
       accent: "warning",
-      text: "Some test data will not be used on this connection.",
-    });
-    lines.push({
-      accent: "warning",
-      text: (
+      lines: [
+        "Some test data will not be used on this connection.",
         <>
-          {`${String(dispatch)} of ${many} tests carry `}
+          {`${carryOf(dispatch, total)} `}
           <Key>job_dispatch_metadata</Key>
           {
-            ". On a token-endpoint connection your endpoint dispatches the agent, so egma cannot pass it."
+            ". On a token-endpoint connection your endpoint dispatches the agent, so Egma cannot pass it."
           }
-        </>
-      ),
-    });
-  }
-
-  /* And the two quiet facts: data the other platform simply has no use for. */
-  if (livekit && retellVars > 0) {
-    lines.push({
-      accent: "quiet",
-      text: (
-        <>
-          {`${carry(retellVars)} `}
-          <Key>retell_dynamic_variables</Key>
-          {", which a LiveKit connection does not use."}
-        </>
-      ),
-    });
-  }
-  if (retell && dispatch > 0) {
-    lines.push({
-      accent: "quiet",
-      text: (
-        <>
-          {`${carry(dispatch)} `}
-          <Key>job_dispatch_metadata</Key>
-          {", which a Retell connection does not use."}
-        </>
-      ),
+        </>,
+      ],
     });
   }
 
   /*
-   * Loudest first, and never more than three. `toSorted` is stable, so a
-   * group's own title still stands over the lines it introduces.
+   * And the two quiet facts: data the other platform simply has no use for.
+   * Each is one line and its own group, because each says the whole of itself.
    */
-  return lines
-    .toSorted((left, right) => VOLUME[left.accent] - VOLUME[right.accent])
-    .slice(0, LINES_AT_MOST);
+  if (livekit && retellVars > 0) {
+    groups.push({
+      accent: "quiet",
+      lines: [
+        <>
+          {`${carry(retellVars)} `}
+          <Key>retell_dynamic_variables</Key>
+          {", which a LiveKit connection does not use."}
+        </>,
+      ],
+    });
+  }
+  if (retell && dispatch > 0) {
+    groups.push({
+      accent: "quiet",
+      lines: [
+        <>
+          {`${carry(dispatch)} `}
+          <Key>job_dispatch_metadata</Key>
+          {", which a Retell connection does not use."}
+        </>,
+      ],
+    });
+  }
+
+  /*
+   * Loudest first, and never more than three lines. `toSorted` is stable, so
+   * two groups at one volume stay in the order they were written here.
+   *
+   * **A group goes in whole or not at all**, and the note stops at the first
+   * one that does not fit. Half a group is a title with its explanation cut
+   * off, and letting a quieter group in behind a dropped one would show the
+   * lesser fact and hide the greater — the opposite of what the order is for.
+   */
+  const kept: RunNoteLine[] = [];
+  for (const group of groups.toSorted(
+    (left, right) => VOLUME[left.accent] - VOLUME[right.accent],
+  )) {
+    if (kept.length + group.lines.length > LINES_AT_MOST) break;
+    for (const text of group.lines) kept.push({ accent: group.accent, text });
+  }
+  return kept;
 }
 
 /**

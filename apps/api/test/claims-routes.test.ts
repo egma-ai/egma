@@ -79,6 +79,19 @@ const LIVEKIT = {
   },
 } as const;
 
+/**
+ * The one lane that branches a temporary copy, so the one lane where Egma's
+ * own routing variables exist at all.
+ */
+const WEB_CALL = {
+  agentPlatform: "retell",
+  connectionType: "retell_web_call",
+  accessVariant: "retell_web_call.api_key",
+  modality: "voice",
+  config: { retellAgentId: "agent_in_retell_1" },
+  credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+} as const;
+
 const PHONE = {
   agentPlatform: null,
   connectionType: "phone_number",
@@ -104,6 +117,44 @@ const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
     { status: 200 },
   );
 };
+
+/**
+ * A Retell that answers exactly what a web-call run's start asks it: the agent
+ * the connection names, this account's numbers — none, so no binding chooses a
+ * version — and the versions that agent has, of which the published one is
+ * what real callers reach.
+ */
+const RETELL_WEB_CALL_FETCH: typeof fetch = (async (
+  input: string | URL | Request,
+) => {
+  const url = String(input);
+  const json = (value: unknown) =>
+    new Response(JSON.stringify(value), { status: 200 });
+  if (url.includes("/v2/list-agents")) {
+    return json({
+      items: [
+        { agent_id: "agent_in_retell_1", agent_name: "Front desk", channel: "voice" },
+      ],
+      has_more: false,
+    });
+  }
+  if (url.includes("/v2/list-phone-numbers")) return json({ items: [], has_more: false });
+  if (url.includes("/get-agent/")) {
+    // No number binds this agent, so the run start asks for the newest
+    // published version and this account has exactly one.
+    return json({
+      agent_id: "agent_in_retell_1",
+      version: 105,
+      is_published: true,
+      response_engine: {
+        type: "conversation-flow",
+        conversation_flow_id: "flow_1",
+        version: 105,
+      },
+    });
+  }
+  throw new Error(`Unexpected Retell read: ${url}`);
+}) as typeof fetch;
 
 /** One claim as the simulator makes it, with whatever token the test says. */
 async function claim(
@@ -139,6 +190,7 @@ async function aCustomerReadyToRun(
   options: TestApiOptions = {},
   personaModels?: PersonaModels,
   world: TestWorld = {},
+  connection: typeof RETELL | typeof WEB_CALL = RETELL,
 ): Promise<{
   ada: Customer;
   key: string;
@@ -159,7 +211,7 @@ async function aCustomerReadyToRun(
   const registered = await ask(api.app, "POST", "/v1/agents", key, {
     agentPlatform: "retell",
     name: "Front desk",
-    connection: RETELL,
+    connection,
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
   const agentId = (registered.body.agent as { id: string }).id;
@@ -629,6 +681,60 @@ describe("claiming work", () => {
       expect(name.startsWith("egma_"), name).toBe(false);
     }
     expect("job_dispatch_metadata" in spec).toBe(false);
+  });
+
+  it("leaves Egma's own variables off a call placed on the serving version", async () => {
+    /*
+     * **The run branched a copy, and this simulation is not on it.** A web-call
+     * run makes one temporary version for the tests that mock, and conducts
+     * every other test against the version real callers reach. The routing
+     * variables are names that only the temporary version declares, so a call
+     * on the serving version is handed none of them — a row of empty
+     * `egma_url_…` on the customer's own call record would name variables that
+     * version never had.
+     *
+     * The run's world is written here rather than branched, because branching
+     * one is Retell's business and this door's business is what it hands the
+     * simulator once one exists.
+     */
+    const { key, connectionId, versionId } = await aCustomerReadyToRun(
+      "claims_serving_version_variables",
+      { retellFetch: RETELL_WEB_CALL_FETCH },
+      undefined,
+      { env: { retell_dynamic_variables: { caller_name: "Margaret" } } },
+      WEB_CALL,
+    );
+
+    const { runId } = await aQueuedRun(key, connectionId, versionId);
+    await api.database.sql(
+      `update run
+          set temp_mock_agent_version = 106,
+              temp_mock_agent_version_cleanup = false,
+              mock_metadata = $2::jsonb
+        where id = $1`,
+      [
+        runId,
+        JSON.stringify({
+          engine: { type: "conversation-flow", engine_id: "flow_1", version: 105 },
+          url_variables: [
+            { tool: "get_availability", variable: "egma_url_get_availability" },
+          ],
+        }),
+      ],
+    );
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 4,
+      wait_seconds: 0,
+    });
+    const spec = (answered.body.specs as Record<string, unknown>[])[0];
+    if (spec === undefined) throw new Error("no spec came back");
+    expect(specComplaints(spec)).toEqual([]);
+    // The version real callers reach, and the test's own variables alone.
+    expect(spec.agent_version).toBe(105);
+    expect(spec.dynamic_variables).toEqual({ caller_name: "Margaret" });
+    expect("mock_tools" in spec).toBe(false);
   });
 
   it("carries no answers at all on a lane Egma cannot answer a call on", async () => {

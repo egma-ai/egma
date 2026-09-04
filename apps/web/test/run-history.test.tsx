@@ -2423,8 +2423,8 @@ describe("one run after suites", () => {
       const lines = await noteLines();
       expect(lines.map((line) => line.textContent)).toEqual([
         "Some test data will not be used on this connection.",
-        "1 of 3 tests carry mock tools. A Retell phone connection cannot mock tools, so those simulations reach your real tools.",
-        "1 of 3 tests carry Retell dynamic variables. A phone call is answered by Retell, not created by egma, so they cannot be passed.",
+        "1 of 3 tests carries mock tools. A Retell phone connection cannot mock tools, so those simulations reach your real tools.",
+        "1 of 3 tests carries Retell dynamic variables. A phone call is answered by Retell, not created by Egma, so they cannot be passed.",
       ]);
       for (const line of lines) {
         expect(line.getAttribute("data-accent")).toBe("warning");
@@ -2447,8 +2447,8 @@ describe("one run after suites", () => {
       const lines = await noteLines();
       expect(lines.map((line) => line.textContent)).toEqual([
         "This run creates one temporary version of your Retell agent.",
-        "egma makes it at run start, points only the mocked tools at egma, and deletes it when the run ends. Your serving version is never changed.",
-        "1 of 3 tests carry mock tools. In those simulations, tools the test does not mock reach your real backend. The other 2 tests run on your serving version with all real tools.",
+        "Egma makes it at run start, points only the mocked tools at Egma, and deletes it when the run ends. Your serving version is never changed.",
+        "1 of 3 tests carries mock tools. In those simulations, tools the test does not mock reach your real backend. The other 2 tests run on your serving version with all real tools.",
       ]);
       for (const line of lines) {
         expect(line.getAttribute("data-accent")).toBe("brand");
@@ -2456,10 +2456,12 @@ describe("one run after suites", () => {
       }
     });
 
-    it("says LiveKit mocks need the SDK, and keeps the loudest three lines", async () => {
-      // Four facts apply on a token endpoint: the SDK pair, and the pair about
-      // the dispatch it cannot pass. Warning goes first and the note stops at
-      // three, because a note nobody finishes reading says nothing.
+    it("keeps the loudest fact whole and drops the ones that do not fit", async () => {
+      // Three facts apply on a token endpoint: the warning pair about the
+      // dispatch it cannot pass, the brand pair about the SDK, and the quiet
+      // line about Retell's variables. Five lines, three of room. The warning
+      // pair goes in whole and the rest are dropped whole, because half a fact
+      // is a title standing over an explanation that was cut off.
       answers(
         noteStubs(
           {
@@ -2472,17 +2474,22 @@ describe("one run after suites", () => {
       render(<RunDetailPage />);
 
       const lines = await noteLines();
-      expect(lines).toHaveLength(3);
+      expect(lines).toHaveLength(2);
       expect(lines.map((line) => line.textContent)).toEqual([
         "Some test data will not be used on this connection.",
-        "1 of 3 tests carry job_dispatch_metadata. On a token-endpoint connection your endpoint dispatches the agent, so egma cannot pass it.",
-        "Mock tools on LiveKit need the egma SDK in your agent.",
+        "1 of 3 tests carries job_dispatch_metadata. On a token-endpoint connection your endpoint dispatches the agent, so Egma cannot pass it.",
       ]);
       expect(lines.map((line) => line.getAttribute("data-accent"))).toEqual([
         "warning",
         "warning",
-        "brand",
       ]);
+      // The SDK title is not left standing on its own: it is dropped with the
+      // line that explains it.
+      expect(
+        lines.some((line) =>
+          (line.textContent ?? "").includes("Mock tools on LiveKit"),
+        ),
+      ).toBe(false);
     });
 
     it("says quietly what the other platform's data is, on a key-pair room", async () => {
@@ -2509,6 +2516,66 @@ describe("one run after suites", () => {
       ]);
       expect(lines[0]?.getAttribute("data-accent")).toBe("quiet");
       expect(lines[0]?.className).toContain("border-border");
+    });
+
+    it("counts every page of the run's simulations, not the page on screen", async () => {
+      /*
+       * The list shows the first page and grows on the reader's own Load more.
+       * The note says "1 of 3", so it walks the run to the end itself: a
+       * denominator read off the rows that happen to be on screen would be a
+       * wrong number said quietly, and the one test that mocks is on page two.
+       */
+      const versions = [
+        testVersion({ id: "tstv_1" }),
+        testVersion({ id: "tstv_2" }),
+        testVersion({
+          id: "tstv_3",
+          mockTools: [{ tool: "get_availability", answer: { slots: [] } }],
+        }),
+      ];
+      const rows = versions.map((version, at) =>
+        simulation({
+          id: `sim_${String(at + 1)}`,
+          position: at + 1,
+          testId: `tst_${String(at + 1)}`,
+          testName: `Test ${String(at + 1)}`,
+          testVersionId: String(version.id),
+        }),
+      );
+      answers({
+        "/api/me": { status: 200, body: ME },
+        "/v1/runs/run_1": {
+          status: 200,
+          body: runDetail({
+            connectionType: "retell_web_call",
+            accessVariant: "retell_web_call.api_key",
+          }),
+        },
+        "/v1/runs/run_1/simulations": [
+          {
+            status: 200,
+            body: { simulations: rows.slice(0, 2), nextPageToken: "sim_2" },
+          },
+          { status: 200, body: { simulations: rows.slice(2), nextPageToken: null } },
+        ],
+        "/v1/simulations/sim_1": { status: 200, body: simulationEvidence() },
+        ...Object.fromEntries(
+          versions.map((version) => [
+            `/v1/test-versions/${String(version.id)}`,
+            { status: 200, body: version },
+          ]),
+        ),
+      });
+      render(<RunDetailPage />);
+
+      const lines = await noteLines();
+      // Three tests, one of them mocking — and the first page held neither of
+      // those facts.
+      expect(lines.map((line) => line.textContent)).toEqual([
+        "This run creates one temporary version of your Retell agent.",
+        "Egma makes it at run start, points only the mocked tools at Egma, and deletes it when the run ends. Your serving version is never changed.",
+        "1 of 3 tests carries mock tools. In those simulations, tools the test does not mock reach your real backend. The other 2 tests run on your serving version with all real tools.",
+      ]);
     });
 
     it("draws no note at all when nothing applies", async () => {

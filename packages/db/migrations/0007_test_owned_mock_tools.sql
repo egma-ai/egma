@@ -2,7 +2,7 @@
 -- version, and the project-level machinery around them goes.
 --
 -- **Destructive**, under the standing pre-launch allowance README.md sets out
--- in "Before launch": two tables, three columns, two checks and two JSON keys
+-- in "Before launch": two tables, three columns, two checks and three JSON keys
 -- are removed in one step rather than stopped-reading now and dropped later.
 -- The code that reads the new shape ships in the same change, so the two are
 -- never apart.
@@ -22,8 +22,15 @@
 --   * `simulation.mock_tool_coverage` and its terminal check — the three name
 --     lists saying which tools Egma answered for. Every answered call is on
 --     the transcript already.
---   * the `mockOverrides` key inside `test_version.content`, and the
---     `mockToolsEnabled` key inside `run.connection_snapshot`.
+--   * the `mockOverrides` key inside `test_version.content`, the
+--     `mockToolsEnabled` key inside `run.connection_snapshot`, and the
+--     `metadata` key inside a LiveKit connection's own `config`. That last one
+--     is the object every run over the connection dispatched its worker with.
+--     A test says what its worker is told now, in `env.job_dispatch_metadata`,
+--     so the registry no longer holds the key — and the registry refuses a
+--     config key it does not hold, by name. A row that kept `metadata` could
+--     therefore not be read back at all, which makes stripping it part of the
+--     same step rather than a tidy-up afterwards.
 --
 -- **What is carried across is carried across.** Every override a test version
 -- already holds becomes that version's own `mock_tools` entry, in the order it
@@ -96,9 +103,20 @@ UPDATE "run"
  WHERE jsonb_exists("connection_snapshot", 'mockToolsEnabled');--> statement-breakpoint
 ALTER TABLE "run" ENABLE TRIGGER "run_lifecycle_guard";--> statement-breakpoint
 
+-- The one dispatch metadata a LiveKit connection carried for every run over
+-- it. No trigger guards a connection row, so this is one plain statement.
+--
+-- Scoped to the lane that could hold the key: `metadata` is a LiveKit word,
+-- and a Retell config that happened to hold one would be a different thing
+-- under the same name. A config key the registry does not hold is refused by
+-- name at read, so a LiveKit row left carrying this one would answer nothing
+-- at all — not the run that reads it, not the form that edits it.
+UPDATE "connection"
+   SET "config" = "config" - 'metadata'
+ WHERE "connection_type" = 'livekit_room'
+   AND jsonb_exists("config", 'metadata');--> statement-breakpoint
+
 -- The project's own mocked world, and the agents it was scoped to.
-ALTER TABLE "mock_tool" DISABLE ROW LEVEL SECURITY;--> statement-breakpoint
-ALTER TABLE "mock_tool_agent" DISABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP TABLE "mock_tool" CASCADE;--> statement-breakpoint
 DROP TABLE "mock_tool_agent" CASCADE;--> statement-breakpoint
 

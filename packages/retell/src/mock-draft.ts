@@ -253,6 +253,13 @@ export function mockedToolsFor(engine: EngineConfiguration): MockedDraft {
    */
   const variables: MockToolVariable[] = [];
   const claimed = new Map<string, string>();
+  /**
+   * Each intercepted tool's routing variable, by the tool's own name, so the
+   * rewrite below reads the name this loop settled on rather than working it
+   * out a second time. Two tools cannot share a name here: the same name gives
+   * the same variable, which is refused above.
+   */
+  const variableOf = new Map<string, string>();
   for (const tool of tools) {
     if (!isIntercepted(tool)) continue;
     const variable = mockToolVariable(tool.name);
@@ -283,10 +290,20 @@ export function mockedToolsFor(engine: EngineConfiguration): MockedDraft {
       };
     }
     claimed.set(variable, tool.name);
+    variableOf.set(tool.name, variable);
     variables.push({ tool: tool.name, variable });
   }
 
-  const at = (
+  /**
+   * The entries of one array that this draft rewrites, by their index in it:
+   * every intercepted tool held there, with its own routing variable written in
+   * front of the URL the customer wrote.
+   *
+   * Keyed by index because that is how the array goes back — the rewritten
+   * entries take their own places and every other row is copied across
+   * untouched.
+   */
+  const prefixedAt = (
     array: "tools" | "general_tools" | "states",
     stateIndex: number | null,
   ): Map<number, Record<string, unknown>> => {
@@ -300,7 +317,11 @@ export function mockedToolsFor(engine: EngineConfiguration): MockedDraft {
       ) {
         continue;
       }
-      rewritten.set(tool.index, prefixed(tool, mockToolVariable(tool.name)));
+      const variable = variableOf.get(tool.name);
+      // Every intercepted tool was given one above, so this is the type's
+      // question rather than the product's.
+      if (variable === undefined) continue;
+      rewritten.set(tool.index, prefixed(tool, variable));
     }
     return rewritten;
   };
@@ -334,7 +355,7 @@ export function mockedToolsFor(engine: EngineConfiguration): MockedDraft {
     return {
       kind: "mocked",
       tools: Array.isArray(document["tools"])
-        ? { tools: rewrite(document["tools"], at("tools", null)) }
+        ? { tools: rewrite(document["tools"], prefixedAt("tools", null)) }
         : {},
       defaults,
       variables,
@@ -345,7 +366,7 @@ export function mockedToolsFor(engine: EngineConfiguration): MockedDraft {
   if (Array.isArray(document["general_tools"])) {
     written["general_tools"] = rewrite(
       document["general_tools"],
-      at("general_tools", null),
+      prefixedAt("general_tools", null),
     );
   }
 
@@ -359,7 +380,7 @@ export function mockedToolsFor(engine: EngineConfiguration): MockedDraft {
       if (!Array.isArray(held["tools"])) return state;
       return {
         ...held,
-        tools: rewrite(held["tools"], at("states", stateIndex)),
+        tools: rewrite(held["tools"], prefixedAt("states", stateIndex)),
       };
     });
   }

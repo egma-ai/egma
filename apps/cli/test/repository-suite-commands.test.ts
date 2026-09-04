@@ -620,6 +620,78 @@ describe("complete repository suite commands", () => {
     }
   });
 
+  it.each([
+    [
+      "a mock tool that holds delay_ms",
+      [
+        "## Mock tools",
+        "### book",
+        "```json",
+        '{"answer": {"booked": true}, "delay_ms": 250}',
+        "```",
+      ].join("\n"),
+      "delay_ms.*take the line out",
+    ],
+    [
+      "a mock tool that holds agents",
+      [
+        "## Mock tools",
+        "### book",
+        "```json",
+        '{"answer": {"booked": true}, "agents": ["front-desk"]}',
+        "```",
+      ].join("\n"),
+      "agents.*belongs to the test that writes it",
+    ],
+    [
+      "an Env key the format does not hold",
+      ["## Env", "```json", '{"webhooks": {"url": "https://hooks.test"}}', "```"].join("\n"),
+      '"webhooks".*nothing else',
+    ],
+  ])(
+    "turns the whole push away for %s, naming the file and the reason",
+    async (_name, section, reason) => {
+      const platform = await startPlatform();
+      const key = "egma_sk_world-refusals";
+      const release = platform.suites.add("Release");
+      platform.tests.add({
+        suiteId: release.id,
+        name: "Books a visit",
+        scenario: "The caller asks for Tuesday.",
+        expectedBehaviors: ["The agent books Tuesday."],
+      });
+      const repository = await fixtureRepository(platform, release, key);
+      try {
+        await pullFixture(platform, repository, key);
+        const paths = folderPathsIn(repository.dir);
+        const file = (await readRepository(paths)).suites[0]?.tests[0]!;
+        // The section is typed under the file Egma wrote, which is where an
+        // author working from an older Egma would have left it.
+        const typed = `${(await readFile(file.file, "utf8")).trimEnd()}\n${section}\n`;
+        await writeFile(file.file, typed);
+        const firstRecord = platform.records.length;
+
+        // The sentence names the file rather than the section, because a
+        // repository of a hundred tests has to say which one to open.
+        await expect(
+          pushTests({ signedIn: { url: platform.url, key }, paths }),
+        ).rejects.toThrow(new RegExp(file.shown.replaceAll("/", "\\/"), "u"));
+        await expect(
+          pushTests({ signedIn: { url: platform.url, key }, paths }),
+        ).rejects.toThrow(new RegExp(reason, "su"));
+
+        // A push is one change set, so a file Egma cannot read stops it before
+        // the platform is asked for anything at all: nothing lands, and the
+        // file on disk is still the one the author has open.
+        expect(platform.records.slice(firstRecord)).toEqual([]);
+        expect(platform.tests.versionsOf("Books a visit")).toBe(1);
+        expect(await readFile(file.file, "utf8")).toBe(typed);
+      } finally {
+        await Promise.all([platform.close(), repository.remove()]);
+      }
+    },
+  );
+
   it("pulls every suite through the suite-scoped HTTP test-list contract", async () => {
     const platform = await startPlatform();
     const repository = await makeWorkspace();
