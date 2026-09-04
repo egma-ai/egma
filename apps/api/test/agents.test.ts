@@ -1679,8 +1679,8 @@ describe("a livekit connection", () => {
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: { headers: '{"Authorization":"Bearer not-a-real-token"}' },
       },
@@ -1695,12 +1695,46 @@ describe("a livekit connection", () => {
       modality: "voice",
       topology: "agent-dials-out",
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
+        agentName: "front-desk",
       },
       credentialsHint: "Authorization",
     });
     expect(connectionOf(registered)).not.toHaveProperty("credentials");
+  });
+
+  /**
+   * The chat lane on the other way in: the same four facts, `chat` for the
+   * modality, and its own label so the two token-endpoint options can be
+   * told apart wherever the label is shown.
+   */
+  it("is registered for chat through a token endpoint", async () => {
+    api = await createApi("agents_livekit_endpoint_chat");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const registered = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "livekit",
+      name: "Typed agent",
+      connection: {
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.customer_token_endpoint",
+        modality: "chat",
+        config: {
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
+        },
+        credentials: { headers: '{"Authorization":"Bearer not-a-real-token"}' },
+      },
+    });
+
+    expect(registered.status).toBe(201);
+    expect(connectionOf(registered)).toMatchObject({
+      accessVariant: "livekit_room.customer_token_endpoint",
+      productLabel: "LiveKit chat token endpoint",
+      modality: "chat",
+      credentialsHint: "Authorization",
+    });
   });
 
   it("refuses a literal private token endpoint", async () => {
@@ -1716,8 +1750,8 @@ describe("a livekit connection", () => {
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
-          url: "ws://livekit.internal:7880",
           tokenEndpoint: "https://127.0.0.1/egma",
+          agentName: "front-desk",
         },
         credentials: { headers: '{"Authorization":"Bearer not-real"}' },
       },
@@ -1744,28 +1778,6 @@ describe("a livekit connection", () => {
     readonly payload: Record<string, unknown>;
     readonly message: string;
   }[] = [
-    {
-      // The kind speaks chat; this way of reaching it cannot. Egma asks the
-      // customer's endpoint for a token and never dispatches the worker, so
-      // there is nowhere to tell the agent to answer in text.
-      named: "chat on the access variant Egma cannot dispatch through",
-      slug: "chat_on_endpoint",
-      payload: {
-        accessVariant: "livekit_room.customer_token_endpoint",
-        modality: "chat",
-        config: {
-          url: "wss://acme.livekit.cloud",
-          tokenEndpoint: "https://acme.example/egma/livekit-token",
-        },
-        credentials: { headers: '{"Authorization":"Bearer not-real"}' },
-      },
-      message:
-        "a token-endpoint livekit connection speaks voice: Egma asks your " +
-        "endpoint for a token and never dispatches the worker itself, so " +
-        "it has no way to tell the agent to answer in text. Chat is " +
-        "offered on the LiveKit project credentials access variant, where " +
-        "Egma dispatches the named worker and sends the modality with it.",
-    },
     {
       named: "a word that is not a modality at all",
       slug: "not_a_modality",
@@ -1840,8 +1852,8 @@ describe("a livekit connection", () => {
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
       },
       message:
@@ -1857,8 +1869,8 @@ describe("a livekit connection", () => {
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: undefined,
       },
@@ -1889,8 +1901,8 @@ describe("a livekit connection", () => {
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "wss://acme.livekit.cloud",
+          agentName: "front-desk",
         },
         credentials: { headers: '{"Authorization":"Bearer not-real"}' },
       },
@@ -1899,21 +1911,22 @@ describe("a livekit connection", () => {
         "looks like https://example.com/egma/livekit-token",
     },
     {
-      // Dispatching is a power a key pair buys, and this shape has none.
-      named: "an agent to dispatch on a connection that cannot dispatch",
-      slug: "agent_name_with_endpoint",
+      // The endpoint's answer names the server, so a url here would be a
+      // second answer to a question the endpoint settles.
+      named: "a server url on a connection whose endpoint names the server",
+      slug: "url_with_endpoint",
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
           agentName: "front-desk",
+          url: "wss://acme.livekit.cloud",
         },
         credentials: { headers: '{"Authorization":"Bearer not-real"}' },
       },
       message:
-        'a token-endpoint livekit connection\'s config has no key "agentName"; ' +
-        "it holds url, tokenEndpoint",
+        'a token-endpoint livekit connection\'s config has no key "url"; ' +
+        "it holds tokenEndpoint, agentName",
     },
     {
       named: "headers that are not a JSON object of name to value",
@@ -1921,8 +1934,8 @@ describe("a livekit connection", () => {
       payload: {
         accessVariant: "livekit_room.customer_token_endpoint",
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: { headers: "Authorization: Bearer not-real" },
       },
@@ -2082,8 +2095,8 @@ describe("a livekit connection", () => {
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
+        agentName: "front-desk",
       },
       credentials: { headers },
       ...overrides,
@@ -2116,8 +2129,14 @@ describe("a livekit connection", () => {
       }),
       await post("/v1/agents", withKey(ada.secret), {
         agentPlatform: "livekit",
-        name: "Refused for a modality it does not speak",
-        connection: endpointPayload({ modality: "chat" }),
+        name: "Refused for a server url the endpoint answers with",
+        connection: endpointPayload({
+          config: {
+            tokenEndpoint: "https://acme.example/egma/livekit-token",
+            agentName: "front-desk",
+            url: "wss://acme.livekit.cloud",
+          },
+        }),
       }),
       await post("/v1/agents", withKey(ada.secret), {
         agentPlatform: "livekit",

@@ -37,6 +37,7 @@ Current supported combinations include:
 | LiveKit | `livekit_room` | `livekit_room.project_credentials` | chat | LiveKit chat |
 | LiveKit | `livekit_room` | `livekit_room.project_credentials` | voice | LiveKit project credentials |
 | LiveKit | `livekit_room` | `livekit_room.customer_token_endpoint` | voice | LiveKit token endpoint |
+| LiveKit | `livekit_room` | `livekit_room.customer_token_endpoint` | chat | LiveKit chat token endpoint |
 | LiveKit | `phone_number` | `phone_number.public_e164` | voice | Phone number |
 | Any or unknown | `phone_number` | `phone_number.public_e164` | voice | Phone number |
 
@@ -94,17 +95,18 @@ never mocks, and it carries no dynamic variables.
 
 ### LiveKit room
 
-`livekit_room` joins a room in the customer's LiveKit project. Project
-credentials support chat and voice in the current catalog. A customer token
-endpoint supports voice.
+`livekit_room` joins a room in the customer's LiveKit project. Both access
+variants support chat and voice.
 
 - `livekit_room.project_credentials`: the config names `url` and `agentName`.
   Egma stores the project key pair sealed, mints a token, creates the room, and
   dispatches that exact worker name.
-- `livekit_room.customer_token_endpoint`: the config names `url` and
-  `tokenEndpoint`. The customer keeps the signing key and exposes a public
-  HTTPS endpoint that returns a room token. Egma stores only the endpoint
-  authentication headers sealed.
+- `livekit_room.customer_token_endpoint`: the config names `tokenEndpoint` and
+  `agentName`. The customer keeps the signing key and exposes a public HTTPS
+  endpoint in LiveKit's standard token endpoint format. Egma asks it for a room
+  token and the server URL, and names the worker to dispatch in the request.
+  Egma stores the endpoint URL, the agent name, and the sealed auth headers. It
+  stores no server URL. See [LiveKit token endpoint](/integrations/livekit-token-endpoint).
 
 These are access variants of the same connection type, not different agent
 platforms. A connection carries no per-call data of its own: what a simulation
@@ -112,9 +114,11 @@ starts with is the running test's `env`.
 
 #### What a LiveKit worker reads
 
-On a key-pair connection, Egma writes the running test's
-`job_dispatch_metadata` to the agent dispatch, as one compact JSON string, byte
-for byte:
+Egma writes the running test's `job_dispatch_metadata` to the agent dispatch,
+as one compact JSON string, byte for byte. On a key-pair connection Egma makes
+that dispatch itself. On a token-endpoint connection Egma sends the same
+string to the endpoint inside the request's `room_config`, and the endpoint
+copies it into the token it mints:
 
 | Channel | Worker path | What it carries |
 |---|---|---|
@@ -125,10 +129,11 @@ Egma adds no scenario, persona, expected behavior, or mock-tool answer to the
 dispatch. A worker must not receive the test script that defines its simulation.
 The room name tells the Egma SDK that the worker is in a simulation.
 
-The customer-token-endpoint variant takes no dispatch name. Without the project
-key pair, Egma cannot create the room or dispatch a named worker; the customer's
-endpoint owns those actions, so Egma has nowhere to write a test's
-`job_dispatch_metadata` and does not pass it.
+On the customer-token-endpoint variant Egma cannot create the room, so only the
+dispatch channel carries anything. Egma names the worker and passes the test's
+`job_dispatch_metadata` inside the request's `room_config`. The endpoint copies
+that block into the token, and LiveKit dispatches the worker when the room is
+created.
 
 ## What each connection can use of a test
 
@@ -141,7 +146,7 @@ A test carries its own world: the **mock tools** it answers for itself, and the
 | Retell web call | Yes | Yes | Not used |
 | Retell phone | No | No | Not used |
 | LiveKit key pair, chat or voice | Yes, with the Egma SDK in your worker | Not used | Yes |
-| LiveKit token endpoint | Yes, with the Egma SDK in your worker | Not used | No |
+| LiveKit token endpoint | Yes, with the Egma SDK in your worker | Not used | Yes, inside the `room_config` your endpoint copies into the token |
 
 **A run proceeds whatever its connection can carry, and says what it could not
 use.** Egma reads the connection and the tests' pinned versions and shows a

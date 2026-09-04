@@ -29,13 +29,6 @@ two is broken.
 
 - **A voice simulation.** The plug carrying the speech legs is the one
   next door, and this one has no transport to give a pipeline.
-- **A connection that names a token endpoint.** Egma holds no key pair
-  there, so it neither makes the room nor dispatches the worker — and
-  those are the two powers that tell an agent it is in a chat: the
-  telling is the room's name, and on that variant the name is a request
-  to the customer's endpoint rather than a fact egma controls. A chat
-  run against an agent that was never told is the slow, expensive path
-  this lane exists to remove.
 - **An agent that is speaking.** The wire says which of the two states an
   agent is in, and it says it at the agent's first output: a speaking
   agent publishes an audio track and its words carry LiveKit's
@@ -304,15 +297,6 @@ class LiveKitChat:
             raise PlugError(
                 f"the livekit chat plug speaks chat only; a {modality!r} "
                 "simulation in a room needs the plug carrying the speech legs"
-            )
-
-        if access_variant == "livekit_room.customer_token_endpoint":
-            raise PlugError(
-                "a livekit connection that names a tokenEndpoint holds no key "
-                "pair, so Egma neither makes the room whose name would tell "
-                "the agent it is in a chat, nor dispatches the worker that "
-                "must read it; chat is offered on the project-credential "
-                "access variant, where Egma holds both powers"
             )
 
         # Read here, before anything is reached, so a connection the driver

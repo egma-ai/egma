@@ -1,0 +1,313 @@
+---
+title: "LiveKit token endpoint"
+sidebarTitle: "LiveKit token endpoint"
+description: "Test a LiveKit agent without giving Egma your API secret. Your endpoint mints one scoped room token per simulation, in LiveKit's standard token endpoint format."
+---
+
+Egma tests a LiveKit agent by joining a room in your LiveKit project and
+holding a conversation with the worker that joins it. Something has to mint the
+token that opens that room. There are two answers.
+
+The first is to give Egma your project's API key and secret. That is the
+quickest setup, and the right one for a laptop or a development project. See
+[Agents and connections](/concepts/agents-and-connections).
+
+This page is the second answer. **You keep the key pair, and Egma asks an
+endpoint of yours for one scoped token per simulation.** The secret that signs
+tokens for your whole LiveKit project never leaves your side. Egma holds a token
+that opens one room, as one participant, for one conversation.
+
+## The contract is LiveKit's own
+
+Egma speaks [LiveKit's standard token endpoint
+format](https://docs.livekit.io/frontends/build/authentication/endpoint/). That
+is the request every LiveKit client SDK sends through `TokenSource.endpoint`,
+and the answer they read back. If your frontend already has a token endpoint,
+point Egma at it. LiveKit's own example servers in Go, Node.js, Python, Ruby,
+Rust, and PHP serve Egma unchanged.
+
+Two rules are Egma's, on top of that format. The room name always starts with
+`egma-sim-`. The participant identity always starts with `egma-persona-`.
+
+A chat simulation's room is named `egma-sim-chat-<simulation id>`. It still
+starts with the prefix, so your allowlist does not change. Your worker's chat
+setup reads that mark from the room name, exactly as it does when Egma mints
+the token itself.
+
+## What Egma sends
+
+One `POST` per simulation, with the auth headers you configured on the
+connection.
+
+```http
+POST /egma/livekit-token HTTP/1.1
+content-type: application/json
+authorization: Bearer <the header you configured>
+
+{
+  "room_name": "egma-sim-sim_01K5TB2H8Y4P7QCWF9XKMD6RZN",
+  "participant_identity": "egma-persona-sim_01K5TB2H8Y4P7QCWF9XKMD6RZN",
+  "participant_name": "egma-persona-sim_01K5TB2H8Y4P7QCWF9XKMD6RZN",
+  "room_config": {
+    "agents": [
+      { "agent_name": "front-desk", "metadata": "{\"tenant\":\"acme\"}" }
+    ]
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `room_name` | A new room for this simulation. It always starts with `egma-sim-`. A chat simulation's room starts with `egma-sim-chat-`. Egma never creates it first and never reuses it. |
+| `participant_identity` | The identity Egma joins as. It always starts with `egma-persona-`. |
+| `participant_name` | The same value as the identity, on purpose. Endpoints written against Egma's earlier contract read this key as the identity, so they keep working. A standard endpoint uses it as the display name. |
+| `room_config.agents[0].agent_name` | The LiveKit agent name on the connection. Egma asks your endpoint to dispatch this worker. |
+| `room_config.agents[0].metadata` | The running test's `job_dispatch_metadata`, as one compact JSON string. Sent only when the test has one. Your worker reads it at `ctx.job.metadata`, exactly as it does when Egma dispatches the worker itself. |
+
+Egma sends nothing else. No persona, no scenario, no participant metadata or
+attributes. Nothing from the connection rides along beyond the agent name. The
+room name is the only signal that a simulation is running.
+
+What you can hold Egma to:
+
+- **One request per simulation.** No retry. A failed request ends the
+  simulation with the reason.
+- **The auth headers go to this URL only.** Egma does not follow redirects. It
+  never logs a header value, and it scrubs the values out of anything it quotes.
+- **HTTPS to a public host only.** Egma resolves the host again at request time
+  and refuses private addresses. It waits 20 seconds for an answer and reads at
+  most 64 KiB of it.
+- **One join, over TLS, to a public server.** Egma joins once, as that
+  identity, to that room, at the server URL you return. It holds that URL to the
+  rule it holds your endpoint to: `wss://` or `https://`, and a host that
+  resolves to a public address. It publishes and subscribes audio. It waits 30
+  seconds for your worker to join and speak, then ends the simulation as
+  `agent_never_joined`.
+- **Leave, never delete.** Egma leaves when the conversation ends. It never
+  deletes the room, and it never uses the token again.
+
+## What your endpoint returns
+
+Any 2xx status with a JSON object. LiveKit's format says `201 Created`. A
+`200 OK` is fine.
+
+```json
+{
+  "server_url": "wss://acme.livekit.cloud",
+  "participant_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+| Field | Required | Rule |
+|---|---|---|
+| `server_url` | yes | The LiveKit server Egma connects to. `wss://` or `https://` to a public host. Egma refuses a cleartext scheme, credentials in the URL, and a private, loopback, or link-local address. Also read under `serverUrl`. |
+| `participant_token` | yes | The join token. Also read under `participantToken`, `token`, `accessToken`, and `access_token`. |
+| anything else | ignored | LiveKit's development token server returns extra keys. Extra keys never fail. |
+
+The token must follow these rules:
+
+- Its identity is exactly `participant_identity`. The Egma SDK inside your
+  worker addresses the persona by this identity for mock tools.
+- It grants join on exactly `room_name`, with publish and subscribe. Leave data
+  publishing allowed, which is the default. Mock tools use LiveKit RPC.
+- It carries the `room_config` from the request as its room configuration.
+  LiveKit reads that block only when the room is created, so do not create the
+  room in your handler.
+- It expires soon. A few minutes is enough.
+- It carries no admin grants. No room create, room list, or room admin.
+
+Your endpoint must also:
+
+- Check the auth header on every request, in constant time. Answer 401 or 403
+  otherwise.
+- Refuse a `room_name` that does not start with `egma-sim-`. Answer 4xx.
+- Copy `room_config` into the token, or answer 4xx if you do not let a client
+  name the worker. LiveKit's own rule is 4xx for fields a client may not set. If
+  you refuse it, your side must dispatch the worker another way: automatic
+  dispatch, or an `AgentDispatchService` call in the same handler.
+- Keep a short empty timeout on your project, so the room closes after Egma
+  leaves.
+
+## A complete handler
+
+Python, with FastAPI and `livekit-api`:
+
+```python
+import os
+import secrets
+from datetime import timedelta
+
+from fastapi import FastAPI, Header, HTTPException
+from google.protobuf.json_format import ParseDict
+from livekit import api
+
+app = FastAPI()
+EGMA_SECRET = os.environ["EGMA_TOKEN_SECRET"]
+LIVEKIT_URL = os.environ["LIVEKIT_URL"]
+
+
+@app.post("/egma/livekit-token")
+async def egma_token(body: dict, authorization: str = Header(default="")):
+    # 1. Only Egma may ask.
+    if not secrets.compare_digest(authorization, f"Bearer {EGMA_SECRET}"):
+        raise HTTPException(401)
+
+    # 2. Never a production room.
+    room_name = body.get("room_name", "")
+    if not room_name.startswith("egma-sim-"):
+        raise HTTPException(400, "not a simulation room")
+
+    # 3. Exactly the identity that asked, for exactly that room, for a few minutes.
+    token = (
+        api.AccessToken()  # reads LIVEKIT_API_KEY and LIVEKIT_API_SECRET
+        .with_identity(body["participant_identity"])
+        .with_name(body.get("participant_name", ""))
+        .with_grants(
+            api.VideoGrants(
+                room_join=True, room=room_name, can_publish=True, can_subscribe=True
+            )
+        )
+        .with_ttl(timedelta(minutes=5))
+    )
+
+    # 4. The worker Egma asked for, dispatched by LiveKit when the room is created.
+    if "room_config" in body:
+        token = token.with_room_config(
+            ParseDict(body["room_config"], api.RoomConfiguration())
+        )
+
+    return {"server_url": LIVEKIT_URL, "participant_token": token.to_jwt()}
+```
+
+Node.js with `livekit-server-sdk` follows the same four steps: check the header,
+check the prefix, build an `AccessToken` for the requested identity and room,
+and set `at.roomConfig = RoomConfiguration.fromJson(body.room_config)`.
+
+## A development path with no code
+
+LiveKit Cloud's development token server implements the same format. Enable it
+on your project's settings page and copy the token server ID. Then register a
+connection with:
+
+- Token endpoint: `https://cloud-api.livekit.io/api/v2/sandbox/connection-details`
+- Auth headers: `{"X-Sandbox-ID": "<your token server id>"}`
+
+LiveKit marks the development token server as development only. Anyone with the
+ID can mint a token with any permissions.
+
+## Registering the connection
+
+In the app, choose LiveKit, voice or chat, and the connection type **Token
+endpoint**. The form asks for three things: the LiveKit agent name, the token
+endpoint, and the auth headers. It does not ask for your LiveKit server URL.
+Your endpoint answers with it. What your worker reads at `ctx.job.metadata`
+belongs to each test, as its `job_dispatch_metadata`, not to the connection.
+
+Through the API, `tokenEndpoint` and `agentName` go in the config, and the auth
+headers are a credential:
+
+```bash
+curl -sX POST https://<your egma>/v1/agents \
+  -H 'authorization: Bearer egma_sk_...' \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "Front desk",
+    "agentPlatform": "livekit",
+    "connection": {
+      "agentPlatform": "livekit",
+      "connectionType": "livekit_room",
+      "accessVariant": "livekit_room.customer_token_endpoint",
+      "modality": "voice",
+      "config": {
+        "tokenEndpoint": "https://acme.example/egma/livekit-token",
+        "agentName": "front-desk"
+      },
+      "credentials": {
+        "headers": "{\"Authorization\":\"Bearer a-long-random-secret\"}"
+      }
+    }
+  }'
+```
+
+Three things about that body:
+
+- `headers` is a JSON object written inside a string. Put as many headers in it
+  as your endpoint needs. Every value is treated as a secret.
+- The headers are sealed and never come back. A read shows the header names
+  only, as `credentialsHint`.
+- A `url` key is refused. The connection holds no server URL, because your
+  endpoint's `server_url` is where Egma connects.
+
+Through the CLI, the secret comes from the environment:
+
+```bash
+EGMA_LIVEKIT_TOKEN_HEADERS='{"Authorization":"Bearer a-long-random-secret"}' \
+egma connect \
+  --platform livekit \
+  --name front-desk \
+  --modality voice \
+  --access-variant livekit_room.customer_token_endpoint \
+  --dispatch-name front-desk \
+  --token-endpoint https://acme.example/egma/livekit-token
+```
+
+## Hardening your endpoint
+
+Your endpoint mints tokens into your LiveKit project. Treat it as what it is.
+
+1. **Require an auth header.** Put a long random secret behind an
+   `Authorization` header, check it on every request in constant time, and
+   configure it on the Egma connection. An unauthenticated endpoint lets anyone
+   who learns the URL mint tokens into your project. A URL is not a secret.
+2. **Mint for exactly the identity and room that were asked for.** Do not
+   substitute your own, do not append anything, and do not mint a wildcard.
+3. **Allowlist the `egma-sim-` prefix.** Refuse any other `room_name`. Then
+   refuse the same prefix everywhere else you mint a token, so a production room
+   can never carry a name the Egma SDK reads as a simulation.
+4. **Give the token a short expiry.** It is used once, seconds after it is
+   minted.
+5. **Grant join, and nothing else.** No room create, no room list, no admin.
+6. **Set a short empty timeout on your project.** A minute or two. This is what
+   closes the room after Egma leaves, because Egma cannot delete it.
+
+## What closes the room
+
+Egma leaves the room when the conversation ends. It does not delete it, on any
+path. Deleting a room is an administrative call signed with the project's key
+pair, and Egma does not have one on this connection. A short empty timeout on
+your project closes the room moments after Egma's participant leaves.
+
+## When it does not work
+
+Every one of these is a sentence Egma puts on the simulation, so the failure
+tells you which line to look at.
+
+- **"the token endpoint at … could not be reached over HTTPS"**: Egma could not
+  open a connection. Check that the address is reachable from where Egma runs.
+- **"the token endpoint at … resolved to a non-public network address"**: the
+  hostname points inside a private network. Egma refuses those.
+- **"the token endpoint at … did not answer within 20 seconds"**: your handler
+  is too slow, or something in front of it is.
+- **"the token endpoint at … answered 401"**, or any other non-2xx: your handler
+  refused. Usually the auth header on the connection and the one your handler
+  checks have drifted apart.
+- **"answered something that is not a JSON object"**: usually a framework error
+  page or a proxy's HTML. The request never reached your handler, or it threw.
+- **"answered no token"**: the body was JSON, but nothing in it was a token under
+  `participant_token` or one of the other accepted names.
+- **"answered no server_url"**: the body carried a token but no server. Add
+  `server_url` to the answer.
+- **"answered a server_url Egma cannot join"**: the server URL is not `wss://`
+  or `https://`, or carries credentials. Egma sends the token over TLS only.
+- **"answered a server_url on a non-public network address"**: the server
+  resolves inside a private network. Egma refuses it, as it refuses the
+  endpoint itself. A self-hosted LiveKit on a private network uses project
+  credentials instead.
+- **"no agent named … joined … nothing dispatched the agent"**: the whole path
+  worked and the room stayed empty. Your endpoint did not copy `room_config` into
+  the token, or nothing else dispatched that worker, or no worker registered
+  under that name is running.
+
+The auth headers you configure appear in none of these. They are sealed on the
+connection, they go out on the one request they exist for, and they are scrubbed
+out of anything Egma quotes.

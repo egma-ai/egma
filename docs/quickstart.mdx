@@ -182,9 +182,10 @@ egma connect \
   --dispatch-name receptionist
 ```
 
-For a customer token endpoint, the coding agent uses the catalog's voice option,
-`--token-endpoint <https-url>`, and supplies the JSON auth headers through
-`EGMA_LIVEKIT_TOKEN_HEADERS`.
+For a customer token endpoint, the coding agent uses the catalog's option with
+`--dispatch-name` and `--token-endpoint <https-url>`, no `--livekit-url`, and
+supplies the JSON auth headers through `EGMA_LIVEKIT_TOKEN_HEADERS`. The
+endpoint answers with the server URL.
 
 The CLI accepts LiveKit secrets only from these environment variables:
 
@@ -252,9 +253,9 @@ egma connect record \
   [--name <registration_name>]
 ```
 
-For a token-endpoint target, replace `--dispatch-name` with
-`--token-endpoint <https-url>`. The LiveKit command needs exactly one of those
-flags. In both provider commands, `--name` only prefers the attempted Egma name.
+For a token-endpoint target, replace `--livekit-url` with
+`--token-endpoint <https-url>` and keep `--dispatch-name`. The LiveKit command
+needs exactly one of the two URL flags. In both provider commands, `--name` only prefers the attempted Egma name.
 It does not define the target. If several equivalent connections remain, the
 command prints `connection_option` lines so the coding agent can repeat it with
 an exact `--connection-id` from that output.

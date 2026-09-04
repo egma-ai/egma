@@ -683,8 +683,8 @@ describe("a livekit connection's two credential shapes, through the claim", () =
       // No agentName here: this variant holds no key pair, so it cannot
       // dispatch, and the key it would dispatch by is not one of its own.
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/livekit/token",
+        agentName: "front-desk",
       },
       credentials: {
         headers: '{"Authorization":"Bearer acme-endpoint-token-9999"}',

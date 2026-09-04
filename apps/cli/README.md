@@ -226,7 +226,7 @@ EGMA_LIVEKIT_TOKEN_HEADERS='{"Authorization":"Bearer ..."}' \
   --name receptionist \
   --access livekit-token-endpoint \
   --modality voice \
-  --livekit-url wss://example.livekit.cloud \
+  --dispatch-name receptionist \
   --token-endpoint https://example.com/livekit/token
 ```
 

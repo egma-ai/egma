@@ -83,19 +83,19 @@ const LIVEKIT_TOKEN = {
   simulatorAdapter: true,
   fields: [
     {
-      key: "url",
-      label: "LiveKit WebSocket URL",
-      kind: "url",
-      required: true,
-      help: "The server.",
-      afterCredentials: false,
-    },
-    {
       key: "tokenEndpoint",
       label: "Token endpoint",
       kind: "url",
       required: true,
       help: "The endpoint.",
+      afterCredentials: false,
+    },
+    {
+      key: "agentName",
+      label: "LiveKit agent name",
+      kind: "text",
+      required: true,
+      help: "The worker.",
       afterCredentials: false,
     },
   ],
@@ -209,12 +209,19 @@ describe("skills-led Agent commands", () => {
     expect(io.fail).toEqual([]);
     expect(io.out).toContain("  Access: livekit-token-endpoint");
     expect(io.out).toContain(
-      "  Required flags: --livekit-url, --token-endpoint",
+      "  Required flags: --token-endpoint, --dispatch-name",
     );
+    expect(io.out).toContain("  Optional flags: none");
     expect(io.out).toContain(
       "  Credential environment: EGMA_LIVEKIT_TOKEN_HEADERS",
     );
-    expect(io.out.join("\n")).toContain("--name '<Egma Agent name>'");
+    // The dispatch name is the Egma agent's default name on this variant, as
+    // it is on project credentials, so the suggested command asks for no
+    // --name of its own.
+    expect(io.out.join("\n")).toContain(
+      "--dispatch-name '<LiveKit agent name>'",
+    );
+    expect(io.out.join("\n")).not.toContain("--name '<Egma Agent name>'");
   });
 
   it("prints add commands when Retell discovery reuses an Egma Agent key", async () => {
@@ -541,8 +548,8 @@ describe("skills-led Agent commands", () => {
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
-        url: "wss://example.livekit.cloud",
         tokenEndpoint: "https://example.com/livekit/token",
+        agentName: "receptionist",
       },
     });
     const fetchImpl: typeof fetch = async (input, init) => {
@@ -573,8 +580,8 @@ describe("skills-led Agent commands", () => {
       connectionName: null,
       retellAgentId: null,
       phoneNumber: null,
-      livekitUrl: "wss://example.livekit.cloud",
-      dispatchName: null,
+      livekitUrl: null,
+      dispatchName: "receptionist",
       tokenEndpoint: "https://example.com/livekit/token",
       credentialsStdin: true,
       stdin: Readable.from([

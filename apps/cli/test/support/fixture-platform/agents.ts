@@ -226,6 +226,28 @@ function livekitServerOrigin(url: string): string {
   return parsed.port === "" ? host : `${host}:${parsed.port}`;
 }
 
+/**
+ * Which token endpoint a url names, as one comparable string: the whole
+ * route, not the origin alone, because one gateway commonly mints for several
+ * projects on several routes. Host case and a trailing root dot go the way
+ * they do for a server; path and query are kept as written. Copied from the
+ * registry for the reason above.
+ */
+function tokenEndpointIdentity(endpoint: string): string {
+  const written = endpoint.trim();
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(written);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed === undefined) return written;
+
+  const host = parsed.hostname.toLowerCase().replace(/\.$/u, "");
+  const origin = parsed.port === "" ? host : `${host}:${parsed.port}`;
+  return `${origin}${parsed.pathname}${parsed.search}`;
+}
+
 /** The last four of one field — only ever a credential's public half. */
 function lastFourOf(field: string): CredentialHint {
   return (sealed) => sealed[field]?.slice(-4) ?? "";
@@ -442,13 +464,12 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     // egma opens the room and the customer's agent joins it.
     topology: "agent-dials-out",
     /**
-     * Two access variants answer one question: who mints the
-     * token that opens the room. Nothing carries over between them — a
-     * connection that names an endpoint holds no key pair, so it can neither
-     * create the room nor dispatch the worker; the test's job dispatch
-     * metadata rides that dispatch, which is why `agentName` is not among that
-     * variant's keys and is refused on it by name rather than silently
-     * ignored.
+     * Two access variants answer one question: who mints the token that opens
+     * the room. Both name the worker: the key-pair variant dispatches it
+     * itself, the endpoint variant asks its endpoint for it by name in
+     * LiveKit's standard token request, with the test's job dispatch metadata
+     * on that dispatch. Only the key-pair variant holds a server url — the
+     * endpoint's answer names the server.
      */
     accessVariants: [
       {
@@ -475,19 +496,9 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
       {
         id: "livekit_room.customer_token_endpoint",
         named: "a token-endpoint livekit connection",
-        // Voice only, on a kind that speaks both: egma joins a room this
-        // variant's endpoint let it into and never dispatches the worker, so
-        // it has nowhere to ask the agent to go text-only.
-        modalities: {
-          speaks: ["voice"],
-          refusal:
-            "a token-endpoint livekit connection speaks voice: Egma asks your " +
-            "endpoint for a token and never dispatches the worker itself, so " +
-            "it has no way to tell the agent to answer in text. Chat is " +
-            "offered on the LiveKit project credentials access variant, where " +
-            "Egma dispatches the named worker and sends the modality with it.",
-        },
-        config: { url: livekitServerUrl, tokenEndpoint: tokenEndpointUrl },
+        // Speaks both, like the key pair: a chat room is asked for under its
+        // marked name, which the endpoint's allowlist matches unchanged.
+        config: { tokenEndpoint: tokenEndpointUrl, agentName: nonEmptyString },
         credentials: {
           required: true,
           fields: ["headers"],
@@ -511,10 +522,13 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     reuse: {
       matchedKeys: ["agentName"],
       identityOf: (config) => {
-        const url = config["url"];
         const agentName = config["agentName"];
-        if (url === undefined || agentName === undefined) return undefined;
-        return `${livekitServerOrigin(url)}|${agentName}`;
+        if (agentName === undefined) return undefined;
+        const url = config["url"];
+        if (url !== undefined) return `${livekitServerOrigin(url)}|${agentName}`;
+        const endpoint = config["tokenEndpoint"];
+        if (endpoint === undefined) return undefined;
+        return `${tokenEndpointIdentity(endpoint)}|${agentName}`;
       },
     },
     simulatorAdapter: true,
@@ -572,6 +586,13 @@ const CONNECTION_OPTIONS = [
     accessVariant: "livekit_room.customer_token_endpoint",
     modality: "voice",
     productLabel: "LiveKit token endpoint",
+  },
+  {
+    agentPlatform: "livekit",
+    connectionType: "livekit_room",
+    accessVariant: "livekit_room.customer_token_endpoint",
+    modality: "chat",
+    productLabel: "LiveKit chat token endpoint",
   },
   {
     agentPlatform: "livekit",
