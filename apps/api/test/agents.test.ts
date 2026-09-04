@@ -1734,6 +1734,40 @@ describe("a livekit connection", () => {
     expect(connectionOf(registered)).not.toHaveProperty("credentials");
   });
 
+  /**
+   * The chat lane on the other way in: the same four facts, `chat` for the
+   * modality, and its own label so the two token-endpoint options can be
+   * told apart wherever the label is shown.
+   */
+  it("is registered for chat through a token endpoint", async () => {
+    api = await createApi("agents_livekit_endpoint_chat");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const registered = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "livekit",
+      name: "Typed agent",
+      connection: {
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.customer_token_endpoint",
+        modality: "chat",
+        config: {
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
+        },
+        credentials: { headers: '{"Authorization":"Bearer not-a-real-token"}' },
+      },
+    });
+
+    expect(registered.status).toBe(201);
+    expect(connectionOf(registered)).toMatchObject({
+      accessVariant: "livekit_room.customer_token_endpoint",
+      productLabel: "LiveKit chat token endpoint",
+      modality: "chat",
+      credentialsHint: "Authorization",
+    });
+  });
+
   it("refuses a literal private token endpoint", async () => {
     api = await createApi("agents_livekit_open_endpoint");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -1775,27 +1809,6 @@ describe("a livekit connection", () => {
     readonly payload: Record<string, unknown>;
     readonly message: string;
   }[] = [
-    {
-      // The kind speaks chat; this way of reaching it does not yet. The room
-      // whose name tells the worker it is in a chat is minted by the
-      // customer's endpoint here, and the chat lane is proven only where Egma
-      // mints it.
-      named: "chat on the access variant the chat lane is not proven on",
-      slug: "chat_on_endpoint",
-      payload: {
-        accessVariant: "livekit_room.customer_token_endpoint",
-        modality: "chat",
-        config: {
-          tokenEndpoint: "https://acme.example/egma/livekit-token",
-          agentName: "front-desk",
-        },
-        credentials: { headers: '{"Authorization":"Bearer not-real"}' },
-      },
-      message:
-        "a token-endpoint livekit connection speaks voice: chat is offered " +
-        "on the LiveKit project credentials access variant, where Egma mints " +
-        "the room whose name tells the worker it is in a chat.",
-    },
     {
       named: "a word that is not a modality at all",
       slug: "not_a_modality",
@@ -2161,8 +2174,14 @@ describe("a livekit connection", () => {
       }),
       await post("/v1/agents", withKey(ada.secret), {
         agentPlatform: "livekit",
-        name: "Refused for a modality it does not speak",
-        connection: endpointPayload({ modality: "chat" }),
+        name: "Refused for a server url the endpoint answers with",
+        connection: endpointPayload({
+          config: {
+            tokenEndpoint: "https://acme.example/egma/livekit-token",
+            agentName: "front-desk",
+            url: "wss://acme.livekit.cloud",
+          },
+        }),
       }),
       await post("/v1/agents", withKey(ada.secret), {
         agentPlatform: "livekit",

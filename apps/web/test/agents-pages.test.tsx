@@ -503,6 +503,54 @@ const TYPES = {
       ],
     },
     {
+      agentPlatform: "livekit",
+      agentPlatformLabel: "LiveKit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.customer_token_endpoint",
+      accessVariantLabel: "Token endpoint",
+      modality: "chat",
+      productLabel: "LiveKit chat token endpoint",
+      topology: "egma-dials-out",
+      simulatorAdapter: true,
+      fields: [
+        {
+          key: "tokenEndpoint",
+          label: "Token endpoint",
+          kind: "url",
+          required: true,
+          help: "The service that creates room tokens.",
+          afterCredentials: false,
+        },
+        {
+          key: "agentName",
+          label: "LiveKit agent name",
+          kind: "text",
+          required: true,
+          help: "The worker Egma asks your endpoint to dispatch.",
+          afterCredentials: false,
+        },
+        {
+          key: "metadata",
+          label: "Agent metadata",
+          kind: "json",
+          required: false,
+          help: "Optional JSON handed to the worker as job metadata.",
+          afterCredentials: true,
+        },
+      ],
+      credentialRule: "required",
+      credentialHelp: "Auth headers for the endpoint.",
+      credentialFields: [
+        {
+          field: "headers",
+          label: "Auth headers",
+          kind: "json",
+          required: true,
+          help: "Header names and secret values sent to the endpoint.",
+        },
+      ],
+    },
+    {
       agentPlatform: null,
       agentPlatformLabel: "Any or unknown",
       connectionType: "phone_number",
@@ -3043,7 +3091,32 @@ describe("goal-first agent setup", () => {
     });
   });
 
-  it("saves a LiveKit chat connection and offers no way in but project credentials", async () => {
+  it("offers the token endpoint for chat and asks for its four fields", async () => {
+    sheetAnswers();
+    render(<RegisterAgentPage />);
+    await choose("Run simulations", "LiveKit");
+    await chooseLiveKitModality("Chat");
+
+    fireEvent.change(
+      await screen.findByRole("combobox", { name: "Connection type*" }),
+      { target: { value: "livekit_room.customer_token_endpoint" } },
+    );
+    expect(
+      await screen.findByRole("heading", {
+        name: "Connect LiveKit Chat for simulations",
+      }),
+    ).toBeDefined();
+    expect(screen.getByLabelText("LiveKit agent name*")).toBeDefined();
+    expect(screen.getByLabelText("Token endpoint*")).toBeDefined();
+    expect(screen.getByLabelText("Auth headers*")).toBeDefined();
+    expect(screen.getByLabelText("Agent metadata [optional]")).toBeDefined();
+    // The endpoint answers with the server, and holds the project secret.
+    expect(screen.queryByLabelText("WebSocket URL*")).toBeNull();
+    expect(screen.queryByLabelText("API key*")).toBeNull();
+    expect(screen.queryByLabelText("API secret*")).toBeNull();
+  });
+
+  it("saves a LiveKit chat connection on project credentials, with the token endpoint offered beside it", async () => {
     sheetAnswers({
       "/v1/agents": [
         { status: 200, body: { agents: [], nextPageToken: null } },
@@ -3077,12 +3150,15 @@ describe("goal-first agent setup", () => {
         name: "Connect LiveKit Chat for simulations",
       }),
     ).toBeDefined();
-    // Egma has to dispatch the worker to tell it the simulation is typed, so
-    // there is one way in and nothing that pretends otherwise.
+    // Chat has two ways in, as voice does: project credentials first, and
+    // the token endpoint beside it. The default is the key pair.
+    const connectionType = screen.getByRole("combobox", {
+      name: "Connection type*",
+    }) as HTMLSelectElement;
+    expect(connectionType.value).toBe("livekit_room.project_credentials");
     expect(
-      screen.queryByRole("combobox", { name: "Connection type*" }),
-    ).toBeNull();
-    expect(screen.queryByText("Token endpoint")).toBeNull();
+      Array.from(connectionType.options).map((option) => option.text),
+    ).toEqual(["Project credentials", "Token endpoint"]);
     expect(screen.queryByLabelText("Token endpoint*")).toBeNull();
 
     fireEvent.change(screen.getByLabelText("LiveKit agent name*"), {

@@ -29,6 +29,11 @@ Rust, and PHP serve Egma unchanged.
 Two rules are Egma's, on top of that format. The room name always starts with
 `egma-sim-`. The participant identity always starts with `egma-persona-`.
 
+A chat simulation's room is named `egma-sim-chat-<simulation id>`. It still
+starts with the prefix, so your allowlist does not change. Your worker's chat
+setup reads that mark from the room name, exactly as it does when Egma mints
+the token itself.
+
 ## What Egma sends
 
 One `POST` per simulation, with the auth headers you configured on the
@@ -53,7 +58,7 @@ authorization: Bearer <the header you configured>
 
 | Field | Meaning |
 |---|---|
-| `room_name` | A new room for this simulation. It always starts with `egma-sim-`. Egma never creates it first and never reuses it. |
+| `room_name` | A new room for this simulation. It always starts with `egma-sim-`. A chat simulation's room starts with `egma-sim-chat-`. Egma never creates it first and never reuses it. |
 | `participant_identity` | The identity Egma joins as. It always starts with `egma-persona-`. |
 | `participant_name` | The same value as the identity, on purpose. Endpoints written against Egma's earlier contract read this key as the identity, so they keep working. A standard endpoint uses it as the display name. |
 | `room_config.agents[0].agent_name` | The LiveKit agent name on the connection. Egma asks your endpoint to dispatch this worker. |
@@ -188,7 +193,8 @@ ID can mint a token with any permissions.
 
 ## Registering the connection
 
-In the app, choose LiveKit, voice, and the connection type **Token endpoint**.
+In the app, choose LiveKit, voice or chat, and the connection type **Token
+endpoint**.
 The form asks for the LiveKit agent name, the token endpoint, the auth headers,
 and optional agent metadata. It does not ask for your LiveKit server URL. Your
 endpoint answers with it.

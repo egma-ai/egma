@@ -37,6 +37,7 @@ Current supported combinations include:
 | LiveKit | `livekit_room` | `livekit_room.project_credentials` | chat | LiveKit chat |
 | LiveKit | `livekit_room` | `livekit_room.project_credentials` | voice | LiveKit project credentials |
 | LiveKit | `livekit_room` | `livekit_room.customer_token_endpoint` | voice | LiveKit token endpoint |
+| LiveKit | `livekit_room` | `livekit_room.customer_token_endpoint` | chat | LiveKit chat token endpoint |
 | LiveKit | `phone_number` | `phone_number.public_e164` | voice | Phone number |
 | Any or unknown | `phone_number` | `phone_number.public_e164` | voice | Phone number |
 
@@ -93,9 +94,8 @@ mock tools.
 
 ### LiveKit room
 
-`livekit_room` joins a room in the customer's LiveKit project. Project
-credentials support chat and voice in the current catalog. A customer token
-endpoint supports voice.
+`livekit_room` joins a room in the customer's LiveKit project. Both access
+variants support chat and voice.
 
 - `livekit_room.project_credentials`: Egma stores the project key pair sealed,
   mints a token, creates the room, and dispatches an exact worker name.

@@ -152,6 +152,18 @@ def room_name_for(simulation_id: str) -> str:
     return f"{ROOM_PREFIX}-{simulation_id}"
 
 
+def chat_room_name_for(simulation_id: str) -> str:
+    """The marked form of :func:`room_name_for`: the room a customer's
+    endpoint is asked for a token into, on a chat simulation.
+
+    The same mark as :func:`fresh_chat_room_name`, for the same reader —
+    the worker keys its chat setup off ``egma-sim-chat-`` however the token
+    was minted. The bare prefix survives inside it, so the endpoint's own
+    ``egma-sim-`` allowlist matches without change.
+    """
+    return f"{ROOM_PREFIX}-chat-{simulation_id}"
+
+
 def persona_name_for(simulation_id: str) -> str:
     return f"{PERSONA_IDENTITY}-{simulation_id}"
 

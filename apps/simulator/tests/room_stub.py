@@ -777,6 +777,13 @@ class StubTextRoom(TextRoom):
         # taking what a real room hands it.
         self._watch(room)
         self._room = room
+        # Where egma minted its own token, the worker is on its way because
+        # egma asked for it. Where a customer's endpoint minted it, the
+        # endpoint dispatches the worker egma named, so from the room's side
+        # the agent simply turns up — or does not — exactly as in the voice
+        # fake.
+        if self._backend.endpoint_dispatches:
+            self._backend.agent_is_coming = self.stub.agent_joins
         if self._backend.agent_is_coming:
             self.agent_arrives()
 
@@ -939,18 +946,49 @@ class StubTextRoom(TextRoom):
 
 class ChatRoomStubBackend(LiveKitChatRoomBackend):
     """The real chat driver, with the calls it makes of a LiveKit answered
-    here: making the room, dispatching into it, and deleting it.
+    here: making the room, dispatching into it, joining it, deleting it.
 
-    Three where the voice fake stands in for four. A chat connection never
-    asks a customer's endpoint for a token, because chat is refused on
-    that access variant — egma holds no key pair there, so it could
-    neither dispatch the worker nor tell it to go text-only.
+    The token request is not among them, exactly as in the voice fake: a
+    chat connection that asks a customer's endpoint for a token really
+    asks, over a socket, of the fake endpoint in
+    :mod:`token_endpoint_stub`, so the marked room name the chat driver
+    asks for is proved on the driver's own HTTP code.
     """
 
     def __init__(self, stub: ChatStub, **built: object) -> None:
+        settings = built.get("settings")
+        if isinstance(settings, RoomSettings) and settings.token_endpoint.startswith(
+            "https://127.0.0.1:"
+        ):
+            built["settings"] = replace(
+                settings,
+                token_endpoint=settings.token_endpoint.replace(
+                    "https://", "http://", 1
+                ),
+            )
         super().__init__(**built)
         self.stub = stub
         self.agent_is_coming = False
+
+    def _endpoint_connector(self, aiohttp: Any, resolver: Any) -> tuple[Any, Any]:
+        """Reach this test's loopback HTTP server after production parsing.
+
+        The same explicit test-only exception the voice fake makes to the
+        production connector's public-address and TLS policy.
+        """
+        connector = aiohttp.TCPConnector(
+            resolver=resolver,
+            socket_factory=_test_endpoint_socket,
+            use_dns_cache=False,
+        )
+        return resolver, connector
+
+    @property
+    def endpoint_dispatches(self) -> bool:
+        """Whether getting the agent in was somebody else's job: true where
+        egma holds no key pair, so the worker it named arrives because the
+        endpoint that minted the token dispatched it, or not at all."""
+        return not self._settings.mints_its_own
 
     async def _asked(self, request: object, what_failed: str) -> None:
         """The requests the driver really built, answered here instead."""

@@ -551,11 +551,13 @@ describe("a connection's stored credential", () => {
       "livekit_room.project_credentials/voice",
       "livekit_room.project_credentials/chat",
       "livekit_room.customer_token_endpoint/voice",
+      "livekit_room.customer_token_endpoint/chat",
     ]);
     expect(livekit.map((one) => one.productLabel)).toEqual([
       "LiveKit project credentials",
       "LiveKit chat",
       "LiveKit token endpoint",
+      "LiveKit chat token endpoint",
     ]);
 
     // The three credential rules the product's Restore is written against,

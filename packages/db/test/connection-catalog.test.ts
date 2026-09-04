@@ -177,11 +177,11 @@ describe("what a browser is told about a simulation connection", () => {
   });
 
   /**
-   * The chat lane's whole product surface, as the catalog says it: one more
-   * row on the variant where Egma dispatches the worker itself, and nothing
-   * new on the one where it cannot.
+   * The chat lane's whole product surface, as the catalog says it: one chat
+   * row on each of the two ways in, each with its own label so a person can
+   * tell the four LiveKit room options apart.
    */
-  it("offers LiveKit chat on project credentials and nowhere else", () => {
+  it("offers LiveKit chat on both access variants", () => {
     const livekit = connectionOptionMetadata().filter(
       (one) => one.connectionType === "livekit_room",
     );
@@ -192,6 +192,7 @@ describe("what a browser is told about a simulation connection", () => {
       "livekit_room.project_credentials/voice",
       "livekit_room.project_credentials/chat",
       "livekit_room.customer_token_endpoint/voice",
+      "livekit_room.customer_token_endpoint/chat",
     ]);
 
     expect(
@@ -208,12 +209,17 @@ describe("what a browser is told about a simulation connection", () => {
     });
 
     expect(
-      livekit.some(
+      livekit.find(
         (one) =>
           one.accessVariant === "livekit_room.customer_token_endpoint" &&
           one.modality === "chat",
       ),
-    ).toBe(false);
+    ).toMatchObject({
+      agentPlatform: "livekit",
+      productLabel: "LiveKit chat token endpoint",
+      topology: "agent-dials-out",
+      credentialRule: "required",
+    });
   });
 
   it("reads each explicit stored access variant without inferring from config", () => {

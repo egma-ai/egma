@@ -180,6 +180,7 @@ from .room import (
     JoinedRoom,
     RpcMethod,
     answering,
+    chat_room_name_for,
     delete_room,
     first_of,
     fresh_chat_room_name,
@@ -853,7 +854,9 @@ class RoomLifecycle:
         # modality mark the customer's worker reads. A room egma asks for
         # a token into is named after the simulation, because the endpoint
         # being asked has to be able to check the name against its own
-        # rules. A room a platform opened is **not named here at all**: it
+        # rules — and it carries the same mark, because the worker reads
+        # the name however the token was minted. A room a platform opened
+        # is **not named here at all**: it
         # has a name already, egma is never told it, and inventing one
         # would put a string in every log line that exists in nobody's
         # telemetry.
@@ -862,10 +865,13 @@ class RoomLifecycle:
             if settings.given_token
             else self._fresh_room_name()
             if settings.mints_its_own
-            else room_name_for(simulation_id)
+            else self._room_name_for(simulation_id)
         )
         self._participant_name = persona_name_for(simulation_id)
         self._room: Any = None
+        self._server_url = ""
+        """The server the join went to, once there was one: the connection's
+        own url, or the one an endpoint's answer named."""
         self._asked_for_a_room = False
         self._offered = False
 
@@ -884,6 +890,11 @@ class RoomLifecycle:
         overrides this with the marked form, because the name is where a
         worker reads the modality from."""
         return fresh_room_name()
+
+    def _room_name_for(self, simulation_id: str) -> str:
+        """The room named after the simulation, where an endpoint is asked
+        for a token into it: the bare form, which says voice."""
+        return room_name_for(simulation_id)
 
     def _answer_for_mocked_tools(self) -> None:
         """Stand ready to answer for the agent's tools, in the room.
@@ -1389,6 +1400,7 @@ class LiveKitRoomBackend(RoomLifecycle):
     async def create_transport(self) -> VoiceMedia:
         """Get a way into the room and build its Pipecat transport."""
         way_in = await self._way_in()
+        self._server_url = way_in.url
         self._room = self._joined_room(way_in)
         self._room.answer_when_joined(self._answer_for_mocked_tools)
         return self._room.create_transport()
@@ -2021,9 +2033,19 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         options before it has connected to anything."""
         return fresh_chat_room_name()
 
+    def _room_name_for(self, simulation_id: str) -> str:
+        """The marked form again, for the room an endpoint is asked for.
+
+        The worker reads ``egma-sim-chat-`` off the name however the token
+        was minted, and the endpoint's ``egma-sim-`` allowlist still
+        matches: the bare prefix is inside the marked one.
+        """
+        return chat_room_name_for(simulation_id)
+
     async def open_room(self) -> None:
         """Get a way into the room and join it, publishing nothing."""
         way_in = await self._way_in()
+        self._server_url = way_in.url
         self._room = self._joined_room(way_in)
         await self._room.join()
         # The offer goes on at the join itself, exactly as the voice room
@@ -2287,7 +2309,7 @@ class LiveKitChatRoomBackend(RoomLifecycle):
             left_to_drain = drain
         if room.failed.is_set():
             raise MediaBackendError(
-                f"the livekit server at {self._settings.url} closed "
+                f"the livekit server at {self._server_url} closed "
                 f"{self._room_name} while the exchange was under way",
                 ending=ERROR,
             )

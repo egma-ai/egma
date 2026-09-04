@@ -550,22 +550,20 @@ describe("a LiveKit room connection's modality", () => {
   });
 
   /**
-   * The kind speaks chat and this way of reaching it cannot, which is a
-   * different thing to be told than "this kind speaks voice" — so the variant
-   * says which variant, why, and where chat is offered instead.
+   * The telling that a simulation is typed is the room's name, and egma
+   * asks an endpoint for the marked name exactly as it asks for the bare
+   * one — so the way in that mints elsewhere speaks both too.
    */
-  it("refuses chat on the token endpoint with the variant's own reason", () => {
-    expect(() =>
-      validModality(
-        "livekit_room",
-        "livekit_room.customer_token_endpoint",
-        "chat",
-      ),
-    ).toThrow(
-      "a token-endpoint livekit connection speaks voice: chat is offered " +
-        "on the LiveKit project credentials access variant, where Egma " +
-        "mints the room whose name tells the worker it is in a chat.",
-    );
+  it("takes voice and chat where the customer's endpoint mints the token", () => {
+    for (const modality of ["voice", "chat"]) {
+      expect(
+        validModality(
+          "livekit_room",
+          "livekit_room.customer_token_endpoint",
+          modality,
+        ),
+      ).toBe(modality);
+    }
   });
 
   it("refuses a word that is not a modality at all as exactly that", () => {
@@ -901,30 +899,21 @@ describe("what the shipped simulator can conduct", () => {
   /**
    * Dispatch reads the variant's list rather than the kind's, or a stored row
    * on a narrowed variant would be handed to a simulator for a modality the
-   * door refused to write.
+   * door refused to write. The narrowing rule is proven on the made-up kind
+   * above; this is the shipped catalog, where no LiveKit variant narrows any
+   * more, so both ways in conduct both modalities.
    */
-  it("holds a narrowed access variant to what that variant speaks", () => {
-    expect(
-      connectionIsConductable(
-        "livekit_room",
-        "livekit_room.project_credentials",
-        "chat",
-      ),
-    ).toBe(true);
-    expect(
-      connectionIsConductable(
-        "livekit_room",
-        "livekit_room.customer_token_endpoint",
-        "chat",
-      ),
-    ).toBe(false);
-    expect(
-      connectionIsConductable(
-        "livekit_room",
-        "livekit_room.customer_token_endpoint",
-        "voice",
-      ),
-    ).toBe(true);
+  it("conducts both modalities on both LiveKit access variants", () => {
+    for (const variant of [
+      "livekit_room.project_credentials",
+      "livekit_room.customer_token_endpoint",
+    ] as const) {
+      for (const modality of ["chat", "voice"] as const) {
+        expect(connectionIsConductable("livekit_room", variant, modality)).toBe(
+          true,
+        );
+      }
+    }
   });
 
   it("names every shipped type in the refusal, and takes the list from the registry", () => {

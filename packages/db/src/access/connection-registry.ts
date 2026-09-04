@@ -577,6 +577,13 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
   },
   {
     agentPlatform: "livekit",
+    connectionType: "livekit_room",
+    accessVariant: "livekit_room.customer_token_endpoint",
+    modality: "chat",
+    productLabel: "LiveKit chat token endpoint",
+  },
+  {
+    agentPlatform: "livekit",
     connectionType: "phone_number",
     accessVariant: "phone_number.public_e164",
     modality: "voice",
@@ -1298,9 +1305,10 @@ export const CONNECTION_REGISTRY: Readonly<
      * token endpoint answers `server_url` beside `participant_token`.
      *
      * What egma still cannot do on the endpoint variant is create or delete
-     * a room. So the room's own metadata stays the endpoint's, and the chat
-     * lane — whose telling is the name of a room egma mints — is offered on
-     * the key-pair variant only until it is proven against an endpoint.
+     * a room, so the room's own metadata stays the endpoint's. Both variants
+     * speak both modalities: the telling that a simulation is typed is the
+     * room's name, and on the endpoint variant egma asks the endpoint for the
+     * marked name exactly as it asks for the bare one.
      */
     accessVariants: [
       {
@@ -1389,19 +1397,10 @@ export const CONNECTION_REGISTRY: Readonly<
         named: "a token-endpoint livekit connection",
         id: "livekit_room.customer_token_endpoint",
         label: "Customer token endpoint [Advanced]",
-        // Voice only, on a kind that speaks both. The chat lane is proven on
-        // the key-pair variant, where egma mints the room whose name tells
-        // the worker it is in a chat. Here the room's name is a request to
-        // the customer's endpoint, and the lane has not been proven against
-        // one; offering it before that would be egma promising a text
-        // simulation it has not conducted.
-        modalities: {
-          speaks: ["voice"],
-          refusal:
-            "a token-endpoint livekit connection speaks voice: chat is " +
-            "offered on the LiveKit project credentials access variant, where " +
-            "Egma mints the room whose name tells the worker it is in a chat.",
-        },
+        // Speaks both, like the key pair. A chat simulation's room is asked
+        // for under its marked name, `egma-sim-chat-…`, which the endpoint's
+        // `egma-sim-` allowlist matches unchanged and the worker reads
+        // however the token was minted.
         config: {
           // Where egma asks for a token, once per simulation. The answer names
           // the LiveKit server to join, so no url is held here.

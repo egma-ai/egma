@@ -10,13 +10,16 @@ the room is the driver's — see
 with the voice one line for line. What is here is the chat half of the
 conversation loop's three verbs: open, deliver, close.
 
-Its config keys and its credentials are the voice plug's, read by the same
-driver, and its ``agentName`` is required for the same reason: egma
-dispatches explicitly, so the record names the agent it graded. The
-modality itself needs no dispatch to travel — it is the name of the room
-this plug's driver mints, ``egma-sim-chat-`` against the voice lane's bare
-``egma-sim-``, read by the worker before it connects to anything. No key
-the customer configures can collide with a room's name.
+Its config keys and its credentials are the voice plug's, on both of the
+ways in that come by their own token, read by the same driver, and its
+``agentName`` is required for the same reason: egma names the worker, so
+the record names the agent it graded. The modality itself needs no
+dispatch to travel — it is the name of the room, ``egma-sim-chat-``
+against the voice lane's bare ``egma-sim-``, read by the worker before it
+connects to anything. Where egma mints the token it names the room so;
+where a customer's endpoint mints it, egma asks for exactly that name and
+the endpoint's ``egma-sim-`` allowlist matches it unchanged. No key the
+customer configures can collide with a room's name.
 
 **No speech runs anywhere.** There is no text-to-speech leg, no
 speech-to-text leg, no Pipecat pipeline and no recording. A chat
@@ -29,14 +32,6 @@ two is broken.
 
 - **A voice simulation.** The plug carrying the speech legs is the one
   next door, and this one has no transport to give a pipeline.
-- **A connection that names a token endpoint.** The telling is the
-  room's name, and on that variant the name is a request to the
-  customer's endpoint rather than a fact egma controls: egma asks for
-  the room and the worker by name, and the endpoint mints what it will.
-  Until the chat lane is proven against an endpoint that honours both,
-  a chat run against an agent that was never told is the slow, expensive
-  path this lane exists to remove, so the lane is offered where egma
-  mints the room.
 - **An agent that is speaking.** The wire says which of the two states an
   agent is in, and it says it at the agent's first output: a speaking
   agent publishes an audio track and its words carry LiveKit's
@@ -301,16 +296,6 @@ class LiveKitChat:
             raise PlugError(
                 f"the livekit chat plug speaks chat only; a {modality!r} "
                 "simulation in a room needs the plug carrying the speech legs"
-            )
-
-        if access_variant == "livekit_room.customer_token_endpoint":
-            raise PlugError(
-                "a livekit connection that names a tokenEndpoint asks the "
-                "customer's endpoint for its room, so the room whose name "
-                "would tell the agent it is in a chat is minted by their side "
-                "and the chat lane is not yet proven against one; chat is "
-                "offered on the project-credential access variant, where Egma "
-                "mints the room and dispatches the worker"
             )
 
         # Read here, before anything is reached, so a connection the driver

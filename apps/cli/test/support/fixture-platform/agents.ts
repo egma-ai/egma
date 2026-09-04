@@ -510,16 +510,8 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
       {
         id: "livekit_room.customer_token_endpoint",
         named: "a token-endpoint livekit connection",
-        // Voice only, on a kind that speaks both: the chat lane is proven
-        // where egma mints the room whose name tells the worker it is in a
-        // chat, and that is the key-pair variant.
-        modalities: {
-          speaks: ["voice"],
-          refusal:
-            "a token-endpoint livekit connection speaks voice: chat is " +
-            "offered on the LiveKit project credentials access variant, where " +
-            "Egma mints the room whose name tells the worker it is in a chat.",
-        },
+        // Speaks both, like the key pair: a chat room is asked for under its
+        // marked name, which the endpoint's allowlist matches unchanged.
         config: {
           tokenEndpoint: tokenEndpointUrl,
           agentName: nonEmptyString,
@@ -609,6 +601,13 @@ const CONNECTION_OPTIONS = [
     accessVariant: "livekit_room.customer_token_endpoint",
     modality: "voice",
     productLabel: "LiveKit token endpoint",
+  },
+  {
+    agentPlatform: "livekit",
+    connectionType: "livekit_room",
+    accessVariant: "livekit_room.customer_token_endpoint",
+    modality: "chat",
+    productLabel: "LiveKit chat token endpoint",
   },
   {
     agentPlatform: "livekit",
