@@ -9,7 +9,7 @@ We need to do two things to setup a livekit agent for simulation testing.
 
 First off, check if the agent we wanna test is already present in `egma/config.yaml`.
 - If its already registered, lets move to step 2.
-- If the agent is not present, we need to register it. use `egma agent register -- help` to see how. 
+- If the agent is not present, we need to register it. use `egma agent register --help` to see how. 
 
 ## 2. Add a connection to the registered livekit agent
 
