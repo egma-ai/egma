@@ -302,8 +302,11 @@ egma persona list
 egma suite create receptionist-core --name "Receptionist core"
 ```
 
-Write tests under `egma/tests/receptionist-core/`. The
-`write-egma-tests` skill owns the Markdown format and test-authoring guidance.
+Write tests under `egma/tests/receptionist-core/`. One Markdown file is the
+whole of one test: its scenario, its expected behaviors, its personas, the mock
+tools it answers for itself under `## Mock tools`, and the world it starts in
+under `## Env`. The `write-egma-tests` skill owns the Markdown format and
+test-authoring guidance.
 
 Push the complete repository state:
 

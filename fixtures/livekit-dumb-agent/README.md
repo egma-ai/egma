@@ -70,6 +70,20 @@ The `egma` dependency here is the copy in `sdks/python`, not the published
 package, so this fixture always exercises the seam as it stands on this
 branch.
 
+## The line that reads the test's env
+
+```python
+world = json.loads(ctx.job.metadata or "{}")
+logger.info("dispatched %s=%r", "tenant", world.get("tenant"))
+```
+
+The other half of a test's world arrives on the job dispatch: whatever the
+test wrote under `## Env` as `job_dispatch_metadata`, as one compact JSON
+string, key for key and nothing of Egma's beside it. This fixture reads
+one key out of it and logs it, so a live run can read back the tenant the
+test said it was calling about. A test that names no env dispatches the
+empty string, which is what this worker meets in a production room.
+
 ## Run it by hand
 
 ```bash

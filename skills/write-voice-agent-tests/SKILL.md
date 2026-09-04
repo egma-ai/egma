@@ -6,7 +6,14 @@ description: Write, edit, or convert notes into Egma Markdown tests, including p
 # Write Egma tests
 
 An Egma **test** describes one situation for a voice agent and the expected
-behaviors that must hold. Egma executes it as one **simulation** per persona.
+behaviors that must hold. It also carries the world that situation happens in:
+the **mock tools** it answers for itself, and the **env** the call starts with.
+Egma executes it as one **simulation** per persona.
+
+**Only what a test names is mocked. Everything else runs for real.** A test
+naming no mock tool runs the agent against its real backend from end to end, so
+"the calendar is full" and "the calendar is open" are two tests, each naming one
+tool.
 
 Write one Markdown file per test in the direct suite directory that the CLI
 created. Run `npm install --global egma-cli` if the `egma` command is unavailable. Read
@@ -85,18 +92,26 @@ Apply these rules:
     workflow.
   - A mock tool belongs to the test that writes it. A block here is the only
     answer Egma serves for that tool in this test, and every tool without one
-    runs for real.
-  - Name the real tool in a `###` heading. Put exactly one of `answer` or
-    `error` in its JSON block, and nothing else. Make `answer` the same JSON
-    shape that the real tool returns. Do not infer that shape from this example.
+    runs for real. There is no project-wide list and no file outside the test.
+  - Name the real tool in a `###` heading, spelled exactly as the agent
+    registers it. A name that matches no tool of the agent answers nothing and
+    leaves no trace on the record.
+  - Put exactly one of `answer` or `error` in its JSON block, and nothing else.
+    Make `answer` the same JSON shape that the real tool returns. Do not infer
+    that shape from this example. Use `error` to force the failure branch.
+  - Name each tool at most once. Matching is by name only; a mock tool never
+    reads a call's arguments.
 - Add `## Env` when this test needs the agent started in a specific world. Write
   one JSON block holding at most these two keys, and leave the section out when
   the test needs neither:
   - `retell_dynamic_variables`: the values Retell substitutes into the agent's
-    prompt, as an object of text. A name beginning `egma_` is refused, because
-    Egma keeps those for what it says to the simulator itself.
-  - `job_dispatch_metadata`: the JSON object LiveKit hands your worker on the
-    job dispatch.
+    prompt and tool configuration for the call, as an object of text values. A
+    name beginning `egma_` is reserved and refused, because Egma keeps those for
+    what it says to the simulator itself.
+  - `job_dispatch_metadata`: the JSON object the LiveKit worker reads at
+    `ctx.job.metadata`, written to the dispatch byte for byte.
+  - One test may hold both keys. On a run, the key for the other platform is
+    simply not used, and the run says so.
 
 ## Name a persona
 

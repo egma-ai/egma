@@ -118,12 +118,24 @@ The caller missed yesterday's appointment and wants to reschedule this week.
 | `identity_revision` | No for a new test | The last synced live identity revision |
 | `personas` | Yes | Persona IDs and display names. A test says who calls, so it needs at least one |
 
+The body carries the four things a test says, under the four headings above, in
+that order. `## Scenario` and `## Expected behaviors` are always written.
+`## Mock tools` and `## Env` are written only when the test says something under
+them: a test that mocks nothing carries no mock tools heading, and a test that
+names no env carries no env heading.
+
 Test files do not contain a suite ID. Their containing suite directory owns
 them. A tracked test found under another suite is refused. Tests cannot move
 between suites.
 
 Older Markdown formats and `required_capabilities` are not supported. There is
-no compatibility reader.
+no compatibility reader. A file that claims another format number is refused by
+name:
+
+```text
+egma/tests/receptionist-core/booking.md uses test file format 4. This Egma
+requires format 5 and has no legacy reader.
+```
 
 ## Scenario and expected behaviors
 
@@ -157,7 +169,16 @@ Each tool uses a `###` heading and one JSON block holding exactly one of
 ```
 ````
 
+The heading is the tool's name, exactly as your agent registers it. The block
+says one of `answer` — any JSON value the tool returns — and `error`, the
+failure it raises as text. Name each tool at most once.
+
+**Egma mocks exactly the tools this section names. Every other tool the agent
+calls runs for real.** A test with no `## Mock tools` section runs against your
+real backend from end to end.
+
 A mock tool belongs to the test that writes it, and versions with the test.
+There is no project-wide list and no file outside the test.
 
 ## Env
 
@@ -174,10 +195,40 @@ world. It is one JSON block with at most two keys:
 ```
 ````
 
-`retell_dynamic_variables` is what Retell substitutes into the agent's prompt,
-as text; a name beginning `egma_` is refused. `job_dispatch_metadata` is the
-object LiveKit hands your worker on the job dispatch. The env versions with the
-test.
+`retell_dynamic_variables` is what Retell substitutes into the agent's prompt
+and tool configuration for the call. Every value is text, and a name beginning
+`egma_` is reserved for Egma and refused. `job_dispatch_metadata` is the JSON
+object LiveKit hands your worker at `ctx.job.metadata`. The env versions with
+the test.
+
+One test may carry both keys. On a run the key for the other platform is simply
+not used, and the run says so.
+
+## What validation refuses
+
+`egma push`, `egma pull`, and `egma run` all parse the complete repository
+first. One unreadable file refuses the whole operation before any platform
+write, and the message names the file and the reason:
+
+```text
+egma/tests/receptionist-core/booking.md: the mock tool "check_availability"
+says both answer and error. A mock tool answers with one thing: write whichever
+branch the test needs.
+```
+
+```text
+egma/tests/receptionist-core/booking.md: retell_dynamic_variables names
+"egma_caller". A variable beginning egma_ is one Egma says to the simulator
+itself; name the variable something the agent's own prompt uses.
+```
+
+```text
+egma/tests/receptionist-core/booking.md: Env holds "room_metadata"; it holds
+retell_dynamic_variables and job_dispatch_metadata, and nothing else.
+```
+
+Egma writes every file through one serializer, so `egma pull` straight after
+`egma push` changes zero bytes.
 
 ## Push the complete repository
 

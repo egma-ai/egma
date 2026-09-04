@@ -70,8 +70,8 @@ changing the meaning of agent platform.
 places no call. The `retell_text_mode.api_key` variant stores the Retell agent
 ID and a sealed API key.
 
-Text-mode connections start with mock tools on. Answers ride on the request, so
-the lane writes nothing to the Retell account.
+A test's mock tools ride on every request Egma sends, so this lane writes
+nothing to the Retell account. Its `retell_dynamic_variables` ride with them.
 
 ### Retell web call
 
@@ -79,17 +79,18 @@ the lane writes nothing to the Retell account.
 `retell_web_call.api_key` variant stores the Retell agent ID and a sealed API
 key.
 
-Web-call connections start with mock tools off. Enabling them is a separate
-explicit platform action because a mocked run creates a temporary Retell
-version and restores the original state afterward.
+Where at least one test of a run names a mock tool, Egma creates one temporary
+version of the agent at run start, routes each mocked tool to Egma per call, and
+deletes that version when the run ends. Your serving version is never changed.
+See [Retell](/integrations/retell#how-a-mocked-web-call-reaches-egma).
 
 ### Phone number
 
 `phone_number` is platform-independent and voice-only. Its
 `phone_number.public_e164` variant stores a public number such as
 `+15551234567`. It stores no provider credential. Egma dials it with the
-deployment's telephony route. Phone simulations reach real tools and cannot use
-mock tools.
+deployment's telephony route. Phone simulations reach real tools: this lane
+never mocks, and it carries no dynamic variables.
 
 ### LiveKit room
 
@@ -97,32 +98,62 @@ mock tools.
 credentials support chat and voice in the current catalog. A customer token
 endpoint supports voice.
 
-- `livekit_room.project_credentials`: Egma stores the project key pair sealed,
-  mints a token, creates the room, and dispatches an exact worker name.
-- `livekit_room.customer_token_endpoint`: the customer keeps the signing key
-  and exposes a public HTTPS endpoint that returns a room token. Egma stores
-  only the endpoint authentication headers sealed.
+- `livekit_room.project_credentials`: the config names `url` and `agentName`.
+  Egma stores the project key pair sealed, mints a token, creates the room, and
+  dispatches that exact worker name.
+- `livekit_room.customer_token_endpoint`: the config names `url` and
+  `tokenEndpoint`. The customer keeps the signing key and exposes a public
+  HTTPS endpoint that returns a room token. Egma stores only the endpoint
+  authentication headers sealed.
 
 These are access variants of the same connection type, not different agent
-platforms.
+platforms. A connection carries no per-call data of its own: what a simulation
+starts with is the running test's `env`.
 
 #### What a LiveKit worker reads
 
-A project-credentials connection can store a `metadata` JSON object inside a
-string. Egma gives the same bytes to both LiveKit metadata channels:
+On a key-pair connection, Egma writes the running test's
+`job_dispatch_metadata` to the agent dispatch, as one compact JSON string, byte
+for byte:
 
-| Channel | Worker path | When |
+| Channel | Worker path | What it carries |
 |---|---|---|
-| Room metadata | `ctx.room.metadata` | Every simulation |
-| Dispatch metadata | `ctx.job.metadata` | Every named-worker dispatch |
+| Dispatch metadata | `ctx.job.metadata` | The test's `job_dispatch_metadata`, and nothing of Egma's. A test that names none dispatches the empty string |
+| Room metadata | `ctx.room.metadata` | Nothing. Egma leaves it empty |
 
-Egma adds no scenario, persona, expected behavior, or mock-tool answer to this
-metadata. A worker must not receive the test script that defines its simulation.
+Egma adds no scenario, persona, expected behavior, or mock-tool answer to the
+dispatch. A worker must not receive the test script that defines its simulation.
 The room name tells the Egma SDK that the worker is in a simulation.
 
-The customer-token-endpoint variant takes no dispatch name or metadata. Without
-the project key pair, Egma cannot create the room or dispatch a named worker;
-the customer's endpoint owns those actions.
+The customer-token-endpoint variant takes no dispatch name. Without the project
+key pair, Egma cannot create the room or dispatch a named worker; the customer's
+endpoint owns those actions, so Egma has nowhere to write a test's
+`job_dispatch_metadata` and does not pass it.
+
+## What each connection can use of a test
+
+A test carries its own world: the **mock tools** it answers for itself, and the
+**env** the call starts with. Not every connection can carry all of it.
+
+| Connection | Mock tools | `retell_dynamic_variables` | `job_dispatch_metadata` |
+|---|---|---|---|
+| Retell text mode | Yes | Yes | Not used |
+| Retell web call | Yes | Yes | Not used |
+| Retell phone | No | No | Not used |
+| LiveKit key pair, chat or voice | Yes, with the Egma SDK in your worker | Not used | Yes |
+| LiveKit token endpoint | Yes, with the Egma SDK in your worker | Not used | No |
+
+**A run proceeds whatever its connection can carry, and says what it could not
+use.** Egma reads the connection and the tests' pinned versions and shows a
+short note when a run picks up something this connection cannot carry — mock
+tools on a phone run, dispatch metadata on a token-endpoint run — under the
+connection picker when you start the run, and again on the run page. Nothing is
+refused for it, and nothing is stored: the note is computed from what the run
+holds.
+
+"Not used" means the key belongs to the other platform. One test can carry both
+keys and run on either agent; the key the lane does not use is simply not
+passed.
 
 ## Create connections with skills and the CLI
 
