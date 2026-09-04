@@ -75,6 +75,22 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
         "additionalProperties",
         "error",
     ),
+    # How long a mocked backend takes is not something a test says: the
+    # answer is served the moment it is asked for, and there is no slot on
+    # the entry for a number that would hold it back.
+    "spec/mock-tool-with-delay.json": (
+        "/mock_tools/0",
+        "additionalProperties",
+        "delay_milliseconds",
+    ),
+    # The agent dispatch carries a JSON object, because that is what
+    # `json.loads(ctx.job.metadata)` gives the agent on the far side. A list
+    # would reach it as something its own reader cannot key into.
+    "spec/job-dispatch-metadata-not-an-object.json": (
+        "/job_dispatch_metadata",
+        "type",
+        None,
+    ),
     "spec/modality-unknown.json": ("/modality", "enum", None),
     "spec/unknown-field.json": ("", "additionalProperties", "agent_id"),
     # The work-order platform block may carry the carrier only. Model and speech choices
@@ -291,6 +307,7 @@ def test_the_text_mode_lane_reads_back_with_and_without_the_optional_fields():
         "book_appointment",
     ]
     assert spec.mock_tools[1].fails
+    assert spec.job_dispatch_metadata is None
 
     plain = read_json(
         contract_dir()
@@ -306,6 +323,80 @@ def test_the_text_mode_lane_reads_back_with_and_without_the_optional_fields():
     assert spec.agent_version is None
     assert spec.dynamic_variables == {}
     assert spec.mock_tools == ()
+
+
+def test_a_spec_carries_the_agent_dispatchs_own_metadata_or_none():
+    """The half of the test's env that no platform renders.
+
+    It rides the LiveKit agent dispatch and is read on the far side by the
+    agent itself, so the simulator holds it whole and reads none of it.
+    Absent is the ordinary case, and every other valid fixture is a spec
+    without it.
+    """
+    plain = read_json(
+        contract_dir() / "fixtures" / "spec" / "valid" / "voice-livekit.json"
+    )
+    assert "job_dispatch_metadata" not in plain
+    assert SimulationSpec.from_document(plain).job_dispatch_metadata is None
+
+    carried = read_json(
+        contract_dir()
+        / "fixtures"
+        / "spec"
+        / "valid"
+        / "voice-livekit-job-dispatch-metadata.json"
+    )
+    spec = SimulationSpec.from_document(carried)
+    assert spec.connection_type == "livekit_room"
+    assert spec.access_variant == "livekit_room.project_credentials"
+    # Held whole, exactly as the test wrote it: nothing here keys into it,
+    # so nothing here may reshape it.
+    assert spec.job_dispatch_metadata == {
+        "tenant": "acme",
+        "caller_id": "+15550100",
+    }
+
+    # An object and nothing else, and a list is refused as a document
+    # rather than reasoned about later.
+    with pytest.raises(ContractViolation) as refusal:
+        SimulationSpec.from_document(
+            {**carried, "job_dispatch_metadata": ["tenant", "acme"]}
+        )
+    assert any(
+        complaint.startswith("/job_dispatch_metadata")
+        for complaint in refusal.value.complaints
+    ), refusal.value.complaints
+
+
+def test_a_mock_tool_declaring_a_delay_is_refused_as_a_document():
+    """There is no slot for it, so it is refused rather than dropped: a
+    spec carrying one was written against a contract this simulator does
+    not speak, and reading it anyway would serve an answer at a moment
+    nobody asked for."""
+    carried = read_json(
+        contract_dir()
+        / "fixtures"
+        / "spec"
+        / "valid"
+        / "voice-livekit-mocked-tools.json"
+    )
+    with pytest.raises(ContractViolation) as refusal:
+        SimulationSpec.from_document(
+            {
+                **carried,
+                "mock_tools": [
+                    {
+                        "tool_name": "check_calendar",
+                        "answer": {"answer": {"slots": []}},
+                        "delay_milliseconds": 250,
+                    }
+                ],
+            }
+        )
+    assert any(
+        complaint.startswith("/mock_tools/0")
+        for complaint in refusal.value.complaints
+    ), refusal.value.complaints
 
 
 def test_phone_connection_stays_phone_while_models_select_voice_legs():

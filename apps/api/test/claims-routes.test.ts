@@ -124,16 +124,27 @@ async function claim(
   };
 }
 
+/**
+ * What a test carries with it: the tools it mocks and the world it is
+ * conducted in. Absent means a test that carries neither, which is most.
+ */
+type TestWorld = {
+  readonly mockTools?: readonly Record<string, unknown>[];
+  readonly env?: Record<string, unknown> | null;
+};
+
 /** A customer with an agent, a persona, and a test — everything a run needs. */
 async function aCustomerReadyToRun(
   label: string,
   options: TestApiOptions = {},
   personaModels?: PersonaModels,
+  world: TestWorld = {},
 ): Promise<{
   ada: Customer;
   key: string;
   agentId: string;
   connectionId: string;
+  testId: string;
   versionId: string;
   /** Version 1 of her, whole — the version every simulation below pins. */
   persona: Persona;
@@ -174,6 +185,7 @@ async function aCustomerReadyToRun(
     ...RESCHEDULING,
     suiteId,
     personas: ["Impatient Rita"],
+    ...world,
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
@@ -182,6 +194,7 @@ async function aCustomerReadyToRun(
     key,
     agentId,
     connectionId,
+    testId: String(pushed.body.id),
     versionId: String(pushed.body.versionId),
     persona,
   };
@@ -193,10 +206,12 @@ async function aRealtimeVoiceCustomerReadyToRun(
   options: TestApiOptions = {},
   connection: typeof LIVEKIT | typeof PHONE = LIVEKIT,
   speed = 1,
+  world: TestWorld = {},
 ): Promise<{
   ada: Customer;
   key: string;
   connectionId: string;
+  testId: string;
   versionId: string;
 }> {
   api = await createApi(label, options);
@@ -238,6 +253,7 @@ async function aRealtimeVoiceCustomerReadyToRun(
     ...RESCHEDULING,
     suiteId,
     personas: ["Realtime Rita"],
+    ...world,
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
@@ -245,6 +261,7 @@ async function aRealtimeVoiceCustomerReadyToRun(
     ada,
     key,
     connectionId,
+    testId: String(pushed.body.id),
     versionId: String(pushed.body.versionId),
   };
 }
@@ -491,51 +508,23 @@ describe("claiming work", () => {
     expect(specComplaints(spec)).toEqual([]);
   });
 
-  it("carries the answers this simulation serves, resolved into one world", async () => {
-    api = await createApi("claims_mock_tools", {
-      retellFetch: RETELL_CHAT_FETCH,
-    });
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const key = await projectKeyFor(api.app, ada);
+  it("carries exactly the tools its own test named, and no delay", async () => {
+    // A LiveKit room: one of the three lanes Egma can answer a tool call on.
+    const { key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_mock_tools",
+        {},
+        LIVEKIT,
+        1,
+        {
+          mockTools: [
+            { tool: "check_availability", answer: { slots: [] } },
+            { tool: "book_appointment", error: "the booking service is down" },
+          ],
+        },
+      );
 
-    const registered = await ask(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
-      name: "Front desk",
-      connection: RETELL,
-    });
-    expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
-    const connectionId = (registered.body.connection as { id: string }).id;
-    await createPersona(contextFor(ada, "member"), {
-      name: "Impatient Rita",
-      ...NEUTRAL_PERSON,
-    });
-    const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
-      name: "Mock tool branches",
-    });
-    expect(suite.statusCode, JSON.stringify(suite.body)).toBe(201);
-
-    // The project's world: two tools answered for every test it runs.
-    for (const written of [
-      { tool: "check_availability", answer: { slots: ["Tuesday 14:00"] } },
-      { tool: "send_confirmation_sms", answer: { delivered: true }, delayMs: 250 },
-    ]) {
-      const authored = await ask(api.app, "POST", "/v1/mock-tools", key, written);
-      expect(authored.statusCode, JSON.stringify(authored.body)).toBe(201);
-    }
-
-    // And one test that forces a branch the project's world does not have.
-    const pushed = await ask(api.app, "POST", "/v1/tests", key, {
-      ...RESCHEDULING,
-      suiteId: String(suite.body.id),
-      personas: ["Impatient Rita"],
-      mockTools: [
-        { tool: "check_availability", answer: { slots: [] } },
-        { tool: "book_appointment", error: "the booking service is down" },
-      ],
-    });
-    expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
-
-    await aQueuedRun(key, connectionId, String(pushed.body.versionId));
+    await aQueuedRun(key, connectionId, versionId);
     const answered = await claim(api.config.simulatorServiceToken, {
       claimant: "sim-under-test",
       capacity: 4,
@@ -546,73 +535,140 @@ describe("claiming work", () => {
     if (spec === undefined) throw new Error("no spec came back");
     expect(specComplaints(spec)).toEqual([]);
 
-    // The override beat the default of the same name and took its place;
-    // the default the test said nothing about stayed; and the override for
-    // a tool no default covers joined the end. One world, decided here, so
-    // there is nothing left for the simulator to choose between.
+    // The test's own world, in its own order: one answer, one authored
+    // failure, and nothing merged in from anywhere else.
     expect(spec.mock_tools).toEqual([
       {
         tool_name: "check_availability",
         answer: { answer: { slots: [] } },
-        delay_milliseconds: 0,
-      },
-      {
-        tool_name: "send_confirmation_sms",
-        answer: { answer: { delivered: true } },
-        delay_milliseconds: 250,
       },
       {
         tool_name: "book_appointment",
         answer: { error: "the booking service is down" },
-        delay_milliseconds: 0,
       },
     ]);
+    // **Two keys, and no third.** A declared delay is gone from the product,
+    // so a mock tool travels as the name and the answer and nothing else.
+    for (const entry of spec.mock_tools as Record<string, unknown>[]) {
+      expect(Object.keys(entry).sort()).toEqual(["answer", "tool_name"]);
+    }
   });
 
-  it("goes on serving the world its run froze after the mock tool is edited", async () => {
-    api = await createApi("claims_mock_snapshot", {
-      retellFetch: RETELL_CHAT_FETCH,
-    });
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const key = await projectKeyFor(api.app, ada);
+  it("hands a LiveKit room the dispatch metadata its test carries, verbatim", async () => {
+    const { key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_job_dispatch_metadata",
+        {},
+        LIVEKIT,
+        1,
+        {
+          env: {
+            job_dispatch_metadata: { tenant: "acme", flags: { beta: true } },
+            // Retell's own word for Retell's own feature. A room renders none
+            // of these, so none of them travel here.
+            retell_dynamic_variables: { caller_name: "Margaret" },
+          },
+        },
+      );
 
-    const registered = await ask(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
-      name: "Front desk",
-      connection: RETELL,
+    await aQueuedRun(key, connectionId, versionId);
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 4,
+      wait_seconds: 0,
     });
-    const connectionId = (registered.body.connection as { id: string }).id;
-    await createPersona(contextFor(ada, "member"), {
-      name: "Impatient Rita",
-      ...NEUTRAL_PERSON,
+    const spec = (answered.body.specs as Record<string, unknown>[])[0];
+    if (spec === undefined) throw new Error("no spec came back");
+    expect(specComplaints(spec)).toEqual([]);
+    // Verbatim: it is the customer's own word to their own agent, and Egma
+    // reads none of it.
+    expect(spec.job_dispatch_metadata).toEqual({
+      tenant: "acme",
+      flags: { beta: true },
     });
-    const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
-      name: "Frozen mock tool world",
-    });
-    expect(suite.statusCode, JSON.stringify(suite.body)).toBe(201);
-    const authored = await ask(api.app, "POST", "/v1/mock-tools", key, {
-      tool: "check_availability",
-      answer: { slots: ["Tuesday 14:00"] },
-    });
-    const pushed = await ask(api.app, "POST", "/v1/tests", key, {
-      ...RESCHEDULING,
-      suiteId: String(suite.body.id),
-      personas: ["Impatient Rita"],
-    });
-    await aQueuedRun(key, connectionId, String(pushed.body.versionId));
+    expect("dynamic_variables" in spec).toBe(false);
+  });
 
-    // The edit lands after the run was created, which is the case the
-    // snapshot exists for: a mock tool is unversioned and an edit
-    // overwrites the row, so a run reading the row at claim time would
-    // hand two simulations of one run two different worlds.
-    const edited = await ask(
-      api.app,
-      "PATCH",
-      `/v1/mock-tools/${String(authored.body.id)}`,
-      key,
-      { answer: { slots: [] } },
+  it("carries the test's own variables on a Retell lane", async () => {
+    const { key, connectionId, versionId } = await aCustomerReadyToRun(
+      "claims_retell_dynamic_variables",
+      {},
+      undefined,
+      {
+        env: {
+          retell_dynamic_variables: {
+            caller_name: "Margaret",
+            account_tier: "gold",
+          },
+          // The room's word, on a lane that has no room. It does not travel.
+          job_dispatch_metadata: { tenant: "acme" },
+        },
+      },
     );
+
+    await aQueuedRun(key, connectionId, versionId);
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 4,
+      wait_seconds: 0,
+    });
+    const spec = (answered.body.specs as Record<string, unknown>[])[0];
+    if (spec === undefined) throw new Error("no spec came back");
+    expect(specComplaints(spec)).toEqual([]);
+    expect(spec.dynamic_variables).toEqual({
+      caller_name: "Margaret",
+      account_tier: "gold",
+    });
+    expect("job_dispatch_metadata" in spec).toBe(false);
+  });
+
+  it("carries no answers at all on a lane Egma cannot answer a call on", async () => {
+    // A Retell chat API conversation reaches the customer's own tools: Egma is
+    // nowhere in that path, so a test's mock tools are not sent as though they
+    // were going to be served.
+    const { key, connectionId, versionId } = await aCustomerReadyToRun(
+      "claims_unserved_lane",
+      {},
+      undefined,
+      { mockTools: [{ tool: "check_availability", answer: { slots: [] } }] },
+    );
+
+    await aQueuedRun(key, connectionId, versionId);
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 4,
+      wait_seconds: 0,
+    });
+    const spec = (answered.body.specs as Record<string, unknown>[])[0];
+    if (spec === undefined) throw new Error("no spec came back");
+    expect("mock_tools" in spec).toBe(false);
+  });
+
+  it("goes on serving the version this simulation pinned after the test is edited", async () => {
+    // The pinned test version is immutable, which is what the run's own frozen
+    // copy of the world used to be for: an edit lands as a new version, and a
+    // simulation pinned to the old one is served the old one.
+    const { key, connectionId, testId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_pinned_mock_tools",
+        {},
+        LIVEKIT,
+        1,
+        {
+          mockTools: [
+            { tool: "check_availability", answer: { slots: ["Tuesday 14:00"] } },
+          ],
+        },
+      );
+
+    await aQueuedRun(key, connectionId, versionId);
+
+    const edited = await ask(api.app, "PATCH", `/v1/tests/${testId}`, key, {
+      mockTools: [{ tool: "check_availability", answer: { slots: [] } }],
+      expectedVersionId: versionId,
+    });
     expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
+    expect(String(edited.body.versionId)).not.toBe(versionId);
 
     const answered = await claim(api.config.simulatorServiceToken, {
       claimant: "sim-under-test",
@@ -624,7 +680,6 @@ describe("claiming work", () => {
       {
         tool_name: "check_availability",
         answer: { answer: { slots: ["Tuesday 14:00"] } },
-        delay_milliseconds: 0,
       },
     ]);
   });

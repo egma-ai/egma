@@ -7,9 +7,8 @@
  * a change to a dozen checks that are not about the format — and the check that
  * *is* about the format would be no easier to read for it.
  *
- * So the defaults here are the empty ones: nothing synced, nothing overridden,
- * nobody named, and one P0 behavior's worth of nothing. A check that is about a
- * field says that field.
+ * So the defaults here are the empty ones: nothing synced, nothing mocked, no
+ * world named, and nobody named. A check that is about a field says that field.
  */
 
 import type { TestFile } from "../../src/folder/test-file.ts";
@@ -19,12 +18,13 @@ export type PartialTestFile = Partial<TestFile> &
 
 export function aTestFile(said: PartialTestFile): TestFile {
   return {
-    format: 4,
+    format: 5,
     description: null,
     personas: [],
     version: null,
     identityRevision: null,
     mockTools: [],
+    env: null,
     ...said,
   };
 }

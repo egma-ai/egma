@@ -15,7 +15,6 @@ is one suite directory:
 ```text
 egma/
   config.yaml
-  mock-tools.md
   tests/
     receptionist-core/
       suite.yaml
@@ -62,12 +61,12 @@ setting. Pull updates a renamed suite's `name` but does not move its directory.
 
 ## Test file format
 
-Each test is one Markdown file inside its suite directory. Format 4 is the only
+Each test is one Markdown file inside its suite directory. Format 5 is the only
 supported file format:
 
-```markdown
+````markdown
 ---
-format: 4
+format: 5
 name: missed-appointment-reschedule
 description: The caller missed an appointment and needs another time this week.
 version: tstv_01JXMK8P2QN4R6S9T1UV3WX5Y
@@ -85,11 +84,34 @@ The caller missed yesterday's appointment and wants to reschedule this week.
 
 1. The agent offers at least two alternative times.
 2. The agent confirms the new booking before ending the call.
+
+## Mock tools
+
+### check_availability
+```json
+{
+  "answer": {
+    "slots": []
+  }
+}
 ```
+
+## Env
+```json
+{
+  "retell_dynamic_variables": {
+    "caller_name": "Margaret"
+  },
+  "job_dispatch_metadata": {
+    "tenant": "acme"
+  }
+}
+```
+````
 
 | Field | Required | Description |
 |---|---|---|
-| `format` | Yes | Must be `4` |
+| `format` | Yes | Must be `5` |
 | `name` | Yes | The test display name |
 | `description` | No | A short explanation |
 | `version` | No for a new test | The last synced immutable test-version ID |
@@ -111,9 +133,11 @@ caller is, what they want, and any useful context.
 Every expected behavior is a sentence that the agent should satisfy. A test
 needs at least one expected behavior.
 
-## Test-level mock tool overrides
+## Mock tools
 
-Add a `## Mock tools` section when one test needs a different backend state:
+Add a `## Mock tools` section when this test needs a specific backend state.
+Each tool uses a `###` heading and one JSON block holding exactly one of
+`answer` and `error`:
 
 ````markdown
 ## Mock tools
@@ -121,32 +145,39 @@ Add a `## Mock tools` section when one test needs a different backend state:
 ### check_availability
 ```json
 {
-  "answer": { "slots": [] },
-  "delay_ms": 150
+  "answer": { "slots": [] }
 }
 ```
-````
 
-These overrides version with the test.
-
-## Project mock tools
-
-`egma/mock-tools.md` defines project-wide Mock Tool answers. Each tool uses a
-`###` heading and one JSON block:
-
-````markdown
-## Mock tools
-
-### check_availability
+### book_appointment
 ```json
 {
-  "answer": { "slots": ["Mon 9am", "Tue 2pm"] }
+  "error": "the calendar is unreachable"
 }
 ```
 ````
 
-Project Mock Tools are unversioned. Push writes the local values. Pull writes
-the current platform values.
+A mock tool belongs to the test that writes it, and versions with the test.
+
+## Env
+
+Add a `## Env` section when this test needs the agent started in a specific
+world. It is one JSON block with at most two keys:
+
+````markdown
+## Env
+```json
+{
+  "retell_dynamic_variables": { "caller_name": "Margaret" },
+  "job_dispatch_metadata": { "tenant": "acme" }
+}
+```
+````
+
+`retell_dynamic_variables` is what Retell substitutes into the agent's prompt,
+as text; a name beginning `egma_` is refused. `job_dispatch_metadata` is the
+object LiveKit hands your worker on the job dispatch. The env versions with the
+test.
 
 ## Push the complete repository
 
@@ -154,8 +185,8 @@ the current platform values.
 egma push
 ```
 
-Push validates every suite, test, and Mock Tool first. It then applies one
-all-or-nothing project change. A late conflict writes nothing.
+Push validates every suite and test first. It then applies one all-or-nothing
+project change. A late conflict writes nothing.
 
 A missing local suite or test never means deletion. Push refuses when the
 platform has a resource that is absent locally. Pull first, or delete the
@@ -171,8 +202,8 @@ Pull plans the complete update before it changes local files. It preserves
 changed versioned tests and unpushed test drafts. If a later local write fails,
 Egma restores earlier bytes and removes new paths created by that pull.
 
-Suite names and known project Mock Tools are the unversioned exceptions. Pull
-writes their current platform values.
+A suite name is the unversioned exception. Pull writes its current platform
+value.
 
 ## Run one exact suite
 

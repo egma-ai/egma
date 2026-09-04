@@ -6,7 +6,6 @@ import {
   startSimulation,
   type CompletedEndingReason,
   type FailedEndingReason,
-  type MockToolCoverage,
   type Simulation,
   type SimulationStanding,
   type SimulationSummaryFacts,
@@ -93,16 +92,6 @@ type StatusEvent = {
       readonly recording: string;
     } | null;
     readonly provider_reference: string | null;
-    /**
-     * The one terminal fact that may be omitted, and the only one whose
-     * absence is itself a sentence: the agent was never asked what tools it
-     * has, so nothing was learned and nothing is claimed.
-     */
-    readonly mock_tool_coverage?: {
-      readonly discovered: readonly string[];
-      readonly covered: readonly string[];
-      readonly uncovered: readonly string[];
-    };
   };
 };
 
@@ -153,30 +142,10 @@ function reportedMoments(facts: {
   return { startedAt, endedAt };
 }
 
-/**
- * The stamp this landing writes: what the conductor reported, and nothing
- * added to it.
- *
- * **One writer, deliberately.** A simulator that stands in the tool path — the
- * LiveKit in-room seam — reports the three lists, because there the agent
- * declares its tools per conversation and two simulations of one run can
- * honestly differ. Every other lane reports none, and the stamp is left off,
- * which is the report saying nobody was ever asked — a different sentence from
- * three empty lists. The Retell lanes decide what they answer for once per run
- * and mark each answered call on the transcript, so a per-simulation copy would
- * be a second version of a fact that cannot differ.
- */
-function coverageOf(
-  facts: NonNullable<StatusEvent["facts"]>,
-): MockToolCoverage | undefined {
-  return facts.mock_tool_coverage;
-}
-
 /** The terminal facts, as the landings take them. */
 function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
   const facts = event.facts;
   if (facts === undefined) return {};
-  const coverage = coverageOf(facts);
   return {
     turnCount: facts.turn_count,
     ...(facts.provider_reference === null
@@ -185,7 +154,6 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
     ...(facts.audio === null
       ? {}
       : { recordingReference: facts.audio.recording }),
-    ...(coverage === undefined ? {} : { mockToolCoverage: coverage }),
     // Absent when incoherent, so the landing's own stamps stand for both.
     ...(reportedMoments(facts) ?? {}),
   };

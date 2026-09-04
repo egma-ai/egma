@@ -4,7 +4,6 @@
  * ```
  * egma/
  *   config.yaml     one platform and project, with many agents and connections
- *   mock-tools.md   what egma answers for the agent's tools with
  *   tests/          one direct directory per test suite
  *     release/
  *       suite.yaml  stable suite identity and current display name
@@ -29,13 +28,6 @@ import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import {
-  MOCK_TOOLS_HEADING,
-  MOCK_TOOLS_LINE,
-  readMockTools,
-  writeMockTools,
-  type MockToolEntry,
-} from "./mock-tools.ts";
 import { normalizePlatformOrigin } from "../platform/url.ts";
 import { parseTestFile, serializeTestFile, type TestFile } from "./test-file.ts";
 import {
@@ -54,7 +46,6 @@ import {
 
 export const FOLDER_NAME = "egma";
 export const CONFIG_FILE_NAME = "config.yaml";
-export const MOCK_TOOLS_FILE_NAME = "mock-tools.md";
 export const TESTS_FOLDER_NAME = "tests";
 export const SUITE_MANIFEST_FILE_NAME = "suite.yaml";
 /** Reserved for per-agent memory files. Nothing creates it. */
@@ -64,8 +55,6 @@ export const MEMORY_FOLDER_NAME = "memory";
 export type FolderPaths = {
   readonly root: string;
   readonly config: string;
-  /** The project's own mock tools. A test's overrides live in the test. */
-  readonly mockTools: string;
   readonly tests: string;
 };
 
@@ -74,7 +63,6 @@ export function folderPathsIn(repository: string): FolderPaths {
   return {
     root,
     config: path.join(root, CONFIG_FILE_NAME),
-    mockTools: path.join(root, MOCK_TOOLS_FILE_NAME),
     tests: path.join(root, TESTS_FOLDER_NAME),
   };
 }
@@ -459,116 +447,6 @@ export async function bindRepositoryPlatform(
   return updateConfig(paths.config, { platform: binding });
 }
 
-/**
- * What `egma/mock-tools.md` opens with, above the mock tools themselves.
- *
- * It is prose rather than a comment because it is markdown a person reads in a
- * pull request, and it says the three things nothing else in the folder would
- * teach: that an answer belongs here, that this one authored thing is not
- * versioned and so the last write wins, and that neither verb removes one.
- */
-const MOCK_TOOLS_HEADER = [
-  // Deliberately not the section's own heading: the section is found by that
-  // heading, and a title saying the same words would be the one the reader
-  // stopped at, leaving every mock tool below it unread.
-  "# The mock tools this project answers with",
-  "",
-  "Each one answers for a tool of the voice agent while a simulation runs, so a",
-  "test never reaches the real backend and can ask for the branch it needs. An",
-  "answer may be a failure, and may hold Egma back a while so a mocked backend",
-  "takes as long as the real one.",
-  "",
-  "Committed like everything else in this folder: an answer is your own data, and",
-  "nothing here is secret.",
-  "",
-  "Egma writes this file from what it holds, and a mock tool is not versioned — so",
-  "`egma pull` writes Egma's answer over what is here, and `egma push` writes what",
-  "is here over Egma's. Whichever ran last, wins. A mock tool Egma has never heard",
-  "of is left exactly as it is until you push it.",
-  "",
-  "Neither verb removes one: a block taken out of this file comes back on the next",
-  "`egma pull`, exactly as deleting a test file does not delete the test.",
-  "",
-  "This prose is Egma's own. Either verb rewrites the whole file from what Egma",
-  "holds, so a note added up here does not survive the next one.",
-  "",
-  "A test that needs a different answer writes it under the same heading in its own",
-  "file. That override is the test's own content, and is versioned with the test.",
-  "",
-];
-
-export function serializeMockToolsFile(
-  entries: readonly MockToolEntry[],
-): string {
-  // The heading is written even with nothing under it, unlike a test's own
-  // section: this file is the mock tools, and one with none has to say where
-  // the first one goes.
-  const written = writeMockTools(entries);
-  const section = written.length === 0 ? [MOCK_TOOLS_HEADING] : written;
-  return [...MOCK_TOOLS_HEADER, ...section, ""].join("\n");
-}
-
-/**
- * The mock tools one file says, whatever prose somebody wrote above them.
- *
- * The *first* heading opens the section here, where a test file takes its last
- * one. The difference is the shape of the two documents rather than two minds
- * about one rule: everything above the heading in this file is the prose egma
- * writes at the top — whose own title deliberately does not read as the section
- * heading — and everything below it is mock tools, one of which could perfectly
- * well be a tool somebody named `mock tools`.
- *
- * A file with no heading at all is read as holding none rather than refused: a
- * folder somebody emptied on purpose is still a folder egma can push.
- */
-export function parseMockToolsFile(
-  document: string,
-  where: string,
-): readonly MockToolEntry[] {
-  const lines = document.split("\n");
-  const at = lines.findIndex((line) => MOCK_TOOLS_LINE.test(line.trim()));
-  return at === -1 ? [] : readMockTools(lines.slice(at + 1), where);
-}
-
-/**
- * The project's mock tools as they now stand on disk. A folder that has no such
- * file yet holds no mock tools, which is what a folder made before this file
- * existed says and what a folder somebody has not pulled into says too.
- */
-export async function readMockToolsFile(
-  file: string,
-): Promise<readonly MockToolEntry[]> {
-  let document: string;
-  try {
-    document = await readFile(file, "utf8");
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw cause;
-  }
-  return parseMockToolsFile(document, `${FOLDER_NAME}/${MOCK_TOOLS_FILE_NAME}`);
-}
-
-/**
- * Write the project's mock tools, and say whether that changed anything. The
- * comparison is on the bytes, for the reason `writeTestFile` compares bytes.
- */
-export async function writeMockToolsFile(
-  file: string,
-  entries: readonly MockToolEntry[],
-): Promise<{ readonly changed: boolean }> {
-  const document = serializeMockToolsFile(entries);
-  let held: string | null = null;
-  try {
-    held = await readFile(file, "utf8");
-  } catch {
-    held = null;
-  }
-  if (held === document) return { changed: false };
-
-  await writeFile(file, document, "utf8");
-  return { changed: true };
-}
-
 export type CreateFolderOptions = {
   /** The repository the folder goes in. */
   readonly repository: string;
@@ -599,8 +477,7 @@ async function exists(where: string): Promise<boolean> {
  * A file that already exists is never rewritten — it is somebody's committed
  * file, and the second developer to run this must not turn up in a diff having
  * changed it. Anything missing beside it is made, so a folder that lost its
- * `tests/` directory to a branch merge comes back whole, and a folder made
- * before mock tools existed grows the file the first time this runs again.
+ * `tests/` directory to a branch merge comes back whole.
  */
 export async function createEgmaFolder(
   options: CreateFolderOptions,
@@ -611,13 +488,6 @@ export async function createEgmaFolder(
   await mkdir(paths.tests, { recursive: true });
   if (!already) {
     await writeConfig(paths.config, options.config ?? EMPTY_CONFIG);
-  }
-  // Empty, and here from the start: the folder is what teaches a developer and
-  // a coding agent where a mock tool goes, and a file that is not there teaches
-  // nobody. Never rewritten, so mock tools somebody authored survive a second
-  // run of `egma init`.
-  if (!(await exists(paths.mockTools))) {
-    await writeMockToolsFile(paths.mockTools, []);
   }
 
   return { paths, created: !already, config: await readConfig(paths.config) };
@@ -740,7 +610,6 @@ export type FolderSuite = {
 /** One complete validated repository value. */
 export type RepositoryContents = {
   readonly config: FolderConfig;
-  readonly mockTools: readonly MockToolEntry[];
   readonly suites: readonly FolderSuite[];
 };
 
@@ -778,17 +647,11 @@ function shown(...parts: readonly string[]): string {
 export async function readRepository(paths: FolderPaths): Promise<RepositoryContents> {
   const issues: string[] = [];
   let config: FolderConfig = EMPTY_CONFIG;
-  let mockTools: readonly MockToolEntry[] = [];
 
   try {
     config = await readConfig(paths.config);
   } catch (problem) {
     issues.push(`${FOLDER_NAME}/${CONFIG_FILE_NAME}: ${reasonOf(problem)}`);
-  }
-  try {
-    mockTools = await readMockToolsFile(paths.mockTools);
-  } catch (problem) {
-    issues.push(`${FOLDER_NAME}/${MOCK_TOOLS_FILE_NAME}: ${reasonOf(problem)}`);
   }
 
   let entries: Dirent[] = [];
@@ -910,7 +773,7 @@ export async function readRepository(paths: FolderPaths): Promise<RepositoryCont
   }
 
   if (issues.length > 0) throw new RepositoryValidationError(issues);
-  return { config, mockTools, suites };
+  return { config, suites };
 }
 
 /**

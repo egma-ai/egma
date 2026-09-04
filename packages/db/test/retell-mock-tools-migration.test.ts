@@ -18,12 +18,16 @@ import {
  * The mock-tools migration, run the way a real deployment meets it: over a
  * database that already holds connections, runs and finished simulations.
  *
- * **Nothing is backfilled and no trigger is disabled.** The switch arrives off
- * for every connection there is, which is what it means, and the four run
+ * **What 0003 added and 0007 kept**, which is the four columns a temporary copy
+ * of somebody's Retell agent is tracked by. The connection switch and the
+ * project's own mocked world that arrived with them are gone again — proved in
+ * `test-owned-mock-tools-migration.test.ts`, which is 0007's own file — so what
+ * is asserted here is what a run still remembers.
+ *
+ * **Nothing 0003 wrote is backfilled and it disables no trigger.** The four run
  * columns arrive null, which is their honest value on every run already
  * written: none of them conducted against a named version and none of them made
- * a temporary copy. The coverage stamp is not touched at all — it stays the
- * three lists `main` shipped, written by the LiveKit in-room seam alone.
+ * a temporary copy.
  *
  * **The freeze carve-out is exact.** A finished run may still be told the two
  * cleanup facts, because clearing a crashed run's litter is by definition
@@ -49,13 +53,6 @@ const testId = newId("tst");
 const testVersionId = newId("tstv");
 const runId = newId("run");
 const finishedSimulation = newId("sim");
-
-/** The coverage stamp an in-room LiveKit run wrote, in its three lists. */
-const OLD_STAMP = {
-  discovered: ["check_calendar", "send_confirmation"],
-  covered: ["check_calendar"],
-  uncovered: ["send_confirmation"],
-} as const;
 
 /** Every connection kind an older build could already have written. */
 const EXISTING_CONNECTIONS = [
@@ -186,11 +183,10 @@ async function seedExistingWork(): Promise<void> {
        (id, run_id, organization_id, project_id, agent_id, connection_id,
         persona_id, persona_version_id, test_id, test_version_id,
         position, modality, status, ending_reason,
-        claimed_by, claimed_at, heartbeat_at, started_at, ended_at, turn_count,
-        mock_tool_coverage)
+        claimed_by, claimed_at, heartbeat_at, started_at, ended_at, turn_count)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, 'chat',
        'completed', 'persona_concluded', 'simulator-blue-1', now(), now(),
-       now(), now(), 12, $11::jsonb)`,
+       now(), now(), 12)`,
     [
       finishedSimulation,
       runId,
@@ -202,7 +198,6 @@ async function seedExistingWork(): Promise<void> {
       personaVersionId,
       testId,
       testVersionId,
-      JSON.stringify(OLD_STAMP),
     ],
   );
 }
@@ -243,41 +238,15 @@ describe("the mock-tools migration over a populated database", () => {
   it("carries nothing across, because there is nothing to carry", async () => {
     // Asserted against the file rather than inferred from its effect: a
     // backfill or a disabled trigger is exactly what this migration must not
-    // have, and the earlier draft of it had both.
+    // have, and the earlier draft of it had both. 0007, which does carry
+    // something across, says so in its own header and proves it in its own
+    // file.
     const sql = await readFile(
       path.join(MIGRATIONS_DIRECTORY, UNDER_TEST),
       "utf8",
     );
     expect(sql).not.toMatch(/DISABLE TRIGGER/iu);
     expect(sql).not.toMatch(/^\s*UPDATE /imu);
-  });
-
-  it("gives every connection the switch, off", async () => {
-    const { rows } = await store.sql<{
-      id: string;
-      mock_tools_enabled: boolean;
-    }>(
-      "select id, mock_tools_enabled from connection where id = any($1::text[])",
-      [connectionIds],
-    );
-    expect(rows).toHaveLength(EXISTING_CONNECTIONS.length);
-    for (const row of rows) expect(row.mock_tools_enabled).toBe(false);
-  });
-
-  it("refuses the switch on a phone connection", async () => {
-    const refused = await store
-      .sql(
-        `insert into connection
-           (id, organization_id, project_id, agent_id, name, connection_type,
-            access_variant, modality, topology, config, mock_tools_enabled)
-         values ($1, $2, $3, $4, 'Mocked phone', 'phone_number',
-           'phone_number.public_e164', 'voice', 'egma-dials-in',
-           '{"phoneNumber": "+15550100"}'::jsonb, true)`,
-        [newId("con"), acme.organization, acme.project, agentId],
-      )
-      .then(() => undefined)
-      .catch((error: unknown) => error);
-    expect(String(refused)).toMatch(/connection_mock_tools_lanes/u);
   });
 
   it("leaves every run already written with nothing to claim", async () => {
@@ -298,16 +267,6 @@ describe("the mock-tools migration over a populated database", () => {
       temp_mock_agent_version_cleanup: null,
       mock_metadata: null,
     });
-  });
-
-  it("leaves a stamped simulation's coverage exactly as it was", async () => {
-    const { rows } = await store.sql<{ mock_tool_coverage: unknown }>(
-      "select mock_tool_coverage from simulation where id = $1",
-      [finishedSimulation],
-    );
-    // Three lists, as `main` ships them. The Retell lanes never write one, so
-    // nothing here widens what a LiveKit run already said.
-    expect(rows[0]?.mock_tool_coverage).toEqual(OLD_STAMP);
   });
 
   it("indexes the cleanup flag the claim searches by, partially", async () => {
@@ -352,10 +311,9 @@ describe("the mock-tools migration over a populated database", () => {
     await store.sql(
       `insert into run
          (id, organization_id, project_id, suite_id, agent_id, connection_id,
-          status, triggered_via, connection_snapshot, mock_tool_snapshot,
+          status, triggered_via, connection_snapshot,
           expected_simulation_count)
-       values ($1, $2, $3, $4, $5, $6, 'pending', 'manual', '{}'::jsonb,
-         '{"defaults": [], "overrides": {}}'::jsonb, 1)`,
+       values ($1, $2, $3, $4, $5, $6, 'pending', 'manual', '{}'::jsonb, 1)`,
       [
         fresh,
         acme.organization,

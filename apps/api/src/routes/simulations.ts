@@ -7,13 +7,11 @@ import {
   getRun,
   getSimulation,
   getSimulationExecutionEvidence,
-  mockToolCoverageRow,
   NotPermittedError,
   readTrace,
   readTraceGrading,
   regradeTrace,
   type GradingPlan,
-  type MockToolCoverage,
   type Simulation,
   type TraceDetail,
   type TraceSpan,
@@ -27,7 +25,6 @@ import { actingIn, reachingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { describedMetrics } from "../http/metrics.ts";
 import { describedTraceGrading } from "../http/grades.ts";
-import { describedMockTool } from "../http/mock-tools.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
@@ -96,12 +93,6 @@ function describedTranscript(
     spans: detail.spans.map(describedSpan),
     spansTruncated: detail.truncated,
   };
-}
-
-function describedMockToolCoverage(
-  coverage: MockToolCoverage | null,
-): Record<string, unknown> | null {
-  return coverage === null ? null : mockToolCoverageRow(coverage);
 }
 
 /** The exact grader selection frozen for this simulation's test. */
@@ -222,7 +213,6 @@ export async function simulationRoutes(
       ]);
 
       const testVersion = executionEvidence?.testVersion;
-      const mockToolSnapshot = executionEvidence?.mockToolSnapshot;
 
       return reply.send({
         id: simulation.id,
@@ -295,18 +285,6 @@ export async function simulationRoutes(
           topology: run.connectionSnapshot.topology,
           environment: run.connectionSnapshot.environment,
           config: run.connectionSnapshot.config,
-        },
-        mockToolCoverage: describedMockToolCoverage(
-          simulation.mockToolCoverage,
-        ),
-        mockTools: {
-          defaults: (mockToolSnapshot?.defaults ?? []).map((entry) => ({
-            ...describedMockTool(entry),
-            mockToolId: entry.mockToolId,
-          })),
-          overrides: (
-            mockToolSnapshot?.overrides[simulation.testVersionId] ?? []
-          ).map(describedMockTool),
         },
         gradingPlan: describedPlanForSimulation(
           plan,

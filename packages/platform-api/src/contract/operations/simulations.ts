@@ -15,11 +15,7 @@ import {
   gradingStateSchema,
   normalizedScoreSchema,
 } from "./grades.ts";
-import {
-  mockToolCoverageSchema,
-  mockToolSchema,
-  simulationStatusSchema,
-} from "./runs.ts";
+import { simulationStatusSchema } from "./runs.ts";
 
 const stringSchema = { type: "string" } as const;
 const integerSchema = { type: "integer" } as const;
@@ -124,20 +120,6 @@ const gradingPlanSchema = {
     items: arrayOf(planItemSchema),
   },
   required: ["state", "capturedAt", "items"],
-  additionalProperties: false,
-} as const;
-
-const mockToolDefaultSchema = {
-  type: "object",
-  properties: {
-    ...mockToolSchema.properties,
-    mockToolId: stringIdSchema,
-  },
-  required: [...mockToolSchema.required, "mockToolId"],
-  oneOf: [
-    { type: "object", required: ["answer"] },
-    { type: "object", required: ["error"] },
-  ],
   additionalProperties: false,
 } as const;
 
@@ -263,16 +245,6 @@ const simulationSchema = {
       ],
       additionalProperties: false,
     },
-    mockToolCoverage: nullable(mockToolCoverageSchema),
-    mockTools: {
-      type: "object",
-      properties: {
-        defaults: arrayOf(mockToolDefaultSchema),
-        overrides: arrayOf(mockToolSchema),
-      },
-      required: ["defaults", "overrides"],
-      additionalProperties: false,
-    },
     gradingPlan: nullable(gradingPlanSchema),
     transcript: nullable(transcriptSchema),
   },
@@ -300,8 +272,6 @@ const simulationSchema = {
     "agent",
     "connection",
     "connectionSnapshot",
-    "mockToolCoverage",
-    "mockTools",
     "gradingPlan",
     "transcript",
   ],

@@ -1753,7 +1753,7 @@ async def test_the_mock_tool_methods_are_offered_at_the_join():
         config={"url": A_URL, "agentName": AN_AGENT},
         credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
         simulation_id=A_SIMULATION,
-        mock_tools=MockToolSeam((MockTool("check_calendar", {"answer": {}}, 0),)),
+        mock_tools=MockToolSeam((MockTool("check_calendar", {"answer": {}}),)),
         driver=stub.driver,
     )
 
@@ -1794,7 +1794,7 @@ async def test_a_refusal_at_the_join_leaves_the_second_offer_its_chance():
         config={"url": A_URL, "agentName": AN_AGENT},
         credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
         simulation_id=A_SIMULATION,
-        mock_tools=MockToolSeam((MockTool("check_calendar", {"answer": {}}, 0),)),
+        mock_tools=MockToolSeam((MockTool("check_calendar", {"answer": {}}),)),
         driver=stub.driver,
     )
 

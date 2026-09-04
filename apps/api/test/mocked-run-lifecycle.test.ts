@@ -20,13 +20,13 @@ import {
 /**
  * One mocked run, end to end, against a Retell that exists only in this file.
  *
- * The whole promise in one walk: a developer ticks the box, starts a run, and
- * every step of the mocked world happens — a temporary version branched from
- * the exact version the agent serves, its tools pointed at Egma, the live
- * version untouched, each simulation conducted against the temporary version,
- * a tool call answered from the run's frozen world and landed on the record
- * with `mocked` provenance and the three-class stamp, and the temporary version
- * deleted when the run ends.
+ * The whole promise in one walk: a developer writes a test that names the tools
+ * it mocks, starts a run, and every step of the mocked world happens — a
+ * temporary version branched from the exact version the agent serves, its tools
+ * pointed at Egma, the live version untouched, each simulation conducted
+ * against the temporary version, a tool call answered from the pinned test
+ * version and landed on the record with `mocked` provenance, and the temporary
+ * version deleted when the run ends.
  *
  * And the other half of the promise beside it: a run whose world cannot be
  * built is refused with the reason, before a single simulation is conducted,
@@ -294,16 +294,27 @@ type Ready = {
   readonly state: Account["state"];
 };
 
-/** A ticked Retell agent with one test, ready for a run. */
-async function aTickedAgent(
+/**
+ * A Retell agent with one test that carries its own mock tools, ready for a
+ * run.
+ *
+ * The tools are named by the test and by nothing else: there is no switch on
+ * the connection and no project list to seed, so a run is mocked exactly when
+ * a test of it named a tool.
+ */
+async function anAgentReadyToRun(
   label: string,
-  options: { branching?: "fork" | "share"; published?: boolean } = {},
+  options: {
+    branching?: "fork" | "share";
+    published?: boolean;
+    /** What the one test mocks. An empty list is a test that mocks nothing. */
+    mockTools?: readonly Record<string, unknown>[];
+  } = {},
 ): Promise<Ready> {
   const account = anAccount(options);
   api = await createApi(label, {
     traceStore: true,
     retellFetch: account.fetchImpl,
-    mockToolWait: async () => undefined,
   });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
@@ -326,30 +337,6 @@ async function aTickedAgent(
   const agentId = (registered.body.agent as { id: string }).id;
   const connectionId = (registered.body.connection as { id: string }).id;
 
-  // The switch, on the connection a mocked run is conducted over. Consent to
-  // pin a `latest`-riding number is one of the four promises the single
-  // consent screen makes, so there is no second checkbox here.
-  const ticked = await ask(
-    api.app,
-    "PATCH",
-    `/v1/agents/${agentId}/connections/${connectionId}`,
-    key,
-    { mockToolsEnabled: true },
-  );
-  expect(ticked.statusCode, JSON.stringify(ticked.body)).toBe(200);
-
-  // The answers a mocked run serves. Seeding is the discovery read's own job
-  // now that the agent tick is gone: it adds a deterministic answer for every
-  // tool Egma can stand in front of and this project does not answer for yet.
-  const seeded = await ask(
-    api.app,
-    "POST",
-    `/v1/agents/${agentId}/mock-tools:discover`,
-    key,
-    { seed: true },
-  );
-  expect(seeded.statusCode, JSON.stringify(seeded.body)).toBe(200);
-
   const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
     name: "Appointment changes",
   });
@@ -363,6 +350,9 @@ async function aTickedAgent(
     expectedBehaviors: ["confirms the time back before finishing"],
     suiteId: String(suite.body.id),
     personas: ["Impatient Rita"],
+    mockTools: options.mockTools ?? [
+      { tool: "get_availability", answer: { slots: ["Tuesday 14:00"] } },
+    ],
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
@@ -434,9 +424,9 @@ async function report(
   expect(answered.statusCode, answered.body).toBe(200);
 }
 
-describe("one mocked run, from the tick to the teardown", () => {
+describe("one mocked run, from the test to the teardown", () => {
   it("branches, swaps, conducts, records, and gives the account back", async () => {
-    const ready = await aTickedAgent("mocked_run_end_to_end");
+    const ready = await anAgentReadyToRun("mocked_run_end_to_end");
 
     const started = await ask(api.app, "POST", "/v1/runs", ready.key, {
       suiteId: ready.suiteId,
@@ -489,29 +479,31 @@ describe("one mocked run, from the tick to the teardown", () => {
     expect(spec["dynamic_variables"]).toEqual({
       [SIMULATION_VARIABLE]: simulationId,
     });
-    // And its answers, resolved from the run's frozen world.
+    // And its answers, straight off the pinned test version.
     expect(spec["mock_tools"]).toEqual([
       {
         tool_name: "get_availability",
-        answer: { answer: { slots: "" } },
-        delay_milliseconds: 0,
+        answer: { answer: { slots: ["Tuesday 14:00"] } },
       },
     ]);
 
     await report(simulationId, "running");
 
-    // The tool call, arriving at the address the transform wrote.
+    // The tool call, arriving the way Retell's would. The endpoint is keyed on
+    // the simulation alone; the URL the transform writes still carries the run
+    // as well, and the two are joined back up when the transform is rewritten
+    // onto per-tool variables.
     const answered = await api.app.inject({
       method: "POST",
       url:
-        `${MOCK_TOOL_PREFIX}/${encodeURIComponent(runId)}` +
-        `/${encodeURIComponent(simulationId)}/get_availability`,
+        `${MOCK_TOOL_PREFIX}/${encodeURIComponent(simulationId)}` +
+        `/get_availability`,
       headers: { "content-type": "application/json" },
       payload: JSON.stringify({ service: "facial" }),
     });
     expect(answered.statusCode, answered.body).toBe(200);
-    // The answer the tick seeded, derived from the tool's own declaration.
-    expect(JSON.parse(answered.body)).toEqual({ slots: "" });
+    // The answer the test named, and nothing derived from anywhere else.
+    expect(JSON.parse(answered.body)).toEqual({ slots: ["Tuesday 14:00"] });
 
     await report(simulationId, "completed");
 
@@ -530,15 +522,17 @@ describe("one mocked run, from the tick to the teardown", () => {
     expect(spans).toHaveLength(1);
     expect(spans[0]?.tool_name).toBe("get_availability");
     expect(spans[0]?.tool_arguments).toBe(JSON.stringify({ service: "facial" }));
-    expect(spans[0]?.tool_result).toBe(JSON.stringify({ slots: "" }));
+    expect(spans[0]?.tool_result).toBe(
+      JSON.stringify({ slots: ["Tuesday 14:00"] }),
+    );
     const payload = JSON.parse(spans[0]?.payload ?? "{}") as Record<string, unknown>;
     expect(payload["egma.tool.provenance"]).toBe("mocked");
-    expect(payload["egma.tool.mock_tool"]).toMatch(/^mck_/u);
+    expect(payload["egma.tool.mock_tool"]).toBe("get_availability");
 
-    // **No coverage stamp, and that is the settled answer.** The stamp is the
-    // LiveKit in-room seam's, where the agent declares its tools per
-    // conversation; this lane decides what it answers for once per run and
-    // marks each answered call on the transcript, which the span above is.
+    // **No coverage anywhere on the record, and that is the settled answer.**
+    // A simulation is answered for what its own test named, and every answered
+    // call is on the transcript — which the span above is. A second, summarised
+    // version of the same fact is a field two readers could disagree about.
     const page = await ask(
       api.app,
       "GET",
@@ -546,7 +540,8 @@ describe("one mocked run, from the tick to the teardown", () => {
       ready.key,
     );
     const simulation = (page.body.simulations as Record<string, unknown>[])[0];
-    expect(simulation?.["mockToolCoverage"]).toBeNull();
+    expect(simulation).toBeDefined();
+    expect("mockToolCoverage" in (simulation ?? {})).toBe(false);
 
     // And the account, given back: the temporary version deleted first, then
     // the number's routing restored exactly as it was read.
@@ -562,20 +557,15 @@ describe("one mocked run, from the tick to the teardown", () => {
   });
 });
 
-describe("a web-call run whose connection has the switch off", () => {
+describe("a web-call run whose tests mock nothing", () => {
   it("still records the version it conducted against, and branches nothing", async () => {
-    const ready = await aTickedAgent("web_call_unmocked_row");
-    // The same connection, switched off. What changes is the mocked world, not
-    // whether Egma knows which version answered: a result nobody can tie to a
-    // version is a result nobody can act on, mocked or not.
-    const untick = await ask(
-      api.app,
-      "PATCH",
-      `/v1/agents/${ready.agentId}/connections/${ready.connectionId}`,
-      ready.key,
-      { mockToolsEnabled: false },
-    );
-    expect(untick.statusCode, JSON.stringify(untick.body)).toBe(200);
+    // The same agent and the same lane, with a test that names no tool. What
+    // changes is the mocked world, not whether Egma knows which version
+    // answered: a result nobody can tie to a version is a result nobody can act
+    // on, mocked or not.
+    const ready = await anAgentReadyToRun("web_call_unmocked_row", {
+      mockTools: [],
+    });
 
     const started = await ask(api.app, "POST", "/v1/runs", ready.key, {
       suiteId: ready.suiteId,
@@ -615,7 +605,7 @@ describe("a web-call run whose connection has the switch off", () => {
 
 describe("a run over a Retell lane against an agent that publishes nothing", () => {
   it("is refused before any run row exists, and names both doors", async () => {
-    const ready = await aTickedAgent("web_call_never_published", {
+    const ready = await anAgentReadyToRun("web_call_never_published", {
       published: false,
     });
 
@@ -649,7 +639,7 @@ describe("a run over a Retell lane against an agent that publishes nothing", () 
   });
 
   it("conducts the run once that version is published", async () => {
-    const ready = await aTickedAgent("web_call_published_after", {
+    const ready = await anAgentReadyToRun("web_call_published_after", {
       published: false,
     });
     // The developer takes door one.
@@ -670,7 +660,7 @@ describe("a run whose world cannot be built", () => {
   it("is refused with the reason, before a single simulation is conducted", async () => {
     // The fork guard's case: Retell answers a branch that still points at the
     // serving version's own engine version.
-    const ready = await aTickedAgent("mocked_run_unbuildable", {
+    const ready = await anAgentReadyToRun("mocked_run_unbuildable", {
       branching: "share",
     });
 
@@ -709,7 +699,7 @@ describe("a run whose world cannot be built", () => {
  */
 describe("a second mocked run on an agent already holding its world", () => {
   it("is refused with the reason, and writes nothing to the platform", async () => {
-    const ready = await aTickedAgent("mocked_run_second_refused");
+    const ready = await anAgentReadyToRun("mocked_run_second_refused");
 
     const first = await ask(api.app, "POST", "/v1/runs", ready.key, {
       suiteId: ready.suiteId,
@@ -761,7 +751,7 @@ describe("a second mocked run on an agent already holding its world", () => {
   });
 
   it("lets the next run build once the first has finished and given the account back", async () => {
-    const ready = await aTickedAgent("mocked_run_second_after_teardown");
+    const ready = await anAgentReadyToRun("mocked_run_second_after_teardown");
 
     const first = await ask(api.app, "POST", "/v1/runs", ready.key, {
       suiteId: ready.suiteId,
@@ -817,7 +807,7 @@ describe("a second mocked run on an agent already holding its world", () => {
  */
 describe("a teardown that is in flight when the next run starts", () => {
   it("makes the next run wait for it, and touches no binding either way", async () => {
-    const ready = await aTickedAgent("mocked_run_teardown_meets_claim");
+    const ready = await anAgentReadyToRun("mocked_run_teardown_meets_claim");
 
     const first = await ask(api.app, "POST", "/v1/runs", ready.key, {
       suiteId: ready.suiteId,
@@ -906,7 +896,7 @@ describe("a teardown that is in flight when the next run starts", () => {
  */
 describe("a mocked run after a predecessor's teardown failed", () => {
   it("is refused until the debt settles, and the retried restore finds no draft", async () => {
-    const ready = await aTickedAgent("mocked_run_owed_refuses");
+    const ready = await anAgentReadyToRun("mocked_run_owed_refuses");
 
     const first = await ask(api.app, "POST", "/v1/runs", ready.key, {
       suiteId: ready.suiteId,

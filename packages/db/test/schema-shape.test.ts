@@ -49,10 +49,6 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // One immutable executable revision. Its identity is the definition id plus
   // a revision number, so its leading id keeps the definition prefix.
   grader_definition_version: "grl",
-  mock_tool: "mck",
-  // The scope's junction, pinning the mock tool it narrows — the shape the
-  // persona junction has, for the same reason.
-  mock_tool_agent: "mck",
   test_suite: "ste",
   test: "tst",
   test_version: "tstv",

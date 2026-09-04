@@ -104,8 +104,11 @@ type Ready = {
   readonly personaVersionId: string;
 };
 
-/** A ticked agent with a web-call connection and one test, all through the API. */
-async function aTickedAgent(label: string): Promise<Ready> {
+/**
+ * An agent with a web-call connection and one test that carries its own mock
+ * tools, all through the API.
+ */
+async function anAgentReadyToRun(label: string): Promise<Ready> {
   api = await createApi(label, { retellFetch: RETELL });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
@@ -141,6 +144,7 @@ async function aTickedAgent(label: string): Promise<Ready> {
     expectedBehaviors: ["confirms the time back before finishing"],
     suiteId: String(suite.body.id),
     personas: ["Impatient Rita"],
+    mockTools: [{ tool: "get_availability", answer: { slots: [] } }],
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
@@ -183,19 +187,19 @@ async function seedRun(
   await api.database.sql(
     `insert into run
        (id, organization_id, project_id, suite_id, agent_id, connection_id,
-        status, triggered_via, connection_snapshot, mock_tool_snapshot,
+        status, triggered_via, connection_snapshot,
         temp_mock_agent_version, temp_mock_agent_version_cleanup,
         mock_metadata, expected_simulation_count, created_at, started_at,
         finished_at, completed_count, failed_count, canceled_count)
-     values ($1,$2,$3,$4,$5,$6,$11,'manual',$7::jsonb,$8::jsonb,$9::integer,
-        case when $12 = 'no' then null else false end,
-        case when $12 = 'no' then null else $13::jsonb end,1,
-        now() - ($10 || ' minutes')::interval,
-        case when $11 = 'completed' then now() - ($10 || ' minutes')::interval end,
-        case when $11 = 'completed' then now() - interval '1 minute' end,
-        case when $11 = 'completed' then 1 end,
-        case when $11 = 'completed' then 0 end,
-        case when $11 = 'completed' then 0 end)`,
+     values ($1,$2,$3,$4,$5,$6,$10,'manual',$7::jsonb,$8::integer,
+        case when $11 = 'no' then null else false end,
+        case when $11 = 'no' then null else $12::jsonb end,1,
+        now() - ($9 || ' minutes')::interval,
+        case when $10 = 'completed' then now() - ($9 || ' minutes')::interval end,
+        case when $10 = 'completed' then now() - interval '1 minute' end,
+        case when $10 = 'completed' then 1 end,
+        case when $10 = 'completed' then 0 end,
+        case when $10 = 'completed' then 0 end)`,
     [
       runId,
       organizationId,
@@ -211,9 +215,7 @@ async function seedRun(
         topology: "hosted-broker",
         environment: null,
         config: { retellAgentId: RETELL_AGENT },
-        mockToolsEnabled: true,
       }),
-      JSON.stringify({ defaults: [], overrides: {} }),
       copy?.version ?? null,
       String(minutesOld),
       status,
@@ -271,7 +273,7 @@ const BRANCHED = { version: 106 };
 
 describe("the sweep, over a run that is pending", () => {
   it("cancels a run whose build died before it named a draft", async () => {
-    const ready = await aTickedAgent("sweep_cancels_stuck");
+    const ready = await anAgentReadyToRun("sweep_cancels_stuck");
     // Its world is the building marker — the row a run wears while building,
     // with no draft — and it is twenty minutes old, well past the build window.
     const { runId, simulationId } = await seedRun(ready, CLAIMED, 20);
@@ -285,7 +287,7 @@ describe("the sweep, over a run that is pending", () => {
   });
 
   it("leaves a run alone whose world is built and is waiting for a simulator", async () => {
-    const ready = await aTickedAgent("sweep_spares_waiting");
+    const ready = await anAgentReadyToRun("sweep_spares_waiting");
     // A fully built world — its draft exists — and just as old. This run is not
     // stuck; it is queued, waiting for a free simulator, and its clock is queue
     // wait, not a dead build.
@@ -304,7 +306,7 @@ describe("the sweep, over a run that is pending", () => {
   });
 
   it("does not cancel a stuck run that is still inside the build window", async () => {
-    const ready = await aTickedAgent("sweep_young_stuck");
+    const ready = await anAgentReadyToRun("sweep_young_stuck");
     // Same marker, but two minutes old — a build in flight, not a dead one.
     const { runId } = await seedRun(ready, CLAIMED, 2);
     const auth = contextFor(ready.ada, "member");
@@ -322,7 +324,7 @@ describe("the sweep, over a run that is pending", () => {
  */
 describe("what the sweep answers", () => {
   it("answers settled over an agent that owes nothing", async () => {
-    const ready = await aTickedAgent("sweep_answers_clean");
+    const ready = await anAgentReadyToRun("sweep_answers_clean");
     const auth = contextFor(ready.ada, "member");
 
     const swept = await settleOwedMockCleanups(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
@@ -331,7 +333,7 @@ describe("what the sweep answers", () => {
   });
 
   it("answers settled once a finished run's world is given back", async () => {
-    const ready = await aTickedAgent("sweep_answers_settled");
+    const ready = await anAgentReadyToRun("sweep_answers_settled");
     // A finished run still holding its draft — ordinary litter, and the
     // account honours the delete.
     const { runId } = await seedRun(ready, BRANCHED, 20, "completed");
@@ -346,7 +348,7 @@ describe("what the sweep answers", () => {
   });
 
   it("answers unsettled while a finished run's draft cannot be deleted", async () => {
-    const ready = await aTickedAgent("sweep_answers_unsettled");
+    const ready = await anAgentReadyToRun("sweep_answers_unsettled");
     const { runId } = await seedRun(ready, BRANCHED, 20, "completed");
     const auth = contextFor(ready.ada, "member");
 
@@ -406,7 +408,7 @@ describe("a teardown resumed from the note alone", () => {
   }
 
   it("settles when the serving version still declares what was captured", async () => {
-    const ready = await aTickedAgent("sweep_print_unmoved");
+    const ready = await anAgentReadyToRun("sweep_print_unmoved");
     const { runId } = await seedRun(
       ready,
       BRANCHED,
@@ -428,7 +430,7 @@ describe("a teardown resumed from the note alone", () => {
   });
 
   it("stays unsettled, and says what stands there now, when it moved", async () => {
-    const ready = await aTickedAgent("sweep_print_moved");
+    const ready = await anAgentReadyToRun("sweep_print_moved");
     const { runId } = await seedRun(
       ready,
       BRANCHED,
@@ -477,7 +479,7 @@ describe("a teardown resumed from the note alone", () => {
  */
 describe("a settle that arrives after somebody else settled the run", () => {
   it("deletes nothing a second time, and still answers settled", async () => {
-    const ready = await aTickedAgent("sweep_settles_once");
+    const ready = await anAgentReadyToRun("sweep_settles_once");
     const account = anAccountCountingDeletes();
     const { runId } = await seedRun(ready, BRANCHED, 20, "completed");
     const auth = contextFor(ready.ada, "member");
@@ -494,7 +496,7 @@ describe("a settle that arrives after somebody else settled the run", () => {
   });
 
   it("settles once when two of them run at the same time", async () => {
-    const ready = await aTickedAgent("sweep_settles_once_racing");
+    const ready = await anAgentReadyToRun("sweep_settles_once_racing");
     const account = anAccountCountingDeletes();
     const { runId } = await seedRun(ready, BRANCHED, 20, "completed");
     const auth = contextFor(ready.ada, "member");

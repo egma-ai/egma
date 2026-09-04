@@ -7,6 +7,7 @@ import {
   MockDraftFenceBusyError,
   owedMockCleanups,
   recordMockState,
+  runCarriesMockTools,
   type AuthContext,
   type MockRunState,
   type OwedMockCleanup,
@@ -111,12 +112,11 @@ function reachOf(reach: MockedWorldReach) {
  * Build the temporary world this run will be conducted in, or refuse.
  *
  * **Whether this run is one at all is decided from the same two facts the
- * queue's own gate reads**, both frozen onto this run's own connection snapshot
- * at start — the recorded connection type, and that connection's own
- * `mockToolsEnabled` switch — so the two can never disagree about which runs
- * wait for a world. The connection type is checked first because it costs
- * nothing: every run over a lane that is never mocked leaves here without a
- * read.
+ * queue's own gate reads**: the connection type frozen onto this run's own
+ * snapshot at start, and whether any test this run pins named a mock tool. So
+ * the two can never disagree about which runs wait for a world. The connection
+ * type is checked first because it costs nothing: every run over a lane that
+ * never branches a copy leaves here without a read.
  *
  * On a refusal the run is canceled here rather than left for somebody to
  * notice: its simulations are unclaimable, so a run left alone would sit
@@ -128,15 +128,16 @@ export async function buildRunMockedWorld(
   reach: MockedWorldReach,
   log: { error: (payload: unknown, message?: string) => void },
 ): Promise<MockedWorldOutcome> {
-  // Two facts, both frozen onto this run's own snapshot at start: the lane,
-  // and the switch. A run whose connection had mocking off goes real, and one
-  // over a lane that carries its answers on the request — text mode — branches
-  // nothing here. The queue's own gate reads the same two facts, so the two can
-  // never disagree about which runs wait for a copy.
-  if (
-    !run.connectionSnapshot.mockToolsEnabled ||
-    !connectionTypeBranchesMockDraft(run.connectionSnapshot.connectionType)
-  ) {
+  // Two facts: the lane, frozen onto this run's own snapshot at start, and
+  // whether any test of this run carries a mock tool of its own. A run whose
+  // tests mock nothing goes real, and one over a lane that carries its answers
+  // on the request — text mode — branches nothing here. The queue's own gate
+  // reads the same two facts, so the two can never disagree about which runs
+  // wait for a copy.
+  if (!connectionTypeBranchesMockDraft(run.connectionSnapshot.connectionType)) {
+    return { kind: "not-mocked" };
+  }
+  if (!(await runCarriesMockTools(auth, run.id))) {
     return { kind: "not-mocked" };
   }
   const agent = await getAgent(auth, run.agentId);
@@ -145,8 +146,8 @@ export async function buildRunMockedWorld(
     return await refuseRun(
       auth,
       run,
-      "This agent has mock tools turned on but holds no platform identity, so " +
-        "Egma has no agent to branch a temporary version of.",
+      "A test in this run carries mock tools, but this agent holds no platform " +
+        "identity, so Egma has no agent to branch a temporary version of.",
       log,
     );
   }
@@ -175,8 +176,8 @@ export async function buildRunMockedWorld(
     return await refuseRun(
       auth,
       run,
-      "This agent has mock tools turned on but holds no platform key, so Egma " +
-        "cannot create the temporary version a mocked run needs.",
+      "A test in this run carries mock tools, but this agent holds no platform " +
+        "key, so Egma cannot create the temporary version a mocked run needs.",
       log,
     );
   }

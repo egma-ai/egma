@@ -15,7 +15,6 @@ import {
   createEgmaFolder,
   folderPathsIn,
   readRepository,
-  serializeMockToolsFile,
   serializeSuiteManifest,
 } from "../src/folder/egma-folder.ts";
 import {
@@ -128,6 +127,7 @@ function testBody(input: {
     expectedBehaviors: ["The agent books Tuesday."],
     personas: [],
     mockTools: [],
+    env: null,
     versionId: input.versionId ?? VERSION_ID,
     version: 1,
     revision: input.revision ?? REVISION,
@@ -135,7 +135,7 @@ function testBody(input: {
 }
 
 describe("complete repository suite commands", () => {
-  it("pushes all suites, tests, and Mock Tools in one atomic call", async () => {
+  it("pushes every suite and every test's own world in one atomic call", async () => {
     const release = await suite("release", SUITE_ID, "Release");
     await suite("empty", EMPTY_SUITE_ID, "Empty");
     await writeFile(
@@ -145,12 +145,10 @@ describe("complete repository suite commands", () => {
           name: "Books a visit",
           scenario: "The caller asks for Tuesday.",
           expectedBehaviors: blocking("The agent books Tuesday."),
+          mockTools: [{ tool: "calendar", answer: { open: true } }],
+          env: { retell_dynamic_variables: { caller_name: "Margaret" } },
         }),
       ),
-    );
-    await writeFile(
-      folderPathsIn(workspace.dir).mockTools,
-      serializeMockToolsFile([{ tool: "calendar", says: { answer: { open: true } } }]),
     );
 
     const calls: { readonly url: string; readonly body: Record<string, unknown> }[] = [];
@@ -180,9 +178,16 @@ describe("complete repository suite commands", () => {
       { id: EMPTY_SUITE_ID, name: "Empty" },
       { id: SUITE_ID, name: "Release" },
     ]);
-    expect(calls[0]?.body.mockTools).toEqual([
-      { tool: "calendar", answer: { open: true } },
+    // Both halves of the world ride the test entry, and every entry says both
+    // even when it has nothing to say: the change set has no optional halves.
+    expect(calls[0]?.body.tests).toEqual([
+      expect.objectContaining({
+        suiteId: SUITE_ID,
+        mockTools: [{ tool: "calendar", answer: { open: true } }],
+        env: { retell_dynamic_variables: { caller_name: "Margaret" } },
+      }),
     ]);
+    expect(calls[0]?.body).not.toHaveProperty("mockTools");
     expect(report.tests[0]).toMatchObject({ testId: TEST_ID, versionId: VERSION_ID });
     expect(await readFile(path.join(release, "books-a-visit.md"), "utf8")).toContain(
       `version: ${VERSION_ID}`,
@@ -416,7 +421,7 @@ describe("complete repository suite commands", () => {
 
   it("rolls back every new path when a staged pull write fails", async () => {
     const paths = folderPathsIn(workspace.dir);
-    const beforeMockTools = await readFile(paths.mockTools, "utf8");
+    const beforeConfig = await readFile(paths.config, "utf8");
     const fetchImpl: typeof fetch = async (input) => {
       const url = String(input);
       if (url === `${URL}/v1/test-suites?projectId=${PROJECT_ID}`) {
@@ -429,9 +434,6 @@ describe("complete repository suite commands", () => {
       }
       if (url.includes("/v1/tests?")) {
         return new JsonResponse(JSON.stringify({ tests: [testBody()], nextPageToken: null }));
-      }
-      if (url === `${URL}/v1/mock-tools`) {
-        return new JsonResponse(JSON.stringify({ mockTools: [], nextPageToken: null }));
       }
       return new JsonResponse(JSON.stringify({ message: "unexpected" }), { status: 404 });
     };
@@ -449,7 +451,7 @@ describe("complete repository suite commands", () => {
     ).rejects.toThrow("disk stopped");
 
     await expect(stat(path.join(paths.tests, "release"))).rejects.toMatchObject({ code: "ENOENT" });
-    expect(await readFile(paths.mockTools, "utf8")).toEqual(beforeMockTools);
+    expect(await readFile(paths.config, "utf8")).toEqual(beforeConfig);
   });
 
   it("finds a free suite directory after both normal collision names are taken", async () => {
@@ -471,9 +473,6 @@ describe("complete repository suite commands", () => {
         testFeeds += 1;
         return new JsonResponse(JSON.stringify({ tests: [], nextPageToken: null }));
       }
-      if (url === `${URL}/v1/mock-tools`) {
-        return new JsonResponse(JSON.stringify({ mockTools: [], nextPageToken: null }));
-      }
       return new JsonResponse(JSON.stringify({ message: "unexpected" }), { status: 404 });
     };
 
@@ -491,6 +490,134 @@ describe("complete repository suite commands", () => {
       await readFile(path.join(folderPathsIn(workspace.dir).tests, directory, "suite.yaml"), "utf8"),
     ).toBe(serializeSuiteManifest({ id: SUITE_ID, name: "Release" }));
     expect(testFeeds).toBe(1);
+  });
+
+  it("carries a test's own world down, back up, and down again with zero byte change", async () => {
+    const platform = await startPlatform();
+    const repository = await makeWorkspace();
+    const key = "egma_sk_test-owned-world";
+    try {
+      platform.signedInWith(key);
+      const release = platform.suites.add("Release");
+      platform.tests.add({
+        suiteId: release.id,
+        name: "Books a visit",
+        scenario: "The caller asks for Tuesday.",
+        expectedBehaviors: ["The agent books Tuesday."],
+        mockTools: [
+          { tool: "check_availability", answer: { slots: ["Tuesday 15:00"] } },
+          { tool: "book", error: "the calendar is unreachable" },
+        ],
+        env: {
+          retell_dynamic_variables: { caller_name: "Margaret" },
+          job_dispatch_metadata: { tenant: "acme" },
+        },
+      });
+      await createEgmaFolder({
+        repository: repository.dir,
+        config: {
+          ...EMPTY_CONFIG,
+          platform: { origin: platform.url },
+          project: { id: release.projectId, name: "Fixture project" },
+        },
+      });
+      const paths = folderPathsIn(repository.dir);
+
+      await pullRepository({ signedIn: { url: platform.url, key }, paths });
+
+      // Pull writes both sections into the one file, and reading it back gives
+      // exactly what the platform holds.
+      const pulled = await readRepository(paths);
+      const file = pulled.suites[0]?.tests[0]!;
+      expect(file.test.mockTools).toEqual([
+        { tool: "check_availability", answer: { slots: ["Tuesday 15:00"] } },
+        { tool: "book", error: "the calendar is unreachable" },
+      ]);
+      expect(file.test.env).toEqual({
+        retell_dynamic_variables: { caller_name: "Margaret" },
+        job_dispatch_metadata: { tenant: "acme" },
+      });
+      const afterPull = await readFile(file.file, "utf8");
+      expect(afterPull).toContain("## Mock tools");
+      expect(afterPull).toContain("## Env");
+
+      // Push sends both, unchanged, so the platform mints no new version...
+      const versionBeforePush = platform.tests.worldOf("Books a visit").versionId;
+      await pushTests({ signedIn: { url: platform.url, key }, paths });
+      const world = platform.tests.worldOf("Books a visit");
+      expect(world.versionId).toBe(versionBeforePush);
+      expect(world.mockTools).toEqual(file.test.mockTools);
+      expect(world.env).toEqual(file.test.env);
+
+      // ...and a pull straight afterwards writes nothing at all.
+      expect(await readFile(file.file, "utf8")).toBe(afterPull);
+      await pullRepository({ signedIn: { url: platform.url, key }, paths });
+      expect(await readFile(file.file, "utf8")).toBe(afterPull);
+    } finally {
+      await platform.close();
+      await repository.remove();
+    }
+  });
+
+  it("mints a new version when only the env changed, and refuses a bad one", async () => {
+    const platform = await startPlatform();
+    const repository = await makeWorkspace();
+    const key = "egma_sk_world-edits";
+    try {
+      platform.signedInWith(key);
+      const release = platform.suites.add("Release");
+      platform.tests.add({
+        suiteId: release.id,
+        name: "Books a visit",
+        scenario: "The caller asks for Tuesday.",
+        expectedBehaviors: ["The agent books Tuesday."],
+      });
+      await createEgmaFolder({
+        repository: repository.dir,
+        config: {
+          ...EMPTY_CONFIG,
+          platform: { origin: platform.url },
+          project: { id: release.projectId, name: "Fixture project" },
+        },
+      });
+      const paths = folderPathsIn(repository.dir);
+      await pullRepository({ signedIn: { url: platform.url, key }, paths });
+      const file = (await readRepository(paths)).suites[0]?.tests[0]!;
+
+      await writeFile(
+        file.file,
+        serializeTestFile({
+          ...file.test,
+          env: { retell_dynamic_variables: { caller_name: "Margaret" } },
+        }),
+      );
+      await pushTests({ signedIn: { url: platform.url, key }, paths });
+
+      // The env is versioned content: changing it alone mints a version.
+      expect(platform.tests.versionsOf("Books a visit")).toBe(2);
+      expect(platform.tests.worldOf("Books a visit").env).toEqual({
+        retell_dynamic_variables: { caller_name: "Margaret" },
+      });
+
+      // A variable Egma keeps for itself is refused at Egma's door, in Egma's
+      // own words, because the file said nothing this end could judge.
+      await writeFile(
+        file.file,
+        serializeTestFile({
+          ...file.test,
+          version: platform.tests.worldOf("Books a visit").versionId,
+          identityRevision: platform.tests.seeded("Books a visit").revision,
+          env: { retell_dynamic_variables: { egma_run_id: "r1" } },
+        }),
+      );
+      await expect(
+        pushTests({ signedIn: { url: platform.url, key }, paths }),
+      ).rejects.toThrow(/egma_run_id/u);
+      expect(platform.tests.versionsOf("Books a visit")).toBe(2);
+    } finally {
+      await platform.close();
+      await repository.remove();
+    }
   });
 
   it("pulls every suite through the suite-scoped HTTP test-list contract", async () => {
@@ -670,9 +797,6 @@ describe("complete repository suite commands", () => {
       }
       if (url.startsWith(`${URL}/v1/tests?`)) {
         return new JsonResponse(JSON.stringify({ tests: [testBody()], nextPageToken: null }));
-      }
-      if (url === `${URL}/v1/mock-tools`) {
-        return new JsonResponse(JSON.stringify({ mockTools: [], nextPageToken: null }));
       }
       return new JsonResponse(JSON.stringify({ message: "unexpected" }), { status: 404 });
     };

@@ -1,6 +1,6 @@
 ---
 name: write-egma-tests
-description: Write, edit, or convert notes into Egma Markdown tests, including personas and test-level mock-tool answers.
+description: Write, edit, or convert notes into Egma Markdown tests, including personas, mock-tool answers, and the env a test runs in.
 ---
 
 # Write Egma tests
@@ -42,7 +42,7 @@ actual tool contract before using this answer shape.
 
 ````markdown
 ---
-format: 4
+format: 5
 name: missed-appointment-reschedule
 description: The person missed an appointment and needs another time this week.
 personas:
@@ -60,6 +60,10 @@ They are short of time and already annoyed.
 ```json
 { "answer": { "slots": ["Wednesday 15:00", "Thursday 11:00"] } }
 ```
+## Env
+```json
+{ "retell_dynamic_variables": { "caller_name": "Margaret" } }
+```
 ````
 
 Apply these rules:
@@ -71,8 +75,7 @@ Apply these rules:
   the test useful. Write a situation, not a script.
 - Under `## Expected behaviors`, follow the judgeable-behavior rules below.
 - Add `## Mock tools` when this test depends on a specific backend state — an
-  empty calendar, a lookup that fails, an answer that takes three seconds.
-  Otherwise leave the section out.
+  empty calendar, or a lookup that fails. Otherwise leave the section out.
   - A mock tool represents an external dependency. Keep agent-runtime tools
     real: tools that complete a task, advance or hand off a workflow, stop the
     voice agent, validate data already held by the agent, or update in-memory
@@ -80,16 +83,20 @@ Apply these rules:
     `AgentTask.complete` or
     advances a `TaskGroup`. Replacing their implementation can stop the
     workflow.
-  - Where the project already has a mocked world in `egma/mock-tools.md`, a
-    block here replaces that world's answer for this test alone. Do not repeat
-    an answer the project file already gives.
-  - Where the project has no mocked world, a block here is the only answer Egma
-    will serve for that tool, and every tool without one runs for real.
-  - Name the real tool in a `###` heading. Put exactly one of `answer` or `error`
-    in its JSON block. Add `delay_ms` when the answer must be delayed; write it
-    as a whole number of milliseconds from 0 through 30000. For example, three
-    seconds is `"delay_ms": 3000`. Make `answer` the same JSON shape that the
-    real tool returns. Do not infer that shape from this example.
+  - A mock tool belongs to the test that writes it. A block here is the only
+    answer Egma serves for that tool in this test, and every tool without one
+    runs for real.
+  - Name the real tool in a `###` heading. Put exactly one of `answer` or
+    `error` in its JSON block, and nothing else. Make `answer` the same JSON
+    shape that the real tool returns. Do not infer that shape from this example.
+- Add `## Env` when this test needs the agent started in a specific world. Write
+  one JSON block holding at most these two keys, and leave the section out when
+  the test needs neither:
+  - `retell_dynamic_variables`: the values Retell substitutes into the agent's
+    prompt, as an object of text. A name beginning `egma_` is refused, because
+    Egma keeps those for what it says to the simulator itself.
+  - `job_dispatch_metadata`: the JSON object LiveKit hands your worker on the
+    job dispatch.
 
 ## Name a persona
 
@@ -111,8 +118,8 @@ Preserve every machine-owned field already in the frontmatter, including:
 - persona ids and their display names
 
 Preserve authored fields that the task does not change, including description,
-personas, expected behaviors, and mock tools. Make the
-smallest edit that completes the developer's request.
+personas, expected behaviors, mock tools, and env. Make the smallest edit that
+completes the developer's request.
 
 ## Write judgeable expected behaviors
 
@@ -141,12 +148,15 @@ Read every changed file back. A test file is complete only when:
 
 - its YAML frontmatter opens and closes and contains only `format`, `name`,
   `description`, `personas`, `version`, and `identity_revision`;
-- `format` is `4`, its name matches the file name, and it names at least one
+- `format` is `5`, its name matches the file name, and it names at least one
   persona by a value supplied by Egma or already present in the repository;
 - `## Scenario` contains a situation, `## Expected behaviors` contains at least
-  one judgeable numbered statement, and both required headings exist; and
-- every mock-tool block is a JSON object with exactly one of `answer` or `error`
-  and, when present, a whole-number `delay_ms` from 0 through 30000.
+  one judgeable numbered statement, and both required headings exist;
+- every mock-tool block is a JSON object with exactly one of `answer` or
+  `error`, and nothing else; and
+- any `## Env` block is one JSON object holding at most
+  `retell_dynamic_variables` and `job_dispatch_metadata`, with no variable name
+  beginning `egma_`.
 
 Use the current local validation operation after reading the changed files
 back. Fix every named local problem and repeat it until validation succeeds.

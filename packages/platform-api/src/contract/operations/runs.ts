@@ -45,46 +45,6 @@ const endingReasonSchema = {
   ],
 } as const;
 
-const mockToolProperties = {
-  tool: stringSchema,
-  answer: {},
-  error: stringSchema,
-  delayMs: integerSchema,
-} as const;
-
-export const mockToolSchema = {
-  type: "object",
-  properties: mockToolProperties,
-  required: ["tool", "delayMs"],
-  oneOf: [
-    { type: "object", required: ["answer"] },
-    { type: "object", required: ["error"] },
-  ],
-  additionalProperties: false,
-} as const;
-
-/**
- * How isolated one simulation was, in three lists: what the agent has, what
- * Egma answered for, and what reached its real implementation.
- *
- * **Written by the LiveKit in-room seam and by nothing else.** There the agent
- * declares its tools per conversation, so two simulations of one run can
- * honestly differ and the stamp belongs at the simulation. The Retell lanes
- * decide what they answer for once per run and mark each answered call on the
- * transcript, so they leave it absent — which is the report saying nobody was
- * ever asked, a different sentence from three empty lists.
- */
-export const mockToolCoverageSchema = {
-  type: "object",
-  properties: {
-    discovered: arrayOf(stringSchema),
-    covered: arrayOf(stringSchema),
-    uncovered: arrayOf(stringSchema),
-  },
-  required: ["discovered", "covered", "uncovered"],
-  additionalProperties: false,
-} as const;
-
 /**
  * The note a mocked run leaves behind, as a reader sees it.
  *
@@ -186,7 +146,6 @@ const runHeaderSchema = {
     productLabel: stringSchema,
     environment: nullable(stringSchema),
     agentVersion: nullable(integerSchema),
-    mockToolsEnabled: booleanSchema,
     expectedSimulationCount: integerSchema,
     completedCount: nullable(integerSchema),
     failedCount: nullable(integerSchema),
@@ -217,7 +176,6 @@ const runHeaderSchema = {
     "productLabel",
     "environment",
     "agentVersion",
-    "mockToolsEnabled",
     "expectedSimulationCount",
     "completedCount",
     "failedCount",
@@ -294,7 +252,6 @@ const runSimulationSchema = {
     endedAt: nullable(dateTimeSchema),
     modality: modalitySchema,
     hasRecording: booleanSchema,
-    mockToolCoverage: nullable(mockToolCoverageSchema),
   },
   required: [
     "id",
@@ -314,7 +271,6 @@ const runSimulationSchema = {
     "endedAt",
     "modality",
     "hasRecording",
-    "mockToolCoverage",
   ],
   additionalProperties: false,
 } as const;

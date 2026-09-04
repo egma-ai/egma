@@ -234,7 +234,6 @@ export type ListAgentsResponses = {
                 };
                 credentialPresent: boolean;
                 credentialsHint: string | null;
-                mockToolsEnabled: boolean;
                 archived: boolean;
                 archivedAt: string | null;
                 createdAt: string;
@@ -272,10 +271,6 @@ export type RegisterAgentData = {
              * Start pulling this agent's production calls with the same save. Off unless the request says otherwise; the first switch-on imports the fixed 30-day history.
              */
             pullProductionCalls?: boolean;
-            /**
-             * Whether runs over this connection answer the agent's tools with your test data. Sent by the setup flow so mocking is always an explicit yes; absent leaves the lane's own default. Never true for a phone_number connection, which reaches your real tools.
-             */
-            mockToolsEnabled?: boolean;
             /**
              * Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.
              */
@@ -371,7 +366,6 @@ export type RegisterAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -417,7 +411,6 @@ export type RegisterAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -504,7 +497,6 @@ export type GetAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -615,10 +607,6 @@ export type AddConnectionData = {
          */
         pullProductionCalls?: boolean;
         /**
-         * Whether runs over this connection answer the agent's tools with your test data. Sent by the setup flow so mocking is always an explicit yes; absent leaves the lane's own default. Never true for a phone_number connection, which reaches your real tools.
-         */
-        mockToolsEnabled?: boolean;
-        /**
          * Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.
          */
         agentPlatformSelection?: {
@@ -696,7 +684,6 @@ export type AddConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -706,93 +693,6 @@ export type AddConnectionResponses = {
 };
 
 export type AddConnectionResponse = AddConnectionResponses[keyof AddConnectionResponses];
-
-export type DiscoverMockToolsData = {
-    body?: {
-        /**
-         * Also seed a mock tool for every interceptable tool this project does not answer for yet. Never overwrites an authored answer: a known name keeps its row. Absent is a read.
-         */
-        seed?: boolean;
-    };
-    path: {
-        agentId: string;
-    };
-    query?: {
-        projectId?: string;
-    };
-    url: '/v1/agents/{agentId}/mock-tools:discover';
-};
-
-export type DiscoverMockToolsErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-    /**
-     * The request was refused.
-     */
-    503: Refusal;
-};
-
-export type DiscoverMockToolsError = DiscoverMockToolsErrors[keyof DiscoverMockToolsErrors];
-
-export type DiscoverMockToolsResponses = {
-    /**
-     * What a mocked run over this agent would cover.
-     */
-    200: {
-        mockable: boolean;
-        refusal: {
-            reason: 'custom_llm_engine' | 'keys_disagree' | 'platform_unavailable' | 'never_published';
-            message: string;
-        } | null;
-        engine: 'retell-llm' | 'conversation-flow' | 'custom-llm' | null;
-        servingVersion: number | null;
-        tools: Array<{
-            name: string;
-            type: string;
-            coverage: 'mocked' | 'notInterceptable' | 'notInThisVersion';
-            answered: boolean;
-        }>;
-        warnings: Array<{
-            toolName: string;
-            toolType: string;
-            effect: string;
-        }>;
-        numbers: Array<{
-            number: string;
-            label: string;
-            verdicts: Array<'numeric' | 'environment-tag' | 'latest-published' | 'hijackable'>;
-        }>;
-        seeded: Array<string>;
-    };
-};
-
-export type DiscoverMockToolsResponse = DiscoverMockToolsResponses[keyof DiscoverMockToolsResponses];
 
 export type ArchiveAgentData = {
     body?: {
@@ -1009,7 +909,6 @@ export type GetConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -1030,10 +929,6 @@ export type UpdateConnectionData = {
         credentials?: {
             [key: string]: unknown;
         };
-        /**
-         * Turn mock tools on or off for runs over this connection. Absent leaves it as it is, so renaming a connection never changes the world its next run meets. Turning it on for a retell_web_call connection is refused where the agent holds no platform identity and key, because Egma would have nothing to branch a temporary copy with; a phone_number connection can never hold true.
-         */
-        mockToolsEnabled?: boolean;
     };
     path: {
         agentId: string;
@@ -1104,7 +999,6 @@ export type UpdateConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -1188,7 +1082,6 @@ export type ArchiveConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -1281,7 +1174,6 @@ export type RestoreConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -2345,297 +2237,6 @@ export type DeactivateMemberResponses = {
 };
 
 export type DeactivateMemberResponse = DeactivateMemberResponses[keyof DeactivateMemberResponses];
-
-export type ListMockToolsData = {
-    body?: never;
-    path?: never;
-    query?: {
-        projectId?: string;
-        pageToken?: string;
-    };
-    url: '/v1/mock-tools';
-};
-
-export type ListMockToolsErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type ListMockToolsError = ListMockToolsErrors[keyof ListMockToolsErrors];
-
-export type ListMockToolsResponses = {
-    /**
-     * Mock tools, newest first.
-     */
-    200: {
-        mockTools: Array<{
-            id: string;
-            tool: string;
-            delayMs: number;
-            agents: Array<{
-                id: string;
-                name: string;
-            }>;
-            createdAt: string;
-            updatedAt: string;
-            answer: unknown;
-            error?: never;
-        } | {
-            id: string;
-            tool: string;
-            delayMs: number;
-            agents: Array<{
-                id: string;
-                name: string;
-            }>;
-            createdAt: string;
-            updatedAt: string;
-            answer?: never;
-            error: string;
-        }>;
-        nextPageToken: string | null;
-    };
-};
-
-export type ListMockToolsResponse = ListMockToolsResponses[keyof ListMockToolsResponses];
-
-export type CreateMockToolData = {
-    body: {
-        tool: string;
-        delayMs?: number;
-        agents?: Array<string>;
-        projectId?: string;
-        answer: unknown;
-        error?: never;
-    } | {
-        tool: string;
-        delayMs?: number;
-        agents?: Array<string>;
-        projectId?: string;
-        answer?: never;
-        error: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/v1/mock-tools';
-};
-
-export type CreateMockToolErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type CreateMockToolError = CreateMockToolErrors[keyof CreateMockToolErrors];
-
-export type CreateMockToolResponses = {
-    /**
-     * The new mock tool.
-     */
-    201: {
-        id: string;
-        tool: string;
-        delayMs: number;
-        agents: Array<{
-            id: string;
-            name: string;
-        }>;
-        createdAt: string;
-        updatedAt: string;
-        answer: unknown;
-        error?: never;
-    } | {
-        id: string;
-        tool: string;
-        delayMs: number;
-        agents: Array<{
-            id: string;
-            name: string;
-        }>;
-        createdAt: string;
-        updatedAt: string;
-        answer?: never;
-        error: string;
-    };
-};
-
-export type CreateMockToolResponse = CreateMockToolResponses[keyof CreateMockToolResponses];
-
-export type DeleteMockToolData = {
-    body?: never;
-    path: {
-        mockToolId: string;
-    };
-    query?: {
-        projectId?: string;
-    };
-    url: '/v1/mock-tools/{mockToolId}';
-};
-
-export type DeleteMockToolErrors = {
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type DeleteMockToolError = DeleteMockToolErrors[keyof DeleteMockToolErrors];
-
-export type DeleteMockToolResponses = {
-    /**
-     * The deleted mock tool.
-     */
-    200: {
-        id: string;
-        tool: string;
-        deletedAt: string;
-    };
-};
-
-export type DeleteMockToolResponse = DeleteMockToolResponses[keyof DeleteMockToolResponses];
-
-export type UpdateMockToolData = {
-    body?: {
-        tool?: string;
-        delayMs?: number;
-        agents?: Array<string>;
-        projectId?: string;
-        answer: unknown;
-        error?: never;
-    } | {
-        tool?: string;
-        delayMs?: number;
-        agents?: Array<string>;
-        projectId?: string;
-        answer?: never;
-        error: string;
-    } | {
-        tool?: string;
-        delayMs?: number;
-        agents?: Array<string>;
-        projectId?: string;
-        answer?: never;
-        error?: never;
-    };
-    path: {
-        mockToolId: string;
-    };
-    query?: never;
-    url: '/v1/mock-tools/{mockToolId}';
-};
-
-export type UpdateMockToolErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type UpdateMockToolError = UpdateMockToolErrors[keyof UpdateMockToolErrors];
-
-export type UpdateMockToolResponses = {
-    /**
-     * The updated mock tool.
-     */
-    200: {
-        id: string;
-        tool: string;
-        delayMs: number;
-        agents: Array<{
-            id: string;
-            name: string;
-        }>;
-        createdAt: string;
-        updatedAt: string;
-        answer: unknown;
-        error?: never;
-    } | {
-        id: string;
-        tool: string;
-        delayMs: number;
-        agents: Array<{
-            id: string;
-            name: string;
-        }>;
-        createdAt: string;
-        updatedAt: string;
-        answer?: never;
-        error: string;
-    };
-};
-
-export type UpdateMockToolResponse = UpdateMockToolResponses[keyof UpdateMockToolResponses];
 
 export type DiscoverRetellVoiceAgentsData = {
     body: {
@@ -3970,30 +3571,23 @@ export type ApplyRepositoryChangeSetData = {
             personas: Array<string>;
             mockTools: Array<{
                 tool: string;
-                delayMs?: number;
                 answer: unknown;
                 error?: never;
             } | {
                 tool: string;
-                delayMs?: number;
                 answer?: never;
                 error: string;
             }>;
+            env: {
+                retell_dynamic_variables?: {
+                    [key: string]: string;
+                };
+                job_dispatch_metadata?: {
+                    [key: string]: unknown;
+                };
+            } | null;
             expectedVersionId?: string;
             expectedRevision?: string;
-        }>;
-        mockTools: Array<{
-            tool: string;
-            delayMs?: number;
-            answer: unknown;
-            error?: never;
-            agents?: Array<string>;
-        } | {
-            tool: string;
-            delayMs?: number;
-            answer?: never;
-            error: string;
-            agents?: Array<string>;
         }>;
     };
     path?: never;
@@ -4056,16 +3650,21 @@ export type ApplyRepositoryChangeSetResponses = {
                 }>;
                 mockTools: Array<{
                     tool: string;
-                    delayMs: number;
                     answer: unknown;
                     error?: never;
                 } | {
                     tool: string;
-                    delayMs: number;
                     answer?: never;
                     error: string;
                 }>;
-                overrideCount: number;
+                env: {
+                    retell_dynamic_variables?: {
+                        [key: string]: string;
+                    };
+                    job_dispatch_metadata?: {
+                        [key: string]: unknown;
+                    };
+                } | null;
                 revision: string;
                 createdAt: string;
                 updatedAt: string;
@@ -4145,7 +3744,6 @@ export type ListRunsResponses = {
             productLabel: string;
             environment: string | null;
             agentVersion: number | null;
-            mockToolsEnabled: boolean;
             expectedSimulationCount: number;
             completedCount: number | null;
             failedCount: number | null;
@@ -4249,7 +3847,6 @@ export type CreateRunResponses = {
         productLabel: string;
         environment: string | null;
         agentVersion: number | null;
-        mockToolsEnabled: boolean;
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
@@ -4335,7 +3932,6 @@ export type GetRunResponses = {
         productLabel: string;
         environment: string | null;
         agentVersion: number | null;
-        mockToolsEnabled: boolean;
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
@@ -4455,11 +4051,6 @@ export type ListRunSimulationsResponses = {
             endedAt: string | null;
             modality: 'voice' | 'chat';
             hasRecording: boolean;
-            mockToolCoverage: {
-                discovered: Array<string>;
-                covered: Array<string>;
-                uncovered: Array<string>;
-            } | null;
         }>;
         nextPageToken: string | null;
     };
@@ -4602,7 +4193,6 @@ export type CancelRunResponses = {
         productLabel: string;
         environment: string | null;
         agentVersion: number | null;
-        mockToolsEnabled: boolean;
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
@@ -4781,34 +4371,6 @@ export type GetSimulationResponses = {
             topology: string;
             environment: string | null;
             config: unknown;
-        };
-        mockToolCoverage: {
-            discovered: Array<string>;
-            covered: Array<string>;
-            uncovered: Array<string>;
-        } | null;
-        mockTools: {
-            defaults: Array<({
-                [key: string]: unknown;
-            } | {
-                [key: string]: unknown;
-            }) & {
-                tool: string;
-                answer?: unknown;
-                error?: string;
-                delayMs: number;
-                mockToolId: string;
-            }>;
-            overrides: Array<({
-                [key: string]: unknown;
-            } | {
-                [key: string]: unknown;
-            }) & {
-                tool: string;
-                answer?: unknown;
-                error?: string;
-                delayMs: number;
-            }>;
         };
         gradingPlan: {
             state: 'run_start';
@@ -5248,16 +4810,21 @@ export type ListTestsResponses = {
             }>;
             mockTools: Array<{
                 tool: string;
-                delayMs: number;
                 answer: unknown;
                 error?: never;
             } | {
                 tool: string;
-                delayMs: number;
                 answer?: never;
                 error: string;
             }>;
-            overrideCount: number;
+            env: {
+                retell_dynamic_variables?: {
+                    [key: string]: string;
+                };
+                job_dispatch_metadata?: {
+                    [key: string]: unknown;
+                };
+            } | null;
             revision: string;
             createdAt: string;
             updatedAt: string;
@@ -5278,15 +4845,21 @@ export type CreateTestData = {
         personas: Array<string>;
         mockTools?: Array<{
             tool: string;
-            delayMs?: number;
             answer: unknown;
             error?: never;
         } | {
             tool: string;
-            delayMs?: number;
             answer?: never;
             error: string;
         }>;
+        env?: {
+            retell_dynamic_variables?: {
+                [key: string]: string;
+            };
+            job_dispatch_metadata?: {
+                [key: string]: unknown;
+            };
+        } | null;
     };
     path?: never;
     query?: {
@@ -5349,16 +4922,21 @@ export type CreateTestResponses = {
         }>;
         mockTools: Array<{
             tool: string;
-            delayMs: number;
             answer: unknown;
             error?: never;
         } | {
             tool: string;
-            delayMs: number;
             answer?: never;
             error: string;
         }>;
-        overrideCount: number;
+        env: {
+            retell_dynamic_variables?: {
+                [key: string]: string;
+            };
+            job_dispatch_metadata?: {
+                [key: string]: unknown;
+            };
+        } | null;
         revision: string;
         createdAt: string;
         updatedAt: string;
@@ -5427,16 +5005,21 @@ export type GetTestVersionResponses = {
         }>;
         mockTools: Array<{
             tool: string;
-            delayMs: number;
             answer: unknown;
             error?: never;
         } | {
             tool: string;
-            delayMs: number;
             answer?: never;
             error: string;
         }>;
-        overrideCount: number;
+        env: {
+            retell_dynamic_variables?: {
+                [key: string]: string;
+            };
+            job_dispatch_metadata?: {
+                [key: string]: unknown;
+            };
+        } | null;
         createdAt: string;
     };
 };
@@ -5557,16 +5140,21 @@ export type GetTestResponses = {
         }>;
         mockTools: Array<{
             tool: string;
-            delayMs: number;
             answer: unknown;
             error?: never;
         } | {
             tool: string;
-            delayMs: number;
             answer?: never;
             error: string;
         }>;
-        overrideCount: number;
+        env: {
+            retell_dynamic_variables?: {
+                [key: string]: string;
+            };
+            job_dispatch_metadata?: {
+                [key: string]: unknown;
+            };
+        } | null;
         revision: string;
         createdAt: string;
         updatedAt: string;
@@ -5584,15 +5172,21 @@ export type UpdateTestData = {
         personas?: Array<string>;
         mockTools?: Array<{
             tool: string;
-            delayMs?: number;
             answer: unknown;
             error?: never;
         } | {
             tool: string;
-            delayMs?: number;
             answer?: never;
             error: string;
         }>;
+        env?: {
+            retell_dynamic_variables?: {
+                [key: string]: string;
+            };
+            job_dispatch_metadata?: {
+                [key: string]: unknown;
+            };
+        } | null;
         expectedVersionId?: string;
         expectedRevision?: string;
     };
@@ -5668,16 +5262,21 @@ export type UpdateTestResponses = {
         }>;
         mockTools: Array<{
             tool: string;
-            delayMs: number;
             answer: unknown;
             error?: never;
         } | {
             tool: string;
-            delayMs: number;
             answer?: never;
             error: string;
         }>;
-        overrideCount: number;
+        env: {
+            retell_dynamic_variables?: {
+                [key: string]: string;
+            };
+            job_dispatch_metadata?: {
+                [key: string]: unknown;
+            };
+        } | null;
         revision: string;
         createdAt: string;
         updatedAt: string;
@@ -5749,16 +5348,21 @@ export type ListTestVersionsResponses = {
             }>;
             mockTools: Array<{
                 tool: string;
-                delayMs: number;
                 answer: unknown;
                 error?: never;
             } | {
                 tool: string;
-                delayMs: number;
                 answer?: never;
                 error: string;
             }>;
-            overrideCount: number;
+            env: {
+                retell_dynamic_variables?: {
+                    [key: string]: string;
+                };
+                job_dispatch_metadata?: {
+                    [key: string]: unknown;
+                };
+            } | null;
             createdAt: string;
         }>;
         nextPageToken: string | null;

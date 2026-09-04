@@ -184,10 +184,6 @@ async function insertRun(overrides: RunOverrides = {}): Promise<string> {
       environment: null,
       config: {},
     }),
-    // A run that mocked nothing, which is what these rows are about: the
-    // lifecycle is the question here, and the world a run froze is another
-    // file's.
-    mock_tool_snapshot: JSON.stringify({ defaults: [], overrides: {} }),
     expected_simulation_count: 1,
     ...overrides,
   };

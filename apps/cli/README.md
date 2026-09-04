@@ -93,7 +93,7 @@ egma init
 
 Every new organization already has a Project. `init` never creates one. When
 the login identifies a Project, `init` selects that Project and pulls its
-Agents, Connections, suites, tests, and mock tools. Use `--project <Project ID>`
+Agents, Connections, suites, and tests. Use `--project <Project ID>`
 only with an organization-scoped or older credential that does not identify one
 Project. In that case, `init` lists the available Project IDs when the flag is
 missing.
@@ -292,8 +292,8 @@ Pull the complete remote repository state:
 egma pull
 ```
 
-Pull refreshes the Agent and Connection index, suites, tests, and project mock
-tools. It keeps local test drafts instead of overwriting them.
+Pull refreshes the Agent and Connection index, suites, and tests. It keeps local
+test drafts instead of overwriting them.
 
 List the Project's personas and create a suite:
 

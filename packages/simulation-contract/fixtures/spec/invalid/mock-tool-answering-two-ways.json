@@ -54,8 +54,7 @@
       "answer": {
         "answer": { "slots": [] },
         "error": "the calendar service is down"
-      },
-      "delay_milliseconds": 0
+      }
     }
   ]
 }

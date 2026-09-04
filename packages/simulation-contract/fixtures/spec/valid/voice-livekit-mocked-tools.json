@@ -52,18 +52,15 @@
   "mock_tools": [
     {
       "tool_name": "check_calendar",
-      "answer": { "answer": { "slots": [] } },
-      "delay_milliseconds": 250
+      "answer": { "answer": { "slots": [] } }
     },
     {
       "tool_name": "book_appointment",
-      "answer": { "error": "the booking service is not accepting requests" },
-      "delay_milliseconds": 0
+      "answer": { "error": "the booking service is not accepting requests" }
     },
     {
       "tool_name": "send_confirmation_sms",
-      "answer": { "answer": null },
-      "delay_milliseconds": 0
+      "answer": { "answer": null }
     }
   ]
 }

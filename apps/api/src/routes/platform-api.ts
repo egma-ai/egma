@@ -11,7 +11,6 @@ import { apiKeyRoutes } from "./api-keys.ts";
 import { graderLibraryRoutes } from "./grader-library.ts";
 import { graderRoutes } from "./graders.ts";
 import { memberRoutes } from "./members.ts";
-import { mockToolRoutes } from "./mock-tools.ts";
 import { monitoringRoutes } from "./monitoring.ts";
 import { organizationRoutes } from "./organization.ts";
 import { personaRoutes } from "./personas.ts";
@@ -114,7 +113,6 @@ export async function platformApiRoutes(
   void app.register(repositoryRoutes, credentialed);
   void app.register(graderLibraryRoutes, credentialed);
   void app.register(graderRoutes, credentialed);
-  void app.register(mockToolRoutes, credentialed);
   void app.register(runRoutes, {
     ...credentialed,
     baseUrl: options.baseUrl,

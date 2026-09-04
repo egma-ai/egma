@@ -5,12 +5,6 @@ import {
   type ApplyRepositoryChangeSetResponse,
 } from "@egma/platform-api/client";
 
-type ApplyRepositoryParameters = Parameters<
-  typeof applyRepositoryChangeSetRequest
->[0];
-type RepositoryMockTool = ApplyRepositoryParameters["mockTools"][number];
-
-import type { MockToolEntry } from "../folder/mock-tools.ts";
 import {
   platformClient,
   platformRefusalMessage,
@@ -45,7 +39,6 @@ export type RepositoryChangeSet = {
   readonly projectId: string;
   readonly suites: readonly RepositorySuiteChange[];
   readonly tests: readonly RepositoryTestChange[];
-  readonly mockTools: readonly MockToolEntry[];
 };
 
 export type AppliedRepositoryTest = {
@@ -56,15 +49,6 @@ export type AppliedRepositoryTest = {
 export type AppliedRepositoryChangeSet = {
   readonly tests: readonly AppliedRepositoryTest[];
 };
-
-function mockToolBody(entry: MockToolEntry): RepositoryMockTool {
-  const { delay_ms: delayMs, ...says } = entry.says;
-  return {
-    tool: entry.tool,
-    ...says,
-    ...(typeof delayMs === "number" ? { delayMs } : {}),
-  } as RepositoryMockTool;
-}
 
 export async function applyRepositoryChangeSet(
   signedIn: SignedIn,
@@ -87,7 +71,6 @@ export async function applyRepositoryChangeSet(
           ? {}
           : { expectedRevision: test.expectedRevision }),
       })),
-      mockTools: changeSet.mockTools.map(mockToolBody),
     },
     {
       client: platformClient(signedIn, fetchImpl),

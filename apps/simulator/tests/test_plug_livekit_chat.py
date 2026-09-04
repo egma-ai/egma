@@ -2,8 +2,8 @@
 
 The claim proved here is that a spec naming a chat ``livekit_room``
 connection becomes a whole simulation — a transcript, a distinct ending,
-the mock-tool coverage stamp, and the room's own name as the join to the
-platform's telemetry — with no LiveKit server, no project, no worker and
+the mock-tool calls egma answered, and the room's own name as the join to
+the platform's telemetry — with no LiveKit server, no project, no worker and
 no network anywhere. What stands in for the LiveKit is
 :mod:`room_stub`'s chat half, which is the real chat driver and the real
 text room with only the three requests and the one join answered locally.
@@ -256,8 +256,7 @@ async def chat_walk(
     pipeline the service assembles — and is driven by the real conversation loop, so
     everything below the room-shaped LiveKit is every line the service
     would run. What comes back is the ending, the transcript, the tool
-    calls egma answered, and the assembled pipeline, which is where the
-    coverage stamp is asked for.
+    calls egma answered, and the assembled pipeline the seam lives on.
     """
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "LiveKitChatRoomBackend", stub.driver)
@@ -489,9 +488,8 @@ async def test_egma_answers_for_the_agents_tools_in_a_typed_room(
     """The mock-tool seam is modality-blind, and this is what that buys.
 
     The exchange knows nothing about rooms and nothing about speech, so a
-    typed room gets tool answering and the coverage stamp for free — and
-    the stamp names one tool covered and one left running, which is how a
-    reader learns a simulation was not fully isolated.
+    typed room gets tool answering for free — the one tool the test named
+    is answered by egma, and the other runs its own implementation.
     """
     hurry(monkeypatch)
     stub = ChatStub(greeting="Front desk.", replies=["Noted."])
@@ -502,7 +500,6 @@ async def test_egma_answers_for_the_agents_tools_in_a_typed_room(
                 {
                     "tool_name": "check_availability",
                     "answer": {"answer": "Nothing free on Tuesday."},
-                    "delay_milliseconds": 0,
                 }
             ]
         )
@@ -524,11 +521,6 @@ async def test_egma_answers_for_the_agents_tools_in_a_typed_room(
     answered = await stub.calls("check_availability", {"day": "Tuesday"})
     assert answered == {"answer": "Nothing free on Tuesday."}
 
-    assert assembled.mock_tool_coverage == {
-        "discovered": ["check_availability", "opening_hours"],
-        "covered": ["check_availability"],
-        "uncovered": ["opening_hours"],
-    }
     exchanged = assembled.tool_calls()
     assert [call.name for call in exchanged] == ["check_availability"]
     assert exchanged[0].mock_tool == "check_availability"
@@ -544,8 +536,8 @@ async def test_a_mocked_chat_simulation_comes_back_as_a_record_of_its_tools(
     contract on the way in; a session in the typed room reports two tools
     and calls the mocked one; and what comes back is everything the
     simulator would have sent — the tool-call span with its provenance and
-    the mock tool that served it, and the coverage stamp on the terminal
-    facts naming the other tool as left running.
+    the mock tool that served it, and no span at all for the tool the test
+    did not name, which ran its own implementation.
     """
     hurry(monkeypatch)
     stub = ChatStub(greeting="Front desk.", replies=["Nothing free, I am afraid."])
@@ -569,7 +561,6 @@ async def test_a_mocked_chat_simulation_comes_back_as_a_record_of_its_tools(
                     {
                         "tool_name": "check_availability",
                         "answer": {"answer": "Nothing free on Tuesday."},
-                        "delay_milliseconds": A_DECLARED_DELAY_MS,
                     }
                 ],
             )
@@ -614,10 +605,9 @@ async def test_a_mocked_chat_simulation_comes_back_as_a_record_of_its_tools(
     }
     assert held["egma.tool.name"] == "check_availability"
     assert held["egma.tool.mock_tool"] == "check_availability"
-    took = (
-        int(served[0]["endTimeUnixNano"]) - int(served[0]["startTimeUnixNano"])
-    ) / 1_000_000
-    assert took >= A_DECLARED_DELAY_MS, "the declared delay was really spent"
+    # The round trip is the span's own duration, with no second field to
+    # disagree with it.
+    assert int(served[0]["endTimeUnixNano"]) >= int(served[0]["startTimeUnixNano"])
 
     facts = next(
         event["facts"]
@@ -626,19 +616,8 @@ async def test_a_mocked_chat_simulation_comes_back_as_a_record_of_its_tools(
         if event["status"] in ("completed", "failed", "canceled")
     )
     assert facts["ending"] == "persona_concluded"
-    assert facts["mock_tool_coverage"] == {
-        "discovered": ["check_availability", "opening_hours"],
-        "covered": ["check_availability"],
-        "uncovered": ["opening_hours"],
-    }
     assert facts["audio"] is None, "a typed simulation put audio on the record"
     assert facts["provider_reference"] == stub.rooms[0].name
-
-
-A_DECLARED_DELAY_MS = 60
-"""Short enough to cost CI nothing, long enough that a span holding it
-cannot be a rounding error. The delay is real time on a real clock, here
-as in a live room."""
 
 
 class _FilingControlPlane:

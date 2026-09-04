@@ -153,6 +153,35 @@ export const testVersion = pgTable(
      * migration. Today: the scenario, and the expected behaviors.
      */
     content: jsonb("content").notNull(),
+    /**
+     * The tools this test answers for itself, as a list of
+     * `{tool, answer}` or `{tool, error}` entries.
+     *
+     * **The test carries its own world, and there is no project half.** A mock
+     * tool used to be a project row a test could override; it is a sentence in
+     * the test now, versioned with the test exactly as an expected behavior is,
+     * because "the calendar has no free slots" is a fact about this scenario
+     * and about nothing else in the project.
+     *
+     * A column of its own rather than a key inside `content`, because the claim
+     * gate asks the database directly whether a run's tests mock anything — one
+     * `mock_tools is not null` over the join, rather than a jsonb key dug out of
+     * every version. Null means this test mocks nothing, which is what most
+     * tests do; an empty list is written as null so the two can never say the
+     * same thing in two ways.
+     */
+    mockTools: jsonb("mock_tools"),
+    /**
+     * The world outside the conversation that this test asks for:
+     * `retell_dynamic_variables` for the platform's own template variables, and
+     * `job_dispatch_metadata` for what LiveKit hands the worker it dispatches.
+     *
+     * Beside the mock tools rather than inside them for the same reason they
+     * are beside the content: it is a different question, asked of a different
+     * lane, and a reader after one never pays for the other. Null means this
+     * test asks for nothing, and an empty object is written as null.
+     */
+    env: jsonb("env"),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
     }),
@@ -231,8 +260,8 @@ export const testPersona = pgTable(
  * forced a scenario-specific decision through the wrong object, when "where does
  * this grader apply" is the grader's own setting.
  *
- * A version's content is therefore the scenario, the expected behaviors and the
- * mock overrides, and nothing else. Scenario-specific grading returns as
+ * A version's content is therefore the scenario, the expected behaviors, the
+ * mock tools and the env, and nothing else. Scenario-specific grading returns as
  * selectors on the project grader's JSON scope, over test suites and tests,
  * where the same question is asked once per grader rather than once per test.
  */

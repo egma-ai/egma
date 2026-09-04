@@ -11,16 +11,21 @@ import {
 } from "@egma/platform-api/client";
 
 type CreateTestParameters = Parameters<typeof createTestRequest>[0];
-type TestMockTool = NonNullable<CreateTestParameters["mockTools"]>[number];
+type WireMockTool = NonNullable<CreateTestParameters["mockTools"]>[number];
+type WireEnv = NonNullable<CreateTestParameters["env"]>;
 type TestWriteParameters = {
   readonly name: string;
   readonly description: string;
   readonly scenario: string;
   readonly expectedBehaviors: string[];
   readonly personas: string[];
-  readonly mockTools: TestMockTool[];
+  /** Always sent, and empty where the test mocks nothing. */
+  readonly mockTools: WireMockTool[];
+  /** Always sent, and null where the test names no world. */
+  readonly env: WireEnv | null;
 };
 
+import type { TestEnv } from "../folder/env.ts";
 import type { MockToolEntry } from "../folder/mock-tools.ts";
 import type { ExpectedBehavior, FilePersona } from "../folder/test-file.ts";
 import {
@@ -30,7 +35,6 @@ import {
   platformText,
 } from "./client.ts";
 import type { Fetch } from "./device-flow.ts";
-import { overrideFrom } from "./mock-tools.ts";
 import { PlatformRefusedError } from "./refused.ts";
 import type { SignedIn } from "./signed-in.ts";
 
@@ -39,6 +43,7 @@ export type PlatformContent = {
   readonly expectedBehaviors: readonly ExpectedBehavior[];
   readonly personas: readonly FilePersona[];
   readonly mockTools: readonly MockToolEntry[];
+  readonly env: TestEnv | null;
 };
 
 export type PlatformTest = PlatformContent & {
@@ -87,21 +92,45 @@ function behaviorsIn(
   return value.map(platformText).filter((entry) => entry !== "");
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function mockToolsIn(value: GetTestResponse["mockTools"]): readonly MockToolEntry[] {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) =>
-    typeof entry === "object" && entry !== null && !Array.isArray(entry)
-      ? [
-          overrideFrom({
-            tool: platformText(entry.tool),
-            ...("error" in entry
-              ? { error: entry.error }
-              : { answer: entry.answer }),
-            delayMs: typeof entry.delayMs === "number" ? entry.delayMs : 0,
-          }),
-        ]
-      : [],
-  );
+  return value.flatMap((entry): readonly MockToolEntry[] => {
+    if (!isRecord(entry)) return [];
+    const tool = platformText(entry["tool"]);
+    if ("error" in entry) return [{ tool, error: platformText(entry["error"]) }];
+    // JSON has no undefined, so a missing answer is a test the platform could
+    // not have stored. Reading it as null keeps the file writable rather than
+    // writing a block that would not read back.
+    return [{ tool, answer: entry["answer"] ?? null }];
+  });
+}
+
+/**
+ * The env as the folder holds it, with the two halves in the format's order.
+ *
+ * Written here rather than passed through, so the bytes a file ends up with are
+ * decided by the value and not by the order the platform happened to answer in.
+ */
+function envIn(value: GetTestResponse["env"]): TestEnv | null {
+  if (!isRecord(value)) return null;
+  // A half with nothing in it says what an absent half says, and egma stores
+  // both the same way. Reading them the same way is what keeps a pull straight
+  // after a push finding nothing to write.
+  const said = (held: unknown): Record<string, unknown> | null =>
+    isRecord(held) && Object.keys(held).length > 0 ? held : null;
+  const variables = said(value.retell_dynamic_variables);
+  const dispatch = said(value.job_dispatch_metadata);
+  const env: TestEnv = {
+    ...(variables === null
+      ? {}
+      : { retell_dynamic_variables: variables as Record<string, string> }),
+    ...(dispatch === null ? {} : { job_dispatch_metadata: dispatch }),
+  };
+  return Object.keys(env).length === 0 ? null : env;
 }
 
 function contentFrom(body: GetTestResponse | GetTestVersionResponse): PlatformContent {
@@ -110,6 +139,7 @@ function contentFrom(body: GetTestResponse | GetTestVersionResponse): PlatformCo
     expectedBehaviors: behaviorsIn(body.expectedBehaviors),
     personas: personasIn(body.personas),
     mockTools: mockToolsIn(body.mockTools),
+    env: envIn(body.env),
   };
 }
 
@@ -262,14 +292,12 @@ export function testWriteBody(input: TestInput): TestWriteParameters {
     scenario: input.scenario,
     expectedBehaviors: [...input.expectedBehaviors],
     personas: input.personas.map(personaFor),
-    mockTools: input.mockTools.map((entry): TestMockTool => {
-      const { delay_ms: delayMs, ...says } = entry.says;
-      return {
-        ...says,
-        tool: entry.tool,
-        ...(typeof delayMs === "number" ? { delayMs } : {}),
-      } as TestMockTool;
-    }),
+    mockTools: input.mockTools.map((entry): WireMockTool =>
+      "error" in entry
+        ? { tool: entry.tool, error: entry.error }
+        : { tool: entry.tool, answer: entry.answer },
+    ),
+    env: input.env === null ? null : { ...input.env },
   };
 }
 

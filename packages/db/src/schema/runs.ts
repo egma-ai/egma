@@ -158,26 +158,18 @@ export const run = pgTable(
      * stamped here at start. Never credentials.
      */
     connectionSnapshot: jsonb("connection_snapshot").notNull(),
-    /**
-     * The mocked world this run executes in, resolved once and frozen here.
+    /*
+     * **There is no frozen mocked world here.** There was one: a run resolved
+     * the project's mock tools at creation and froze them, because a project
+     * mock tool was the one authored thing with no version chain and could be
+     * edited underneath a run that was already going.
      *
-     * Mock tools are the one authored thing that is not versioned, so nothing
-     * else could hold a run still: editing one tomorrow would silently change
-     * what a simulation of this run was answered, and a run half-conducted
-     * under two worlds is a run whose numbers mean nothing. Resolving at
-     * creation is what makes "every simulation in one run sees one world" a
-     * fact about the row rather than a hope about timing.
-     *
-     * It holds the project's mock tools that apply to this run's agent, with
-     * scoping already applied. Test overrides remain on the immutable
-     * test-version rows that each Simulation pins. A Simulation evidence read
-     * joins only its own version to these defaults, so no run-header read grows
-     * with the number of tests in the Suite.
-     *
-     * A run whose project answers for no tool holds the explicit final shape:
-     * `{ defaults: [], overrides: {} }`.
+     * A test carries its own mock tools now, and a simulation pins the test
+     * version it executes — which is immutable. So what a simulation is
+     * answered is read off that pinned version at the moment a call is served,
+     * and there is nothing left that could move underneath a run. A copy here
+     * would be a second version of an immutable fact, free to disagree with it.
      */
-    mockToolSnapshot: jsonb("mock_tool_snapshot").notNull(),
     /**
      * The serving version this run conducted against, resolved once at its
      * start and named on every request from then on.
@@ -443,24 +435,15 @@ export const simulation = pgTable(
      * never parsed; null when the plug had none to offer.
      */
     providerReference: text("provider_reference"),
-    /**
-     * Which of the agent's tools mock tools answered for, and which reached
-     * their real implementations — `{discovered, covered, uncovered}`, the
-     * three name lists the report's stamp carries.
-     *
-     * On the row rather than worked out from the conversation's spans,
-     * because it is the answer to "did mock tools change the world this
-     * simulation met", and that question has to be answerable from the
-     * simulation alone with nothing else to consult.
-     *
-     * Three states, and the third is why this is nullable rather than
-     * defaulted: null means the agent was never asked what tools it has, so
-     * nothing was learned and nothing is claimed — every row written before
-     * this column, and every connection egma stands outside the tool path of.
-     * Three empty lists is the other absence: the asking happened and no tool
-     * came back.
+    /*
+     * **There is no coverage stamp here.** There was one — three name lists
+     * saying which of the agent's tools Egma answered for and which reached
+     * their real implementations. It is gone with the project-owned mocked
+     * world it described: what a simulation was answered is the pinned test
+     * version's own list, and every answered call is already on the transcript,
+     * so a stamp beside them was a second telling of a fact the record already
+     * holds.
      */
-    mockToolCoverage: jsonb("mock_tool_coverage"),
     createdAt: createdAt(),
   },
   (table) => [
@@ -563,12 +546,6 @@ export const simulation = pgTable(
     check(
       "simulation_turn_count_is_a_count",
       sql`${table.turnCount} is null or ${table.turnCount} >= 0`,
-    ),
-    // The coverage stamp is a terminal fact too, and gets its own additive
-    // guard for the same reason the two above did.
-    check(
-      "simulation_mock_tool_coverage_only_when_ended",
-      sql`${table.endedAt} is not null or ${table.mockToolCoverage} is null`,
     ),
     // A chat has no audio, so its row refuses a recording.
     check(

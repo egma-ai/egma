@@ -3,7 +3,6 @@ import { setTimeout as sleep } from "node:timers/promises";
 import {
   claimSimulations,
   catalogEntry,
-  connectionTypeCarriesMockSwitch,
   connectionTypeUsesPlatformCarrier,
   failSimulationDispatch,
   getPersonaVersion,
@@ -11,12 +10,12 @@ import {
   getSimulationExecutionEvidence,
   markSimulationCanceled,
   releaseSimulationClaim,
-  resolveMockTools,
   resolveSimulationConnection,
   type PersonaModels,
   type ProviderCatalogEntry,
   type Run,
   type SimulationClaim,
+  type TestEnv,
 } from "@egma/db";
 import {
   ProviderCredentialSourceUnavailableError,
@@ -239,6 +238,23 @@ async function modelsBlock(
 }
 
 /**
+ * The lanes on which Egma stands in front of the agent's own tools.
+ *
+ * A named list rather than a fact worked out from something else, because what
+ * it decides is narrow: on these three lanes Egma is in the tool path and can
+ * answer for a name the test wrote down — text mode carries its answers on the
+ * request, a web call reaches Egma's own endpoint, and the LiveKit seam is in
+ * the room by construction. A phone call reaches the customer's real backend by
+ * design and is never on this list; the Retell chat API has no place to put an
+ * answer either.
+ */
+const LANES_SERVING_MOCK_TOOLS: readonly string[] = [
+  "retell_text_mode",
+  "retell_web_call",
+  "livekit_room",
+];
+
+/**
  * The version this simulation is placed against and the variables it carries —
  * one code path for both lanes that name a version, or nothing at all.
  *
@@ -257,10 +273,19 @@ async function modelsBlock(
  * one is being conducted against the mocked tools on it and nothing else would
  * be honest: the serving version beside it is what the copy was branched from.
  *
- * **The variables** are what the platform renders per call, and Egma passes only
- * its own: the attribution variable that carries this simulation's identifier
- * into the tool URL. Everything else falls back to the version's declared
- * defaults. Both lanes hand it, because both render variables.
+ * **The variables** are what the platform renders per call, and there are now
+ * two sources: the test's own `retell_dynamic_variables` — the caller context a
+ * test carries with it — and Egma's own attribution variable, which carries this
+ * simulation's identifier into the tool URL. Egma's own is written last, so no
+ * authored name can take its place; the save door refuses an `egma_` name
+ * anyway, and the two guards are one rule said at both ends.
+ *
+ * The two travel differently, because they are for different things. The test's
+ * own variables go wherever the platform renders variables at all, named
+ * version or not: the test asked for them. Egma's attribution variable goes
+ * only where a version is named, which is the same thing as saying only where
+ * Egma may be in the tool path — a lane that reaches the customer's real
+ * backend has nothing to attribute.
  *
  * The attribution variable is **asserted rather than assumed**. The whole tool
  * record of a mocked simulation rides on it: the swapped URL carries
@@ -272,11 +297,18 @@ async function modelsBlock(
 function runVersionSpecOf(
   run: Run,
   simulationId: string,
+  agentPlatform: string | null,
+  env: TestEnv | null,
 ): Record<string, unknown> {
   const version = run.tempMockAgentVersion ?? run.agentVersion ?? undefined;
-  if (version === null || version === undefined) return {};
+  if (version === null || version === undefined) {
+    const authored = authoredVariables(agentPlatform, env);
+    return Object.keys(authored).length === 0
+      ? {}
+      : { dynamic_variables: authored };
+  }
 
-  const variables = dynamicVariablesFor(simulationId);
+  const variables = dynamicVariablesFor(simulationId, agentPlatform, env);
   if (variables[SIMULATION_VARIABLE] !== simulationId) {
     throw new Error(
       `simulation ${simulationId} would be conducted against a named version ` +
@@ -292,16 +324,38 @@ function runVersionSpecOf(
 }
 
 /**
- * The variables one simulation is conducted with.
+ * The variables one simulation is conducted with: the test's own, then Egma's.
  *
- * One entry today, and the assertion above is on its answer rather than inside
- * it deliberately: authored caller-context variables are a named later chapter,
- * and the day this function merges a second source is the day it could drop the
- * first. The check is placed where it will still be looking at the whole answer
- * when that happens.
+ * The merge is here rather than at the call site so the assertion above is on
+ * this function's whole answer: a second source is exactly what could drop the
+ * first, and the day a third arrives the check is still looking at the result
+ * of all of them.
  */
-function dynamicVariablesFor(simulationId: string): Record<string, string> {
-  return { [SIMULATION_VARIABLE]: simulationId };
+function dynamicVariablesFor(
+  simulationId: string,
+  agentPlatform: string | null,
+  env: TestEnv | null,
+): Record<string, string> {
+  return {
+    ...authoredVariables(agentPlatform, env),
+    [SIMULATION_VARIABLE]: simulationId,
+  };
+}
+
+/**
+ * The caller context this test carries, where the platform renders one.
+ *
+ * `retell_dynamic_variables` is Retell's own word for its own feature, so a
+ * LiveKit or phone simulation carries none — a lane that renders nothing must
+ * never be handed a name it would drop silently while looking like it had been
+ * served.
+ */
+function authoredVariables(
+  agentPlatform: string | null,
+  env: TestEnv | null,
+): Record<string, string> {
+  if (agentPlatform !== "retell") return {};
+  return { ...(env?.retell_dynamic_variables ?? {}) };
 }
 
 /** What a claim request said, once every field has been read and refused for itself. */
@@ -488,38 +542,22 @@ async function assembledSpec(
     return { unbuildable: "its run could not be read" };
   }
 
-  // Resolved here and nowhere else. `resolveMockTools` is the one place a
-  // project default and a test override are folded together, and the
-  // snapshot it folds was frozen when the run was created — so every
-  // simulation in one run is served one world, and a mock tool edited
-  // mid-run tears nothing. The simulator receives the answers already
-  // decided, exactly as it receives everything else: flattened, with
-  // nothing left to look up and nothing left to choose between.
-  const resolved = resolveMockTools(
-    evidence.mockToolSnapshot,
-    claim.testVersionId,
-  );
-
-  // **Whether this run is mocked is read from its own snapshot**, on every
-  // lane the switch governs. The switch lives on the connection, and the run
-  // froze it at start — so a switch unticked mid-run leaves this run in the
-  // world it began in, and a text run started with the switch off carries no
-  // answers and goes real. Nothing consults the connection row here.
+  // **The test carries its own world, and this is the whole of the decision.**
+  // The answers come off the pinned test version — immutable, so an edit
+  // mid-run moves nothing — and there is nothing else to fold in: no project
+  // list, no run-level switch, nothing frozen on the run. A simulation is
+  // mocked when its own test named a tool and the lane can serve one.
   //
-  // A lane the switch does not govern keeps the behaviour it has: the LiveKit
-  // in-room seam serves what the run resolved because Egma *is* in the tool
-  // path there by construction.
-  const mocked =
-    !connectionTypeCarriesMockSwitch(run.connectionSnapshot.connectionType) ||
-    run.connectionSnapshot.mockToolsEnabled;
-  const mockTools = (mocked ? resolved : []).map((mock) => ({
-    tool_name: mock.toolName,
-    answer: mock.answer,
-    // Carried on every lane, and deliberately never spent on a chat one: a
-    // declared delay is speech-world fidelity, which is the layer chat leaves
-    // out. It rides along so one authored answer serves every modality.
-    delay_milliseconds: mock.delayMilliseconds,
-  }));
+  // The simulator receives the answers already decided, exactly as it receives
+  // everything else: flattened, with nothing left to look up and nothing left
+  // to choose between.
+  const mockTools = LANES_SERVING_MOCK_TOOLS.includes(connection.connectionType)
+    ? evidence.mockTools.map((entry) => ({
+        tool_name: entry.tool,
+        answer:
+          "error" in entry ? { error: entry.error } : { answer: entry.answer },
+      }))
+    : [];
 
   let models: Record<string, unknown>;
   try {
@@ -544,8 +582,22 @@ async function assembledSpec(
 
   // The version this simulation is placed against and the variables it carries,
   // for whichever lane named a version — the draft lane's temporary version or
-  // the text-mode lane's resolved serving version, in one code path.
-  const versionSpec = runVersionSpecOf(run, claim.id);
+  // the text-mode lane's resolved serving version, in one code path, with the
+  // test's own caller context merged in.
+  const versionSpec = runVersionSpecOf(
+    run,
+    claim.id,
+    connection.agentPlatform,
+    evidence.env,
+  );
+
+  // What the room's agent is dispatched with, straight off the test's env and
+  // verbatim: it is the customer's own word to their own agent, and Egma reads
+  // none of it. Only on the lane that has a dispatch to write it to.
+  const jobDispatchMetadata =
+    connection.connectionType === "livekit_room"
+      ? evidence.env?.job_dispatch_metadata
+      : undefined;
 
   const spec = {
     contract_version: CONTRACT_VERSION,
@@ -579,18 +631,22 @@ async function assembledSpec(
     // text-mode lane's resolved serving version alike. They are not written a
     // second time here.
     //
-    // Left out entirely where the run mocks nothing, which is what most
-    // runs do: a simulation egma answers no tool for is byte for byte the
+    // Left out entirely where the test mocks nothing, which is what most
+    // tests do: a simulation egma answers no tool for is byte for byte the
     // work order it was before mock tools existed, and an empty list
     // would be a claim about tools where there is nothing to claim.
     ...(mockTools.length === 0 ? {} : { mock_tools: mockTools }),
+    // The same rule for the room's dispatch: absent where the test wrote none.
+    ...(jobDispatchMetadata === undefined
+      ? {}
+      : { job_dispatch_metadata: jobDispatchMetadata }),
     // No phone route means no platform block.
     ...(platform === undefined ? {} : { platform }),
   };
-  // `mockToolId` is deliberately not among the fields sent. The simulator
-  // records which mock tool answered by its tool name, which is the whole
-  // of how one is matched; an identifier it would carry and never read is
-  // a field two sides could come to disagree about.
+  // A mock tool is named by its tool name and by nothing else, here and
+  // everywhere: that is the whole of how one is matched, and an identifier
+  // two sides carried and never read is a field they could come to disagree
+  // about.
 
   // Validated on the way out, against the same schema the simulator compiles
   // on the way in — so a document that does not speak the contract is this
