@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 import {
   appendSpans,
@@ -48,8 +48,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
  * byte, because that same version serves the tools a test does *not* mock and
  * those calls have to authenticate exactly as production does. So on a mocked
  * call the customer's backend credentials arrive here — and nothing here reads
- * them, logs them, stores them or puts them on the record. The one header this
- * endpoint reads is the platform's own signature.
+ * them, logs them, stores them or puts them on the record. No header is read at
+ * all.
  *
  * That has a cost, and it is paid deliberately: a tool the customer wrote as a
  * **GET** carries the model's arguments in the same query string as their own
@@ -58,44 +58,29 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
  * and the provenance, and no arguments. A POST tool's arguments are its body,
  * which is Egma's to read, and they land in full.
  *
- * ## Three gates, in order
+ * ## Two gates, in order
  *
  * 1. **The simulation named belongs to a live run.** A simulation nobody has
  *    heard of and one whose run has finished are the same answer: a finished
  *    run's temporary version has been deleted, so an answer served after it
  *    would come from a world that no longer exists.
- * 2. **The signature verifies**, where the platform sent one.
- * 3. **The tool is one this simulation's own test named.** The pinned test
+ * 2. **The tool is one this simulation's own test named.** The pinned test
  *    version carries the answers, so one temporary version serves every test of
  *    the run and each simulation answers for exactly what its own test wrote.
  *
  * Everything else is refused, and **each refusal is its own answer**: a dead
- * run, an unmocked tool and a bad signature are three different things and are
- * never collapsed into one.
+ * run and an unmocked tool are two different things and are never collapsed
+ * into one.
  *
- * ## The signature, and the guess inside it
+ * ## No signature check
  *
- * Where the platform signs one of these requests, it is verified over the raw
- * bytes that arrived with **the agent's own sealed platform key** — the key the
- * customer stored for this agent.
- *
- * **That choice is a guess, and it is written down as one.** Retell's *webhook*
- * signatures are made with a dedicated webhook-signing key, which is a
- * different value from every management key on the same account — proven by
- * hand on 2026-08-27, after the management key failed to verify a real webhook.
- * Whether a **custom-function** call is signed with that same webhook key, with
- * the management key, or not signed at all is not known, and nothing here may
- * pretend otherwise.
- *
- * So the check is conditional in the direction that fails safe for the product:
- * a signature that is present must verify, and a request that carries none is
- * admitted on the strength of the unguessable simulation identifier and the
- * liveness gate. If the guess is wrong, the symptom is a wall of `bad_signature`
- * refusals rather than a silent hole — and the refusal names which key was
- * tried and which one to try instead, so whoever sees that wall knows what they
- * are looking at. The question is on the developer's live checklist beside the
- * fork check, in `packages/retell/README.md`; when it is answered, either this
- * reads a different key or the header becomes required.
+ * The request is not authenticated beyond those two gates. The simulation
+ * identifier is unguessable and answers only while its run is live. Retell does
+ * sign custom-function calls, but with the account's webhook-badged key, which
+ * is not the management key a customer stores on the agent — so a check against
+ * the stored key refused every real call (2026-09-04, on the founder's own
+ * agent), and the founder chose to drop the check rather than ask customers for
+ * a second key. Nothing about the arriving headers is read, logged, or kept.
  *
  * ## The record
  *
@@ -126,95 +111,14 @@ export function mockToolBase(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/u, "")}${MOCK_TOOL_PREFIX}`;
 }
 
-/** The header the platform signs these requests with, where it signs them. */
-export const SIGNATURE_HEADER = "x-retell-signature";
-
-/**
- * How old a signed request may be, in milliseconds.
- *
- * The platform's own window. A replay of a signed request outside it is
- * refused on the signature, which is the only thing that makes a signature
- * worth checking at all.
- */
-export const SIGNATURE_WINDOW_MILLISECONDS = 5 * 60 * 1000;
-
-/** How each refusal names itself, so three different things stay three. */
-export const MOCK_TOOL_REFUSALS = [
-  "no_live_run",
-  "tool_not_mocked",
-  "bad_signature",
-] as const;
+/** How each refusal names itself, so two different things stay two. */
+export const MOCK_TOOL_REFUSALS = ["no_live_run", "tool_not_mocked"] as const;
 export type MockToolRefusal = (typeof MOCK_TOOL_REFUSALS)[number];
-
-/**
- * What a badly signed request is told.
- *
- * It names the key Egma tried and the one to try instead, because the failure
- * this sentence most likely describes is not an attack: it is Egma having
- * guessed wrong about which key Retell signs a custom-function call with. A
- * developer meeting a wall of these needs to know that in the first sentence,
- * not after reading the source.
- */
-const WRONG_SIGNING_KEY =
-  "this request's signature was not made with the Retell API key stored for " +
-  "this agent, which is the key Egma checks against. If every mocked tool " +
-  "call is failing this way, Retell is probably signing these requests with " +
-  "the account's separate webhook-signing key — the one carrying the Webhook " +
-  "badge in the Retell dashboard's API Keys page — which is a different value.";
 
 type Params = {
   readonly simulationId: string;
   readonly toolName: string;
 };
-
-/**
- * Whether a signature the platform sent is this request's.
- *
- * `v={milliseconds},d={hex}`, where the digest is an HMAC-SHA256 of the raw
- * body followed by the timestamp. The raw body, always: a body that has been
- * parsed and re-serialised is different bytes, and a check over different bytes
- * is a check of nothing.
- */
-export function signatureIsValid(
-  header: string,
-  rawBody: string,
-  key: string,
-  now: number,
-): boolean {
-  const parts = new Map<string, string>();
-  for (const piece of header.split(",")) {
-    const at = piece.indexOf("=");
-    if (at <= 0) return false;
-    parts.set(piece.slice(0, at).trim(), piece.slice(at + 1).trim());
-  }
-
-  const timestamp = parts.get("v");
-  const digest = parts.get("d");
-  if (timestamp === undefined || digest === undefined) return false;
-  if (!/^\d+$/u.test(timestamp) || !/^[0-9a-f]+$/iu.test(digest)) return false;
-  if (Math.abs(now - Number(timestamp)) > SIGNATURE_WINDOW_MILLISECONDS) {
-    return false;
-  }
-
-  const expected = createHmac("sha256", key)
-    .update(`${rawBody}${timestamp}`)
-    .digest("hex");
-  const sent = Buffer.from(digest.toLowerCase(), "utf8");
-  const mine = Buffer.from(expected, "utf8");
-  return sent.length === mine.length && timingSafeEqual(sent, mine);
-}
-
-/** The signature a caller would have to send. Exported for the tests only. */
-export function signatureFor(
-  rawBody: string,
-  key: string,
-  now: number,
-): string {
-  const digest = createHmac("sha256", key)
-    .update(`${rawBody}${now}`)
-    .digest("hex");
-  return `v=${now},d=${digest}`;
-}
 
 /**
  * One exchange, as the record keeps it.
@@ -331,11 +235,11 @@ function refuse(
 }
 
 export async function mockEndpointRoutes(app: FastifyInstance): Promise<void> {
-  // The bytes that were sent, kept as they were sent. A signature is over the
-  // raw body, and a body Fastify parsed and something else re-serialised is
-  // different bytes. Registered inside this plugin's own scope, without
-  // `fastify-plugin`, so encapsulation keeps it away from the JSON routes —
-  // the same shape the provider adapter and the OTLP door use.
+  // The bytes that were sent, kept as they were sent: the record carries the
+  // agent's arguments exactly as they arrived, not a re-serialisation of them.
+  // Registered inside this plugin's own scope, without `fastify-plugin`, so
+  // encapsulation keeps it away from the JSON routes — the same shape the
+  // provider adapter and the OTLP door use.
   app.addContentTypeParser(
     "application/json",
     { parseAs: "string" },
@@ -396,32 +300,8 @@ export async function mockEndpointRoutes(app: FastifyInstance): Promise<void> {
     }
     const simulation = target.simulation;
 
-    // Gate two, the signature: **before** the tool is looked up, and before
-    // anything is written down.
-    //
-    // Both halves of that order are load-bearing. Checking it after gate three
-    // would answer a badly signed call about an unmocked tool with
-    // `tool_not_mocked`, which is a sentence about the mocked world sent to
-    // somebody who has not authenticated. And writing the record first would
-    // let anyone holding the identifier spray `refused` spans carrying any tool
-    // name they liked, by sending a signature that was never going to verify.
-    //
-    // A request carrying no signature at all is admitted on the unguessable
-    // identifier and the liveness gate — see the note at the top of this file
-    // for why the check is conditional rather than required.
-    const signature = request.headers[SIGNATURE_HEADER];
-    if (typeof signature === "string" && signature.trim() !== "") {
-      const key = target.signingKey;
-      if (
-        key === null ||
-        !signatureIsValid(signature, rawBody, key, Date.now())
-      ) {
-        return refuse(reply, 401, "bad_signature", WRONG_SIGNING_KEY);
-      }
-    }
-
-    // Gate three. From here on the caller has got past every gate there is, so
-    // a refusal here is about the mocked world and lands on the record.
+    // Gate two, the tool. A refusal here is about the mocked world and lands on
+    // the record.
     const served = simulation.answers.find(
       (candidate) => candidate.tool === toolName,
     );
