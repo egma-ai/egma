@@ -35,8 +35,6 @@ export type LogoutCommandOptions = {
   readonly out: (line: string) => void;
   readonly fail: (line: string) => void;
   readonly fetchImpl?: Fetch;
-  /** Filesystem boundary, replaced only by command-level recovery tests. */
-  readonly removeCredentials?: typeof removeCredentials;
 };
 
 function stillAuthenticatedByEnvironment(options: LogoutCommandOptions): void {
@@ -59,7 +57,7 @@ async function removeReadEntry(
   options: LogoutCommandOptions,
   held: Credentials,
 ): Promise<number> {
-  const removed = await (options.removeCredentials ?? removeCredentials)(
+  const removed = await removeCredentials(
     options.access.credentialsFile,
     held,
   );

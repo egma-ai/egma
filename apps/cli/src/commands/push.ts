@@ -3,7 +3,6 @@
 import { RepositoryValidationError } from "../folder/egma-folder.ts";
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
-import { RepositoryReceiptError } from "../platform/repository.ts";
 import {
   PushMaterializationError,
   pushTests,
@@ -92,22 +91,6 @@ export async function runPushCommand(options: PushCommandOptions): Promise<numbe
       options.fail(
         `Egma applied the repository, but could not refresh ${cause.shown}: ${detail}`,
       );
-      options.fail("Run egma pull.");
-      return FOLDER_EXIT.localWriteFailed;
-    }
-    if (cause instanceof RepositoryReceiptError) {
-      for (const receipt of cause.receipts) {
-        options.out(
-          `Egma returned Test ${JSON.stringify(receipt.test.name)} (${oneLineFactText(receipt.test.id, "unknown Test ID")}).`,
-        );
-        options.out(
-          `  File receipt: ${oneLineFactText(receipt.clientRef ?? "", "unknown local file")}`,
-        );
-        options.out(
-          `  Version ID: ${oneLineFactText(receipt.test.versionId, "unknown Test version ID")}`,
-        );
-      }
-      options.fail(cause.reason);
       options.fail("Run egma pull.");
       return FOLDER_EXIT.localWriteFailed;
     }

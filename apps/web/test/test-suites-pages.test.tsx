@@ -590,10 +590,9 @@ describe("the suite-first Tests route", () => {
    * **The rest of the support table, one lane at a time.**
    *
    * The row above walks a Retell web call and a LiveKit room with nothing to
-   * say. What is left is the LiveKit key pair that serves mocks through the
-   * customer's own SDK, the token endpoint that cannot pass a dispatch it
-   * never makes, and a Retell lane that quietly says LiveKit's word is not one
-   * it uses.
+   * say. What is left is the LiveKit SDK requirement for mock tools, proof that
+   * token-endpoint dispatch metadata needs no warning, and a Retell lane that
+   * quietly says LiveKit's word is not one it uses.
    */
   it("says what each remaining lane will and will not use", async () => {
     routed.pathname = "/projects/prj_1/runs/new";
@@ -680,17 +679,15 @@ describe("the suite-first Tests route", () => {
     );
 
     // On a token endpoint the customer's own endpoint dispatches the worker,
-    // so a dispatch metadata Egma never writes cannot be passed.
+    // and Egma hands it the test's dispatch metadata inside the token
+    // request — so a suite that carries only that has nothing to be told.
     await noteOn(
       {
         connectionType: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
       },
       [DISPATCHING, PLAIN],
-      [
-        "Some test data will not be used on this connection.",
-        "1 of 2 tests carries job_dispatch_metadata. On a token-endpoint connection your endpoint dispatches the agent, so Egma cannot pass it.",
-      ],
+      [],
     );
 
     // A Retell lane says the same fact quietly: nothing is lost, because

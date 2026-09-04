@@ -531,7 +531,7 @@ export async function addConnection(
  * Agent's own fact, so an Agent can exist in the roster before the simulator has
  * a way to reach it.
  */
-export async function registerBoundAgent(
+export async function registerAgentIdentity(
   registration: {
     readonly name: string;
     readonly agentPlatform: "retell" | "livekit";

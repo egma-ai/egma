@@ -1,7 +1,7 @@
 {
   "contract_version": 5,
-  "simulation_id": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZN",
-  "modality": "voice",
+  "simulation_id": "sim_01K7MZ4T8P6QA3XDBW9NHF2SVL",
+  "modality": "chat",
   "connection": {
     "agent_platform": "livekit",
     "connection_type": "livekit_room",
@@ -14,16 +14,20 @@
       "headers": "{\"Authorization\":\"Bearer example0endpoint0token0not0a0real0one\"}"
     }
   },
+  "job_dispatch_metadata": {
+    "clinic": "lakeside",
+    "locale": "en-GB"
+  },
   "persona": {
     "name": "Eleanor",
-    "personality": "Retired teacher, 68, calling from a quiet kitchen. Polite, thorough, repeats details back to be sure she has them right.",
+    "personality": "Retired teacher, 68. Polite and thorough, and types the way she speaks: full sentences, and she repeats details back to be sure she has them right.",
     "language": "en-US"
   },
   "scenario": {
-    "instructions": "Your six-month check-up is on Tuesday and you now have to be somewhere else that morning. You want it moved to any Thursday in the next month, and you want the new date read back to you before the call ends."
+    "instructions": "Your six-month check-up is on Tuesday and you now have to be somewhere else that morning. You want it moved to any Thursday in the next month, and you want the new date read back to you before you finish."
   },
   "limits": {
-    "max_duration_seconds": 600,
+    "max_duration_seconds": 300,
     "max_turns": 40
   },
   "models": {
@@ -36,16 +40,14 @@
     "stt": {
       "provider": "deepgram",
       "model": "nova-3-general",
-      "adapter": "deepgram",
-      "key": "fixture-not-a-real-secret-stt"
+      "adapter": "deepgram"
     },
     "tts": {
       "provider": "cartesia",
       "model": "sonic-3.5",
       "adapter": "cartesia",
       "voice_id": "measured-alto-3",
-      "speed": 0.95,
-      "key": "fixture-not-a-real-secret-tts"
+      "speed": 0.95
     }
   }
 }

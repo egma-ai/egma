@@ -2456,12 +2456,12 @@ describe("one run after suites", () => {
       }
     });
 
-    it("keeps the loudest fact whole and drops the ones that do not fit", async () => {
-      // Three facts apply on a token endpoint: the warning pair about the
-      // dispatch it cannot pass, the brand pair about the SDK, and the quiet
-      // line about Retell's variables. Five lines, three of room. The warning
-      // pair goes in whole and the rest are dropped whole, because half a fact
-      // is a title standing over an explanation that was cut off.
+    it("warns about nothing on a token endpoint, which carries the dispatch metadata too", async () => {
+      // Two facts apply on a token endpoint, the same two as on a key pair:
+      // the brand pair about the SDK and the quiet line about Retell's
+      // variables. The test's dispatch metadata rides the token request Egma
+      // sends the endpoint, so the warning that used to lead this note is
+      // gone, and three lines fit whole.
       answers(
         noteStubs(
           {
@@ -2474,20 +2474,19 @@ describe("one run after suites", () => {
       render(<RunDetailPage />);
 
       const lines = await noteLines();
-      expect(lines).toHaveLength(2);
       expect(lines.map((line) => line.textContent)).toEqual([
-        "Some test data will not be used on this connection.",
-        "1 of 3 tests carries job_dispatch_metadata. On a token-endpoint connection your endpoint dispatches the agent, so Egma cannot pass it.",
+        "Mock tools on LiveKit need the Egma SDK in your agent.",
+        "1 of 3 tests carries mock tools. They are served only when your agent runs mockable(...). Tools a test does not mock run real.",
+        "1 test carries retell_dynamic_variables, which a LiveKit connection does not use.",
       ]);
       expect(lines.map((line) => line.getAttribute("data-accent"))).toEqual([
-        "warning",
-        "warning",
+        "brand",
+        "brand",
+        "quiet",
       ]);
-      // The SDK title is not left standing on its own: it is dropped with the
-      // line that explains it.
       expect(
         lines.some((line) =>
-          (line.textContent ?? "").includes("Mock tools on LiveKit"),
+          (line.textContent ?? "").includes("job_dispatch_metadata"),
         ),
       ).toBe(false);
     });

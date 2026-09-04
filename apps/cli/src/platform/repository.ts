@@ -5,9 +5,6 @@ import {
   type ApplyRepositoryChangeSetResponse,
 } from "@egma/platform-api/client";
 
-import { sameEnv } from "../folder/env.ts";
-import { sameMockTools } from "../folder/mock-tools.ts";
-import type { FilePersona } from "../folder/test-file.ts";
 import {
   platformClient,
   platformRefusalMessage,
@@ -53,90 +50,6 @@ export type AppliedRepositoryChangeSet = {
   readonly tests: readonly AppliedRepositoryTest[];
 };
 
-export type ReturnedRepositoryTestReceipt = {
-  readonly clientRef: string | null;
-  readonly test: Readonly<Pick<PlatformTest, "id" | "name" | "versionId">>;
-};
-
-/** Egma committed the change set but returned no safe one-to-one local mapping. */
-export class RepositoryReceiptError extends PlatformRefusedError {
-  public readonly receipts: readonly ReturnedRepositoryTestReceipt[];
-  public readonly reason: string;
-
-  public constructor(
-    status: number,
-    reason: string,
-    receipts: readonly ReturnedRepositoryTestReceipt[],
-  ) {
-    const listed = receipts.map(
-      ({ clientRef, test }) =>
-        `- Test ${JSON.stringify(test.name)} (${JSON.stringify(test.id)}), version ${JSON.stringify(test.versionId)}, for ${clientRef === null ? "an unknown local file" : JSON.stringify(clientRef)}`,
-    );
-    super(
-      status,
-      [
-        reason,
-        ...(listed.length === 0 ? [] : ["Returned Test receipts:", ...listed]),
-        "Run egma pull.",
-      ].join("\n"),
-    );
-    this.name = "RepositoryReceiptError";
-    this.receipts = receipts;
-    this.reason = reason;
-  }
-}
-
-function samePersonas(
-  requested: readonly FilePersona[],
-  returned: readonly FilePersona[],
-): boolean {
-  return requested.length === returned.length &&
-    requested.every((persona, index) => {
-      const found = returned[index];
-      if (found === undefined) return false;
-      return persona.id === "" || found.id === ""
-        ? persona.name === found.name
-        : persona.id === found.id;
-    });
-}
-
-function confirmsTest(
-  returned: PlatformTest,
-  requested: RepositoryTestChange,
-  projectId: string,
-): boolean {
-  return returned.projectId === projectId &&
-    returned.suiteId === requested.suiteId &&
-    returned.name === requested.input.name &&
-    returned.description === requested.input.description &&
-    returned.scenario === requested.input.scenario &&
-    returned.expectedBehaviors.length === requested.input.expectedBehaviors.length &&
-    returned.expectedBehaviors.every(
-      (behavior, index) => behavior === requested.input.expectedBehaviors[index],
-    ) &&
-    samePersonas(requested.input.personas, returned.personas) &&
-    sameMockTools(requested.input.mockTools, returned.mockTools) &&
-    sameEnv(requested.input.env, returned.env);
-}
-
-function durableReceipt(value: unknown): ReturnedRepositoryTestReceipt | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const row = value as Readonly<Record<string, unknown>>;
-  const held = row["test"];
-  if (typeof held !== "object" || held === null || Array.isArray(held)) return null;
-  const test = held as Readonly<Record<string, unknown>>;
-  const clientRef = platformText(row["clientRef"]);
-  const id = platformText(test["id"]);
-  const name = platformText(test["name"]);
-  const versionId = platformText(test["versionId"]);
-  return id === "" || versionId === ""
-    ? null
-    : {
-        clientRef: clientRef === "" ? null : clientRef,
-        test: { id, name, versionId },
-      };
-}
-
 export async function applyRepositoryChangeSet(
   signedIn: SignedIn,
   changeSet: RepositoryChangeSet,
@@ -172,78 +85,24 @@ export async function applyRepositoryChangeSet(
     );
   }
 
-  if (!Array.isArray(answer.data.tests)) {
-    throw new RepositoryReceiptError(
-      response.status,
-      "Egma applied the repository but answered without a Test receipt collection this CLI can read.",
-      [],
-    );
-  }
-
   const applied: AppliedRepositoryTest[] = [];
-  const receipts = answer.data.tests.flatMap((value) => {
-    const receipt = durableReceipt(value);
-    return receipt === null ? [] : [receipt];
-  });
-  let incomplete = false;
   for (const value of answer.data.tests) {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      incomplete = true;
-      continue;
-    }
+    if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
     const row: ApplyRepositoryChangeSetResponse["tests"][number] = value;
     const clientRef = platformText(row.clientRef);
     const test = platformTestFrom(row.test);
     if (clientRef === "" || test === null) {
-      incomplete = true;
-      continue;
+      throw new PlatformRefusedError(
+        response.status,
+        "Egma applied the repository but answered without the test identities needed to update local pins. Pull to recover them.",
+      );
     }
     applied.push({ clientRef, test });
   }
-  if (incomplete) {
-    throw new RepositoryReceiptError(
+  if (applied.length !== changeSet.tests.length) {
+    throw new PlatformRefusedError(
       response.status,
-      "Egma applied the repository but answered without every Test identity needed to update local pins.",
-      receipts,
-    );
-  }
-
-  const expected = new Set(changeSet.tests.map((test) => test.clientRef));
-  const seen = new Set<string>();
-  const duplicate = applied.find((receipt) => {
-    if (seen.has(receipt.clientRef)) return true;
-    seen.add(receipt.clientRef);
-    return false;
-  });
-  const unexpected = applied.find((receipt) => !expected.has(receipt.clientRef));
-  const missing = [...expected].find((clientRef) => !seen.has(clientRef));
-  if (duplicate !== undefined || unexpected !== undefined || missing !== undefined) {
-    const detail =
-      duplicate !== undefined
-        ? `duplicate file receipt ${JSON.stringify(duplicate.clientRef)}`
-        : unexpected !== undefined
-          ? `unknown file receipt ${JSON.stringify(unexpected.clientRef)}`
-          : `no receipt for ${JSON.stringify(missing)}`;
-    throw new RepositoryReceiptError(
-      response.status,
-      `Egma applied the repository but returned a ${detail}, so local Test pins were not changed.`,
-      receipts,
-    );
-  }
-
-  const requestedByRef = new Map(
-    changeSet.tests.map((test) => [test.clientRef, test] as const),
-  );
-  const mismatched = applied.find((receipt) => {
-    const requested = requestedByRef.get(receipt.clientRef);
-    return requested === undefined ||
-      !confirmsTest(receipt.test, requested, changeSet.projectId);
-  });
-  if (mismatched !== undefined) {
-    throw new RepositoryReceiptError(
-      response.status,
-      `Egma applied the repository but returned Test content or ownership that does not match ${JSON.stringify(mismatched.clientRef)}, so local Test pins were not changed.`,
-      receipts,
+      "Egma applied the repository but did not answer every test needed to update local pins. Pull to recover them.",
     );
   }
   return { tests: applied };

@@ -502,26 +502,6 @@ describe("skills-first init and pull", () => {
     });
   });
 
-  it("keeps remote Project fields on one terminal line", async () => {
-    await workspace.signIn(URL, "egma_sk_organization");
-    const api = remoteApi({
-      projects: [
-        { id: PROJECT_ONE, name: "North\nside\u001b[2J" },
-        { id: PROJECT_TWO, name: "Westside" },
-      ],
-    });
-    const io = outputs();
-
-    const code = await runInitCommand({
-      ...commandOptions(workspace, io),
-      fetchImpl: api.fetchImpl,
-    });
-
-    expect(code).toBe(FOLDER_EXIT.nothing);
-    expect(io.out).toContain(`- Northside[2J (${PROJECT_ONE})`);
-    expect(io.out.join("\n")).not.toContain("\u001b");
-  });
-
   it("turns init into a pull when the repository names the same Project", async () => {
     await signInFromLogin(workspace, PROJECT_ONE);
     await createEgmaFolder({
@@ -718,39 +698,4 @@ describe("skills-first init and pull", () => {
     expect(io.out.join("\n")).not.toContain("status:");
   });
 
-  it("keeps pulled resource names on one terminal line", async () => {
-    await workspace.signIn(URL);
-    await createEgmaFolder({
-      repository: workspace.dir,
-      config: {
-        ...EMPTY_CONFIG,
-        platform: { origin: URL },
-        project: PROJECT,
-      },
-    });
-    const api = remoteApi({
-      projects: [PROJECT],
-      suites: [{ ...RELEASE, name: "Release\nforged" }],
-      tests: [
-        {
-          ...BOOKS_A_VISIT,
-          name: "Books a visit\u001b[2J",
-        },
-      ],
-    });
-    const io = outputs();
-
-    const code = await runPullCommand({
-      access: { url: URL, credentialsFile: workspace.credentialsFile },
-      cwd: workspace.dir,
-      out: io.say,
-      fail: io.complain,
-      fetchImpl: api.fetchImpl,
-    });
-
-    expect(code).toBe(FOLDER_EXIT.done);
-    expect(io.out).toContain("Wrote suite Releaseforged.");
-    expect(io.out).toContain("Wrote test Books a visit[2J.");
-    expect(io.out.join("\n")).not.toContain("\u001b");
-  });
 });

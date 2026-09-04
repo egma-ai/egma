@@ -241,7 +241,7 @@ The public Access values are:
 | `retell-api-key` | Retell | Chat text mode or voice web call |
 | `retell-phone-number` | Retell | Voice call to a routed public number |
 | `livekit-project-credentials` | LiveKit | Chat or voice room with a Project key pair |
-| `livekit-token-endpoint` | LiveKit | Voice room through a customer token endpoint |
+| `livekit-token-endpoint` | LiveKit | Chat or voice room through a customer token endpoint |
 
 ### Retell examples
 
@@ -309,9 +309,13 @@ EGMA_LIVEKIT_TOKEN_ENDPOINT_HEADERS='{"Authorization":"Bearer ..."}' \
   --agent agt_... \
   --access livekit-token-endpoint \
   --modality voice \
-  --livekit-url wss://example.livekit.cloud \
+  --livekit-agent-name receptionist \
   --livekit-token-endpoint https://example.com/livekit/token
 ```
+
+Use `--modality chat` for a chat Connection. A token-endpoint Connection takes
+no `--livekit-url`; the endpoint returns the LiveKit server URL. See
+[LiveKit token endpoint](/integrations/livekit-token-endpoint).
 
 The provider-specific public flags are:
 
@@ -319,8 +323,8 @@ The provider-specific public flags are:
 |---|---|
 | `--retell-agent <id>` | Retell Agent ID, required on the first Retell Connection |
 | `--retell-phone-number <E.164>` | Retell phone number when required |
-| `--livekit-url <wss-url>` | LiveKit Project URL |
-| `--livekit-agent-name <name>` | Registered LiveKit Agent dispatch name |
+| `--livekit-url <wss-url>` | LiveKit Project URL for Project credentials |
+| `--livekit-agent-name <name>` | Registered LiveKit Agent name for either LiveKit Access method |
 | `--livekit-token-endpoint <url>` | Customer-owned token endpoint |
 
 A Connection carries no per-call data. The data a simulation starts with is

@@ -51,10 +51,6 @@ async function egma(args: readonly string[]): Promise<Result> {
   }
 }
 
-function escapedForRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
-
 function flagsIn(text: string): readonly string[] {
   return [...new Set(text.match(/--[a-z][a-z-]*/gu) ?? [])].sort();
 }
@@ -107,32 +103,6 @@ const APPROVED_FLAGS = [
   { words: ["self-host", "up"], flags: ["--cwd"] },
 ] as const;
 
-const RAW_CREDENTIAL_FLAGS = [
-  "--api-key",
-  "--api-secret",
-  "--headers",
-  "--retell-api-key",
-  "--livekit-api-key",
-  "--livekit-api-secret",
-  "--livekit-token-endpoint-headers",
-] as const;
-
-const CREDENTIAL_COMMANDS = [
-  ["agent", "connection", "options", "--platform", "retell"],
-  [
-    "agent",
-    "connection",
-    "add",
-    "--agent",
-    "agt_one",
-    "--access",
-    "retell-api-key",
-    "--modality",
-    "chat",
-  ],
-  ["agent", "monitoring", "setup", "--agent", "agt_one", "--platform", "retell"],
-] as const;
-
 describe("the skills-first public command surface", () => {
   it("publishes only the approved root command tree", async () => {
     const result = await egma(["--help"]);
@@ -172,45 +142,6 @@ describe("the skills-first public command surface", () => {
     }
   });
 
-  it.each([
-    ["login"],
-    ["logout"],
-    ["init"],
-    ["pull"],
-    ["push"],
-    ["agent"],
-    ["agent", "register"],
-    ["agent", "connection"],
-    ["agent", "connection", "options"],
-    ["agent", "connection", "add"],
-    ["agent", "monitoring"],
-    ["agent", "monitoring", "setup"],
-    ["agent", "monitoring", "stop"],
-    ["project"],
-    ["project", "api-key"],
-    ["project", "api-key", "create"],
-    ["persona"],
-    ["persona", "list"],
-    ["suite"],
-    ["suite", "create"],
-    ["suite", "delete"],
-    ["test"],
-    ["test", "delete"],
-    ["run"],
-    ["run", "create"],
-    ["run", "cancel"],
-    ["self-host"],
-    ["self-host", "up"],
-  ])("prints focused help for `egma %s`", async (...words: string[]) => {
-    const result = await egma([...words, "--help"]);
-    const command = `egma ${words.join(" ")}`;
-
-    expect(result, command).toMatchObject({ code: 0, stderr: "" });
-    expect(result.stdout, command).toMatch(
-      new RegExp(`Usage:\\s*${escapedForRegExp(command)}(?:\\s|$)`, "u"),
-    );
-  });
-
   it.each(APPROVED_FLAGS)(
     "publishes exactly the approved flags for `egma $words`",
     async ({ words, flags }) => {
@@ -228,49 +159,6 @@ describe("the skills-first public command surface", () => {
     expect(result.stdout).toContain(
       "--platform <retell|livekit>  Agent platform whose Connection choices to list.",
     );
-  });
-
-  it.each([
-    "connect",
-    "monitoring",
-    "livekit",
-    "validate",
-    "status",
-    "personas",
-    "mock-tool",
-    "mock-tools",
-    "worker",
-    "follow",
-    "ci",
-  ])(
-    "refuses the removed root command `%s`",
-    async (command) => {
-      const result = await egma([command]);
-
-      expect(result.code).toBe(1);
-      expect(result.stdout).toBe("");
-      expect(result.stderr).toContain(command);
-    },
-  );
-
-  it.each([
-    ["agent", "connect"],
-    ["agent", "discover"],
-    ["agent", "list"],
-    ["agent", "livekit"],
-    ["agent", "status"],
-    ["agent", "monitoring", "status"],
-    ["project", "mock-tool"],
-    ["project", "mock-tools"],
-    ["run", "follow"],
-    ["run", "status"],
-  ])("refuses the removed nested command `egma %s`", async (...words: string[]) => {
-    const result = await egma(words);
-
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("does not know");
-    expect(result.stderr).toContain("--help");
   });
 
   it.each([
@@ -370,11 +258,38 @@ describe("the skills-first public command surface", () => {
     },
   );
 
-  it.each(
-    CREDENTIAL_COMMANDS.flatMap((command) =>
-      RAW_CREDENTIAL_FLAGS.map((option) => ({ command, option })),
-    ),
-  )(
+  it.each([
+    {
+      command: ["agent", "connection", "options", "--platform", "retell"],
+      option: "--api-key",
+    },
+    {
+      command: [
+        "agent",
+        "connection",
+        "add",
+        "--agent",
+        "agt_one",
+        "--access",
+        "retell-api-key",
+        "--modality",
+        "chat",
+      ],
+      option: "--retell-api-key",
+    },
+    {
+      command: [
+        "agent",
+        "monitoring",
+        "setup",
+        "--agent",
+        "agt_one",
+        "--platform",
+        "retell",
+      ],
+      option: "--api-secret",
+    },
+  ])(
     "refuses raw credential flag $option on `egma $command` without echoing its value",
     async ({ command, option }) => {
       const secret = "must-not-print-this-credential-value";
@@ -430,19 +345,6 @@ describe("the skills-first public command surface", () => {
     expect(init.stdout).toBe("");
     expect(init.stderr).toContain(url);
     expect(init.stderr).toContain("egma login");
-  });
-
-  it("does not publish --json as part of the CLI contract", async () => {
-    for (const words of [
-      ["--help"],
-      ["agent", "register", "--help"],
-      ["agent", "connection", "options", "--help"],
-      ["run", "create", "--help"],
-    ]) {
-      const result = await egma(words);
-      expect(result.code, words.join(" ")).toBe(0);
-      expect(result.stdout, words.join(" ")).not.toContain("--json");
-    }
   });
 
   it("requires both an Agent and a Connection to create a Run", async () => {

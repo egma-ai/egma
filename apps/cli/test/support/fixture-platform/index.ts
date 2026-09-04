@@ -74,12 +74,6 @@ export type Platform = FixturePlatform & {
 };
 
 export type StartPlatformOptions = {
-  /** A synchronous race seam after remote creation and before the CLI writes. */
-  readonly afterSuiteCreate?: (suite: import("./suites.ts").SeededSuite) => void;
-  /** A synchronous race seam after one Test Version answer is frozen. */
-  readonly afterTestVersionRead?: (
-    version: import("./tests.ts").FixtureTestVersion,
-  ) => void;
   /** Replace the server catalog to prove how a built CLI handles new vocabulary. */
   readonly connectionOptions?: readonly unknown[];
 };
@@ -112,9 +106,6 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
       projectId,
       projectName: "Fixture project",
       afterDelete: (suiteId) => tests.deleteInSuite(suiteId),
-      ...(options.afterSuiteCreate === undefined
-        ? {}
-        : { afterCreate: options.afterSuiteCreate }),
     });
     suites = suiteGroup.controls;
 
@@ -161,9 +152,6 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
       suiteById: suiteGroup.controls.byId,
       allSuites: () => suiteGroup.controls.suites,
       createSuite: suiteGroup.controls.add,
-      ...(options.afterTestVersionRead === undefined
-        ? {}
-        : { afterVersionRead: options.afterTestVersionRead }),
     });
     tests = testGroup.controls;
 

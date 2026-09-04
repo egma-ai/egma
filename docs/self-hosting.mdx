@@ -178,14 +178,13 @@ feature that needs your Egma API to be reachable from the public internet.
   names a mock tool, keeping the API on a private network costs you nothing.
 - The endpoint answers only calls that name a simulation of a run Egma is
   conducting right now, and a tool that simulation's own test named. Everything
-  else is refused. Where Retell signs the request, Egma verifies the signature
-  with the key you stored for that agent.
+  else is refused. The simulation identifier is unguessable and stops answering
+  the moment the run ends; Egma checks nothing else about the caller.
 - **Egma drops the headers and query parameters that arrive on a mocked call,
   unread.** The temporary version keeps each tool's own headers and query
   parameters exactly as you wrote them, because that same version also serves
   the tools your tests do not name. So your backend credentials arrive at this
-  endpoint, and nothing there reads, logs, or stores them. The one header it
-  reads is the platform's signature.
+  endpoint, and nothing there reads, logs, or stores them.
 
 Egma needs the agent's Retell identity and key stored already, because it builds
 the mocked world by creating one temporary version of the agent in your Retell
@@ -193,8 +192,8 @@ account at run start and deleting it when the run ends. Your serving version is
 never changed.
 
 If you put Egma behind a reverse proxy, `/mock-tools/` has to reach the API like
-the rest of it, and the request body must arrive unchanged — the signature is
-checked over the exact bytes Retell sent.
+the rest of it, and the request body must arrive unchanged — the record keeps
+the tool's arguments as the exact bytes Retell sent.
 
 ## Production Monitoring
 

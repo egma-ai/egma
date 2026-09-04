@@ -523,17 +523,22 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   }
 
   /*
-   * Chat is offered on project credentials and nowhere else, because that is
-   * the access variant where Egma dispatches the worker and can tell it this
-   * simulation is typed. Choosing chat therefore settles the way in as well,
-   * and the screen that would have asked is not drawn.
+   * Each modality offers whichever ways in the catalog lists for it — today
+   * both variants speak both, because the telling that a simulation is typed
+   * is the room's name, which Egma asks an endpoint for exactly as it asks
+   * for a bare one. A way in the new modality does not offer falls back to
+   * project credentials, so the form never draws a connection type the
+   * server would refuse.
    */
   function chooseLiveKitModality(next: "chat" | "voice"): void {
     if (next !== livekitModality) {
       setLivekitConfig({});
       setLivekitCredentials({});
     }
-    if (next === "chat") setLivekitAccess(PROJECT_CREDENTIALS);
+    const offered = livekitOptions.some(
+      (one) => one.modality === next && one.accessVariant === livekitAccess,
+    );
+    if (!offered) setLivekitAccess(PROJECT_CREDENTIALS);
     setLivekitModality(next);
   }
 
@@ -1751,10 +1756,9 @@ function LiveKitSimulationStep({
   /**
    * Whether the chosen modality has more than one way in.
    *
-   * Voice has two, and which one this is changes what the form asks for. Chat
-   * has one — Egma has to dispatch the worker to tell it the simulation is
-   * typed — so there is nothing to choose and no control that pretends there
-   * is.
+   * Voice and chat both have two today, and which one this is changes what
+   * the form asks for. A deployment whose catalog narrows a modality to one
+   * way in gets no control that pretends there is a choice.
    */
   readonly chooseAccess: boolean;
   readonly agentName: string;
@@ -1804,7 +1808,7 @@ function LiveKitSimulationStep({
         }
         description={
           endpoint
-            ? "Egma requests a short-lived room token from your endpoint for every simulation."
+            ? "For every simulation Egma asks your endpoint for a short-lived room token, your LiveKit server URL, and the dispatch of the worker named below."
             : undefined
         }
       />
@@ -1826,11 +1830,7 @@ function LiveKitSimulationStep({
       <Field
         label="LiveKit agent name*"
         htmlFor="livekit-agent-name"
-        hint={
-          endpoint
-            ? "This names the agent in Egma. Your token endpoint decides which deployed worker joins the room."
-            : "Enter the exact agent name shown in your LiveKit Cloud dashboard."
-        }
+        hint="Enter the exact agent name shown in your LiveKit Cloud dashboard."
       >
         <Input
           id="livekit-agent-name"

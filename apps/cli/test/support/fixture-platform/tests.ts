@@ -311,8 +311,6 @@ export function testRoutes(options: {
   readonly suiteById: (id: string) => SeededSuite | null;
   readonly allSuites: () => readonly SeededSuite[];
   readonly createSuite: (name: string) => SeededSuite;
-  /** A deterministic edit seam after a version answer is frozen. */
-  readonly afterVersionRead?: (version: FixtureTestVersion) => void;
 }): TestRouteGroup {
   const tests: StoredTest[] = [];
   const personas: { readonly id: string; readonly name: string }[] = [];
@@ -607,7 +605,6 @@ export function testRoutes(options: {
               return refuse(404, "not_found", "there is no test version with that id");
             }
             const body = versionBody(version);
-            options.afterVersionRead?.(version);
             return { status: 200, body };
           }),
       },

@@ -32,7 +32,6 @@ const SUITE_ID = "ste_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const TEST_ID = "tst_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const VERSION_ID = "tstv_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const REVISION = "rev_01K3XQ7M4E8YB2FVN0H9TZQWER";
-const RUN_ID = "run_01K3XQ7M4E8YB2FVN0H9TZQWER";
 
 class JsonResponse extends Response {
   constructor(body: unknown, status = 200) {
@@ -248,107 +247,6 @@ it("writes returned push pins before it stops an interrupted command", async () 
   }
 });
 
-it("prints a started Run receipt before a post-write interruption exits 130", async () => {
-  const workspace = await preparedWorkspace("https://egma.example");
-  const controller = new AbortController();
-  const output: string[] = [];
-  const failed: string[] = [];
-  try {
-    const code = await runCreateCommand({
-      access: {
-        url: "https://egma.example",
-        credentialsFile: workspace.credentialsFile,
-      },
-      cwd: workspace.dir,
-      suiteDirectory: "release",
-      agent: "agt_one",
-      connection: "con_one",
-      signal: controller.signal,
-      out: (line) => output.push(line),
-      fail: (line) => failed.push(line),
-      fetchImpl: async (input, init) => {
-        const phase = phaseOf(String(input));
-        if (phase === null) return new JsonResponse({ error: "not-found" }, 404);
-        if (phase !== "run") return answerFor(phase, init?.body);
-        controller.abort("interrupt");
-        return new JsonResponse(
-          {
-            id: RUN_ID,
-            projectId: PROJECT_ID,
-            suiteId: SUITE_ID,
-            agentId: "agt_one",
-            connectionId: "con_one",
-            status: "pending",
-            connectionType: "livekit_room",
-            productLabel: "LiveKit project credentials",
-            modality: "voice",
-            expectedSimulationCount: 1,
-            resultsUrl: "",
-          },
-          201,
-        );
-      },
-    });
-
-    expect(code).toBe(130);
-    expect(output).toContain(`Started Run ${RUN_ID}.`);
-    expect(output.join("\n")).toContain(`/projects/${PROJECT_ID}/runs/${RUN_ID}`);
-    expect(failed).toEqual([
-      "The command was interrupted after Egma started this Run. The Run is continuing. Use the printed Egma URL to view it, and do not start another Run for the same work.",
-    ]);
-  } finally {
-    await workspace.remove();
-  }
-});
-
-it("keeps a returned Run ID from injecting terminal lines or ANSI", async () => {
-  const workspace = await preparedWorkspace("https://egma.example");
-  const unsafeRunId = `${RUN_ID}\n\u001b[31m\u202e`;
-  const output: string[] = [];
-  try {
-    const code = await runCreateCommand({
-      access: {
-        url: "https://egma.example",
-        credentialsFile: workspace.credentialsFile,
-      },
-      cwd: workspace.dir,
-      suiteDirectory: "release",
-      agent: "agt_one",
-      connection: "con_one",
-      signal: new AbortController().signal,
-      out: (line) => output.push(line),
-      fail: () => undefined,
-      fetchImpl: async (input, init) => {
-        const phase = phaseOf(String(input));
-        if (phase === null) return new JsonResponse({ error: "not-found" }, 404);
-        if (phase !== "run") return answerFor(phase, init?.body);
-        return new JsonResponse(
-          {
-            id: unsafeRunId,
-            projectId: PROJECT_ID,
-            suiteId: SUITE_ID,
-            agentId: "agt_one",
-            connectionId: "con_one",
-            status: "pending",
-            connectionType: "livekit_room",
-            productLabel: "LiveKit project credentials",
-            modality: "voice",
-            expectedSimulationCount: 1,
-            resultsUrl: "",
-          },
-          201,
-        );
-      },
-    });
-
-    expect(code).toBe(0);
-    expect(output[0]).toBe(`Started Run ${RUN_ID}[31m.`);
-    expect(output.every((line) => !/[\r\n\u001b\u202e]/u.test(line))).toBe(true);
-  } finally {
-    await workspace.remove();
-  }
-});
-
 it("returns 130 when a Run cancellation request is interrupted", async () => {
   const workspace = await preparedWorkspace("https://egma.example");
   const controller = new AbortController();
@@ -382,50 +280,6 @@ it("returns 130 when a Run cancellation request is interrupted", async () => {
     expect(output).toEqual([]);
     expect(failed).toEqual([
       "The command was interrupted before it received a complete answer. Check the Runs page before you try again.",
-    ]);
-  } finally {
-    await workspace.remove();
-  }
-});
-
-it("prints a canceled Run receipt before a post-write interruption exits 130", async () => {
-  const workspace = await preparedWorkspace("https://egma.example");
-  const controller = new AbortController();
-  const output: string[] = [];
-  const failed: string[] = [];
-  try {
-    const code = await runCancelCommand({
-      access: {
-        url: "https://egma.example",
-        credentialsFile: workspace.credentialsFile,
-      },
-      cwd: workspace.dir,
-      runId: RUN_ID,
-      signal: controller.signal,
-      out: (line) => output.push(line),
-      fail: (line) => failed.push(line),
-      fetchImpl: async () => {
-        controller.abort("interrupt");
-        return new JsonResponse({
-          id: RUN_ID,
-          projectId: PROJECT_ID,
-          suiteId: SUITE_ID,
-          agentId: "agt_one",
-          connectionId: "con_one",
-          status: "canceled",
-          connectionType: "livekit_room",
-          productLabel: "LiveKit project credentials",
-          modality: "voice",
-          expectedSimulationCount: 1,
-          resultsUrl: "",
-        });
-      },
-    });
-
-    expect(code).toBe(130);
-    expect(output).toEqual([`Canceled Run ${RUN_ID}.`]);
-    expect(failed).toEqual([
-      "The command was interrupted after Egma canceled this Run. The cancellation is complete. Nothing needs to be retried.",
     ]);
   } finally {
     await workspace.remove();

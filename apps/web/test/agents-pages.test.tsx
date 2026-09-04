@@ -450,19 +450,59 @@ const TYPES = {
       simulatorAdapter: true,
       fields: [
         {
-          key: "url",
-          label: "LiveKit WebSocket URL",
+          key: "tokenEndpoint",
+          label: "Token endpoint",
           kind: "url",
           required: true,
-          help: "Your LiveKit project or self-hosted server.",
+          help: "The service that creates room tokens.",
           afterCredentials: false,
         },
+        {
+          key: "agentName",
+          label: "LiveKit agent name",
+          kind: "text",
+          required: true,
+          help: "The worker Egma asks your endpoint to dispatch.",
+          afterCredentials: false,
+        },
+      ],
+      credentialRule: "required",
+      credentialHelp: "Auth headers for the endpoint.",
+      credentialFields: [
+        {
+          field: "headers",
+          label: "Auth headers",
+          kind: "json",
+          required: true,
+          help: "Header names and secret values sent to the endpoint.",
+        },
+      ],
+    },
+    {
+      agentPlatform: "livekit",
+      agentPlatformLabel: "LiveKit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.customer_token_endpoint",
+      accessVariantLabel: "Token endpoint",
+      modality: "chat",
+      productLabel: "LiveKit chat token endpoint",
+      topology: "egma-dials-out",
+      simulatorAdapter: true,
+      fields: [
         {
           key: "tokenEndpoint",
           label: "Token endpoint",
           kind: "url",
           required: true,
           help: "The service that creates room tokens.",
+          afterCredentials: false,
+        },
+        {
+          key: "agentName",
+          label: "LiveKit agent name",
+          kind: "text",
+          required: true,
+          help: "The worker Egma asks your endpoint to dispatch.",
           afterCredentials: false,
         },
       ],
@@ -2705,7 +2745,31 @@ describe("goal-first agent setup", () => {
     });
   });
 
-  it("saves a LiveKit chat connection and offers no way in but project credentials", async () => {
+  it("offers the token endpoint for chat and asks for its three fields", async () => {
+    sheetAnswers();
+    render(<RegisterAgentPage />);
+    await choose("Run simulations", "LiveKit");
+    await chooseLiveKitModality("Chat");
+
+    fireEvent.change(
+      await screen.findByRole("combobox", { name: "Connection type*" }),
+      { target: { value: "livekit_room.customer_token_endpoint" } },
+    );
+    expect(
+      await screen.findByRole("heading", {
+        name: "Connect LiveKit Chat for simulations",
+      }),
+    ).toBeDefined();
+    expect(screen.getByLabelText("LiveKit agent name*")).toBeDefined();
+    expect(screen.getByLabelText("Token endpoint*")).toBeDefined();
+    expect(screen.getByLabelText("Auth headers*")).toBeDefined();
+    // The endpoint answers with the server, and holds the project secret.
+    expect(screen.queryByLabelText("WebSocket URL*")).toBeNull();
+    expect(screen.queryByLabelText("API key*")).toBeNull();
+    expect(screen.queryByLabelText("API secret*")).toBeNull();
+  });
+
+  it("saves a LiveKit chat connection on project credentials, with the token endpoint offered beside it", async () => {
     sheetAnswers({
       "/v1/agents": [
         { status: 200, body: { agents: [], nextPageToken: null } },
@@ -2739,12 +2803,15 @@ describe("goal-first agent setup", () => {
         name: "Connect LiveKit Chat for simulations",
       }),
     ).toBeDefined();
-    // Egma has to dispatch the worker to tell it the simulation is typed, so
-    // there is one way in and nothing that pretends otherwise.
+    // Chat has two ways in, as voice does: project credentials first, and
+    // the token endpoint beside it. The default is the key pair.
+    const connectionType = screen.getByRole("combobox", {
+      name: "Connection type*",
+    }) as HTMLSelectElement;
+    expect(connectionType.value).toBe("livekit_room.project_credentials");
     expect(
-      screen.queryByRole("combobox", { name: "Connection type*" }),
-    ).toBeNull();
-    expect(screen.queryByText("Token endpoint")).toBeNull();
+      Array.from(connectionType.options).map((option) => option.text),
+    ).toEqual(["Project credentials", "Token endpoint"]);
     expect(screen.queryByLabelText("Token endpoint*")).toBeNull();
 
     fireEvent.change(screen.getByLabelText("LiveKit agent name*"), {
@@ -2911,8 +2978,8 @@ describe("goal-first agent setup", () => {
               accessVariant: "livekit_room.customer_token_endpoint",
               productLabel: "LiveKit token endpoint",
               config: {
-                url: "wss://rooms.example.test",
                 tokenEndpoint: "https://tokens.example.test/livekit",
+                agentName: "front-desk",
               },
             },
           },
@@ -2944,13 +3011,15 @@ describe("goal-first agent setup", () => {
     expect(screen.getByLabelText("LiveKit agent name*")).toBeDefined();
     expect(
       screen.getByText(
-        "This names the agent in Egma. Your token endpoint decides which deployed worker joins the room.",
+        "Enter the exact agent name shown in your LiveKit Cloud dashboard.",
       ),
     ).toBeDefined();
     expect(screen.queryByLabelText("API secret*")).toBeNull();
+    // The endpoint answers with the server, so the form never asks for it.
+    expect(screen.queryByLabelText("WebSocket URL*")).toBeNull();
     expect(
-      screen.getByPlaceholderText("wss://your-project.livekit.cloud"),
-    ).toBeDefined();
+      screen.queryByPlaceholderText("wss://your-project.livekit.cloud"),
+    ).toBeNull();
     expect(
       screen.getByPlaceholderText("https://api.example.com/livekit/token"),
     ).toBeDefined();
@@ -2963,9 +3032,6 @@ describe("goal-first agent setup", () => {
       ),
     ).toBeDefined();
 
-    fireEvent.change(screen.getByLabelText("WebSocket URL*"), {
-      target: { value: "wss://rooms.example.test" },
-    });
     fireEvent.change(screen.getByLabelText("LiveKit agent name*"), {
       target: { value: "appointment-scheduling-langsmith" },
     });
@@ -2996,8 +3062,8 @@ describe("goal-first agent setup", () => {
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
-          url: "wss://rooms.example.test",
           tokenEndpoint: "https://tokens.example.test/livekit",
+          agentName: "appointment-scheduling-langsmith",
         },
         credentials: {
           headers: '{"Authorization":"Bearer token"}',
@@ -3435,8 +3501,8 @@ describe("one connection's page", () => {
         productLabel: "LiveKit token endpoint",
         modality: "voice",
         config: {
-          url: "wss://example.livekit.cloud",
           tokenEndpoint: "https://example.test/livekit-token",
+          agentName: "front-desk",
         },
       },
     ]) {

@@ -421,8 +421,8 @@ of the project, joining the room, and deleting it — and leaves every
 other line of the driver real. So a whole simulation in a room runs with
 no server, no project and no worker, and what the suite proves about a
 refusal or an ending is proved about the code a customer's server will
-run: the two dispatch paths, the test's own job dispatch metadata written
-byte for byte onto the one that has a dispatch, a worker that
+run: both token-minting paths, the test's own job dispatch metadata carried
+byte for byte to the worker on either path, a worker that
 never comes and one that joins and publishes nothing, an agent that
 leaves mid-exchange, and the room deleted however it ended. The
 customer's api secret is a sentinel there too.

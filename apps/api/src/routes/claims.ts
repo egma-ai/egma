@@ -624,7 +624,9 @@ async function assembledSpec(
 
   // What the room's agent is dispatched with, straight off the test's env and
   // verbatim: it is the customer's own word to their own agent, and Egma reads
-  // none of it. Only on the lane that has a dispatch to write it to.
+  // none of it. A Project-credentials connection writes it to the dispatch;
+  // a token-endpoint connection sends it in room_config for the endpoint to
+  // copy into the token.
   const jobDispatchMetadata =
     connection.connectionType === "livekit_room"
       ? evidence.env?.job_dispatch_metadata

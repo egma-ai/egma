@@ -250,9 +250,12 @@ EGMA_LIVEKIT_TOKEN_ENDPOINT_HEADERS='{"Authorization":"Bearer ..."}' \
   --agent agt_... \
   --access livekit-token-endpoint \
   --modality voice \
-  --livekit-url wss://example.livekit.cloud \
+  --livekit-agent-name receptionist \
   --livekit-token-endpoint https://example.com/livekit/token
 ```
+
+The token endpoint returns the LiveKit server URL. Use `--modality chat` for a
+chat Connection.
 
 `--name` is an optional Connection name. The platform product label is the
 default. There is no `--platform` flag on Connection creation because the Egma

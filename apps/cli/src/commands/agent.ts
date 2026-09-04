@@ -19,7 +19,7 @@ import {
 import {
   addConnection,
   readAgent,
-  registerBoundAgent,
+  registerAgentIdentity,
   type NewConnection,
   type RegisteredAgent,
   type RegisteredConnection,
@@ -48,6 +48,7 @@ import { refreshProjectTargets } from "../sync/targets.ts";
 import { connectionFieldIssue } from "../ui/connection-field-validation.ts";
 import { oneLineFactText } from "../ui/fact-value.ts";
 import {
+  readApiKeyCredential,
   readCredentialStdin,
   type CredentialStdin,
 } from "./credential-stdin.ts";
@@ -297,35 +298,13 @@ function selectedOption(
 }
 
 function connectionFlag(key: string): string | null {
-  switch (key) {
-    case "phoneNumber":
-      return "--retell-phone-number";
-    case "url":
-      return "--livekit-url";
-    case "agentName":
-      return "--livekit-agent-name";
-    case "tokenEndpoint":
-      return "--livekit-token-endpoint";
-    case "retellAgentId":
-      return "--retell-agent";
-    default:
-      return null;
-  }
+  if (key === "retellAgentId") return "--retell-agent";
+  return CONFIG_FLAGS.find(([field]) => field === key)?.[1] ?? null;
 }
 
 function flagValue(key: string, flags: ConnectionFlags): string {
-  switch (key) {
-    case "phoneNumber":
-      return clean(flags.retellPhoneNumber);
-    case "url":
-      return clean(flags.livekitUrl);
-    case "agentName":
-      return clean(flags.livekitAgentName);
-    case "tokenEndpoint":
-      return clean(flags.livekitTokenEndpoint);
-    default:
-      return "";
-  }
+  const descriptor = CONFIG_FLAGS.find(([field]) => field === key);
+  return descriptor === undefined ? "" : clean(flags[descriptor[2]]);
 }
 
 const CONFIG_FLAGS = [
@@ -410,7 +389,7 @@ async function retellCredential(
 ): Promise<ConnectionCredentials | Stop> {
   let apiKey: string;
   if (options.credentialsStdin) {
-    const read = await readCredentialStdin(options.stdin, options.signal);
+    const read = await readApiKeyCredential(options.stdin, options.signal);
     if (read.kind === "interrupted") {
       return sayFailure(
         options,
@@ -419,8 +398,7 @@ async function retellCredential(
         AGENT_EXIT.interrupted,
       );
     }
-    const raw = read.text;
-    if (raw === "") {
+    if (read.kind === "missing") {
       return sayFailure(
         options,
         "credentials-required",
@@ -428,20 +406,7 @@ async function retellCredential(
         AGENT_EXIT.noCredentials,
       );
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw) as unknown;
-    } catch {
-      parsed = null;
-    }
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      Array.isArray(parsed) ||
-      Object.keys(parsed).length !== 1 ||
-      !("apiKey" in parsed) ||
-      typeof parsed.apiKey !== "string"
-    ) {
+    if (read.kind === "invalid") {
       return sayFailure(
         options,
         "invalid-credentials",
@@ -449,7 +414,7 @@ async function retellCredential(
         AGENT_EXIT.noCredentials,
       );
     }
-    apiKey = parsed.apiKey.trim();
+    apiKey = read.apiKey;
   } else {
     apiKey = retellCredentialFromEnvironment(options.env);
   }
@@ -1172,7 +1137,7 @@ export async function runAgentRegisterCommand(
       AGENT_EXIT.incomplete,
     ).code;
   }
-  const result = await registerBoundAgent(
+  const result = await registerAgentIdentity(
     {
       name,
       agentPlatform: platform,

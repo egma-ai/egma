@@ -138,7 +138,7 @@
       "propertyNames": { "minLength": 1, "pattern": "\\S" }
     },
     "job_dispatch_metadata": {
-      "description": "The metadata this one simulation's agent dispatch carries, exactly as the test wrote it. It is the LiveKit agent's own channel — what `json.loads(ctx.job.metadata)` reads on the far side — so the simulator passes it through byte for byte and reads none of it: a value the simulator tidied would be a value the agent under test never saw. Absent is the ordinary case, and a connection with no dispatch of egma's to carry it takes it and drops it.",
+      "description": "The metadata this one simulation's agent dispatch carries, exactly as the test wrote it. It is the LiveKit agent's own channel — what `json.loads(ctx.job.metadata)` reads on the far side — so the simulator passes it to the worker byte for byte and reads none of it: a value the simulator tidied would be a value the agent under test never saw. LiveKit Project credentials carry it on Egma's dispatch. A LiveKit token endpoint carries it in the room configuration that the endpoint copies into the token. Absent is the ordinary case.",
       "type": "object"
     },
     "mock_tools": {

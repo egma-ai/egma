@@ -551,11 +551,13 @@ describe("a connection's stored credential", () => {
       "livekit_room.project_credentials/voice",
       "livekit_room.project_credentials/chat",
       "livekit_room.customer_token_endpoint/voice",
+      "livekit_room.customer_token_endpoint/chat",
     ]);
     expect(livekit.map((one) => one.productLabel)).toEqual([
       "LiveKit project credentials",
       "LiveKit chat",
       "LiveKit token endpoint",
+      "LiveKit chat token endpoint",
     ]);
 
     // The three credential rules the product's Restore is written against,
@@ -682,8 +684,8 @@ describe("a connection's shape", () => {
       ada,
       {
         config: {
-          url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
         },
         credentials: { headers: '{"Authorization":"Bearer token-value"}' },
         expectedRevision: wiring.revision,
@@ -808,8 +810,8 @@ describe("restoring a connection", () => {
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
-        url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
+        agentName: "front-desk",
       },
       credentials: { headers: '{"Authorization":"Bearer token-value"}' },
     });

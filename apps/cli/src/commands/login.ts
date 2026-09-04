@@ -79,7 +79,6 @@ export async function runLoginCommand(options: LoginCommandOptions): Promise<num
     onPrompt: (prompt) => {
       for (const line of loginLines(prompt)) options.out(line);
     },
-    say: (line) => options.out(line),
     openBrowser: (address) =>
       openInBrowser(address, { instanceUrl: url, env: options.env }),
   });

@@ -5,10 +5,10 @@
  * tests exercise the same path a coding agent uses.
  *
  * Nothing in here draws, and nothing in here reads a keystroke. What the
- * developer has to see arrives through `onPrompt` and `say`; what they may have
- * pasted back is read through `paste`, which the caller answers from wherever
- * it collects typing. A flow that asked a question directly could not be both
- * both browser approval and a promptless command.
+ * developer has to see arrives through `onPrompt`; browser approval is polled
+ * at the pace set by the platform. A flow that
+ * asked a question directly could not be both browser approval and a
+ * promptless command.
  */
 
 import {
@@ -19,9 +19,7 @@ import {
 import { revokeProjectKey } from "./api-keys.ts";
 import { platformText } from "./client.ts";
 import {
-  codeFromPaste,
   collectKey,
-  normalizeUserCode,
   startDeviceAuthorization,
   PlatformUnreachableError,
   type Fetch,
@@ -78,32 +76,12 @@ export type LogInOptions = {
   readonly signal: AbortSignal;
   /** The code and the address, as soon as egma has them. */
   readonly onPrompt: (prompt: LoginPrompt) => void;
-  /** One line about what is happening, for whoever is watching. */
-  readonly say?: (line: string) => void;
-  /** What the developer has pasted back since the last look, if anything. */
-  readonly paste?: () => string | null;
   /** Starts a browser on the address. Answers whether one started. */
   readonly openBrowser?: (url: string) => Promise<boolean>;
   readonly fetchImpl?: Fetch;
-  /** Filesystem boundary, replaced only by recovery tests. */
-  readonly saveCredentials?: typeof writeCredentials;
-  /** Compensating revoke boundary, replaced only by recovery tests. */
-  readonly revokeLoginKey?: typeof revokeProjectKey;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
 };
-
-const NOTHING = (): void => undefined;
-
-/**
- * How often a wait looks up to see whether something was pasted.
- *
- * The instance sets how often it may be asked for a key, and that is measured
- * in seconds. A developer who has just come back from a browser and pasted the
- * address should not sit through the rest of one, so the wait is slept in
- * slices and ends early the moment the code on screen arrives.
- */
-const LOOK_UP_EVERY_MS = 100;
 
 /**
  * What `slow_down` costs, in milliseconds.
@@ -142,7 +120,7 @@ async function recoverUnstoredKey(
 
   let recovery: string;
   try {
-    const revoked = await (options.revokeLoginKey ?? revokeProjectKey)(
+    const revoked = await revokeProjectKey(
       input.apiKeyId,
       {
         url: options.url,
@@ -193,54 +171,15 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
 type Wait = {
   readonly waitMs: number;
   readonly sleep: (ms: number) => Promise<void>;
-  readonly paste: (() => string | null) | undefined;
-  readonly say: (line: string) => void;
-  /** The code this terminal is waiting on, tidied for comparing. */
-  readonly waitingFor: string;
-  /** The same code as it is written on the screen, for saying back. */
-  readonly shownAs: string;
   readonly signal: AbortSignal;
 };
 
 /**
- * Waits out the interval, and ends early only for the code on this screen.
- *
- * Pasting is read here rather than by the caller because what a paste means is
- * a question about the wait. The code on screen means "I have approved it, look
- * now" and cuts the wait short. Anything else — a sentence, half an address,
- * somebody else's code — is answered on screen and changes nothing: the pace
- * belongs to the instance, and a keyboard must not be able to turn a wrong
- * paste into a request. Otherwise a developer holding a paste key would make
- * egma ask for a key as fast as they could type.
+ * Waits out the interval set by the platform, unless the command is stopped.
  */
 async function waitForPace(wait: Wait): Promise<void> {
-  let left = wait.waitMs;
-  for (;;) {
-    if (wait.signal.aborted) return;
-
-    const typed = wait.paste?.() ?? null;
-    if (typed !== null && typed.trim() !== "") {
-      const code = codeFromPaste(typed);
-      if (code === null) {
-        wait.say("That is not an Egma code or an approval address. Paste the whole line.");
-      } else if (code !== wait.waitingFor) {
-        wait.say(
-          `That code is ${code}, and this terminal is waiting on ${wait.shownAs}. Approve the one on this screen.`,
-        );
-      } else {
-        // The developer has been to a browser and come back, so the answer is
-        // asked for now rather than at the next tick. That is the whole point
-        // of pasting it back on a machine that could not open one itself.
-        wait.say("Checking that one now.");
-        return;
-      }
-    }
-
-    if (left <= 0) return;
-    const slice = wait.paste === undefined ? left : Math.min(left, LOOK_UP_EVERY_MS);
-    await wait.sleep(slice);
-    left -= slice;
-  }
+  if (wait.signal.aborted) return;
+  await wait.sleep(wait.waitMs);
 }
 
 /**
@@ -251,7 +190,6 @@ async function waitForPace(wait: Wait): Promise<void> {
  * code is not a denial, and an instance that never answered is neither.
  */
 export async function logIn(options: LogInOptions): Promise<LoginResult> {
-  const say = options.say ?? NOTHING;
   const sleep = options.sleep ?? ((ms: number) => pause(ms, options.signal));
   const now = options.now ?? Date.now;
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -290,7 +228,6 @@ export async function logIn(options: LogInOptions): Promise<LoginResult> {
     browserOpened: opened,
   });
 
-  const waitingFor = normalizeUserCode(grant.userCode);
   const givesUpAt = now() + grant.expiresInSeconds * 1000;
   let waitMs = grant.intervalSeconds * 1000;
 
@@ -329,7 +266,7 @@ export async function logIn(options: LogInOptions): Promise<LoginResult> {
           login: collected.login,
         };
         try {
-          await (options.saveCredentials ?? writeCredentials)(
+          await writeCredentials(
             options.credentialsFile,
             credentials,
           );
@@ -375,10 +312,6 @@ export async function logIn(options: LogInOptions): Promise<LoginResult> {
     await waitForPace({
       waitMs,
       sleep,
-      paste: options.paste,
-      say,
-      waitingFor,
-      shownAs: grant.userCode,
       signal: options.signal,
     });
     if (options.signal.aborted) return { kind: "interrupted" };

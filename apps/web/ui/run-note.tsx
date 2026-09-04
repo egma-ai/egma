@@ -23,10 +23,11 @@ import { cn } from "@/lib/utils";
  * heading would make a quiet note into a section of the page.
  *
  * **A fact is a title and the lines that explain it, and the three-line
- * ceiling drops a fact whole.** More facts than fit is the ordinary case on a
- * LiveKit token endpoint, and cutting the list at three lines wherever three
- * lines fell left the last title standing with its explanation gone — a note
- * that names a rule and never says what the rule is.
+ * ceiling drops a fact whole.** More facts than fit is an ordinary case on a
+ * Retell lane whose suite also carries LiveKit's dispatch metadata, and
+ * cutting the list at three lines wherever three lines fell left the last
+ * title standing with its explanation gone — a note that names a rule and
+ * never says what the rule is.
  *
  * **Nothing here is stored.** The lines are computed from the connection and
  * the tests every time they are drawn: on the run-start sheet from the suite's
@@ -55,7 +56,6 @@ export type RunNoteTest = {
 /** The connection a run is conducted over, as this note reads it. */
 export type RunNoteConnection = {
   readonly connectionType: string;
-  readonly accessVariant: string;
 };
 
 /** At most this many lines, however many facts apply. */
@@ -120,8 +120,9 @@ function theOthers(rest: number): string {
  *
  * The three facts are separate because a connection can support one and not
  * another: a Retell phone call passes neither mock tools nor dynamic
- * variables, and a LiveKit token endpoint serves mocks but dispatches no
- * metadata of egma's.
+ * variables, while a LiveKit connection of either kind carries a test's
+ * dispatch metadata — on its own dispatch where egma holds the key pair, and
+ * inside the token request where the customer's endpoint mints the token.
  */
 function counted(tests: readonly RunNoteTest[]): {
   readonly total: number;
@@ -161,8 +162,6 @@ export function runNoteLines(
     connection.connectionType === "retell_chat_api" ||
     connection.connectionType === "phone_number";
   const livekit = connection.connectionType === "livekit_room";
-  const tokenEndpoint =
-    connection.accessVariant === "livekit_room.customer_token_endpoint";
 
   /* A phone call is the customer's own published number answered by Retell. */
   if (
@@ -213,23 +212,6 @@ export function runNoteLines(
           {`${carryOf(mocks, total)} mock tools. They are served only when your agent runs `}
           <Key>mockable(...)</Key>
           {". Tools a test does not mock run real."}
-        </>,
-      ],
-    });
-  }
-
-  /* The endpoint dispatches the agent, so egma never writes the dispatch. */
-  if (livekit && tokenEndpoint && dispatch > 0) {
-    groups.push({
-      accent: "warning",
-      lines: [
-        "Some test data will not be used on this connection.",
-        <>
-          {`${carryOf(dispatch, total)} `}
-          <Key>job_dispatch_metadata</Key>
-          {
-            ". On a token-endpoint connection your endpoint dispatches the agent, so Egma cannot pass it."
-          }
         </>,
       ],
     });

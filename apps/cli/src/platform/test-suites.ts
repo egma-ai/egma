@@ -8,8 +8,6 @@ import {
   type GetTestSuiteResponse,
 } from "@egma/platform-api/client";
 
-import { isSuiteId } from "../folder/egma-folder.ts";
-
 import {
   platformClient,
   platformRefusalMessage,
@@ -27,19 +25,6 @@ export type PlatformTestSuite = Readonly<
 export type GetTestSuiteAnswer =
   | { readonly kind: "suite"; readonly suite: PlatformTestSuite }
   | { readonly kind: "not-found"; readonly reason: string };
-
-/** A successful create response did not prove that it created the requested Suite. */
-export class TestSuiteCreationReceiptError extends Error {
-  public readonly suiteId: string | null;
-
-  public constructor(suiteId: string | null) {
-    super(
-      "Egma answered with a Suite receipt that did not match the requested Project and name.",
-    );
-    this.name = "TestSuiteCreationReceiptError";
-    this.suiteId = suiteId;
-  }
-}
 
 function suiteFrom(value: GetTestSuiteResponse): PlatformTestSuite | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
@@ -73,15 +58,10 @@ export async function createTestSuite(
   }
   const suite = suiteFrom(answer.data);
   if (suite === null) {
-    const returnedId = platformText(answer.data.id);
-    throw new TestSuiteCreationReceiptError(returnedId === "" ? null : returnedId);
-  }
-  if (
-    !isSuiteId(suite.id) ||
-    suite.projectId !== input.projectId ||
-    suite.name !== input.name
-  ) {
-    throw new TestSuiteCreationReceiptError(suite.id);
+    throw new PlatformRefusedError(
+      response.status,
+      "Egma created a suite but did not answer with its stable identity. Pull to recover it, and check that this Egma instance is up to date.",
+    );
   }
   return suite;
 }
@@ -132,17 +112,7 @@ export async function listTestSuites(
         platformRefusalMessage(answer.error, response.status),
       );
     }
-    const values = answer.data?.testSuites;
-    const next = answer.data?.nextPageToken;
-    if (
-      !Array.isArray(values) ||
-      (next !== null && typeof next !== "string")
-    ) {
-      throw new PlatformRefusedError(
-        response.status,
-        "Egma answered with a Test Suite collection this CLI cannot read. Check that this Egma platform is up to date.",
-      );
-    }
+    const values = answer.data?.testSuites ?? [];
     for (const value of values) {
       const suite = suiteFrom(value);
       if (suite === null) {
@@ -153,6 +123,7 @@ export async function listTestSuites(
       }
       suites.push(suite);
     }
+    const next = answer.data?.nextPageToken ?? null;
     if (next === null || next === "") return suites;
     pageToken = next;
   }

@@ -16,7 +16,6 @@ import {
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
 import {
-  TestSuiteCreationReceiptError,
   createTestSuite,
   deleteTestSuite,
 } from "../platform/test-suites.ts";
@@ -31,16 +30,12 @@ export type SuiteCreateCommandOptions = FolderCommandOptions & {
   readonly signal?: AbortSignal;
   /** Filesystem boundary, replaced only by command-level recovery tests. */
   readonly writeManifest?: typeof writeSuiteManifest;
-  /** Rollback boundary, replaced only by command-level recovery tests. */
-  readonly removeCreatedDirectory?: (directory: string) => Promise<void>;
 };
 
 export type SuiteDeleteCommandOptions = FolderCommandOptions & {
   /** One existing direct child of `egma/tests`. */
   readonly directory: string;
   readonly signal: AbortSignal;
-  /** Filesystem boundary, replaced only by command-level recovery tests. */
-  readonly removeDirectory?: (directory: string) => Promise<void>;
 };
 
 async function exists(file: string): Promise<boolean> {
@@ -121,18 +116,6 @@ export async function runSuiteCreateCommand(
       options.signal,
     );
   } catch (cause) {
-    if (cause instanceof TestSuiteCreationReceiptError) {
-      if (cause.suiteId !== null) {
-        options.out(
-          `Egma may have created remote Suite ${oneLineFactText(cause.suiteId, "with an unreadable ID")}.`,
-        );
-      }
-      options.fail(cause.message);
-      options.fail("Run egma pull before you try to create this Suite again.");
-      return wasInterrupted(options.signal)
-        ? FOLDER_EXIT.interrupted
-        : FOLDER_EXIT.localWriteFailed;
-    }
     if (wasInterrupted(options.signal)) {
       options.fail(
         "The command was interrupted before Egma returned a complete Suite receipt. Run egma pull before you try again.",
@@ -157,16 +140,14 @@ export async function runSuiteCreateCommand(
       name: suite.name,
     });
   } catch (cause) {
-    let rollbackFailure: unknown;
+    let cleanupFailure: unknown;
     if (createdRoot) {
       // This exact path did not exist before the command and contains only
       // bytes this attempt could have written. Remove all of it on rollback.
       try {
-        await (options.removeCreatedDirectory ?? (async (directory: string) => {
-          await rm(directory, { recursive: true, force: true });
-        }))(root);
-      } catch (rollbackCause) {
-        rollbackFailure = rollbackCause;
+        await rm(root, { recursive: true, force: true });
+      } catch (cleanupCause) {
+        cleanupFailure = cleanupCause;
       }
     }
     options.out(
@@ -176,20 +157,19 @@ export async function runSuiteCreateCommand(
       cause instanceof Error ? cause.message : String(cause),
       "unknown local write error",
     );
-    if (rollbackFailure === undefined) {
+    if (cleanupFailure === undefined) {
       options.fail(
         `Egma created suite ${suite.id}, but could not write egma/tests/${directory}/suite.yaml: ${manifestFailure} Run egma pull to recover this remote-only Suite.`,
       );
     } else {
-      const rollbackReason =
-        oneLineFactText(
-          rollbackFailure instanceof Error
-            ? rollbackFailure.message
-            : String(rollbackFailure),
-          "unknown local cleanup error",
-        );
+      const cleanupReason = oneLineFactText(
+        cleanupFailure instanceof Error
+          ? cleanupFailure.message
+          : String(cleanupFailure),
+        "unknown local cleanup error",
+      );
       options.fail(
-        `Egma created suite ${suite.id}, but could not write its manifest: ${manifestFailure} egma/tests/${directory} may remain because cleanup failed: ${rollbackReason}`,
+        `Egma created suite ${suite.id}, but could not write its manifest: ${manifestFailure} egma/tests/${directory} may remain because cleanup failed: ${cleanupReason}`,
       );
       options.fail(
         `Inspect and remove egma/tests/${directory} if it exists, then run egma pull.`,
@@ -287,7 +267,7 @@ export async function runSuiteDeleteCommand(
   }
 
   try {
-    await (options.removeDirectory ?? removeSuiteDirectory)(suite.root);
+    await removeSuiteDirectory(suite.root);
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code !== "ENOENT") {
       options.out(

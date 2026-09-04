@@ -5,13 +5,9 @@ import type { FixtureAnswer, FixtureRequest, RouteGroup } from "./server.ts";
 
 export type SeededSuite = { readonly id: string; readonly projectId: string; name: string };
 
-export type ListedProject = { readonly id: string; readonly name: string };
-
 export type SuiteControls = {
   add(name: string): SeededSuite;
   rename(id: string, name: string): SeededSuite;
-  /** What an organization-scoped credential sees during `egma init`. */
-  setListedProjects(projects: readonly ListedProject[]): void;
   readonly suites: readonly SeededSuite[];
   byId(id: string): SeededSuite | null;
   wasDeleted(id: string): boolean;
@@ -26,13 +22,9 @@ export function suiteRoutes(options: {
   readonly holdsKey: (key: string) => boolean;
   readonly projectId: string;
   readonly projectName: string;
-  readonly afterCreate?: (suite: SeededSuite) => void;
   readonly afterDelete?: (suiteId: string) => void;
 }): { readonly group: RouteGroup; readonly controls: SuiteControls } {
   const suites: SeededSuite[] = [];
-  let listedProjects: ListedProject[] = [
-    { id: options.projectId, name: options.projectName },
-  ];
   const deletedSuiteIds = new Set<string>();
   const behind = (request: FixtureRequest, action: () => FixtureAnswer): FixtureAnswer =>
     options.holdsKey(bearer(request)) ? action() : { status: 401, body: NOT_AUTHENTICATED };
@@ -51,9 +43,6 @@ export function suiteRoutes(options: {
       if (suite === undefined) throw new Error(`no suite ${id}`);
       suite.name = name.trim();
       return suite;
-    },
-    setListedProjects(projects) {
-      listedProjects = projects.map((project) => ({ ...project }));
     },
     get suites() {
       return suites;
@@ -76,18 +65,6 @@ export function suiteRoutes(options: {
     group: {
       name: "test-suites",
       routes: [
-        {
-          method: "GET",
-          path: "/v1/projects",
-          handle: (request) =>
-            behind(request, () => ({
-              status: 200,
-              body: {
-                projects: listedProjects.map((project) => ({ ...project })),
-                mayManageProjects: false,
-              },
-            })),
-        },
         {
           method: "GET",
           path: "/v1/projects/:projectId",
@@ -125,7 +102,6 @@ export function suiteRoutes(options: {
               const name = text(said.name);
               if (name === "") return refuse(422, "unprocessable", "a suite name is required");
               const created = controls.add(name);
-              options.afterCreate?.(created);
               return { status: 201, body: described(created) };
             }),
         },

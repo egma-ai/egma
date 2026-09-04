@@ -8,6 +8,12 @@ export type CredentialStdinRead =
   | { readonly kind: "read"; readonly text: string }
   | { readonly kind: "interrupted" };
 
+export type ApiKeyCredentialRead =
+  | { readonly kind: "key"; readonly apiKey: string }
+  | { readonly kind: "missing" }
+  | { readonly kind: "invalid" }
+  | { readonly kind: "interrupted" };
+
 /**
  * Read until EOF, or detach every listener and return as soon as the command is
  * interrupted. The stream is paused, not destroyed, because process.stdin is
@@ -64,4 +70,34 @@ export async function readCredentialStdin(
     signal?.addEventListener("abort", onAbort, { once: true });
     stdin.resume();
   });
+}
+
+/** Read one exact `{ "apiKey": "..." }` credential document. */
+export async function readApiKeyCredential(
+  stdin: CredentialStdin | undefined,
+  signal: AbortSignal | undefined,
+): Promise<ApiKeyCredentialRead> {
+  const read = await readCredentialStdin(stdin, signal);
+  if (read.kind === "interrupted") return read;
+  if (read.text === "") return { kind: "missing" };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(read.text) as unknown;
+  } catch {
+    return { kind: "invalid" };
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    Array.isArray(parsed) ||
+    Object.keys(parsed).length !== 1 ||
+    !("apiKey" in parsed) ||
+    typeof parsed.apiKey !== "string"
+  ) {
+    return { kind: "invalid" };
+  }
+
+  const apiKey = parsed.apiKey.trim();
+  return apiKey === "" ? { kind: "missing" } : { kind: "key", apiKey };
 }

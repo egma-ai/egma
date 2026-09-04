@@ -43,6 +43,7 @@ from conftest import (
     load_fixture_spec,
 )
 from room_stub import AGENT_IDENTITY, ChatStub, ClosesLate
+from token_endpoint_stub import serving
 
 from egma_simulator import service as service_module
 from egma_simulator.blob import FilesystemBlobStore
@@ -219,6 +220,45 @@ def chat_spec(
     )
 
 
+AN_AUTH_HEADER = '{"Authorization":"Bearer SENTINEL-chat-endpoint-bearer-2f7a"}'
+
+
+def chat_endpoint_spec(
+    simulation_id: str = A_SIMULATION,
+    *,
+    token_endpoint: str = "https://acme.example/egma/livekit-token",
+    agent_name: str = AN_AGENT,
+    scenario: str = A_SCENARIO,
+    max_turns: int = 60,
+    max_duration_seconds: int = 600,
+    mock_tools: list[dict] | None = None,
+    job_dispatch_metadata: dict | None = None,
+) -> dict:
+    """One chat spec whose connection asks an endpoint for its token.
+
+    The voice suite's ``livekit_endpoint_spec`` with ``chat`` for its
+    modality and nothing else different — the two ways in differ by who
+    mints the token, never by what is said in the room.
+    """
+    return a_spec(
+        simulation_id,
+        modality="chat",
+        connection={
+            "agent_platform": "livekit",
+            "connection_type": "livekit_room",
+            "access_variant": "livekit_room.customer_token_endpoint",
+            "config": {"tokenEndpoint": token_endpoint, "agentName": agent_name},
+            "credentials": {"headers": AN_AUTH_HEADER},
+        },
+        scenario=scenario,
+        personality=A_PERSONALITY,
+        max_turns=max_turns,
+        max_duration_seconds=max_duration_seconds,
+        mock_tools=mock_tools,
+        job_dispatch_metadata=job_dispatch_metadata,
+    )
+
+
 def chat_room(stub: ChatStub, **config: object) -> LiveKitChat:
     """One livekit chat plug against a room-shaped LiveKit."""
     return LiveKitChat(
@@ -251,6 +291,7 @@ async def chat_walk(
     monkeypatch: pytest.MonkeyPatch,
     *,
     controls: ConversationControls | None = None,
+    built_by=chat_spec,
     **overrides: object,
 ) -> tuple[Conducted, list[tuple[str, str]], list[tuple[str, str | None]], object]:
     """One chat simulation, conducted the way the service conducts it.
@@ -263,7 +304,7 @@ async def chat_walk(
     """
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "LiveKitChatRoomBackend", stub.driver)
-    spec = SimulationSpec.from_document(chat_spec(**overrides))
+    spec = SimulationSpec.from_document(built_by(**overrides))
     turns: list[tuple[str, str]] = []
     calls: list[tuple[str, str | None]] = []
 
@@ -1651,24 +1692,88 @@ def test_the_plug_speaks_chat_only():
     assert "voice" in str(refusal.value)
 
 
-def test_chat_is_refused_on_the_connection_that_names_a_token_endpoint():
-    """Egma holds no key pair there, so it neither makes the room whose
-    name would say chat nor dispatches the worker that must read it — and
-    the refusal says which."""
-    with pytest.raises(PlugError) as refusal:
-        LiveKitChat(
-            modality="chat",
-            access_variant="livekit_room.customer_token_endpoint",
-            config={
-                "url": A_URL,
-                "tokenEndpoint": "https://acme.example/egma/livekit-token",
-            },
-            credentials={"headers": '{"Authorization":"Bearer nothing"}'},
-            simulation_id=A_SIMULATION,
+async def test_a_chat_spec_through_a_token_endpoint_conducts_a_whole_simulation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The chat lane on the other way in.
+
+    The endpoint is asked for the *marked* room — spelled by hand here for
+    the reason the mark test above spells it — by LiveKit's standard token
+    request naming the worker; the token comes back; egma joins with it;
+    the worker somebody else dispatched turns up typing; and the exchange
+    is the one the key-pair shape conducts, word for word.
+    """
+    stub = ChatStub(
+        greeting="Lakeside Dental, how can I help?",
+        replies=["Of course — could I take your name?", "Booked for Thursday."],
+    )
+    written = {"tenant": "acme"}
+    with serving(token="minted.by.the.customer") as endpoint:
+        conducted, turns, _calls, assembled = await chat_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            built_by=chat_endpoint_spec,
+            token_endpoint=endpoint.url,
+            job_dispatch_metadata=written,
+            scenario=(
+                "I need to move my Tuesday cleaning to Thursday. "
+                "My name is Margaret Hale."
+            ),
         )
-    told = str(refusal.value)
-    assert "tokenEndpoint" in told
-    assert "dispatch" in told
+
+    assert turns == [
+        ("agent", "Lakeside Dental, how can I help?"),
+        ("human", "I need to move my Tuesday cleaning to Thursday."),
+        ("agent", "Of course — could I take your name?"),
+        ("human", "My name is Margaret Hale."),
+        ("agent", "Booked for Thursday."),
+        ("human", GOODBYE),
+    ]
+    assert conducted.status == "completed"
+    assert conducted.ending == "persona_concluded"
+    assert assembled.conductor is None, "no speech leg was built"
+
+    # One request, in the standard shape, for the marked room and the
+    # named worker — and the token it answered is what egma joined with.
+    assert len(endpoint.asked) == 1
+    asked = endpoint.asked[0]
+    assert asked.body["room_name"] == f"egma-sim-chat-{A_SIMULATION}"
+    assert asked.body["room_name"].startswith("egma-sim-")
+    assert asked.body["participant_identity"] == f"{PERSONA_IDENTITY}-{A_SIMULATION}"
+    assert asked.body["room_config"] == {
+        "agents": [
+            {
+                "agent_name": AN_AGENT,
+                "metadata": json.dumps(written, separators=(",", ":")),
+            }
+        ]
+    }
+    assert asked.header("authorization") == "Bearer SENTINEL-chat-endpoint-bearer-2f7a"
+    assert stub.joined_with[0].token == "minted.by.the.customer"
+
+    # Nothing was created and nothing was dispatched by egma: it holds no
+    # key pair here, and the room it typed in is the one it asked for.
+    assert stub.rooms == []
+    assert conducted.provider_reference == f"egma-sim-chat-{A_SIMULATION}"
+
+
+def test_the_chat_plug_takes_a_token_endpoint_connection():
+    """The refusal this variant used to draw is gone: the plug reads the
+    endpoint shape the voice plug reads, and names the marked room."""
+    stub = ChatStub()
+    plug = LiveKitChat(
+        modality="chat",
+        access_variant="livekit_room.customer_token_endpoint",
+        config={
+            "tokenEndpoint": "https://acme.example/egma/livekit-token",
+            "agentName": "front-desk",
+        },
+        credentials={"headers": AN_AUTH_HEADER},
+        simulation_id=A_SIMULATION,
+        driver=stub.driver,
+    )
+    assert plug.backend.room_name == f"egma-sim-chat-{A_SIMULATION}"
 
 
 @pytest.mark.parametrize("agent_name", [None, "", "   "])
@@ -1794,10 +1899,11 @@ async def test_closing_a_chat_that_never_opened_asks_for_nothing():
 def test_the_fake_is_the_real_chat_driver_with_its_network_answered():
     """The claim the chat fake's fidelity rests on.
 
-    Three overrides where the voice fake has four: a chat connection never
-    asks a customer's endpoint for a token, because chat is refused on
-    that access variant — so there is no loopback route to add, and adding
-    one would be code nothing runs.
+    The same four overrides as the voice fake, for the same reason: the
+    room's network is answered here, and the token request is not — a chat
+    connection that asks a customer's endpoint really asks the loopback
+    fake, so the loopback route is the one exception to the production
+    connector's policy, in both fakes alike.
     """
     stub = ChatStub()
     driver = stub.driver(
@@ -1814,7 +1920,12 @@ def test_the_fake_is_the_real_chat_driver_with_its_network_answered():
         for name in vars(type(driver))
         if not name.startswith("__") and hasattr(LiveKitChatRoomBackend, name)
     }
-    assert overridden == {"_asked", "_joined_room", "_delete_room"}
+    assert overridden == {
+        "_asked",
+        "_joined_room",
+        "_delete_room",
+        "_endpoint_connector",
+    }
 
 
 async def test_egmas_own_words_are_never_read_back_as_the_agents(

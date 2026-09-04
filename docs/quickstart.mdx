@@ -193,6 +193,11 @@ EGMA_LIVEKIT_API_SECRET=... \
 Use `--modality chat` to add a chat Connection. The coding agent may add both
 when you did not limit the requested setup.
 
+A customer token endpoint also supports voice and chat. It uses
+`--livekit-agent-name` and `--livekit-token-endpoint`, with no `--livekit-url`,
+because the endpoint returns the LiveKit server URL. Supply its auth headers
+through `EGMA_LIVEKIT_TOKEN_ENDPOINT_HEADERS`.
+
 If you specifically use a customer token endpoint:
 
 ```bash
@@ -201,7 +206,7 @@ EGMA_LIVEKIT_TOKEN_ENDPOINT_HEADERS='{"Authorization":"Bearer ..."}' \
   --agent agt_... \
   --access livekit-token-endpoint \
   --modality voice \
-  --livekit-url wss://example.livekit.cloud \
+  --livekit-agent-name receptionist \
   --livekit-token-endpoint https://example.com/livekit/token
 ```
 

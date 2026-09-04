@@ -577,6 +577,13 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
   },
   {
     agentPlatform: "livekit",
+    connectionType: "livekit_room",
+    accessVariant: "livekit_room.customer_token_endpoint",
+    modality: "chat",
+    productLabel: "LiveKit chat token endpoint",
+  },
+  {
+    agentPlatform: "livekit",
     connectionType: "phone_number",
     accessVariant: "phone_number.public_e164",
     modality: "voice",
@@ -822,6 +829,39 @@ export function livekitServerOrigin(url: string): string {
 
   const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
   return parsed.port === "" ? host : `${host}:${parsed.port}`;
+}
+
+/**
+ * Which token endpoint a url names, as one comparable string.
+ *
+ * The whole address, where `livekitServerOrigin` keeps only host and port. A
+ * LiveKit server is one host and a path on it means nothing; a token endpoint
+ * is a route on a service the customer wrote, and one service commonly mints
+ * for several projects on several routes — `/staging/token` beside
+ * `/production/token`, or a tenant named in the query — so the origin alone
+ * would fold two workers behind one gateway into one agent. Host case and a
+ * trailing root dot go the way they do for a server. The path and query are
+ * kept as written, because a route is case-sensitive and the query is the
+ * customer's to shape. The scheme is dropped for the reason it is dropped
+ * there: a stored endpoint is https, admitted or refused at the gate above.
+ *
+ * A comparison key and never a value anybody requests: the endpoint is stored
+ * as it was written. An unparseable one answers with what it was given, as a
+ * server url does, and compares equal only to itself.
+ */
+export function tokenEndpointIdentity(endpoint: string): string {
+  const written = endpoint.trim();
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(written);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed === undefined) return written;
+
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  const origin = parsed.port === "" ? host : `${host}:${parsed.port}`;
+  return `${origin}${parsed.pathname}${parsed.search}`;
 }
 
 /*
@@ -1245,22 +1285,23 @@ export const CONNECTION_REGISTRY: Readonly<
      * second is an advanced, customer-operated integration for a team that
      * must keep the token-signing secret on its side.
      *
-     * Nothing carries over between them. A connection that names an endpoint
-     * holds no key pair, so it cannot create a room, cannot dispatch a worker
-     * and cannot delete anything — which is why `agentName` is not among its
-     * keys. Dispatching is a power a key pair buys, and a config key egma would
-     * silently ignore is worse than one it refuses by name. The same holds for
-     * a test's `env.job_dispatch_metadata`: there is no dispatch of egma's on
-     * this variant for it to ride on. Where a customer on that variant wants
-     * their agent to read something, their own endpoint is what puts it
-     * there — it is the side minting the token and dispatching the worker.
+     * Both variants name the worker, and on both a test's
+     * `env.job_dispatch_metadata` reaches it. On the key-pair variant egma
+     * dispatches the worker itself and writes the string on that dispatch. On
+     * the endpoint variant it asks the endpoint for that worker by name, in
+     * the `room_config` block of LiveKit's standard token request, with the
+     * test's string as that dispatch's metadata; the endpoint copies the
+     * block into the token it mints — which is how every LiveKit frontend
+     * dispatches a named agent without holding the key pair. What the
+     * endpoint variant does not hold is a server url: the endpoint's answer
+     * names the server, exactly as LiveKit's standard token endpoint answers
+     * `server_url` beside `participant_token`.
      *
-     * That same missing power is why the two variants no longer speak the
-     * same modalities. Chat needs the agent told, before its session opens,
-     * that it is in a chat — and the telling is the name of the room, which
-     * only the side minting the room controls. Egma can ask a customer's
-     * endpoint for a name; it can guarantee one, and dispatch the worker
-     * that must read it, only where it holds the key pair.
+     * What egma still cannot do on the endpoint variant is create or delete
+     * a room. Both variants speak both modalities: the telling that a
+     * simulation is typed is the room's name, and on the endpoint variant
+     * egma asks the endpoint for the marked name exactly as it asks for the
+     * bare one.
      */
     accessVariants: [
       {
@@ -1333,38 +1374,35 @@ export const CONNECTION_REGISTRY: Readonly<
         named: "a token-endpoint livekit connection",
         id: "livekit_room.customer_token_endpoint",
         label: "Customer token endpoint [Advanced]",
-        // Voice only, on a kind that speaks both. Egma joins a room this
-        // variant's endpoint let it into; it never dispatches the worker, so
-        // there is no dispatch metadata of egma's on the job and nowhere to
-        // ask the agent to go text-only. Offering chat here would be egma
-        // promising a text simulation and then running a spoken one.
-        modalities: {
-          speaks: ["voice"],
-          refusal:
-            "a token-endpoint livekit connection speaks voice: Egma asks your " +
-            "endpoint for a token and never dispatches the worker itself, so " +
-            "it has no way to tell the agent to answer in text. Chat is " +
-            "offered on the LiveKit project credentials access variant, where " +
-            "Egma dispatches the named worker and sends the modality with it.",
-        },
+        // Speaks both, like the key pair. A chat simulation's room is asked
+        // for under its marked name, `egma-sim-chat-…`, which the endpoint's
+        // `egma-sim-` allowlist matches unchanged and the worker reads
+        // however the token was minted.
         config: {
-          // Where the join goes, unless the endpoint's answer names another.
-          url: livekitServerUrl,
-          // Where egma asks for a token, once per simulation.
+          // Where egma asks for a token, once per simulation. The answer names
+          // the LiveKit server to join, so no url is held here.
           tokenEndpoint: tokenEndpointUrl,
+          // Which worker to dispatch. Egma asks the endpoint for it by name,
+          // in the `room_config` of LiveKit's standard token request — with
+          // the test's `env.job_dispatch_metadata` as that dispatch's
+          // metadata — and the endpoint copies that block into the token it
+          // mints, so a named dispatch needs no key pair on egma's side.
+          // Demanded for the same reason as on the key-pair variant: the
+          // record names the agent it graded.
+          agentName: nonEmptyString,
         },
         fields: [
-          {
-            key: "url",
-            label: "LiveKit WebSocket URL",
-            kind: "url",
-            help: "Your LiveKit project or self-hosted server, like wss://example.livekit.cloud.",
-          },
           {
             key: "tokenEndpoint",
             label: "Token endpoint",
             kind: "url",
-            help: "The public HTTPS URL where Egma asks for one room token per simulation. Private network addresses are refused.",
+            help: "The public HTTPS URL where Egma asks for one room token per simulation. It answers with the token and your LiveKit server URL. Private network addresses are refused.",
+          },
+          {
+            key: "agentName",
+            label: "LiveKit agent name",
+            kind: "text",
+            help: "The name your worker registers under. Egma asks your endpoint to dispatch that worker by name for every simulation, so the record names the agent it graded.",
           },
         ],
         credentialHelp:
@@ -1408,15 +1446,24 @@ export const CONNECTION_REGISTRY: Readonly<
     // accumulate somewhere they can be read side by side.
     //
     // `agentName` is what the query narrows on because it is the half SQL can
-    // compare honestly. The origin is settled afterwards, in `identityOf`,
+    // compare honestly. The address is settled afterwards, in `identityOf`,
     // where two spellings of one server can be seen for what they are.
     reuse: {
       matchedKeys: ["agentName"],
       identityOf: (config) => {
-        const url = config["url"];
         const agentName = config["agentName"];
-        if (url === undefined || agentName === undefined) return undefined;
-        return `${livekitServerOrigin(url)}|${agentName}`;
+        if (agentName === undefined) return undefined;
+        const url = config["url"];
+        if (url !== undefined) return `${livekitServerOrigin(url)}|${agentName}`;
+        // On the token-endpoint variant the endpoint stands in for the
+        // server: it is the one address the connection holds, and the server
+        // it answers with is not known until a simulation asks it. The whole
+        // route counts, not the origin alone, because one gateway mints for
+        // many projects — and an identity that always carries a path can
+        // never compare equal to a server's, which never does.
+        const endpoint = config["tokenEndpoint"];
+        if (endpoint === undefined) return undefined;
+        return `${tokenEndpointIdentity(endpoint)}|${agentName}`;
       },
     },
   },

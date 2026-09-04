@@ -24,10 +24,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openInBrowser } from "../src/platform/browser.ts";
-import {
-  codeFromPaste,
-  startDeviceAuthorization,
-} from "../src/platform/device-flow.ts";
+import { startDeviceAuthorization } from "../src/platform/device-flow.ts";
 import {
   CredentialsFileUnreadableError,
   readCredentials,
@@ -35,11 +32,7 @@ import {
   writeCredentials,
   UnusableUrlError,
 } from "../src/platform/credentials.ts";
-import {
-  logIn,
-  type LoginPrompt,
-  type LogInOptions,
-} from "../src/platform/login.ts";
+import { logIn, type LoginPrompt } from "../src/platform/login.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { makeWorkspace, NO_BROWSER, type Workspace } from "./support/workspace.ts";
 
@@ -59,27 +52,22 @@ afterEach(async () => {
 /** Everything a run of `logIn` said and did, collected for the assertions. */
 type Watched = {
   readonly prompts: LoginPrompt[];
-  readonly said: string[];
   readonly opened: string[];
 };
 
 function watch(): Watched {
-  return { prompts: [], said: [], opened: [] };
+  return { prompts: [], opened: [] };
 }
 
 type RunOptions = {
   readonly watched: Watched;
   readonly signal?: AbortSignal;
-  /** Answers with whatever should be pasted back, once. */
-  readonly paste?: () => string | null;
   /** Runs the moment the code is on screen: what a person in a browser does. */
   readonly whenPrompted?: (prompt: LoginPrompt) => void;
   /** Every wait, in milliseconds, in the order it was asked for. */
   readonly waits?: number[];
   /** Runs at each wait, so a test can change the world between two polls. */
   readonly whenWaiting?: (waits: readonly number[]) => void;
-  readonly saveCredentials?: LogInOptions["saveCredentials"];
-  readonly revokeLoginKey?: LogInOptions["revokeLoginKey"];
 };
 
 async function login(options: RunOptions) {
@@ -87,22 +75,14 @@ async function login(options: RunOptions) {
     url: platform.url,
     credentialsFile: workspace.credentialsFile,
     signal: options.signal ?? new AbortController().signal,
-    ...(options.paste === undefined ? {} : { paste: options.paste }),
     onPrompt: (prompt) => {
       options.watched.prompts.push(prompt);
       options.whenPrompted?.(prompt);
     },
-    say: (line) => options.watched.said.push(line),
     openBrowser: async (url) => {
       options.watched.opened.push(url);
       return true;
     },
-    ...(options.saveCredentials === undefined
-      ? {}
-      : { saveCredentials: options.saveCredentials }),
-    ...(options.revokeLoginKey === undefined
-      ? {}
-      : { revokeLoginKey: options.revokeLoginKey }),
     // Nothing here waits on a person, so nothing here waits — but how long it
     // was going to wait for is written down, because the pace is a promise.
     sleep: async (ms) => {
@@ -230,38 +210,6 @@ describe("signing a machine in", () => {
     expect(waits).toEqual([5_000, 5_000]);
   });
 
-  it("does not ask for a key again because somebody pasted the wrong thing", async () => {
-    // A wrong paste must not be a way to make egma poll: a developer holding a
-    // paste key would otherwise ask for a key as fast as they could type.
-    platform.device.pollEvery(30);
-
-    const watched = watch();
-    const controller = new AbortController();
-    const flood = ["I approved it, thanks", "https://example.test/somewhere", "ZZZZZZZZ"];
-    let pasted = 0;
-
-    const result = await login({
-      watched,
-      signal: controller.signal,
-      paste: () => {
-        if (pasted < flood.length) {
-          pasted += 1;
-          return flood[pasted - 1] ?? null;
-        }
-        controller.abort("interrupt");
-        return null;
-      },
-    });
-
-    expect(result.kind).toBe("interrupted");
-    expect(pasted).toBe(flood.length);
-    // One request, and it is the one that was going to happen anyway. Not one
-    // of the three pastes added another.
-    expect(platform.records.filter((seen) => seen.path === "/api/device/token")).toHaveLength(1);
-    // And the developer was told about every one of them.
-    expect(watched.said).toHaveLength(flood.length);
-  });
-
   it("names an egma that never answered, rather than reporting a broken thing", async () => {
     const result = await logIn({
       // Nothing listens here: the port is reserved and the address is not routed.
@@ -295,108 +243,6 @@ describe("signing a machine in", () => {
     ).toBeNull();
   });
 
-  it("revokes a newly minted key when its local credential cannot be saved", async () => {
-    const watched = watch();
-    let revokedId = "";
-    const result = await login({
-      watched,
-      whenPrompted: (prompt) => void platform.device.approve(prompt.userCode),
-      saveCredentials: async () => {
-        throw new Error("disk is read-only");
-      },
-      revokeLoginKey: async (apiKeyId, options) => {
-        revokedId = apiKeyId;
-        platform.device.reject(options.key);
-        return { kind: "revoked" };
-      },
-    });
-
-    expect(result).toMatchObject({ kind: "not-stored", interrupted: false });
-    expect(result.kind === "not-stored" && result.reason).toContain(
-      `created login key ${revokedId}`,
-    );
-    expect(result.kind === "not-stored" && result.reason).toContain(
-      `revoked the unstored login key ${revokedId}`,
-    );
-    expect(result.kind === "not-stored" && result.reason).not.toContain(
-      "egma_sk_",
-    );
-    expect(platform.device.keys).toHaveLength(0);
-    expect(
-      await readCredentials(workspace.credentialsFile, platform.url),
-    ).toBeNull();
-  });
-
-  it("finishes storing a minted login before reporting a late interrupt", async () => {
-    const watched = watch();
-    const controller = new AbortController();
-    const result = await login({
-      watched,
-      signal: controller.signal,
-      whenPrompted: (prompt) => void platform.device.approve(prompt.userCode),
-      saveCredentials: async (file, credentials, options) => {
-        await writeCredentials(file, credentials, options);
-        controller.abort("interrupt after mint");
-      },
-    });
-
-    expect(result.kind).toBe("stored-interrupted");
-    expect(
-      await readCredentials(workspace.credentialsFile, platform.url),
-    ).toMatchObject({
-      login: { apiKeyId: expect.stringMatching(/^ak_/u) },
-    });
-  });
-
-  it("does not store a key from an incomplete login receipt", async () => {
-    const minted = "egma_sk_incomplete_receipt";
-    const keyId = "ak_incomplete_receipt";
-    let requests = 0;
-    let revoked = "";
-    const result = await logIn({
-      url: "https://egma.invalid",
-      credentialsFile: workspace.credentialsFile,
-      signal: new AbortController().signal,
-      onPrompt: () => undefined,
-      fetchImpl: async () => {
-        requests += 1;
-        return requests === 1
-          ? new Response(
-              JSON.stringify({
-                device_code: "device",
-                user_code: "ABCD1234",
-                verification_uri_complete:
-                  "https://egma.invalid/device?user_code=ABCD1234",
-                expires_in: 30,
-                interval: 0,
-              }),
-              { status: 200 },
-            )
-          : new Response(
-              JSON.stringify({
-                access_token: minted,
-                api_key_id: keyId,
-                // project_id is deliberately absent.
-              }),
-              { status: 200 },
-            );
-      },
-      revokeLoginKey: async (apiKeyId, options) => {
-        revoked = apiKeyId;
-        expect(options.key).toBe(minted);
-        return { kind: "revoked" };
-      },
-    });
-
-    expect(revoked).toBe(keyId);
-    expect(result).toMatchObject({ kind: "not-stored", interrupted: false });
-    expect(result.kind === "not-stored" && result.reason).toContain(
-      "incomplete receipt",
-    );
-    expect(
-      await readCredentials(workspace.credentialsFile, "https://egma.invalid"),
-    ).toBeNull();
-  });
 });
 
 describe("a machine that is already signed in", () => {
@@ -431,108 +277,6 @@ describe("a machine that is already signed in", () => {
       url: "https://somewhere.else.example",
       key: "egma_sk_for-somewhere-else",
     });
-  });
-});
-
-/**
- * The machine with no browser on it: a devbox, anything over SSH.
- *
- * The address goes to a browser somewhere else, and what comes back is whatever
- * was easiest to select over there. All three shapes carry the same fact, so
- * all three work — and a code from somebody else's terminal is refused by name
- * rather than silently waited on.
- */
-describe("coming back from a browser on another machine", () => {
-  const shapes = [
-    { called: "the whole address", of: (prompt: LoginPrompt) => prompt.url },
-    {
-      called: "the query part of it",
-      of: (prompt: LoginPrompt) => `?user_code=${prompt.userCode}`,
-    },
-    { called: "the bare code", of: (prompt: LoginPrompt) => prompt.userCode },
-    {
-      called: "the code as somebody read it out",
-      of: (prompt: LoginPrompt) =>
-        `${prompt.userCode.slice(0, 4)} ${prompt.userCode.slice(4)}`.toLowerCase(),
-    },
-  ];
-
-  /**
-   * The developer walks away with the address, approves it over there, and
-   * comes back to paste something in. Approving therefore happens at the moment
-   * the paste is handed over, and not before — which is why the first ask comes
-   * back pending and the paste is what makes the second one land.
-   */
-  function pasteAfterApproving(
-    watched: Watched,
-    held: { text: string | null },
-  ): () => string | null {
-    return () => {
-      const typed = held.text;
-      if (typed === null) return null;
-      held.text = null;
-      platform.device.approve(watched.prompts[0]?.userCode ?? "");
-      return typed;
-    };
-  }
-
-  for (const shape of shapes) {
-    it(`completes the login when ${shape.called} is pasted back`, async () => {
-      const watched = watch();
-      const held: { text: string | null } = { text: null };
-
-      const result = await login({
-        watched,
-        // No browser opens here: this is the machine that has none.
-        whenPrompted: (prompt) => {
-          held.text = shape.of(prompt);
-        },
-        paste: pasteAfterApproving(watched, held),
-      });
-
-      expect(result.kind).toBe("stored");
-      expect(watched.said).toContain("Checking that one now.");
-      expect(
-        (await readCredentials(workspace.credentialsFile, platform.url))?.key,
-      ).toBe(platform.device.keys.at(-1));
-    });
-  }
-
-  it("says which code it is waiting on when somebody pastes another one", async () => {
-    const watched = watch();
-    const held = { text: "ZZZZ-ZZZZ" as string | null };
-
-    const result = await login({ watched, paste: pasteAfterApproving(watched, held) });
-
-    // Somebody else's code changes nothing about this terminal's own login,
-    // which still finishes on the approval that did happen.
-    expect(result.kind).toBe("stored");
-    const complaint = watched.said.find((line) => line.includes("ZZZZZZZZ"));
-    expect(complaint).toBeDefined();
-    expect(complaint).toContain(watched.prompts[0]?.userCode);
-  });
-
-  it("says so when what was pasted is not a code at all", async () => {
-    const watched = watch();
-    const held = { text: "I approved it, thanks" as string | null };
-
-    await login({ watched, paste: pasteAfterApproving(watched, held) });
-
-    expect(watched.said.some((line) => line.includes("not an Egma code"))).toBe(true);
-  });
-});
-
-describe("reading a code out of whatever was pasted", () => {
-  it("takes all three shapes and refuses what is not one", () => {
-    expect(codeFromPaste("http://egma.example/device?user_code=WDJB-MJHT")).toBe("WDJBMJHT");
-    expect(codeFromPaste("?user_code=WDJB-MJHT")).toBe("WDJBMJHT");
-    expect(codeFromPaste("user_code=wdjb-mjht")).toBe("WDJBMJHT");
-    expect(codeFromPaste("  WDJB-MJHT  ")).toBe("WDJBMJHT");
-    expect(codeFromPaste("wdjb mjht")).toBe("WDJBMJHT");
-
-    expect(codeFromPaste("")).toBeNull();
-    expect(codeFromPaste("http://egma.example/device")).toBeNull();
-    expect(codeFromPaste("no idea what you mean")).toBeNull();
   });
 });
 
@@ -656,8 +400,8 @@ describe("which egma a command talks to", () => {
  * What egma will start a browser on.
  *
  * The address comes back from the instance, and handing a string to a browser
- * opener is handing it to a program. What fails here is not a failed login: the
- * address is still on the screen, and the paste-back still finishes it.
+ * opener is handing it to a program. What fails here is not a failed login:
+ * the address is still on the screen and polling can still finish the login.
  */
 describe("what an instance can put on this terminal's screen", () => {
   it("draws no instruction, whatever the instance sent", async () => {

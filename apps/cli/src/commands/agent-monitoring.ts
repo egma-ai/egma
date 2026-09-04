@@ -19,7 +19,7 @@ import {
 import { notSignedInRefusal, signedInAt } from "../platform/signed-in.ts";
 import { oneLineFactText } from "../ui/fact-value.ts";
 import {
-  readCredentialStdin,
+  readApiKeyCredential,
   type CredentialStdin,
 } from "./credential-stdin.ts";
 
@@ -183,37 +183,27 @@ async function oneTimeRetellKey(
   const env = options.env ?? process.env;
   let key = "";
   if (options.credentialsStdin) {
-    const read = await readCredentialStdin(options.stdin, options.signal);
+    const read = await readApiKeyCredential(options.stdin, options.signal);
     if (read.kind === "interrupted") return { kind: "interrupted" };
-    const document = read.text;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(document) as unknown;
-    } catch {
-      parsed = null;
-    }
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      Array.isArray(parsed) ||
-      Object.keys(parsed).length !== 1 ||
-      !("apiKey" in parsed) ||
-      typeof parsed.apiKey !== "string"
-    ) {
+    if (read.kind === "invalid") {
       options.fail(
         'Retell credentials on standard input must be one JSON object shaped {"apiKey":"..."}. Nothing was changed.',
       );
       return { kind: "failed" };
     }
-    key = parsed.apiKey.trim();
+    if (read.kind === "missing") {
+      options.fail(
+        'No Retell API key arrived on standard input. Pipe one JSON object such as {"apiKey":"..."}, or remove --credentials-stdin and set EGMA_RETELL_API_KEY. Nothing was changed.',
+      );
+      return { kind: "failed" };
+    }
+    key = read.apiKey;
   } else {
     key = (env["EGMA_RETELL_API_KEY"] ?? "").trim();
   }
   if (key === "") {
     options.fail(
-      options.credentialsStdin
-        ? 'No Retell API key arrived on standard input. Pipe one JSON object such as {"apiKey":"..."}, or remove --credentials-stdin and set EGMA_RETELL_API_KEY. Nothing was changed.'
-        : 'Set EGMA_RETELL_API_KEY, or pipe {"apiKey":"..."} into this command with --credentials-stdin. Nothing was changed.',
+      'Set EGMA_RETELL_API_KEY, or pipe {"apiKey":"..."} into this command with --credentials-stdin. Nothing was changed.',
     );
     return { kind: "failed" };
   }
