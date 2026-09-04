@@ -1293,38 +1293,60 @@ describe("the suite-first Tests route", () => {
     expect(screen.getByText("1 mock tool")).toBeTruthy();
 
     /*
-     * And the second row's empty Env cell offers to be filled rather than
-     * sitting blank until somebody happens to press it. The offer is the
-     * button's spoken name too, so what it says and what it is called agree.
+     * And the second row's empty Env cell says `None` rather than sitting
+     * blank — the truthful empty state, in the summary's own faint ink. The
+     * brand offer is in the cell too and hidden until a pointer or the
+     * keyboard reaches it, so a full suite is not a column of orange. The
+     * button's spoken name stays the verb either way, because `None` is the
+     * value rather than a name for the control.
      */
     const second = screen.getByRole("button", {
       name: "Add env variables for Cancels service",
     });
-    expect(second.textContent).toBe("+ Add env variables");
+    const resting = within(second).getByText("None");
+    expect(resting.className).toContain("text-faint");
+    expect(resting.className).toContain("group-pointer-hover/json:hidden");
+    expect(resting.className).toContain("group-focus-visible/json:hidden");
+    const offer = within(second).getByText("+ Add env variables");
+    expect(offer.className).toContain("text-primary");
+    expect(offer.className).toContain("hidden");
+    expect(offer.className).toContain("group-pointer-hover/json:inline");
+    expect(offer.className).toContain("group-focus-visible/json:inline");
+    // The cell is the group both of them read.
+    expect(second.className).toContain("group/json");
+
     fireEvent.click(second);
     expect(await screen.findByRole("dialog", { name: "Env" })).toBeTruthy();
   });
 
   /**
-   * **An empty JSON cell says how to fill it, in every row that has one.**
+   * **An empty JSON cell says how to fill it — quietly in a written row, and
+   * out loud in the row being written.**
    *
    * The cells used to be blank until a pointer went over them, so the only
    * thing saying a mock tool or an env could be written here was the cursor
-   * changing shape. The line is the ember affordance the Expected behaviors
-   * and Personas cells already grow (founder, 2026-09-04).
+   * changing shape. Offering in brand on every row was the other extreme: two
+   * orange lines down a suite of forty tests, in a table whose job is to be
+   * scanned. A written row rests on `None` and offers when it is reached for;
+   * the entry row offers always, because that row is the authoring (founder,
+   * 2026-09-04).
    */
-  it("offers the add line in an existing row and in the entry row, and each opens its dialog", async () => {
+  it("keeps the add line quiet in a written row and plain in the entry row, and each opens its dialog", async () => {
     gridAnswers({ tests: [testBody({ personas: [PERSONA] })] });
 
     render(<TestSuitePage />);
 
     expect(await screen.findByText("Books service")).toBeTruthy();
 
-    // The written row holds neither, so both cells offer.
+    // The written row holds neither, so both cells rest on `None`.
     const rowMockTools = screen.getByRole("button", {
       name: "Add mock tools for Books service",
     });
-    expect(rowMockTools.textContent).toBe("+ Add mock tools");
+    expect(within(rowMockTools).getByText("None")).toBeTruthy();
+    expect(
+      within(rowMockTools).getByText("+ Add mock tools").className,
+    ).toContain("hidden");
+    // Pressing it opens the same dialog whichever word was showing.
     fireEvent.click(rowMockTools);
     const opened = await screen.findByRole("dialog", { name: "Mock tools" });
     fireEvent.click(within(opened).getByRole("button", { name: "Cancel" }));
@@ -1332,15 +1354,20 @@ describe("the suite-first Tests route", () => {
       expect(screen.queryByRole("dialog", { name: "Mock tools" })).toBeNull();
     });
 
-    // And the row being written offers the same two lines, in the same words.
+    // And the row being written offers the same two lines with nothing hiding
+    // them, and says no `None`: nothing about that row is settled yet.
     fireEvent.click(screen.getByRole("button", { name: "+ Write a test" }));
     const entry = await waitFor(() => {
       const held = document.querySelector("tr[data-entry-row]");
       if (held === null) throw new Error("no entry row yet");
       return held as HTMLTableRowElement;
     });
-    expect(within(entry).getByText("+ Add mock tools")).toBeTruthy();
-    expect(within(entry).getByText("+ Add env variables")).toBeTruthy();
+    for (const line of ["+ Add mock tools", "+ Add env variables"]) {
+      const said = within(entry).getByText(line);
+      expect(said.className).toContain("text-primary");
+      expect(said.className).not.toContain("hidden");
+    }
+    expect(within(entry).queryByText("None")).toBeNull();
 
     fireEvent.click(
       within(entry).getByRole("button", { name: "Add env variables for the new test" }),
@@ -1348,6 +1375,26 @@ describe("the suite-first Tests route", () => {
     expect(await screen.findByRole("dialog", { name: "Env" })).toBeTruthy();
     // Nothing is written by opening a dialog from a row that does not exist.
     expect(sent.some((request) => request.method === "POST")).toBe(false);
+  });
+
+  it("shows a reader who cannot author the empty state and no offer at all", async () => {
+    gridAnswers({ role: "viewer", tests: [testBody({ personas: [PERSONA] })] });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    // Both JSON cells say the same true thing about the row they are in.
+    expect(screen.getAllByText("None")).toHaveLength(2);
+    /*
+     * And there is no offer in the cell, hidden or otherwise: a line inviting
+     * somebody to write what their role cannot write is an invitation to a
+     * refusal. The cell is not even a button.
+     */
+    expect(screen.queryByText("+ Add mock tools")).toBeNull();
+    expect(screen.queryByText("+ Add env variables")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /^(Add|Mock tools|Env)/ }),
+    ).toBeNull();
   });
 
   /**
