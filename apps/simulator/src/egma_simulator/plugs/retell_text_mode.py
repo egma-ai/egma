@@ -64,7 +64,7 @@ marks a call ``mocked`` on exactly that basis. So the safe default for a
 kind nobody has proved yet — an MCP tool today, which Retell's own mocks
 do not match — is simply an answer that never arrives here, and the call
 lands on the record as the real one it was. A plug that guessed instead
-would be the one place a coverage stamp could start claiming isolation
+would be the one place the record could start claiming an isolation
 nobody had.
 
 **No provider reference exists, and the record says so.** Text mode
@@ -181,7 +181,7 @@ Egma's own rule, said in Retell's word for it. A mock tool never reads a
 call's arguments — wrong arguments are caught by grading, not by matching,
 because the arguments are on the record either way — so any other rule
 would be egma answering for a tool sometimes, which is not a thing the
-coverage stamp could honestly say."""
+record could honestly say."""
 
 TIMEOUT_SECONDS = 60.0
 """The most one completion may take. Generous because it waits on the
@@ -246,14 +246,16 @@ class RetellTextMode:
         simulation_id: str | None = None,
         agent_version: object = None,
         dynamic_variables: object = None,
+        job_dispatch_metadata: object = None,
         mock_tools: object = None,
         media: object = None,
     ) -> None:
         # Text mode stores nothing, so there is no record on Retell's
         # side for this plug to tell which simulation it is. And no audio
         # exists on this lane at all, so the deployment's carrier is
-        # nothing to it either.
-        del simulation_id, media
+        # nothing to it either. It dispatches no worker, so the half of
+        # the test's env that rides a job dispatch has nowhere to go.
+        del simulation_id, media, job_dispatch_metadata
 
         if access_variant != "retell_text_mode.api_key":
             raise PlugError(
@@ -430,13 +432,7 @@ class RetellTextMode:
 
     async def _exchange(self) -> dict:
         """One completion, and egma's answers into Retell's hands with it."""
-        answered = await self._call(self._asked())
-        # Said once the platform has really taken them, and not before: a
-        # request that never landed put egma in nobody's tool path, and a
-        # coverage stamp claiming otherwise is the one thing the stamp
-        # exists to make impossible.
-        self._mock_tools.handed_over()
-        return answered
+        return await self._call(self._asked())
 
     def _read(self, answered: dict) -> AgentReply:
         """The agent's new messages, become one turn on the record.

@@ -54,7 +54,7 @@ async function suite(
 }
 
 describe("the complete suite repository", () => {
-  it("round-trips current format 4 awkward content byte for byte", () => {
+  it("round-trips current format 5 awkward content byte for byte", () => {
     const written = serializeTestFile(
       aTestFile({
         name: "true",
@@ -73,7 +73,8 @@ describe("the complete suite repository", () => {
           "### Expected behaviors",
           "This quoted heading is still part of the scenario.",
           "## Mock tools",
-          "This heading is also scenario text because it comes before the real behavior list.",
+          "## Env",
+          "These headings are also scenario text because they come before the real behavior list.",
         ].join("\n"),
         expectedBehaviors: [
           'The agent says "Tuesday #2": yes.',
@@ -82,15 +83,17 @@ describe("the complete suite repository", () => {
         mockTools: [
           {
             tool: "calendar #2",
-            says: {
-              answer: {
-                note: "### this JSON text is not a Markdown heading",
-                slots: ["Tuesday #2", "a ``` fence inside text"],
-              },
-              delay_ms: 25,
+            answer: {
+              note: "### this JSON text is not a Markdown heading",
+              slots: ["Tuesday #2", "a ``` fence inside text"],
             },
           },
+          { tool: "book #2", error: 'the calendar said "no": twice' },
         ],
+        env: {
+          retell_dynamic_variables: { caller_name: 'Rita "the #2"' },
+          job_dispatch_metadata: { tenant: "acme", note: "## Env\n```" },
+        },
       }),
     );
 
@@ -113,15 +116,17 @@ describe("the complete suite repository", () => {
     expect(read.mockTools).toEqual([
       {
         tool: "calendar #2",
-        says: {
-          answer: {
-            note: "### this JSON text is not a Markdown heading",
-            slots: ["Tuesday #2", "a ``` fence inside text"],
-          },
-          delay_ms: 25,
+        answer: {
+          note: "### this JSON text is not a Markdown heading",
+          slots: ["Tuesday #2", "a ``` fence inside text"],
         },
       },
+      { tool: "book #2", error: 'the calendar said "no": twice' },
     ]);
+    expect(read.env).toEqual({
+      retell_dynamic_variables: { caller_name: 'Rita "the #2"' },
+      job_dispatch_metadata: { tenant: "acme", note: "## Env\n```" },
+    });
     expect(serializeTestFile(read)).toBe(written);
   });
 
@@ -156,7 +161,6 @@ describe("the complete suite repository", () => {
     ]);
     expect(repository.suites[0]?.tests).toEqual([]);
     expect(repository.suites[1]?.tests[0]?.test.name).toBe("Books a visit");
-    expect(repository.mockTools).toEqual([]);
   });
 
   it.each([
@@ -221,7 +225,7 @@ describe("the complete suite repository", () => {
     );
   });
 
-  it.each(["3", "4.5", "4-old"])("does not read test file format %s", async (format) => {
+  it.each(["3", "4", "5.5", "5-old"])("does not read test file format %s", async (format) => {
     const root = await suite("one", { id: SUITE_ID, name: "One" });
     await writeFile(
       path.join(root, "legacy.md"),
@@ -229,7 +233,7 @@ describe("the complete suite repository", () => {
     );
 
     await expect(readRepository(folderPathsIn(workspace.dir))).rejects.toThrow(
-      /requires format 4.*no legacy reader/i,
+      /requires format 5.*no legacy reader/i,
     );
   });
 

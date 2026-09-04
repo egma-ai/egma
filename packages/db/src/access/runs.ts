@@ -54,18 +54,6 @@ import {
 import { test, testPersona, testSuite, testVersion } from "../schema/tests.ts";
 import { openCredentials } from "../sealing.ts";
 import {
-  resolveMockTools,
-  type MockToolSnapshot,
-  type ResolvedMockTool,
-  type SnapshotDefault,
-  type SnapshotEntry,
-} from "../mock-tools/resolve.ts";
-import {
-  mockToolCoverageFrom,
-  mockToolCoverageRow,
-  type MockToolCoverage,
-} from "../mock-tools/coverage.ts";
-import {
   mockMetadataAsRead,
   mockMetadataFrom,
   mockMetadataRow,
@@ -83,7 +71,6 @@ import {
 import type { AuthContext } from "./context.ts";
 import { IdempotencyConflictError, RunWriteRefusedError } from "./errors.ts";
 import { requestGradingIn, traceEvidenceStartedAt } from "./grading.ts";
-import { mockToolsApplyingTo } from "./mock-tools.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import {
@@ -95,7 +82,10 @@ import {
 } from "./run-plans.ts";
 import {
   getTestVersionExecutionContent,
+  mockToolsOfVersion,
+  type TestEnv,
   type TestExecutionContent,
+  type TestMockTool,
 } from "./tests.ts";
 import { within } from "./within.ts";
 
@@ -148,16 +138,6 @@ export type ConnectionSnapshot = {
   readonly topology: Topology;
   readonly environment: string | null;
   readonly config: unknown;
-  /**
-   * Whether this run is mocked, frozen from the connection's own switch at the
-   * moment it started.
-   *
-   * **The run reads this and never the connection row.** A switch unticked
-   * mid-run does not change the world a run is already in, and a run started
-   * before the switch existed is honestly unmocked — so the fact the claim
-   * gate, the report and the endpoint all read is the one stamped here.
-   */
-  readonly mockToolsEnabled: boolean;
 };
 
 export type Run = {
@@ -192,7 +172,7 @@ export type Run = {
 
 export type StartedRun = Run;
 
-export type { MockToolCoverage, MockMetadata };
+export type { MockMetadata };
 
 export type Simulation = {
   readonly id: string;
@@ -218,7 +198,6 @@ export type Simulation = {
   readonly recordingReference: string | null;
   readonly turnCount: number | null;
   readonly providerReference: string | null;
-  readonly mockToolCoverage: MockToolCoverage | null;
   readonly createdAt: Date;
 };
 
@@ -234,7 +213,6 @@ export type SimulationSummaryFacts = {
   readonly turnCount?: number | undefined;
   readonly providerReference?: string | undefined;
   readonly recordingReference?: string | undefined;
-  readonly mockToolCoverage?: MockToolCoverage | undefined;
   readonly startedAt?: Date | undefined;
   readonly endedAt?: Date | undefined;
 };
@@ -297,7 +275,6 @@ const SIMULATION_COLUMNS = {
   recordingReference: simulation.recordingReference,
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
-  mockToolCoverage: simulation.mockToolCoverage,
   createdAt: simulation.createdAt,
 } as const;
 
@@ -325,11 +302,10 @@ type RunRow = {
   readonly createdAt: Date;
 };
 
-type SimulationRow = Omit<Simulation, "status" | "endingReason" | "modality" | "mockToolCoverage"> & {
+type SimulationRow = Omit<Simulation, "status" | "endingReason" | "modality"> & {
   readonly status: string;
   readonly endingReason: string | null;
   readonly modality: string;
-  readonly mockToolCoverage: unknown;
 };
 
 const LARGEST_CLAIM_CAPACITY = 50;
@@ -354,9 +330,6 @@ function summaryFactsWrite(facts: SimulationSummaryFacts): Record<string, unknow
   }
   if (facts.recordingReference !== undefined) {
     write.recordingReference = facts.recordingReference.trim() || null;
-  }
-  if (facts.mockToolCoverage !== undefined) {
-    write.mockToolCoverage = mockToolCoverageRow(facts.mockToolCoverage);
   }
   if (facts.startedAt !== undefined) write.startedAt = facts.startedAt;
   if (facts.endedAt !== undefined) write.endedAt = facts.endedAt;
@@ -395,57 +368,7 @@ function connectionSnapshotFromRow(value: unknown, runId: string): ConnectionSna
     topology: row.topology as Topology,
     environment: row.environment as string | null,
     config: row.config,
-    mockToolsEnabled: row.mockToolsEnabled === true,
   };
-}
-
-function mockToolSnapshotFromRow(value: unknown, runId: string): MockToolSnapshot {
-  const malformed = () => new Error(`run ${runId} holds a malformed mock-tool snapshot`);
-  if (typeof value !== "object" || value === null || Array.isArray(value)) throw malformed();
-  const { defaults, overrides } = value as Record<string, unknown>;
-  // The header freezes the project's answers and **only** those. What a pinned
-  // test version overrode lives on that version, which is immutable, so there
-  // is nothing about it to freeze — it is merged in per simulation at the
-  // moment a call is served. A stored override would be a second copy of an
-  // immutable thing, free to disagree with it, so the shape refuses one.
-  if (
-    !Array.isArray(defaults) ||
-    typeof overrides !== "object" ||
-    overrides === null ||
-    Array.isArray(overrides) ||
-    Object.keys(overrides).length !== 0
-  ) {
-    throw malformed();
-  }
-  const entryFromRow = (entry: unknown): SnapshotEntry => {
-    if (typeof entry !== "object" || entry === null) throw malformed();
-    const { toolName, answer, delayMilliseconds } = entry as Record<string, unknown>;
-    if (typeof toolName !== "string" || typeof delayMilliseconds !== "number" || typeof answer !== "object" || answer === null) throw malformed();
-    const held = answer as Record<string, unknown>;
-    const read = "error" in held
-      ? { error: held.error as string }
-      : { answer: held.answer };
-    return { toolName, delayMilliseconds, answer: read } as SnapshotEntry;
-  };
-  return {
-    defaults: defaults.map((entry): SnapshotDefault => {
-      const mockToolId = (entry as Record<string, unknown>).mockToolId;
-      if (typeof mockToolId !== "string") throw malformed();
-      return { ...entryFromRow(entry), mockToolId };
-    }),
-    overrides: {},
-  };
-}
-
-function mockToolCoverageFromRow(
-  value: unknown,
-  simulationId: string,
-): MockToolCoverage | null {
-  return mockToolCoverageFrom(
-    value,
-    () =>
-      new Error(`simulation ${simulationId} holds malformed mock-tool coverage`),
-  );
 }
 
 function runFromRow(
@@ -479,7 +402,6 @@ function simulationFromRow(row: SimulationRow): Simulation {
     status: row.status as SimulationStatus,
     endingReason: row.endingReason as SimulationEndingReason | null,
     modality: row.modality as Modality,
-    mockToolCoverage: mockToolCoverageFromRow(row.mockToolCoverage, row.id),
   };
 }
 
@@ -549,24 +471,6 @@ function theRun(auth: AuthContext, id: string): SQL {
 
 function nothingLeftToCancel(runId: string): string {
   return `run ${runId} has already finished, so there is nothing left to cancel`;
-}
-
-async function freezeMockTools(
-  on: Queryable,
-  auth: AuthContext,
-  projectId: string,
-  agentId: string,
-): Promise<MockToolSnapshot> {
-  const defaults = await mockToolsApplyingTo(on, auth, projectId, agentId);
-  return {
-    defaults: defaults.map((one) => ({
-      mockToolId: one.id,
-      toolName: one.toolName,
-      answer: one.answer,
-      delayMilliseconds: one.delayMilliseconds,
-    })),
-    overrides: {},
-  };
 }
 
 function validateExpectedVersions(
@@ -696,7 +600,6 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           topology: connection.topology,
           environment: connection.environment,
           config: connection.config,
-          mockToolsEnabled: connection.mockToolsEnabled,
           credentials: connection.credentials,
         })
         .from(connection)
@@ -774,12 +677,6 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
         testVersionId: string;
         modality: Modality;
       }[] = [];
-      const mockToolSnapshot = await freezeMockTools(
-        tx,
-        auth,
-        projectId,
-        reached.agentId,
-      );
       const [measured] = await tx
         .select({ total: count() })
         .from(test)
@@ -817,13 +714,7 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           topology: reached.topology,
           environment: reached.environment,
           config: reached.config,
-          // The switch, frozen with the rest of the connection. Every later
-          // reader — the claim gate, the report, the endpoint — asks the run
-          // rather than the connection, so unticking mid-run changes nothing
-          // about a run already going.
-          mockToolsEnabled: reached.mockToolsEnabled,
         },
-        mockToolSnapshot,
         // Read before this transaction opened; written down here so that every
         // request this run makes names the same version, and a concurrent edit
         // on the account cannot move what the suite is testing halfway through.
@@ -1559,15 +1450,25 @@ async function owedMockCleanupRows(
 
 export type SimulationExecutionEvidence = {
   readonly testVersion: TestExecutionContent;
-  readonly mockToolSnapshot: MockToolSnapshot;
+  /** The pinned version's own mock tools, in the order it named them. */
+  readonly mockTools: readonly TestMockTool[];
+  /** The pinned version's own env, or null where it asks for none. */
+  readonly env: TestEnv | null;
 };
 
 /**
- * The bounded frozen test and Mock Tool evidence for one Simulation.
+ * The bounded frozen test evidence for one Simulation, and the world that
+ * version asks for.
  *
  * The Simulation already pins one persona. This read therefore never loads the
  * full persona list on its test version, even when hundreds of Simulations
  * share that version.
+ *
+ * **Read off the pinned version, never off the run.** The run used to carry a
+ * frozen copy of the project's mocked world, because a project mock tool could
+ * be edited underneath it. There is no project half now: the version a
+ * simulation pins is immutable, so reading it is reading exactly what this
+ * simulation executes, and a copy on the run could only disagree with it.
  */
 export async function getSimulationExecutionEvidence(
   auth: AuthContext,
@@ -1576,30 +1477,56 @@ export async function getSimulationExecutionEvidence(
   authorize(auth, "read", here(auth));
   const [row] = await db()
     .select({
-      runId: run.id,
       testVersionId: simulation.testVersionId,
-      snapshot: run.mockToolSnapshot,
     })
     .from(simulation)
-    .innerJoin(run, eq(simulation.runId, run.id))
     .where(within(auth, simulation, and(
       eq(simulation.id, simulationId),
       inActingProject(auth, simulation),
     )))
     .limit(1);
   if (row === undefined) return undefined;
-  const frozen = mockToolSnapshotFromRow(row.snapshot, row.runId);
   const version = await getTestVersionExecutionContent(auth, row.testVersionId);
   if (version === undefined) {
     throw new Error(`simulation ${simulationId} pins unreadable test version ${row.testVersionId}`);
   }
   return {
     testVersion: version,
-    mockToolSnapshot: {
-      defaults: frozen.defaults,
-      overrides: { [row.testVersionId]: version.mockOverrides },
-    },
+    mockTools: version.mockTools,
+    env: version.env,
   };
+}
+
+/**
+ * Whether any simulation of this run pins a test version that mocks something.
+ *
+ * The question the run-start machinery asks before it decides to branch a
+ * temporary copy of the customer's agent, and the same question the claim gate
+ * asks in SQL — asked here as one existence check over the run's own
+ * simulations, so a suite of a thousand tests costs one read.
+ */
+export async function runCarriesMockTools(
+  auth: AuthContext,
+  runId: string,
+): Promise<boolean> {
+  authorize(auth, "read", here(auth));
+  const [found] = await db()
+    .select({ id: simulation.id })
+    .from(simulation)
+    .innerJoin(testVersion, eq(simulation.testVersionId, testVersion.id))
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          eq(simulation.runId, runId),
+          inActingProject(auth, simulation),
+          isNotNull(testVersion.mockTools),
+        ),
+      ),
+    )
+    .limit(1);
+  return found !== undefined;
 }
 
 export type RunPage = {
@@ -2265,59 +2192,44 @@ export async function resolveSimulationStanding(
  * Everything the mock endpoint needs to answer one tool call, in one read.
  *
  * The request arrives from the agent's platform with no credential of egma's,
- * so this read carries the whole of what the three gates ask: whether the run
- * named is still live, whether the simulation named is that run's, and what
- * that simulation's answers are. It takes no `AuthContext` for the same reason
+ * so this read carries the whole of what the gates ask: whether the simulation
+ * named exists, whether its run is still live, and what that simulation is
+ * answered. It takes no `AuthContext` for the same reason
  * `resolveSimulationStanding` beside it takes none — there is no caller to
  * resolve, and the row is the authority.
+ *
+ * **The simulation is the whole address.** The endpoint used to name a run and
+ * a simulation and check that the two belonged together; a simulation names its
+ * own run, so the pair could only ever agree or be a mistake. One identifier is
+ * one gate, and the run it names comes back beside it.
  *
  * `signingKey` is the agent's sealed platform key, opened. It is used to
  * **verify** a signature the platform put on the request and for nothing else:
  * nothing on this path spends it, and it never reaches an answer, a log, or a
  * refusal.
  *
- * `undefined` means no such run, which is the first gate's answer.
+ * `undefined` means no such simulation, which is the first gate's answer.
  */
 export type MockToolCallTarget = {
   readonly runId: string;
   /** Whether the run can still be conducting simulations. */
   readonly runIsLive: boolean;
-  /** The simulation named, or `undefined` when it is not this run's. */
-  readonly simulation:
-    | {
-        readonly id: string;
-        readonly agentId: string;
-        readonly testVersionId: string;
-        readonly personaVersionId: string;
-        readonly status: SimulationStatus;
-        /** What this simulation is answered, project defaults and overrides merged. */
-        readonly answers: readonly ResolvedMockTool[];
-      }
-    | undefined;
+  readonly simulation: {
+    readonly id: string;
+    readonly agentId: string;
+    readonly testVersionId: string;
+    readonly personaVersionId: string;
+    readonly status: SimulationStatus;
+    /** What this simulation is answered: its pinned test version's own list. */
+    readonly answers: readonly TestMockTool[];
+  };
   readonly auth: AuthContext;
   readonly signingKey: string | null;
 };
 
 export async function resolveMockToolCall(
-  runId: string,
   simulationId: string,
 ): Promise<MockToolCallTarget | undefined> {
-  const [header] = await db()
-    .select({
-      id: run.id,
-      organizationId: run.organizationId,
-      projectId: run.projectId,
-      status: run.status,
-      finishedAt: run.finishedAt,
-      mockToolSnapshot: run.mockToolSnapshot,
-      signingKey: agent.monitoringApiKey,
-    })
-    .from(run)
-    .innerJoin(agent, eq(run.agentId, agent.id))
-    .where(eq(run.id, runId))
-    .limit(1);
-  if (header === undefined) return undefined;
-
   const [row] = await db()
     .select({
       id: simulation.id,
@@ -2325,83 +2237,50 @@ export async function resolveMockToolCall(
       testVersionId: simulation.testVersionId,
       personaVersionId: simulation.personaVersionId,
       status: simulation.status,
+      runId: run.id,
+      organizationId: run.organizationId,
+      projectId: run.projectId,
+      runStatus: run.status,
+      runFinishedAt: run.finishedAt,
+      mockTools: testVersion.mockTools,
+      signingKey: agent.monitoringApiKey,
     })
     .from(simulation)
-    .where(and(eq(simulation.id, simulationId), eq(simulation.runId, runId)))
+    .innerJoin(run, eq(simulation.runId, run.id))
+    .innerJoin(agent, eq(run.agentId, agent.id))
+    .innerJoin(testVersion, eq(simulation.testVersionId, testVersion.id))
+    .where(eq(simulation.id, simulationId))
     .limit(1);
+  if (row === undefined) return undefined;
 
-  const frozen = mockToolSnapshotFromRow(header.mockToolSnapshot, header.id);
-  const auth = conductingContext(header.organizationId, header.projectId);
+  const auth = conductingContext(row.organizationId, row.projectId);
 
-  // The run header freezes the **project's** answers and nothing else. What a
-  // pinned test version overrode is on that version, which is immutable — so
-  // there is nothing to freeze and nothing that can move underneath a run, and
-  // the two are merged here, per simulation, at the moment a call is served.
-  // That is what makes a per-test branch cost the draft nothing: one temporary
-  // version carries URLs, never answers, so it serves every override.
-  //
-  // The same merge `getSimulationExecutionEvidence` performs for the simulator,
-  // performed for the endpoint — one resolution, one answer to "what was this
-  // simulation served".
-  const answers =
-    row === undefined
-      ? []
-      : await answersFor(auth, frozen, row.testVersionId, simulationId);
+  // Read off the pinned version in the same statement as the row, because the
+  // version is immutable: what this simulation is answered was settled when the
+  // run pinned it and nothing since can have moved it. The endpoint and the
+  // simulator therefore read one list rather than merging two.
+  const answers = mockToolsOfVersion(row.mockTools, row.testVersionId);
 
   return {
-    runId: header.id,
+    runId: row.runId,
     // Live means the run can still be conducting: it has not been finished,
     // and it has not been canceled. A finished run's world has been torn down,
     // so an answer served after it would be an answer from a world that no
     // longer exists.
     runIsLive:
-      header.finishedAt === null &&
-      (header.status === "pending" || header.status === "running"),
-    simulation:
-      row === undefined
-        ? undefined
-        : {
-            id: row.id,
-            agentId: row.agentId,
-            testVersionId: row.testVersionId,
-            personaVersionId: row.personaVersionId,
-            status: row.status as SimulationStatus,
-            answers,
-          },
-    auth,
-    signingKey:
-      header.signingKey === null ? null : openedApiKey(header.signingKey),
-  };
-}
-
-/**
- * The run's frozen defaults merged with what this simulation's pinned test
- * version overrode.
- *
- * A version that cannot be read is a refusal rather than a silent fall back to
- * the project's defaults: serving the default where a test authored a branch
- * would answer the wrong world and put it on the record as though it were
- * asked for.
- */
-async function answersFor(
-  auth: AuthContext,
-  frozen: MockToolSnapshot,
-  testVersionId: string,
-  simulationId: string,
-): Promise<readonly ResolvedMockTool[]> {
-  const version = await getTestVersionExecutionContent(auth, testVersionId);
-  if (version === undefined) {
-    throw new Error(
-      `simulation ${simulationId} pins unreadable test version ${testVersionId}`,
-    );
-  }
-  return resolveMockTools(
-    {
-      defaults: frozen.defaults,
-      overrides: { [testVersionId]: version.mockOverrides },
+      row.runFinishedAt === null &&
+      (row.runStatus === "pending" || row.runStatus === "running"),
+    simulation: {
+      id: row.id,
+      agentId: row.agentId,
+      testVersionId: row.testVersionId,
+      personaVersionId: row.personaVersionId,
+      status: row.status as SimulationStatus,
+      answers,
     },
-    testVersionId,
-  );
+    auth,
+    signingKey: row.signingKey === null ? null : openedApiKey(row.signingKey),
+  };
 }
 
 /** The plaintext key inside a sealed `{ apiKey }` envelope, or null. */

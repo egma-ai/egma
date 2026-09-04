@@ -14,8 +14,9 @@ for its token really asks, over a socket, of the endpoint in
 Everything else is the real driver's own code, and deliberately so. The
 requests recorded below are the very protobuf messages that would have
 gone on the wire, built by the driver: the room's name, the agent's name,
-and the metadata the connection configured on both channels that carry
-it. So are the waits, the endings, the sentences a person
+and the metadata the test wrote for the agent's dispatch. The room's own
+metadata is recorded too, and what it records is that egma writes none.
+So are the waits, the endings, the sentences a person
 reads and the scrubbing of the key pair. What this suite proves about a
 refusal or an ending is therefore proved about the code a customer's
 server will run.
@@ -155,7 +156,12 @@ class RpcAsk:
 
 @dataclass(frozen=True)
 class CreatedRoom:
-    """One room this LiveKit was asked to make, and what it carries."""
+    """One room this LiveKit was asked to make, and what it carries.
+
+    ``metadata`` is here to be read as empty: egma writes on the dispatch
+    and never on the room, and a field nobody records is a field no test
+    can hold that to.
+    """
 
     name: str
     metadata: str
@@ -163,7 +169,12 @@ class CreatedRoom:
 
 @dataclass(frozen=True)
 class Dispatch:
-    """One agent this LiveKit was asked to put in a room."""
+    """One agent this LiveKit was asked to put in a room.
+
+    ``metadata`` is the test's own ``job_dispatch_metadata``, serialised
+    by the driver — the exact string a worker would read out of
+    ``ctx.job.metadata``.
+    """
 
     room: str
     agent_name: str

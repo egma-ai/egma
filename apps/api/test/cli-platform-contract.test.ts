@@ -114,14 +114,15 @@ describe("the CLI and API suite contract", () => {
             // resolve. A test names at least one persona from birth, so a push
             // naming none is refused rather than given the project's default.
             personas: [{ id: "", name: "Everyday caller" }],
+            // The world the test carries. A repository push names both on
+            // every test, because the change set is the complete authored
+            // state and a silent absence would be a field the push had no
+            // opinion about.
             mockTools: [],
+            env: null,
           },
           expectedVersionId: null,
           expectedRevision: null,
-        }],
-        mockTools: [{
-          tool: "calendar",
-          says: { answer: { open: true } },
         }],
       },
       fetchImpl,
@@ -215,9 +216,13 @@ describe("the CLI and API suite contract", () => {
       tests: [{
         clientRef: "egma/tests/release/books-a-visit.md",
         suiteId: suite.id,
+        mockTools: [],
+        env: null,
       }],
-      mockTools: [{ tool: "calendar", answer: { open: true } }],
     });
+    // The change set has no project-level list any more: mock tools belong to
+    // the test that needs them.
+    expect(writes[1]?.body).not.toHaveProperty("mockTools");
     expect(writes[2]?.body).toMatchObject({
       suiteId: suite.id,
       agentId: agentId,

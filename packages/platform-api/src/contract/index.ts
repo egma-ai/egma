@@ -4,7 +4,6 @@ import { apiKeyOperations } from "./operations/api-keys.ts";
 import { graderLibraryOperations } from "./operations/grader-library.ts";
 import { graderOperations } from "./operations/graders.ts";
 import { memberOperations } from "./operations/members.ts";
-import { mockToolOperations } from "./operations/mock-tools.ts";
 import { monitoringOperations } from "./operations/monitoring.ts";
 import { organizationOperations } from "./operations/organization.ts";
 import { personaOperations } from "./operations/personas.ts";
@@ -31,7 +30,6 @@ export { apiKeyOperations } from "./operations/api-keys.ts";
 export { graderLibraryOperations } from "./operations/grader-library.ts";
 export { graderOperations } from "./operations/graders.ts";
 export { memberOperations } from "./operations/members.ts";
-export { mockToolOperations } from "./operations/mock-tools.ts";
 export { monitoringOperations } from "./operations/monitoring.ts";
 export { organizationOperations } from "./operations/organization.ts";
 export { personaOperations } from "./operations/personas.ts";
@@ -50,7 +48,6 @@ export const platformOperations = {
   ...graderLibraryOperations,
   ...graderOperations,
   ...memberOperations,
-  ...mockToolOperations,
   ...monitoringOperations,
   ...organizationOperations,
   ...personaOperations,

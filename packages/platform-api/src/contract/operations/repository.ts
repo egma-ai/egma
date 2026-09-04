@@ -1,13 +1,15 @@
 import { defineOperation } from "../definition.ts";
 import {
   arrayOf,
+  nullable,
   parameters,
   rateLimitResponse,
   refusalResponse,
   stringIdSchema,
 } from "../schemas.ts";
 import {
-  testMockToolInputSchema,
+  testEnvSchema,
+  testMockToolSchema,
   testSchema,
 } from "./tests.ts";
 
@@ -31,25 +33,16 @@ const repositoryTestSchema = {
     scenario: stringSchema,
     expectedBehaviors: arrayOf(stringSchema),
     personas: arrayOf(stringSchema),
-    mockTools: arrayOf(testMockToolInputSchema),
+    mockTools: arrayOf(testMockToolSchema),
+    env: nullable(testEnvSchema),
     expectedVersionId: stringIdSchema,
     expectedRevision: stringIdSchema,
   },
   required: [
     "clientRef", "suiteId", "name", "description", "scenario",
-    "expectedBehaviors", "personas", "mockTools",
+    "expectedBehaviors", "personas", "mockTools", "env",
   ],
   additionalProperties: false,
-} as const;
-
-const repositoryMockToolSchema = {
-  oneOf: testMockToolInputSchema.oneOf.map((variant) => ({
-    ...variant,
-    properties: {
-      ...variant.properties,
-      agents: arrayOf(stringSchema),
-    },
-  })),
 } as const;
 
 const changeSetBody = {
@@ -57,9 +50,8 @@ const changeSetBody = {
   properties: {
     suites: arrayOf(repositorySuiteSchema),
     tests: arrayOf(repositoryTestSchema),
-    mockTools: arrayOf(repositoryMockToolSchema),
   },
-  required: ["suites", "tests", "mockTools"],
+  required: ["suites", "tests"],
   additionalProperties: false,
 } as const;
 
@@ -70,7 +62,7 @@ export const repositoryOperations = {
     path: "/v1/repository/change-set",
     summary: "Apply the complete authored state from a repository",
     description:
-      "The complete authored suites, tests, and mock tools are applied atomically. Missing resources refuse rather than delete.",
+      "The complete authored suites and tests are applied atomically. Each test carries its own mock tools and env. Missing resources refuse rather than delete.",
     tag: "Repository",
     security: "credentialed",
     request: { query: projectQuery, body: changeSetBody },

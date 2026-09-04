@@ -47,7 +47,7 @@ The two skills divide the work by purpose:
 | Skill | Responsibility |
 |---|---|
 | `integrate-egma` | First-time repository discovery, Retell or LiveKit setup, human-only pauses, the first suite, a first run, and monitoring |
-| `write-egma-tests` | Egma Markdown test authoring, personas, expected behaviors, and test-level mock tools |
+| `write-egma-tests` | Egma Markdown test authoring, personas, expected behaviors, and each test's own mock tools and env |
 
 ## Human and command boundaries
 
@@ -103,8 +103,7 @@ cost money.
     `egma connect record`. It either proves exact receipt IDs or matches the
     settled provider-public identity. Retell recovery uses the provider agent,
     exactly one lane, and a phone number for phone. LiveKit recovery uses the
-    server URL and exactly one dispatch name or token endpoint. It also matches
-    the settled metadata exactly; omission means the setup had none. The
+    server URL and exactly one dispatch name or token endpoint. The
     attempted `registration_name` is only an optional preference. The command makes no
     remote write and writes the proven or equivalent target to local
     `egma/config.yaml`. `registration-not-found` means no equivalent public
@@ -160,7 +159,7 @@ cost money.
 | `egma personas` | Lists machine-readable valid persona IDs and names for the bound project |
 | `egma suite create <directory> --name <name>` | Creates a suite and writes its local manifest |
 | `egma validate` | Reads and validates the complete folder, including platform persona references |
-| `egma pull` | Pulls remote suites, tests, and project mock tools |
+| `egma pull` | Pulls remote suites and tests |
 | `egma push` | Uploads the complete validated repository as one change |
 | `egma run <suite-directory>` | Runs and follows one complete suite |
 | `egma monitoring enable` | Enables Retell polling or wires LiveKit push monitoring |
@@ -181,7 +180,6 @@ repository:
 ```text
 egma/
   config.yaml      format 3 platform, project, agents, and connections
-  mock-tools.md    project-wide simulation answers
   tests/
     receptionist-core/
       suite.yaml   stable suite ID and current display name
@@ -189,7 +187,8 @@ egma/
 ```
 
 No provider secret belongs in this folder. Tests are ordinary Markdown files,
-so the team can review and version them with the voice-agent source. See
+so the team can review and version them with the voice-agent source. Each test
+file carries the whole of one test, its mock tools and env included. See
 [Test files](/cli/test-files) for the format.
 
 ## LiveKit catalog and local worker runs
@@ -227,7 +226,6 @@ the public fields that the chosen catalog entry requests:
 - `--livekit-url <wss-url>`
 - `--dispatch-name <name>`
 - `--token-endpoint <https-url>`
-- `--metadata <json>`
 
 Connection secrets come only from `EGMA_LIVEKIT_API_KEY`,
 `EGMA_LIVEKIT_API_SECRET`, or `EGMA_LIVEKIT_TOKEN_HEADERS`.

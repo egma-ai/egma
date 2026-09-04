@@ -254,26 +254,14 @@ export const connection = pgTable(
     credentials: text("credentials"),
     /** The last characters of the secret, kept so a person can tell keys apart. */
     credentialsHint: text("credentials_hint"),
-    /**
-     * The switch: a run over this connection is conducted with Egma's mock
-     * tools in front of the agent's own.
-     *
-     * **On the connection rather than on the agent**, because the lane is what
-     * decides whether a mocked run is a thing Egma can conduct at all. A text
-     * exchange and a web call are conversations Egma creates against a named
-     * agent version, so a temporary version is reachable; a phone call is the
-     * real carrier leg to the customer's published number, and Egma never
-     * dials it for a mocked run. One switch above all three would govern one of
-     * them and quietly misdescribe the other two.
-     *
-     * Off by default and checked: only a `retell_text_mode` or
-     * `retell_web_call` connection may hold true. A text connection is created
-     * with it on — that lane carries its answers on each request and writes
-     * nothing to the customer's account — and a web-call connection turns it on
-     * only through the consent screen, where the platform identity and the
-     * sealed key it needs are checked at write time.
+    /*
+     * **There is no mock-tools switch here.** There was one, and a run over a
+     * ticked connection was conducted with Egma's answers in front of the
+     * agent's own. A test carries its own mock tools now, so what a run mocks
+     * is decided by the tests it executes and by nothing on the connection —
+     * and a switch beside them would be a second answer to one question, able
+     * to say no to a test that asked for a world.
      */
-    mockToolsEnabled: boolean("mock_tools_enabled").notNull().default(false),
     /** When this connection stopped being reachable for new work, or null. */
     archivedAt: moment("archived_at"),
     createdBy: idText("created_by").references(() => user.id, {
@@ -295,14 +283,6 @@ export const connection = pgTable(
     check(
       "connection_credentials_hint_agrees",
       sql`(${table.credentials} is null) = (${table.credentialsHint} is null)`,
-    ),
-    // The switch can only be on where a mocked run is a conversation Egma
-    // creates itself. A ticked phone connection would be a box promising
-    // isolation that no run over it could keep.
-    check(
-      "connection_mock_tools_lanes",
-      sql`${table.mockToolsEnabled} = false
-        or ${table.connectionType} in ('retell_text_mode', 'retell_web_call')`,
     ),
     foreignKey({
       name: "connection_project_organization_fk",

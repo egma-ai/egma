@@ -57,7 +57,9 @@ it("registers every contract operation only at its v1 Fastify route", async () =
   api = await createApi("platform_route_closure");
 
   const operations = Object.values(platformOperations);
-  expect(operations).toHaveLength(77);
+  // The same count `packages/platform-api/test/contract.test.ts` pins. The
+  // five mock-tool routes went when mock tools moved onto the test.
+  expect(operations).toHaveLength(72);
 
   for (const operation of operations) {
     const v1Route = fastifyPath(operation.path);

@@ -128,17 +128,23 @@ def outside_egma(
     )
 
 
-def inside_egma(room_name: str = "egma-sim-fixture-0001") -> StubContext:
+def inside_egma(
+    room_name: str = "egma-sim-fixture-0001", metadata: str = ""
+) -> StubContext:
     """A job in a room egma named, with nobody in it yet.
 
     Empty on purpose. Nothing dispatches this worker on egma's behalf
     unless the practice configured a named agent, so the ordinary order is
     that this agent is in the room first and egma walks in afterwards —
     which is what ``StubRoom.arrive`` is for.
+
+    ``metadata`` is what egma wrote onto the dispatch, which is the test's
+    own ``job_dispatch_metadata`` serialised — the string a real worker
+    reads out of ``ctx.job.metadata``.
     """
     return StubContext(
         room=StubRoom(present=()),
-        job=StubJob(room=StubJobRoom(name=room_name), metadata=""),
+        job=StubJob(room=StubJobRoom(name=room_name), metadata=metadata),
     )
 
 

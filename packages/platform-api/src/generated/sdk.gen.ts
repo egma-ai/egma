@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import { buildClientParams, type Client, type ClientMeta, type Options as Options2, type RequestResult, type TDataShape } from './client/index.js';
-import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateCustomGraderErrors, CreateCustomGraderResponses, CreateInvitationErrors, CreateInvitationResponses, CreateMockToolErrors, CreateMockToolResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeleteMockToolErrors, DeleteMockToolResponses, DeletePersonaErrors, DeletePersonaResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverMockToolsErrors, DiscoverMockToolsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetGraderLibraryEntryErrors, GetGraderLibraryEntryResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListMockToolsErrors, ListMockToolsResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveGraderErrors, RemoveGraderResponses, RemoveMemberErrors, RemoveMemberResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, StartMonitoringErrors, StartMonitoringResponses, StopMonitoringErrors, StopMonitoringResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateMockToolErrors, UpdateMockToolResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses, UseGraderInProjectErrors, UseGraderInProjectResponses } from './types.gen.js';
+import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateCustomGraderErrors, CreateCustomGraderResponses, CreateInvitationErrors, CreateInvitationResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeletePersonaErrors, DeletePersonaResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetGraderLibraryEntryErrors, GetGraderLibraryEntryResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveGraderErrors, RemoveGraderResponses, RemoveMemberErrors, RemoveMemberResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, StartMonitoringErrors, StartMonitoringResponses, StopMonitoringErrors, StopMonitoringResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses, UseGraderInProjectErrors, UseGraderInProjectResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -123,10 +123,6 @@ export const registerAgent = <ThrowOnError extends boolean = false>(parameters: 
          */
         pullProductionCalls?: boolean;
         /**
-         * Whether runs over this connection answer the agent's tools with your test data. Sent by the setup flow so mocking is always an explicit yes; absent leaves the lane's own default. Never true for a phone_number connection, which reaches your real tools.
-         */
-        mockToolsEnabled?: boolean;
-        /**
          * Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.
          */
         agentPlatformSelection?: {
@@ -235,7 +231,6 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
     };
     platformAgentId?: string;
     pullProductionCalls?: boolean;
-    mockToolsEnabled?: boolean;
     agentPlatformSelection?: {
         platformAgentId: string;
         credentials: {
@@ -256,7 +251,6 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
                 { in: 'body', key: 'credentials' },
                 { in: 'body', key: 'platformAgentId' },
                 { in: 'body', key: 'pullProductionCalls' },
-                { in: 'body', key: 'mockToolsEnabled' },
                 { in: 'body', key: 'agentPlatformSelection' }
             ] }]);
     return (options?.client ?? client).post<AddConnectionResponses, AddConnectionErrors, ThrowOnError>({
@@ -266,36 +260,6 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
                 type: 'apiKey'
             }],
         url: '/v1/agents/{agentId}/connections',
-        ...options,
-        ...params,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options?.headers,
-            ...params.headers
-        }
-    });
-};
-
-/**
- * Discover the tools a mocked run would stand in front of
- */
-export const discoverMockTools = <ThrowOnError extends boolean = false>(parameters: {
-    agentId: string;
-    projectId?: string;
-    seed?: boolean;
-}, options?: Options<never, ThrowOnError>): RequestResult<DiscoverMockToolsResponses, DiscoverMockToolsErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [
-                { in: 'path', key: 'agentId' },
-                { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'seed' }
-            ] }]);
-    return (options?.client ?? client).post<DiscoverMockToolsResponses, DiscoverMockToolsErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/agents/{agentId}/mock-tools:discover',
         ...options,
         ...params,
         headers: {
@@ -408,7 +372,6 @@ export const updateConnection = <ThrowOnError extends boolean = false>(parameter
     credentials?: {
         [key: string]: unknown;
     };
-    mockToolsEnabled?: boolean;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdateConnectionResponses, UpdateConnectionErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
@@ -417,8 +380,7 @@ export const updateConnection = <ThrowOnError extends boolean = false>(parameter
                 { in: 'body', key: 'name' },
                 { in: 'body', key: 'environment' },
                 { in: 'body', key: 'config' },
-                { in: 'body', key: 'credentials' },
-                { in: 'body', key: 'mockToolsEnabled' }
+                { in: 'body', key: 'credentials' }
             ] }]);
     return (options?.client ?? client).patch<UpdateConnectionResponses, UpdateConnectionErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -927,130 +889,6 @@ export const deactivateMember = <ThrowOnError extends boolean = false>(parameter
         url: '/v1/members/{userId}/deactivate',
         ...options,
         ...params
-    });
-};
-
-/**
- * List mock tools
- */
-export const listMockTools = <ThrowOnError extends boolean = false>(parameters?: {
-    projectId?: string;
-    pageToken?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<ListMockToolsResponses, ListMockToolsErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'query', key: 'projectId' }, { in: 'query', key: 'pageToken' }] }]);
-    return (options?.client ?? client).get<ListMockToolsResponses, ListMockToolsErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/mock-tools',
-        ...options,
-        ...params
-    });
-};
-
-/**
- * Create a mock tool
- */
-export const createMockTool = <ThrowOnError extends boolean = false>(parameters: {
-    body: {
-        tool: string;
-        delayMs?: number;
-        agents?: Array<string>;
-        projectId?: string;
-        answer: unknown;
-        error?: unknown;
-    } | {
-        tool: string;
-        delayMs?: number;
-        agents?: Array<string>;
-        projectId?: string;
-        answer?: unknown;
-        error: string;
-    };
-}, options?: Options<never, ThrowOnError>): RequestResult<CreateMockToolResponses, CreateMockToolErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ key: 'body', map: 'body' }] }]);
-    return (options?.client ?? client).post<CreateMockToolResponses, CreateMockToolErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/mock-tools',
-        ...options,
-        ...params,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options?.headers,
-            ...params.headers
-        }
-    });
-};
-
-/**
- * Delete a mock tool
- */
-export const deleteMockTool = <ThrowOnError extends boolean = false>(parameters: {
-    mockToolId: string;
-    projectId?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<DeleteMockToolResponses, DeleteMockToolErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'mockToolId' }, { in: 'query', key: 'projectId' }] }]);
-    return (options?.client ?? client).delete<DeleteMockToolResponses, DeleteMockToolErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/mock-tools/{mockToolId}',
-        ...options,
-        ...params
-    });
-};
-
-/**
- * Update a mock tool
- */
-export const updateMockTool = <ThrowOnError extends boolean = false>(parameters: {
-    mockToolId: string;
-    body?: {
-        tool?: string;
-        delayMs?: number;
-        agents?: Array<string>;
-        projectId?: string;
-        answer: unknown;
-        error?: unknown;
-    } | {
-        tool?: string;
-        delayMs?: number;
-        agents?: Array<string>;
-        projectId?: string;
-        answer?: unknown;
-        error: string;
-    } | {
-        tool?: string;
-        delayMs?: number;
-        agents?: Array<string>;
-        projectId?: string;
-        answer?: unknown;
-        error?: unknown;
-    };
-}, options?: Options<never, ThrowOnError>): RequestResult<UpdateMockToolResponses, UpdateMockToolErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'mockToolId' }, { key: 'body', map: 'body' }] }]);
-    return (options?.client ?? client).patch<UpdateMockToolResponses, UpdateMockToolErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/mock-tools/{mockToolId}',
-        ...options,
-        ...params,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options?.headers,
-            ...params.headers
-        }
     });
 };
 
@@ -1587,7 +1425,7 @@ export const getSimulationRecording = <ThrowOnError extends boolean = false>(par
 /**
  * Apply the complete authored state from a repository
  *
- * The complete authored suites, tests, and mock tools are applied atomically. Missing resources refuse rather than delete.
+ * The complete authored suites and tests are applied atomically. Each test carries its own mock tools and env. Missing resources refuse rather than delete.
  */
 export const applyRepositoryChangeSet = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
@@ -1605,37 +1443,29 @@ export const applyRepositoryChangeSet = <ThrowOnError extends boolean = false>(p
         personas: Array<string>;
         mockTools: Array<{
             tool: string;
-            delayMs?: number;
             answer: unknown;
             error?: unknown;
         } | {
             tool: string;
-            delayMs?: number;
             answer?: unknown;
             error: string;
         }>;
+        env: {
+            retell_dynamic_variables?: {
+                [key: string]: string;
+            };
+            job_dispatch_metadata?: {
+                [key: string]: unknown;
+            };
+        } | null;
         expectedVersionId?: string;
         expectedRevision?: string;
-    }>;
-    mockTools: Array<{
-        tool: string;
-        delayMs?: number;
-        answer: unknown;
-        error?: unknown;
-        agents?: Array<string>;
-    } | {
-        tool: string;
-        delayMs?: number;
-        answer?: unknown;
-        error: string;
-        agents?: Array<string>;
     }>;
 }, options?: Options<never, ThrowOnError>): RequestResult<ApplyRepositoryChangeSetResponses, ApplyRepositoryChangeSetErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
                 { in: 'body', key: 'suites' },
-                { in: 'body', key: 'tests' },
-                { in: 'body', key: 'mockTools' }
+                { in: 'body', key: 'tests' }
             ] }]);
     return (options?.client ?? client).post<ApplyRepositoryChangeSetResponses, ApplyRepositoryChangeSetErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -2028,15 +1858,21 @@ export const createTest = <ThrowOnError extends boolean = false>(parameters: {
     personas: Array<string>;
     mockTools?: Array<{
         tool: string;
-        delayMs?: number;
         answer: unknown;
         error?: unknown;
     } | {
         tool: string;
-        delayMs?: number;
         answer?: unknown;
         error: string;
     }>;
+    env?: {
+        retell_dynamic_variables?: {
+            [key: string]: string;
+        };
+        job_dispatch_metadata?: {
+            [key: string]: unknown;
+        };
+    } | null;
 }, options?: Options<never, ThrowOnError>): RequestResult<CreateTestResponses, CreateTestErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
@@ -2046,7 +1882,8 @@ export const createTest = <ThrowOnError extends boolean = false>(parameters: {
                 { in: 'body', key: 'scenario' },
                 { in: 'body', key: 'expectedBehaviors' },
                 { in: 'body', key: 'personas' },
-                { in: 'body', key: 'mockTools' }
+                { in: 'body', key: 'mockTools' },
+                { in: 'body', key: 'env' }
             ] }]);
     return (options?.client ?? client).post<CreateTestResponses, CreateTestErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -2140,15 +1977,21 @@ export const updateTest = <ThrowOnError extends boolean = false>(parameters: {
     personas?: Array<string>;
     mockTools?: Array<{
         tool: string;
-        delayMs?: number;
         answer: unknown;
         error?: unknown;
     } | {
         tool: string;
-        delayMs?: number;
         answer?: unknown;
         error: string;
     }>;
+    env?: {
+        retell_dynamic_variables?: {
+            [key: string]: string;
+        };
+        job_dispatch_metadata?: {
+            [key: string]: unknown;
+        };
+    } | null;
     expectedVersionId?: string;
     expectedRevision?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdateTestResponses, UpdateTestErrors, ThrowOnError> => {
@@ -2161,6 +2004,7 @@ export const updateTest = <ThrowOnError extends boolean = false>(parameters: {
                 { in: 'body', key: 'expectedBehaviors' },
                 { in: 'body', key: 'personas' },
                 { in: 'body', key: 'mockTools' },
+                { in: 'body', key: 'env' },
                 { in: 'body', key: 'expectedVersionId' },
                 { in: 'body', key: 'expectedRevision' }
             ] }]);

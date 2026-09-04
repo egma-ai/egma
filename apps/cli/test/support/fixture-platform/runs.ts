@@ -237,7 +237,6 @@ export function runRoutes(options: {
       reason: simulation.reason,
       modality: connection?.modality ?? "voice",
       hasRecording: false,
-      mockToolCoverage: null,
     };
   };
   const simulationDetailOut = (

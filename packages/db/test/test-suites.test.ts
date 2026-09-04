@@ -150,7 +150,6 @@ describe("suite identity and membership", () => {
           { id: newId("ste"), name: "Hand authored" },
         ],
         tests: [],
-        mockTools: [],
       }),
     ).rejects.toThrow(/create the suite first/u);
     expect((await getTestSuite(outbound, acme.outboundSuite))?.name).toBe(
@@ -168,7 +167,6 @@ describe("suite identity and membership", () => {
         ...authored,
         personaIds: [world.rita],
       }],
-      mockTools: [],
     });
     const written = created.tests[0]?.test;
     if (written === undefined) throw new Error("repository test was not created");
@@ -184,7 +182,6 @@ describe("suite identity and membership", () => {
           personaIds: [world.rita],
           expectedVersionId: written.versionId,
         }],
-        mockTools: [],
       }),
     ).rejects.toThrow(/both expected_version_id and expected_revision/u);
 
@@ -204,7 +201,6 @@ describe("suite identity and membership", () => {
       const push = applyRepositoryChangeSet(outbound, {
         suites: [{ id: acme.outboundSuite, name: "Repository rename" }],
         tests: [],
-        mockTools: [],
       });
       const browser = renameTestSuite(outbound, acme.outboundSuite, {
         name: "Browser rename",
@@ -581,7 +577,6 @@ async function seedManyTests(
         JSON.stringify({
           scenario: authored.scenario,
           expectedBehaviors: authored.expectedBehaviors,
-          mockOverrides: [],
         }),
         ids.map((row) => row.versionId),
         ids.map((row) => row.testId),

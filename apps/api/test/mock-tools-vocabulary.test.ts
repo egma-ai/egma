@@ -21,33 +21,29 @@ import { describe, expect, it } from "vitest";
  * into disagreeing about which words are banned, which is exactly the failure
  * a vocabulary guard exists to prevent happening to itself.
  *
- * The files are the whole of what somebody outside egma can meet: the tables,
- * the factory and its refusals, the shared resolver, the route groups that
- * carry mock tools across the wire, both directions of the simulation
- * contract, the simulator's own side of the exchange, the folder and sync
- * modules a developer's repository is written by — and the SDK a customer
- * installs in their own agent, which is the surface with the least chance of
- * anyone at egma rereading it.
+ * The files are the whole of what somebody outside egma can meet: the tables a
+ * test's own world is stored in, the factory and its refusals, the route groups
+ * that carry mock tools across the wire, both directions of the simulation
+ * contract, the simulator's own side of the exchange, the test file a
+ * developer's repository is written by — and the SDK a customer installs in
+ * their own agent, which is the surface with the least chance of anyone at egma
+ * rereading it.
  */
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
 
 const SURFACE = [
-  "packages/db/src/schema/mock-tools.ts",
+  "packages/db/src/schema/tests.ts",
   "packages/db/src/schema/runs.ts",
   "packages/db/migrations/0000_baseline.sql",
-  "packages/db/src/access/mock-tools.ts",
   "packages/db/src/access/tests.ts",
   "packages/db/src/access/runs.ts",
-  "packages/db/src/mock-tools/resolve.ts",
-  "packages/db/src/mock-tools/coverage.ts",
   "packages/db/src/mock-tools/record.ts",
   "packages/db/src/mock-tools/lanes.ts",
   "packages/db/migrations/0002_retell_lanes.sql",
   "packages/db/migrations/0003_retell_mock_tools.sql",
+  "packages/db/migrations/0007_test_owned_mock_tools.sql",
   "packages/db/src/access/errors.ts",
-  "apps/api/src/http/mock-tools.ts",
-  "apps/api/src/routes/mock-tools.ts",
   "apps/api/src/routes/tests.ts",
   "apps/api/src/routes/runs.ts",
   "apps/api/src/routes/claims.ts",
@@ -73,9 +69,7 @@ const SURFACE = [
   "sdks/python/src/egma/seam.py",
   "sdks/python/src/egma/mockable.py",
   "sdks/python/README.md",
-  "apps/cli/src/folder/mock-tools.ts",
-  "apps/cli/src/sync/mock-tools.ts",
-  "apps/cli/src/platform/mock-tools.ts",
+  "apps/cli/src/folder/test-file.ts",
 ];
 
 describe("the words the mocked world is described in", () => {

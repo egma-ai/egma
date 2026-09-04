@@ -15,8 +15,9 @@ import {
   TestMovedOnError,
   UnprocessableInputError,
   type AuthContext,
-  type MockOverrideInput,
   type Test,
+  type TestEnv,
+  type TestMockTool,
   type TestVersion,
 } from "@egma/db";
 import { isId } from "@egma/ids";
@@ -26,7 +27,6 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
-import { answerAsSent, describedMockTool } from "../http/mock-tools.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
 import {
   notFound,
@@ -53,11 +53,19 @@ type Query = {
 
 const CREATE_KEYS = [
   "suiteId", "name", "description", "scenario", "expectedBehaviors",
-  "personas", "mockTools",
+  "personas", "mockTools", "env",
 ] as const;
 const EDIT_KEYS = [
   "name", "description", "scenario", "expectedBehaviors", "personas",
-  "mockTools", "expectedVersionId", "expectedRevision",
+  "mockTools", "env", "expectedVersionId", "expectedRevision",
+] as const;
+
+/**
+ * Everything a test version is made of. An edit that touches any of it has to
+ * name the version it was written against, because any of it mints a new one.
+ */
+const CONTENT_KEYS = [
+  "scenario", "expectedBehaviors", "personas", "mockTools", "env",
 ] as const;
 
 function unknownKey(body: Body, allowed: readonly string[]): string | undefined {
@@ -90,8 +98,8 @@ export function describedTest(one: Test): Record<string, unknown> {
     scenario: one.scenario,
     expectedBehaviors: [...one.expectedBehaviors],
     personas: one.personas.map(describedPersona),
-    mockTools: one.mockOverrides.map(describedMockTool),
-    overrideCount: one.mockOverrides.length,
+    mockTools: [...one.mockTools],
+    env: one.env,
     revision: one.revision,
     createdAt: one.createdAt.toISOString(),
     updatedAt: one.updatedAt.toISOString(),
@@ -109,8 +117,8 @@ function describedVersion(one: TestVersion): Record<string, unknown> {
     scenario: one.scenario,
     expectedBehaviors: [...one.expectedBehaviors],
     personas: one.personas.map(describedPersona),
-    mockTools: one.mockOverrides.map(describedMockTool),
-    overrideCount: one.mockOverrides.length,
+    mockTools: [...one.mockTools],
+    env: one.env,
     createdAt: one.createdAt.toISOString(),
   };
 }
@@ -122,26 +130,48 @@ function strings(value: unknown, field: string): readonly string[] | string {
   return value as string[];
 }
 
-function mockOverrides(value: unknown): readonly MockOverrideInput[] | string {
+const MOCK_TOOL_KEYS: readonly string[] = ["tool", "answer", "error"];
+
+/**
+ * The tools a body says this test answers for, forwarded rather than judged.
+ *
+ * **The door owns the envelope and nothing inside it.** A list, of objects,
+ * with no key the shape has no place for — that is all this checks. Whether
+ * the two answer keys add up to exactly one branch, whether a name is blank or
+ * said twice, and whether an answer is inside the cap are one rule in the
+ * access layer, said in one set of words, so the same mistake cannot come back
+ * in two dialects depending on which door it arrived at.
+ */
+export function mockToolsIn(value: unknown): TestMockTool[] | string {
   if (!Array.isArray(value)) return "mockTools must be a list";
-  const entries: MockOverrideInput[] = [];
+  const entries: TestMockTool[] = [];
   for (const valueEntry of value) {
     if (typeof valueEntry !== "object" || valueEntry === null || Array.isArray(valueEntry)) {
       return "each mockTools entry must be an object";
     }
     const entry = valueEntry as Body;
-    if ("delayMs" in entry && typeof entry.delayMs !== "number") {
-      return "delayMs must be a number of milliseconds";
+    const unexpected = Object.keys(entry).find(
+      (key) => !MOCK_TOOL_KEYS.includes(key),
+    );
+    if (unexpected !== undefined) {
+      return `a mock tool has no key "${unexpected}"`;
     }
-    entries.push({
-      toolName: entry.tool,
-      answer: answerAsSent(entry),
-      ...(typeof entry.delayMs === "number"
-        ? { delayMilliseconds: entry.delayMs }
-        : {}),
-    });
+    entries.push(entry as TestMockTool);
   }
   return entries;
+}
+
+/**
+ * The world the test is conducted in, forwarded the same way: an object, or
+ * `null` for none. Which keys it may hold, and what may be inside them, is the
+ * access layer's rule for the same reason.
+ */
+export function envIn(value: unknown): TestEnv | null | string {
+  if (value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return "env must be an object, or null for none";
+  }
+  return value as TestEnv;
 }
 
 async function personaIds(
@@ -223,8 +253,10 @@ export async function testRoutes(
     if (typeof people === "string") return unprocessable(reply, people);
     const behaviors = strings(body.expectedBehaviors, "expectedBehaviors");
     if (typeof behaviors === "string") return unprocessable(reply, behaviors);
-    const overrides = "mockTools" in body ? mockOverrides(body.mockTools) : undefined;
-    if (typeof overrides === "string") return unprocessable(reply, overrides);
+    const mockTools = "mockTools" in body ? mockToolsIn(body.mockTools) : undefined;
+    if (typeof mockTools === "string") return unprocessable(reply, mockTools);
+    const env = "env" in body ? envIn(body.env) : undefined;
+    if (typeof env === "string") return unprocessable(reply, env);
     const created = await createTest(reached.auth, {
       suiteId,
       name: text(body.name),
@@ -232,7 +264,8 @@ export async function testRoutes(
       scenario: text(body.scenario),
       expectedBehaviors: behaviors,
       ...(people === undefined ? {} : { personaIds: people }),
-      ...(overrides === undefined ? {} : { mockOverrides: overrides }),
+      ...(mockTools === undefined ? {} : { mockTools }),
+      ...(env === undefined ? {} : { env }),
     });
     return reply.code(201).send(describedTest(created));
   });
@@ -264,10 +297,11 @@ export async function testRoutes(
       ? strings(body.expectedBehaviors, "expectedBehaviors")
       : undefined;
     if (typeof behaviors === "string") return unprocessable(reply, behaviors);
-    const overrides = "mockTools" in body ? mockOverrides(body.mockTools) : undefined;
-    if (typeof overrides === "string") return unprocessable(reply, overrides);
-    const changesContent = ["scenario", "expectedBehaviors", "personas", "mockTools"]
-      .some((key) => key in body);
+    const mockTools = "mockTools" in body ? mockToolsIn(body.mockTools) : undefined;
+    if (typeof mockTools === "string") return unprocessable(reply, mockTools);
+    const env = "env" in body ? envIn(body.env) : undefined;
+    if (typeof env === "string") return unprocessable(reply, env);
+    const changesContent = CONTENT_KEYS.some((key) => key in body);
     if (
       "expectedVersionId" in body &&
       (typeof body.expectedVersionId !== "string" || !isId("tstv", body.expectedVersionId))
@@ -291,7 +325,8 @@ export async function testRoutes(
       ...(body.scenario !== undefined ? { scenario: text(body.scenario) } : {}),
       ...(behaviors === undefined ? {} : { expectedBehaviors: behaviors }),
       ...(people === undefined ? {} : { personaIds: people }),
-      ...(overrides === undefined ? {} : { mockOverrides: overrides }),
+      ...(mockTools === undefined ? {} : { mockTools }),
+      ...(env === undefined ? {} : { env }),
       ...(typeof body.expectedVersionId === "string"
         ? { expectedVersionId: body.expectedVersionId }
         : {}),

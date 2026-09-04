@@ -3,10 +3,9 @@
 A **mock tool** answers for one of the agent's tools while a simulation
 runs, so the agent's real backend is never touched and a test can order up
 the branch it needs — an empty calendar, a booking that errors, a lookup
-that takes three seconds. Which tools this simulation answers for, and
-what each answers with, arrives on the claimed spec already resolved: one
-world per run, worked out once, nothing here to merge and nothing to
-disagree about.
+that finds nobody. Which tools this simulation answers for, and what each
+answers with, arrives on the claimed spec already resolved from the test
+that named them: nothing here to merge and nothing to disagree about.
 
 ## The exchange
 
@@ -20,15 +19,15 @@ in the room, before anything real runs — two methods and no more:
   names it will answer for, so the other side wraps exactly those and leaves
   every other tool alone.
 - **``egma.tool``** — one per call the agent makes to a wrapped tool. It
-  carries the tool's name and the arguments. egma waits the mock tool's
-  declared delay, answers with the pinned answer, and writes the whole
-  exchange down: what was asked, what was served, and how long it took.
+  carries the tool's name and the arguments. egma answers at once with the
+  pinned answer and writes the whole exchange down: what was asked, what
+  was served, and how long it took.
 
 Both directions are JSON objects in a string, because that is what the
 transport carries, and the answer travels on the wire in **the shape it
 was authored in** — ``{"answer": …}`` or ``{"error": …}`` — from the
-authoring row, through the run's snapshot, through the claimed spec, onto
-the wire. One shape all that way means nothing in between re-tags it, and
+test that wrote it, through its pinned test version, through the claimed
+spec, onto the wire. One shape all that way means nothing in between re-tags it, and
 the tag is what lets the other side tell "return this" from "raise this"
 even when the authored value itself looks like a failure.
 
@@ -50,9 +49,8 @@ the tool path there — the agent's real backend was never reached — but
 there is no exchange to conduct, so :meth:`MockToolSeam.hello` and
 :meth:`MockToolSeam.tool` have nothing to do.
 
-That lane uses three other doors: :meth:`MockToolSeam.answers` for the
-answers to send, :meth:`MockToolSeam.handed_over` to say they are in the
-platform's hands, and :meth:`MockToolSeam.reported` for each call the
+That lane uses these other doors: :meth:`MockToolSeam.answers` for the
+answers to send, and :meth:`MockToolSeam.reported` for each call the
 platform tells egma about afterwards. The answers are rendered here, once,
 so the bytes a tool is given are the same bytes on every lane and one
 record reads across them.
@@ -62,8 +60,9 @@ record reads across them.
 Every call egma answers becomes a ``tool_call`` span: the name, the
 arguments as they arrived, what the call was given, the provenance stamp,
 and the mock tool that answered. The span brackets the exchange — the
-round trip plus the declared delay — so a delay is readable as the time
-it really took, with no second field to disagree with it.
+round trip, from the call arriving to the answer going back — so the time
+it really took is the span's own duration, with no second field to
+disagree with it.
 
 A call served for a tool the census never named is flagged
 **late-attached**: answers stand ready for every name this simulation
@@ -79,20 +78,14 @@ Its span carries the provenance ``refused``: no result and no mock tool,
 because nothing answered it, but a stamp all the same. A span with no
 stamp means egma watched the call go past to a real backend, and a
 refused call is the opposite of that.
-
-The simulation's terminal facts carry the **coverage stamp**: which tools
-the agent reported, which egma stood ready for, and which ran their own
-implementations untouched. It is the only place a reader learns a
-simulation was not fully isolated.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from .spec import MockTool
@@ -184,8 +177,7 @@ class ExchangedToolCall:
 
     Both ends are instants on the wall clock: an exchange egma conducted
     is timed by egma, unlike a turn, which is read off the audio. The span
-    it becomes brackets exactly this — the round trip plus whatever delay
-    the mock tool declared.
+    it becomes brackets exactly this — the round trip.
     """
 
     name: str
@@ -253,9 +245,6 @@ class AuthoredAnswer:
     """Whether this answer is the failure branch."""
 
 
-Sleep = Callable[[float], Awaitable[None]]
-"""How the declared delay is spent. Injected so a suite can hold it."""
-
 Clock = Callable[[], int]
 """Wall-clock nanoseconds, which is what a span's two ends are."""
 
@@ -274,28 +263,14 @@ class MockToolSeam:
         mock_tools: tuple[MockTool, ...] = (),
         *,
         clock: Clock = time.time_ns,
-        sleep: Sleep = asyncio.sleep,
     ) -> None:
         self._answers = {mock.tool_name: mock for mock in mock_tools}
         self._clock = clock
-        self._sleep = sleep
-        self._standing_ready = False
-        self._stood_in_the_path = False
         self._censuses = 0
         self._discovered: tuple[str, ...] = ()
         self._exchanged: list[ExchangedToolCall] = []
 
     # -- What the driver does with it -----------------------------------------
-
-    def standing_ready(self) -> None:
-        """The handlers are in front of the agent; egma is in the tool path.
-
-        Said by whoever registered them, and it is what decides whether the
-        record carries a coverage stamp at all. A simulation whose room was
-        never joined has no stamp to make: egma was not there, so it learned
-        nothing and claims nothing.
-        """
-        self._standing_ready = True
 
     def exchanged(self) -> list[ExchangedToolCall]:
         """Every call since this was last asked, and then none.
@@ -306,54 +281,6 @@ class MockToolSeam:
         """
         taken, self._exchanged = self._exchanged, []
         return taken
-
-    def coverage(self) -> dict | None:
-        """The coverage stamp, or nothing where there is nothing to claim.
-
-        ``None`` where egma never stood in the tool path — the honest
-        reading of every connection egma is not in the path of, and of a
-        room that was never joined.
-
-        Three empty lists where it stood ready and nothing was ever really
-        covered: the asking happened, and no tool came back.
-
-        **``covered`` is a claim about isolation, so it is only ever made
-        where isolation really happened.** The names go on the stamp once
-        egma has told somebody what it answers for — a hello it answered —
-        or once it has actually answered a call. A hello egma *refused*
-        covers nothing: the other side wrapped nothing, so every tool it
-        has ran its own implementation, and a stamp claiming those names
-        were covered would be the record saying a simulation was isolated
-        when it was not. That is the one thing this stamp exists to make
-        impossible.
-
-        ``uncovered`` is the discovered names left over — the tools that
-        ran their own implementations.
-
-        **The three lists mean the same thing on both lanes, but they are
-        learned differently, and a reader should know which.** Where egma
-        *stands* in the tool path, ``discovered`` is the census the agent's
-        own session reported — every tool it has, called or not — and an
-        uncovered tool ran untouched and **unobserved**, so its presence
-        here is all that is known about it. Where egma's answers are
-        *handed to a platform* that serves them, there is no census to
-        ask: ``discovered`` is the tools the platform reported the agent
-        actually calling during this simulation, so a tool never reached
-        is simply absent, and an uncovered one ran untouched but **was
-        observed** — the platform said it happened. ``covered`` means the
-        same on both: the names egma stood ready to answer, once egma
-        really was in the path.
-        """
-        if not self._standing_ready:
-            return None
-        covered = tuple(self._answers) if self._stood_in_the_path else ()
-        return {
-            "discovered": list(self._discovered),
-            "covered": list(covered),
-            "uncovered": [
-                name for name in self._discovered if name not in set(covered)
-            ],
-        }
 
     # -- What a platform that serves egma's answers itself uses ---------------
 
@@ -375,33 +302,20 @@ class MockToolSeam:
             for mock in self._answers.values()
         )
 
-    def handed_over(self) -> None:
-        """The answers are in the platform's own hands for this exchange.
-
-        The same claim :meth:`standing_ready` makes, and one more: on this
-        lane the two are one moment. There is no census to answer and no
-        call to serve, so the handing over *is* egma coming to stand
-        between the agent and its backends — every name in the snapshot
-        will be answered by the platform from here on, by the same
-        match-anything rule egma matches by.
-        """
-        self._standing_ready = True
-        self._stood_in_the_path = True
-
     def reported(self, name: str, *, arguments: str | None = None) -> None:
         """One tool call the platform says it made.
 
         Written down the way a call egma served itself is, with two
         differences that are both the truth about this lane. It is one
         instant, because egma did not conduct the exchange and did not time
-        it. And the result rides **only** where the snapshot covers the
-        name: a covered call was answered from egma's own authored answer,
-        so recording that answer invents nothing, while an uncovered one
-        ran the customer's real implementation and its return value is
-        neither egma's to vouch for nor the record's to stamp. An uncovered
-        call lands as the observation it is — the name, the arguments, and
-        no stamp at all, which is the record's own way of saying a real
-        backend did the work.
+        it. And the result rides **only** where this simulation has an
+        answer for the name: such a call was answered from egma's own
+        authored answer, so recording that answer invents nothing, while
+        a call for any other name ran the customer's real implementation
+        and its return value is neither egma's to vouch for nor the
+        record's to stamp. That one lands as the observation it is — the
+        name, the arguments, and no stamp at all, which is the record's own
+        way of saying a real backend did the work.
 
         The answer recorded for a covered call is **egma's own rendering**
         and never the platform's echo of it, even where the platform
@@ -473,25 +387,19 @@ class MockToolSeam:
                 "mocked_tools": list(self._answers),
             }
         )
-        # Measured before anything here is written down, for the same
-        # reason an answer is measured before its delay is spent: a reply
-        # that cannot be sent tells the other side nothing, so it wraps
-        # nothing, so nothing is covered — and a census recorded ahead of
-        # the refusal would leave the record claiming otherwise. A project
-        # with more mocked tools than one message can name is also a fault
-        # worth naming, where the transport's own complaint would arrive
-        # as a hello that mysteriously failed.
+        # Measured before anything here is written down: a reply that
+        # cannot be sent tells the other side nothing, so it wraps nothing,
+        # and a census recorded ahead of the refusal would leave the record
+        # claiming egma was asked and answered. A test naming more mocked
+        # tools than one message can carry is also a fault worth naming,
+        # where the transport's own complaint would arrive as a hello that
+        # mysteriously failed.
         _fits_on_the_wire("the list of tools Egma answers for", reply)
 
         replaced = self._censuses
         self._censuses += 1
         replacing = self._discovered
         self._discovered = tuple(discovered)
-        # Only now: the reply is what tells the other side which tools to
-        # wrap, so this is the moment egma really comes to stand between
-        # the agent and its backends. A hello refused above never reaches
-        # here, and nothing was covered by one.
-        self._stood_in_the_path = True
         logger.info(
             "the agent reported %d tool(s); %d of them are answered by mock "
             "tools",
@@ -501,9 +409,9 @@ class MockToolSeam:
         if replaced:
             # A census is a snapshot of the agent's tools, so a second one
             # is the agent saying what it has *now*. Said out loud because
-            # the stamp keeps only the last, and an operator reading a
-            # coverage stamp that surprises them deserves to find the
-            # moment it changed.
+            # only the last one is kept, and an operator reading a
+            # late-attached call that surprises them deserves to find the
+            # moment the census changed.
             logger.info(
                 "a second census replaced the first: %d tool(s) became %d",
                 len(replacing),
@@ -512,7 +420,7 @@ class MockToolSeam:
         return reply
 
     async def tool(self, payload: str) -> str:
-        """One tool call: waited out, answered, and written down."""
+        """One tool call: answered at once, and written down."""
         began = self._clock()
         asked = _object(TOOL_METHOD, payload)
 
@@ -582,13 +490,7 @@ class MockToolSeam:
         # a mocked failure from reading as a tool that returned a string.
         served = _serialized(mock.answer)
         _fits_on_the_wire(f"the mock tool for {name!r}", served)
-        #
         recorded = _recorded(mock)
-        # Answered, so egma really did stand between this tool and its
-        # backend — which is what the coverage stamp claims.
-        self._stood_in_the_path = True
-        if mock.delay_milliseconds:
-            await self._sleep(mock.delay_milliseconds / 1000)
 
         self._write_down(
             ExchangedToolCall(
@@ -689,12 +591,9 @@ def _serialized(value: object) -> str:
 def _fits_on_the_wire(what: str, message: str) -> None:
     """Refuse a message the transport could not carry, before it is sent.
 
-    Measured before a delay is spent rather than after: an answer that
-    cannot be sent is a fault to raise at once, not something to make a
-    simulation wait thirty seconds for. And refused here rather than by
-    the transport, because the transport's own complaint arrives at the
-    far side as a call that mysteriously failed, where this one names the
-    thing that outgrew the message.
+    Refused here rather than by the transport, because the transport's own
+    complaint arrives at the far side as a call that mysteriously failed,
+    where this one names the thing that outgrew the message.
     """
     bytes_over_the_wire = len(message.encode())
     if bytes_over_the_wire <= LARGEST_PAYLOAD_BYTES:

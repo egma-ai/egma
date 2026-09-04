@@ -75,9 +75,10 @@ describe("a test version's content", () => {
   /**
    * A caller still sending last month's field is a compile error and never a
    * silent write, so what has to hold at run time is only that nothing is
-   * stored for it: the version's content is the three fields it says it is.
+   * stored for it: the version's content is the two fields it says it is, and
+   * the world the test carries is beside it in two columns of its own.
    */
-  it("stores the scenario, the behaviors, and the overrides, and nothing else", async () => {
+  it("stores the scenario and the behaviors, and nothing else", async () => {
     const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     const { rows } = await database.sql<{ keys: string[] }>(
@@ -86,11 +87,7 @@ describe("a test version's content", () => {
       [created.versionId],
     );
 
-    expect(rows[0]?.keys).toEqual([
-      "expectedBehaviors",
-      "mockOverrides",
-      "scenario",
-    ]);
+    expect(rows[0]?.keys).toEqual(["expectedBehaviors", "scenario"]);
   });
 });
 

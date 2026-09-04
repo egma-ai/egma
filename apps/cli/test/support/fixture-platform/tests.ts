@@ -1,10 +1,38 @@
-/** Current suite-owned test and atomic repository fixture contract. */
+/**
+ * Current suite-owned test and atomic repository fixture contract.
+ *
+ * **A test carries its own world.** Its mock tools and its env are versioned
+ * content of the test, so this one group is where both are written, judged, and
+ * answered — there is no project-wide mock tool and no route that holds one.
+ *
+ * The content gates are the platform's, and the two ceilings are read from the
+ * platform's own constants rather than copied: a fixture holding its own number
+ * would go on refusing at yesterday's budget for a year after the real one
+ * moved, and the CLI would ship a check against a number nothing enforces.
+ */
+
+import {
+  LARGEST_JOB_DISPATCH_METADATA_BYTES,
+  LARGEST_MOCK_TOOL_ANSWER_BYTES,
+  RESERVED_ENV_VARIABLE_PREFIX,
+} from "@egma/db";
 
 import { given, newId, NOT_AUTHENTICATED, refuse, text, textList } from "./reading.ts";
 import type { FixtureAnswer, FixtureRequest, RouteGroup } from "./server.ts";
 import type { SeededSuite } from "./suites.ts";
 
 export type SeedBehavior = string;
+
+/** One tool the test answers for, and the one thing it answers with. */
+export type FixtureMockTool =
+  | { readonly tool: string; readonly answer: unknown }
+  | { readonly tool: string; readonly error: string };
+
+/** The world one test is conducted in, in the two platforms' own words. */
+export type FixtureEnv = {
+  readonly retell_dynamic_variables?: Readonly<Record<string, string>>;
+  readonly job_dispatch_metadata?: Readonly<Record<string, unknown>>;
+};
 
 export type SeedTest = {
   readonly suiteId?: string;
@@ -13,7 +41,8 @@ export type SeedTest = {
   readonly scenario: string;
   readonly expectedBehaviors: readonly SeedBehavior[];
   readonly personas?: readonly string[];
-  readonly mockTools?: readonly Record<string, unknown>[];
+  readonly mockTools?: readonly FixtureMockTool[];
+  readonly env?: FixtureEnv | null;
 };
 
 export type SeededTest = {
@@ -25,6 +54,13 @@ export type SeededTest = {
   readonly revision: string;
 };
 
+/** What one stored version says, for a check that wants to look at it. */
+export type SeededTestVersion = {
+  readonly versionId: string;
+  readonly mockTools: readonly FixtureMockTool[];
+  readonly env: FixtureEnv | null;
+};
+
 export type FixtureTestVersion = {
   readonly id: string;
   readonly testId: string;
@@ -34,7 +70,8 @@ export type FixtureTestVersion = {
   readonly scenario: string;
   readonly expectedBehaviors: readonly string[];
   readonly personas: readonly { readonly id: string; readonly name: string }[];
-  readonly mockTools: readonly Record<string, unknown>[];
+  readonly mockTools: readonly FixtureMockTool[];
+  readonly env: FixtureEnv | null;
 };
 
 type StoredTest = {
@@ -59,6 +96,8 @@ export type TestControls = {
   readonly tests: readonly SeededTest[];
   versionsOf(name: string): number;
   seeded(name: string): SeededTest;
+  /** The world the current version of one test carries. */
+  worldOf(name: string): SeededTestVersion;
 };
 
 export type TestRouteGroup = {
@@ -82,15 +121,192 @@ function records(value: unknown): readonly Record<string, unknown>[] {
     : [];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** What the shipped API turns a write away with, thrown where it is noticed. */
+class Unprocessable extends Error {}
+
+/** The tagged envelope, which is what the exchange carries and counts. */
+function servedBytes(value: unknown, key: "answer" | "error"): number {
+  return Buffer.byteLength(`{"${key}":${JSON.stringify(value) ?? ""}}`, "utf8");
+}
+
+function tooLarge(tool: string, key: "answer" | "error", bytes: number): string {
+  return (
+    `mock tool "${tool}": ${key} is ${bytes} bytes once serialized and tagged ` +
+    `for the wire, and the exchange that carries it holds at most ` +
+    `${LARGEST_MOCK_TOOL_ANSWER_BYTES}. An answer that needs more than that ` +
+    `is a document rather than a tool answer.`
+  );
+}
+
+/**
+ * The mock tools as they will be stored: one branch each, named once.
+ *
+ * Deliberately not kinder than the shipped factory anywhere. A CLI that relayed
+ * a body this refuses would pass against a fixture that took it.
+ */
+function mockToolsFrom(value: unknown): readonly FixtureMockTool[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new Unprocessable("mockTools is the list of tools this test answers for");
+  }
+  const mockTools: FixtureMockTool[] = [];
+  const named = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry)) {
+      throw new Unprocessable("each mock tool is an object naming one tool");
+    }
+    const tool = text(entry.tool);
+    if (tool === "") {
+      throw new Unprocessable(
+        "tool is the name of the agent's tool this mock tool answers for, and " +
+          "this one is blank.",
+      );
+    }
+    if (named.has(tool)) {
+      throw new Unprocessable(
+        `this test answers for "${tool}" more than once. One answer per tool.`,
+      );
+    }
+    named.add(tool);
+    const unknown = Object.keys(entry).find(
+      (key) => key !== "tool" && key !== "answer" && key !== "error",
+    );
+    if (unknown !== undefined) {
+      throw new Unprocessable(
+        `mock tool "${tool}" has no key "${unknown}"; it holds tool, and one ` +
+          `of answer and error.`,
+      );
+    }
+    const gives = "answer" in entry && entry.answer !== undefined;
+    const fails = "error" in entry && entry.error !== undefined;
+    if (gives && fails) {
+      throw new Unprocessable(
+        `mock tool "${tool}" answers with one thing: this one sent both ` +
+          "answer and error. Send whichever branch the test needs.",
+      );
+    }
+    if (!gives && !fails) {
+      throw new Unprocessable(
+        `mock tool "${tool}" answers with something: send answer with what ` +
+          "the tool returns, or error with the failure it raises. This one " +
+          "sent neither.",
+      );
+    }
+    if (fails) {
+      const message = entry.error;
+      if (typeof message !== "string" || message.trim() === "") {
+        throw new Unprocessable(
+          `error is the failure mock tool "${tool}" raises, written as text.`,
+        );
+      }
+      const bytes = servedBytes(message, "error");
+      if (bytes > LARGEST_MOCK_TOOL_ANSWER_BYTES) {
+        throw new Unprocessable(tooLarge(tool, "error", bytes));
+      }
+      mockTools.push({ tool, error: message });
+      continue;
+    }
+    const bytes = servedBytes(entry.answer, "answer");
+    if (bytes > LARGEST_MOCK_TOOL_ANSWER_BYTES) {
+      throw new Unprocessable(tooLarge(tool, "answer", bytes));
+    }
+    mockTools.push({ tool, answer: entry.answer });
+  }
+  return mockTools;
+}
+
+/** The two keys an env may carry, and nothing else. */
+const ENV_KEYS = ["retell_dynamic_variables", "job_dispatch_metadata"] as const;
+
+/**
+ * The env as it will be stored, or null where the test asks for nothing.
+ *
+ * `{}`, a half with nothing in it, and an absent field all say the same thing,
+ * so all three are stored the same way — which is what lets a pull straight
+ * after a push find nothing to write.
+ */
+function envFrom(value: unknown): FixtureEnv | null {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) {
+    throw new Unprocessable(
+      "env is an object with at most retell_dynamic_variables and " +
+        "job_dispatch_metadata in it",
+    );
+  }
+  for (const key of Object.keys(value)) {
+    if ((ENV_KEYS as readonly string[]).includes(key)) continue;
+    throw new Unprocessable(
+      `env has no ${JSON.stringify(key)} in it. An env carries ` +
+        `${ENV_KEYS.join(" and ")}, and nothing else.`,
+    );
+  }
+
+  const env: {
+    retell_dynamic_variables?: Record<string, string>;
+    job_dispatch_metadata?: Record<string, unknown>;
+  } = {};
+
+  const written = value.retell_dynamic_variables;
+  if (written !== undefined && written !== null) {
+    if (!isRecord(written)) {
+      throw new Unprocessable(
+        "env.retell_dynamic_variables is an object of text values, which " +
+          'looks like {"caller_name": "Margaret"}',
+      );
+    }
+    const variables: Record<string, string> = {};
+    for (const [name, said] of Object.entries(written)) {
+      if (name.startsWith(RESERVED_ENV_VARIABLE_PREFIX)) {
+        throw new Unprocessable(
+          `env.retell_dynamic_variables names ${JSON.stringify(name)}, and ` +
+            `Egma keeps every variable beginning ` +
+            `"${RESERVED_ENV_VARIABLE_PREFIX}" for the facts it writes into ` +
+            `the conversation itself. Name the variable something else.`,
+        );
+      }
+      if (typeof said !== "string") {
+        throw new Unprocessable(
+          `env.retell_dynamic_variables.${name} is the text Retell ` +
+            `substitutes into the prompt, and this request sent ${typeof said}.`,
+        );
+      }
+      variables[name] = said;
+    }
+    if (Object.keys(variables).length > 0) env.retell_dynamic_variables = variables;
+  }
+
+  const dispatch = value.job_dispatch_metadata;
+  if (dispatch !== undefined && dispatch !== null) {
+    if (!isRecord(dispatch)) {
+      throw new Unprocessable(
+        "env.job_dispatch_metadata is a JSON object handed to your worker, " +
+          'which looks like {"tenant": "acme"}',
+      );
+    }
+    const bytes = Buffer.byteLength(JSON.stringify(dispatch), "utf8");
+    if (bytes > LARGEST_JOB_DISPATCH_METADATA_BYTES) {
+      throw new Unprocessable(
+        `env.job_dispatch_metadata is ${bytes} bytes once serialized, and ` +
+          `LiveKit carries at most ${LARGEST_JOB_DISPATCH_METADATA_BYTES} on ` +
+          `the dispatch.`,
+      );
+    }
+    if (Object.keys(dispatch).length > 0) env.job_dispatch_metadata = dispatch;
+  }
+
+  return Object.keys(env).length === 0 ? null : env;
+}
+
 export function testRoutes(options: {
   readonly holdsKey: (key: string) => boolean;
   readonly projectId: string;
   readonly suiteById: (id: string) => SeededSuite | null;
   readonly allSuites: () => readonly SeededSuite[];
   readonly createSuite: (name: string) => SeededSuite;
-  readonly prepareMockTools: (
-    entries: readonly Record<string, unknown>[],
-  ) => { readonly apply: () => void } | { readonly refusal: FixtureAnswer };
 }): TestRouteGroup {
   const tests: StoredTest[] = [];
   const personas: { readonly id: string; readonly name: string }[] = [];
@@ -133,7 +349,8 @@ export function testRoutes(options: {
         ? textList(value.personas).filter(Boolean).map(persona)
         : (fallback?.personas ?? []),
     mockTools:
-      "mockTools" in value ? records(value.mockTools) : (fallback?.mockTools ?? []),
+      "mockTools" in value ? mockToolsFrom(value.mockTools) : (fallback?.mockTools ?? []),
+    env: "env" in value ? envFrom(value.env) : (fallback?.env ?? null),
   });
   const writeVersion = (
     test: StoredTest,
@@ -192,8 +409,8 @@ export function testRoutes(options: {
       scenario: version.scenario,
       expectedBehaviors: [...version.expectedBehaviors],
       personas: version.personas.map((one) => ({ ...one, archivedAt: null })),
-      mockTools: [...version.mockTools],
-      overrideCount: version.mockTools.length,
+      mockTools: version.mockTools.map((entry) => ({ ...entry })),
+      env: version.env === null ? null : { ...version.env },
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
     };
@@ -208,8 +425,8 @@ export function testRoutes(options: {
     scenario: version.scenario,
     expectedBehaviors: [...version.expectedBehaviors],
     personas: version.personas.map((one) => ({ ...one, archivedAt: null })),
-    mockTools: [...version.mockTools],
-    overrideCount: version.mockTools.length,
+    mockTools: version.mockTools.map((entry) => ({ ...entry })),
+    env: version.env === null ? null : { ...version.env },
     createdAt: "2026-01-01T00:00:00.000Z",
   });
   const validateWrite = (value: Record<string, unknown>): FixtureAnswer | null => {
@@ -217,6 +434,17 @@ export function testRoutes(options: {
     if (text(value.scenario) === "") return refuse(422, "unprocessable", "a test scenario is required");
     if (textList(value.expectedBehaviors).filter(Boolean).length === 0) {
       return refuse(422, "unprocessable", "a test needs at least one expected behavior");
+    }
+    // The world the test carries is judged here, with the shipped factory's own
+    // sentences: everything the CLI does with a bad one is relay what it heard.
+    try {
+      if ("mockTools" in value) mockToolsFrom(value.mockTools);
+      if ("env" in value) envFrom(value.env);
+    } catch (problem) {
+      if (problem instanceof Unprocessable) {
+        return refuse(422, "unprocessable", problem.message);
+      }
+      throw problem;
     }
     return null;
   };
@@ -249,6 +477,7 @@ export function testRoutes(options: {
           expectedBehaviors: [...seed.expectedBehaviors],
           personas: [...(seed.personas ?? [])],
           mockTools: [...(seed.mockTools ?? [])],
+          env: seed.env ?? null,
         }),
       );
     },
@@ -263,6 +492,7 @@ export function testRoutes(options: {
           expectedBehaviors: changes.expectedBehaviors ?? current(test).expectedBehaviors,
           personas: changes.personas ?? current(test).personas.map((one) => one.id),
           mockTools: changes.mockTools ?? current(test).mockTools,
+          env: changes.env === undefined ? current(test).env : changes.env,
         }),
       );
     },
@@ -292,6 +522,16 @@ export function testRoutes(options: {
       const test = tests.find((one) => one.name === name);
       if (test === undefined) throw new Error(`no test ${name}`);
       return seedOf(test);
+    },
+    worldOf(name) {
+      const test = tests.find((one) => one.name === name);
+      if (test === undefined) throw new Error(`no test ${name}`);
+      const version = current(test);
+      return {
+        versionId: version.id,
+        mockTools: version.mockTools.map((entry) => ({ ...entry })),
+        env: version.env === null ? null : { ...version.env },
+      };
     },
   };
 
@@ -470,13 +710,9 @@ export function testRoutes(options: {
                 `the repository does not include active test ${testNotInRepository.id}; pull before pushing so no server test is deleted by inference`,
               );
             }
-            const mockTools = options.prepareMockTools(records(said.mockTools));
-            if ("refusal" in mockTools) return mockTools.refusal;
-
             // Nothing above this line changes fixture state. The complete
-            // change set is valid before any suite, test, or mock tool moves.
+            // change set is valid before any suite or test moves.
             for (const entry of suiteNames) entry.suite.name = entry.name;
-            mockTools.apply();
             const applied = planned.map((entry) => ({
               clientRef: entry.clientRef,
               test: described(

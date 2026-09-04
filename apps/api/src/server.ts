@@ -105,15 +105,6 @@ export type ServerOptions = {
   /** Test seam for Retell account reads. Production uses the global fetch. */
   readonly retellFetch?: RetellFetch | undefined;
   /**
-   * How the mock endpoint waits out a mock tool's declared delay. Production
-   * waits on a real timer.
-   *
-   * A seam, because a declared delay is the thing this whole seam exists to
-   * make possible — nobody else can make a mocked backend slow — and a proof of
-   * it that waited out real seconds would be a proof about a timer.
-   */
-  readonly mockToolWait?: ((milliseconds: number) => Promise<void>) | undefined;
-  /**
    * Whether this process runs the standing drainer, over and above what its
    * role already says. Defaults to whatever the role says.
    *
@@ -447,6 +438,10 @@ export function buildApi(options: ServerOptions): Api {
     serviceToken: config.simulatorServiceToken,
     providerCredentials: config.providerCredentials,
     carrierRoute: config.carrierRoute,
+    // Where the mock endpoint answers. A mocked web call's tool URLs carry no
+    // address of Egma's at all — the claim fills one in per call, for exactly
+    // the tools that simulation's own test names.
+    baseUrl: config.baseUrl,
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),
@@ -467,12 +462,10 @@ export function buildApi(options: ServerOptions): Api {
     // A landing that finished a mocked run gives the account back: the
     // temporary version deleted, then any pin restored. The next run's sweep
     // is the same act and finishes whatever this one could not.
-    mockedWorldReach: {
-      baseUrl: config.baseUrl,
-      ...(options.retellFetch === undefined
+    mockedWorldReach:
+      options.retellFetch === undefined
         ? {}
-        : { retellFetch: options.retellFetch }),
-    },
+        : { retellFetch: options.retellFetch },
   });
 
   // The mock endpoint: the seam's one new public surface. Registered without
@@ -482,16 +475,12 @@ export function buildApi(options: ServerOptions): Api {
   //
   // Outside the credentialed scope and outside the per-organization rate limit
   // on purpose. The caller is the customer's own agent platform, which holds no
-  // credential of egma's: the whole gate is two unguessable identifiers, a live
-  // run, and a tool the run's frozen world answers for. A budget keyed on the
+  // credential of egma's: the whole gate is one unguessable identifier, a live
+  // run, and a tool the simulation's own test named. A budget keyed on the
   // organization would let a busy mocked run eat that customer's own request
   // budget from the inside, and a run whose tool calls started failing would be
   // a green suite that quietly tested nothing.
-  void app.register(mockEndpointRoutes, {
-    ...(options.mockToolWait === undefined
-      ? {}
-      : { wait: options.mockToolWait }),
-  });
+  void app.register(mockEndpointRoutes);
 
   // The OTLP door, registered without `fastify-plugin` for the same reason the
   // provider's adapter is: it replaces every body parser inside its own scope

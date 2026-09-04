@@ -81,7 +81,7 @@ barge-in is represented when the persona becomes full-duplex, and
 | `recording` | stored voice recording | Zero. Its start is audio sample zero on the same clock used by spoken turns. It is emitted only after the WAV is stored, before the root closes. | none |
 | `human_turn` | transcript turn spoken by the persona | The turn, ear to ear. Zero on chat, where a message is one instant. | `egma.turn.text` |
 | `agent_turn` | transcript turn spoken by the agent under test | Same terms as `human_turn`. | `egma.turn.text` |
-| `tool_call` | tool call observed from Egma's side of the connection | One instant where the platform reports the invocation and nothing more. Where Egma stood in the tool path — answering the call or refusing it — the span brackets the exchange Egma conducted, the round trip plus any delay the mock tool declared, so a declared delay is readable as the time it actually took and no attribute repeats the number for the two to disagree about. | `egma.tool.name`, `egma.tool.arguments`, `egma.tool.result`, `egma.tool.provenance`, `egma.tool.mock_tool`, `egma.tool.late_attached` |
+| `tool_call` | tool call observed from Egma's side of the connection | One instant where the platform reports the invocation and nothing more. Where Egma stood in the tool path — answering the call or refusing it — the span brackets the exchange Egma conducted: the round trip, from the moment the call arrived to the moment the answer went back, so the time it really took is the span's own duration and no attribute repeats the number for the two to disagree about. | `egma.tool.name`, `egma.tool.arguments`, `egma.tool.result`, `egma.tool.provenance`, `egma.tool.mock_tool`, `egma.tool.late_attached` |
 | *measure name* | measurement | **The measurement itself.** A timing span is named for the measure it takes — `first_response_latency`, `turn_response_latency`, `time_to_first_word`, `agent_speech_duration`, `persona_speech_duration` — and its start and end bracket the measured interval, so the span's duration *is* the number, in nanoseconds. The catalog (`measure-catalog.md`) says what each measure means and who emits it. | none |
 
 The speaker of a turn rides the span name — `human_turn` and `agent_turn` are
@@ -122,17 +122,17 @@ The three shapes are three different histories and each gets its own:
 | name, arguments, and nothing else | Egma was not in the path. The real tool ran, and Egma saw only that it was called. |
 
 Written the same way, the second and third would be indistinguishable — and
-they are opposite facts about whether the agent's own backend ran. The whole
-point of the coverage stamp on the simulation's terminal facts is that a reader
-can tell an isolated simulation from one that was not; a refusal that read as a
-pass-through would undo that at the call grain.
+they are opposite facts about whether the agent's own backend ran. A reader
+telling an isolated call from one that reached a real backend is the whole
+point of the stamp, and a refusal that read as a pass-through would undo it.
 
 **Why the tool's name and the mock tool's name are both written down.**
 `egma.tool.name` is the agent's word — what the platform reported being called.
-`egma.tool.mock_tool` is Egma's own — the authored thing that answered. Today
-they always match, because a mock tool is matched to a call by name and by
-nothing else; writing both is what makes the day they stop matching visible on
-the record instead of assumed away.
+`egma.tool.mock_tool` is Egma's own — the name of the mock tool that answered,
+which is the tool's own name, because a mock tool is matched to a call by name
+and by nothing else. So the two always match today, and writing both is what
+makes the day they stop matching visible on the record instead of assumed
+away.
 
 **What `late_attached` owns.** When a simulation starts, the agent reports the
 tools it has. Answers are then held ready for every tool name this simulation
@@ -161,10 +161,10 @@ takes thin arguments for an agent that passed none.
   recording span places audio sample zero on the trace clock, followed by the
   root last.
 - `voice-mocked-tool-calls.json` — a mid-conversation flush of three calls that
-  reached Egma: an ordinary mocked call, arguments whole and its 250 ms of
-  declared delay showing as the span's duration; a late-attached one whose
-  arguments never arrived; and one for a tool this simulation answers for
-  nothing of, refused on the wire and stamped `refused` on the record. Beside
+  reached Egma: an ordinary mocked call, arguments whole and its round trip
+  showing as the span's duration; a late-attached one whose arguments never
+  arrived; and one for a tool this simulation answers for nothing of, refused
+  on the wire and stamped `refused` on the record. Beside
   `chat-flush-2-tools.json`, whose calls carry name and arguments and nothing
   else because Egma was not in that path at all, it is the whole range this
   span shape covers.

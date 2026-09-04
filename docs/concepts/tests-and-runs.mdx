@@ -7,7 +7,8 @@ description: "Learn how Egma groups tests into durable suites and runs one compl
 Egma uses four related objects:
 
 - A **test suite** is a named container of tests that you review and run together.
-- A **test** describes one situation and the behavior you expect.
+- A **test** describes one situation, the behavior you expect, and the world the
+  agent meets: its **mock tools** and its **env**.
 - A **run** executes one complete suite against one agent and one connection.
 - A **simulation** is one test and persona combination inside that run.
 
@@ -38,8 +39,8 @@ connection, grader, schedule, or run setting.
 ## Tests keep exact versions
 
 Each edit to test content creates an immutable test version with a `tstv_…` ID.
-This includes the scenario, expected behaviors, personas, and test-level Mock
-Tool overrides.
+A version freezes the scenario, the expected behaviors, the personas, the mock
+tools, and the env.
 
 The suite contains the current test identities. It does not copy or version its
 membership.
@@ -58,7 +59,16 @@ one simulation for each test and persona combination. You cannot select a
 weaker subset inside the run. An empty suite cannot run.
 
 Each simulation stores the exact test and persona versions that it executed.
-This keeps old evidence exact even after you edit a test.
+This keeps old evidence exact even after you edit a test. A simulation reads its
+world from that pinned version: Egma mocks exactly the tools the test names, and
+every other tool the agent calls runs for real. Two tests in one suite can carry
+different worlds, so one run can hold a simulation with mock tools beside one
+without any.
+
+A connection cannot always carry everything a test says. The run proceeds and
+says so on the run itself. See
+[Agents and connections](/concepts/agents-and-connections) for what each
+connection can use.
 
 ## Deletion is permanent
 

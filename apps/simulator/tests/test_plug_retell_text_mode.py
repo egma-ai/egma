@@ -22,8 +22,6 @@ end in a refusal a person can act on, and none of them says the key.
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 from text_mode_stub import Reply, ToolTurn
 
@@ -50,16 +48,12 @@ def seam(*mocks: MockTool) -> MockToolSeam:
     return MockToolSeam(mocks)
 
 
-def answering(name: str, value: object, *, delay_milliseconds: int = 0) -> MockTool:
-    return MockTool(
-        tool_name=name,
-        answer={"answer": value},
-        delay_milliseconds=delay_milliseconds,
-    )
+def answering(name: str, value: object) -> MockTool:
+    return MockTool(tool_name=name, answer={"answer": value})
 
 
 def failing(name: str, value: object) -> MockTool:
-    return MockTool(tool_name=name, answer={"error": value}, delay_milliseconds=0)
+    return MockTool(tool_name=name, answer={"error": value})
 
 
 def text_mode(
@@ -355,7 +349,7 @@ async def test_a_reply_updates_this_simulations_variables_without_dropping_them(
     )
     plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url},
-        dynamic_variables={"egma_simulation": "sim_01", "caller_name": ""},
+        dynamic_variables={"account_id": "sim_01", "caller_name": ""},
         mock_tools=seam(),
     )
 
@@ -368,13 +362,13 @@ async def test_a_reply_updates_this_simulations_variables_without_dropping_them(
         request["body"].get("retell_llm_dynamic_variables")
         for request in running.stub.requests
     ]
-    assert carried[0] == {"egma_simulation": "sim_01", "caller_name": ""}
-    assert carried[1] == {"egma_simulation": "sim_01", "caller_name": ""}
-    assert carried[2] == {"egma_simulation": "sim_01", "caller_name": "Margaret"}
+    assert carried[0] == {"account_id": "sim_01", "caller_name": ""}
+    assert carried[1] == {"account_id": "sim_01", "caller_name": ""}
+    assert carried[2] == {"account_id": "sim_01", "caller_name": "Margaret"}
     # The one that must never fall off: it is what a tool call the platform
     # makes rides back to this simulation on.
     assert all(
-        variables["egma_simulation"] == "sim_01" for variables in carried
+        variables["account_id"] == "sim_01" for variables in carried
     ), carried
 
 
@@ -646,17 +640,11 @@ async def test_a_covered_call_is_marked_mocked_and_an_uncovered_one_is_not(
     assert mocked.arguments == '{"day":"thu"}'
     assert mocked.answer == '{"slots":["thu-1430"]}'
     assert mocked.refused is False and mocked.late_attached is False
-    # The uncovered call is on the record as the observation it is: what was
-    # called, with what — and no stamp, which is the record's own way of
-    # saying a real backend did the work.
+    # The call the test did not name is on the record as the observation it
+    # is: what was called, with what — and no stamp, which is the record's
+    # own way of saying a real backend did the work.
     assert real.arguments == '{"phone":"+1"}'
     assert real.answer is None
-
-    assert answers.coverage() == {
-        "discovered": ["check_calendar", "lookup_customer"],
-        "covered": ["check_calendar"],
-        "uncovered": ["lookup_customer"],
-    }
 
 
 async def test_a_mocked_failure_reads_back_as_a_failure_not_a_string(
@@ -722,48 +710,6 @@ async def test_an_answer_spelled_differently_by_the_platform_still_counts(
 
     (call,) = answers.exchanged()
     assert call.mock_tool == "check_calendar"
-
-
-async def test_a_declared_delay_is_not_spent_on_this_lane(start_text_mode_stub):
-    """Delays are speech-world fidelity — the layer chat deliberately
-    excludes — and the answer is served inside Retell's own execution
-    anyway, where egma has nothing to hold back."""
-    answers = seam(answering("check_calendar", {}, delay_milliseconds=30_000))
-    running = await start_text_mode_stub(
-        api_key=SENTINEL_KEY,
-        replies=[Reply(), Reply(words="Checked.", tools=[ToolTurn("check_calendar")])],
-    )
-    plug = text_mode(
-        {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
-    )
-
-    await plug.open()
-    async with asyncio.timeout(10):
-        await plug.deliver("Anything Thursday?")
-    await plug.close()
-
-    (call,) = answers.exchanged()
-    assert call.mock_tool == "check_calendar"
-
-
-async def test_a_simulation_reaching_no_platform_claims_no_coverage(
-    start_text_mode_stub,
-):
-    """A request that never landed put egma in nobody's tool path, and the
-    stamp is the one thing that must never claim otherwise."""
-    answers = seam(answering("check_calendar", {}))
-    running = await start_text_mode_stub(
-        api_key="the-only-key-this-stub-honors", replies=[Reply()]
-    )
-    plug = text_mode(
-        {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
-    )
-
-    with pytest.raises(PlugError):
-        await plug.open()
-    await plug.close()
-
-    assert answers.coverage() is None
 
 
 # -- Errors, loud and without the key ----------------------------------------

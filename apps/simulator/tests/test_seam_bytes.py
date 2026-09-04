@@ -102,7 +102,7 @@ async def test_the_hello_reply_is_the_golden_bytes():
     one of them, which is the ordinary case and the one where the reply
     has something to leave out.
     """
-    seam = MockToolSeam((MockTool("check_calendar", {"answer": {"slots": []}}, 0),))
+    seam = MockToolSeam((MockTool("check_calendar", {"answer": {"slots": []}}),))
 
     assert await seam.hello(message("hello_request")) == message("hello_reply")
 
@@ -114,9 +114,7 @@ async def test_both_tool_replies_are_the_golden_bytes():
     ``error`` key, so the far side reads the tag and never the shape —
     which only works if the tag is where this file says it is.
     """
-    answering = MockToolSeam(
-        (MockTool("check_calendar", {"answer": {"slots": []}}, 0),)
-    )
+    answering = MockToolSeam((MockTool("check_calendar", {"answer": {"slots": []}}),))
     assert await answering.tool(message("tool_request")) == message(
         "tool_reply_answer"
     )
@@ -126,7 +124,6 @@ async def test_both_tool_replies_are_the_golden_bytes():
             MockTool(
                 "check_calendar",
                 {"error": "the calendar service is unavailable"},
-                0,
             ),
         )
     )
@@ -138,7 +135,7 @@ async def test_a_call_with_no_arguments_at_all_is_read_the_same_way():
     ``arguments`` key at all, because an empty object would say the call
     had none. egma answers it exactly as it answers a call that carried
     them."""
-    seam = MockToolSeam((MockTool("check_calendar", {"answer": {"slots": []}}, 0),))
+    seam = MockToolSeam((MockTool("check_calendar", {"answer": {"slots": []}}),))
 
     assert await seam.tool(message("tool_request_without_arguments")) == message(
         "tool_reply_answer"
@@ -150,7 +147,7 @@ async def test_the_hello_reply_names_only_what_this_simulation_answers_for():
     it is refused with the code the fixture names — which is the sentence
     the whole exchange rests on: the far side wraps exactly what egma
     said, so anything else is a protocol error."""
-    seam = MockToolSeam((MockTool("check_calendar", {"answer": {"slots": []}}, 0),))
+    seam = MockToolSeam((MockTool("check_calendar", {"answer": {"slots": []}}),))
     await seam.hello(message("hello_request"))
 
     census = json.loads(message("hello_request"))["tools"]

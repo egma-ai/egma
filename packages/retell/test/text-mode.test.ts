@@ -185,7 +185,7 @@ describe("one text-mode exchange", () => {
         json({
           [WIRE.messages]: [{ role: "agent", content: "Which day?" }],
           [WIRE.dynamicVariables]: {
-            egma_simulation: "sim_1",
+            caller_name: "Margaret",
             booked_day: "Thursday",
           },
           [WIRE.nodeId]: "node_booking",
@@ -201,14 +201,14 @@ describe("one text-mode exchange", () => {
         agentId: AGENT,
         agentVersion: 106,
         messages: [{ role: "user", content: "Thursday" }],
-        dynamicVariables: { egma_simulation: "sim_1" },
+        dynamicVariables: { caller_name: "Margaret" },
       },
       REACH(fetchImpl),
     );
     expect(first.kind).toBe("exchanged");
     if (first.kind !== "exchanged") return;
     expect(first.reply.dynamicVariables).toEqual({
-      egma_simulation: "sim_1",
+      caller_name: "Margaret",
       booked_day: "Thursday",
     });
     expect(first.reply.resume).toEqual({
@@ -238,7 +238,7 @@ describe("one text-mode exchange", () => {
 
     const sent = seen[1];
     expect(sent?.body[WIRE.dynamicVariables]).toEqual({
-      egma_simulation: "sim_1",
+      caller_name: "Margaret",
       booked_day: "Thursday",
     });
     expect(sent?.body[WIRE.nodeId]).toBe("node_booking");
@@ -340,7 +340,7 @@ describe("one text-mode exchange", () => {
         }),
     ]);
 
-    const sent = { egma_simulation: "sim_1", caller_name: "Eleanor" };
+    const sent = { caller_name: "Eleanor" };
     for (const expected of ["Thursday", "Friday"]) {
       const answered = await exchangeInTextMode(
         key,

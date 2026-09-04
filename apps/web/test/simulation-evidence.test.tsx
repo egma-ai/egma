@@ -213,8 +213,6 @@ function evidence(overrides: Record<string, unknown> = {}) {
       environment: "staging",
       config: { phoneNumber: "+15551234567" },
     },
-    mockToolCoverage: null,
-    mockTools: { defaults: [], overrides: [] },
     gradingPlan: {
       state: "run_start",
       capturedAt: "2026-08-15T09:59:00.000Z",
@@ -697,6 +695,58 @@ describe("the transcript time rail", () => {
         .getByLabelText("Tool call, lookup_appointment")
         .querySelector('[data-state-mark="error"]'),
     ).not.toBeNull();
+  });
+
+  /**
+   * **Who answered a tool call, said once and quietly.**
+   *
+   * Egma stamps the span it files for a call it served itself, so a reader
+   * knows the answer in front of them came from the test rather than from
+   * their own backend. A real call is the ordinary case and says nothing
+   * extra — there is no second word for "not mocked" to learn.
+   */
+  it("marks a tool call egma answered, and leaves a real one unmarked", () => {
+    const read = evidence();
+    const transcript = read.transcript as NonNullable<
+      ReturnType<typeof evidence>["transcript"]
+    >;
+    const tool = {
+      spanId: "span_tool_provenance",
+      parentSpanId: "span_agent",
+      name: "lookup_appointment",
+      kind: "tool" as const,
+      status: "ok" as const,
+      startedAt: "2026-08-15T10:00:06.000000Z",
+      durationNs: "250000000",
+      text: "",
+      audioUrl: "",
+      toolName: "lookup_appointment",
+      toolArguments: "{}",
+      toolResult: "{}",
+      spans: [],
+    };
+    const rendered = render(
+      <ChatTranscript
+        transcript={transcript as never}
+        toolCalls={[{ ...tool, toolProvenance: "mocked" } as never]}
+        onSeek={vi.fn()}
+      />,
+    );
+
+    const mocked = screen.getByLabelText("Tool call, lookup_appointment");
+    expect(within(mocked).getByText(/mocked/u)).toBeTruthy();
+    expect(mocked.textContent).toContain("mocked · Succeeded");
+
+    rendered.rerender(
+      <ChatTranscript
+        transcript={transcript as never}
+        toolCalls={[tool as never]}
+        onSeek={vi.fn()}
+      />,
+    );
+    const real = screen.getByLabelText("Tool call, lookup_appointment");
+    expect(real.textContent).toContain("Succeeded");
+    expect(real.textContent).not.toContain("mocked");
   });
 
   it("seeks speech without autoplay and expands exact tool requests and responses", () => {

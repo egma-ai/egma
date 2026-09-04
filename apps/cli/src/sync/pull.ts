@@ -16,7 +16,6 @@ import {
   RepositoryValidationError,
   readRepository,
   serializeConfig,
-  serializeMockToolsFile,
   serializeSuiteManifest,
   type FolderConfig,
   type FolderPaths,
@@ -33,9 +32,9 @@ import {
   portableSuiteDirectory,
   withStablePathSuffix,
 } from "../folder/portable-path.ts";
-import { sameMockTools, type MockToolEntry } from "../folder/mock-tools.ts";
+import { sameEnv } from "../folder/env.ts";
+import { sameMockTools } from "../folder/mock-tools.ts";
 import type { Fetch } from "../platform/device-flow.ts";
-import { listMockTools } from "../platform/mock-tools.ts";
 import type { SignedIn } from "../platform/signed-in.ts";
 import { listTestSuites, type PlatformTestSuite } from "../platform/test-suites.ts";
 import {
@@ -69,7 +68,6 @@ export type PullReport = {
   readonly suites: readonly PulledSuite[];
   readonly tests: readonly PulledTest[];
   readonly kept: readonly KeptDraft[];
-  readonly mockTools: readonly string[];
 };
 
 type StagedFileApplier = (
@@ -99,6 +97,7 @@ export function fileFromPlatform(test: PlatformTest): TestFile {
     scenario: test.scenario,
     expectedBehaviors: test.expectedBehaviors,
     mockTools: test.mockTools,
+    env: test.env,
   };
 }
 
@@ -126,7 +125,8 @@ function sameContent(file: TestFile, platform: PlatformContent): boolean {
       (entry, index) => entry === platform.expectedBehaviors[index],
     ) &&
     samePersonas(file.personas, platform.personas) &&
-    sameMockTools(file.mockTools, platform.mockTools)
+    sameMockTools(file.mockTools, platform.mockTools) &&
+    sameEnv(file.env, platform.env)
   );
 }
 
@@ -282,8 +282,6 @@ export async function pullRepository(options: PullOptions): Promise<PullReport> 
       })),
     );
   }
-  const remoteMockTools = await listMockTools(options.signedIn, options.fetchImpl);
-
   const localSuiteById = new Map(
     repository.suites.map((suite) => [suite.manifest.id, suite] as const),
   );
@@ -423,17 +421,6 @@ export async function pullRepository(options: PullOptions): Promise<PullReport> 
     });
   }
 
-  const remoteToolNames = new Set(remoteMockTools.map((tool) => tool.entry.tool));
-  const toolDrafts = repository.mockTools.filter((tool) => !remoteToolNames.has(tool.tool));
-  const mockTools: readonly MockToolEntry[] = [
-    ...remoteMockTools.map((tool) => tool.entry),
-    ...toolDrafts,
-  ].sort((a, b) => a.tool.localeCompare(b.tool));
-  const mockDocument = serializeMockToolsFile(mockTools);
-  if (!(await sameBytes(options.paths.mockTools, mockDocument))) {
-    planned.push({ destination: options.paths.mockTools, document: mockDocument });
-  }
-
   const configDocument = serializeConfig(pulledConfig);
   if (!(await sameBytes(options.paths.config, configDocument))) {
     // Apply the config last. A failed earlier write never exposes a target
@@ -448,10 +435,5 @@ export async function pullRepository(options: PullOptions): Promise<PullReport> 
     options.applyStagedFile,
   );
 
-  return {
-    suites: suiteReports,
-    tests: testReports,
-    kept,
-    mockTools: mockTools.map((tool) => tool.tool),
-  };
+  return { suites: suiteReports, tests: testReports, kept };
 }

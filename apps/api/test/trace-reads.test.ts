@@ -876,3 +876,112 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
     expect((await measureOf(REPORTED)).partial).toBe(false);
   });
 });
+
+/**
+ * **Who answered a tool call, on the wire.**
+ *
+ * Egma writes `egma.tool.provenance` on the span it files for a call it served
+ * itself — the mock endpoint on the Retell lanes, the simulator on LiveKit —
+ * and writes nothing at all for a call that reached the customer's own
+ * backend. The read projects that one word and nothing around it, so a
+ * transcript can say "mocked" beside the answer a test supplied without
+ * claiming anything about the call beside it.
+ */
+describe.skipIf(!storage.available)("who answered each tool call", () => {
+  const MIXED = "1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d";
+  const WHEN = {
+    from: "2026-08-05T00:00:00Z",
+    to: "2026-08-06T00:00:00Z",
+  } as const;
+  const AT = BigInt(Date.parse("2026-08-05T09:00:00Z")) * 1_000n;
+
+  /** Every column stated, so a case says only what it is about. */
+  function span(over: Partial<NewSpan>): NewSpan {
+    return {
+      traceId: MIXED,
+      spanId: "",
+      parentSpanId: "",
+      source: "simulation",
+      emitter: "egma-runtime",
+      environment: "default",
+      startedAtMicroseconds: AT,
+      durationNanoseconds: 1_000_000_000n,
+      name: "agent_session",
+      kind: "root",
+      status: "ok",
+      text: "",
+      audioUrl: "",
+      toolName: "",
+      toolArguments: "",
+      toolResult: "",
+      providerCallId: "",
+      agentPlatform: "retell",
+      platformAgentId: "",
+      platformAgentName: "",
+      platformAgentVersion: "",
+      connectionType: "",
+      runId: "run_01JQZ0000000000000000000BB",
+      agentId: "agt_01JQZ0000000000000000000BB",
+      agentVersionId: "",
+      testVersionId: "",
+      personaVersionId: "",
+      payload: "{}",
+      endsTrace: false,
+      ...over,
+    };
+  }
+
+  beforeAll(async () => {
+    await appendSpans(contextFor(acme, "admin"), [
+      span({ spanId: "5400000000000001" }),
+      // The one egma stood in front of, written exactly as the mock endpoint
+      // writes it.
+      span({
+        spanId: "5400000000000002",
+        parentSpanId: "5400000000000001",
+        name: "tool_call",
+        kind: "tool",
+        toolName: "get_availability",
+        toolArguments: '{"day":"Tuesday"}',
+        toolResult: '{"slots":[]}',
+        startedAtMicroseconds: AT + 1_000_000n,
+        payload: JSON.stringify({
+          "egma.tool.name": "get_availability",
+          "egma.tool.arguments": '{"day":"Tuesday"}',
+          "egma.tool.result": '{"slots":[]}',
+          "egma.tool.provenance": "mocked",
+          "egma.tool.mock_tool": "get_availability",
+        }),
+      }),
+      // And one the test never named, which reached the real backend.
+      span({
+        spanId: "5400000000000003",
+        parentSpanId: "5400000000000001",
+        name: "tool_call",
+        kind: "tool",
+        toolName: "send_receipt",
+        toolArguments: "{}",
+        toolResult: "ok",
+        startedAtMicroseconds: AT + 2_000_000n,
+      }),
+    ]);
+  });
+
+  it("marks the call egma answered, and says nothing about the one it did not", async () => {
+    const response = await readTraceOverHttp(api.app, acme.secret, MIXED, WHEN);
+    expect(response.statusCode, response.body).toBe(200);
+    const detail = response.json() as TraceDetailBody;
+
+    const tools = [
+      ...everySpan(detail.turns),
+      ...everySpan(detail.spans),
+    ].filter((one) => one.kind === "tool");
+    const byName = new Map(tools.map((one) => [one.toolName, one]));
+
+    expect(byName.get("get_availability")?.toolProvenance).toBe("mocked");
+    // Absent, not empty and not null: a real call carries no key to interpret.
+    const real = byName.get("send_receipt");
+    if (real === undefined) throw new Error("the real tool call is missing");
+    expect("toolProvenance" in real).toBe(false);
+  });
+});

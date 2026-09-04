@@ -2,8 +2,8 @@
 
 The claim proved here is that a spec naming a chat ``livekit_room``
 connection becomes a whole simulation — a transcript, a distinct ending,
-the mock-tool coverage stamp, and the room's own name as the join to the
-platform's telemetry — with no LiveKit server, no project, no worker and
+the mock-tool calls egma answered, and the room's own name as the join to
+the platform's telemetry — with no LiveKit server, no project, no worker and
 no network anywhere. What stands in for the LiveKit is
 :mod:`room_stub`'s chat half, which is the real chat driver and the real
 text room with only the three requests and the one join answered locally.
@@ -142,17 +142,20 @@ with this pause is several honest slow utterances in a row and not one
 stalled stream anywhere.
 """
 
-A_DECLARED_TOOL_DELAY = 3.0
-"""The mock-tool delay this plug's budgets are written to clear.
+A_SLOW_TOOL = 3.0
+"""How long the scripted agent stays quiet in the middle of one turn.
 
-The customer declares it on the test and
-:data:`~egma_simulator.plugs.livekit_chat.REPLY_SECONDS` names it in so
-many words. It is the slow half of the gap an agent that publishes no
-state leaves in the middle of one turn.
+The room stub's own pause, and it stands for the slowest honest thing an
+agent does inside a turn: call a tool that egma is **not** answering for,
+wait on the customer's real backend, and answer out of what came back.
+Egma serves its own answers at once, so nothing egma does puts a gap
+here; what leaves one is a real lookup, and
+:data:`~egma_simulator.plugs.livekit_chat.REPLY_SECONDS` is written to
+clear it.
 """
 
-A_TOOL_TURN_GAP = A_DECLARED_TOOL_DELAY + 0.5
-"""That delay with a model round trip on either side of it.
+A_TOOL_TURN_GAP = A_SLOW_TOOL + 0.5
+"""That lookup with a model round trip on either side of it.
 
 Half a second for the pair, which is generous to the quiet period rather
 than to the agent: two real round trips cost more than that, so a quiet
@@ -180,7 +183,7 @@ def chat_spec(
     *,
     url: str = A_URL,
     agent_name: str | None = AN_AGENT,
-    metadata: object = None,
+    job_dispatch_metadata: dict | None = None,
     scenario: str = A_SCENARIO,
     max_turns: int = 60,
     max_duration_seconds: int = 600,
@@ -191,16 +194,16 @@ def chat_spec(
     Deliberately the same shape as the voice suite's ``livekit_spec``: a
     chat room simulation differs from a spoken one by its modality and by
     nothing else in the document, which is the whole point of one
-    connection type answering in two.
+    connection type answering in two — the test's own dispatch metadata
+    included.
     """
     config: dict = {"url": url}
     if agent_name is not None:
         config["agentName"] = agent_name
-    if metadata is not None:
-        config["metadata"] = metadata
     return a_spec(
         simulation_id,
         modality="chat",
+        job_dispatch_metadata=job_dispatch_metadata,
         connection={
             "agent_platform": "livekit",
             "connection_type": "livekit_room",
@@ -256,8 +259,7 @@ async def chat_walk(
     pipeline the service assembles — and is driven by the real conversation loop, so
     everything below the room-shaped LiveKit is every line the service
     would run. What comes back is the ending, the transcript, the tool
-    calls egma answered, and the assembled pipeline, which is where the
-    coverage stamp is asked for.
+    calls egma answered, and the assembled pipeline the seam lives on.
     """
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "LiveKitChatRoomBackend", stub.driver)
@@ -379,9 +381,9 @@ async def test_the_dispatch_carries_chat_and_none_of_the_test(
     """What an agent is told when it is asked for a typed simulation.
 
     Nothing, on this channel. The signal that lets it go text-only is the
-    room's name, and dispatch metadata is the customer's: a connection
-    that configured none sends none, so an agent reads here in a chat
-    simulation exactly what it reads in its own production rooms.
+    room's name, and dispatch metadata is the test's: a test that wrote
+    none sends none, so an agent reads here in a chat simulation exactly
+    what it reads in its own production rooms.
 
     Which makes the second half of this test the one that matters: not a
     word about what the agent will be asked, because an agent that reads
@@ -426,32 +428,56 @@ async def test_a_chat_rooms_name_carries_the_mark_the_worker_reads(
     assert suffix and all(digit in "0123456789abcdef" for digit in suffix)
 
 
-async def test_a_customers_own_modality_key_cannot_touch_the_simulation(
+async def test_a_tests_own_modality_key_cannot_touch_the_simulation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The collision the retiring block yields to, shrugged off whole.
+    """A key a test writes cannot break the lane, whatever it is called.
 
-    A customer may configure metadata that uses egma's own key names — a
-    ``modality`` of their own among them. The block is then dropped and
-    their string rides alone, byte for byte, exactly as the voice lane
-    promises. Nothing about the simulation bends, because nothing the
-    simulation needs travels on that channel: the room's name carries the
-    modality and the persona's identity carries the mock-tool address.
-    This is the test that says the chat lane cannot be broken by any key
-    a customer writes.
+    A test may write job dispatch metadata using egma's own key names — a
+    ``modality`` of its own among them. It rides alone, byte for byte,
+    exactly as the voice lane promises, and nothing about the simulation
+    bends: nothing the simulation needs travels on that channel, because
+    the room's name carries the modality and the persona's identity
+    carries the mock-tool address.
     """
-    configured = '{"modality":"my own word","simulationId":"their-id"}'
+    written = {"modality": "my own word", "simulationId": "their-id"}
     stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
     conducted, turns, _calls, _assembled = await chat_walk(
-        tmp_path, stub, monkeypatch, metadata=configured
+        tmp_path, stub, monkeypatch, job_dispatch_metadata=written
     )
 
-    # Their string, alone and untouched; egma's block dropped whole.
-    assert stub.dispatches[0].metadata == configured
+    # Their object, alone and untouched.
+    assert json.loads(stub.dispatches[0].metadata) == written
+    assert stub.dispatches[0].metadata == (
+        '{"modality":"my own word","simulationId":"their-id"}'
+    )
+    # The room carries none of it, on this lane as on the spoken one.
+    assert stub.rooms[0].metadata == ""
     # And the simulation neither noticed nor cared.
     assert stub.rooms[0].name.startswith("egma-sim-chat-")
     assert conducted.ending == "persona_concluded"
     assert ("agent", "Front desk.") in turns
+
+
+async def test_a_chat_dispatch_carries_the_tests_metadata_byte_for_byte(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The typed lane writes it exactly as the spoken one does.
+
+    The driver under both is the same driver, so this is the claim rather
+    than a second implementation of it: one compact serialisation, key
+    order as written, characters outside ASCII carried raw.
+    """
+    written = {"tenant": "caf\u00e9", "caller": {"name": "Margaret", "ids": [1, 2]}}
+    stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
+    await chat_walk(
+        tmp_path, stub, monkeypatch, job_dispatch_metadata=written
+    )
+
+    assert stub.dispatches[0].metadata == (
+        '{"tenant":"caf\u00e9","caller":{"name":"Margaret","ids":[1,2]}}'
+    )
+    assert json.loads(stub.dispatches[0].metadata) == written
 
 
 async def test_a_greeting_that_outran_its_wait_is_never_the_first_answer(
@@ -489,9 +515,8 @@ async def test_egma_answers_for_the_agents_tools_in_a_typed_room(
     """The mock-tool seam is modality-blind, and this is what that buys.
 
     The exchange knows nothing about rooms and nothing about speech, so a
-    typed room gets tool answering and the coverage stamp for free — and
-    the stamp names one tool covered and one left running, which is how a
-    reader learns a simulation was not fully isolated.
+    typed room gets tool answering for free — the one tool the test named
+    is answered by egma, and the other runs its own implementation.
     """
     hurry(monkeypatch)
     stub = ChatStub(greeting="Front desk.", replies=["Noted."])
@@ -502,7 +527,6 @@ async def test_egma_answers_for_the_agents_tools_in_a_typed_room(
                 {
                     "tool_name": "check_availability",
                     "answer": {"answer": "Nothing free on Tuesday."},
-                    "delay_milliseconds": 0,
                 }
             ]
         )
@@ -524,11 +548,6 @@ async def test_egma_answers_for_the_agents_tools_in_a_typed_room(
     answered = await stub.calls("check_availability", {"day": "Tuesday"})
     assert answered == {"answer": "Nothing free on Tuesday."}
 
-    assert assembled.mock_tool_coverage == {
-        "discovered": ["check_availability", "opening_hours"],
-        "covered": ["check_availability"],
-        "uncovered": ["opening_hours"],
-    }
     exchanged = assembled.tool_calls()
     assert [call.name for call in exchanged] == ["check_availability"]
     assert exchanged[0].mock_tool == "check_availability"
@@ -544,8 +563,8 @@ async def test_a_mocked_chat_simulation_comes_back_as_a_record_of_its_tools(
     contract on the way in; a session in the typed room reports two tools
     and calls the mocked one; and what comes back is everything the
     simulator would have sent — the tool-call span with its provenance and
-    the mock tool that served it, and the coverage stamp on the terminal
-    facts naming the other tool as left running.
+    the mock tool that served it, and no span at all for the tool the test
+    did not name, which ran its own implementation.
     """
     hurry(monkeypatch)
     stub = ChatStub(greeting="Front desk.", replies=["Nothing free, I am afraid."])
@@ -569,7 +588,6 @@ async def test_a_mocked_chat_simulation_comes_back_as_a_record_of_its_tools(
                     {
                         "tool_name": "check_availability",
                         "answer": {"answer": "Nothing free on Tuesday."},
-                        "delay_milliseconds": A_DECLARED_DELAY_MS,
                     }
                 ],
             )
@@ -614,10 +632,9 @@ async def test_a_mocked_chat_simulation_comes_back_as_a_record_of_its_tools(
     }
     assert held["egma.tool.name"] == "check_availability"
     assert held["egma.tool.mock_tool"] == "check_availability"
-    took = (
-        int(served[0]["endTimeUnixNano"]) - int(served[0]["startTimeUnixNano"])
-    ) / 1_000_000
-    assert took >= A_DECLARED_DELAY_MS, "the declared delay was really spent"
+    # The round trip is the span's own duration, with no second field to
+    # disagree with it.
+    assert int(served[0]["endTimeUnixNano"]) >= int(served[0]["startTimeUnixNano"])
 
     facts = next(
         event["facts"]
@@ -626,19 +643,8 @@ async def test_a_mocked_chat_simulation_comes_back_as_a_record_of_its_tools(
         if event["status"] in ("completed", "failed", "canceled")
     )
     assert facts["ending"] == "persona_concluded"
-    assert facts["mock_tool_coverage"] == {
-        "discovered": ["check_availability", "opening_hours"],
-        "covered": ["check_availability"],
-        "uncovered": ["opening_hours"],
-    }
     assert facts["audio"] is None, "a typed simulation put audio on the record"
     assert facts["provider_reference"] == stub.rooms[0].name
-
-
-A_DECLARED_DELAY_MS = 60
-"""Short enough to cost CI nothing, long enough that a span holding it
-cannot be a rounding error. The delay is real time on a real clock, here
-as in a live room."""
 
 
 class _FilingControlPlane:
@@ -1086,28 +1092,58 @@ async def test_an_agent_that_publishes_no_state_is_no_worse_off_than_before(
     )
 
 
-async def test_a_stateless_agent_may_take_a_declared_tool_delay_inside_one_turn(
+async def test_a_stateless_agent_may_take_a_slow_real_tool_inside_one_turn(
     monkeypatch: pytest.MonkeyPatch
 ):
     """The gap the quiet period is sized for, held to the number itself.
 
     An agent that publishes no state has nothing but the quiet period to
     end its turns, and the slowest honest thing it does inside one is call
-    a tool and answer out of what came back. How slow that tool is, is the
-    customer's to declare: a test that makes a backend take three seconds
-    is exactly the kind this lane exists to run, which is why
-    :data:`~egma_simulator.plugs.livekit_chat.REPLY_SECONDS` says so. The
-    gap between the filler and the answer is then that delay with a model
-    round trip on either side of it, and the quiet period has to outlast
-    the whole gap or the answer belongs to no turn at all — the record
-    keeps "one moment", the words that answered the question are dropped,
-    and only a line in the log says so.
+    a tool and answer out of what came back. That tool is one egma is not
+    answering for: egma serves its own answers at once, so the wait is the
+    customer's real backend taking as long as it takes, which is why
+    :data:`~egma_simulator.plugs.livekit_chat.REPLY_SECONDS` is written to
+    clear it. The gap between the filler and the answer is then that
+    lookup with a model round trip on either side of it, and the quiet
+    period has to outlast the whole gap or the answer belongs to no turn
+    at all — the record keeps "one moment", the words that answered the
+    question are dropped, and only a line in the log says so.
 
     The pause below is that gap carried onto this suite's clock at the
     production ratio, divided by the production number rather than by a
     copy of it. So this test holds the *number*: cut the quiet period and
     the pause grows past it, and the turn ends on the filler.
     """
+    hurry(monkeypatch)
+    monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_MEASURED_QUIET)
+    stub = ChatStub(
+        greeting=None,
+        replies=[
+            [
+                "One moment while I check the calendar.",
+                "Nothing is free on Tuesday.",
+            ]
+        ],
+        pause_seconds=A_TOOL_PAUSE,
+    )
+    assert stub.agent_states is None, "this agent says nothing about itself"
+    plug = chat_room(stub)
+    assert await plug.open() is None
+
+    answered = await plug.deliver("Anything on Tuesday?")
+
+    assert answered.text == (
+        "One moment while I check the calendar.\nNothing is free on Tuesday."
+    ), (
+        f"the answer was lost across a {A_TOOL_PAUSE:.2f}s gap inside one "
+        f"turn — a {A_SLOW_TOOL:.0f}-second real backend lookup with a model "
+        "round trip either side, on this suite's clock at the production "
+        "ratio. The quiet period is the whole of the rule for an agent that "
+        "publishes no state, so it has to outlast that gap"
+    )
+    await plug.close()
+
+
 async def test_the_finish_line_is_the_answers_start_not_the_turns_end(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1153,36 +1189,6 @@ async def test_the_finish_line_is_the_answers_start_not_the_turns_end(
         f"the answer began {to_the_answer:.3f}s in and the call returned "
         f"{to_the_return:.3f}s in: the finish line has to be the first, or "
         "every stateless agent is billed egma's whole quiet period"
-    )
-    await plug.close()
-
-
-    hurry(monkeypatch)
-    monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_MEASURED_QUIET)
-    stub = ChatStub(
-        greeting=None,
-        replies=[
-            [
-                "One moment while I check the calendar.",
-                "Nothing is free on Tuesday.",
-            ]
-        ],
-        pause_seconds=A_TOOL_PAUSE,
-    )
-    assert stub.agent_states is None, "this agent says nothing about itself"
-    plug = chat_room(stub)
-    assert await plug.open() is None
-
-    answered = await plug.deliver("Anything on Tuesday?")
-
-    assert answered.text == (
-        "One moment while I check the calendar.\nNothing is free on Tuesday."
-    ), (
-        f"the answer was lost across a {A_TOOL_PAUSE:.2f}s gap inside one "
-        f"turn — a {A_DECLARED_TOOL_DELAY:.0f}-second declared mock-tool "
-        "delay with a model round trip either side, on this suite's clock "
-        "at the production ratio. The quiet period is the whole of the rule "
-        "for an agent that publishes no state, so it has to outlast that gap"
     )
     await plug.close()
 

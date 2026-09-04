@@ -47,42 +47,19 @@ const testPersonaSchema = {
   required: [...namedResourceSchema.required, "archivedAt"],
 } as const;
 
-const mockToolProperties = {
-  tool: stringSchema,
-  delayMs: { type: "integer", minimum: 0 },
-} as const;
-
+/**
+ * One tool the test answers for, and what it answers.
+ *
+ * Exactly one of `answer` and `error`: an entry carrying both, or neither, is
+ * not a mock tool. There is no delay — a mocked answer arrives when the lane
+ * can send it, and a made-up wait told nobody anything true about the agent.
+ */
 export const testMockToolSchema = {
   oneOf: [
     {
       type: "object",
       properties: {
-        ...mockToolProperties,
-        answer: anySchema,
-        error: { not: {} },
-      },
-      required: ["tool", "delayMs", "answer"],
-      additionalProperties: false,
-    },
-    {
-      type: "object",
-      properties: {
-        ...mockToolProperties,
-        answer: { not: {} },
-        error: stringSchema,
-      },
-      required: ["tool", "delayMs", "error"],
-      additionalProperties: false,
-    },
-  ],
-} as const;
-
-export const testMockToolInputSchema = {
-  oneOf: [
-    {
-      type: "object",
-      properties: {
-        ...mockToolProperties,
+        tool: stringSchema,
         answer: anySchema,
         error: { not: {} },
       },
@@ -92,7 +69,7 @@ export const testMockToolInputSchema = {
     {
       type: "object",
       properties: {
-        ...mockToolProperties,
+        tool: stringSchema,
         answer: { not: {} },
         error: stringSchema,
       },
@@ -100,6 +77,31 @@ export const testMockToolInputSchema = {
       additionalProperties: false,
     },
   ],
+} as const;
+
+/**
+ * The world the test is conducted in, in the two platforms' own words.
+ *
+ * The inner keys stay snake_case on purpose. `retell_dynamic_variables` is what
+ * Retell calls the values it substitutes into an agent's prompt, and
+ * `job_dispatch_metadata` is what LiveKit calls the blob it hands the job. A
+ * reader who knows either platform reads this without a translation table, so
+ * the wire keeps their spelling even though every structural name around it is
+ * lowerCamelCase.
+ *
+ * A dynamic variable whose name begins `egma_` is refused: those are Egma's own
+ * words to the simulator, and a test cannot overwrite them.
+ */
+export const testEnvSchema = {
+  type: "object",
+  properties: {
+    retell_dynamic_variables: {
+      type: "object",
+      additionalProperties: stringSchema,
+    },
+    job_dispatch_metadata: { type: "object", additionalProperties: true },
+  },
+  additionalProperties: false,
 } as const;
 
 export const testSchema = {
@@ -116,7 +118,7 @@ export const testSchema = {
     expectedBehaviors: arrayOf(stringSchema),
     personas: arrayOf(testPersonaSchema),
     mockTools: arrayOf(testMockToolSchema),
-    overrideCount: { type: "integer", minimum: 0 },
+    env: nullable(testEnvSchema),
     revision: stringIdSchema,
     createdAt: dateTimeSchema,
     updatedAt: dateTimeSchema,
@@ -124,7 +126,7 @@ export const testSchema = {
   required: [
     "id", "projectId", "suiteId", "name", "description", "version",
     "versionId", "scenario", "expectedBehaviors", "personas", "mockTools",
-    "overrideCount", "revision", "createdAt", "updatedAt",
+    "env", "revision", "createdAt", "updatedAt",
   ],
   additionalProperties: false,
 } as const;
@@ -142,22 +144,30 @@ const testVersionSchema = {
     expectedBehaviors: arrayOf(stringSchema),
     personas: arrayOf(testPersonaSchema),
     mockTools: arrayOf(testMockToolSchema),
-    overrideCount: { type: "integer", minimum: 0 },
+    env: nullable(testEnvSchema),
     createdAt: dateTimeSchema,
   },
   required: [
     "id", "testId", "suiteId", "testName", "version", "current",
-    "scenario", "expectedBehaviors", "personas", "mockTools", "overrideCount",
+    "scenario", "expectedBehaviors", "personas", "mockTools", "env",
     "createdAt",
   ],
   additionalProperties: false,
 } as const;
 
+/**
+ * Everything a test version is made of, on create and on update alike.
+ *
+ * `mockTools` and `env` are versioned content: changing either mints a new test
+ * version, exactly as an edited expected behavior does. On an update an absent
+ * field leaves the field alone and `env: null` clears it.
+ */
 const testContentInput = {
   scenario: stringSchema,
   expectedBehaviors: arrayOf(stringSchema),
   personas: arrayOf(stringSchema),
-  mockTools: arrayOf(testMockToolInputSchema),
+  mockTools: arrayOf(testMockToolSchema),
+  env: nullable(testEnvSchema),
 } as const;
 
 const createTestBody = {

@@ -80,7 +80,6 @@
               "api/agents",
               "api/test-suites",
               "api/tests",
-              "api/mock-tools",
               "api/runs"
             ]
           },

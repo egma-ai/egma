@@ -8,8 +8,7 @@
     "access_variant": "livekit_room.project_credentials",
     "config": {
       "url": "wss://lakeside-dental.livekit.cloud",
-      "agentName": "front-desk",
-      "metadata": "{\"clinic\":\"lakeside\",\"locale\":\"en-GB\"}"
+      "agentName": "front-desk"
     },
     "credentials": {
       "apiKey": "APIexample0key0",

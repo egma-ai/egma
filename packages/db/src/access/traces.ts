@@ -278,6 +278,16 @@ export type TraceSpan = {
   readonly toolName: string;
   readonly toolArguments: string;
   readonly toolResult: string;
+  /**
+   * That egma answered this tool call itself, when it did.
+   *
+   * The only value is `"mocked"`, and it is absent everywhere else. A tool that
+   * ran for real is the ordinary case and carries nothing, so a reader who sees
+   * this word knows the answer came from the test rather than from the
+   * customer's own backend. Written by the mock endpoint and by the simulator,
+   * both on the span's own payload.
+   */
+  readonly toolProvenance?: "mocked";
   /** This span's own children, in time order. A turn is never nested here. */
   readonly spans: readonly TraceSpan[];
 };
@@ -985,6 +995,7 @@ function measureSpanRowAsSpanRow(row: PageMeasureSpanRow): SpanRow {
     tool_arguments: "",
     tool_result: "",
     provider_tool_id: "",
+    tool_provenance: "",
   };
 }
 
@@ -1078,6 +1089,8 @@ type SpanRow = {
   readonly tool_result: string;
   /** Retell's structural correlation id, extracted without the tool payload. */
   readonly provider_tool_id: string;
+  /** `mocked` when egma answered this call, and `''` on every other span. */
+  readonly tool_provenance: string;
 };
 
 /** A turn is a span whose kind says somebody was speaking. */
@@ -1179,7 +1192,17 @@ export async function readTrace(
          agent_platform = 'retell' and kind = 'tool',
          JSONExtractString(payload, 'id'),
          ''
-       ) as provider_tool_id
+       ) as provider_tool_id,
+       -- Who answered this tool call. Egma writes the word on the span it
+       -- files for a call it served — the mock endpoint on the Retell lanes,
+       -- the simulator on LiveKit — and writes nothing at all for a real one,
+       -- so an empty string here honestly means "not mocked" rather than
+       -- "unknown".
+       if(
+         kind = 'tool',
+         JSONExtractString(payload, 'egma.tool.provenance'),
+         ''
+       ) as tool_provenance
      from ${SPANS_TABLE} final
      where ${where}
      order by started_at asc, span_id asc
@@ -1423,5 +1446,11 @@ function spanOf(row: SpanRow): Omit<TraceSpan, "spans"> {
     toolName: row.tool_name,
     toolArguments: row.tool_arguments,
     toolResult: row.tool_result,
+    // Present only when egma answered the call. The key is left off entirely
+    // otherwise, so nothing downstream has to tell "not mocked" from "the
+    // reader forgot to ask".
+    ...(row.tool_provenance === "mocked"
+      ? { toolProvenance: "mocked" as const }
+      : {}),
   };
 }

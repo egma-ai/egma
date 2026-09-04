@@ -4,12 +4,10 @@ import {
   NotPermittedError,
   PersonaNameAmbiguousError,
   ProjectOutsideOrganizationError,
-  resolveMockToolAgents,
   resolvePersonaNames,
   TestMovedOnError,
   UnprocessableInputError,
   type AuthContext,
-  type MockOverrideInput,
   type RepositoryChangeSet,
 } from "@egma/db";
 import { isId } from "@egma/ids";
@@ -19,7 +17,6 @@ import type { FastifyInstance } from "fastify";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
-import { answerAsSent } from "../http/mock-tools.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
 import {
   notPermitted,
@@ -29,7 +26,7 @@ import {
 } from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
-import { describedTest } from "./tests.ts";
+import { describedTest, envIn, mockToolsIn } from "./tests.ts";
 
 export type RepositoryRoutesOptions = {
   readonly provider: SessionIdentityProvider;
@@ -71,31 +68,6 @@ function unknownKey(
   return key === undefined ? undefined : `${noun} has no key "${key}"`;
 }
 
-function overrides(value: unknown): readonly MockOverrideInput[] | string {
-  const entries = objects(value, "mockTools");
-  if (typeof entries === "string") return entries;
-  const found: MockOverrideInput[] = [];
-  for (const entry of entries) {
-    const unexpected = unknownKey(
-      entry,
-      ["tool", "answer", "error", "delayMs"],
-      "a test mock tool override",
-    );
-    if (unexpected !== undefined) return unexpected;
-    if ("delayMs" in entry && typeof entry.delayMs !== "number") {
-      return "delayMs must be a number of milliseconds";
-    }
-    found.push({
-      toolName: entry.tool,
-      answer: answerAsSent(entry),
-      ...(typeof entry.delayMs === "number"
-        ? { delayMilliseconds: entry.delayMs }
-        : {}),
-    });
-  }
-  return found;
-}
-
 async function repositoryTests(
   auth: AuthContext,
   value: unknown,
@@ -108,8 +80,8 @@ async function repositoryTests(
       entry,
       [
         "clientRef", "suiteId", "name", "description", "scenario",
-        "expectedBehaviors", "personas", "mockTools", "expectedVersionId",
-        "expectedRevision",
+        "expectedBehaviors", "personas", "mockTools", "env",
+        "expectedVersionId", "expectedRevision",
       ],
       "a repository test",
     );
@@ -128,8 +100,10 @@ async function repositoryTests(
     const people = strings(entry.personas, "personas");
     if (typeof people === "string") return people;
     const personaIds = await resolvePersonaNames(auth, people);
-    const mockOverrides = overrides(entry.mockTools);
-    if (typeof mockOverrides === "string") return mockOverrides;
+    const mockTools = mockToolsIn(entry.mockTools);
+    if (typeof mockTools === "string") return mockTools;
+    const env = envIn(entry.env);
+    if (typeof env === "string") return env;
     if (
       "expectedVersionId" in entry &&
       typeof entry.expectedVersionId !== "string"
@@ -158,44 +132,14 @@ async function repositoryTests(
       scenario: entry.scenario,
       expectedBehaviors: behaviors,
       personaIds,
-      mockOverrides,
+      mockTools,
+      env,
       ...(typeof entry.expectedVersionId === "string"
         ? { expectedVersionId: entry.expectedVersionId }
         : {}),
       ...(typeof entry.expectedRevision === "string"
         ? { expectedRevision: entry.expectedRevision }
         : {}),
-    });
-  }
-  return found;
-}
-
-async function repositoryMockTools(
-  auth: AuthContext,
-  value: unknown,
-): Promise<RepositoryChangeSet["mockTools"] | string> {
-  const entries = objects(value, "mockTools");
-  if (typeof entries === "string") return entries;
-  const found: RepositoryChangeSet["mockTools"][number][] = [];
-  for (const entry of entries) {
-    const unexpected = unknownKey(
-      entry,
-      ["tool", "answer", "error", "delayMs", "agents"],
-      "a repository mock tool",
-    );
-    if (unexpected !== undefined) return unexpected;
-    if ("delayMs" in entry && typeof entry.delayMs !== "number") {
-      return "delayMs must be a number of milliseconds";
-    }
-    const named = "agents" in entry ? strings(entry.agents, "agents") : [];
-    if (typeof named === "string") return named;
-    found.push({
-      toolName: entry.tool,
-      answer: answerAsSent(entry),
-      ...(typeof entry.delayMs === "number"
-        ? { delayMilliseconds: entry.delayMs }
-        : {}),
-      agentIds: await resolveMockToolAgents(auth, named),
     });
   }
   return found;
@@ -212,7 +156,7 @@ export async function repositoryRoutes(
     const query = (request.query ?? {}) as Body;
     const unexpectedQuery = unknownKey(query, ["projectId"], "the repository query");
     if (unexpectedQuery !== undefined) return unprocessable(reply, unexpectedQuery);
-    const unexpected = unknownKey(body, ["suites", "tests", "mockTools"], "a repository change set");
+    const unexpected = unknownKey(body, ["suites", "tests"], "a repository change set");
     if (unexpected !== undefined) return unprocessable(reply, unexpected);
     const acting = await actingIn(
       requesterOf(request).auth,
@@ -237,13 +181,10 @@ export async function repositoryRoutes(
 
     const tests = await repositoryTests(acting.auth, body.tests);
     if (typeof tests === "string") return unprocessable(reply, tests);
-    const mockTools = await repositoryMockTools(acting.auth, body.mockTools);
-    if (typeof mockTools === "string") return unprocessable(reply, mockTools);
 
     const applied = await applyRepositoryChangeSet(acting.auth, {
       suites: preparedSuites,
       tests,
-      mockTools,
     });
     return reply.send({
       tests: applied.tests.map((entry) => ({

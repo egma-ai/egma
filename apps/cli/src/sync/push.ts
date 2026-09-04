@@ -1,5 +1,6 @@
 /** Build and apply one complete, atomic repository change set. */
 
+import { sameEnv } from "../folder/env.ts";
 import { sameMockTools } from "../folder/mock-tools.ts";
 import type {
   FileBehavior,
@@ -61,7 +62,6 @@ export type PushReport = {
   readonly tests: readonly PushedTest[];
   readonly turnedAway: readonly TurnedAway[];
   readonly suites: number;
-  readonly mockTools: number;
 };
 
 export type PushOptions = {
@@ -79,6 +79,7 @@ function inputFrom(test: TestFile): TestInput {
     expectedBehaviors: [...test.expectedBehaviors],
     personas: test.personas,
     mockTools: test.mockTools,
+    env: test.env,
   };
 }
 
@@ -112,7 +113,8 @@ export function sameAsPlatform(file: TestFile, test: PlatformTest): boolean {
     file.scenario === test.scenario &&
     sameBehaviors(file.expectedBehaviors, test.expectedBehaviors) &&
     samePersonas(file.personas, test.personas) &&
-    sameMockTools(file.mockTools, test.mockTools)
+    sameMockTools(file.mockTools, test.mockTools) &&
+    sameEnv(file.env, test.env)
   );
 }
 
@@ -142,7 +144,6 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
       tests: [],
       turnedAway,
       suites: repository.suites.length,
-      mockTools: repository.mockTools.length,
     };
   }
 
@@ -156,7 +157,6 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
       expectedVersionId: file.test.version,
       expectedRevision: file.test.identityRevision,
     })),
-    mockTools: repository.mockTools,
   };
 
   const answer = await applyRepositoryChangeSet(
@@ -197,6 +197,5 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
     tests: pushed,
     turnedAway: [],
     suites: repository.suites.length,
-    mockTools: repository.mockTools.length,
   };
 }

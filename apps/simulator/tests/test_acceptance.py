@@ -755,9 +755,8 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     A spec carrying a text-mode connection block goes in, and what comes
     back is a record with everything this lane promises on it: the turns,
     the transition the platform announced, one tool call marked ``mocked``
-    because the run's snapshot covered its name and one carrying no stamp
-    at all because it ran for real, a coverage stamp saying which was
-    which, no audio, and no provider reference — because text mode
+    because the test named it and one carrying no stamp at all because it
+    ran for real, no audio, and no provider reference — because text mode
     keeps no record of its own and an id only egma has seen is not a join.
     """
     sentinel = "SENTINEL-text-mode-key-0d4f8b3e6a12"
@@ -788,13 +787,12 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
         api_key=sentinel,
         agent_id="agent_lakeside_voice",
         agent_version=106,
-        dynamic_variables={"egma_simulation": "sim-text-mode-001"},
+        dynamic_variables={"account_id": "sim-text-mode-001"},
         scenario="I need to move my Tuesday cleaning to Thursday.",
         mock_tools=[
             {
                 "tool_name": "get_availability",
                 "answer": {"answer": {"slots": ["thu-1430"]}},
-                "delay_milliseconds": 30000,
             }
         ],
     )
@@ -834,15 +832,10 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     # No provider reference exists either, and the record says that too,
     # rather than carrying an id egma invented for itself.
     assert terminal["facts"]["provider_reference"] is None
-    assert terminal["facts"]["mock_tool_coverage"] == {
-        "discovered": ["get_availability", "lookup_customer"],
-        "covered": ["get_availability"],
-        "uncovered": ["lookup_customer"],
-    }
 
-    # The tool facts, at the grain the honesty claim is made at: the
-    # covered call carries what Egma answered with and the stamp that says
-    # Egma authored it; the uncovered one carries neither, which is the
+    # The tool facts, at the grain the honesty claim is made at: the call
+    # the test named carries what Egma answered with and the stamp that
+    # says Egma authored it; the other carries neither, which is the
     # record's own way of saying a real backend did the work.
     calls = [span for span in spans if span["name"] == "tool_call"]
     assert [span_attribute(span, "egma.tool.name") for span in calls] == [
@@ -922,9 +915,7 @@ async def test_a_text_mode_exchange_the_agent_never_ends_hits_the_turn_limit(
 
     Nothing in the plug ends an exchange the agent did not end, so an agent
     that would answer forever runs out of turns instead — reported as the
-    limit it was and never as the agent failing. The coverage stamp is
-    still made, because Egma's answers were in the platform's hands from
-    the first request whether or not the agent ever called a tool.
+    limit it was and never as the agent failing.
     """
     sentinel = "SENTINEL-text-mode-key-limits-2f9b"
     running = await start_text_mode_stub(
@@ -941,7 +932,6 @@ async def test_a_text_mode_exchange_the_agent_never_ends_hits_the_turn_limit(
             {
                 "tool_name": "get_availability",
                 "answer": {"answer": {"slots": []}},
-                "delay_milliseconds": 0,
             }
         ],
     )
@@ -956,11 +946,6 @@ async def test_a_text_mode_exchange_the_agent_never_ends_hits_the_turn_limit(
     assert "turn limit" in terminal["reason"], terminal["reason"]
     assert terminal["facts"]["turn_count"] == 3
     assert terminal["facts"]["provider_reference"] is None
-    assert terminal["facts"]["mock_tool_coverage"] == {
-        "discovered": [],
-        "covered": ["get_availability"],
-        "uncovered": [],
-    }
 
     simulator.stop()
     assert_kept_secret(sentinel, records=records, simulator=simulator)
@@ -1001,9 +986,6 @@ async def test_a_text_mode_billing_wall_fails_loudly_and_says_nothing(
     assert "billing" in terminal["reason"], terminal["reason"]
     # Nothing was conducted: no exchange happened off the record.
     assert turns_for(records, "sim-text-mode-billing") == []
-    # And Egma never stood in this agent's tool path, so it claims nothing
-    # about its tools.
-    assert terminal["facts"].get("mock_tool_coverage") is None
 
     simulator.stop()
     assert_kept_secret(sentinel, records=records, simulator=simulator)

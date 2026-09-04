@@ -545,10 +545,12 @@ describe("the pages", () => {
     // the same prefix. A minted URL points at this origin, so a disagreement
     // here is a 404 on somebody's live agent.
     expect(endpoint).toContain('export const MOCK_TOOL_PREFIX = "/mock-tools"');
-    // The run, the simulation and the tool all live under the prefix, so the
-    // rule has to carry the whole tail rather than one segment.
+    // The simulation and the tool live under the prefix, so the rule has to
+    // carry the whole tail rather than one segment. The run is not in the path
+    // any more: a simulation names its own run, so asking the caller to repeat
+    // it was one more thing a minted URL could get wrong.
     expect(endpoint).toContain(
-      "`${MOCK_TOOL_PREFIX}/:runId/:simulationId/:toolName`",
+      "`${MOCK_TOOL_PREFIX}/:simulationId/:toolName`",
     );
   });
 

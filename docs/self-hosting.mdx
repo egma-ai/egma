@@ -161,29 +161,36 @@ forwarding. If yours does not, use a public server or LiveKit Cloud.
 
 ## Mock tools on Retell: the one public address
 
-Mock tools let a simulation run against answers you author instead of against
-your real backend, so a test never books a real appointment. On a Retell agent
-this works by pointing the agent's own tool URLs at Egma for the length of a
-run.
+A mock tool lets a simulation run against an answer the test authors instead of
+against your real backend, so a test never books a real appointment. On a Retell
+web-call agent this works by routing the tools a test names to Egma, per call,
+for the length of a run. Every tool a test does not name goes to your own
+backend and never reaches Egma.
 
-Retell calls those URLs from its own infrastructure, and **Retell refuses
+Retell calls a tool's URL from its own infrastructure, and **Retell refuses
 `localhost` and private network addresses for a tool URL**. So this is the one
 feature that needs your Egma API to be reachable from the public internet.
 
 - The address is your API's own origin — the same one `EGMA_BASE_URL` names —
-  under the path `/mock-tools/`. There is nothing extra to configure and no
-  second service to run.
-- Nothing else in Egma needs an inbound public address. If you never turn mock
-  tools on, keeping the API on a private network costs you nothing.
-- The endpoint answers only calls that name a run Egma is conducting right now,
-  a simulation of that run, and a tool that run answers for. Everything else is
-  refused. Where Retell signs the request, Egma verifies the signature with the
-  key you stored for that agent.
+  under the path `/mock-tools/{simulationId}/{toolName}`. There is nothing extra
+  to configure and no second service to run.
+- Nothing else in Egma needs an inbound public address. If no test of yours
+  names a mock tool, keeping the API on a private network costs you nothing.
+- The endpoint answers only calls that name a simulation of a run Egma is
+  conducting right now, and a tool that simulation's own test named. Everything
+  else is refused. Where Retell signs the request, Egma verifies the signature
+  with the key you stored for that agent.
+- **Egma drops the headers and query parameters that arrive on a mocked call,
+  unread.** The temporary version keeps each tool's own headers and query
+  parameters exactly as you wrote them, because that same version also serves
+  the tools your tests do not name. So your backend credentials arrive at this
+  endpoint, and nothing there reads, logs, or stores them. The one header it
+  reads is the platform's signature.
 
-Turn it on per agent, with **mock tools during simulations** on the agent. It
-needs the agent's Retell identity and key to be stored already, because Egma
-builds the mocked world by creating a temporary version of the agent in your
-Retell account and deleting it when the run ends.
+Egma needs the agent's Retell identity and key stored already, because it builds
+the mocked world by creating one temporary version of the agent in your Retell
+account at run start and deleting it when the run ends. Your serving version is
+never changed.
 
 If you put Egma behind a reverse proxy, `/mock-tools/` has to reach the API like
 the rest of it, and the request body must arrive unchanged — the signature is
@@ -242,18 +249,20 @@ Your simulator is built from this repository. The Egma Python SDK in a
 customer's LiveKit worker is an unpinned source dependency. A lockfile can keep
 an older resolved commit, so refresh that dependency when you update Egma.
 
-Older workers looked for Egma in dispatch metadata. The current simulator
-writes nothing there, so such a worker never finds Egma and its real tools can
-run inside a simulation. Update the unpinned SDK dependency and its lockfile;
-do not repair this by pinning an older SDK release.
+A worker finds Egma by the room's name. Dispatch metadata carries the running
+test's own `job_dispatch_metadata` and no key of Egma's, so a worker that looks
+for Egma there never finds it and its real tools can run inside a simulation.
+Update the unpinned SDK dependency and its lockfile; do not repair this by
+pinning an older SDK release.
 
 The `egma-sim-` room-name prefix and the `egma-persona` participant identity
 are frozen contracts, so updating the worker first does not break an older
 simulator.
 
-An out-of-date worker does not fail loudly. The coverage stamp on the run is
-where it shows, so refresh the source dependency on your own schedule rather
-than waiting for a run to complain.
+An out-of-date worker does not fail loudly. A simulation whose mocked tools all
+ran real shows it on the transcript, which carries no answered call, so refresh
+the source dependency on your own schedule rather than waiting for a run to
+complain.
 
 <Warning>
   There is no in-place self-host upgrade from a build before the current

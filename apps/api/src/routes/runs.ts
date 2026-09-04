@@ -11,7 +11,7 @@ import {
   listRunEvents,
   listRuns,
   listSimulations,
-  mockToolCoverageRow,
+  mockMetadataAsPublished,
   NotPermittedError,
   productLabelOf,
   ProjectOutsideOrganizationError,
@@ -235,9 +235,6 @@ function describedHeader(
     // reader scanning a page of runs can see which version each of them
     // tested.
     agentVersion: run.agentVersion,
-    // Whether this run was mocked, read off its own frozen snapshot rather
-    // than off the connection, which may have been unticked since.
-    mockToolsEnabled: run.connectionSnapshot.mockToolsEnabled,
     // What this run put onto the customer's account and what it owes back:
     // the temporary copy, the cleanup flag, and the put-it-back note. A reader
     // sees what Egma promised to restore. Absent from a list, on purpose — the
@@ -247,10 +244,11 @@ function describedHeader(
       ? {
           tempMockAgentVersion: run.tempMockAgentVersion,
           tempMockAgentVersionCleanup: run.tempMockAgentVersionCleanup,
-          // The note in the wire's own spelling. The stored row keeps the
-          // record's, which is the one the decisions record settled; a reader
-          // of the API sees the same three facts either way.
-          mockMetadata: run.mockMetadata,
+          // The note in the wire's own spelling, and only the part the wire
+          // publishes: the engine this run's copy was built from. The claim's
+          // own reader of the same note keeps the routing-variable map beside
+          // it, which is machinery rather than anything a person acts on.
+          mockMetadata: mockMetadataAsPublished(run.mockMetadata),
         }
       : {}),
     expectedSimulationCount: run.expectedSimulationCount,
@@ -333,10 +331,6 @@ function describedSimulation(
     endedAt: simulation.endedAt?.toISOString() ?? null,
     modality: simulation.modality,
     hasRecording: simulation.recordingReference !== null,
-    mockToolCoverage:
-      simulation.mockToolCoverage === null
-        ? null
-        : mockToolCoverageRow(simulation.mockToolCoverage),
   };
 }
 
@@ -563,19 +557,16 @@ export async function runRoutes(
       // mocked run's simulations are unclaimable until the record names a
       // temporary version, from the instant they are written. This is a no-op
       // for a text-mode run — not a mockable draft lane — and for a web-call run
-      // whose own connection has the mock-tools switch off; only a run whose
-      // frozen snapshot holds both facts reaches Retell here. A world that
-      // cannot be built cancels the run and is answered as itself, never as a
-      // run that started.
+      // whose pinned test versions carry no mock tools; only a run whose tests
+      // bring a mocked world reaches Retell here. A world that cannot be built
+      // cancels the run and is answered as itself, never as a run that
+      // started.
       const world = await buildRunMockedWorld(
         acting.auth,
         started,
-        {
-          baseUrl: options.baseUrl,
-          ...(options.retellFetch === undefined
-            ? {}
-            : { retellFetch: options.retellFetch }),
-        },
+        options.retellFetch === undefined
+          ? {}
+          : { retellFetch: options.retellFetch },
         request.log,
       );
       if (world.kind === "refused") {
