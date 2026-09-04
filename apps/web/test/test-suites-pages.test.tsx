@@ -1,5 +1,13 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import TestsPage from "../app/projects/[projectId]/tests/page.tsx";
@@ -263,6 +271,9 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  // The `Saved` indicator's own wait is the only fake clock in this file, and
+  // a test that used one must not hand it to the next.
+  vi.useRealTimers();
 });
 
 describe("the suite-first Tests route", () => {
@@ -1541,6 +1552,160 @@ describe("the suite-first Tests route", () => {
     });
     expect((await within(dialog).findByRole("alert")).textContent).toBe(REFUSED);
     expect(screen.getByRole("dialog", { name: "Env" })).toBeTruthy();
+  });
+
+  /**
+   * **A press elsewhere is leaving the cell, and most of a page takes no
+   * focus.**
+   *
+   * Blur closed a woken cell only when the browser had somewhere else to put
+   * the caret. The canvas beside the table, the table's own headings and the
+   * page title take none, so a cell was left open over words nobody had saved
+   * (founder, 2026-09-04). The press runs the same commit the blur runs.
+   */
+  it("commits and closes a woken cell when the press lands on the page itself", async () => {
+    gridAnswers({
+      saved: {
+        status: 200,
+        body: testBody({
+          personas: [PERSONA],
+          version: 2,
+          versionId: "tstv_2",
+          scenario: "The caller books a service visit.",
+        }),
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByText("The caller books service."));
+    fireEvent.change(screen.getByLabelText("Scenario"), {
+      target: { value: "The caller books a service visit." },
+    });
+    expect(document.querySelector("[data-woken-cell]")).not.toBeNull();
+
+    // The page's own background takes no focus, so nothing here blurs.
+    fireEvent.pointerDown(document.body);
+
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toEqual([
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          body: {
+            scenario: "The caller books a service visit.",
+            expectedVersionId: "tstv_1",
+          },
+        },
+      ]);
+    });
+    // One request, one closed cell, and the row showing what was saved.
+    await waitFor(() => {
+      expect(document.querySelector("[data-woken-cell]")).toBeNull();
+    });
+    expect(screen.queryByLabelText("Scenario")).toBeNull();
+    expect(screen.getByText("The caller books a service visit.")).toBeTruthy();
+  });
+
+  /**
+   * **A grid that saves itself has to say when it did.**
+   *
+   * Every other write surface is a form whose Save button goes busy and then
+   * says so. A cell commits on blur with no button to change, so the word
+   * stands over the grid instead — muted, briefly, and gone (founder,
+   * 2026-09-04).
+   */
+  it("says Saved when a cell commit lands, and takes the word away again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    gridAnswers({
+      saved: {
+        status: 200,
+        body: testBody({
+          personas: [PERSONA],
+          version: 2,
+          versionId: "tstv_2",
+          name: "Books a service",
+        }),
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    // Nothing has been saved, so the header says nothing.
+    expect(screen.queryByText("Saved")).toBeNull();
+
+    fireEvent.click(screen.getByText("Books service"));
+    const name = screen.getByLabelText("Name");
+    fireEvent.change(name, { target: { value: "Books a service" } });
+    fireEvent.keyDown(name, { key: "Enter" });
+
+    const said = await screen.findByText("Saved");
+    expect(said.getAttribute("role")).toBe("status");
+    expect(said.getAttribute("data-slot")).toBe("save-indicator");
+
+    // It stands for a moment and then leaves on its own.
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.queryByText("Saved")).toBeNull();
+  });
+
+  it("says Saved when the entry row writes the test", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    gridAnswers({
+      tests: [],
+      created: {
+        status: 201,
+        body: testBody({ personas: [PERSONA], name: "Books service" }),
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Write a test" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Books service" },
+    });
+    fireEvent.change(screen.getByLabelText("Scenario"), {
+      target: { value: "The caller books service." },
+    });
+    fireEvent.change(screen.getByLabelText("Expected behavior 1"), {
+      target: { value: "Offers an available time" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a persona" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Impatient Rita" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save test" }));
+
+    expect(await screen.findByText("Saved")).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.queryByText("Saved")).toBeNull();
+  });
+
+  it("says nothing over the grid when a save is refused", async () => {
+    const REFUSED = "Somebody else moved this test. Read it again.";
+    gridAnswers({
+      saved: { status: 409, body: { error: "conflict", message: REFUSED } },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByText("Books service"));
+    const name = screen.getByLabelText("Name");
+    fireEvent.change(name, { target: { value: "Books a service" } });
+    fireEvent.keyDown(name, { key: "Enter" });
+
+    // The refusal is in the cell, where the person is looking, and the header
+    // says nothing at all: nothing was saved.
+    expect(await screen.findByText(REFUSED)).toBeTruthy();
+    expect(screen.queryByText("Saved")).toBeNull();
+    expect(document.querySelector("[data-slot='save-indicator']")).toBeNull();
   });
 
   it("duplicates a test into a prefilled entry row below it, and writes nothing until Save", async () => {

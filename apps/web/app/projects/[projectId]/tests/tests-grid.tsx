@@ -333,6 +333,22 @@ const QUIET_INPUT =
 const ADD_LINE =
   "cursor-pointer bg-transparent p-0 text-left text-sm leading-(--line-caption) text-primary underline-offset-4 pointer-hover:underline";
 
+/**
+ * Where a press is *not* leaving the woken cell.
+ *
+ * The cell itself, obviously. The persona picker, because it is the cell's own
+ * panel and shutting it is what commits — the blur handler makes the same
+ * exception for the same reason. And a dialog, scrim included, because a save
+ * still in flight can leave a cell woken while one is opened over it, and a
+ * press meant for Save is not a press meant for the table.
+ */
+const KEEPS_THE_CELL = [
+  "[data-woken-cell]",
+  '[data-slot="popover-content"]',
+  '[data-slot="dialog-content"]',
+  '[data-slot="dialog-overlay"]',
+].join(",");
+
 type Draft = {
   readonly name: string;
   readonly scenario: string;
@@ -1565,6 +1581,55 @@ export function TestsGrid(props: GridProps) {
     await run;
   }
 
+  /**
+   * A press anywhere else is leaving the cell, and leaving a cell commits it.
+   *
+   * **Blur alone does not close a cell, because most of a page takes no
+   * focus.** The canvas beside the table, the table's own headings, the page
+   * title: pressing any of them moves focus nowhere, so no blur fires and the
+   * woken cell sat there wearing its ink edge over words nobody had saved
+   * (founder, 2026-09-04). A press is what a person means by "I am done with
+   * that cell", whether or not the browser had anywhere to put the caret.
+   *
+   * **It runs the same `commit` a blur runs**, so every rule that governs a
+   * save governs this one: the identical-resubmit guard that makes a press
+   * followed by a blur one request rather than two, the per-test queue, the
+   * version the queue hands it, and the refusal shown in place. Escape is
+   * untouched and still reverts.
+   *
+   * The handler is rebuilt every render and reached through a ref, because it
+   * has to run *this* render's `commit` over *this* render's draft — a
+   * listener captured once would save whatever was in the cell when it was
+   * woken.
+   */
+  const outsidePress = useRef<((event: Event) => void) | null>(null);
+  useEffect(() => {
+    outsidePress.current = (event: Event): void => {
+      if (active === null) return;
+      // Its own picker being open is the blur handler's exception too: Radix
+      // shuts the panel on this same press, and shutting it is the commit.
+      if (picking === active.testId) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(KEEPS_THE_CELL) !== null) return;
+      const test = tests.find((one) => one.id === active.testId);
+      if (test === undefined) return;
+      void commit(test, active.field);
+    };
+  });
+
+  useEffect(() => {
+    if (active === null) return undefined;
+    const press = (event: Event): void => outsidePress.current?.(event);
+    /*
+     * Capture, so the cell is committed on the way down to whatever was
+     * pressed rather than after it has had its turn — a press that opens a
+     * dialog or navigates away must carry the save with it.
+     */
+    document.addEventListener("pointerdown", press, true);
+    return () => document.removeEventListener("pointerdown", press, true);
+  }, [active]);
+
   async function write(): Promise<void> {
     if (entry === null || entrySaving) return;
     if (whatIsMissing(entry) !== null) return;
@@ -1820,6 +1885,7 @@ export function TestsGrid(props: GridProps) {
       <td
         className={cn(CELL, woken && WOKEN)}
         key={field}
+        {...(woken ? { "data-woken-cell": "" } : {})}
         onClick={woken ? undefined : () => wake(test, field)}
         onBlur={
           woken
