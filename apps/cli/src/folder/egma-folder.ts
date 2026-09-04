@@ -115,12 +115,7 @@ const NAMED_KEYS = ["id", "name"] as const;
 const CONNECTION_KEYS = NAMED_KEYS;
 const AGENT_KEYS = [...NAMED_KEYS, "platform", "connections"] as const;
 
-const CONFIG_HEADER = [
-  "# What this folder points at on Egma.",
-  "#",
-  "# Committed on purpose: nothing in this folder is secret. Egma writes an id",
-  "# beside each name once it has registered one.",
-];
+const CONFIG_HEADER = ["# config file for egma"];
 
 export function serializeConfig(config: FolderConfig): string {
   const lines = [...CONFIG_HEADER, `format: ${String(CONFIG_FORMAT)}`];

@@ -42,10 +42,7 @@ describe("folder config format 4", () => {
 
     expect(written).toBe(
       [
-        "# What this folder points at on Egma.",
-        "#",
-        "# Committed on purpose: nothing in this folder is secret. Egma writes an id",
-        "# beside each name once it has registered one.",
+        "# config file for egma",
         "format: 4",
         "platform:",
         "  origin: https://egma.example",

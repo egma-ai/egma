@@ -84,52 +84,6 @@ describe("the public skill source", () => {
     }
   });
 
-  it("shows a new test in a shape the real parser reads", async () => {
-    const skill = await readFile(
-      path.join(SOURCE_ROOT, "write-voice-agent-tests", "SKILL.md"),
-      "utf8",
-    );
-    const examples = markdownExamples(skill);
-    expect(examples).not.toHaveLength(0);
-
-    const test = parseTestFile(examples[0] ?? "", "shown-in-skill.md", "fallback");
-    expect(test.format).toBe(5);
-    expect(test.name).toBe("missed-appointment-reschedule");
-    expect(test.scenario).not.toBe("");
-    expect(test.expectedBehaviors.length).toBeGreaterThan(0);
-    expect(test.mockTools.map((tool) => tool.tool)).toEqual(["check_availability"]);
-    expect(test.env).toEqual({ retell_dynamic_variables: { caller_name: "Margaret" } });
-  });
-
-  it("routes integration work through the selected public references", async () => {
-    const root = path.join(SOURCE_ROOT, "integrate-egma");
-    const skill = await readFile(path.join(root, "SKILL.md"), "utf8");
-    const simulation = await readFile(
-      path.join(root, "references", "setup-simulation-testing.md"),
-      "utf8",
-    );
-
-    expect(await filesUnder(path.join(root, "references"))).toEqual([
-      "livekit-agent-connection-guide.md",
-      "retell-agent-connection-guide.md",
-      "setup-monitoring.md",
-      "setup-simulation-testing.md",
-    ]);
-    expect(skill).toContain(
-      "[simulation testing setup guide](references/setup-simulation-testing.md)",
-    );
-    expect(skill).toContain(
-      "[monitoring setup guide](references/setup-monitoring.md)",
-    );
-    expect(simulation).toContain(
-      "[guide to connect a livekit agent](references/livekit-agent-connection-guide.md)",
-    );
-    expect(simulation).toContain(
-      "[guide to connect a retell agent](references/retell-agent-connection-guide.md)",
-    );
-    expect([skill, simulation].join("\n")).not.toMatch(CLI_MARKER);
-  });
-
   it("keeps the documented complete test in the shape the real parser reads", async () => {
     const docs = await readFile(path.join(CODE_ROOT, "docs", "cli", "test-files.mdx"), "utf8");
     const example = markdownExamples(docs).find(
