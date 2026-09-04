@@ -34,6 +34,7 @@
  * `pull` immediately after a `push` change zero bytes.
  */
 
+import { FolderProblem } from "./problem.ts";
 import { sameJsonValue } from "./json-value.ts";
 
 /** One mock tool as a file writes it: one tool, and the one thing it says. */
@@ -59,13 +60,10 @@ const FENCE_LINE = /^(`{3,})\s*(\S*)\s*$/u;
  * Thrown rather than carried, because every reader of these files already
  * catches: a test file that will not parse is named and left alone.
  */
-export class MockToolProblem extends Error {
-  readonly where: string;
-
+export class MockToolProblem extends FolderProblem {
   constructor(where: string, said: string) {
-    super(`${where}: ${said}`);
+    super(where, `${where}: ${said}`);
     this.name = "MockToolProblem";
-    this.where = where;
   }
 }
 

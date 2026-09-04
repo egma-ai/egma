@@ -36,6 +36,7 @@
  * answer ceiling is left to the platform for the same reason.
  */
 
+import { FolderProblem } from "./problem.ts";
 import { sameJsonValue } from "./json-value.ts";
 
 /** The world one test is conducted in. Both halves are optional. */
@@ -69,13 +70,10 @@ const ENV_KEYS = ["retell_dynamic_variables", "job_dispatch_metadata"] as const;
 export const RESERVED_ENV_VARIABLE_PREFIX = "egma_";
 
 /** A file egma could not read, said with enough to go and fix it. */
-export class EnvProblem extends Error {
-  readonly where: string;
-
+export class EnvProblem extends FolderProblem {
   constructor(where: string, said: string) {
-    super(`${where}: ${said}`);
+    super(where, `${where}: ${said}`);
     this.name = "EnvProblem";
-    this.where = where;
   }
 }
 

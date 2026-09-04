@@ -673,12 +673,14 @@ describe("complete repository suite commands", () => {
 
         // The sentence names the file rather than the section, because a
         // repository of a hundred tests has to say which one to open.
-        await expect(
-          pushTests({ signedIn: { url: platform.url, key }, paths }),
-        ).rejects.toThrow(new RegExp(file.shown.replaceAll("/", "\\/"), "u"));
-        await expect(
-          pushTests({ signedIn: { url: platform.url, key }, paths }),
-        ).rejects.toThrow(new RegExp(reason, "su"));
+        const refusal = await pushTests({ signedIn: { url: platform.url, key }, paths }).then(
+          () => "",
+          (problem: unknown) => (problem instanceof Error ? problem.message : String(problem)),
+        );
+        expect(refusal).toMatch(new RegExp(reason, "su"));
+        // Exactly once: the parser names its file, and the reporter adds no
+        // second copy in front of it.
+        expect(refusal.split(file.shown).length - 1).toBe(1);
 
         // A push is one change set, so a file Egma cannot read stops it before
         // the platform is asked for anything at all: nothing lands, and the

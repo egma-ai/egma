@@ -24,6 +24,7 @@
  * repository runs the same command as the first and loses nothing by it.
  */
 
+import { FolderProblem, namesItsPlace } from "./problem.ts";
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -165,7 +166,7 @@ function unsupportedKeys(
 ): void {
   const unknown = Object.keys(mapping).filter((key) => !supported.includes(key));
   if (unknown.length > 0) {
-    throw new Error(
+    throw new FolderProblem(where, 
       `${where} has unsupported ${unknown.length === 1 ? "key" : "keys"}: ${unknown.join(", ")}.`,
     );
   }
@@ -180,10 +181,10 @@ function identifiedThing(
   const id = textAt(mapping, "id");
   const name = textAt(mapping, "name");
   if (id === null || name === null) {
-    throw new Error(`${where} must contain a nonblank id and name.`);
+    throw new FolderProblem(where, `${where} must contain a nonblank id and name.`);
   }
   if (id !== id.trim() || name !== name.trim()) {
-    throw new Error(`${where} has outer whitespace in its id or name.`);
+    throw new FolderProblem(where, `${where} has outer whitespace in its id or name.`);
   }
   return { id, name };
 }
@@ -224,7 +225,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
       typeof writtenFormat === "string" || typeof writtenFormat === "number"
         ? String(writtenFormat)
         : "none";
-    throw new Error(
+    throw new FolderProblem(where, 
       `${where} uses folder format ${said}. This Egma requires format ${String(CONFIG_FORMAT)} and has no legacy reader.`,
     );
   }
@@ -233,7 +234,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
     (key) => !Object.prototype.hasOwnProperty.call(mapping, key),
   );
   if (missing.length > 0) {
-    throw new Error(
+    throw new FolderProblem(where, 
       `${where} is missing required ${missing.length === 1 ? "key" : "keys"}: ${missing.join(", ")}.`,
     );
   }
@@ -243,7 +244,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
     platformMapping === null
       ? (() => {
           if (platformScalar !== null) {
-            throw new Error(
+            throw new FolderProblem(where, 
               `${where} has a platform value without an origin. Repair the repository binding, then run egma pull.`,
             );
           }
@@ -253,7 +254,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
           unsupportedKeys(platformMapping, ["origin"], `${where} platform`);
           const origin = textAt(platformMapping, "origin");
           if (origin === null) {
-            throw new Error(
+            throw new FolderProblem(where, 
               `${where} has a platform binding without an origin. Repair it, then run egma pull.`,
             );
           }
@@ -262,7 +263,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
 
   const projectMapping = mappingAtKey(mapping, "project");
   if (projectMapping === null && textAt(mapping, "project") !== null) {
-    throw new Error(`${where} has a project value without an id and name.`);
+    throw new FolderProblem(where, `${where} has a project value without an id and name.`);
   }
   const project =
     projectMapping === null
@@ -274,13 +275,13 @@ export function parseConfig(document: string, where: string): FolderConfig {
   const connectionOwners = new Map<string, string>();
   for (const [index, entry] of sequenceAt(mapping, "agents").entries()) {
     if (typeof entry !== "object") {
-      throw new Error(
+      throw new FolderProblem(where, 
         `${where} agent ${String(index + 1)} must contain id, name, and connections.`,
       );
     }
     unsupportedKeys(entry, AGENT_KEYS, `${where} agent ${String(index + 1)}`);
     if (!Object.prototype.hasOwnProperty.call(entry, "connections")) {
-      throw new Error(
+      throw new FolderProblem(where, 
         `${where} agent ${String(index + 1)} is missing required key: connections.`,
       );
     }
@@ -290,12 +291,12 @@ export function parseConfig(document: string, where: string): FolderConfig {
     );
     const platform = textAt(entry, "platform");
     if (platform !== "retell" && platform !== "livekit") {
-      throw new Error(
+      throw new FolderProblem(where, 
         `${where} agent ${String(index + 1)} must contain platform retell or livekit.`,
       );
     }
     if (agentIds.has(agent.id)) {
-      throw new Error(`${where} uses agent id ${agent.id} more than once.`);
+      throw new FolderProblem(where, `${where} uses agent id ${agent.id} more than once.`);
     }
     agentIds.add(agent.id);
 
@@ -305,7 +306,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
       "connections",
     ).entries()) {
       if (typeof connectionEntry !== "object") {
-        throw new Error(
+        throw new FolderProblem(where, 
           `${where} agent ${agent.id} connection ${String(connectionIndex + 1)} must contain id and name.`,
         );
       }
@@ -315,7 +316,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
       );
       const firstOwner = connectionOwners.get(connection.id);
       if (firstOwner !== undefined) {
-        throw new Error(
+        throw new FolderProblem(where, 
           `${where} uses connection id ${connection.id} under both agent ${firstOwner} and agent ${agent.id}.`,
         );
       }
@@ -334,7 +335,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
 }
 
 export async function readConfig(file: string): Promise<FolderConfig> {
-  return parseConfig(await readFile(file, "utf8"), path.basename(file));
+  return parseConfig(await readFile(file, "utf8"), `${FOLDER_NAME}/${CONFIG_FILE_NAME}`);
 }
 
 export async function writeConfig(file: string, config: FolderConfig): Promise<void> {
@@ -521,7 +522,7 @@ export function parseSuiteManifest(
       ...(missing.length === 0 ? [] : [`missing ${missing.join(", ")}`]),
       ...(unknown.length === 0 ? [] : [`unsupported ${unknown.join(", ")}`]),
     ].join("; ");
-    throw new Error(
+    throw new FolderProblem(where, 
       `${where} must contain exactly id and name${details === "" ? "" : ` (${details})`}.`,
     );
   }
@@ -529,18 +530,18 @@ export function parseSuiteManifest(
   const writtenName = mapping["name"];
   const name = typeof writtenName === "string" ? writtenName : null;
   if (id === null || !SUITE_ID.test(id)) {
-    throw new Error(
+    throw new FolderProblem(where, 
       `${where} has an invalid suite id. Expected ste_ followed by 26 Crockford base32 characters.`,
     );
   }
   if (name === null) {
-    throw new Error(`${where} has a non-string suite name.`);
+    throw new FolderProblem(where, `${where} has a non-string suite name.`);
   }
   if (name.trim() === "") {
-    throw new Error(`${where} has a blank suite name.`);
+    throw new FolderProblem(where, `${where} has a blank suite name.`);
   }
   if (name !== name.trim()) {
-    throw new Error(`${where} has outer whitespace in its suite name.`);
+    throw new FolderProblem(where, `${where} has outer whitespace in its suite name.`);
   }
   return { id, name };
 }
@@ -633,6 +634,15 @@ function reasonOf(problem: unknown): string {
   return problem instanceof Error ? problem.message : String(problem);
 }
 
+/**
+ * One issue line. A parser's own refusal already names its file, so it is
+ * taken as written; anything else — the file system, a JSON parser — is given
+ * the place the reporter was reading when it happened.
+ */
+function issueAt(place: string, problem: unknown): string {
+  return namesItsPlace(problem) ? problem.message : `${place}: ${reasonOf(problem)}`;
+}
+
 function shown(...parts: readonly string[]): string {
   return path.posix.join(FOLDER_NAME, TESTS_FOLDER_NAME, ...parts);
 }
@@ -651,14 +661,14 @@ export async function readRepository(paths: FolderPaths): Promise<RepositoryCont
   try {
     config = await readConfig(paths.config);
   } catch (problem) {
-    issues.push(`${FOLDER_NAME}/${CONFIG_FILE_NAME}: ${reasonOf(problem)}`);
+    issues.push(issueAt(`${FOLDER_NAME}/${CONFIG_FILE_NAME}`, problem));
   }
 
   let entries: Dirent[] = [];
   try {
     entries = await readdir(paths.tests, { withFileTypes: true });
   } catch (problem) {
-    issues.push(`${FOLDER_NAME}/${TESTS_FOLDER_NAME}: ${reasonOf(problem)}`);
+    issues.push(issueAt(`${FOLDER_NAME}/${TESTS_FOLDER_NAME}`, problem));
   }
 
   const suites: FolderSuite[] = [];
@@ -688,16 +698,14 @@ export async function readRepository(paths: FolderPaths): Promise<RepositoryCont
         shown(entry.name, SUITE_MANIFEST_FILE_NAME),
       );
     } catch (problem) {
-      issues.push(
-        `${shown(entry.name, SUITE_MANIFEST_FILE_NAME)}: ${reasonOf(problem)}`,
-      );
+      issues.push(issueAt(shown(entry.name, SUITE_MANIFEST_FILE_NAME), problem));
     }
 
     let children: Dirent[] = [];
     try {
       children = await readdir(suiteRoot, { withFileTypes: true });
     } catch (problem) {
-      issues.push(`${shown(entry.name)}: ${reasonOf(problem)}`);
+      issues.push(issueAt(shown(entry.name), problem));
     }
 
     const tests: FolderTest[] = [];
@@ -733,7 +741,7 @@ export async function readRepository(paths: FolderPaths): Promise<RepositoryCont
           test: parseTestFile(document, shown(entry.name, child.name), child.name.replace(/\.md$/u, "")),
         });
       } catch (problem) {
-        issues.push(`${shown(entry.name, child.name)}: ${reasonOf(problem)}`);
+        issues.push(issueAt(shown(entry.name, child.name), problem));
       }
     }
 

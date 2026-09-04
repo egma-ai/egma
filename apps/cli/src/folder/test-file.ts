@@ -56,6 +56,7 @@
  * makes `pull` immediately after `push` change zero bytes.
  */
 
+import { FolderProblem } from "./problem.ts";
 import { ENV_LINE, readEnv, writeEnv, type TestEnv } from "./env.ts";
 import {
   MOCK_TOOLS_LINE,
@@ -298,7 +299,7 @@ export function parseTestFile(
       typeof writtenFormat === "string" || typeof writtenFormat === "number"
         ? String(writtenFormat)
         : "none";
-    throw new Error(
+    throw new FolderProblem(where, 
       `${where} uses test file format ${said}. This Egma requires format ${String(TEST_FILE_FORMAT)} and has no legacy reader.`,
     );
   }
@@ -314,7 +315,7 @@ export function parseTestFile(
   ];
   const unsupported = Object.keys(mapping).filter((key) => !supported.includes(key));
   if (unsupported.length > 0) {
-    throw new Error(`${where} has unsupported frontmatter: ${unsupported.join(", ")}.`);
+    throw new FolderProblem(where, `${where} has unsupported frontmatter: ${unsupported.join(", ")}.`);
   }
 
   return {
