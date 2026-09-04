@@ -14,7 +14,7 @@ requires reading anything beyond this file, that is a bug in this file.
 ## What a plug receives
 
 A plug is constructed once per simulation, from the claimed spec, with
-nine keyword arguments:
+ten keyword arguments:
 
 - ``modality`` — ``"chat"`` or ``"voice"``. A plug that cannot speak the
   requested modality must refuse at construction (raise ``PlugError``).
@@ -61,6 +61,15 @@ nine keyword arguments:
   one there, and it is what a tool call the platform makes rides back to
   this simulation on. A plug whose platform renders no such thing takes them
   and drops them.
+- ``job_dispatch_metadata`` — the other half of the world a test starts its
+  agent in: the JSON object the test wrote, or ``None``. It is not rendered
+  by anybody's platform and it is not read here; it is written, whole, onto
+  the one channel that carries a per-session object to a worker — the
+  LiveKit agent dispatch. So exactly one plug has a use for it, and every
+  other plug takes it and drops it. Like the variables beside it, it is
+  **passed on byte for byte**: a worker doing
+  ``json.loads(ctx.job.metadata)["tenant"]`` reads what its test wrote, and
+  a value the simulator tidied would be a value the agent never saw.
 - ``mock_tools`` — egma's side of the mock-tool exchange for this
   simulation (:class:`egma_simulator.mock_tools.MockToolSeam`), already
   holding the answers the run resolved. Only a plug that can **put egma in
@@ -69,11 +78,10 @@ nine keyword arguments:
   exchange to whoever is in the room with it and says so. Or it can *hand
   the answers over* to a platform that serves them itself — text mode
   does: they ride every request, and the platform matches them by name. In
-  both cases the saying-so is what puts a coverage stamp on the record, and
-  every tool call the plug learns of goes to the seam, which is the only
-  writer that can stamp one ``mocked``. Every other plug takes the seam and
-  drops it, and its record honestly claims nothing about tools, because
-  egma was never in the path to learn anything.
+  both cases every tool call the plug learns of goes to the seam, which is
+  the only writer that can stamp one ``mocked``. Every other plug takes the
+  seam and drops it, and its record honestly claims nothing about tools,
+  because egma was never in the path to learn anything.
 - ``media`` — how a call reaches the telephone network for this
   simulation (:class:`egma_simulator.config.MediaSettings`), or ``None``
   on a deployment that places no calls. Already resolved: this
@@ -84,7 +92,7 @@ nine keyword arguments:
 
 Constructors validate and hold; they never do I/O. A constructor that
 raises means the simulation fails with an honest reason before the
-connection is ever opened. Two of the nine are read for you where a plug
+connection is ever opened. Two of the ten are read for you where a plug
 uses them — :func:`named_version` and :func:`rendered_variables` below —
 so that two plugs reaching one platform cannot disagree about what a
 version reference is or what a variable may hold.
@@ -425,9 +433,9 @@ class VoiceConnection(Protocol):
 PlugFactory = Callable[..., ConnectionPlug | VoiceConnection]
 """What the registry hands back: called with ``modality=``,
 ``access_variant=``, ``config=``, ``credentials=``, ``simulation_id=``,
-``agent_version=``, ``dynamic_variables=``, ``mock_tools=`` and ``media=``
-keywords, it returns one plug for one simulation — in practice, the plug
-class itself."""
+``agent_version=``, ``dynamic_variables=``, ``job_dispatch_metadata=``,
+``mock_tools=`` and ``media=`` keywords, it returns one plug for one
+simulation — in practice, the plug class itself."""
 
 
 def _livekit_room(*, modality: str, **rest: object) -> ConnectionPlug | VoiceConnection:

@@ -15,8 +15,8 @@ driver, and its ``agentName`` is required for the same reason: egma
 dispatches explicitly, so the record names the agent it graded. The
 modality itself needs no dispatch to travel — it is the name of the room
 this plug's driver mints, ``egma-sim-chat-`` against the voice lane's bare
-``egma-sim-``, read by the worker before it connects to anything. No key
-the customer configures can collide with a room's name.
+``egma-sim-``, read by the worker before it connects to anything. No key a
+test writes into its job dispatch metadata can collide with a room's name.
 
 **No speech runs anywhere.** There is no text-to-speech leg, no
 speech-to-text leg, no Pipecat pipeline and no recording. A chat
@@ -104,8 +104,8 @@ the moment it starts — which is before it has greeted anybody.
 Exactly as the room does for voice, and by construction rather than by a
 second implementation: the mock-tool exchange knows nothing about rooms
 and nothing about modality, so the same two methods go on egma's own
-participant the moment the room is joined, and the coverage stamp lands on
-a chat record the way it lands on a voice one.
+participant the moment the room is joined, and a call egma answered lands
+on a chat record the way it lands on a voice one.
 
 The reply's tool-call list, on the other hand, stays empty. The seam
 records the calls it answers as spans of their own, and this plug can see
@@ -152,10 +152,9 @@ seconds before its first word is thinking, not silent, and a budget that
 called it silent would file its answer against the persona's *next*
 question.
 
-Thirty seconds because a tool call can sit inside that round trip, and a
-mock tool's delay is the customer's to declare: a test that makes a
-backend take three seconds is exactly the kind this lane exists to run,
-and the budget has to clear the slowest declared delay plus the model on
+Thirty seconds because a tool call can sit inside that round trip: an
+unmocked tool reaches the customer's own backend and takes whatever that
+backend takes, so the budget has to clear a real lookup plus the model on
 either side of it. It matches the join wait for the same reason that one
 is what it is — long enough that reaching it means something is wrong,
 rather than something is slow.
@@ -184,29 +183,32 @@ came back — because on those agents it is the whole of the rule, exactly
 as it was before.
 
 Measured against the tool-calling fixture agent in a real room, on
-2026-08-28, with ``check_availability`` answered by a mock tool declaring
-the 1.5-second delay the live mock-tool run declares. The gap between the
-filler utterance closing and the answer's stream opening was **1.52
-seconds**, of which the declared delay was 1.50 — so everything the wire
-itself costs, the tool round trip over LiveKit's own RPC included, is
-about **0.02 seconds**. A turn with no tool call in it arrived in 0.03.
+2026-08-28, with ``check_availability`` answered by a mock tool. The
+measurement was taken while the seam still held an answer back by a
+declared 1.5 seconds, and the gap between the filler utterance closing
+and the answer's stream opening was **1.52 seconds** — so everything the
+wire itself costs, the tool round trip over LiveKit's own RPC included,
+is about **0.02 seconds**. A turn with no tool call in it arrived in
+0.03. Egma serves its answers at once now, so the 1.5 seconds is no
+longer paid on a mocked call; what the number below still has to clear is
+an **unmocked** tool reaching the customer's own backend.
 
 Five seconds is that measurement plus a budget for the one part it could
 not include — the agent's model, because the account it ran on had no
 credit and a scripted one stood in. It is the measured number and not a
 tuned one, deliberately: the budget has to clear the same gap
-:data:`REPLY_SECONDS` is written for, which is a declared mock-tool delay
-of three seconds with a model round trip on either side of it. A turn cut
-short here is an agent that publishes no state *and* is still inside one
-of those gaps, and the words it loses are the answer rather than the
-filler.
+:data:`REPLY_SECONDS` is written for, which is an unmocked tool taking
+three seconds at the customer's own backend with a model round trip on
+either side of it. A turn cut short here is an agent that publishes no
+state *and* is still inside one of those gaps, and the words it loses are
+the answer rather than the filler.
 
 Cutting it to three seconds was tried and taken back. It reads as free —
 the state signal now carries the common case — and it is not: what the
 cut removes is the whole of the rule for the three kinds of agent above,
 and a stateless agent that says a filler and answers three and a half
 seconds later loses its answer at three seconds and keeps it at five.
-``test_a_stateless_agent_may_take_a_declared_tool_delay_inside_one_turn``
+``test_a_stateless_agent_may_take_a_slow_real_tool_inside_one_turn``
 holds that case, so the number cannot be re-tuned quietly.
 
 What the state signal changed is who pays, not how much. On the founder's
@@ -219,11 +221,11 @@ pays none of that, and the number is spent only where nothing else can
 end the turn.
 
 It is deliberately a plain number and not a wait that stretches while a
-mock-tool exchange is in flight. Egma answers only the tools this
-simulation has answers for; the agent's other tools run their own
-implementations with egma nowhere near them, and a rule that shortened the
-turn whenever egma happened not to be in the path would cut exactly those
-turns off. This plug claims nothing it cannot see, and it cannot see them.
+mock-tool exchange is in flight. Egma answers only the tools this test
+names; the agent's other tools run their own implementations with egma
+nowhere near them, and a rule that shortened the turn whenever egma
+happened not to be in the path would cut exactly those turns off. This
+plug claims nothing it cannot see, and it cannot see them.
 """
 
 TURN_DRAIN_SECONDS = 15.0
@@ -286,14 +288,16 @@ class LiveKitChat:
         simulation_id: str,
         agent_version: object = None,
         dynamic_variables: object = None,
+        job_dispatch_metadata: dict[str, Any] | None = None,
         mock_tools: MockToolSeam | None = None,
         media: object = None,
         driver: Any = None,
     ) -> None:
         # A room is reached with this connection's URL and authority, and a
         # typed one reaches the telephone network not at all. A worker is
-        # whatever the customer is running: LiveKit keeps no versions of it,
-        # so the two version-shaped fields have nothing to name here.
+        # whatever the customer is running: LiveKit keeps no versions of it
+        # and renders no variables, so those two fields have nothing to name
+        # here. The test's dispatch metadata does, and goes to the driver.
         del media, agent_version, dynamic_variables
 
         if modality != "chat":
@@ -321,6 +325,7 @@ class LiveKitChat:
             settings=read_connection(access_variant, config, credentials),
             simulation_id=simulation_id,
             mock_tools=mock_tools,
+            job_dispatch_metadata=job_dispatch_metadata,
         )
         self._reference: str | None = None
 

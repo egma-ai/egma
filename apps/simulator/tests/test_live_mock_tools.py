@@ -18,26 +18,22 @@ tools make.
 Four things, and every one of them is on the record rather than in this
 process's memory:
 
-- **the census arrived** — the agent reported both of its tools by name
-  at session start, so mock authoring could start from the real names;
 - **the answer this spec carried is the answer the agent got**, byte for
   byte, with the provenance stamp and the mock tool that served it;
-- **the tool egma does not answer for is named uncovered** and has no
-  span at all, which is how the record admits a simulation was not fully
-  isolated;
-- **the declared delay really was spent** in the middle of a live
-  conversation, and the record carries it as the call's own duration —
-  because a mocked backend that answered instantly would make every
-  latency number from a mocked run a flattering lie.
+- **the tool the test did not name has no span at all**, because egma was
+  never in its path — which is the honest other half of the rule, and the
+  thing no offline suite can show against a real worker;
+- **the test's own env reached the worker**: the spec carries
+  ``job_dispatch_metadata``, egma writes it onto the agent dispatch, and
+  the fixture worker reads it back out of ``ctx.job.metadata`` and logs
+  it, so the bytes are proved to have crossed a real LiveKit.
 
-A spec arrives with its mock tools **already resolved**: the control
-plane worked the project's defaults and this test's overrides into one
-answer per tool name at run creation, and which of the two won is settled
-and tested there (`apps/api/test/mock-tools-world.test.ts`). Resolving it
-a second time here would be a second implementation of that rule, free to
-disagree with the first. So what this file carries is the answer a
-calendar-is-full override resolves to, and what it proves is that the
-answer reaches a real agent unchanged.
+A spec carries its mock tools and its env **from the test that wrote
+them**: the pinned test version names the tools egma answers for and the
+world the agent starts in, and there is nothing to merge and nothing to
+resolve. So what this file carries is one test's calendar-is-full answer
+and one test's dispatch metadata, and what it proves is that both reach a
+real agent unchanged.
 
 And the transcript reads the way the test intends: the agent says Tuesday
 is full and offers the day the mock named instead, and never once offers
@@ -71,7 +67,9 @@ failing, never waiting on anybody — when any of them is missing.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 from pathlib import Path
 
 import nltk
@@ -217,29 +215,49 @@ is where a reader sees the agent take it well rather than claim a booking
 it never made.
 """
 
-# About as long as a real calendar lookup, which is the point of the
-# knob: a mocked run's latency numbers stay comparable to a real one's.
-# Long enough to be unmistakably a delay somebody declared, short enough
-# that a live conversation still fits inside its walls.
-DECLARED_DELAY_MS = 1500
-
-# What the span may hold beyond the delay. The two ends are egma's own —
-# the moment the call arrived and the moment the answer went back — so
-# what sits inside them besides the sleep is reading a small JSON object
-# and writing one, which is microseconds. A second is room enough for a
-# loaded machine and still tight enough that a delay served twice, or a
-# duration measuring something else entirely, fails here.
-DELAY_SLACK_MS = 1000
+# The most a call egma answers may take. Its two ends are egma's own — the
+# moment the call arrived and the moment the answer went back — so what
+# sits between them is reading a small JSON object and writing one, which
+# is microseconds. Egma serves at once now, so this is a ceiling and not a
+# window: a second is room enough for a loaded machine and still tight
+# enough that a driver that held an answer back would fail here.
+SERVED_AT_ONCE_MS = 1000
 
 # What this simulation answers `check_availability` with, and the only
 # place this answer exists: the calendar-is-full shape a test orders up
-# when it wants that branch. It arrives already resolved — see the module
-# docstring on why nothing here re-runs the control plane's rule.
+# when it wants that branch. It comes from the test that wrote it — see
+# the module docstring — so there is nothing here to resolve.
 MOCKED_ANSWER = {
     "tool_name": BOOKING_TOOL,
     "answer": {"answer": CALENDAR_IS_FULL},
-    "delay_milliseconds": DECLARED_DELAY_MS,
 }
+
+# The test's own env, and the value the fixture worker reads back and logs.
+# An ordinary customer key: what is being proved is that a *test's* object
+# reaches the channel LiveKit teaches an agent to read, so a key of egma's
+# own would prove the wrong thing.
+DISPATCHED_WORLD = {"tenant": "maple-street", "caller_id": "+15550100"}
+SERIALISED_WORLD = '{"tenant":"maple-street","caller_id":"+15550100"}'
+"""The exact string egma writes onto the dispatch: compact, key order as
+written, and the same form the control plane measured its size cap on."""
+
+WORKER_LOG = os.environ.get("EGMA_DUMB_AGENT_LOG", "").strip()
+"""Where the fixture worker's own output was written, when the runner says.
+
+The far side of the dispatch runs in a process this one did not start, so
+the only way to prove the bytes crossed is to read what that process
+wrote. ``calendar-is-full.sh`` hands the path over; a run started by hand
+has none, and is told where to look instead of being failed for it.
+"""
+
+WORLD_READ_BACK = f"dispatched tenant={DISPATCHED_WORLD['tenant']!r}"
+"""The line the fixture worker logs, written out here rather than imported.
+
+The fixture is the customer's side and this is egma's: a constant shared
+between them would let both move together and prove nothing. Rename the
+line in ``fixtures/livekit-dumb-agent/agent.py`` and this is supposed to
+go red.
+"""
 
 # Roomier than the sibling live test's walls, and for a reason found by
 # running this one: a turn is where the transcriber heard a pause, so one
@@ -257,7 +275,8 @@ WITHIN_SECONDS = AGENT_JOIN_SECONDS + MAX_DURATION_SECONDS + 60
 
 
 def mocked_spec() -> dict:
-    """One spec: a real room, a real worker, and one tool egma answers for."""
+    """One spec, as one test wrote it: a real room, a real worker, one tool
+    egma answers for, and the world the worker starts in."""
     config = {"url": LIVEKIT_URL, "agentName": AGENT_NAME}
     return a_spec(
         SIMULATION,
@@ -285,6 +304,7 @@ def mocked_spec() -> dict:
         max_turns=MAX_TURNS,
         max_duration_seconds=MAX_DURATION_SECONDS,
         mock_tools=[MOCKED_ANSWER],
+        job_dispatch_metadata=DISPATCHED_WORLD,
         models=direct_models(
             modality="voice",
             voice={
@@ -312,6 +332,15 @@ def deployment() -> dict[str, str]:
     }
 
 
+def _worker_wrote() -> str:
+    """Everything the fixture worker printed, read off disk.
+
+    Read in a thread by the caller: this is somebody else's process's log
+    and the loop is conducting a live simulation while it is opened.
+    """
+    return Path(WORKER_LOG).read_text(encoding="utf-8", errors="replace")
+
+
 def tool_calls_in(records: list[dict]) -> list[dict]:
     """Every call egma answered, as the spans they landed as.
 
@@ -326,7 +355,7 @@ def tool_calls_in(records: list[dict]) -> list[dict]:
     ]
 
 
-def hand_back(spoken: list[tuple[str, str]], call: dict, coverage: dict) -> None:
+def hand_back(spoken: list[tuple[str, str]], call: dict) -> None:
     """Print the transcript and the record showing the mock answered.
 
     On stdout rather than in an assertion message, because the point of
@@ -346,8 +375,12 @@ def hand_back(spoken: list[tuple[str, str]], call: dict, coverage: dict) -> None
         "egma.tool.mock_tool",
     ):
         print(f"{attribute}: {span_attribute(call, attribute)}")
-    print(f"duration: {milliseconds_of(call):.0f}ms, declared {DECLARED_DELAY_MS}ms")
-    print(f"\n--- the coverage stamp ---\n{json.dumps(coverage, indent=2)}")
+    print(f"duration: {milliseconds_of(call):.0f}ms, served at once")
+    print(
+        "\n--- the test's own world, as egma wrote it onto the dispatch ---\n"
+        f"{SERIALISED_WORLD}\n"
+        "(the worker logs the tenant it read back; watch its output)"
+    )
 
 
 @pytest.mark.timeout(WITHIN_SECONDS + 30)
@@ -381,21 +414,11 @@ async def test_a_mock_tool_answers_a_real_agent_in_a_real_room(
     facts = terminal["facts"]
     assert facts["provider_reference"].startswith(f"{ROOM_PREFIX}-")
 
-    # 1. The census arrived. Both of the agent's tools, by the names the
-    #    running process knows them by — which is what makes authoring
-    #    start from the real names rather than somebody's memory of them.
-    coverage = facts["mock_tool_coverage"]
-    assert coverage is not None, (
-        "no coverage stamp on a livekit simulation: egma never stood in "
-        "the tool path, so the agent's own tools ran"
-    )
-    assert set(coverage["discovered"]) == {BOOKING_TOOL, UNMOCKED_TOOL}, coverage
-
-    # 2. The stamp names one tool covered and one not. The uncovered half
-    #    is the only place a reader ever learns a simulation was not fully
-    #    isolated, so it is asserted as loudly as the covered half.
-    assert coverage["covered"] == [BOOKING_TOOL], coverage
-    assert coverage["uncovered"] == [UNMOCKED_TOOL], coverage
+    # 1. The record counts nothing about the agent's tools. What egma
+    #    answered is on it as the calls egma answered; what it did not
+    #    answer for ran with egma nowhere near it, and a tally would be
+    #    claiming an isolation nobody can vouch for.
+    assert not [name for name in facts if "coverage" in name], facts
 
     calls = tool_calls_in(records)
     assert calls, (
@@ -407,11 +430,11 @@ async def test_a_mock_tool_answers_a_real_agent_in_a_real_room(
     # Handed back before anything else is asserted, because this is what
     # the one command exists to show — and a run that then fails an
     # assertion about it is exactly the run where seeing it matters.
-    hand_back(spoken, calls[0], coverage)
+    hand_back(spoken, calls[0])
 
-    # 3. The unmocked tool has no span, in either direction. egma is not
-    #    in its path and does not observe it, so a span naming it would
-    #    mean the record had invented one.
+    # 2. The tool this test did not name has no span, in either direction.
+    #    egma is not in its path and does not observe it, so a span naming
+    #    it would mean the record had invented one.
     assert [span_attribute(call, "egma.tool.name") for call in calls] == [
         BOOKING_TOOL
     ] * len(calls), "a tool egma answers for nothing landed on the record"
@@ -423,24 +446,46 @@ async def test_a_mock_tool_answers_a_real_agent_in_a_real_room(
     )
     assert "day" in json.loads(span_attribute(call, "egma.tool.arguments"))
 
-    # 4. The answer the spec carried is the answer the agent got, byte for
+    # 3. The answer the spec carried is the answer the agent got, byte for
     #    byte, with the stamp that says where it came from. A result
     #    never rides without its provenance, so all three are read.
     assert json.loads(span_attribute(call, "egma.tool.result")) == CALENDAR_IS_FULL
     assert span_attribute(call, "egma.tool.provenance") == "mocked"
     assert span_attribute(call, "egma.tool.mock_tool") == BOOKING_TOOL
 
-    # 5. The declared delay really was spent, in the middle of a live
-    #    conversation, and the record carries it as the call's own
-    #    duration — the span's two ends being the moment the call reached
-    #    egma and the moment the answer went back. Bounded above as well
-    #    as below: a duration that only cleared the floor could be
-    #    measuring anything.
+    # 4. The answer was served at once, in the middle of a live
+    #    conversation, and the record carries the round trip as the call's
+    #    own duration — the span's two ends being the moment the call
+    #    reached egma and the moment the answer went back. Nothing holds an
+    #    answer back any more, so what this bounds is a driver that did.
     took = milliseconds_of(call)
-    assert DECLARED_DELAY_MS <= took < DECLARED_DELAY_MS + DELAY_SLACK_MS, (
-        f"the mocked call took {took:.0f}ms against a declared delay of "
-        f"{DECLARED_DELAY_MS}ms"
+    assert 0 <= took < SERVED_AT_ONCE_MS, (
+        f"the mocked call took {took:.0f}ms, which is not being served at "
+        "once: something stood between the call arriving and the answer "
+        "going back"
     )
+
+    # 5. The test's own env reached the worker, read back off the far
+    #    side's own output. This is the only half of the run that happens
+    #    inside the customer's process, so nothing in egma's record can
+    #    stand in for it: what is asserted is the line the fixture logged
+    #    after doing ``json.loads(ctx.job.metadata)``.
+    if WORKER_LOG:
+        wrote = await asyncio.to_thread(_worker_wrote)
+        assert WORLD_READ_BACK in wrote, (
+            f"the worker never logged {WORLD_READ_BACK!r}: the test's job "
+            "dispatch metadata did not reach ctx.job.metadata, so an agent "
+            "reading its per-session context found the wrong world (or "
+            f"none). Its whole log is at {WORKER_LOG}"
+        )
+        print(f"\n--- the world the worker read back ---\n{WORLD_READ_BACK}")
+    else:
+        print(
+            "\n--- the world the worker read back ---\n"
+            "not checked: set EGMA_DUMB_AGENT_LOG to the worker's log, or "
+            f"look in it by hand for {WORLD_READ_BACK!r}. "
+            "calendar-is-full.sh passes the path for you"
+        )
 
     # 6. And the conversation reads the way the test intended it to: the
     #    agent was told the calendar was full and behaved like it.

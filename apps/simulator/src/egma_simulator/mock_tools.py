@@ -26,8 +26,8 @@ in the room, before anything real runs — two methods and no more:
 Both directions are JSON objects in a string, because that is what the
 transport carries, and the answer travels on the wire in **the shape it
 was authored in** — ``{"answer": …}`` or ``{"error": …}`` — from the
-authoring row, through the run's snapshot, through the claimed spec, onto
-the wire. One shape all that way means nothing in between re-tags it, and
+test that wrote it, through its pinned test version, through the claimed
+spec, onto the wire. One shape all that way means nothing in between re-tags it, and
 the tag is what lets the other side tell "return this" from "raise this"
 even when the authored value itself looks like a failure.
 
@@ -50,8 +50,7 @@ there is no exchange to conduct, so :meth:`MockToolSeam.hello` and
 :meth:`MockToolSeam.tool` have nothing to do.
 
 That lane uses these other doors: :meth:`MockToolSeam.answers` for the
-answers to send, :meth:`MockToolSeam.handed_over` to say they are in the
-platform's hands, and :meth:`MockToolSeam.reported` for each call the
+answers to send, and :meth:`MockToolSeam.reported` for each call the
 platform tells egma about afterwards. The answers are rendered here, once,
 so the bytes a tool is given are the same bytes on every lane and one
 record reads across them.
@@ -273,14 +272,6 @@ class MockToolSeam:
 
     # -- What the driver does with it -----------------------------------------
 
-    def standing_ready(self) -> None:
-        """The handlers are in front of the agent; egma is in the tool path.
-
-        Said by whoever registered them. The seam keeps no tally of it: a
-        call egma answered is on the record as one it answered, and a room
-        nobody joined leaves no such call to read.
-        """
-
     def exchanged(self) -> list[ExchangedToolCall]:
         """Every call since this was last asked, and then none.
 
@@ -310,16 +301,6 @@ class MockToolSeam:
             )
             for mock in self._answers.values()
         )
-
-    def handed_over(self) -> None:
-        """The answers are in the platform's own hands for this exchange.
-
-        The same claim :meth:`standing_ready` makes, on the lane where the
-        handing over *is* egma coming to stand between the agent and its
-        backends: there is no census to answer and no call to serve, and
-        every name this simulation answers for will be answered by the
-        platform from here on.
-        """
 
     def reported(self, name: str, *, arguments: str | None = None) -> None:
         """One tool call the platform says it made.

@@ -39,13 +39,13 @@ EGMA_LIVEKIT_ENV=~/.egma-livekit.env:~/.egma-voice.env \
 
 | Tool | What it does | In the live test |
 | --- | --- | --- |
-| `check_availability(day)` | The booking-shaped one. Answers out of two times written into `agent.py`; there is no calendar behind it. | Answered by a **mock tool** — the calendar-is-full override, after a declared delay |
-| `opening_hours()` | Reads out fixed opening hours. | **Not** mocked: it runs its own implementation, and the record names it uncovered |
+| `check_availability(day)` | The booking-shaped one. Answers out of two times written into `agent.py`; there is no calendar behind it. | Answered by a **mock tool** — the calendar-is-full answer the test carries, served at once |
+| `opening_hours()` | Reads out fixed opening hours. | **Not** named by the test: it runs its own implementation, with Egma nowhere near it and no span on the record |
 
-Two rather than one, on purpose. A coverage stamp exists to say *this
-simulation was not fully isolated, and here is what was left out* — and
-with every tool covered it has nothing to say. The second tool is what
-gives the record both halves.
+Two rather than one, on purpose. The rule the live proof exists to show
+has two halves — Egma answers exactly the tools the test names, and every
+other tool runs for real, untouched and unobserved — and one tool can
+only show the first.
 
 Neither tool reads a clock, a network or a disk, so this worker can be
 left running against a real project without booking anything, and an

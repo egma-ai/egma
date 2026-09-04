@@ -116,10 +116,12 @@ def assemble(
         simulation_id=spec.simulation_id,
         # Handed over exactly as the spec carried them, to every plug, for
         # the same reason the mock-tool seam is: which of them reaches a
-        # platform that keeps versions or renders variables is the plug's
-        # own answer, not a list kept here of the ones that do.
+        # platform that keeps versions, renders variables or dispatches a
+        # worker is the plug's own answer, not a list kept here of the ones
+        # that do.
         agent_version=spec.agent_version,
         dynamic_variables=spec.dynamic_variables,
+        job_dispatch_metadata=spec.job_dispatch_metadata,
         mock_tools=mock_tools,
         media=media,
     )

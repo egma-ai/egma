@@ -332,7 +332,13 @@ async def test_a_simulation_that_mocks_nothing_records_exactly_what_it_used_to(
     )
 
     assert tool_spans(client) == []
-    assert terminal_facts(client)["ending"] == "persona_concluded"
+    facts = terminal_facts(client)
+    assert facts["ending"] == "persona_concluded"
+    # And nothing counts the agent's tools for it. What egma answered is
+    # on the record as the calls it answered; what it did not answer for
+    # ran with egma nowhere near it, and the record says nothing about it
+    # rather than tallying an isolation nobody can vouch for.
+    assert not [name for name in facts if "coverage" in name], facts
 
 
 async def test_a_connection_egma_stands_outside_records_no_tool_call(
@@ -439,6 +445,23 @@ async def test_hello_answers_the_names_this_simulation_answers_for():
         "protocol_version": PROTOCOL_VERSION,
         "mocked_tools": ["check_calendar", "book_appointment"],
     }
+    await plug.close()
+
+
+async def test_hello_answers_a_test_that_mocks_nothing_with_an_empty_list():
+    """A test naming no tools is answered, not ignored.
+
+    The rule is one rule: egma answers for exactly the tools the test
+    names, and a test that names none has egma answering for none. That is
+    an empty list rather than a silence, because the other side needs a
+    reply to learn to wrap nothing — a hello nobody answered would leave
+    it waiting, and the census would never reach the record.
+    """
+    stub = RoomStub(greeting="Front desk.")
+    plug = await opened(stub)
+
+    said = await stub.says_hello("check_calendar", "book_appointment")
+    assert said == {"protocol_version": PROTOCOL_VERSION, "mocked_tools": []}
     await plug.close()
 
 

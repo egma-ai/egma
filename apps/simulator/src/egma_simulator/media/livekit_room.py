@@ -14,7 +14,7 @@ verbs every media driver has (see :mod:`egma_simulator.media`):
    own, and egma deliberately does not lean on that: **a room filled
    automatically is a room where the record cannot say which agent it
    graded** — whichever workers were listening took it — and where the
-   customer's configured metadata has no dispatch of egma's to ride.
+   test's job dispatch metadata has no dispatch of egma's to ride.
    The simulation's own signals need no dispatch to travel: the room's
    name carries them (``egma-sim-`` says simulation, ``egma-sim-chat-``
    says which kind), and egma is found among the room's participants by
@@ -88,22 +88,27 @@ Neither is written beside the other: a second copy of the room
 lifecycle would drift from the first, and the first anybody would know
 is a customer's simulation.
 
-## The two metadata channels are the customer's
+## The one metadata channel egma writes on
 
-Platform integrations have taught agents to expect two, and both of them
-belong to the customer:
+A room carries two, and egma writes on exactly one:
 
-- **Room metadata** is the connection's own configured JSON, verbatim.
-- **Dispatch metadata** is the same configured JSON. It is the channel
-  LiveKit's own documentation teaches agents to read for per-session
-  context, so an agent that reads it finds its own object there and not
-  somebody else's — which is what an agent doing
-  ``json.loads(ctx.job.metadata)["their_key"]`` needs in order to survive
-  being put under test.
+- **Dispatch metadata** is the test's own ``job_dispatch_metadata``,
+  written as one compact JSON string. It is the channel LiveKit's own
+  documentation teaches agents to read for per-session context, so an
+  agent doing ``json.loads(ctx.job.metadata)["their_key"]`` finds the
+  keys this scenario meant it to find. A test that wrote none dispatches
+  the empty string, which is what that agent meets in its own production
+  rooms.
+- **Room metadata** is left empty, always. The value belongs to one
+  simulation and the dispatch is what carries one simulation's worker
+  into the room, so writing it in a second place would be a second thing
+  to keep true.
 
-Neither carries **anything of the test's content** — no scenario text, no
-persona, no expected behavior, and no mock answer — because an agent that
-reads its script stops being under test.
+Neither carries **anything else of the test's content** — no scenario
+text, no persona, no expected behavior, and no mock answer — because an
+agent that reads its script stops being under test. What a test does put
+here it wrote key by key, as the world its worker starts in: a tenant, a
+caller id, the account the scenario is about.
 
 **Where egma's own signal lives instead.** Not in either of these. An
 agent learns it is in a simulation from the room's name, which begins
@@ -123,9 +128,9 @@ A room driver is also where egma stands in the agent's tool path, for the
 simulations that mock anything. The two methods are registered on egma's
 participant the moment the room is joined, and what answers them knows
 nothing about rooms — see :mod:`egma_simulator.mock_tools`, which owns
-the exchange, the record it leaves, and the coverage stamp. Room
-membership is the whole of the authorisation, which is why a room with no
-egma participant leaves the agent's tools untouched by construction.
+the exchange and the record it leaves. Room membership is the whole of the
+authorisation, which is why a room with no egma participant leaves the
+agent's tools untouched by construction.
 
 ## Which failed ending a refusal deserves
 
@@ -190,7 +195,7 @@ from .room import (
 
 logger = logging.getLogger(__name__)
 
-KNOWN_CONFIG_KEYS = frozenset({"url", "agentName", "metadata"})
+KNOWN_CONFIG_KEYS = frozenset({"url", "agentName"})
 KNOWN_CREDENTIAL_KEYS = frozenset({"apiKey", "apiSecret"})
 URL_SCHEMES = ("ws://", "wss://", "http://", "https://")
 
@@ -198,15 +203,13 @@ ENDPOINT_CONFIG_KEYS = frozenset({"url", "tokenEndpoint"})
 """What the token-endpoint access variant's config holds — and what it
 does not.
 
-No agent name and no metadata, because both are powers a key pair buys.
-Metadata rides two channels and this access variant reaches neither:
-creating the room that carries the room copy and dispatching the worker
-that is handed the dispatch copy are the same one power, held by whoever
-holds the key pair. A key the driver would read and quietly do nothing
-with is worse than one it refuses by name. Where a customer on this
-access variant wants their agent to read something, their own endpoint is
-the side minting the token and dispatching the worker, so their own
-endpoint is what puts it there.
+No agent name, because dispatching is a power the key pair buys and this
+access variant holds none. Nothing about metadata either, on this variant
+or on the other: what an agent is dispatched with is the **test's**
+``job_dispatch_metadata`` and arrives with the simulation, not with the
+connection. On this variant it is carried nowhere at all, because the
+customer's own endpoint is the side that dispatches the worker, so their
+own endpoint is what puts anything on the job.
 """
 
 ENDPOINT_CREDENTIAL_KEYS = frozenset({"headers"})
@@ -473,18 +476,6 @@ class RoomSettings:
     *can* dispatch must carry a name — see :meth:`from_connection`.
     """
 
-    metadata: str | None = None
-    """The connection's configured JSON, as both metadata channels carry
-    it.
-
-    One field for two channels, because the customer configured one
-    value and both carry it byte for byte: :meth:`_create_room` sets it as
-    the room's metadata and :meth:`_dispatch` sends the same string as the
-    dispatch's. Neither writes it out again, so what an agent reads on
-    either channel is what was configured. ``None`` where the connection
-    configured none.
-    """
-
     token_endpoint: str = ""
     """Where egma asks for a token, once per simulation. Empty on the
     shape that mints its own."""
@@ -568,8 +559,8 @@ class RoomSettings:
         # connection nobody can dispatch is a sentence before any request
         # leaves egma. Every egma dispatch is explicit: a room filled by
         # automatic dispatch goes to whichever workers are listening, so
-        # the record could never say which agent it graded, and the
-        # customer's configured metadata would have no dispatch to ride.
+        # the record could never say which agent it graded, and the test's
+        # job dispatch metadata would have no dispatch to ride.
         agent_name = config.get("agentName")
         if not isinstance(agent_name, str) or not agent_name.strip():
             raise MediaBackendError(
@@ -605,7 +596,6 @@ class RoomSettings:
             api_key=pair["apiKey"],
             api_secret=pair["apiSecret"],
             agent_name=agent_name.strip(),
-            metadata=_configured_json(config.get("metadata")),
         )
 
     @classmethod
@@ -622,9 +612,9 @@ class RoomSettings:
         if unknown:
             raise MediaBackendError(
                 f"a livekit connection that names a tokenEndpoint holds no "
-                f"key pair, so it can neither dispatch an agent nor carry "
-                f"room metadata; config key(s) {sorted(unknown)} are read by "
-                f"nobody. It knows {sorted(ENDPOINT_CONFIG_KEYS)}"
+                f"key pair, so it cannot dispatch an agent; config key(s) "
+                f"{sorted(unknown)} are read by nobody. It knows "
+                f"{sorted(ENDPOINT_CONFIG_KEYS)}"
             )
 
         url = _server_url(config)
@@ -741,24 +731,6 @@ def _endpoint_headers(credentials: Any) -> dict[str, str]:
     return {name.strip(): value.strip() for name, value in held.items()}
 
 
-def _configured_json(configured: object) -> str | None:
-    """The connection's configured metadata, passed through byte for byte.
-
-    The control plane only ever stores this as a JSON object in a string,
-    so a string is the customer's own JSON and rides through verbatim.
-    Anything else never came through the door, and is a mistake worth
-    naming rather than passing on.
-    """
-    if configured is None:
-        return None
-    if isinstance(configured, str):
-        return configured
-    raise MediaBackendError(
-        "livekit config: metadata rides to the agent exactly as configured, "
-        "and it is configured as a JSON object in a string"
-    )
-
-
 @dataclass(frozen=True)
 class WayIn:
     """A token and the server it opens — everything a join needs.
@@ -802,11 +774,25 @@ class RoomLifecycle:
         settings: RoomSettings,
         simulation_id: str,
         mock_tools: MockToolSeam | None = None,
+        job_dispatch_metadata: dict[str, Any] | None = None,
         endpoint_resolver: Any = None,
     ) -> None:
         self._settings = settings
         self._mock_tools = mock_tools
         self._endpoint_resolver = endpoint_resolver
+        # Written out once, here, rather than at the dispatch: the string
+        # is what goes on the wire, and one serialisation means there is
+        # no second spelling of the test's object to disagree with the
+        # first. Compact and not ASCII-escaped, which is the same form the
+        # control plane measured the platform's 512 KiB ceiling on, so a
+        # value that saved cannot fail here for being too large.
+        self._dispatch_metadata = (
+            ""
+            if job_dispatch_metadata is None
+            else json.dumps(
+                job_dispatch_metadata, separators=(",", ":"), ensure_ascii=False
+            )
+        )
         # One registry per driver, so what this driver quotes from the
         # platform goes through the same scrubbing a log line does rather
         # than through a second implementation of it.
@@ -904,7 +890,6 @@ class RoomLifecycle:
             )
             return
         self._offered = True
-        self._mock_tools.standing_ready()
 
     async def _way_in(self) -> WayIn:
         """A token and a room, however this connection comes by them.
@@ -942,7 +927,7 @@ class RoomLifecycle:
         name the connection carries. Nothing here falls back on LiveKit's
         automatic dispatch: a room filled that way goes to whichever
         workers are listening, so the record could not name the agent it
-        graded, and the customer's configured metadata would have no
+        graded, and the test's job dispatch metadata would have no
         dispatch to ride.
 
         A connection that did not mint its own token asks for nothing here
@@ -1014,28 +999,34 @@ class RoomLifecycle:
     # is proved about the code, over a socket, rather than about a mock.
 
     async def _create_room(self) -> None:
-        """One `CreateRoom`, carrying the connection's own metadata."""
+        """One `CreateRoom`, and it carries a name and nothing else.
+
+        No metadata: what a simulation's agent is given belongs to the
+        dispatch that puts that agent in this room, and a second copy on
+        the room would be a second value to keep equal to the first.
+        """
         from livekit import api
 
-        request = api.CreateRoomRequest(name=self._room_name)
-        if self._settings.metadata is not None:
-            request.metadata = self._settings.metadata
-        await self._asked(request, "the room could not be created")
+        await self._asked(
+            api.CreateRoomRequest(name=self._room_name),
+            "the room could not be created",
+        )
 
     async def _dispatch(self) -> None:
-        """One `CreateAgentDispatch`, carrying the connection's own JSON."""
+        """One `CreateAgentDispatch`, carrying the test's own JSON."""
         from livekit import api
 
         request = api.CreateAgentDispatchRequest(
             room=self._room_name,
             agent_name=self._settings.agent_name,
-            # The connection's own JSON, exactly as it was configured and
-            # exactly as the room carries it. Nothing of egma's is added:
-            # an agent reading its per-session context out of the channel
-            # LiveKit teaches it to read finds its own object there and
-            # nothing else, and the two channels carry the same bytes
-            # because neither is written out again.
-            metadata=self._settings.metadata or "",
+            # The test's own ``job_dispatch_metadata``, and nothing of
+            # egma's beside it: an agent reading its per-session context
+            # out of the channel LiveKit teaches it to read finds the keys
+            # this scenario wrote, so a worker doing
+            # ``json.loads(ctx.job.metadata)["tenant"]`` keeps working
+            # under test and reads a different tenant per scenario. Empty
+            # where the test wrote none.
+            metadata=self._dispatch_metadata,
         )
         await self._asked(
             request,

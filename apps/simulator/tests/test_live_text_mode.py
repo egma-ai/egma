@@ -37,15 +37,18 @@ never failing, never waiting on anybody, and never reaching a network.
 
 It **banks its proof**: the whole record it read is written to a JSON file
 under `tests/.live-proof/` (git-ignored) and its path is printed, and the
-transcript, the coverage stamp, every mocked tool call and every transition
-are printed to stdout — which is what the `-s` above is for. Watch it work.
+transcript, every mocked tool call and every transition are printed to
+stdout — which is what the `-s` above is for. Watch it work.
 
 ## What only a live run can say
 
 The exchange really was text — the record carries no audio and no provider
 reference, because text mode stores nothing on Retell's side. The version
-egma resolved was named on every request. Egma's mock answers reached the real
-agent, marked `mocked` on the record with the tool that served them. And the
+egma resolved was named on every request. **The test's own** mock answers
+reached the real agent, marked `mocked` on the record with the tool that
+served them, and **the test's own** dynamic variables were the whole of
+what the request carried: no variable of egma's rides this lane, because
+egma serves nothing on it — Retell matches the answers itself. And the
 platform's own node or state transitions rode back beside the turns, verbatim,
 which is what makes a chat record of a voice agent comparable with a voice one.
 """
@@ -124,6 +127,12 @@ MOCK_ANSWER: dict[str, object] = {
     "note": "answered by an Egma mock tool during a chat simulation",
     "slots": ["Thursday 2:30pm", "Friday 10:00am"],
 }
+
+# The test's own dynamic variables, and the whole of what rides the request.
+# Nothing of egma's goes with them: this lane has no attribution variable
+# any more, because egma answers nothing on it — Retell matches the answers
+# itself and reports afterwards which tools were called.
+AUTHORED_VARIABLES = {"caller_name": "Margaret", "clinic": "maple-street"}
 
 # Where a proof is banked, so a hand-run leaves something to keep and read.
 PROOF_DIR = Path(__file__).with_name(".live-proof")
@@ -218,7 +227,7 @@ def _live_spec(mock_tools: list[dict], version: object) -> dict:
         personality=PERSONALITY,
         max_turns=MAX_TURNS,
         max_duration_seconds=MAX_DURATION_SECONDS,
-        dynamic_variables={"egma_simulation": SIMULATION},
+        dynamic_variables=AUTHORED_VARIABLES,
         mock_tools=mock_tools or None,
         models=direct_models(modality="chat", llm_key=MODEL_API_KEY),
     )
@@ -270,10 +279,6 @@ def _hand_back(records: list[dict], banked: Path) -> None:
     for speaker, text in turns_for(records, SIMULATION):
         print(f"{speaker:>6}: {text}")
 
-    terminal = terminal_event_for(records, SIMULATION) or {}
-    coverage = (terminal.get("facts") or {}).get("mock_tool_coverage")
-    print(f"\n--- the coverage stamp ---\n{json.dumps(coverage, indent=2)}")
-
     print("\n--- the mocked tool calls, on the record ---")
     for call in _tool_calls(records):
         provenance = span_attribute(call, "egma.tool.provenance")
@@ -298,7 +303,20 @@ async def test_a_real_retell_voice_agent_is_conducted_in_text(
         {"tool_name": name, "answer": {"answer": MOCK_ANSWER}} for name in tool_names
     ]
 
-    await workbench.offer(_live_spec(mock_tools, version))
+    offered = _live_spec(mock_tools, version)
+    # Read before it is offered, because it is the claim this lane makes:
+    # what goes to Retell is the test's own mocks and the test's own
+    # variables, and not one variable of egma's. There is no attribution
+    # variable here any more — egma serves nothing on this lane, so there
+    # is nothing for a call to ride back to egma on.
+    assert offered["dynamic_variables"] == AUTHORED_VARIABLES
+    assert not [
+        name for name in offered["dynamic_variables"] if name.startswith("egma_")
+    ], offered["dynamic_variables"]
+    assert [mock["tool_name"] for mock in offered["mock_tools"]] == tool_names
+    assert all("delay_milliseconds" not in mock for mock in offered["mock_tools"])
+
+    await workbench.offer(offered)
     # A real persona brain, no speech: chat synthesizes and hears nothing.
     simulator = start_simulator(workbench, direct_model=True)
 
@@ -328,11 +346,12 @@ async def test_a_real_retell_voice_agent_is_conducted_in_text(
         "text mode answered a provider reference it is not supposed to keep"
     )
 
-    # The coverage stamp is present with its three classes: the run read the
-    # agent's tools before the first turn.
-    coverage = facts["mock_tool_coverage"]
-    assert coverage is not None, "no coverage stamp: the world was never read"
-    assert set(coverage) >= {"discovered", "covered", "uncovered"}, coverage
+    # Nothing counts the agent's tools. What egma handed Retell is on the
+    # record as the calls Retell reported answering; what the test did not
+    # name ran inside Retell against the real backend, and the record says
+    # nothing about it rather than tallying an isolation nobody can vouch
+    # for.
+    assert not [name for name in facts if "coverage" in name], facts
 
     # A genuine exchange happened: the persona reasoned and the agent answered.
     spoken = turns_for(records, SIMULATION)
