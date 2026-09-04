@@ -1357,14 +1357,22 @@ class RoomLifecycle:
         the connected address to the checked one, and the SDK cannot be
         handed the checked address in place of the name: under TLS the name
         is what the server's certificate is checked against. So a name that
-        moves between this lookup and the SDK's is not closed by pinning; it
-        is closed by the scheme rule above. The token rides the WebSocket
-        upgrade, which the SDK sends only once the peer has shown a
-        certificate for the answered name, and a host inside the deployment
-        holds no such certificate. What a moved name can still reach is one
-        TCP connect and one failed handshake, reported as a join refusal;
-        no token and no request body go with it. That is the residue, said
-        here rather than implied away.
+        moves between this lookup and the SDK's is not closed by pinning.
+
+        What it is closed by, as far as this process can close it, is the
+        scheme rule above. The token rides the WebSocket upgrade, which the
+        SDK sends only once the peer has shown a certificate for the
+        answered name. A host inside the deployment holds one only if it
+        already holds a key for a name the endpoint chose, or if the
+        operator's own trust store mints for any name, and in both cases
+        the host was the operator's or the attacker's before this check
+        ran. The token itself was minted by the endpoint that answered, so
+        a moved name discloses nothing to it. What a moved name can reach
+        is one TCP connect and one TLS handshake against an address of its
+        choosing, and a join refusal that says how that went. That residue
+        is accepted here, said rather than implied away, and the layer that
+        closes it is the deployment's egress policy on this process: a
+        socket the SDK owns is guarded where sockets are, not here.
         """
         located = _server_host(server_url)
         if located is None:
