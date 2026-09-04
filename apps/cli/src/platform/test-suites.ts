@@ -2,10 +2,13 @@
 
 import {
   createTestSuite as createTestSuiteRequest,
+  deleteTestSuite as deleteTestSuiteRequest,
   getTestSuite as getTestSuiteRequest,
   listTestSuites as listTestSuitesRequest,
   type GetTestSuiteResponse,
 } from "@egma/platform-api/client";
+
+import { isSuiteId } from "../folder/egma-folder.ts";
 
 import {
   platformClient,
@@ -21,6 +24,23 @@ export type PlatformTestSuite = Readonly<
   Pick<GetTestSuiteResponse, "id" | "projectId" | "name">
 >;
 
+export type GetTestSuiteAnswer =
+  | { readonly kind: "suite"; readonly suite: PlatformTestSuite }
+  | { readonly kind: "not-found"; readonly reason: string };
+
+/** A successful create response did not prove that it created the requested Suite. */
+export class TestSuiteCreationReceiptError extends Error {
+  public readonly suiteId: string | null;
+
+  public constructor(suiteId: string | null) {
+    super(
+      "Egma answered with a Suite receipt that did not match the requested Project and name.",
+    );
+    this.name = "TestSuiteCreationReceiptError";
+    this.suiteId = suiteId;
+  }
+}
+
 function suiteFrom(value: GetTestSuiteResponse): PlatformTestSuite | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const body = value as Record<string, unknown>;
@@ -35,10 +55,14 @@ export async function createTestSuite(
   signedIn: SignedIn,
   input: { readonly projectId: string; readonly name: string },
   fetchImpl?: Fetch,
+  signal?: AbortSignal,
 ): Promise<PlatformTestSuite> {
   const answer = await createTestSuiteRequest(
     { projectId: input.projectId, name: input.name },
-    { client: platformClient(signedIn, fetchImpl) },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
   );
   const response = platformResponse(answer, signedIn.url);
   if (!response.ok || answer.data === undefined) {
@@ -49,12 +73,40 @@ export async function createTestSuite(
   }
   const suite = suiteFrom(answer.data);
   if (suite === null) {
-    throw new PlatformRefusedError(
-      response.status,
-      "Egma created a suite but did not answer with its stable identity. Pull to recover it, and check that this Egma instance is up to date.",
-    );
+    const returnedId = platformText(answer.data.id);
+    throw new TestSuiteCreationReceiptError(returnedId === "" ? null : returnedId);
+  }
+  if (
+    !isSuiteId(suite.id) ||
+    suite.projectId !== input.projectId ||
+    suite.name !== input.name
+  ) {
+    throw new TestSuiteCreationReceiptError(suite.id);
   }
   return suite;
+}
+
+/** Permanently remove one project-owned suite from authoring. */
+export async function deleteTestSuite(
+  signedIn: SignedIn,
+  input: { readonly projectId: string; readonly suiteId: string },
+  fetchImpl?: Fetch,
+  signal?: AbortSignal,
+): Promise<void> {
+  const answer = await deleteTestSuiteRequest(
+    { suiteId: input.suiteId, projectId: input.projectId },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
+  );
+  const response = platformResponse(answer, signedIn.url);
+  if (response.status !== 204) {
+    throw new PlatformRefusedError(
+      response.status,
+      platformRefusalMessage(answer.error, response.status),
+    );
+  }
 }
 
 export async function listTestSuites(
@@ -80,7 +132,17 @@ export async function listTestSuites(
         platformRefusalMessage(answer.error, response.status),
       );
     }
-    const values = answer.data?.testSuites ?? [];
+    const values = answer.data?.testSuites;
+    const next = answer.data?.nextPageToken;
+    if (
+      !Array.isArray(values) ||
+      (next !== null && typeof next !== "string")
+    ) {
+      throw new PlatformRefusedError(
+        response.status,
+        "Egma answered with a Test Suite collection this CLI cannot read. Check that this Egma platform is up to date.",
+      );
+    }
     for (const value of values) {
       const suite = suiteFrom(value);
       if (suite === null) {
@@ -91,7 +153,6 @@ export async function listTestSuites(
       }
       suites.push(suite);
     }
-    const next = answer.data?.nextPageToken ?? null;
     if (next === null || next === "") return suites;
     pageToken = next;
   }
@@ -102,7 +163,7 @@ export async function getTestSuite(
   suiteId: string,
   fetchImpl?: Fetch,
   signal?: AbortSignal,
-): Promise<PlatformTestSuite | null> {
+): Promise<GetTestSuiteAnswer> {
   const answer = await getTestSuiteRequest(
     { suiteId },
     {
@@ -111,7 +172,12 @@ export async function getTestSuite(
     },
   );
   const response = platformResponse(answer, signedIn.url);
-  if (response.status === 404) return null;
+  if (response.status === 404) {
+    return {
+      kind: "not-found",
+      reason: platformRefusalMessage(answer.error, 404),
+    };
+  }
   if (!response.ok || answer.data === undefined) {
     throw new PlatformRefusedError(
       response.status,
@@ -125,5 +191,5 @@ export async function getTestSuite(
       "Egma answered with a suite this CLI cannot read. Check that this Egma platform is up to date.",
     );
   }
-  return suite;
+  return { kind: "suite", suite };
 }

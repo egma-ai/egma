@@ -1089,6 +1089,74 @@ describe("the suite-first Tests route", () => {
     });
   });
 
+  it("waits for an in-flight save and deletes against the guards it returned", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+    answers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
+      "/v1/tests": {
+        status: 200,
+        body: { tests: [testBody({ personas: [PERSONA] })], nextPageToken: null },
+      },
+      "/v1/tests/tst_1": [
+        {
+          status: 200,
+          body: testBody({
+            personas: [PERSONA],
+            scenario: "The caller books the next service slot.",
+            version: 2,
+            versionId: "tstv_2",
+            revision: "rev_2",
+          }),
+          waitFor: held,
+        },
+        { status: 204, body: null },
+      ],
+      "/v1/personas": {
+        status: 200,
+        body: { personas: [PERSONA], nextPageToken: null },
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByText("The caller books service."));
+    const scenario = screen.getByLabelText("Scenario");
+    fireEvent.change(scenario, {
+      target: { value: "The caller books the next service slot." },
+    });
+    fireEvent.keyDown(scenario, { key: "Enter" });
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toHaveLength(1);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open the menu for Books service" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete test" }));
+    const asked = await screen.findByRole("dialog", { name: "Delete this test?" });
+    fireEvent.click(within(asked).getByRole("button", { name: "Delete test" }));
+
+    expect(sent.some((request) => request.method === "DELETE")).toBe(false);
+    release();
+
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "DELETE")).toHaveLength(1);
+    });
+    const requests = await Promise.all(
+      vi.mocked(fetch).mock.calls.map(([input, init]) =>
+        observeRequest(input as FetchInput, init),
+      ),
+    );
+    expect(requests.find((request) => request.method === "DELETE")?.url).toBe(
+      "/v1/tests/tst_1?projectId=prj_1&expectedVersionId=tstv_2&expectedRevision=rev_2",
+    );
+  });
+
   /**
    * **The two JSON fields, in a table that has to stay scannable.**
    *

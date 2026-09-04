@@ -17,6 +17,7 @@ import {
   getSimulationExecutionEvidence,
   getTest,
   getTestSuite,
+  IdentityConflictError,
   IdempotencyConflictError,
   latestRunEventSequence,
   listRunEvents,
@@ -317,11 +318,58 @@ describe("permanent deletion", () => {
     expect(rows).toEqual([{ deleted: true }, { deleted: true }]);
   });
 
-  it("deleting one test leaves its suite active", async () => {
+  it("deletes only the Test content and identity the caller reviewed", async () => {
     const suite = await createTestSuite(actingAsAcme(), { name: "Keep container" });
     const created = await testIn(suite.id, "Delete only me");
+    const renamed = await editTest(actingAsAcme(), created.id, {
+      name: "Delete only this renamed Test",
+      expectedRevision: created.revision,
+    });
+    if (renamed === undefined) throw new Error("the Test disappeared before rename");
 
-    expect(await deleteTest(actingAsAcme(), created.id)).toBe(true);
+    await expect(
+      deleteTest(
+        actingAsAcme(),
+        created.id,
+        created.versionId,
+        created.revision,
+      ),
+    ).rejects.toThrow(IdentityConflictError);
+    expect(await getTest(actingAsAcme(), created.id)).toMatchObject({
+      id: created.id,
+      name: renamed.name,
+      revision: renamed.revision,
+      versionId: created.versionId,
+    });
+
+    const edited = await editTest(actingAsAcme(), created.id, {
+      scenario: "The Test moved after the caller read it.",
+      expectedVersionId: created.versionId,
+      expectedRevision: renamed.revision,
+    });
+    if (edited === undefined) throw new Error("the Test disappeared before deletion");
+
+    await expect(
+      deleteTest(
+        actingAsAcme(),
+        created.id,
+        created.versionId,
+        edited.revision,
+      ),
+    ).rejects.toThrow(TestMovedOnError);
+    expect(await getTest(actingAsAcme(), created.id)).toMatchObject({
+      id: created.id,
+      versionId: edited.versionId,
+    });
+
+    expect(
+      await deleteTest(
+        actingAsAcme(),
+        created.id,
+        edited.versionId,
+        edited.revision,
+      ),
+    ).toBe(true);
     expect(await getTestSuite(actingAsAcme(), suite.id)).toMatchObject({ id: suite.id });
     expect(await listTests(actingAsAcme(), suite.id)).toEqual({
       items: [],

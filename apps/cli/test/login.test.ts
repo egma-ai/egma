@@ -24,7 +24,10 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openInBrowser } from "../src/platform/browser.ts";
-import { codeFromPaste, startDeviceAuthorization } from "../src/platform/device-flow.ts";
+import {
+  codeFromPaste,
+  startDeviceAuthorization,
+} from "../src/platform/device-flow.ts";
 import {
   CredentialsFileUnreadableError,
   readCredentials,
@@ -32,7 +35,11 @@ import {
   writeCredentials,
   UnusableUrlError,
 } from "../src/platform/credentials.ts";
-import { logIn, type LoginPrompt } from "../src/platform/login.ts";
+import {
+  logIn,
+  type LoginPrompt,
+  type LogInOptions,
+} from "../src/platform/login.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { makeWorkspace, NO_BROWSER, type Workspace } from "./support/workspace.ts";
 
@@ -63,7 +70,6 @@ function watch(): Watched {
 type RunOptions = {
   readonly watched: Watched;
   readonly signal?: AbortSignal;
-  readonly force?: boolean;
   /** Answers with whatever should be pasted back, once. */
   readonly paste?: () => string | null;
   /** Runs the moment the code is on screen: what a person in a browser does. */
@@ -72,6 +78,8 @@ type RunOptions = {
   readonly waits?: number[];
   /** Runs at each wait, so a test can change the world between two polls. */
   readonly whenWaiting?: (waits: readonly number[]) => void;
+  readonly saveCredentials?: LogInOptions["saveCredentials"];
+  readonly revokeLoginKey?: LogInOptions["revokeLoginKey"];
 };
 
 async function login(options: RunOptions) {
@@ -79,7 +87,6 @@ async function login(options: RunOptions) {
     url: platform.url,
     credentialsFile: workspace.credentialsFile,
     signal: options.signal ?? new AbortController().signal,
-    ...(options.force === undefined ? {} : { force: options.force }),
     ...(options.paste === undefined ? {} : { paste: options.paste }),
     onPrompt: (prompt) => {
       options.watched.prompts.push(prompt);
@@ -90,6 +97,12 @@ async function login(options: RunOptions) {
       options.watched.opened.push(url);
       return true;
     },
+    ...(options.saveCredentials === undefined
+      ? {}
+      : { saveCredentials: options.saveCredentials }),
+    ...(options.revokeLoginKey === undefined
+      ? {}
+      : { revokeLoginKey: options.revokeLoginKey }),
     // Nothing here waits on a person, so nothing here waits — but how long it
     // was going to wait for is written down, because the pace is a promise.
     sleep: async (ms) => {
@@ -281,6 +294,109 @@ describe("signing a machine in", () => {
       await readCredentials(workspace.credentialsFile, platform.url),
     ).toBeNull();
   });
+
+  it("revokes a newly minted key when its local credential cannot be saved", async () => {
+    const watched = watch();
+    let revokedId = "";
+    const result = await login({
+      watched,
+      whenPrompted: (prompt) => void platform.device.approve(prompt.userCode),
+      saveCredentials: async () => {
+        throw new Error("disk is read-only");
+      },
+      revokeLoginKey: async (apiKeyId, options) => {
+        revokedId = apiKeyId;
+        platform.device.reject(options.key);
+        return { kind: "revoked" };
+      },
+    });
+
+    expect(result).toMatchObject({ kind: "not-stored", interrupted: false });
+    expect(result.kind === "not-stored" && result.reason).toContain(
+      `created login key ${revokedId}`,
+    );
+    expect(result.kind === "not-stored" && result.reason).toContain(
+      `revoked the unstored login key ${revokedId}`,
+    );
+    expect(result.kind === "not-stored" && result.reason).not.toContain(
+      "egma_sk_",
+    );
+    expect(platform.device.keys).toHaveLength(0);
+    expect(
+      await readCredentials(workspace.credentialsFile, platform.url),
+    ).toBeNull();
+  });
+
+  it("finishes storing a minted login before reporting a late interrupt", async () => {
+    const watched = watch();
+    const controller = new AbortController();
+    const result = await login({
+      watched,
+      signal: controller.signal,
+      whenPrompted: (prompt) => void platform.device.approve(prompt.userCode),
+      saveCredentials: async (file, credentials, options) => {
+        await writeCredentials(file, credentials, options);
+        controller.abort("interrupt after mint");
+      },
+    });
+
+    expect(result.kind).toBe("stored-interrupted");
+    expect(
+      await readCredentials(workspace.credentialsFile, platform.url),
+    ).toMatchObject({
+      login: { apiKeyId: expect.stringMatching(/^ak_/u) },
+    });
+  });
+
+  it("does not store a key from an incomplete login receipt", async () => {
+    const minted = "egma_sk_incomplete_receipt";
+    const keyId = "ak_incomplete_receipt";
+    let requests = 0;
+    let revoked = "";
+    const result = await logIn({
+      url: "https://egma.invalid",
+      credentialsFile: workspace.credentialsFile,
+      signal: new AbortController().signal,
+      onPrompt: () => undefined,
+      fetchImpl: async () => {
+        requests += 1;
+        return requests === 1
+          ? new Response(
+              JSON.stringify({
+                device_code: "device",
+                user_code: "ABCD1234",
+                verification_uri_complete:
+                  "https://egma.invalid/device?user_code=ABCD1234",
+                expires_in: 30,
+                interval: 0,
+              }),
+              { status: 200 },
+            )
+          : new Response(
+              JSON.stringify({
+                access_token: minted,
+                api_key_id: keyId,
+                // project_id is deliberately absent.
+              }),
+              { status: 200 },
+            );
+      },
+      revokeLoginKey: async (apiKeyId, options) => {
+        revoked = apiKeyId;
+        expect(options.key).toBe(minted);
+        return { kind: "revoked" };
+      },
+    });
+
+    expect(revoked).toBe(keyId);
+    expect(result).toMatchObject({ kind: "not-stored", interrupted: false });
+    expect(result.kind === "not-stored" && result.reason).toContain(
+      "incomplete receipt",
+    );
+    expect(
+      await readCredentials(workspace.credentialsFile, "https://egma.invalid"),
+    ).toBeNull();
+  });
 });
 
 describe("a machine that is already signed in", () => {
@@ -294,22 +410,6 @@ describe("a machine that is already signed in", () => {
     expect(watched.prompts).toHaveLength(0);
     // Not one call was made: the whole step costs nothing on a second run.
     expect(platform.records).toHaveLength(0);
-  });
-
-  it("signs in again when told to, and replaces the key it held", async () => {
-    await workspace.signIn(platform.url, "egma_sk_held-already");
-
-    const watched = watch();
-    const result = await login({
-      watched,
-      force: true,
-      whenPrompted: (prompt) => void platform.device.approve(prompt.userCode),
-    });
-
-    expect(result.kind).toBe("stored");
-    const held = await readCredentials(workspace.credentialsFile, platform.url);
-    expect(held?.key).not.toBe("egma_sk_held-already");
-    expect(held?.key).toBe(platform.device.keys.at(-1));
   });
 
   it("signs in again for a different egma, because a key is only good at one", async () => {

@@ -32,6 +32,7 @@ const SUITE_ID = "ste_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const TEST_ID = "tst_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const VERSION_ID = "tstv_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const REVISION = "rev_01K3XQ7M4E8YB2FVN0H9TZQWER";
+const RUN_ID = "run_01K3XQ7M4E8YB2FVN0H9TZQWER";
 
 class JsonResponse extends Response {
   constructor(body: unknown, status = 200) {
@@ -147,6 +148,7 @@ it.each<RemotePhase>(["push", "suite", "tests", "version", "run"])(
     const workspace = await preparedWorkspace("https://egma.example");
     const controller = new AbortController();
     const output: string[] = [];
+    const failed: string[] = [];
     let requestSignal: AbortSignal | undefined;
     try {
       const code = await runCreateCommand({
@@ -160,7 +162,7 @@ it.each<RemotePhase>(["push", "suite", "tests", "version", "run"])(
         connection: "con_one",
         signal: controller.signal,
         out: (line) => output.push(line),
-        fail: (line) => output.push(`stderr: ${line}`),
+        fail: (line) => failed.push(line),
         fetchImpl: async (input, init) => {
           const phase = phaseOf(String(input));
           if (phase === null) return new JsonResponse({ error: "not-found" }, 404);
@@ -181,8 +183,12 @@ it.each<RemotePhase>(["push", "suite", "tests", "version", "run"])(
 
       expect(requestSignal?.aborted).toBe(true);
       expect(code).toBe(130);
-      expect(output).toContain("status: interrupted");
-      expect(output).not.toContain("status: started");
+      expect(output).toEqual([]);
+      expect(failed).toEqual([
+        interruptedPhase === "push"
+          ? "Run creation was interrupted during the pre-run push. No Run was created. Run egma pull before you try again."
+          : "The command was interrupted before it received a complete answer. Check the Runs page before you try again.",
+      ]);
     } finally {
       await workspace.remove();
     }
@@ -194,6 +200,7 @@ it("writes returned push pins before it stops an interrupted command", async () 
   const controller = new AbortController();
   const calls: RemotePhase[] = [];
   const output: string[] = [];
+  const failed: string[] = [];
   try {
     const code = await runCreateCommand({
       access: {
@@ -206,7 +213,7 @@ it("writes returned push pins before it stops an interrupted command", async () 
       connection: "con_one",
       signal: controller.signal,
       out: (line) => output.push(line),
-      fail: (line) => output.push(`stderr: ${line}`),
+      fail: (line) => failed.push(line),
       fetchImpl: async (input, init) => {
         const phase = phaseOf(String(input));
         if (phase === null) return new JsonResponse({ error: "not-found" }, 404);
@@ -221,7 +228,11 @@ it("writes returned push pins before it stops an interrupted command", async () 
 
     expect(code).toBe(130);
     expect(calls).toEqual(["push"]);
-    expect(output).toContain("status: interrupted");
+    expect(output.join("\n")).toContain(`Applied Test Books a visit (${TEST_ID}).`);
+    expect(output.join("\n")).toContain(`Version ID: ${VERSION_ID}`);
+    expect(failed).toEqual([
+      "Run creation was interrupted after Egma applied the pre-run push. Returned Test version IDs were saved locally. No Run was created. Run egma run create again when you are ready.",
+    ]);
     expect(
       await readFile(
         path.join(
@@ -237,10 +248,112 @@ it("writes returned push pins before it stops an interrupted command", async () 
   }
 });
 
+it("prints a started Run receipt before a post-write interruption exits 130", async () => {
+  const workspace = await preparedWorkspace("https://egma.example");
+  const controller = new AbortController();
+  const output: string[] = [];
+  const failed: string[] = [];
+  try {
+    const code = await runCreateCommand({
+      access: {
+        url: "https://egma.example",
+        credentialsFile: workspace.credentialsFile,
+      },
+      cwd: workspace.dir,
+      suiteDirectory: "release",
+      agent: "agt_one",
+      connection: "con_one",
+      signal: controller.signal,
+      out: (line) => output.push(line),
+      fail: (line) => failed.push(line),
+      fetchImpl: async (input, init) => {
+        const phase = phaseOf(String(input));
+        if (phase === null) return new JsonResponse({ error: "not-found" }, 404);
+        if (phase !== "run") return answerFor(phase, init?.body);
+        controller.abort("interrupt");
+        return new JsonResponse(
+          {
+            id: RUN_ID,
+            projectId: PROJECT_ID,
+            suiteId: SUITE_ID,
+            agentId: "agt_one",
+            connectionId: "con_one",
+            status: "pending",
+            connectionType: "livekit_room",
+            productLabel: "LiveKit project credentials",
+            modality: "voice",
+            expectedSimulationCount: 1,
+            resultsUrl: "",
+          },
+          201,
+        );
+      },
+    });
+
+    expect(code).toBe(130);
+    expect(output).toContain(`Started Run ${RUN_ID}.`);
+    expect(output.join("\n")).toContain(`/projects/${PROJECT_ID}/runs/${RUN_ID}`);
+    expect(failed).toEqual([
+      "The command was interrupted after Egma started this Run. The Run is continuing. Use the printed Egma URL to view it, and do not start another Run for the same work.",
+    ]);
+  } finally {
+    await workspace.remove();
+  }
+});
+
+it("keeps a returned Run ID from injecting terminal lines or ANSI", async () => {
+  const workspace = await preparedWorkspace("https://egma.example");
+  const unsafeRunId = `${RUN_ID}\n\u001b[31m\u202e`;
+  const output: string[] = [];
+  try {
+    const code = await runCreateCommand({
+      access: {
+        url: "https://egma.example",
+        credentialsFile: workspace.credentialsFile,
+      },
+      cwd: workspace.dir,
+      suiteDirectory: "release",
+      agent: "agt_one",
+      connection: "con_one",
+      signal: new AbortController().signal,
+      out: (line) => output.push(line),
+      fail: () => undefined,
+      fetchImpl: async (input, init) => {
+        const phase = phaseOf(String(input));
+        if (phase === null) return new JsonResponse({ error: "not-found" }, 404);
+        if (phase !== "run") return answerFor(phase, init?.body);
+        return new JsonResponse(
+          {
+            id: unsafeRunId,
+            projectId: PROJECT_ID,
+            suiteId: SUITE_ID,
+            agentId: "agt_one",
+            connectionId: "con_one",
+            status: "pending",
+            connectionType: "livekit_room",
+            productLabel: "LiveKit project credentials",
+            modality: "voice",
+            expectedSimulationCount: 1,
+            resultsUrl: "",
+          },
+          201,
+        );
+      },
+    });
+
+    expect(code).toBe(0);
+    expect(output[0]).toBe(`Started Run ${RUN_ID}[31m.`);
+    expect(output.every((line) => !/[\r\n\u001b\u202e]/u.test(line))).toBe(true);
+  } finally {
+    await workspace.remove();
+  }
+});
+
 it("returns 130 when a Run cancellation request is interrupted", async () => {
   const workspace = await preparedWorkspace("https://egma.example");
   const controller = new AbortController();
   const output: string[] = [];
+  const failed: string[] = [];
   let requestSignal: AbortSignal | undefined;
   try {
     const code = await runCancelCommand({
@@ -252,7 +365,7 @@ it("returns 130 when a Run cancellation request is interrupted", async () => {
       runId: "run_01K3XQ7M4E8YB2FVN0H9TZQWER",
       signal: controller.signal,
       out: (line) => output.push(line),
-      fail: (line) => output.push(`stderr: ${line}`),
+      fail: (line) => failed.push(line),
       fetchImpl: async (_input, init) => {
         requestSignal = init?.signal ?? undefined;
         controller.abort("interrupt");
@@ -266,8 +379,54 @@ it("returns 130 when a Run cancellation request is interrupted", async () => {
 
     expect(requestSignal?.aborted).toBe(true);
     expect(code).toBe(130);
-    expect(output).toContain("status: interrupted");
-    expect(output).not.toContain("status: canceled");
+    expect(output).toEqual([]);
+    expect(failed).toEqual([
+      "The command was interrupted before it received a complete answer. Check the Runs page before you try again.",
+    ]);
+  } finally {
+    await workspace.remove();
+  }
+});
+
+it("prints a canceled Run receipt before a post-write interruption exits 130", async () => {
+  const workspace = await preparedWorkspace("https://egma.example");
+  const controller = new AbortController();
+  const output: string[] = [];
+  const failed: string[] = [];
+  try {
+    const code = await runCancelCommand({
+      access: {
+        url: "https://egma.example",
+        credentialsFile: workspace.credentialsFile,
+      },
+      cwd: workspace.dir,
+      runId: RUN_ID,
+      signal: controller.signal,
+      out: (line) => output.push(line),
+      fail: (line) => failed.push(line),
+      fetchImpl: async () => {
+        controller.abort("interrupt");
+        return new JsonResponse({
+          id: RUN_ID,
+          projectId: PROJECT_ID,
+          suiteId: SUITE_ID,
+          agentId: "agt_one",
+          connectionId: "con_one",
+          status: "canceled",
+          connectionType: "livekit_room",
+          productLabel: "LiveKit project credentials",
+          modality: "voice",
+          expectedSimulationCount: 1,
+          resultsUrl: "",
+        });
+      },
+    });
+
+    expect(code).toBe(130);
+    expect(output).toEqual([`Canceled Run ${RUN_ID}.`]);
+    expect(failed).toEqual([
+      "The command was interrupted after Egma canceled this Run. The cancellation is complete. Nothing needs to be retried.",
+    ]);
   } finally {
     await workspace.remove();
   }
@@ -346,8 +505,11 @@ it("turns Ctrl-C during the pre-run push into process exit 130", async () => {
 
     expect(result.signal).toBeNull();
     expect(result.code).toBe(130);
-    expect(result.stdout).toContain("status: interrupted");
-    expect(result.stdout).not.toContain("status: started");
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(
+      "Run creation was interrupted during the pre-run push. No Run was created.",
+    );
+    expect(result.stderr).toContain("Run egma pull before you try again.");
   } finally {
     server.closeAllConnections();
     await Promise.all([

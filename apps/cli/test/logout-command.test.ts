@@ -48,15 +48,20 @@ async function logout(
   options: {
     readonly env?: NodeJS.ProcessEnv;
     readonly fetchImpl?: typeof fetch;
+    readonly signal?: AbortSignal;
+    readonly removeCredentials?: () => Promise<never>;
   } = {},
 ): Promise<number> {
   return runLogoutCommand({
     access: { url: URL, credentialsFile: workspace.credentialsFile },
     env: options.env ?? workspace.env(),
-    signal: new AbortController().signal,
+    signal: options.signal ?? new AbortController().signal,
     out: (line) => watched.out.push(line),
     fail: (line) => watched.failed.push(line),
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    ...(options.removeCredentials === undefined
+      ? {}
+      : { removeCredentials: options.removeCredentials }),
   });
 }
 
@@ -93,8 +98,11 @@ describe("egma logout", () => {
       url: "https://other.egma.example",
       key: "egma_sk_other",
     });
-    expect(watched.out).toContain(`revoked_key_id: ${apiKeyId}`);
-    expect(watched.out).toContain("authentication: environment");
+    expect(watched.out).toContain(`Revoked saved login key ${apiKeyId}.`);
+    expect(watched.out).toContain(
+      "EGMA_API_KEY is still set for this process. Remove it from the shell or secret store to stop using it.",
+    );
+    expect(watched.out.join("\n")).not.toContain("status:");
   });
 
   it("removes the credentials file after the last login but leaves its folder", async () => {
@@ -117,6 +125,67 @@ describe("egma logout", () => {
     expect((await stat(workspace.egmaFolder)).isDirectory()).toBe(true);
   });
 
+  it("reconciles the saved credential after remote revocation and then exits 130", async () => {
+    const apiKeyId = "key_interrupted_logout";
+    const held = {
+      url: URL,
+      key: "egma_sk_interrupted_logout",
+      login: { apiKeyId, projectId: "prj_login" },
+    } as const;
+    await writeCredentials(workspace.credentialsFile, held);
+    const watched = watch();
+    const controller = new AbortController();
+
+    const code = await logout(watched, {
+      signal: controller.signal,
+      fetchImpl: async () => {
+        controller.abort("interrupt");
+        return new Response(
+          JSON.stringify({ id: apiKeyId, revokedAt: new Date().toISOString() }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+
+    expect(code).toBe(LOGOUT_EXIT.interrupted);
+    expect(watched.out).toContain(`Revoked saved login key ${apiKeyId}.`);
+    expect(watched.out.join("\n")).not.toContain(held.key);
+    expect(await readCredentials(workspace.credentialsFile, URL)).toBeNull();
+    expect(watched.failed.join("\n")).toContain(
+      "The command was interrupted after Egma revoked the saved login.",
+    );
+    expect(watched.failed.join("\n")).toContain(
+      "The revoked credential was removed from this machine.",
+    );
+  });
+
+  it("reports a revoked key and exact recovery when local credential cleanup fails", async () => {
+    const apiKeyId = "key_cleanup_failure";
+    const held = {
+      url: URL,
+      key: "egma_sk_cleanup_failure",
+      login: { apiKeyId, projectId: "prj_login" },
+    } as const;
+    await writeCredentials(workspace.credentialsFile, held);
+    const watched = watch();
+
+    const code = await logout(watched, {
+      fetchImpl: successfulRevoke([], apiKeyId),
+      removeCredentials: async () => {
+        throw new Error(`the credential file is read-only: ${held.key}`);
+      },
+    });
+
+    expect(code).toBe(LOGOUT_EXIT.revokeFailed);
+    expect(watched.out).toContain(`Revoked saved login key ${apiKeyId}.`);
+    expect(watched.out.join("\n")).not.toContain(held.key);
+    expect(watched.failed.join("\n")).not.toContain(held.key);
+    expect(watched.failed.join("\n")).toContain(workspace.credentialsFile);
+    expect(watched.failed.join("\n")).toContain("the credential file is read-only");
+    expect(watched.failed.join("\n")).toContain("Run egma logout again.");
+    expect(await readCredentials(workspace.credentialsFile, URL)).toEqual(held);
+  });
+
   it("keeps the local login when the platform does not confirm revocation", async () => {
     const held = {
       url: URL,
@@ -136,7 +205,7 @@ describe("egma logout", () => {
 
     expect(code).toBe(LOGOUT_EXIT.revokeFailed);
     expect(await readCredentials(workspace.credentialsFile, URL)).toEqual(held);
-    expect(watched.out).toContain("status: revoke-failed");
+    expect(watched.out.join("\n")).not.toContain("status:");
     expect(watched.failed).toEqual(["try later"]);
   });
 
@@ -154,8 +223,10 @@ describe("egma logout", () => {
 
     expect(code).toBe(LOGOUT_EXIT.done);
     expect(requests).toBe(0);
-    expect(watched.out).toContain("status: no-stored-login");
-    expect(watched.out).toContain("authentication: environment");
+    expect(watched.out).toContain("There is no saved login to revoke.");
+    expect(watched.out).toContain(
+      "EGMA_API_KEY is still set for this process. Remove it from the shell or secret store to stop using it.",
+    );
   });
 
   it("removes a legacy local entry without guessing a remote key ID", async () => {
@@ -173,7 +244,9 @@ describe("egma logout", () => {
     expect(code).toBe(LOGOUT_EXIT.done);
     expect(requests).toBe(0);
     expect(await readCredentials(workspace.credentialsFile, URL)).toBeNull();
-    expect(watched.out).toContain("remote_key: unknown-not-revoked");
+    expect(watched.out).toContain(
+      "This login came from an older credentials file with no API key ID. Egma removed only its local record.",
+    );
     expect((await stat(workspace.egmaFolder)).isDirectory()).toBe(true);
   });
 });

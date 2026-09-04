@@ -77,8 +77,8 @@ import {
  *   more. The field is absent from the read shape rather than blanked, so
  *   leaking one through a serializer is not a thing that can be forgotten.
  *
- * **Registering is retry-safe by construction.** A create carrying an inline
- * connection goes through the factory's reuse rule, and the reply's `result`
+ * **Inline API registration is retry-safe by construction.** A create carrying
+ * a connection goes through the factory's reuse rule, and the reply's `result`
  * says which of the three things happened — created, reused, or the same agent
  * reached a new way. A coding agent retrying after an uncertain network
  * failure therefore never mints a second identity for one vendor agent, and
@@ -1284,14 +1284,14 @@ export async function agentRoutes(
   );
 
   /**
-   * Register an agent, with the first way of reaching it written in the same
-   * request.
+   * Register an Agent identity, with an optional first way of reaching it in
+   * the same request.
    *
-   * Both rows or neither: a connection payload the registry turns away leaves
-   * no agent behind, because the two inserts share one transaction. And the
-   * reuse rule runs inside that same transaction, so two machines registering
-   * one vendor agent at the same instant settle to one agent rather than one
-   * of them losing a race it should never have been in.
+   * When a connection is present, both rows are written or neither is: a
+   * payload the registry turns away leaves no agent behind. The reuse rule
+   * runs inside that same transaction, so two machines registering one vendor
+   * agent at the same instant settle to one agent rather than one of them
+   * losing a race it should never have been in.
    */
   registerPlatformOperation(app, agentOperations.registerAgent, async (request, reply) => {
     const { auth } = requesterOf(request);

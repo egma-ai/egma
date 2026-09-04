@@ -2,12 +2,31 @@
 
 import { readConfig } from "../folder/egma-folder.ts";
 import { createProjectKey } from "../platform/api-keys.ts";
+import { oneLineFactText } from "../ui/fact-value.ts";
 import { FOLDER_EXIT, readyToSync, type FolderCommandOptions } from "./folder-verbs.ts";
 
 export type ProjectApiKeyCreateCommandOptions = FolderCommandOptions & {
   readonly name: string;
   readonly signal?: AbortSignal;
 };
+
+function wasInterrupted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+function sayCreatedProjectKey(
+  created: Extract<Awaited<ReturnType<typeof createProjectKey>>, { readonly kind: "created" }>,
+  requestedName: string,
+  out: (line: string) => void,
+): void {
+  out(
+    `Created Project API key ${oneLineFactText(created.key.name ?? requestedName, "Unnamed")}.`,
+  );
+  out(`Key ID: ${oneLineFactText(created.key.id, "unknown Project API key ID")}`);
+  // This is the only reveal in the command. It is intentionally not saved.
+  out(`API key: ${created.key.secret.reveal()}`);
+  out("Copy this key now. Egma CLI does not save it.");
+}
 
 /**
  * Create a Project key and print its secret once.
@@ -19,22 +38,29 @@ export type ProjectApiKeyCreateCommandOptions = FolderCommandOptions & {
 export async function runProjectApiKeyCreateCommand(
   options: ProjectApiKeyCreateCommandOptions,
 ): Promise<number> {
+  if (wasInterrupted(options.signal)) {
+    options.fail("The command was interrupted before anything changed.");
+    return FOLDER_EXIT.interrupted;
+  }
+
   const name = options.name.trim();
   if (name === "") {
-    options.out("status: missing-name");
     options.fail("Give this Project API key a name with --name. Nothing was created.");
     return FOLDER_EXIT.nothing;
   }
 
-  options.out(`url: ${options.access.url}`);
   const ready = await readyToSync(options);
   if (ready.kind === "stop") return ready.code;
 
   const config = await readConfig(ready.paths.config);
   if (config.project === null) {
-    options.out("status: no-project");
     options.fail("egma/config.yaml does not name an Egma Project. Run egma init again.");
     return FOLDER_EXIT.nothing;
+  }
+
+  if (wasInterrupted(options.signal)) {
+    options.fail("The command was interrupted before anything changed.");
+    return FOLDER_EXIT.interrupted;
   }
 
   const created = await createProjectKey(
@@ -46,23 +72,33 @@ export async function runProjectApiKeyCreateCommand(
     },
   );
   switch (created.kind) {
-    case "created":
-      options.out(`api_key_id: ${created.key.id}`);
-      options.out(`api_key_name: ${created.key.name ?? name}`);
-      // This is the only reveal in the command. It is intentionally not saved.
-      options.out(`api_key: ${created.key.secret.reveal()}`);
-      options.out("status: created");
+    case "created": {
+      sayCreatedProjectKey(created, name, options.out);
+      if (wasInterrupted(options.signal)) {
+        options.fail(
+          "The command was interrupted after Egma created this Project API key. The CLI did not save it. Copy it now, or revoke it before you create another key.",
+        );
+        return FOLDER_EXIT.interrupted;
+      }
       return FOLDER_EXIT.done;
+    }
     case "not-authenticated":
-      options.out("status: not-signed-in");
+      options.fail(created.reason);
       options.fail(
         `Egma did not accept the credential for ${options.access.url}. Run egma login, then try again.`,
       );
       return FOLDER_EXIT.notSignedIn;
+    case "uncertain":
+      options.fail(created.reason);
+      if (wasInterrupted(options.signal)) {
+        options.fail(
+          "The command was interrupted before it received a complete answer.",
+        );
+        return FOLDER_EXIT.interrupted;
+      }
+      return FOLDER_EXIT.unreachable;
     case "refused":
     case "unreachable":
-      options.out("status: failed");
-      options.out(`reason: ${created.reason}`);
       options.fail(created.reason);
       return FOLDER_EXIT.unreachable;
   }

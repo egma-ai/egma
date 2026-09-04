@@ -22,7 +22,7 @@ export type PlatformProject = Readonly<
 
 export type ListedProjects =
   | { readonly kind: "projects"; readonly projects: readonly PlatformProject[] }
-  | { readonly kind: "not-authenticated" }
+  | { readonly kind: "not-authenticated"; readonly reason: string }
   | { readonly kind: "refused"; readonly reason: string };
 
 /** List the Projects this credential can select during init. */
@@ -36,11 +36,23 @@ export async function listProjects(
     ...(signal === undefined ? {} : { signal }),
   });
   const response = platformResponse(answer, signedIn.url);
-  if (response.status === 401) return { kind: "not-authenticated" };
+  if (response.status === 401) {
+    return {
+      kind: "not-authenticated",
+      reason: platformRefusalMessage(answer.error, response.status),
+    };
+  }
   if (!response.ok || answer.data === undefined) {
     return {
       kind: "refused",
       reason: platformRefusalMessage(answer.error, response.status),
+    };
+  }
+  if (!Array.isArray(answer.data.projects)) {
+    return {
+      kind: "refused",
+      reason:
+        "Egma answered with a Project collection this CLI cannot read. Check that this Egma platform is up to date.",
     };
   }
   const projects: PlatformProject[] = [];

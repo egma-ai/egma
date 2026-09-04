@@ -124,6 +124,7 @@ export type StartRunAnswer =
 
 /** What a run is asked for. */
 export type NewRun = {
+  readonly projectId: string;
   readonly suiteId: string;
   readonly agentId: string;
   readonly connectionId: string;
@@ -173,6 +174,21 @@ function gradingStateOf(value: unknown): GradingState | null {
 function runStatusOf(value: unknown): RunStatus {
   const said = platformText(value);
   return (RUN_STATUSES.includes(said) ? said : "pending") as RunStatus;
+}
+
+function confirmsStartedRun(body: RunWire, input: NewRun): boolean {
+  return (
+    platformText(body.id) !== "" &&
+    platformText(body.projectId) === input.projectId &&
+    platformText(body.suiteId) === input.suiteId &&
+    platformText(body.agentId) === input.agentId &&
+    platformText(body.connectionId) === input.connectionId &&
+    RUN_STATUSES.includes(platformText(body.status))
+  );
+}
+
+function confirmsCanceledRun(body: RunWire, runId: string): boolean {
+  return platformText(body.id) === runId && platformText(body.status) === "canceled";
 }
 
 type SimulationWire = ListRunSimulationsResponse["simulations"][number];
@@ -269,6 +285,7 @@ export async function startRun(
   const answer = await createRunRequest(
     {
       suiteId: input.suiteId,
+      projectId: input.projectId,
       agentId: input.agentId,
       connectionId: input.connectionId,
       expectedTestVersions: input.expectedTestVersions.map((version) => ({
@@ -310,6 +327,14 @@ export async function startRun(
     );
   }
 
+  if (!confirmsStartedRun(answer.data, input)) {
+    return {
+      kind: "refused",
+      reason:
+        "Egma answered without confirming the Run it created. Check the Runs page before you try again.",
+    };
+  }
+
   return {
     kind: "started",
     run: runFrom(answer.data),
@@ -319,7 +344,7 @@ export async function startRun(
 /** What the platform answered when one Run cancellation was requested. */
 export type CancelRunAnswer =
   | { readonly kind: "canceled"; readonly run: PlatformRun }
-  | { readonly kind: "not-found" }
+  | { readonly kind: "not-found"; readonly reason: string }
   | { readonly kind: "refused"; readonly reason: string };
 
 /** Cancel one Run through the public Run resource endpoint. */
@@ -341,7 +366,12 @@ export async function cancelRun(
   );
   const response = platformResponse(answer, signedIn.url);
 
-  if (response.status === 404) return { kind: "not-found" };
+  if (response.status === 404) {
+    return {
+      kind: "not-found",
+      reason: platformRefusalMessage(answer.error, 404),
+    };
+  }
   if (response.status === 409 || response.status === 422) {
     return {
       kind: "refused",
@@ -353,6 +383,13 @@ export async function cancelRun(
       response.status,
       platformRefusalMessage(answer.error, response.status),
     );
+  }
+
+  if (!confirmsCanceledRun(answer.data, input.runId)) {
+    return {
+      kind: "refused",
+      reason: `Egma answered without confirming that it canceled Run ${input.runId}. Check the Runs page before you try again.`,
+    };
   }
 
   return { kind: "canceled", run: runFrom(answer.data) };

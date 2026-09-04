@@ -379,7 +379,7 @@ export class TestMovedOnError extends Error {
     readonly current: string;
   }) {
     super(
-      `this edit was written against version ${versions.expected}, and test ${test.id} has moved on to ${versions.current}`,
+      `this write was based on version ${versions.expected}, and test ${test.id} has moved on to ${versions.current}`,
     );
     this.name = "TestMovedOnError";
     this.testId = test.id;

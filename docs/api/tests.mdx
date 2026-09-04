@@ -258,7 +258,7 @@ When the test has moved on, Egma returns `409 Conflict`:
 ```json
 {
   "error": "version_conflict",
-  "message": "this edit was written against version tstv_old, and the test has moved on to tstv_new. Read the test again and send the edit with expectedVersionId set to the version it names now.",
+  "message": "this write was based on version tstv_old, and test tst_01abc has moved on to tstv_new",
   "test": { "id": "tst_01abc", "name": "reschedule appointment" },
   "expectedVersionId": "tstv_old",
   "currentVersionId": "tstv_new"
@@ -356,8 +356,21 @@ Permanently remove one test from authoring and future runs. Its suite remains,
 including when this was the suite's last test. There is no Restore action.
 Completed simulation evidence keeps the exact test version it executed.
 
+Send both `expectedVersionId` and `expectedRevision`. Egma compares them with
+the Test's current content version and identity revision inside one deletion
+transaction. If either one changed after you read the Test, Egma returns
+`409 Conflict` and deletes nothing.
+
 <ParamField path="testId" type="string" required>
   The `tst_…` identifier of the test to delete.
+</ParamField>
+
+<ParamField query="expectedVersionId" type="string" required>
+  The `tstv_…` version identifier you last read.
+</ParamField>
+
+<ParamField query="expectedRevision" type="string" required>
+  The `rev_…` identity revision you last read.
 </ParamField>
 
 ---

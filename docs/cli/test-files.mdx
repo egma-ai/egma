@@ -239,9 +239,17 @@ egma push
 Push validates every suite and test first. It then applies one all-or-nothing
 project change. A late conflict writes nothing.
 
-A missing local suite or test never means deletion. Push refuses when the
-platform has a resource that is absent locally. Pull first, or delete the
-resource explicitly in the browser or API.
+A missing local Suite or Test never means deletion. Push refuses when the
+platform has a resource that is absent locally. Pull first, or use the explicit
+CLI deletion command:
+
+```bash
+egma suite delete receptionist-core
+egma test delete receptionist-core/booking.md
+```
+
+Egma deletes the remote resource first. It removes the exact local directory or
+file only after the platform confirms deletion.
 
 ## Pull safely
 
@@ -259,10 +267,12 @@ value.
 ## Run one exact suite
 
 ```bash
-egma run receptionist-core
+egma run create receptionist-core \
+  --agent <Egma Agent ID> \
+  --connection <Connection ID>
 ```
 
-The argument is one local suite directory. Egma checks that its tests and
-current versions exactly match the platform. Missing, extra, stale, unreadable,
-or unpushed content refuses the run. The server checks the same set inside the
-run transaction, then runs every current test in the suite.
+The argument is one local Suite directory. The Agent and Connection are
+explicit stable IDs from `egma/config.yaml`. Egma pushes the complete
+repository before it starts the Run. A failed push creates no Run. On success,
+the command prints the Run ID and web results URL, then returns.

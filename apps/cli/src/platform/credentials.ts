@@ -11,16 +11,27 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 
 import {
+  EMPTY_CONFIG,
   folderPathsIn,
+  parseSuiteManifest,
   platformOwnedIds,
   readConfig,
-  readRepository,
+  SUITE_MANIFEST_FILE_NAME,
   teachingTheMove,
   type FolderConfig,
   type PlatformBinding,
@@ -115,7 +126,7 @@ type CredentialEntries = ReadonlyMap<string, Credentials>;
  */
 export abstract class KeysUnusableError extends Error {}
 
-/** The `status:` line every command prints when the keys file cannot be used. */
+/** Internal name for a credentials-file failure reported in terminal prose. */
 export const KEYS_UNUSABLE = "unusable-keys";
 
 export class CredentialsFileUnreadableError extends KeysUnusableError {
@@ -605,7 +616,7 @@ export class UnboundPlatformIdentifiersError extends Error {
   constructor(held: readonly string[]) {
     super(
       teachingTheMove(
-        `This repository names no Egma platform, and it still holds identifiers that only the platform which issued them can resolve — ${held.join(", ")}. Egma will not send them anywhere, because the line that said which platform they came from is the one that is gone. Two ways on: put the platform: block back in egma/config.yaml, which is committed and so is in this repository's history, or delete the identifiers below and connect again on whichever platform you name next. Nothing was sent.`,
+        `This repository names no Egma platform, and it still holds identifiers that only the platform which issued them can resolve — ${held.join(", ")}. Egma will not send them anywhere, because the line that said which platform they came from is the one that is gone. Two ways on: put the platform: block back in egma/config.yaml, which is committed and so is in this repository's history, or delete the identifiers below and run egma init for the platform you want. Nothing was sent.`,
       ),
     );
     this.name = "UnboundPlatformIdentifiersError";
@@ -615,8 +626,12 @@ export class UnboundPlatformIdentifiersError extends Error {
 /** The committed config could not safely take part in platform resolution. */
 export class RepositoryPlatformConfigError extends Error {
   constructor(cause: unknown) {
+    const reason =
+      cause instanceof Error
+        ? cause.message
+        : "The repository binding could not be read.";
     super(
-      "Egma could not read this repository's complete egma folder, so it did not select a platform. Fix the repository contract and run this again. Egma did not fall back to its own platform.",
+      `Egma could not read the platform binding in egma/config.yaml or, for an unbound repository, the Suite manifests under egma/tests. ${reason} Fix that binding information and run this again. Egma did not fall back to its own platform.`,
       { cause },
     );
     this.name = "RepositoryPlatformConfigError";
@@ -624,29 +639,81 @@ export class RepositoryPlatformConfigError extends Error {
 }
 
 /**
- * The committed folder config, or `null` when this repository has none.
+ * The committed platform binding information, or `null` when this repository
+ * has none.
  *
- * The whole config rather than only its binding, because resolution needs two
- * things out of this file and reading it twice would be two answers to one
- * question: which platform it names, and — when it names none — whether it is
- * still holding identifiers that belong to one.
+ * The whole config rather than only its platform block, because resolution
+ * also needs the Project, Agent, and Connection ids used by the move guard.
+ * In an unbound repository, Suite manifests are read for the same narrow
+ * reason. Tests and Mock Tools do not take part in platform choice.
  */
 type CommittedRepository = {
   readonly config: FolderConfig;
   readonly suiteIds: readonly string[];
 };
 
-async function committedIn(repository: string): Promise<CommittedRepository | null> {
+/**
+ * Read only the Suite identities needed to keep a repository on its platform.
+ *
+ * Platform choice is not repository validation. Tests and Mock Tools may be in
+ * progress while a developer signs in, signs out, or works with an Agent. A
+ * Suite manifest is the one exception because its id belongs to the platform
+ * that issued it and must take part in the move guard.
+ */
+async function committedSuiteIds(testsFolder: string): Promise<readonly string[]> {
+  let entries;
   try {
-    const paths = folderPathsIn(repository);
+    entries = await readdir(testsFolder, { withFileTypes: true });
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw cause;
+  }
+
+  const suiteIds: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const manifest = path.join(testsFolder, entry.name, SUITE_MANIFEST_FILE_NAME);
+    let document: string;
+    try {
+      document = await readFile(manifest, "utf8");
+    } catch (cause) {
+      // A directory with no manifest carries no platform-issued Suite id.
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw cause;
+    }
+    suiteIds.push(
+      parseSuiteManifest(
+        document,
+        path.join("egma", "tests", entry.name, SUITE_MANIFEST_FILE_NAME),
+      ).id,
+    );
+  }
+  return suiteIds;
+}
+
+async function committedIn(repository: string): Promise<CommittedRepository | null> {
+  const paths = folderPathsIn(repository);
+  try {
     const config = await readConfig(paths.config);
-    const complete = await readRepository(paths);
     return {
       config,
-      suiteIds: complete.suites.map((suite) => suite.manifest.id),
+      // The binding already says who owns every committed id. Suite ids are
+      // needed only when that binding is missing and the move guard has to
+      // prove that the folder still belongs to some platform.
+      suiteIds:
+        config.platform === null ? await committedSuiteIds(paths.tests) : [],
     };
   } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {
+      try {
+        const suiteIds = await committedSuiteIds(paths.tests);
+        return suiteIds.length === 0
+          ? null
+          : { config: EMPTY_CONFIG, suiteIds };
+      } catch (suiteCause) {
+        throw new RepositoryPlatformConfigError(suiteCause);
+      }
+    }
     throw new RepositoryPlatformConfigError(cause);
   }
 }

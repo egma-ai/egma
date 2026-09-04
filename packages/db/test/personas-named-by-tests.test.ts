@@ -167,7 +167,12 @@ describe("a persona only deleted tests name", () => {
       personaIds: [dana],
     });
 
-    await deleteTest(actingAsAcme(), created.id);
+    await deleteTest(
+      actingAsAcme(),
+      created.id,
+      created.versionId,
+      created.revision,
+    );
     expect(await testsUsingPersona(actingAsAcme(), dana)).toEqual([]);
 
     expect((await deletePersona(actingAsAcme(), dana))?.id).toBe(dana);

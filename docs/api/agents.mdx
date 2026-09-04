@@ -52,13 +52,13 @@ curl "https://your-egma-host/v1/connection-options" \
 
 `POST /v1/agents`
 
-Register a new agent and, optionally, attach the first connection to it in the same request. Both the agent row and the connection row are written in one transaction, so a connection payload the registry rejects leaves no partial agent behind.
+Register a new Agent identity. Leave `connection` out to create the identity by itself, as `egma agent register` does. API clients may also attach the first Connection in the same request. When a Connection is present, both rows are written in one transaction, so a payload the registry rejects leaves no partial Agent behind.
 
 The `result` field in the response tells you exactly what happened:
 
 | Value | Meaning |
 |---|---|
-| `created` | A new agent and a new connection were written. |
+| `created` | A new Agent was written. If the request supplied a Connection, that Connection was also written. |
 | `reused` | An agent with this provider id already existed; nothing was written. |
 | `connection_added` | The agent already existed; a new connection was attached to it. |
 
@@ -167,7 +167,7 @@ The `result` field in the response tells you exactly what happened:
 </ResponseField>
 
 <ResponseField name="connection" type="object">
-  The connection that was created or reused. Absent when `result` is `reused` and no new connection was written.
+  The Connection that was created or reused. Absent when the request registered only an Agent identity and whenever no Connection was returned.
 
   <Expandable title="connection fields">
     <ResponseField name="id" type="string">Unique connection identifier.</ResponseField>

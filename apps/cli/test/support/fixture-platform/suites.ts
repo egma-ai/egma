@@ -5,11 +5,16 @@ import type { FixtureAnswer, FixtureRequest, RouteGroup } from "./server.ts";
 
 export type SeededSuite = { readonly id: string; readonly projectId: string; name: string };
 
+export type ListedProject = { readonly id: string; readonly name: string };
+
 export type SuiteControls = {
   add(name: string): SeededSuite;
   rename(id: string, name: string): SeededSuite;
+  /** What an organization-scoped credential sees during `egma init`. */
+  setListedProjects(projects: readonly ListedProject[]): void;
   readonly suites: readonly SeededSuite[];
   byId(id: string): SeededSuite | null;
+  wasDeleted(id: string): boolean;
 };
 
 function bearer(request: FixtureRequest): string {
@@ -22,8 +27,13 @@ export function suiteRoutes(options: {
   readonly projectId: string;
   readonly projectName: string;
   readonly afterCreate?: (suite: SeededSuite) => void;
+  readonly afterDelete?: (suiteId: string) => void;
 }): { readonly group: RouteGroup; readonly controls: SuiteControls } {
   const suites: SeededSuite[] = [];
+  let listedProjects: ListedProject[] = [
+    { id: options.projectId, name: options.projectName },
+  ];
+  const deletedSuiteIds = new Set<string>();
   const behind = (request: FixtureRequest, action: () => FixtureAnswer): FixtureAnswer =>
     options.holdsKey(bearer(request)) ? action() : { status: 401, body: NOT_AUTHENTICATED };
   const projectGate = (id: string | undefined): FixtureAnswer | null =>
@@ -42,11 +52,17 @@ export function suiteRoutes(options: {
       suite.name = name.trim();
       return suite;
     },
+    setListedProjects(projects) {
+      listedProjects = projects.map((project) => ({ ...project }));
+    },
     get suites() {
       return suites;
     },
     byId(id) {
       return suites.find((one) => one.id === id) ?? null;
+    },
+    wasDeleted(id) {
+      return deletedSuiteIds.has(id);
     },
   };
   const described = (suite: SeededSuite): Record<string, unknown> => ({
@@ -60,6 +76,18 @@ export function suiteRoutes(options: {
     group: {
       name: "test-suites",
       routes: [
+        {
+          method: "GET",
+          path: "/v1/projects",
+          handle: (request) =>
+            behind(request, () => ({
+              status: 200,
+              body: {
+                projects: listedProjects.map((project) => ({ ...project })),
+                mayManageProjects: false,
+              },
+            })),
+        },
         {
           method: "GET",
           path: "/v1/projects/:projectId",
@@ -129,9 +157,18 @@ export function suiteRoutes(options: {
           path: "/v1/test-suites/:suiteId",
           handle: (request) =>
             behind(request, () => {
+              const projectId = given(request.url.searchParams.get("projectId"));
+              if (projectId !== undefined) {
+                const gate = projectGate(projectId);
+                if (gate !== null) return gate;
+              }
               const at = suites.findIndex((one) => one.id === request.params.suiteId);
               if (at < 0) return refuse(404, "not_found", "there is no active test suite with that id");
-              suites.splice(at, 1);
+              const [deleted] = suites.splice(at, 1);
+              if (deleted !== undefined) {
+                deletedSuiteIds.add(deleted.id);
+                options.afterDelete?.(deleted.id);
+              }
               return { status: 204 };
             }),
         },

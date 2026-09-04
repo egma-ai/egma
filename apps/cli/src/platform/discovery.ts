@@ -62,8 +62,8 @@ function cleanedAgent(raw: GeneratedAgent): DiscoveredAgent | null {
 }
 
 /**
- * A first registration supplies credentials. A later Connection names the
- * Egma Agent whose sealed credential the server may reuse. Never send both.
+ * Discovery either supplies credentials or names the Egma Agent whose sealed
+ * credential the server may reuse. Never send both.
  */
 export async function discoverRetellAgents(
   input: {

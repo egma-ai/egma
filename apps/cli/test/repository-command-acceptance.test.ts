@@ -206,7 +206,8 @@ it("creates a suite first, pushes the complete folder atomically, and runs that 
     ]);
     const runId = platform.running.runs[0]?.id;
     expect(started.stdout).toBe(
-      `run: ${runId}\nresults: ${platform.url}/projects/${registered.agent.projectId}/runs/${runId}\nstatus: started\n`,
+      `Started Run ${runId}.\n` +
+        `View its progress in Egma: ${platform.url}/projects/${registered.agent.projectId}/runs/${runId}\n`,
     );
   } finally {
     await Promise.all([platform.close(), workspace.remove()]);

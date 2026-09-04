@@ -4,6 +4,7 @@ import {
   createClient,
   listAgents,
   type CreateTestData,
+  type DeleteTestData,
 } from "@egma/platform-api/client";
 import { platformOperations } from "../src/contract/index.ts";
 import { buildPlatformOpenApi } from "../src/openapi.ts";
@@ -185,6 +186,20 @@ describe("the platform API operation registry", () => {
         platformOperations.getSimulation.responses[200].schema.properties,
       ).not.toHaveProperty(field);
     }
+  });
+
+  it("requires the version and identity revision a Test deletion was based on", () => {
+    expect(platformOperations.deleteTest.request.query).toMatchObject({
+      properties: {
+        projectId: { type: "string", minLength: 1 },
+        expectedVersionId: { type: "string", minLength: 1 },
+        expectedRevision: { type: "string", minLength: 1 },
+      },
+      required: ["expectedVersionId", "expectedRevision"],
+    });
+    expect(platformOperations.deleteTest.responses[409]).toEqual(
+      platformOperations.updateTest.responses[409],
+    );
   });
 
   it("lets a customer change one project grader's policy", () => {
@@ -536,6 +551,14 @@ describe("the platform API operation registry", () => {
 });
 
 describe("the generated platform client", () => {
+  it("makes the expected Test Version and identity revision required for deletion", () => {
+    expectTypeOf<DeleteTestData["query"]>().toEqualTypeOf<{
+      projectId?: string;
+      expectedVersionId: string;
+      expectedRevision: string;
+    }>();
+  });
+
   it("makes a test mock tool's answer and error mutually exclusive", () => {
     type MockTool = NonNullable<CreateTestData["body"]["mockTools"]>[number];
 

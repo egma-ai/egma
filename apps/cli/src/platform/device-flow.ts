@@ -32,11 +32,19 @@ export type Collection =
   | {
       readonly kind: "key";
       readonly key: string;
-      /** Present on current platforms; absent only for an older server. */
-      readonly login?: {
+      readonly login: {
         readonly apiKeyId: string;
         readonly projectId: string;
       };
+    }
+  | {
+      /**
+       * The server minted a bearer key but omitted part of the receipt needed
+       * to store and later revoke it safely.
+       */
+      readonly kind: "incomplete-key";
+      readonly key: string;
+      readonly apiKeyId: string | null;
     }
   | { readonly kind: "waiting" }
   | { readonly kind: "slow-down" }
@@ -115,6 +123,7 @@ function seconds(value: unknown, fallback: number): number {
 export async function startDeviceAuthorization(
   url: string,
   fetchImpl: Fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<DeviceGrant> {
   let response: Response;
   try {
@@ -122,6 +131,7 @@ export async function startDeviceAuthorization(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ client_id: DEVICE_CLIENT_ID }),
+      ...(signal === undefined ? {} : { signal }),
     });
   } catch (cause) {
     throw new PlatformUnreachableError(url, cause);
@@ -167,6 +177,7 @@ export async function collectKey(
   url: string,
   deviceCode: string,
   fetchImpl: Fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<Collection> {
   let response: Response;
   try {
@@ -178,6 +189,7 @@ export async function collectKey(
         device_code: deviceCode,
         client_id: DEVICE_CLIENT_ID,
       }).toString(),
+      ...(signal === undefined ? {} : { signal }),
     });
   } catch (cause) {
     throw new PlatformUnreachableError(url, cause);
@@ -195,12 +207,17 @@ export async function collectKey(
     }
     const apiKeyId = text(body.api_key_id);
     const projectId = text(body.project_id);
+    if (apiKeyId === "" || projectId === "") {
+      return {
+        kind: "incomplete-key",
+        key,
+        apiKeyId: apiKeyId === "" ? null : apiKeyId,
+      };
+    }
     return {
       kind: "key",
       key,
-      ...(apiKeyId === "" || projectId === ""
-        ? {}
-        : { login: { apiKeyId, projectId } }),
+      login: { apiKeyId, projectId },
     };
   }
 

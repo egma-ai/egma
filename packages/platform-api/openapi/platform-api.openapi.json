@@ -19094,7 +19094,7 @@
             }
           },
           "409": {
-            "description": "The test moved after the version the edit was based on.",
+            "description": "The test content or identity moved after the write was based on it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19185,7 +19185,7 @@
       "delete": {
         "operationId": "deleteTest",
         "summary": "Permanently delete a test from authoring",
-        "description": "The test leaves authoring permanently. Existing run evidence stays readable.",
+        "description": "The test leaves authoring permanently only while expectedVersionId and expectedRevision are both still current. Existing run evidence stays readable.",
         "tags": [
           "Tests"
         ],
@@ -19211,6 +19211,24 @@
             "name": "projectId",
             "in": "query",
             "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "expectedVersionId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "expectedRevision",
+            "in": "query",
+            "required": true,
             "schema": {
               "type": "string",
               "minLength": 1
@@ -19262,11 +19280,59 @@
             }
           },
           "409": {
-            "description": "The request was refused.",
+            "description": "The test content or identity moved after the write was based on it.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Refusal"
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "const": "version_conflict"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "test": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "expectedVersionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "currentVersionId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message",
+                        "test",
+                        "expectedVersionId",
+                        "currentVersionId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "$ref": "#/components/schemas/Refusal"
+                    }
+                  ]
                 }
               }
             }

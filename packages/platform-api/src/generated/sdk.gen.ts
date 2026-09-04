@@ -1925,13 +1925,20 @@ export const getTestVersion = <ThrowOnError extends boolean = false>(parameters:
 /**
  * Permanently delete a test from authoring
  *
- * The test leaves authoring permanently. Existing run evidence stays readable.
+ * The test leaves authoring permanently only while expectedVersionId and expectedRevision are both still current. Existing run evidence stays readable.
  */
 export const deleteTest = <ThrowOnError extends boolean = false>(parameters: {
     testId: string;
     projectId?: string;
+    expectedVersionId: string;
+    expectedRevision: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<DeleteTestResponses, DeleteTestErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'testId' }, { in: 'query', key: 'projectId' }] }]);
+    const params = buildClientParams([parameters], [{ args: [
+                { in: 'path', key: 'testId' },
+                { in: 'query', key: 'projectId' },
+                { in: 'query', key: 'expectedVersionId' },
+                { in: 'query', key: 'expectedRevision' }
+            ] }]);
     return (options?.client ?? client).delete<DeleteTestResponses, DeleteTestErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
                 in: 'cookie',

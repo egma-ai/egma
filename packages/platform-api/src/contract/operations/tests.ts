@@ -16,6 +16,14 @@ const pageSizeSchema = { type: "integer", minimum: 1, maximum: 200 } as const;
 const testParams = parameters({ testId: stringIdSchema }, ["testId"]);
 const versionParams = parameters({ versionId: stringIdSchema }, ["versionId"]);
 const projectQuery = parameters({ projectId: stringIdSchema });
+const deleteTestQuery = parameters(
+  {
+    projectId: stringIdSchema,
+    expectedVersionId: stringIdSchema,
+    expectedRevision: stringIdSchema,
+  },
+  ["expectedVersionId", "expectedRevision"],
+);
 const testListQuery = parameters(
   {
     projectId: stringIdSchema,
@@ -232,7 +240,7 @@ const readRefusals = {
 const writeRefusals = { ...readRefusals, 409: refusalResponse } as const;
 
 const movedTestRefusal = {
-  description: "The test moved after the version the edit was based on.",
+  description: "The test content or identity moved after the write was based on it.",
   schema: {
     oneOf: [
       {
@@ -320,10 +328,15 @@ export const testOperations = {
     method: "DELETE",
     path: "/v1/tests/{testId}",
     summary: "Permanently delete a test from authoring",
-    description: "The test leaves authoring permanently. Existing run evidence stays readable.",
+    description:
+      "The test leaves authoring permanently only while expectedVersionId and expectedRevision are both still current. Existing run evidence stays readable.",
     tag: "Tests",
     security: "credentialed",
-    request: { params: testParams, query: projectQuery },
-    responses: { 204: { description: "The test was deleted." }, ...writeRefusals },
+    request: { params: testParams, query: deleteTestQuery },
+    responses: {
+      204: { description: "The test was deleted." },
+      ...writeRefusals,
+      409: movedTestRefusal,
+    },
   }),
 } as const;

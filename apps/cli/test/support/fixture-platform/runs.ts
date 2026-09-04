@@ -83,6 +83,8 @@ export type RunControls = {
   setGrading(step: GradingStep): void;
   noAdapterFor(connectionType: string): void;
   noAdapterMessage(connectionType: string): string;
+  answerNextStartWith(body: unknown): void;
+  answerNextCancelWith(body: unknown): void;
 };
 
 type StoredRun = Omit<SeededRun, "status"> & {
@@ -152,6 +154,8 @@ export function runRoutes(options: {
   readonly origin: () => string;
   readonly projectId: string;
   readonly testsInSuite: (suiteId: string) => readonly FixtureTestVersion[];
+  readonly testVersionById: (versionId: string) => FixtureTestVersion | null;
+  readonly suiteWasDeleted: (suiteId: string) => boolean;
   readonly connectionById: (connectionId: string) => ReachableConnection | null;
 }): { readonly group: RouteGroup; readonly controls: RunControls } {
   const runs: StoredRun[] = [];
@@ -159,6 +163,8 @@ export function runRoutes(options: {
   const events: StoredEvent[] = [];
   const idempotent = new Map<string, { readonly digest: string; readonly run: StoredRun }>();
   const withoutAdapter = new Set<string>();
+  let nextStartReceipt: { readonly body: unknown } | null = null;
+  let nextCancelReceipt: { readonly body: unknown } | null = null;
   const conductable = (): readonly string[] =>
     CONDUCTABLE_KINDS.filter((kind) => !withoutAdapter.has(kind));
   const behind = (request: FixtureRequest, action: () => FixtureAnswer): FixtureAnswer =>
@@ -183,7 +189,7 @@ export function runRoutes(options: {
       return {
         projectId: options.projectId,
         suiteName: "Fixture suite",
-        suiteDeleted: false,
+        suiteDeleted: options.suiteWasDeleted(run.suiteId),
         agentPlatform: connection?.agentPlatform ?? null,
         connectionType: connection?.connectionType ?? "",
         accessVariant: connection?.accessVariant ?? "",
@@ -245,12 +251,7 @@ export function runRoutes(options: {
     const run = runById(simulation.runId);
     const connection =
       run === undefined ? null : options.connectionById(run.connectionId);
-    const version =
-      run === undefined
-        ? null
-        : (options
-            .testsInSuite(run.suiteId)
-            .find((one) => one.id === simulation.testVersionId) ?? null);
+    const version = options.testVersionById(simulation.testVersionId);
     return {
       ...simulationOut(simulation),
       projectId: options.projectId,
@@ -446,7 +447,65 @@ export function runRoutes(options: {
   const group: RouteGroup = {
     name: "runs",
     routes: [
-      { method: "POST", path: "/v1/runs", handle: (request) => behind(request, () => start(request.body ?? {})) },
+      {
+        method: "POST",
+        path: "/v1/runs",
+        handle: (request) =>
+          behind(request, () => {
+            const answer = start(request.body ?? {});
+            if (answer.status < 200 || answer.status >= 300 || nextStartReceipt === null) {
+              return answer;
+            }
+            const receipt = nextStartReceipt;
+            nextStartReceipt = null;
+            return { ...answer, body: receipt.body };
+          }),
+      },
+      {
+        method: "POST",
+        path: "/v1/runs/:runId/cancel",
+        handle: (request) =>
+          behind(request, () => {
+            const projectId = given(request.url.searchParams.get("projectId"));
+            if (projectId !== undefined && projectId !== options.projectId) {
+              return refuse(
+                403,
+                "not_authorized",
+                "this credential may not act in that project",
+              );
+            }
+            const run = runById(request.params.runId ?? "");
+            if (run === undefined) {
+              return refuse(404, "not_found", "no run of yours has that id");
+            }
+            if (run.status === "completed" || run.status === "canceled") {
+              return refuse(409, "already_finished", "this run has already finished");
+            }
+            for (const simulation of simulationsIn(run.id)) {
+              if (TERMINAL.includes(simulation.status)) continue;
+              simulation.status = "canceled";
+              simulation.gradingState = null;
+              simulation.reason = null;
+              event({
+                runId: run.id,
+                kind: "simulation",
+                simulationId: simulation.id,
+                testName: simulation.testName,
+                personaName: simulation.personaName,
+                status: simulation.status,
+                reason: simulation.reason,
+              });
+            }
+            run.status = "canceled";
+            event({ runId: run.id, kind: "run", status: "canceled" });
+            if (nextCancelReceipt !== null) {
+              const receipt = nextCancelReceipt;
+              nextCancelReceipt = null;
+              return { status: 200, body: receipt.body };
+            }
+            return { status: 200, body: runOut(run) };
+          }),
+      },
       {
         method: "GET",
         path: "/v1/runs/:runId",
@@ -591,6 +650,12 @@ export function runRoutes(options: {
       withoutAdapter.add(connectionType);
     },
     noAdapterMessage: (connectionType) => noAdapterMessage(connectionType, conductable()),
+    answerNextStartWith(body) {
+      nextStartReceipt = { body };
+    },
+    answerNextCancelWith(body) {
+      nextCancelReceipt = { body };
+    },
   };
   return { group, controls };
 }

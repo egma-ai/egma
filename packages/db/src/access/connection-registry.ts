@@ -581,6 +581,7 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
     accessVariant: "phone_number.public_e164",
     modality: "voice",
     productLabel: "Phone number",
+    dormant: true,
   },
   {
     agentPlatform: null,
@@ -588,6 +589,7 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
     accessVariant: "phone_number.public_e164",
     modality: "voice",
     productLabel: "Phone number",
+    dormant: true,
   },
 ] as const;
 

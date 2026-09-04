@@ -1,7 +1,7 @@
 /**
  * Logging in for the promptless `egma login` command.
  *
- * There is one flow here. `egma login` is a plain-line adapter over it, so
+ * There is one flow here. `egma login` is a terminal-text adapter over it, so
  * tests exercise the same path a coding agent uses.
  *
  * Nothing in here draws, and nothing in here reads a keystroke. What the
@@ -16,6 +16,8 @@ import {
   writeCredentials,
   type Credentials,
 } from "./credentials.ts";
+import { revokeProjectKey } from "./api-keys.ts";
+import { platformText } from "./client.ts";
 import {
   codeFromPaste,
   collectKey,
@@ -35,23 +37,33 @@ export type LoginPrompt = {
 };
 
 /**
- * The prompt as plain lines, one fact per line.
- *
- * Written once for `egma login`. A coding agent can read each stable fact while
- * the developer completes the approval in a browser.
+ * The prompt as readable terminal text.
  */
 export function loginLines(prompt: LoginPrompt): readonly string[] {
   return [
-    `code: ${prompt.userCode}`,
-    `approve_url: ${prompt.url}`,
-    `browser: ${prompt.browserOpened ? "opened" : "not-opened"}`,
-    "waiting: for this code to be approved in a browser",
+    "Approve this login in your browser.",
+    `Code: ${prompt.userCode}`,
+    `Approval URL: ${prompt.url}`,
+    prompt.browserOpened
+      ? "The approval page was opened in your browser."
+      : "Open the approval URL in a browser.",
+    "Waiting for approval.",
   ];
 }
 
 export type LoginResult =
   | { readonly kind: "stored"; readonly url: string; readonly key: string }
+  | {
+      readonly kind: "stored-interrupted";
+      readonly url: string;
+      readonly key: string;
+    }
   | { readonly kind: "already-stored"; readonly url: string; readonly key: string }
+  | {
+      readonly kind: "not-stored";
+      readonly reason: string;
+      readonly interrupted: boolean;
+    }
   | { readonly kind: "denied" }
   | { readonly kind: "expired" }
   | { readonly kind: "interrupted" }
@@ -63,8 +75,6 @@ export type LogInOptions = {
   readonly url: string;
   /** Where the key is kept if one is minted. */
   readonly credentialsFile: string;
-  /** Log in again even when a key for this egma is already held. */
-  readonly force?: boolean;
   readonly signal: AbortSignal;
   /** The code and the address, as soon as egma has them. */
   readonly onPrompt: (prompt: LoginPrompt) => void;
@@ -75,6 +85,10 @@ export type LogInOptions = {
   /** Starts a browser on the address. Answers whether one started. */
   readonly openBrowser?: (url: string) => Promise<boolean>;
   readonly fetchImpl?: Fetch;
+  /** Filesystem boundary, replaced only by recovery tests. */
+  readonly saveCredentials?: typeof writeCredentials;
+  /** Compensating revoke boundary, replaced only by recovery tests. */
+  readonly revokeLoginKey?: typeof revokeProjectKey;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
 };
@@ -100,6 +114,63 @@ const LOOK_UP_EVERY_MS = 100;
  * for as long as the login lasted.
  */
 const SLOW_DOWN_MS = 5_000;
+
+function causeText(cause: unknown): string {
+  return (
+    platformText(cause instanceof Error ? cause.message : String(cause)) ||
+    "unknown local error"
+  );
+}
+
+async function recoverUnstoredKey(
+  options: LogInOptions,
+  input: {
+    readonly key: string;
+    readonly apiKeyId: string | null;
+    readonly failure: string;
+  },
+): Promise<LoginResult> {
+  if (input.apiKeyId === null) {
+    return {
+      kind: "not-stored",
+      interrupted: options.signal.aborted,
+      reason:
+        `${input.failure} Egma did not return the new key's ID, so the CLI ` +
+        "could not revoke it. Inspect this platform's API keys in Egma before running egma login again.",
+    };
+  }
+
+  let recovery: string;
+  try {
+    const revoked = await (options.revokeLoginKey ?? revokeProjectKey)(
+      input.apiKeyId,
+      {
+        url: options.url,
+        key: input.key,
+        // Cleanup is required because the server write already completed. Do
+        // not hand an already-aborted user signal to the compensating request.
+        signal: new AbortController().signal,
+        ...(options.fetchImpl === undefined
+          ? {}
+          : { fetchImpl: options.fetchImpl }),
+      },
+    );
+    recovery =
+      revoked.kind === "revoked"
+        ? `Egma revoked the unstored login key ${input.apiKeyId}.`
+        : `Login key ${input.apiKeyId} may still exist. Open Egma and revoke it before retrying. ${revoked.reason}`;
+  } catch (cause) {
+    recovery =
+      `Login key ${input.apiKeyId} may still exist. Open Egma and revoke it before retrying. ` +
+      `The cleanup request failed: ${causeText(cause)}`;
+  }
+
+  return {
+    kind: "not-stored",
+    interrupted: options.signal.aborted,
+    reason: `${input.failure} ${recovery}`,
+  };
+}
 
 function pause(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -186,14 +257,19 @@ export async function logIn(options: LogInOptions): Promise<LoginResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
 
   const held = await readCredentials(options.credentialsFile, options.url);
-  if (options.force !== true && held !== null && held.url === options.url) {
+  if (held !== null && held.url === options.url) {
     return { kind: "already-stored", url: held.url, key: held.key };
   }
 
   let grant;
   try {
-    grant = await startDeviceAuthorization(options.url, fetchImpl);
+    grant = await startDeviceAuthorization(
+      options.url,
+      fetchImpl,
+      options.signal,
+    );
   } catch (cause) {
+    if (options.signal.aborted) return { kind: "interrupted" };
     if (cause instanceof PlatformUnreachableError) {
       return { kind: "unreachable", reason: cause.message };
     }
@@ -223,12 +299,26 @@ export async function logIn(options: LogInOptions): Promise<LoginResult> {
 
     let collected;
     try {
-      collected = await collectKey(options.url, grant.deviceCode, fetchImpl);
+      collected = await collectKey(
+        options.url,
+        grant.deviceCode,
+        fetchImpl,
+        options.signal,
+      );
     } catch (cause) {
+      if (options.signal.aborted) return { kind: "interrupted" };
       if (cause instanceof PlatformUnreachableError) {
         return { kind: "unreachable", reason: cause.message };
       }
       throw cause;
+    }
+
+    if (
+      options.signal.aborted &&
+      collected.kind !== "key" &&
+      collected.kind !== "incomplete-key"
+    ) {
+      return { kind: "interrupted" };
     }
 
     switch (collected.kind) {
@@ -236,11 +326,34 @@ export async function logIn(options: LogInOptions): Promise<LoginResult> {
         const credentials: Credentials = {
           url: options.url,
           key: collected.key,
-          ...(collected.login === undefined ? {} : { login: collected.login }),
+          login: collected.login,
         };
-        await writeCredentials(options.credentialsFile, credentials);
-        return { kind: "stored", url: credentials.url, key: credentials.key };
+        try {
+          await (options.saveCredentials ?? writeCredentials)(
+            options.credentialsFile,
+            credentials,
+          );
+        } catch (cause) {
+          return recoverUnstoredKey(options, {
+            key: collected.key,
+            apiKeyId: collected.login.apiKeyId,
+            failure:
+              `Egma created login key ${collected.login.apiKeyId}, but the CLI could not save it in ` +
+              `${platformText(options.credentialsFile) || "the Egma credentials file"}: ${causeText(cause)}`,
+          });
+        }
+        return {
+          kind: options.signal.aborted ? "stored-interrupted" : "stored",
+          url: credentials.url,
+          key: credentials.key,
+        };
       }
+      case "incomplete-key":
+        return recoverUnstoredKey(options, {
+          key: collected.key,
+          apiKeyId: collected.apiKeyId,
+          failure: "Egma created a login key but returned an incomplete receipt.",
+        });
       case "denied":
         return { kind: "denied" };
       case "expired":

@@ -81,15 +81,15 @@ describe("runPersonasCommand", () => {
     expect(requested[1]?.searchParams.get("pageToken")).toBe(
       "prs_01K3XQ7M4E8YB2FVN0H9TZQWES",
     );
-    expect(lines).toContain(`project: ${PROJECT_ID}`);
+    expect(lines).toContain(`Personas for Project ${PROJECT_ID}:`);
     expect(lines).toContain(
-      'persona: {"id":"prs_01K3XQ7M4E8YB2FVN0H9TZQWER","name":"Everyday caller"}',
+      "- Everyday caller (prs_01K3XQ7M4E8YB2FVN0H9TZQWER)",
     );
     expect(lines).toContain(
-      'persona: {"id":"prs_01K3XQ7M4E8YB2FVN0H9TZQWES","name":"Impatient Rita"}',
+      "- Impatient Rita (prs_01K3XQ7M4E8YB2FVN0H9TZQWES)",
     );
-    expect(lines).toContain("personas: 2");
-    expect(lines.at(-1)).toBe("status: listed");
+    expect(lines.at(-1)).toBe("Listed 2 personas.");
+    expect(lines.join("\n")).not.toContain("status:");
   });
 
   it("does not ask the platform when the folder has no bound project", async () => {
@@ -115,9 +115,35 @@ describe("runPersonasCommand", () => {
 
     expect(code).toBe(1);
     expect(requests).toBe(0);
-    expect(lines).toContain("status: no-project");
     expect(lines).toContain(
       "stderr: This repository does not name its Egma Project. Run egma init here first.",
     );
+    expect(lines.join("\n")).not.toContain("status:");
+  });
+
+  it("keeps remote Persona fields from writing terminal control characters", async () => {
+    const lines: string[] = [];
+    const code = await runPersonasCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile },
+      cwd: workspace.dir,
+      out: (line) => lines.push(line),
+      fail: (line) => lines.push(`stderr: ${line}`),
+      fetchImpl: async () =>
+        new JsonResponse({
+          personas: [
+            {
+              id: "prs_01K3XQ7M4E8YB2FVN0H9TZQWER",
+              name: "Everyday\ncaller\u001b[2J",
+            },
+          ],
+          nextPageToken: null,
+        }),
+    });
+
+    expect(code).toBe(0);
+    expect(lines).toContain(
+      "- Everydaycaller[2J (prs_01K3XQ7M4E8YB2FVN0H9TZQWER)",
+    );
+    expect(lines.join("\n")).not.toContain("\u001b");
   });
 });

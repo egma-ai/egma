@@ -573,20 +573,6 @@ const CONNECTION_OPTIONS = [
     modality: "voice",
     productLabel: "LiveKit token endpoint",
   },
-  {
-    agentPlatform: "livekit",
-    connectionType: "phone_number",
-    accessVariant: "phone_number.public_e164",
-    modality: "voice",
-    productLabel: "Phone number",
-  },
-  {
-    agentPlatform: null,
-    connectionType: "phone_number",
-    accessVariant: "phone_number.public_e164",
-    modality: "voice",
-    productLabel: "Phone number",
-  },
 ] as const;
 
 export const FIXTURE_CONNECTION_OPTION_FACTS = CONNECTION_OPTIONS.map(
@@ -998,6 +984,15 @@ const AGENT_PLATFORMS = ["retell", "livekit"] as const;
 
 type BoundPlatform = (typeof AGENT_PLATFORMS)[number];
 
+/** One Retell Agent on the provider account the fixture API can discover. */
+export type SeedRetellAgent = {
+  readonly id: string;
+  readonly name: string;
+  readonly modality: "chat" | "voice";
+  /** Public phone numbers currently routed to this Agent. */
+  readonly phoneNumbers?: readonly string[];
+};
+
 /** The binding a registration asked for — required, in the real thing's words. */
 function agentPlatformIn(value: unknown): BoundPlatform {
   if (
@@ -1101,6 +1096,8 @@ export type AgentControls = {
    * would put the secret somewhere a failing test prints.
    */
   readonly sealed: readonly string[];
+  /** Seed the Retell account one API key opens for Agent discovery. */
+  retellAccount(apiKey: string, agents: readonly SeedRetellAgent[]): void;
   /** The project a write named, or `null`, per write. */
   readonly projectsNamed: readonly (string | null)[];
 };
@@ -1151,6 +1148,8 @@ export function agentRoutes(options: {
    * one.
    */
   readonly projectId: string;
+  /** A test-only forward-compatibility catalog in place of the normal one. */
+  readonly connectionOptions?: readonly unknown[];
 }): {
   readonly group: RouteGroup;
   readonly controls: AgentControls;
@@ -1169,6 +1168,7 @@ export function agentRoutes(options: {
   const agents: StoredAgent[] = [];
   const connections: StoredConnection[] = [];
   const sealed: string[] = [];
+  const retellAccounts = new Map<string, readonly SeedRetellAgent[]>();
   const projectsNamed: (string | null)[] = [];
 
   /** The project everything lands in, named or not. */
@@ -1203,6 +1203,49 @@ export function agentRoutes(options: {
   const notAuthenticated: FixtureAnswer = {
     status: 401,
     body: NOT_AUTHENTICATED,
+  };
+
+  /** The public candidates the real Retell discovery route derives. */
+  const discoveredRetellAgent = (
+    agent: SeedRetellAgent,
+  ): Record<string, unknown> => {
+    const connectionCandidates: Record<string, unknown>[] = [];
+    if (agent.modality === "voice") {
+      connectionCandidates.push(
+        {
+          agentPlatform: "retell",
+          connectionType: "retell_text_mode",
+          accessVariant: "retell_text_mode.api_key",
+          modality: "chat",
+          productLabel: "Retell text mode",
+          config: { retellAgentId: agent.id },
+        },
+        {
+          agentPlatform: "retell",
+          connectionType: "retell_web_call",
+          accessVariant: "retell_web_call.api_key",
+          modality: "voice",
+          productLabel: "Retell web call",
+          config: { retellAgentId: agent.id },
+        },
+      );
+    }
+    for (const phoneNumber of agent.phoneNumbers ?? []) {
+      connectionCandidates.push({
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        productLabel: "Retell phone",
+        config: { phoneNumber },
+      });
+    }
+    return {
+      platformAgentId: agent.id,
+      name: agent.name,
+      modality: agent.modality,
+      connectionCandidates,
+    };
   };
 
   /**
@@ -1478,12 +1521,108 @@ export function agentRoutes(options: {
     name: "agents",
     routes: [
       {
+        /** Discover Retell Agents with a pasted key or one sealed on an Agent. */
+        method: "POST",
+        path: "/v1/agents:discover",
+        handle: (request) => {
+          if (!authorized(request.headers)) return notAuthenticated;
+          return answering(() => {
+            const body = request.body ?? {};
+            refuseUnknownKeyIn(
+              body,
+              ["agentPlatform", "credentials", "agentId"],
+              "an agent discovery",
+            );
+            if (body["agentPlatform"] !== "retell") {
+              throw new Refusal(
+                "Choose Retell as the agent platform, then try again.",
+                { status: 422, code: "unprocessable" },
+              );
+            }
+            projectNamed(
+              given(request.url.searchParams.get("projectId")),
+              "writes into",
+            );
+
+            const namedAgentId =
+              typeof body["agentId"] === "string"
+                ? body["agentId"].trim()
+                : "";
+            let pasted: string | undefined;
+            if (body["credentials"] !== undefined) {
+              const credentials = body["credentials"];
+              if (
+                typeof credentials !== "object" ||
+                credentials === null ||
+                Array.isArray(credentials)
+              ) {
+                throw new Refusal("Paste a Retell API key, then try again.", {
+                  status: 422,
+                  code: "unprocessable",
+                });
+              }
+              const values = credentials as Record<string, unknown>;
+              refuseUnknownKeyIn(values, ["apiKey"], "Retell account credentials");
+              const offered =
+                typeof values["apiKey"] === "string"
+                  ? values["apiKey"].trim()
+                  : "";
+              if (offered.length < SHORTEST_CREDENTIAL) {
+                throw new Refusal("Paste a Retell API key, then try again.", {
+                  status: 422,
+                  code: "unprocessable",
+                });
+              }
+              pasted = offered;
+            }
+            if (pasted !== undefined && namedAgentId !== "") {
+              throw new Refusal(
+                "a discovery carries a pasted key or names the agent whose stored key to spend, and not both",
+              );
+            }
+
+            const stored =
+              namedAgentId === ""
+                ? undefined
+                : agents.find(
+                    (agent) =>
+                      agent.id === namedAgentId &&
+                      agent.projectId === HOME_PROJECT,
+                  )?.monitoringApiKey ?? undefined;
+            const apiKey = pasted ?? stored;
+            if (apiKey === undefined) {
+              throw new Refusal("Paste a Retell API key, then try again.", {
+                status: 422,
+                code: "unprocessable",
+              });
+            }
+            const account = retellAccounts.get(apiKey);
+            if (account === undefined) {
+              throw new Refusal(
+                "Retell did not accept that API key. Copy it again from Retell, then try again.",
+                { status: 422, code: "unprocessable" },
+              );
+            }
+            return {
+              status: 200,
+              body: { agents: account.map(discoveredRetellAgent) },
+            };
+          });
+        },
+      },
+      {
         // The same server-owned form catalog the real platform exposes.
         method: "GET",
         path: "/v1/connection-options",
         handle: (request) =>
           authorized(request.headers)
-            ? { status: 200, body: { items: connectionOptionMetadata() } }
+            ? {
+                status: 200,
+                body: {
+                  items:
+                    options.connectionOptions ?? connectionOptionMetadata(),
+                },
+              }
             : notAuthenticated,
       },
       {
@@ -1516,10 +1655,17 @@ export function agentRoutes(options: {
                 ? undefined
                 : connectionIn(body["connection"]);
 
-            // A write may name a project in its body. It never names one in
-            // its address, and it never names an organization anywhere.
-            const named =
-              typeof body["projectId"] === "string" ? body["projectId"] : null;
+            // The generated client names the project in the query. The body
+            // spelling remains accepted because the public route accepts both,
+            // with the query winning. Neither spelling names an organization.
+            const inQuery = given(
+              request.url.searchParams.get("projectId"),
+            );
+            const inBody =
+              typeof body["projectId"] === "string"
+                ? body["projectId"]
+                : null;
+            const named = inQuery ?? inBody;
             projectsNamed.push(named);
             const projectId = projectNamed(given(named), "writes into");
 
@@ -1725,13 +1871,93 @@ export function agentRoutes(options: {
           return answering(() => {
             const envelope = connectionIn(request.body ?? {});
             const selectedAgentId = selectedPlatformAgentId(envelope);
-            const admitted = admitConnection(envelope);
+            let retellAccountKey: string | null = null;
+            if (agent.agentPlatform === "retell" && selectedAgentId !== null) {
+              const offered = envelope["credentials"];
+              if (offered === undefined) {
+                retellAccountKey = agent.monitoringApiKey;
+              } else {
+                if (
+                  typeof offered !== "object" ||
+                  offered === null ||
+                  Array.isArray(offered)
+                ) {
+                  throw new Refusal("Paste a Retell API key, then try again.");
+                }
+                const values = offered as Record<string, unknown>;
+                refuseUnknownKeyIn(
+                  values,
+                  ["apiKey"],
+                  "Retell account credentials",
+                );
+                retellAccountKey = credentialString(
+                  "Retell account",
+                  "apiKey",
+                  values["apiKey"],
+                );
+              }
+              if (retellAccountKey === null) {
+                throw new Refusal("Paste a Retell API key, then try again.");
+              }
+              const providerAgent = retellAccounts
+                .get(retellAccountKey)
+                ?.find((candidate) => candidate.id === selectedAgentId);
+              if (providerAgent === undefined) {
+                throw new Refusal(
+                  `Retell no longer lists Agent ${selectedAgentId}.`,
+                );
+              }
+              if (
+                envelope["connectionType"] === "phone_number" &&
+                !providerAgent.phoneNumbers?.includes(
+                  String(
+                    (envelope["config"] as
+                      | Record<string, unknown>
+                      | undefined)?.["phoneNumber"] ?? "",
+                  ),
+                )
+              ) {
+                throw new Refusal(
+                  "Retell no longer routes that phone number to the selected Agent.",
+                );
+              }
+            }
+
+            const isRetellPhone =
+              agent.agentPlatform === "retell" &&
+              envelope["connectionType"] === "phone_number" &&
+              envelope["accessVariant"] === "phone_number.public_e164" &&
+              envelope["modality"] === "voice";
+            const { credentials: _accountCredentials, ...withoutCredentials } =
+              envelope;
+            const admitted = admitConnection(
+              isRetellPhone
+                ? withoutCredentials
+                : envelope["credentials"] === undefined &&
+                    retellAccountKey !== null
+                  ? {
+                      ...envelope,
+                      credentials: { apiKey: retellAccountKey },
+                    }
+                  : envelope,
+            );
             if (agent.agentPlatform === "retell") {
               boundElsewhere(agent, selectedAgentId);
             }
             const written = writeConnection(agent, admitted);
             if (agent.agentPlatform === "retell" && selectedAgentId !== null) {
               agent.platformAgentId = selectedAgentId;
+              if (retellAccountKey !== null) {
+                if (
+                  admitted.credentials === null &&
+                  agent.monitoringApiKey !== retellAccountKey
+                ) {
+                  sealed.push(retellAccountKey);
+                }
+                agent.monitoringApiKey = retellAccountKey;
+                agent.monitoringApiKeyHint = retellAccountKey.slice(-4);
+                agent.updatedAt = new Date().toISOString();
+              }
             }
             return {
               status: 201,
@@ -1765,6 +1991,9 @@ export function agentRoutes(options: {
       agents,
       connections,
       sealed,
+      retellAccount(apiKey, seeded) {
+        retellAccounts.set(apiKey, seeded);
+      },
       projectsNamed,
       received(agentId, at = new Date()) {
         const held = agents.find((one) => one.id === agentId);

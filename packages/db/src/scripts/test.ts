@@ -38,7 +38,7 @@ import { organization, user } from "../schema/index.ts";
  *   node packages/db/dist/scripts/test.js edit tst_… --scenario "…"
  *   node packages/db/dist/scripts/test.js get-version tstv_…
  *   node packages/db/dist/scripts/test.js list [--limit 50] [--cursor tst_…]
- *   node packages/db/dist/scripts/test.js delete tst_…
+ *   node packages/db/dist/scripts/test.js delete tst_… tstv_… rev_…
  *
  * A test says who calls, so `--persona` is required on a create: name one the
  * development project can use, which `persona.js create` or `persona.js list`
@@ -109,7 +109,7 @@ function usage(): never {
       "    [--scenario <text>] [--behavior <text> …] [--persona <prs_id> …]",
       "  test.js get-version <tstv_id>",
       "  test.js list <ste_id> [--limit <n>] [--cursor <tst_id>]",
-      "  test.js delete <tst_id>",
+      "  test.js delete <tst_id> <tstv_id> <rev_id>",
       "  test.js create-suite --name <name>",
     ].join("\n"),
   );
@@ -230,7 +230,15 @@ async function main(): Promise<void> {
     console.log(JSON.stringify(page, null, 2));
   } else if (command === "delete") {
     const id = requiredId(rest);
-    console.log(JSON.stringify({ deleted: await deleteTest(auth, id) }, null, 2));
+    const expectedVersionId = requiredId(rest.slice(1));
+    const expectedRevision = requiredId(rest.slice(2));
+    console.log(
+      JSON.stringify(
+        { deleted: await deleteTest(auth, id, expectedVersionId, expectedRevision) },
+        null,
+        2,
+      ),
+    );
   } else if (command === "create-suite") {
     const { values } = parseArgs({
       args: rest,

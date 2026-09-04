@@ -1,8 +1,8 @@
 /**
  * `egma self-host`: the platform operator's half of the CLI.
  *
- * One CLI, two contexts. The repository commands `connect`, `pull`, `push` and
- * `run` operate an *agent repository* — tests, and the address of the platform
+ * One CLI, two contexts. The repository commands under `agent`, plus `pull`,
+ * `push`, and `run`, operate an *agent repository* — tests, and the address of the platform
  * that owns their identifiers. Everything under `self-host` operates a
  * *platform workspace* — the deployment itself and its containers. On one
  * laptop that is often the same person, and the product still keeps the two apart, because
@@ -23,6 +23,7 @@
 
 import { UnusableUrlError } from "../platform/credentials.ts";
 import { normalizePlatformOrigin } from "../platform/url.ts";
+import { oneLineFactText } from "../ui/fact-value.ts";
 import {
   compose,
   composeEnvironment,
@@ -51,7 +52,9 @@ export const SELF_HOST_EXIT = {
   /** This is not a platform workspace, or docker is not here. */
   noWorkspace: 1,
   /** The platform refused or could not finish, and said why. */
-  refused: 4,
+  refused: 1,
+  /** The operator stopped the command before it finished. */
+  interrupted: 130,
 } as const;
 
 /**
@@ -219,6 +222,7 @@ export function parseSelfHostArgs(argv: readonly string[]): SelfHostInvocation {
 }
 
 export async function runSelfHostCommand(options: SelfHostOptions): Promise<number> {
+  if (abortRequested(options.signal)) return interruptedSelfHost(options);
   const invocation = parseSelfHostArgs(options.argv);
   if (invocation.unknown.length > 0) {
     // Only the name is said back. Something written as `--thing=value` may be
@@ -234,6 +238,7 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
   try {
     if (verb === "up") return await runUp(options, invocation);
   } catch (error) {
+    if (abortRequested(options.signal)) return interruptedSelfHost(options);
     // Three ways this command cannot start at all: the directory is not a
     // platform workspace, there is no docker, or the address it was given is
     // not an address. Each is answered before anything is contacted.
@@ -242,7 +247,6 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
       error instanceof DockerMissingError ||
       error instanceof UnusableUrlError
     ) {
-      options.out(`status: refused\nreason: ${error.message}`);
       options.fail(error.message);
       return SELF_HOST_EXIT.noWorkspace;
     }
@@ -250,7 +254,6 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
       error instanceof OperatorEnvironmentError ||
       error instanceof DockerStateInspectionError
     ) {
-      options.out(`status: refused\nreason: ${error.message}`);
       options.fail(error.message);
       return SELF_HOST_EXIT.refused;
     }
@@ -264,6 +267,17 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
   return SELF_HOST_EXIT.noWorkspace;
 }
 
+function interruptedSelfHost(options: SelfHostOptions): number {
+  options.fail(
+    "The command was interrupted before it finished. Check this platform workspace before you run egma self-host up again.",
+  );
+  return SELF_HOST_EXIT.interrupted;
+}
+
+function abortRequested(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
 // -- up -----------------------------------------------------------------------
 
 async function runUp(
@@ -274,8 +288,6 @@ async function runUp(
   const stored = readPlatformConfig(workspace);
   const composeControlProblem = composeEnvironmentControlProblem(options.env);
   if (composeControlProblem !== null) {
-    options.out("status: refused");
-    options.out(`reason: ${composeControlProblem}`);
     options.fail(composeControlProblem);
     return SELF_HOST_EXIT.refused;
   }
@@ -285,11 +297,10 @@ async function runUp(
     environment: options.env,
     signal: options.signal,
   });
+  if (abortRequested(options.signal)) return interruptedSelfHost(options);
 
   const carrierProblem = carrierEnvironmentProblem(operator);
   if (carrierProblem !== null) {
-    options.out("status: refused");
-    options.out(`reason: ${carrierProblem}`);
     options.fail(carrierProblem);
     return SELF_HOST_EXIT.refused;
   }
@@ -304,8 +315,10 @@ async function runUp(
     offeredAddress ? "EGMA_BASE_URL" : "this workspace's recorded address",
   );
 
-  options.out(`workspace: ${workspace}`);
-  options.out(`url: ${address}`);
+  options.out(
+    `Platform workspace: ${oneLineFactText(workspace, "the platform workspace")}`,
+  );
+  options.out(`Egma URL: ${address}`);
 
   // The database is the durable proof that this is an existing installation.
   // It can remain after every container and platform.env file was removed. We
@@ -316,6 +329,7 @@ async function runUp(
     environment: options.env,
     signal: options.signal,
   });
+  if (abortRequested(options.signal)) return interruptedSelfHost(options);
 
   // Decide every credential used only between Egma containers before Compose
   // starts. Existing values from an older `.env` deployment are adopted; later
@@ -329,20 +343,25 @@ async function runUp(
       address,
       postgresVolumes,
     );
+    if (abortRequested(options.signal)) return interruptedSelfHost(options);
   } catch (cause) {
-    options.out("status: failed");
-    options.out(
-      `reason: Egma could not prepare this workspace's internal credentials: ${
+    if (abortRequested(options.signal)) return interruptedSelfHost(options);
+    options.fail(
+      `Egma could not prepare this workspace's internal credentials: ${
         (cause as Error).message
       }`,
     );
     return SELF_HOST_EXIT.refused;
   }
   options.out(
-    `platform_credentials: ${bootstrap.generated.length > 0 ? "generated" : "existing"}`,
+    bootstrap.generated.length > 0
+      ? "Generated the internal platform credentials."
+      : "Using the existing internal platform credentials.",
   );
   options.out(
-    `media_credential: ${bootstrap.mediaGenerated ? "generated" : "existing"}`,
+    bootstrap.mediaGenerated
+      ? "Generated the LiveKit media credential."
+      : "Using the existing LiveKit media credential.",
   );
   if (bootstrap.generated.length > 0) {
     for (const line of PLATFORM_CREDENTIAL_NOTICE) options.fail(line);
@@ -364,9 +383,8 @@ async function runUp(
   };
 
   function refuseMissingVariable(missing: string): number {
-    options.out("status: failed");
-    options.out(
-      `reason: ${missing} has no value in the prepared deployment configuration. ` +
+    options.fail(
+      `${missing} has no value in the prepared deployment configuration. ` +
         "Nothing was started. Normal bundled self-host configuration generates " +
         "every internal value, so this is either an incomplete advanced override " +
         "or a platform preparation error.",
@@ -381,14 +399,14 @@ async function runUp(
   // a store doing its first boot. Compose keeps its normal layer cache, and
   // services that only name a published image are not built.
   const built = await compose(["build"], composeOptions);
+  if (abortRequested(options.signal)) return interruptedSelfHost(options);
   const missingWhileBuilding = missingRequiredVariable(built);
   if (missingWhileBuilding !== null) {
     return refuseMissingVariable(missingWhileBuilding);
   }
   if (built.code !== 0) {
-    options.out("status: failed");
-    options.out(
-      "reason: docker compose could not build the platform images. What it printed " +
+    options.fail(
+      "Docker Compose could not build the platform images. What it printed " +
         "above names the Dockerfile, registry or local runtime problem. No service " +
         "was started, and this command is safe to run again once it is fixed.",
     );
@@ -407,6 +425,7 @@ async function runUp(
   // fails once and works when you type the same thing again is a product that
   // taught its first user to distrust it.
   let started = await compose(start, composeOptions);
+  if (abortRequested(options.signal)) return interruptedSelfHost(options);
   // Asked before the retry, because the two failures look alike and want
   // opposite answers. A missing bootstrap variable is refused while Compose is
   // still reading the file — nothing was created, and a second attempt would
@@ -424,11 +443,11 @@ async function runUp(
         "creates its database and restarts itself. Trying once more.",
     );
     started = await compose(start, composeOptions);
+    if (abortRequested(options.signal)) return interruptedSelfHost(options);
   }
   if (started.code !== 0) {
-    options.out("status: failed");
-    options.out(
-      "reason: docker compose could not bring the platform up, twice. What it printed " +
+    options.fail(
+      "Docker Compose could not bring the platform up, twice. What it printed " +
         "above names the service that would not start; `docker compose logs` on that " +
         "service in this workspace says why. Nothing here is half-done — this command " +
         "is safe to run again once it is fixed.",
@@ -437,25 +456,20 @@ async function runUp(
   }
 
   const ready = await waitForPlatform(address, options.signal);
+  if (abortRequested(options.signal)) return interruptedSelfHost(options);
   if (!ready) {
-    options.out("status: failed");
-    options.out(
-      `reason: the containers started but nothing answered ${address}${PLATFORM_HEALTH_PATH} within ${
+    options.fail(
+      `The containers started, but nothing answered ${address}${PLATFORM_HEALTH_PATH} within ${
         READY_TIMEOUT_MS / 1000
       }s`,
     );
     return SELF_HOST_EXIT.refused;
   }
 
-  options.out(`services: ${STARTED.join(" ")}`);
-  options.out("status: ready");
-  options.out(`login: egma login --url ${address}`);
-
-  options.fail("");
-  options.fail(`Egma is ready at ${address}`);
-  options.fail("");
-  options.fail("In your agent repository, sign in:");
-  options.fail(`  egma login --url ${address}`);
+  options.out(`Started services: ${STARTED.join(", ")}.`);
+  options.out(`Egma is ready at ${address}.`);
+  options.out("In your Agent repository, sign in with:");
+  options.out(`  egma login --url ${address}`);
   return SELF_HOST_EXIT.ok;
 }
 
@@ -472,10 +486,16 @@ const PLATFORM_CREDENTIAL_NOTICE = [
     "credentials cannot be opened without it.",
 ] as const;
 
-async function platformIsHealthy(address: string): Promise<boolean> {
+async function platformIsHealthy(
+  address: string,
+  commandSignal: AbortSignal | undefined,
+): Promise<boolean> {
   try {
     const answer = await fetch(`${address}${PLATFORM_HEALTH_PATH}`, {
-      signal: AbortSignal.timeout(5_000),
+      signal:
+        commandSignal === undefined
+          ? AbortSignal.timeout(5_000)
+          : AbortSignal.any([commandSignal, AbortSignal.timeout(5_000)]),
     });
     return answer.ok;
   } catch {
@@ -489,7 +509,8 @@ async function waitForPlatform(
 ): Promise<boolean> {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   for (;;) {
-    if (await platformIsHealthy(address)) return true;
+    if (abortRequested(signal)) return false;
+    if (await platformIsHealthy(address, signal)) return true;
     if (Date.now() >= deadline || signal?.aborted === true) return false;
     await new Promise((wake) => setTimeout(wake, READY_POLL_MS));
   }

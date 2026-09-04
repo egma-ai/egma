@@ -49,6 +49,8 @@ type Query = {
   readonly suiteId?: string;
   readonly pageToken?: string;
   readonly pageSize?: string | number;
+  readonly expectedVersionId?: string;
+  readonly expectedRevision?: string;
 };
 
 const CREATE_KEYS = [
@@ -340,11 +342,38 @@ export async function testRoutes(
   registerPlatformOperation(app, testOperations.deleteTest, async (request, reply) => {
     const { testId } = request.params as { testId: string };
     const query = (request.query ?? {}) as Query;
-    const unexpected = unknownQuery(query, ["projectId"]);
+    const unexpected = unknownQuery(query, [
+      "projectId",
+      "expectedVersionId",
+      "expectedRevision",
+    ]);
     if (unexpected !== undefined) return unprocessable(reply, unexpected);
+    if (
+      typeof query.expectedVersionId !== "string" ||
+      !isId("tstv", query.expectedVersionId)
+    ) {
+      return unprocessable(
+        reply,
+        "expectedVersionId must be one tstv_ test-version identifier",
+      );
+    }
+    if (
+      typeof query.expectedRevision !== "string" ||
+      !isId("rev", query.expectedRevision)
+    ) {
+      return unprocessable(
+        reply,
+        "expectedRevision must be one rev_ revision identifier",
+      );
+    }
     const reached = await acting(requesterOf(request).auth, query);
     if ("refusal" in reached) return refuseActing(reply, reached);
-    const deleted = await deleteTest(reached.auth, testId);
+    const deleted = await deleteTest(
+      reached.auth,
+      testId,
+      query.expectedVersionId,
+      query.expectedRevision,
+    );
     return deleted ? reply.code(204).send() : noSuchTest(reply, testId);
   });
 
@@ -378,7 +407,7 @@ export async function testRoutes(
       : reply.send(describedVersion(found));
   });
 
-  app.setErrorHandler(async (error, _request, reply) => {
+  app.setErrorHandler(async (error, request, reply) => {
     if (error instanceof TestMovedOnError) {
       return reply.code(409).send({
         error: "version_conflict",
@@ -389,7 +418,10 @@ export async function testRoutes(
       });
     }
     if (error instanceof IdentityConflictError) {
-      return sendRefusal(reply, "identity_conflict", REFUSALS.identityConflict("Test", error.resourceId));
+      const message = request.method === "DELETE"
+        ? REFUSALS.identityConflictOnDelete("Test", error.resourceId)
+        : REFUSALS.identityConflict("Test", error.resourceId);
+      return sendRefusal(reply, "identity_conflict", message);
     }
     if (error instanceof PersonaNameAmbiguousError) {
       return sendRefusal(reply, "persona_name_ambiguous", REFUSALS.personaNameAmbiguous(error.personaName));

@@ -572,10 +572,18 @@ describe("a connection's stored credential", () => {
     expect(
       items.find(
         (one) =>
-          one.agentPlatform === null &&
+          one.agentPlatform === "retell" &&
           one.connectionType === "phone_number",
       )?.credentialRule,
     ).toBe("forbidden");
+    expect(
+      items.some(
+        (one) =>
+          one.agentPlatform === null ||
+          (one.agentPlatform === "livekit" &&
+            one.connectionType === "phone_number"),
+      ),
+    ).toBe(false);
     expect(
       livekit.find(
         (one) =>

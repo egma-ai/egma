@@ -20,7 +20,6 @@ import process from "node:process";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { createEgmaFolder, EMPTY_CONFIG } from "../src/folder/egma-folder.ts";
-import { KEYS_UNUSABLE } from "../src/platform/credentials.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { CLI_ENTRY, makeWorkspace, type Workspace } from "./support/workspace.ts";
 
@@ -119,13 +118,13 @@ it.each(REPRESENTATIVE_COMMANDS)(
     const shown = `${result.stdout}${result.stderr}`;
 
     expect(result.code).toBe(1);
-    expect(result.stdout).toContain(`status: ${KEYS_UNUSABLE}`);
+    expect(result.stdout).not.toContain("status:");
     expect(result.stderr).toContain(workspace.credentialsFile);
     expect(result.stderr).toContain("move it aside and sign in again");
 
     // None of Node's own words: no stack frames, no parser complaint, no dump
-    // of the cause. A developer gets a sentence and a coding agent gets a
-    // status line, and neither has to read a trace to find out what happened.
+    // of the cause. A developer or coding agent gets one useful error sentence
+    // on stderr and does not have to read a trace to find out what happened.
     expect(shown).not.toMatch(/^\s+at /mu);
     expect(shown).not.toContain("SyntaxError");
     expect(shown).not.toContain("[cause]");
@@ -168,7 +167,7 @@ it.skipIf(process.getuid?.() === 0)(
         const shown = `${result.stdout}${result.stderr}`;
 
         expect(result.code, verb).toBe(1);
-        expect(result.stdout, verb).toContain(`status: ${KEYS_UNUSABLE}`);
+        expect(result.stdout, verb).not.toContain("status:");
         expect(result.stderr, verb).toContain(workspace.credentialsFile);
         expect(shown, verb).not.toMatch(/^\s+at /mu);
         expect(shown, verb).not.toContain("EACCES");
