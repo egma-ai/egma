@@ -2203,10 +2203,8 @@ export async function resolveSimulationStanding(
  * own run, so the pair could only ever agree or be a mistake. One identifier is
  * one gate, and the run it names comes back beside it.
  *
- * `signingKey` is the agent's sealed platform key, opened. It is used to
- * **verify** a signature the platform put on the request and for nothing else:
- * nothing on this path spends it, and it never reaches an answer, a log, or a
- * refusal.
+ * No credential rides along: the endpoint verifies nothing about the caller
+ * beyond the two gates, so the agent's sealed key is never opened on this path.
  *
  * `undefined` means no such simulation, which is the first gate's answer.
  */
@@ -2224,7 +2222,6 @@ export type MockToolCallTarget = {
     readonly answers: readonly TestMockTool[];
   };
   readonly auth: AuthContext;
-  readonly signingKey: string | null;
 };
 
 export async function resolveMockToolCall(
@@ -2243,11 +2240,9 @@ export async function resolveMockToolCall(
       runStatus: run.status,
       runFinishedAt: run.finishedAt,
       mockTools: testVersion.mockTools,
-      signingKey: agent.monitoringApiKey,
     })
     .from(simulation)
     .innerJoin(run, eq(simulation.runId, run.id))
-    .innerJoin(agent, eq(run.agentId, agent.id))
     .innerJoin(testVersion, eq(simulation.testVersionId, testVersion.id))
     .where(eq(simulation.id, simulationId))
     .limit(1);
@@ -2279,7 +2274,6 @@ export async function resolveMockToolCall(
       answers,
     },
     auth,
-    signingKey: row.signingKey === null ? null : openedApiKey(row.signingKey),
   };
 }
 
