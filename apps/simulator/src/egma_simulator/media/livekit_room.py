@@ -1354,10 +1354,17 @@ class RoomLifecycle:
 
         The join itself is made by the LiveKit SDK on a socket of its own,
         so unlike the token request there is no socket factory here to hold
-        the connected address to the checked one. What this enforces is the
-        answer as read; a name that moves between this lookup and the SDK's
-        is the gap that remains, and it is said here rather than implied
-        away.
+        the connected address to the checked one, and the SDK cannot be
+        handed the checked address in place of the name: under TLS the name
+        is what the server's certificate is checked against. So a name that
+        moves between this lookup and the SDK's is not closed by pinning; it
+        is closed by the scheme rule above. The token rides the WebSocket
+        upgrade, which the SDK sends only once the peer has shown a
+        certificate for the answered name, and a host inside the deployment
+        holds no such certificate. What a moved name can still reach is one
+        TCP connect and one failed handshake, reported as a join refusal;
+        no token and no request body go with it. That is the residue, said
+        here rather than implied away.
         """
         located = _server_host(server_url)
         if located is None:
