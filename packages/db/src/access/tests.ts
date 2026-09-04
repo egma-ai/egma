@@ -669,6 +669,28 @@ function validDynamicVariables(value: unknown): Record<string, string> {
   return variables;
 }
 
+/**
+ * A lone surrogate: half of a UTF-16 pair with no partner. Valid JSON, and
+ * JavaScript keeps it, but it has no UTF-8 form, so the dispatch that carries
+ * the metadata to LiveKit could not encode it. Refused at save, because a value
+ * that saves must never fail at dispatch.
+ */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** Every string a JSON value holds, keys included, in document order. */
+function* stringsIn(value: unknown): Generator<string> {
+  if (typeof value === "string") {
+    yield value;
+  } else if (Array.isArray(value)) {
+    for (const item of value) yield* stringsIn(item);
+  } else if (typeof value === "object" && value !== null) {
+    for (const [key, held] of Object.entries(value)) {
+      yield key;
+      yield* stringsIn(held);
+    }
+  }
+}
+
 /** The dispatch metadata as it will be stored: an object, within LiveKit's cap. */
 function validJobDispatchMetadata(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -678,6 +700,15 @@ function validJobDispatchMetadata(value: unknown): Record<string, unknown> {
     );
   }
   const metadata = value as Record<string, unknown>;
+  for (const text of stringsIn(metadata)) {
+    if (LONE_SURROGATE.test(text)) {
+      throw new UnprocessableInputError(
+        "env.job_dispatch_metadata holds a lone surrogate, which is valid " +
+          "JSON but has no UTF-8 form, so LiveKit could not carry it on the " +
+          "dispatch. Send well-formed text.",
+      );
+    }
+  }
   const bytes = Buffer.byteLength(
     serializedJobDispatchMetadata(metadata),
     "utf8",

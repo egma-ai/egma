@@ -312,6 +312,17 @@ describe("what a test's world is refused for", () => {
     );
   });
 
+  it("refuses dispatch metadata holding a lone surrogate, which no UTF-8 dispatch can carry", async () => {
+    await refuses(
+      { env: { job_dispatch_metadata: { caller: "\ud83d" } } },
+      /job_dispatch_metadata holds a lone surrogate/u,
+    );
+    await refuses(
+      { env: { job_dispatch_metadata: { "\udc00": "key" } } },
+      /job_dispatch_metadata holds a lone surrogate/u,
+    );
+  });
+
   it("refuses one tool answered for twice", async () => {
     await refuses(
       {
