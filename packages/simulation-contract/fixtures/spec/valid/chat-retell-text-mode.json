@@ -15,7 +15,7 @@
   },
   "agent_version": 106,
   "dynamic_variables": {
-    "egma_simulation": "sim_01K5T4P2QW7H3NDXB8ZM6VYJRE",
+    "account_id": "sim_01K5T4P2QW7H3NDXB8ZM6VYJRE",
     "is_existing": "true",
     "caller_name": ""
   },

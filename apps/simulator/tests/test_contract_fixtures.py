@@ -260,7 +260,7 @@ def test_a_spec_carries_a_named_version_and_this_simulations_variables():
     assert spec.connection_type == "retell_web_call"
     assert spec.agent_version == 106
     assert spec.dynamic_variables == {
-        "egma_simulation": numbered["simulation_id"],
+        "account_id": numbered["simulation_id"],
         "is_existing": "false",
         "lookup_status": "no_match",
     }
@@ -300,7 +300,7 @@ def test_the_text_mode_lane_reads_back_with_and_without_the_optional_fields():
     assert spec.access_variant == "retell_text_mode.api_key"
     assert spec.modality == "chat"
     assert spec.agent_version == 106
-    assert spec.dynamic_variables["egma_simulation"] == carried["simulation_id"]
+    assert spec.dynamic_variables["account_id"] == carried["simulation_id"]
     assert spec.dynamic_variables["caller_name"] == ""
     assert [mock.tool_name for mock in spec.mock_tools] == [
         "get_availability",

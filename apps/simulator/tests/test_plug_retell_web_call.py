@@ -61,7 +61,7 @@ own default is whatever version is newest, which on a mocked run is exactly
 the draft nobody may be at the mercy of."""
 
 THE_VARIABLES = {
-    "egma_simulation": A_SIMULATION,
+    "account_id": A_SIMULATION,
     "is_existing": "false",
     "caller_name": "",
 }

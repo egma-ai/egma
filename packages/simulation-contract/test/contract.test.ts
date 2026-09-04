@@ -339,7 +339,7 @@ describe("the two schemas, as one contract", () => {
     );
     expect(carried.agent_version).toBe(106);
     expect(carried.dynamic_variables).toMatchObject({
-      egma_simulation: carried.simulation_id as string,
+      account_id: carried.simulation_id as string,
     });
 
     for (const dropped of [
@@ -375,7 +375,7 @@ describe("the two schemas, as one contract", () => {
     // an empty value renders empty rather than falling back to a default,
     // so the wire has to be able to say it.
     const emptied = structuredClone(carried);
-    emptied.dynamic_variables = { egma_simulation: "sim_1", caller_name: "" };
+    emptied.dynamic_variables = { account_id: "sim_1", caller_name: "" };
     expect(
       validators.spec(emptied),
       ajv.errorsText(validators.spec.errors),

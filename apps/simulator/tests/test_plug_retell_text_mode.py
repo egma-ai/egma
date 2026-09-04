@@ -349,7 +349,7 @@ async def test_a_reply_updates_this_simulations_variables_without_dropping_them(
     )
     plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url},
-        dynamic_variables={"egma_simulation": "sim_01", "caller_name": ""},
+        dynamic_variables={"account_id": "sim_01", "caller_name": ""},
         mock_tools=seam(),
     )
 
@@ -362,13 +362,13 @@ async def test_a_reply_updates_this_simulations_variables_without_dropping_them(
         request["body"].get("retell_llm_dynamic_variables")
         for request in running.stub.requests
     ]
-    assert carried[0] == {"egma_simulation": "sim_01", "caller_name": ""}
-    assert carried[1] == {"egma_simulation": "sim_01", "caller_name": ""}
-    assert carried[2] == {"egma_simulation": "sim_01", "caller_name": "Margaret"}
+    assert carried[0] == {"account_id": "sim_01", "caller_name": ""}
+    assert carried[1] == {"account_id": "sim_01", "caller_name": ""}
+    assert carried[2] == {"account_id": "sim_01", "caller_name": "Margaret"}
     # The one that must never fall off: it is what a tool call the platform
     # makes rides back to this simulation on.
     assert all(
-        variables["egma_simulation"] == "sim_01" for variables in carried
+        variables["account_id"] == "sim_01" for variables in carried
     ), carried
 
 

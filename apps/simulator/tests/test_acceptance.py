@@ -787,7 +787,7 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
         api_key=sentinel,
         agent_id="agent_lakeside_voice",
         agent_version=106,
-        dynamic_variables={"egma_simulation": "sim-text-mode-001"},
+        dynamic_variables={"account_id": "sim-text-mode-001"},
         scenario="I need to move my Tuesday cleaning to Thursday.",
         mock_tools=[
             {

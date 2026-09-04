@@ -267,7 +267,7 @@ async def test_this_simulations_variables_reach_retell_byte_for_byte(
     not what a variable nobody set does.
     """
     carried = {
-        "egma_simulation": "sim_01K5T2W8ZC4H6QJDXN9MRB7VFA",
+        "account_id": "sim_01K5T2W8ZC4H6QJDXN9MRB7VFA",
         "is_existing": "false",
         "caller_name": "",
         "note": "  spaces the author meant  ",
@@ -322,9 +322,9 @@ async def test_nothing_carried_is_nothing_sent_however_it_is_spelled(
         (10.5, UNSET),
         (True, UNSET),
         ({"version": 106}, UNSET),
-        (UNSET, "egma_simulation=sim_1"),
-        (UNSET, {"egma_simulation": 7}),
-        (UNSET, {"egma_simulation": None}),
+        (UNSET, "account_id=sim_1"),
+        (UNSET, {"account_id": 7}),
+        (UNSET, {"account_id": None}),
         (UNSET, {"": "sim_1"}),
     ],
 )
