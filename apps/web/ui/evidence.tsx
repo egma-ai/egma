@@ -3,15 +3,12 @@
 import { cn } from "@/lib/utils";
 
 import {
-  type EvidenceCoverage,
-  type EvidenceMockTool,
   type EvidencePlanItem,
   type EvidenceStep,
   type EvidenceTranscript,
 } from "../lib/simulations.ts";
 import { graderDisplayName } from "../lib/presentation.ts";
 import { howFarIn, howLong } from "../lib/transcripts.ts";
-import { Help } from "./form.tsx";
 import { Empty } from "./page-state.tsx";
 import { StateMark } from "./run-status.tsx";
 
@@ -66,9 +63,6 @@ import { StateMark } from "./run-status.tsx";
  */
 export const ROW_HOVER =
   "pointer-hover:bg-[color-mix(in_srgb,var(--surface-soft)_62%,transparent)]";
-
-/** Identifiers, scores and clock times, in the shared monospace face. */
-const MONO = "font-mono text-sm text-muted-foreground";
 
 /**
  * The marker on a disclosure, drawn rather than typed.
@@ -390,7 +384,14 @@ export function ExecutionTimeline({
                   failed && "font-medium text-failure",
                 )}
               >
-                <span>{failed ? "Failed" : howLong(step.durationNs)}</span>
+                <span>
+                  {/*
+                    Who answered, beside what happened. Egma stamps only the
+                    calls it served itself, so a real one says nothing extra.
+                  */}
+                  {step.toolProvenance === "mocked" ? "mocked · " : ""}
+                  {failed ? "Failed" : howLong(step.durationNs)}
+                </span>
                 {containsFailedStep ? (
                   <span className="font-sans text-sm font-medium whitespace-nowrap text-failure">
                     Contains failed step
@@ -440,6 +441,7 @@ export function ExecutionTimeline({
                             : undefined
                         }
                       >
+                        {nested.toolProvenance === "mocked" ? "mocked · " : ""}
                         {nested.status === "error"
                           ? "Failed"
                           : howLong(nested.durationNs)}
@@ -558,139 +560,6 @@ export function Measures({
 /* ------------------------------------------------------------------------ *
  * The mocked world.
  * ------------------------------------------------------------------------ */
-
-/** One tool name, as a chip. */
-const TOOL_CHIP =
-  "rounded-chip border border-border px-3 py-1 font-mono text-sm text-foreground";
-
-/**
- * Which of the agent's tools egma answered for, and which ran for real.
- *
- * **The absence of a stamp is a fact of its own**, and it is said out loud: no
- * stamp means nothing ever asked the agent what tools it has, while three empty
- * lists mean the asking happened and nothing came back. A mocked conversation
- * and an unmocked one are different units, and this is where a reader comparing
- * two of them finds out which they have.
- *
- * There is no authoring here and there never will be: this is a record of what
- * was served, and a control that edited a mock tool from a conversation's page
- * would edit the project's world from inside evidence about the past.
- */
-export function MockToolEvidence({
-  coverage,
-  defaults,
-  overrides,
-}: {
-  readonly coverage: EvidenceCoverage | null;
-  readonly defaults: readonly EvidenceMockTool[];
-  readonly overrides: readonly EvidenceMockTool[];
-}) {
-  const frozen = [...defaults, ...overrides];
-
-  if (coverage === null && frozen.length === 0) {
-    return (
-      <Empty
-        title="Nothing was mocked, and nothing was asked"
-        lead="This run froze no mocked answers, and nobody asked the agent what tools it has — so Egma stood in the path of nothing and claims nothing about what ran."
-      />
-    );
-  }
-
-  return (
-    <div
-      className="flex min-w-0 flex-col overflow-hidden rounded-card border border-border bg-surface"
-      data-slot="mock-tools"
-    >
-      {/* The head `1EZ-0` draws: what this record is, and whether it matched. */}
-      <div
-        className={cn(
-          "flex min-h-(--row-height) flex-none items-center justify-between gap-3",
-          "border-b border-border bg-surface-soft px-5 py-2",
-        )}
-      >
-        <strong className="text-sm font-medium text-foreground">Mock tools</strong>
-        <span
-          className={cn(
-            "text-sm",
-            coverage !== null && coverage.uncovered.length === 0
-              ? "text-success"
-              : "text-faint",
-          )}
-        >
-          {coverage === null
-            ? "Nothing was asked"
-            : coverage.uncovered.length === 0
-              ? "Matched"
-              : `${String(coverage.uncovered.length)} ran for real`}
-        </span>
-      </div>
-      <div className="flex flex-col gap-4 p-5">
-      {frozen.length === 0 ? null : (
-        <div className="flex flex-wrap items-baseline gap-2">
-          <strong className="me-2 text-sm font-medium text-foreground">
-            Frozen for this simulation
-          </strong>
-          {frozen.map((one) => (
-            <span className={TOOL_CHIP} key={`frozen:${one.tool}`}>
-              {one.tool}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {coverage === null ? (
-        <Help>
-          Nobody asked the agent what tools it has, so nothing was learned about
-          coverage. That is not the same as nothing being mocked.
-        </Help>
-      ) : (
-        <>
-          {/*
-           * The good half of the record, on the quiet wash behind a narrow
-           * success edge — a state colour, never the brand one.
-           */}
-          <div className="flex flex-wrap items-baseline gap-2 border-s-[3px] border-s-success bg-surface-soft px-3 py-2">
-            <strong className="me-2 text-sm font-medium text-foreground">
-              Answered by Egma
-            </strong>
-            {coverage.covered.length === 0 ? (
-              <span className={MONO}>none</span>
-            ) : (
-              coverage.covered.map((name) => (
-                <span className={TOOL_CHIP} key={`covered:${name}`}>
-                  {name}
-                </span>
-              ))
-            )}
-          </div>
-          <div className="flex flex-wrap items-baseline gap-2">
-            <strong className="me-2 text-sm font-medium text-foreground">
-              Ran for real
-            </strong>
-            {coverage.uncovered.length === 0 ? (
-              <span className={MONO}>none</span>
-            ) : (
-              coverage.uncovered.map((name) => (
-                <span
-                  className={cn(TOOL_CHIP, "border-brand")}
-                  key={`uncovered:${name}`}
-                >
-                  {name}
-                </span>
-              ))
-            )}
-          </div>
-          <Help>
-            Egma never stood in the path of a tool it did not answer for, so
-            those calls happened natively and unobserved. A simulation with
-            uncovered tools is a different unit from one without.
-          </Help>
-        </>
-      )}
-      </div>
-    </div>
-  );
-}
 
 /** The pinned grader versions this simulation was graded under. */
 export function PlanItems({

@@ -72,6 +72,12 @@ function describedSpan(span: TraceSpan): Record<string, unknown> {
     toolName: span.toolName,
     toolArguments: span.toolArguments,
     toolResult: span.toolResult,
+    // Only when egma answered the call itself. A real call carries no key at
+    // all, so nothing on the wire has to tell "ran for real" from "nobody
+    // recorded who answered".
+    ...(span.toolProvenance === undefined
+      ? {}
+      : { toolProvenance: span.toolProvenance }),
     spans: span.spans.map(describedSpan),
   };
 }

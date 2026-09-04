@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   cancelRun,
   getRun,
+  getTestVersion,
   listRunEvents,
   listRunSimulations,
 } from "@egma/platform-api/client";
@@ -39,6 +40,7 @@ import {
   NotFound,
 } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
+import { RunNote, type RunNoteTest } from "../../../../../ui/run-note.tsx";
 import {
   RelativeInstant,
   useMinuteClock,
@@ -129,6 +131,77 @@ type LoadedSimulationPage = {
   readonly cursor: string;
   readonly value: RunSimulationPage;
 };
+
+/** How many pinned versions are read at once. Six is polite, not a limit. */
+const TEST_VERSIONS_AT_ONCE = 6;
+
+/**
+ * The test versions this run's simulations pinned, read once each.
+ *
+ * **A run's note reads the versions, never the tests.** A simulation is frozen
+ * against the test as it was when the run started, so asking the test now would
+ * describe a run by content it never carried. Nothing is stored: the versions
+ * are read when the page is open and forgotten when it is closed.
+ *
+ * `null` until every version asked for has answered, so the note never counts
+ * "2 of 3" on its way to counting twelve. A version that is refused is settled
+ * too — it simply leaves the list, because a version egma will not hand over is
+ * one this note cannot honestly speak for.
+ */
+function usePinnedTestVersions(
+  projectId: string,
+  versionIds: readonly string[],
+): readonly RunNoteTest[] | null {
+  const [read, setRead] = useState<ReadonlyMap<string, RunNoteTest | null>>(
+    new Map(),
+  );
+  const asked = useRef<Set<string>>(new Set());
+  /* The set as one string, so an effect re-runs on its contents, not its array. */
+  const wanted = [...new Set(versionIds)].sort().join(",");
+
+  useEffect(() => {
+    const ids = wanted === "" ? [] : wanted.split(",");
+    const missing = ids.filter((id) => !asked.current.has(id));
+    if (missing.length === 0) return undefined;
+    for (const id of missing) asked.current.add(id);
+    let live = true;
+    void (async () => {
+      for (let at = 0; at < missing.length; at += TEST_VERSIONS_AT_ONCE) {
+        const answers = await Promise.all(
+          missing.slice(at, at + TEST_VERSIONS_AT_ONCE).map(async (versionId) => ({
+            versionId,
+            answer: await platformAnswer(
+              getTestVersion({ versionId, projectId }, { client: platformClient }),
+            ),
+          })),
+        );
+        if (!live) return;
+        setRead((held) => {
+          const next = new Map(held);
+          for (const { versionId, answer } of answers) {
+            next.set(
+              versionId,
+              answer.status === "ready"
+                ? { mockTools: answer.value.mockTools, env: answer.value.env }
+                : null,
+            );
+          }
+          return next;
+        });
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [wanted, projectId]);
+
+  const ids = wanted === "" ? [] : wanted.split(",");
+  if (ids.some((id) => !read.has(id))) return null;
+  return ids.flatMap((id) => {
+    const one = read.get(id);
+    return one === undefined || one === null ? [] : [one];
+  });
+}
 
 function RunDetailView({
   projectId,
@@ -558,6 +631,19 @@ function RunDetailView({
     });
   }
 
+  /*
+   * The versions this run's rows pin, read before the page decides what to
+   * draw — a hook cannot sit past an early return, and the ids are on the
+   * bounded pages already in hand.
+   */
+  const pinnedVersionIds = [
+    ...(simulationPage?.status === "ready"
+      ? simulationPage.value.simulations
+      : []),
+    ...laterSimulationPages.flatMap((page) => page.value.simulations),
+  ].map((one) => one.testVersionId);
+  const noteTests = usePinnedTestVersions(projectId, pinnedVersionIds);
+
   if (answer === null || answer.status === "signed-out") {
     return (
       <ProductPage>
@@ -671,6 +757,17 @@ function RunDetailView({
       <PageBody>
         <div className="min-w-0 min-[901px]:flex min-[901px]:h-full min-[901px]:min-h-0 min-[901px]:flex-col">
           {refused === null ? null : <Refused message={refused.message} />}
+
+          {noteTests === null ? null : (
+            <RunNote
+              className="flex-none pb-4"
+              connection={{
+                connectionType: read.connectionType,
+                accessVariant: read.accessVariant,
+              }}
+              tests={noteTests}
+            />
+          )}
 
           <dl
             className="m-0 grid flex-none grid-cols-5 gap-px border border-border bg-border max-[1000px]:grid-cols-2 max-[40rem]:grid-cols-1"

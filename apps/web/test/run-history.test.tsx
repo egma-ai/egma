@@ -148,6 +148,25 @@ function runDetail(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** One pinned test version, as the run note reads it. */
+function testVersion(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "tstv_1",
+    testId: "tst_1",
+    suiteId: "ste_1",
+    testName: "Books service",
+    version: 1,
+    current: true,
+    scenario: "The caller books service.",
+    expectedBehaviors: ["Offers an available time"],
+    personas: [{ id: "prs_1", name: "Patient caller", archivedAt: null }],
+    mockTools: [],
+    env: null,
+    createdAt: "2026-08-21T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
 function simulation(overrides: Record<string, unknown> = {}) {
   return {
     id: "sim_1",
@@ -167,7 +186,6 @@ function simulation(overrides: Record<string, unknown> = {}) {
     endedAt: "2026-08-21T10:01:00.000Z",
     modality: "chat",
     hasRecording: false,
-    mockToolCoverage: { discovered: [], covered: [], uncovered: [] },
     ...overrides,
   };
 }
@@ -285,8 +303,6 @@ function simulationEvidence(overrides: Record<string, unknown> = {}) {
       environment: "staging",
       config: {},
     },
-    mockToolCoverage: { discovered: [], covered: [], uncovered: [] },
-    mockTools: { defaults: [], overrides: [] },
     gradingPlan: {
       state: "run_start",
       capturedAt: "2026-08-21T10:00:00.000Z",
@@ -443,6 +459,13 @@ describe("one run after suites", () => {
       "/v1/runs/run_1/simulations": pages,
       "/v1/simulations/sim_1": evidenceRead,
       "/v1/runs/run_1/cancel": { status: 200, body: detail },
+      // The run note reads the versions this run's rows pinned. A test that
+      // says nothing about the note still asks for them, because the page
+      // does.
+      "/v1/test-versions/tstv_1": {
+        status: 200,
+        body: testVersion(),
+      },
     };
   }
 
@@ -2318,5 +2341,195 @@ describe("one run after suites", () => {
       ).toHaveLength(2);
     });
     expect(screen.queryByRole("button", { name: /run again|retry/i })).toBeNull();
+  });
+  /**
+   * **The run note, on the run itself.**
+   *
+   * A run pins its tests' versions, so what it says is a fact about what was
+   * actually conducted rather than about the suite as it stands today. The
+   * connection decides the words: a phone lane cannot mock and cannot carry
+   * Retell's variables, a web call makes one temporary version, and a LiveKit
+   * room serves mocks only through the SDK.
+   */
+  describe("the run note", () => {
+    function noteStubs(
+      connection: { connectionType: string; accessVariant: string },
+      versions: readonly Record<string, unknown>[],
+    ): Record<string, Stub | readonly Stub[]> {
+      const rows = versions.map((version, at) =>
+        simulation({
+          id: `sim_${String(at + 1)}`,
+          position: at + 1,
+          testId: `tst_${String(at + 1)}`,
+          testName: `Test ${String(at + 1)}`,
+          testVersionId: String(version.id),
+        }),
+      );
+      return {
+        "/api/me": { status: 200, body: ME },
+        "/v1/runs/run_1": { status: 200, body: runDetail(connection) },
+        "/v1/runs/run_1/simulations": {
+          status: 200,
+          body: { simulations: rows, nextPageToken: null },
+        },
+        "/v1/simulations/sim_1": { status: 200, body: simulationEvidence() },
+        ...Object.fromEntries(
+          versions.map((version) => [
+            `/v1/test-versions/${String(version.id)}`,
+            { status: 200, body: version },
+          ]),
+        ),
+      };
+    }
+
+    /** Three tests: one mocking, one carrying each half of an env, one bare. */
+    const MIXED = [
+      testVersion({
+        id: "tstv_1",
+        mockTools: [{ tool: "get_availability", answer: { slots: [] } }],
+      }),
+      testVersion({
+        id: "tstv_2",
+        env: { retell_dynamic_variables: { caller_name: "Margaret" } },
+      }),
+      testVersion({ id: "tstv_3", env: { job_dispatch_metadata: { tenant: "acme" } } }),
+    ];
+
+    async function noteLines(): Promise<readonly HTMLElement[]> {
+      await screen.findByRole("group", { name: "Run summary" });
+      return await waitFor(() => {
+        const note = document.querySelector('[data-slot="run-note"]');
+        if (note === null) throw new Error("no run note yet");
+        return [...note.querySelectorAll("p")] as HTMLElement[];
+      });
+    }
+
+    beforeEach(() => {
+      routed.pathname = "/projects/prj_1/runs/run_1";
+    });
+
+    it("says what a phone lane will not use, in the warning colour", async () => {
+      answers(
+        noteStubs(
+          {
+            connectionType: "phone_number",
+            accessVariant: "phone_number.public_e164",
+          },
+          MIXED,
+        ),
+      );
+      render(<RunDetailPage />);
+
+      const lines = await noteLines();
+      expect(lines.map((line) => line.textContent)).toEqual([
+        "Some test data will not be used on this connection.",
+        "1 of 3 tests carry mock tools. A Retell phone connection cannot mock tools, so those simulations reach your real tools.",
+        "1 of 3 tests carry Retell dynamic variables. A phone call is answered by Retell, not created by egma, so they cannot be passed.",
+      ]);
+      for (const line of lines) {
+        expect(line.getAttribute("data-accent")).toBe("warning");
+        expect(line.className).toContain("border-warning");
+      }
+    });
+
+    it("says a web call makes one temporary version, in the brand colour", async () => {
+      answers(
+        noteStubs(
+          {
+            connectionType: "retell_web_call",
+            accessVariant: "retell_web_call.api_key",
+          },
+          MIXED,
+        ),
+      );
+      render(<RunDetailPage />);
+
+      const lines = await noteLines();
+      expect(lines.map((line) => line.textContent)).toEqual([
+        "This run creates one temporary version of your Retell agent.",
+        "egma makes it at run start, points only the mocked tools at egma, and deletes it when the run ends. Your serving version is never changed.",
+        "1 of 3 tests carry mock tools. In those simulations, tools the test does not mock reach your real backend. The other 2 tests run on your serving version with all real tools.",
+      ]);
+      for (const line of lines) {
+        expect(line.getAttribute("data-accent")).toBe("brand");
+        expect(line.className).toContain("border-brand");
+      }
+    });
+
+    it("says LiveKit mocks need the SDK, and keeps the loudest three lines", async () => {
+      // Four facts apply on a token endpoint: the SDK pair, and the pair about
+      // the dispatch it cannot pass. Warning goes first and the note stops at
+      // three, because a note nobody finishes reading says nothing.
+      answers(
+        noteStubs(
+          {
+            connectionType: "livekit_room",
+            accessVariant: "livekit_room.customer_token_endpoint",
+          },
+          MIXED,
+        ),
+      );
+      render(<RunDetailPage />);
+
+      const lines = await noteLines();
+      expect(lines).toHaveLength(3);
+      expect(lines.map((line) => line.textContent)).toEqual([
+        "Some test data will not be used on this connection.",
+        "1 of 3 tests carry job_dispatch_metadata. On a token-endpoint connection your endpoint dispatches the agent, so egma cannot pass it.",
+        "Mock tools on LiveKit need the egma SDK in your agent.",
+      ]);
+      expect(lines.map((line) => line.getAttribute("data-accent"))).toEqual([
+        "warning",
+        "warning",
+        "brand",
+      ]);
+    });
+
+    it("says quietly what the other platform's data is, on a key-pair room", async () => {
+      answers(
+        noteStubs(
+          {
+            connectionType: "livekit_room",
+            accessVariant: "livekit_room.project_credentials",
+          },
+          [
+            testVersion({
+              id: "tstv_1",
+              env: { retell_dynamic_variables: { caller_name: "Margaret" } },
+            }),
+            testVersion({ id: "tstv_2" }),
+          ],
+        ),
+      );
+      render(<RunDetailPage />);
+
+      const lines = await noteLines();
+      expect(lines.map((line) => line.textContent)).toEqual([
+        "1 test carries retell_dynamic_variables, which a LiveKit connection does not use.",
+      ]);
+      expect(lines[0]?.getAttribute("data-accent")).toBe("quiet");
+      expect(lines[0]?.className).toContain("border-border");
+    });
+
+    it("draws no note at all when nothing applies", async () => {
+      answers(
+        noteStubs(
+          {
+            connectionType: "retell_web_call",
+            accessVariant: "retell_web_call.api_key",
+          },
+          [testVersion({ id: "tstv_1" }), testVersion({ id: "tstv_2" })],
+        ),
+      );
+      render(<RunDetailPage />);
+
+      await screen.findByRole("group", { name: "Run summary" });
+      await waitFor(() => {
+        expect(
+          sent.some((request) => request.path === "/v1/test-versions/tstv_2"),
+        ).toBe(true);
+      });
+      expect(document.querySelector('[data-slot="run-note"]')).toBeNull();
+    });
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -30,13 +31,24 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { LANE_X } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   platformAnswer,
   platformClient,
 } from "../../../../lib/platform-client.ts";
-import type { ListedTest } from "../../../../lib/tests.ts";
+import {
+  envSummary,
+  mockToolsSummary,
+  readEnv,
+  readMockTools,
+  type ListedTest,
+  type TestEnv,
+  type TestMockTool,
+} from "../../../../lib/tests.ts";
 import { Dialog } from "../../../../ui/dialog.tsx";
+import { Problem } from "../../../../ui/form.tsx";
+import { MenuDivider, MenuItem } from "../../../../ui/menu.tsx";
 import { DestructiveItem, MenuReason, RowMenu } from "../../../../ui/row-menu.tsx";
 import { ConfirmDialog } from "./parts.tsx";
 
@@ -91,7 +103,48 @@ import { ConfirmDialog } from "./parts.tsx";
 type Named = { readonly id: string; readonly name: string };
 
 /** What a cell is, which is also which field one save carries. */
-type Field = "name" | "scenario" | "expectedBehaviors" | "personas";
+type Field =
+  | "name"
+  | "scenario"
+  | "expectedBehaviors"
+  | "personas"
+  | "mockTools"
+  | "env";
+
+/**
+ * The two fields written as raw JSON, in a dialog rather than in the cell.
+ *
+ * **They are cells that open something, not cells you type in.** A mock tool's
+ * answer is arbitrary JSON and an env is two nested objects, and neither fits
+ * on a table row that has to stay scannable beside a scenario. So the cell
+ * carries the summary and the writing happens in the smallest dialog that
+ * holds a monospace editor, a reason when there is one, and Save and Cancel.
+ */
+type JsonField = "mockTools" | "env";
+
+const JSON_FIELDS: readonly JsonField[] = ["mockTools", "env"];
+
+function isJsonField(field: Field): field is JsonField {
+  return field === "mockTools" || field === "env";
+}
+
+/** What each JSON dialog is called, and what its empty editor shows. */
+const JSON_FIELD: Readonly<
+  Record<JsonField, { readonly title: string; readonly example: string }>
+> = {
+  mockTools: {
+    title: "Mock tools",
+    example:
+      '[{ "tool": "get_availability", "answer": { "slots": [] } }, ' +
+      '{ "tool": "book", "error": "calendar down" }]',
+  },
+  env: {
+    title: "Env",
+    example:
+      '{ "retell_dynamic_variables": { "caller_name": "Margaret" }, ' +
+      '"job_dispatch_metadata": { "tenant": "acme" } }',
+  },
+};
 
 /** One woken cell: which test's, and which of its four fields. */
 type Woken = { readonly testId: string; readonly field: Field };
@@ -113,16 +166,28 @@ function isContent(field: Field): boolean {
   return field !== "name";
 }
 
-/** The four columns, at the proportions `LNC-0` draws them. */
+/**
+ * The columns, at the proportions `LNC-0` draws them, rebalanced for two more.
+ *
+ * **Every column holds its own heading on one line at the grid's floor**, and
+ * that is what set these numbers rather than taste. `Mock tools` wants about
+ * 100px inside `--row-padding-x` either side, and `Personas` about the same, so
+ * the two narrow content lanes are 13% and 12% of the usable width — with the
+ * floor in `tailwind-theme.css` raised to the 900px that makes 13% reach 100.
+ * The four that were here keep their order; what they gave up is the room the
+ * two new lanes needed to stay readable.
+ */
 const COLUMNS: readonly {
   readonly field: Field;
   readonly header: string;
   readonly width: string;
 }[] = [
-  { field: "name", header: "Name", width: "16.3%" },
-  { field: "scenario", header: "Scenario", width: "34.2%" },
-  { field: "expectedBehaviors", header: "Expected behaviors", width: "34.2%" },
-  { field: "personas", header: "Personas", width: "15.2%" },
+  { field: "name", header: "Name", width: "12%" },
+  { field: "scenario", header: "Scenario", width: "27%" },
+  { field: "expectedBehaviors", header: "Expected behaviors", width: "28%" },
+  { field: "personas", header: "Personas", width: "12%" },
+  { field: "mockTools", header: "Mock tools", width: "13%" },
+  { field: "env", header: "Env", width: "8%" },
 ];
 
 const CELL = "border-r border-b border-border p-0 align-top last:border-r-0";
@@ -179,6 +244,16 @@ type Draft = {
   readonly scenario: string;
   readonly expectedBehaviors: readonly string[];
   readonly personas: readonly string[];
+  /**
+   * The two JSON fields, carried on the draft so the entry row can hold them.
+   *
+   * An existing row never edits them through a draft — its dialog writes to the
+   * platform directly, against the version guard, the way every other cell
+   * does. They are here for the row that is not written yet: the entry row, and
+   * the entry row prefilled by Duplicate.
+   */
+  readonly mockTools: readonly TestMockTool[];
+  readonly env: TestEnv | null;
 };
 
 const EMPTY_DRAFT: Draft = {
@@ -186,6 +261,8 @@ const EMPTY_DRAFT: Draft = {
   scenario: "",
   expectedBehaviors: [""],
   personas: [],
+  mockTools: [],
+  env: null,
 };
 
 function draftOf(test: ListedTest): Draft {
@@ -194,7 +271,21 @@ function draftOf(test: ListedTest): Draft {
     scenario: test.scenario,
     expectedBehaviors: [...test.expectedBehaviors],
     personas: test.personas.map((persona) => persona.id),
+    mockTools: [...test.mockTools],
+    env: test.env,
   };
+}
+
+/**
+ * One test as a new one: the same content under a name that says it is a copy.
+ *
+ * Everything the platform stores as content travels — the scenario, the
+ * behaviors, the personas, the mock tools and the env — because a duplicate
+ * that dropped half of them would be a new test wearing an old name. Nothing
+ * is written here: this only fills the entry row in.
+ */
+function copyOf(test: ListedTest): Draft {
+  return { ...draftOf(test), name: `${test.name} (copy)` };
 }
 
 function trimmedBehaviors(behaviors: readonly string[]): readonly string[] {
@@ -710,7 +801,8 @@ function CellBody({
   onCommit,
   onCancel,
 }: {
-  readonly field: Field;
+  /** Never a JSON field: those are cells that open a dialog, not cells to type in. */
+  readonly field: Exclude<Field, JsonField>;
   readonly woken: boolean;
   readonly draft: Draft;
   readonly known: ReadonlyMap<string, Named>;
@@ -840,6 +932,126 @@ function CellBody({
   );
 }
 
+/**
+ * The quiet summary a JSON cell shows at rest, and nothing when it holds none.
+ *
+ * Muted text rather than a chip (founder, 2026-09-03): a chip in a table lane
+ * this narrow is decoration, and what a reader needs is one short fact they can
+ * scan past. The env's keys are the platforms' own words and are drawn as the
+ * identifiers they are.
+ */
+function JsonSummary({
+  field,
+  test,
+}: {
+  readonly field: JsonField;
+  readonly test: Pick<Draft, "mockTools" | "env">;
+}) {
+  if (field === "mockTools") {
+    const said = mockToolsSummary(test.mockTools);
+    return said === "" ? null : (
+      <span className="text-sm leading-(--line-caption) text-faint">{said}</span>
+    );
+  }
+  const keys = envSummary(test.env);
+  return keys === "" ? null : (
+    <span className="font-mono text-sm leading-(--line-caption) text-faint">
+      {keys}
+    </span>
+  );
+}
+
+/**
+ * The smallest dialog that fits one JSON field.
+ *
+ * The editor, the reason when there is one, Save and Cancel — and nothing
+ * else. Centred, focus trapped, Escape closes, the opener restored: all of that
+ * is `ui/dialog.tsx`'s, which is why none of it is written here.
+ *
+ * **The text is this component's, not the grid's.** A keystroke in here would
+ * otherwise re-render every row of the table, and the value only matters when
+ * Save is pressed. The reason and the busy state come from above, because the
+ * platform is what says them.
+ */
+function JsonDialog({
+  field,
+  initial,
+  refused,
+  saving,
+  onSave,
+  onClose,
+}: {
+  readonly field: JsonField;
+  readonly initial: string;
+  readonly refused: string | null;
+  readonly saving: boolean;
+  readonly onSave: (text: string) => void;
+  readonly onClose: () => void;
+}) {
+  const [text, setText] = useState(initial);
+  const editor = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    editor.current?.focus();
+  }, []);
+
+  return (
+    <Dialog title={JSON_FIELD[field].title} onClose={onClose}>
+      {(dismiss) => (
+        <div className="flex flex-col gap-4">
+          <Textarea
+            aria-label={JSON_FIELD[field].title}
+            className="resize-y font-mono text-sm"
+            placeholder={JSON_FIELD[field].example}
+            ref={editor}
+            rows={12}
+            spellCheck={false}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+          />
+          {refused === null ? null : <Problem>{refused}</Problem>}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              size="lg"
+              busy={saving}
+              disabled={saving}
+              onClick={() => onSave(text)}
+            >
+              {saving ? "Saving…" : "Save"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="lg"
+              disabled={saving}
+              onClick={dismiss}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
+/** What one JSON field of a row, or of the entry row, holds right now. */
+type JsonEdit = {
+  /** The test being edited, or `null` for the entry row's own draft. */
+  readonly test: ListedTest | null;
+  readonly field: JsonField;
+};
+
+/** What the editor opens with: the stored value, pretty, or nothing at all. */
+function jsonText(field: JsonField, held: Pick<Draft, "mockTools" | "env">): string {
+  if (field === "mockTools") {
+    return held.mockTools.length === 0
+      ? ""
+      : JSON.stringify(held.mockTools, null, 2);
+  }
+  return held.env === null ? "" : JSON.stringify(held.env, null, 2);
+}
+
 export type GridProps = {
   readonly projectId: string;
   readonly suiteId: string;
@@ -961,12 +1173,25 @@ export function TestsGrid(props: GridProps) {
    * other row (founder, 2026-08-25).
    */
   const [entryFocus, setEntryFocus] = useState<Field | null>(null);
+  /**
+   * Which row the entry row follows, or `null` for the foot of the table.
+   *
+   * Duplicate puts the copy where the eye already is — directly under the row
+   * it came from — because a prefilled row that appeared at the bottom of a
+   * long suite would look like nothing happened. "+ Write a test" keeps the
+   * foot, which is where it opens the row from.
+   */
+  const [entryAnchor, setEntryAnchor] = useState<string | null>(null);
   const [entryRefused, setEntryRefused] = useState<string | null>(null);
   const [entrySaving, setEntrySaving] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [deleting, setDeleting] = useState<ListedTest | null>(null);
   const [deleteInFlight, setDeleteInFlight] = useState(false);
   const [deleteRefused, setDeleteRefused] = useState<string | null>(null);
+  /** Which JSON field is open in its dialog, and whose. */
+  const [editing, setEditing] = useState<JsonEdit | null>(null);
+  const [editingRefused, setEditingRefused] = useState<string | null>(null);
+  const [editingSaving, setEditingSaving] = useState(false);
   const entryName = useRef<HTMLInputElement>(null);
 
   /*
@@ -990,14 +1215,18 @@ export function TestsGrid(props: GridProps) {
     });
   }, [tests]);
 
-  const openEntry = useCallback(() => {
-    setEntry((held) => held ?? EMPTY_DRAFT);
-    setEntryRefused(null);
-    // A fresh row is at rest until the caret lands, which it does below.
-    setEntryFocus(null);
-    onWriting(true);
-    window.requestAnimationFrame(() => entryName.current?.focus());
-  }, [onWriting]);
+  const openEntry = useCallback(
+    (seed?: Draft, below?: string) => {
+      setEntry((held) => seed ?? held ?? EMPTY_DRAFT);
+      setEntryAnchor(below ?? null);
+      setEntryRefused(null);
+      // A fresh row is at rest until the caret lands, which it does below.
+      setEntryFocus(null);
+      onWriting(true);
+      window.requestAnimationFrame(() => entryName.current?.focus());
+    },
+    [onWriting],
+  );
 
   /*
    * The address that means "write a test" opens the entry row the same way the
@@ -1010,6 +1239,7 @@ export function TestsGrid(props: GridProps) {
     if (!writing || arrivedWriting.current) return;
     arrivedWriting.current = true;
     openEntry();
+
   }, [writing, openEntry]);
 
   /** Wake one cell, in state and in the refs that answer "which one now?". */
@@ -1043,6 +1273,11 @@ export function TestsGrid(props: GridProps) {
       personas: Array.isArray(personas)
         ? [...(personas as readonly string[])]
         : held.personas,
+      // The two JSON fields keep no unfinished intent of their own: their
+      // dialog stays open until the platform answers, so there is never a
+      // half-saved value for a woken cell to seed from.
+      mockTools: held.mockTools,
+      env: held.env,
     };
   }
 
@@ -1227,6 +1462,12 @@ export function TestsGrid(props: GridProps) {
           scenario: entry.scenario.trim(),
           expectedBehaviors: [...trimmedBehaviors(entry.expectedBehaviors)],
           personas: [...entry.personas],
+          // Sent only when the row carries them, so a plain new test asks for
+          // exactly what it always asked for.
+          ...(entry.mockTools.length === 0
+            ? {}
+            : { mockTools: [...entry.mockTools] }),
+          ...(entry.env === null ? {} : { env: entry.env }),
         },
         { client: platformClient },
       ),
@@ -1242,7 +1483,117 @@ export function TestsGrid(props: GridProps) {
     }
     onCreated(answer.value);
     setEntry(null);
+    setEntryAnchor(null);
     onWriting(false);
+  }
+
+  /**
+   * One JSON field of one written test, saved against the version it was read
+   * at.
+   *
+   * **It queues behind whatever else that test is saving**, for the reason the
+   * cell commits do: two content edits carrying the same version would have the
+   * second refused for holding a version the first had just replaced. The guard
+   * is read when the queue reaches this, so the save in front hands this one
+   * the version it minted.
+   *
+   * A refusal stays in the dialog. Nothing is written and nothing is closed, so
+   * the JSON somebody wrote is still on screen to fix.
+   */
+  async function saveJson(
+    test: ListedTest,
+    field: JsonField,
+    value: readonly TestMockTool[] | TestEnv | null,
+  ): Promise<void> {
+    setEditingSaving(true);
+    setEditingRefused(null);
+    const send = async (): Promise<void> => {
+      const guard = latest.current.get(test.id) ?? {
+        versionId: test.versionId,
+        revision: test.revision,
+      };
+      const answer = await platformAnswer(
+        updateTest(
+          {
+            testId: test.id,
+            projectId,
+            [field]: value,
+            expectedVersionId: guard.versionId,
+          } as Parameters<typeof updateTest>[0],
+          { client: platformClient },
+        ),
+      );
+      if (answer.status === "signed-out") {
+        window.location.replace("/sign-in");
+        return;
+      }
+      if (answer.status !== "ready") {
+        setEditingRefused(answer.refusal.message);
+        return;
+      }
+      latest.current.set(test.id, {
+        versionId: answer.value.versionId,
+        revision: answer.value.revision,
+      });
+      onSaved(answer.value);
+      setEditing(null);
+    };
+    const ahead = queued.current.get(test.id) ?? Promise.resolve();
+    const run = ahead.then(send, send);
+    queued.current.set(
+      test.id,
+      run.catch(() => undefined),
+    );
+    await run;
+    setEditingSaving(false);
+  }
+
+  /**
+   * What Save does, wherever the dialog was opened from.
+   *
+   * The reading is the platform's own, run here first so a person sees why
+   * without a round trip; the sentence they see is the one the platform would
+   * have sent back. From the entry row nothing is written at all — the draft
+   * takes the value and the first Save of the row creates the test with it.
+   */
+  function commitJson(open: JsonEdit, text: string): void {
+    if (open.field === "mockTools") {
+      const held = readMockTools(text);
+      if (!held.ok) {
+        setEditingRefused(held.why);
+        return;
+      }
+      if (open.test === null) {
+        setEntry((draft) =>
+          draft === null ? draft : { ...draft, mockTools: held.value },
+        );
+        setEditing(null);
+        return;
+      }
+      void saveJson(open.test, "mockTools", held.value);
+      return;
+    }
+    const held = readEnv(text);
+    if (!held.ok) {
+      setEditingRefused(held.why);
+      return;
+    }
+    if (open.test === null) {
+      setEntry((draft) =>
+        draft === null ? draft : { ...draft, env: held.value },
+      );
+      setEditing(null);
+      return;
+    }
+    void saveJson(open.test, "env", held.value);
+  }
+
+  /** Open one JSON field's dialog, with nothing said about it yet. */
+  function openJson(test: ListedTest | null, field: JsonField): void {
+    if (!mayAuthor) return;
+    setEditingRefused(null);
+    setEditingSaving(false);
+    setEditing({ test, field });
   }
 
   async function remove(test: ListedTest): Promise<void> {
@@ -1271,16 +1622,53 @@ export function TestsGrid(props: GridProps) {
       entry.name.trim() !== "" ||
       entry.scenario.trim() !== "" ||
       trimmedBehaviors(entry.expectedBehaviors).length > 0 ||
-      entry.personas.length > 0;
+      entry.personas.length > 0 ||
+      entry.mockTools.length > 0 ||
+      entry.env !== null;
     if (!typed) {
       setEntry(null);
+      setEntryAnchor(null);
       onWriting(false);
       return;
     }
     setDiscarding(true);
   }
 
+  /**
+   * A JSON cell: the summary, and the way into the dialog that writes it.
+   *
+   * It is a button rather than a woken cell because there is nothing to type
+   * here — the value is JSON and it is written in the dialog. A row a reader
+   * cannot author draws the same summary with nothing to press.
+   */
+  function jsonCell(test: ListedTest, field: JsonField): ReactNode {
+    return (
+      <td className={CELL} key={field}>
+        {mayAuthor ? (
+          <button
+            className={cn(
+              PAD,
+              "block w-full cursor-pointer bg-transparent text-left",
+              "focus-visible:outline-2 focus-visible:outline-offset-[-2px]",
+              "focus-visible:outline-ring",
+            )}
+            type="button"
+            aria-label={`${JSON_FIELD[field].title} for ${test.name}`}
+            onClick={() => openJson(test, field)}
+          >
+            <JsonSummary field={field} test={test} />
+          </button>
+        ) : (
+          <div className={PAD}>
+            <JsonSummary field={field} test={test} />
+          </div>
+        )}
+      </td>
+    );
+  }
+
   function cell(test: ListedTest, field: Field): ReactNode {
+    if (isJsonField(field)) return jsonCell(test, field);
     const woken = active?.testId === test.id && active.field === field;
     const draft = woken && cellDraft !== null ? cellDraft : draftOf(test);
     return (
@@ -1353,6 +1741,22 @@ export function TestsGrid(props: GridProps) {
         <RowMenu label={`Open the menu for ${test.name}`}>
           {(close) => (
             <>
+              {/*
+                Duplicate writes nothing. It opens the entry row under this one
+                with this test's content in it, and the row's own Save is what
+                creates the copy — so somebody can change the name, or the
+                scenario, or think better of it, before any test exists.
+              */}
+              <MenuItem
+                disabled={!mayAuthor}
+                onClick={() => {
+                  close();
+                  openEntry(copyOf(test), test.id);
+                }}
+              >
+                Duplicate
+              </MenuItem>
+              <MenuDivider />
               <DestructiveItem
                 disabled={!mayAuthor}
                 onClick={() => {
@@ -1373,6 +1777,27 @@ export function TestsGrid(props: GridProps) {
 
   function entryCell(field: Field): ReactNode {
     if (entry === null) return null;
+    if (isJsonField(field)) {
+      // From the entry row the dialog edits the draft, because there is no
+      // test to save against yet. The row's own Save carries what it holds.
+      return (
+        <td className={CELL} key={field}>
+          <button
+            className={cn(
+              PAD,
+              "block w-full cursor-pointer bg-transparent text-left",
+              "focus-visible:outline-2 focus-visible:outline-offset-[-2px]",
+              "focus-visible:outline-ring",
+            )}
+            type="button"
+            aria-label={`${JSON_FIELD[field].title} for the new test`}
+            onClick={() => openJson(null, field)}
+          >
+            <JsonSummary field={field} test={entry} />
+          </button>
+        </td>
+      );
+    }
     return (
       <td
         className={cn(CELL, entryFocus === field && WOKEN)}
@@ -1436,6 +1861,22 @@ export function TestsGrid(props: GridProps) {
     );
   }
 
+  /** The row being written, wherever it stands. */
+  function entryRow(): ReactNode {
+    return (
+      <tr data-entry-row="">
+        {COLUMNS.map((column) => entryCell(column.field))}
+        {/*
+          Nothing to delete yet, so this cell holds the lane open and says
+          nothing: no wake, no edge, nothing to click. A row that is not
+          written has no action to offer, and dressing the lane like an
+          editable cell promised one.
+        */}
+        <td className={ACTION} />
+      </tr>
+    );
+  }
+
   const missing = entry === null ? null : whatIsMissing(entry);
 
   return (
@@ -1458,10 +1899,11 @@ export function TestsGrid(props: GridProps) {
     >
       {/*
         The grid scrolls sideways rather than squeezing, the way every other
-        table's `TablePanel` already does. Four percentage columns and a fixed
+        table's `TablePanel` already does. Six percentage columns and a fixed
         lane share whatever width there is, and this grid has no narrow layout
-        to fall back to, so under `--tests-grid-min-width` the columns stopped
-        holding a readable word. A phone scrolls it; a tablet and up does not.
+        to fall back to, so under `--tests-grid-min-width` the columns stop
+        holding their own headings on one line. Mock tools and Env raised that
+        floor past a tablet, and the token says why.
 
         **It scrolls at all times now, and it used not to.** The persona picker
         was an absolutely positioned panel inside the cell it belongs to, and a
@@ -1527,23 +1969,20 @@ export function TestsGrid(props: GridProps) {
             of a test that opens a real one is still a picture of a test.
           */}
           {tests.map((test) => (
-            <tr key={test.id}>
-              {COLUMNS.map((column) => cell(test, column.field))}
-              {rowMenu(test)}
-            </tr>
-          ))}
-          {entry === null ? null : (
-            <tr data-entry-row="">
-              {COLUMNS.map((column) => entryCell(column.field))}
+            <Fragment key={test.id}>
+              <tr>
+                {COLUMNS.map((column) => cell(test, column.field))}
+                {rowMenu(test)}
+              </tr>
               {/*
-                Nothing to delete yet, so this cell holds the lane open and
-                says nothing: no wake, no edge, nothing to click. A row that is
-                not written has no action to offer, and dressing the lane like
-                an editable cell promised one.
+                A duplicate stands under the row it came from, so the copy
+                appears where the eye already is rather than at the foot of a
+                suite somebody would have to scroll to find.
               */}
-              <td className={ACTION} />
-            </tr>
-          )}
+              {entry !== null && entryAnchor === test.id ? entryRow() : null}
+            </Fragment>
+          ))}
+          {entry === null || entryAnchor !== null ? null : entryRow()}
           {mayAuthor && entry === null ? (
             <tr>
               <td
@@ -1553,7 +1992,7 @@ export function TestsGrid(props: GridProps) {
                 <button
                   className={cn(ADD_LINE, PAD, "w-full")}
                   type="button"
-                  onClick={openEntry}
+                  onClick={() => openEntry()}
                 >
                   + Write a test
                 </button>
@@ -1625,6 +2064,28 @@ export function TestsGrid(props: GridProps) {
         </p>
       )}
 
+      {editing === null ? null : (
+        <JsonDialog
+          field={editing.field}
+          /*
+           * Keyed so a second cell opened after the first starts from its own
+           * value: the editor holds the text itself, and a component that was
+           * only re-rendered would keep the words from the cell before it.
+           */
+          key={`${editing.test?.id ?? "entry"}:${editing.field}`}
+          initial={jsonText(
+            editing.field,
+            editing.test === null
+              ? (entry ?? EMPTY_DRAFT)
+              : draftOf(editing.test),
+          )}
+          refused={editingRefused}
+          saving={editingSaving}
+          onSave={(text) => commitJson(editing, text)}
+          onClose={() => setEditing(null)}
+        />
+      )}
+
       {deleting === null ? null : (
         <ConfirmDialog
           title="Delete this test?"
@@ -1655,6 +2116,7 @@ export function TestsGrid(props: GridProps) {
                   onClick={() => {
                     setDiscarding(false);
                     setEntry(null);
+                    setEntryAnchor(null);
                     setPicking(null);
                     onWriting(false);
                   }}

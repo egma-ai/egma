@@ -366,14 +366,6 @@ const TYPES = {
           help: "The exact name registered by the deployed LiveKit worker.",
           afterCredentials: false,
         },
-        {
-          key: "metadata",
-          label: "Room metadata",
-          kind: "json",
-          required: false,
-          help: "JSON handed to the agent.",
-          afterCredentials: true,
-        },
       ],
       credentialRule: "required",
       credentialHelp: "Used to create the room.",
@@ -425,14 +417,6 @@ const TYPES = {
           required: true,
           help: "The exact name registered by the deployed LiveKit worker.",
           afterCredentials: false,
-        },
-        {
-          key: "metadata",
-          label: "Agent metadata",
-          kind: "json",
-          required: false,
-          help: "JSON handed to the agent.",
-          afterCredentials: true,
         },
       ],
       credentialRule: "required",
@@ -1008,16 +992,14 @@ describe("reading an agent's reach from the list", () => {
     expect(within(rows[2]!).getByText("Voice")).toBeDefined();
   });
 
-  it("says what a run over each connection meets, and offers no mock control", async () => {
-    // The switch lives in the setup flow now. What an agent's own screen shows
-    // is the fact: what a run over this connection reaches.
+  it("says nothing about tools on a connection row, and offers no mock control", async () => {
+    // **Mock tools belong to the test now, so a connection claims nothing
+    // about them.** What a run meets is a question about that run's tests and
+    // its lane together, and the run note is where a run answers it — with
+    // counts, on the screen where somebody is about to start one.
     listOf({
       ...LISTED_AGENT,
-      connections: [
-        { ...CONNECTION, mockToolsEnabled: true },
-        MEASURED_CONNECTION,
-        { ...LIVEKIT_CONNECTION, mockToolsEnabled: false },
-      ],
+      connections: [CONNECTION, MEASURED_CONNECTION, LIVEKIT_CONNECTION],
     });
     routed.search = "?sheet=agent&agent=agt_1";
     render(<AgentsPage />);
@@ -1027,12 +1009,11 @@ describe("reading an agent's reach from the list", () => {
     const connections = panel
       .getByRole("heading", { name: "Connections" })
       .closest("section");
-    const rows = within(connections!).getAllByRole("listitem");
-    expect(within(rows[0]!).getByText("mocks on")).toBeDefined();
-    // A phone connection reaches the real number and the real tools, always.
-    expect(within(rows[1]!).getByText("real tools")).toBeDefined();
-    // Nothing where mocks are simply off.
-    expect(within(rows[2]!).queryByText("mocks on")).toBeNull();
+    expect(
+      connections?.querySelector('[data-slot="connection-tools-badge"]'),
+    ).toBeNull();
+    expect(within(connections!).queryByText("real tools")).toBeNull();
+    expect(within(connections!).queryByText("mocks on")).toBeNull();
 
     // No agent-level mock control survives.
     expect(
@@ -1912,319 +1893,8 @@ describe("goal-first agent setup", () => {
         config: { retellAgentId: "agent_voice_1" },
         platformAgentId: "agent_voice_1",
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
-        mockToolsEnabled: false,
       },
     });
-  });
-
-  /** What the mock question's discovery answers with, tools and all. */
-  const MOCK_TOOLS_FOUND = {
-    status: 200,
-    body: {
-      mockable: true,
-      refusal: null,
-      engine: "conversation-flow",
-      servingVersion: 105,
-      tools: [
-        { name: "get_availability", type: "custom", coverage: "mocked", answered: false },
-        { name: "book_appointment", type: "custom", coverage: "mocked", answered: false },
-      ],
-      warnings: [],
-      numbers: [],
-      seeded: [],
-    },
-  };
-
-  /** The registration a Retell text lane lands, so the mock question has an agent. */
-  const TEXT_LANE_SAVED = {
-    status: 201,
-    body: {
-      result: "created",
-      agent: {
-        ...AGENT,
-        name: "Appointment line",
-        platformAgentId: "agent_voice_1",
-      },
-      connection: { ...CONNECTION, connectionType: "retell_text_mode" },
-    },
-  };
-
-  /** Walk a Retell simulation as far as the mock question, on the text lane. */
-  async function reachMockQuestion(): Promise<void> {
-    render(<RegisterAgentPage />);
-    await choose("Run simulations", "Retell");
-    await findRetellAgents();
-    await pickRetellAgent("Appointment line");
-    fireEvent.click(screen.getByRole("radio", { name: new RegExp("^Text") }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect(
-      await screen.findByRole("heading", { name: "Mock this agent's tools?" }),
-    ).toBeDefined();
-  }
-
-  it("asks about mocks after the connection, listing the agent's own tools", async () => {
-    // The question is about the agent's tools, and Egma reads those through
-    // the agent it has just made — so it comes after the write, and the
-    // connection is already written `false` until the switch says otherwise.
-    sheetAnswers({
-      "/v1/agents:discover": { status: 200, body: retellDiscovery },
-      "/v1/agents": [
-        { status: 200, body: { agents: [], nextPageToken: null } },
-        TEXT_LANE_SAVED,
-        // Closing the sheet reloads the list, so the queue has to answer it.
-        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
-        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
-      ],
-      "/v1/agents/agt_1/mock-tools:discover": MOCK_TOOLS_FOUND,
-    });
-    await reachMockQuestion();
-
-    expect(await screen.findByText("get_availability")).toBeDefined();
-    expect(screen.getByText("book_appointment")).toBeDefined();
-
-    // Off unless it is turned on.
-    const toggle = screen.getByRole("switch", { name: "Mock tools on runs" });
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
-
-    // The connection was written before this screen, with mocks off.
-    const registration = sent.find(
-      (call) => call.url === "/v1/agents?projectId=prj_1",
-    );
-    expect(
-      (registration?.body as { connection?: { mockToolsEnabled?: boolean } })
-        ?.connection?.mockToolsEnabled,
-    ).toBe(false);
-
-    // **The text lane never carries the Latest Created note**, on or off: it
-    // writes nothing to the Retell account, so no draft exists for a number or
-    // a tag to reach.
-    fireEvent.click(toggle);
-    await waitFor(() => {
-      expect(toggle.getAttribute("aria-checked")).toBe("true");
-    });
-    expect(screen.queryByText(/A draft counts as Latest Created/)).toBeNull();
-  });
-
-  it("turning the switch on writes the flag onto the connection it just made", async () => {
-    sheetAnswers({
-      "/v1/agents:discover": { status: 200, body: retellDiscovery },
-      "/v1/agents": [
-        { status: 200, body: { agents: [], nextPageToken: null } },
-        TEXT_LANE_SAVED,
-        // Closing the sheet reloads the list, so the queue has to answer it.
-        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
-        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
-      ],
-      "/v1/agents/agt_1/mock-tools:discover": MOCK_TOOLS_FOUND,
-      "/v1/agents/agt_1/connections/con_1": {
-        status: 200,
-        body: { connection: { ...CONNECTION, mockToolsEnabled: true } },
-      },
-    });
-    await reachMockQuestion();
-
-    fireEvent.click(
-      await screen.findByRole("switch", { name: "Mock tools on runs" }),
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Set up simulation" }),
-    );
-
-    await waitFor(() => {
-      expect(
-        sent.some((call) => call.method === "PATCH" && call.url.includes("con_1")),
-      ).toBe(true);
-    });
-    const patched = sent.find(
-      (call) => call.method === "PATCH" && call.url.includes("con_1"),
-    );
-    expect(patched?.body).toEqual({ mockToolsEnabled: true });
-  });
-
-  it("puts the switch back when the platform refuses to turn mocks on", async () => {
-    // A switch reading ON over a connection the server still holds `false`
-    // would be the screen disagreeing with the account.
-    sheetAnswers({
-      "/v1/agents:discover": { status: 200, body: retellDiscovery },
-      "/v1/agents": [
-        { status: 200, body: { agents: [], nextPageToken: null } },
-        TEXT_LANE_SAVED,
-        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
-      ],
-      "/v1/agents/agt_1/mock-tools:discover": MOCK_TOOLS_FOUND,
-      "/v1/agents/agt_1/connections/con_1": {
-        status: 422,
-        body: {
-          error: "unprocessable",
-          message: "This agent holds no platform key, so Egma cannot branch a temporary copy.",
-        },
-      },
-    });
-    await reachMockQuestion();
-
-    const toggle = await screen.findByRole("switch", {
-      name: "Mock tools on runs",
-    });
-    fireEvent.click(toggle);
-    await waitFor(() => {
-      expect(toggle.getAttribute("aria-checked")).toBe("true");
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Set up simulation" }));
-
-    // The refusal is said, and the control is back where the server is.
-    expect(
-      await screen.findByText(/cannot branch a temporary copy/),
-    ).toBeDefined();
-    await waitFor(() => {
-      expect(
-        screen
-          .getByRole("switch", { name: "Mock tools on runs" })
-          .getAttribute("aria-checked"),
-      ).toBe("false");
-    });
-    // And the connection stands at false, which is what it was written as.
-    const registration = sent.find(
-      (call) => call.url === "/v1/agents?projectId=prj_1",
-    );
-    expect(
-      (registration?.body as { connection?: { mockToolsEnabled?: boolean } })
-        ?.connection?.mockToolsEnabled,
-    ).toBe(false);
-  });
-
-  it("shows the Latest Created note on a web call, only while mocks are on", async () => {
-    // The web-call lane branches a draft, and a draft **is** the latest
-    // created version — so a number or a tag pointing there reaches Egma's
-    // copy mid-run. The note says exactly that, and only while the switch that
-    // makes it true is on.
-    sheetAnswers({
-      "/v1/agents:discover": { status: 200, body: voiceWithTextMode },
-      "/v1/agents": [
-        { status: 200, body: { agents: [], nextPageToken: null } },
-        {
-          status: 201,
-          body: {
-            result: "created",
-            agent: {
-              ...AGENT,
-              name: "Front desk",
-              platformAgentId: "agent_voice_1",
-            },
-            connection: { ...CONNECTION, connectionType: "retell_web_call" },
-          },
-        },
-        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
-      ],
-      "/v1/agents/agt_1/mock-tools:discover": MOCK_TOOLS_FOUND,
-    });
-    render(<RegisterAgentPage />);
-    await choose("Run simulations", "Retell");
-    await findRetellAgents();
-    await pickRetellAgent("Front desk");
-    fireEvent.click(
-      screen.getByRole("radio", { name: new RegExp("^Web call") }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect(
-      await screen.findByRole("heading", { name: "Mock this agent's tools?" }),
-    ).toBeDefined();
-
-    // Off: no draft is made, so there is nothing to warn about.
-    const toggle = await screen.findByRole("switch", {
-      name: "Mock tools on runs",
-    });
-    expect(
-      screen.queryByText(/Mocked runs create a temporary draft version/),
-    ).toBeNull();
-
-    fireEvent.click(toggle);
-    const note = await screen.findByText(
-      /Mocked runs create a temporary draft version/,
-    );
-    // Verbatim, because the words are the whole of what this note is.
-    expect(note.textContent?.replace(/\s+/gu, " ").trim()).toBe(
-      "Mocked runs create a temporary draft version on this agent and delete " +
-        "it after each run. A draft counts as Latest Created — make sure no " +
-        "phone number or tag sends real callers to Latest Created. Leaving a " +
-        "number's version unset also means Latest Created. Retell keeps an " +
-        "unused copy of the conversation flow behind each mocked run — Retell " +
-        "has no way to delete one — but nothing can route callers to it.",
-    );
-
-    // And it leaves again with the switch.
-    fireEvent.click(toggle);
-    await waitFor(() => {
-      expect(
-        screen.queryByText(/Mocked runs create a temporary draft version/),
-      ).toBeNull();
-    });
-  });
-
-  it("says why mocks are refused, and still finishes the connection", async () => {
-    // Every reason discovery refuses is a fact no answer here can change, so
-    // the switch goes with the list — and the connection, already written with
-    // mocks off, is exactly what it would have been.
-    sheetAnswers({
-      "/v1/agents:discover": { status: 200, body: retellDiscovery },
-      "/v1/agents": [
-        { status: 200, body: { agents: [], nextPageToken: null } },
-        TEXT_LANE_SAVED,
-        // Closing the sheet reloads the list, so the queue has to answer it.
-        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
-        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
-      ],
-      "/v1/agents/agt_1/mock-tools:discover": {
-        status: 200,
-        body: {
-          mockable: false,
-          refusal: {
-            reason: "never_published",
-            message:
-              "this agent has no published version on Retell. Publish in Retell the version you want tested.",
-          },
-          engine: null,
-          servingVersion: null,
-          tools: [],
-          warnings: [],
-          numbers: [],
-          seeded: [],
-        },
-      },
-    });
-    await reachMockQuestion();
-
-    expect(
-      await screen.findByText(/no published version on Retell/),
-    ).toBeDefined();
-    expect(
-      screen.queryByRole("switch", { name: "Mock tools on runs" }),
-    ).toBeNull();
-    // The connection stands: it was written before this screen appeared.
-    const registration = sent.find(
-      (call) => call.url === "/v1/agents?projectId=prj_1",
-    );
-    expect(registration).toBeDefined();
-  });
-
-  it("never asks a phone lane about mocks", async () => {
-    // The phone lane dials the customer's own published number, so what
-    // answers is their real agent with their real tools.
-    sheetAnswers({
-      "/v1/agents:discover": { status: 200, body: retellDiscovery },
-    });
-    render(<RegisterAgentPage />);
-    await choose("Run simulations", "Retell");
-    await findRetellAgents();
-    await pickRetellAgent("Appointment line");
-    fireEvent.click(
-      screen.getByRole("radio", { name: new RegExp("^Phone call") }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-
-    expect(await screen.findByLabelText("Phone number*")).toBeDefined();
-    expect(
-      screen.queryByRole("heading", { name: "Mock this agent's tools?" }),
-    ).toBeNull();
   });
 
   /** A voice agent as discovery now describes one, text mode door and all. */
@@ -2318,7 +1988,6 @@ describe("goal-first agent setup", () => {
         config: { retellAgentId: "agent_voice_1" },
         platformAgentId: "agent_voice_1",
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
-        mockToolsEnabled: false,
       },
     });
   });
@@ -2370,7 +2039,6 @@ describe("goal-first agent setup", () => {
           message: "The connection may have been saved. Try again.",
         },
       },
-      "/v1/agents/agt_1/mock-tools:discover": MOCK_TOOLS_FOUND,
     });
     render(<AgentsPage />);
     await choose("Run simulations", "Retell");
@@ -2389,13 +2057,15 @@ describe("goal-first agent setup", () => {
       );
     expect(posts()).toHaveLength(1);
 
-    // The retry reads the account back and finds the connection it already
-    // wrote, so it sends **no second POST**. That is the whole property: a
-    // lost answer must never become a duplicate non-idempotent write.
-    const before = sent.length;
+    // The retry reads the account back — a GET, which this recorder does not
+    // keep — finds the connection it already wrote, and finishes on it. It
+    // sends **no second POST**. That is the whole property: a lost answer must
+    // never become a duplicate non-idempotent write.
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => {
-      expect(sent.length).toBeGreaterThan(before);
+      expect(
+        screen.queryByText("The connection may have been saved. Try again."),
+      ).toBeNull();
     });
     expect(posts()).toHaveLength(1);
   });

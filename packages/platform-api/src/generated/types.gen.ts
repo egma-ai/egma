@@ -25,6 +25,7 @@ export type TraceSpan = {
     toolName: string;
     toolArguments: string;
     toolResult: string;
+    toolProvenance?: 'mocked';
     spans: Array<TraceSpan>;
 };
 
