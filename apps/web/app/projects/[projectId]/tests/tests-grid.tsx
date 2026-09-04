@@ -310,6 +310,8 @@ const ACTION =
  */
 const PAD = `${LANE_X} py-(--row-padding-y)`;
 const TEXT = "text-sm leading-(--line-caption) text-foreground";
+/** The same quiet line a summary is drawn in, which `None` is one of. */
+const CELL_QUIET = "text-sm leading-(--line-caption) text-faint";
 /*
  * A woken cell wears its 2px ink edge as an inset shadow rather than a border,
  * so waking one moves nothing: a border would take two pixels out of the cell
@@ -1053,6 +1055,17 @@ function jsonSaid(
 }
 
 /**
+ * What an empty JSON cell offers, which is a different thing in three places.
+ */
+type Offer =
+  /** A written row: `None` at rest, and the add line under a pointer or focus. */
+  | "reached"
+  /** The entry row, which is being authored right now: the add line, always. */
+  | "always"
+  /** A reader who cannot author: `None`, because there is nothing to offer. */
+  | "never";
+
+/**
  * What a JSON cell shows at rest: the summary, or the way to write the first one.
  *
  * Muted text rather than a chip (founder, 2026-09-03): a chip in a table lane
@@ -1062,30 +1075,59 @@ function jsonSaid(
  * **An empty cell says how to fill it** (founder, 2026-09-04). It used to be
  * blank, so the only thing that said a mock tool or an env could be written
  * here was the pointer changing shape over it — which a person has to already
- * suspect the cell is a control to find. The line is `ADD_LINE`, the same ember
- * affordance the Expected behaviors and Personas cells grow, so the four
- * writable things on a row are offered in one grammar.
+ * suspect the cell is a control to find.
  *
- * A reader who cannot author is offered nothing, because there is nothing they
- * could do with the offer. Their cell stays the summary or stays blank.
+ * **But it says it only to the row being reached for** (founder, 2026-09-04,
+ * on seeing it built). Two brand lines on every row of a full suite is a column
+ * of orange down a table whose job is to be scanned: `ADD_LINE` is an
+ * invitation, and an invitation repeated on forty rows stops being one. So a
+ * written row rests on `None` — the truthful empty state, in the same faint ink
+ * the summary beside it uses — and offers the line when a pointer is over the
+ * cell or the keyboard is in it. The entry row keeps the line at all times,
+ * because that row *is* the act of authoring.
+ *
+ * **The swap is CSS, not state.** Two spans and the button's own `group`, so a
+ * pointer crossing a suite re-renders nothing; a `useState` per cell would run
+ * React on every mouse move across the grid. The pointer half is gated to fine
+ * pointers, which is `DESIGN.md`'s rule and the reason `pointer-hover` exists —
+ * on a touch screen `:hover` sticks after a tap and would leave the line up on
+ * the row somebody just pressed. The focus half is not gated, because a
+ * keyboard is a keyboard on every device.
  */
 function JsonSummary({
   field,
   test,
-  add,
+  offer,
 }: {
   readonly field: JsonField;
   readonly test: Pick<Draft, "mockTools" | "env">;
-  /** Whether an empty cell offers to be filled, which only an author may do. */
-  readonly add: boolean;
+  readonly offer: Offer;
 }) {
   const said = jsonSaid(field, test);
-  if (said !== "") {
-    return <span className="text-sm leading-(--line-caption) text-faint">{said}</span>;
-  }
-  return add ? (
-    <span className={ADD_LINE}>{`+ ${JSON_FIELD[field].add}`}</span>
-  ) : null;
+  if (said !== "") return <span className={CELL_QUIET}>{said}</span>;
+  const add = `+ ${JSON_FIELD[field].add}`;
+  if (offer === "always") return <span className={ADD_LINE}>{add}</span>;
+  if (offer === "never") return <span className={CELL_QUIET}>None</span>;
+  return (
+    <>
+      <span
+        className={cn(
+          CELL_QUIET,
+          "group-pointer-hover/json:hidden group-focus-visible/json:hidden",
+        )}
+      >
+        None
+      </span>
+      <span
+        className={cn(
+          ADD_LINE,
+          "hidden group-pointer-hover/json:inline group-focus-visible/json:inline",
+        )}
+      >
+        {add}
+      </span>
+    </>
+  );
 }
 
 /**
@@ -1850,14 +1892,21 @@ export function TestsGrid(props: GridProps) {
           <button
             className={cn(
               PAD,
-              "block w-full cursor-pointer bg-transparent text-left",
+              /*
+               * Named, the way every other group in the product is: an
+               * unnamed one is claimed by whatever group wraps this cell next,
+               * and a table row is exactly the place that happens.
+               */
+              "group/json block w-full cursor-pointer bg-transparent text-left",
             )}
             type="button"
             /*
-             * The name follows what the cell shows, because the cell shows
-             * words now: a button reading "+ Add env variables" announced as
-             * "Env for Books service" is the one control on the row whose
-             * spoken name does not contain its written one.
+             * **The name says what pressing does, whichever word is showing.**
+             * At rest the cell reads `None`, which is the value rather than
+             * the control: a button announced as "None" tells a screen reader
+             * nothing about what it is for. So the name stays the verb, and
+             * the moment focus reaches the cell the written line becomes the
+             * same words.
              */
             aria-label={
               said === ""
@@ -1866,11 +1915,11 @@ export function TestsGrid(props: GridProps) {
             }
             onClick={() => openJson(test, field)}
           >
-            <JsonSummary field={field} test={test} add />
+            <JsonSummary field={field} test={test} offer="reached" />
           </button>
         ) : (
           <div className={PAD}>
-            <JsonSummary field={field} test={test} add={false} />
+            <JsonSummary field={field} test={test} offer="never" />
           </div>
         )}
       </td>
@@ -2007,7 +2056,7 @@ export function TestsGrid(props: GridProps) {
             }
             onClick={() => openJson(null, field)}
           >
-            <JsonSummary field={field} test={entry} add />
+            <JsonSummary field={field} test={entry} offer="always" />
           </button>
         </td>
       );
