@@ -2,7 +2,7 @@
 
 The broad order of things that need to be setup before we can run successful tests is as follows:
 1. There needs to be an egma folder in this repo and it should be in sync with the platform.
-2. Connect the voice agent that needs to be tested to the platform.
+2. Create an agent in egma platform and a connection to it so that it can be reached by a simulated persona for testing purposes.
 3. Author tests and how they need to be evaluated.
 4. Now, we can run the test suite against the connected agent.
 
@@ -19,3 +19,11 @@ The broad order of things that need to be setup before we can run successful tes
  - Based on the platform - refer to the platform specific connection guides. Follow the guides and come back here for following the next step.
   - For connecting a livekit agent - you must look at [guide to connect a livekit agent](references/livekit-agent-connection-guide.md) which is a part of this skill's references
   - For connecting a retell agent - you must look at [guide to connect a retell agent](references/retell-agent-connection-guide.md) which is a part of this skill's references
+
+3. Author tests
+  - If this is the first time egma tests are being written in this repository, create at max four tests in one suite covering 4 most common scenrios the voice agent here encounters.
+  - Refer to the `/write-voice-agent-tests` skill. This will teach you how to create a test suite and write good tests that actually move the needle in terms of trusting the voice agent's behavior. Egma tests are just simple markdown files. If this skill is not installed, you MUST first install it using `npx skills add egma-ai/egma --yes`. It contains important instructions regarding test creation, tool mocking and dynamically passing session data to simulation environment.
+  - If the livekit agent has gone through modifications because of integrating the egma sdk for mock tools, you must eiter start a local worker so that the agent with the updated code can join the simulation room. Once the first run has happened successfully, this local worker won't need to start as the cloud deployed agent would have egma sdk setup. 
+
+4. Run the tests
+- Once there is a suite you wanna run use `egma run --help` to look at how to run a suite against a particular agent and one of its connections. Your job is only complete one a suite is running and you have given the developer a link to the UI where the developer can see the suite running against an agent (and its connection).

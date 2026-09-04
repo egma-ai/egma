@@ -1,155 +1,120 @@
 ---
 name: write-egma-tests
-description: Write, edit, or convert notes into Egma Markdown tests, including personas and test-level mock-tool answers.
+description: Write or edit tests for a voice agent that can run on the Egma platform.
 ---
 
-# Write Egma tests
+# Writing tests for voice agents that can run on the Egma platform
 
-An Egma **test** describes one situation for a voice agent and the expected
-behaviors that must hold. Egma executes it as one **simulation** per persona.
+An Egma Test describes one situation that a voice agent should handle and the expected behaviors that should hold during that situation. Tests are grouped inside Suites. Each Test runs once for every Persona named in it.
 
-Write one Markdown file per test in the direct suite directory that the CLI
-created. Run `npm install --global egma-cli` if the `egma` command is unavailable. Read
-current help before using an operation; it owns command syntax and file
-locations.
+A Suite and its Tests do not store the Agent or Connection they run against. The Agent and Connection are selected later when starting a Run.
 
-## Read before writing
+Currently, Egma supports these voice agents platforms - retell & livekit-agents (python/ js) framework.
 
-1. Let the CLI inspect its repository state and locate the suite named by the
-   task. If more than one suite remains possible, ask which suite. If none
-   exists, use `integrate-egma` so the CLI creates the scaffold before this
-   focused authoring skill writes tests.
-2. Read the selected CLI-created suite metadata and only the existing tests
-   needed to avoid duplicates or preserve content the task changes.
-3. Read the voice agent's committed prompts and tool definitions when the task
-   depends on them.
-4. Reuse the test-file shape and persona values supplied by the current CLI,
-   supplied in the task, or already present in the repository. If no valid
-   persona value is present, use the current read-only persona-list operation
-   and only a returned name or stable ID.
-5. Leave `.env` files unread. Work from committed source and the facts supplied
-   by the developer.
+We need to do three things to create good tests:
 
-If more than one voice agent could be the target, stop and ask which one. A
-test for the wrong agent is not useful even when its Markdown is valid.
+1. Find or create the Suite that should hold the Tests.
+2. Understand the voice agent and create appropriate tests for it.
+3. Write test files and push them to Egma.
 
-## Write a new test
+## 1. Find or create the Suite
 
-Use the smallest new-file shape that says the authored intent. Egma adds its
-sync fields after the file is pushed or pulled. The example assumes that the
-real `check_availability` tool returns an object with a `slots` list. Verify the
-actual tool contract before using this answer shape.
+1. First off, check whether `egma/config.yaml` exists.
+  - If it does not exist, run `egma init`. This initializes the repository and pulls its current Egma state.
+  - If it already exists, run `egma pull` before deciding whether a Suite needs to be created.
+2. Every direct directory under `egma/tests/` is one Suite. Its `suite.yaml` file holds the Suite ID and display name. 
+  - If the correct Suite already exists, use it.
+  - If a new Suite is needed, create it through the CLI: `egma suite create appointment-booking --name "Appointment booking"`
+
+
+## 2. Understand the voice agent and decide the tests
+
+This is one of the most crucial step. Here you should read the voice agent’s prompt, tools, the overall harness that makes this voice agent behave the way it does (example multiple subagents, context strategies, etc) and any crucial metadata the voice agent should have before a production session startup path before writing Tests such as organisation name, tenant ID, locale, or agent configuration.
+
+Important concepts to know before writing them:
+
+A. One Test is one situation
+  - Write the Scenario as a situation that a real human might find themselves in while speaking with the voice agent being tested. 
+  - Each Test should cover one clear situation. For example, “call the recepionist to book an appointment at medspa "ABC" but ask for a specific provider "XYZ" and be flexible around dates but you don't know which treatment is right for your skin and so first you'd like to discuss some options but you're someone who's not very decisive". Replace with actual values that you infer from calling the tools attached to this voice agent. 
+  
+
+B. Each scenario has one or more personas
+  - A persona is just a digital human who is enacting the scenario. Different personas have different characteristics. Creating new personas is out of scope for this skill but use one of the default personas. you can run `egma persona list` find the available persona names/ their IDs. If several personas could be appropriate, choose one or two most appropriate by default.
+
+C. Expected behaviors
+  - An expected behavior is simply a lens through which an LLM based grader should look at the entire transcript of a simulation and determine whether that expected behavior is actually observed or not. Each expected behavior should be a binary 0/1 decision for the LLM grader. This of an expected behavior like an assertion in classical testing. 
+  - Each behavior should make one clear claim. What these behaviors should be must be grounded in the voice agent’s actual prompt, harness, tools, and the product requirements to the best of your knowledge.
+  - Usually aim to write around three or four expected behaviors for one Test. Split unrelated requirements into separate Tests.
+
+D. Mock tools
+  - You can add mock tools to a test when you don't want real writes to happen or want to use a controlled backend state. Egma supplies mock tools to the vocie agent of supported platforms and leaves any tools whose mocks were not supplied as it is. For example, you might want to read real availability slots / provider info for a appointment booking voice agent but don't want to create fake appointments in prodution CRM systems. 
+  - To create a mock tool, use the exact tool name supplied to the agent and the same response shape that the real tool returns. A Mock Tool contains exactly one of the following in its result json that will be supplied to the agent during simulation
+    - `answer` for a successful result
+    - `error` for a failed/erronous result
+  - For livekit agents, you will need to setup the agent with egma sdk in order to use mock tools. egma has support for livekit-agents python and js/ts with dedicated sdks. Refer [Egma livekit python sdk](https://docs.egma.ai/integrations/python-sdk) or [Egma livekit js sdk](https://docs.egma.ai/integrations/javascript-sdk) for info on how to setup the agent code to listen for mock tools.
+
+E. Session initiation data
+  - Many agents need per-session context and certain dynamic variables supplied before they speak even a single word - such as an organisation name which they represent, tenant ID, or some other agent configuration needed for the agent to do its job properly in production. Egma provides a way to supply this data for each simulation so that it is as close to the agent's production behavior as possible. 
+  - To find what dynamic variables / job dispatch metadata/ inbound webhooks etc that the agent being tested depends on - carefully look at its code and setting. Inspect the agent’s entrypoint, the normal path it goes through before speaking anything and identify which variables need to be supplied in the simulation. Once you have the required session initiation metadata needed, you can use the `## Env` section of each test to supply curated data that makes the most sense for that test.
+  - For each of the supported agent platforms, egma has a specifc field in its env json that it supplies. 
+    - If the agent is based on retell - use `retell_dynamic_variables` in the env section to supply any inbound webhook and dynamic variables data used by the agent. Egma passes it as is to the retell agent as its dynamic variables. 
+    - If the agent is based on livekit, use a `job_dispatch_metadata` in the env section. for values the LiveKit agent reads from `ctx.job.metadata`. Make sure the code of the livekit agent is able to read the needed data from `ctx.job.metadata`. If the agent must detect whether its running in an Egma simulation, you can add a check when `ctx.room.name` starts with `egma-sim-`. 
+  - Finally, use realistic, non-secret values to pass in the env section. Ask the developer only when a required value cannot be found or safely inferred. Use the default test orgs that usually the developer uses while iterating on the voice agent themselves.
+
+## 3. Write the Test files and push them
+
+You can now actually start writing the tests. A test can be created by simply creating a new md file in a suite directory. Once all tests are created, push them to the platform using `egma push`.
+
+A test file should look like this:
 
 ````markdown
 ---
-format: 4
-name: missed-appointment-reschedule
-description: The person missed an appointment and needs another time this week.
+format: 5
+name: booking-happy-path
+description: The caller wants to book an available appointment.
 personas:
   - name: Everyday person
 ---
+
 ## Scenario
-The person missed yesterday's appointment and wants another one this week.
-They are short of time and already annoyed.
+
+Call the recepionist to book an appointment at medspa "ABC" but ask for a specific provider "XYZ" and be flexible around dates but you don't know which treatment is right for your skin and so first you'd like to discuss some options but you're someone who's not very decisive.
+
 ## Expected behaviors
-1. The agent acknowledges the missed appointment without blaming anyone.
-2. The agent offers at least two other times.
-3. The agent repeats the new time before it ends.
+
+1. The agent walks the patient through avaialble options. It calls get_available_treatments tool before  quoting any treatments and does not hallucinate anything that wasn't provided by the tool call.
+2. The agent calls check_providers tool before suggesting a provider. 
+3. The agent calls the check_availability tool to get the appointment slots. it passes the right provider_id which the patient selected and offer slots in the default 7 day window. 
+
 ## Mock tools
+
 ### check_availability
+
 ```json
-{ "answer": { "slots": ["Wednesday 15:00", "Thursday 11:00"] } }
+{
+  "answer": {
+    "slots": [
+      "Wednesday 15:00",
+      "Wednesday 16:30"
+    ]
+  }
+}
+```
+
+## Env
+
+```json
+{
+  "retell_dynamic_variables": {
+    "clinic_name": "Youth Medspa, Walnut Creek branch",
+    "assistant_name": "Emily"
+  },
+  "job_dispatch_metadata": {
+    "clinic_name": "Youth Medspa, Walnut Creek branch",
+    "assistant_name": "Emily"
+  }
+}
 ```
 ````
 
-Apply these rules:
-
-- Make `name` lower case with hyphens and match the file name.
-- Keep `description` short and useful in a list. Omit it when the name already
-  says enough.
-- Under `## Scenario`, state what the person wants and the conditions that make
-  the test useful. Write a situation, not a script.
-- Under `## Expected behaviors`, follow the judgeable-behavior rules below.
-- Add `## Mock tools` when this test depends on a specific backend state — an
-  empty calendar, a lookup that fails, an answer that takes three seconds.
-  Otherwise leave the section out.
-  - A mock tool represents an external dependency. Keep agent-runtime tools
-    real: tools that complete a task, advance or hand off a workflow, stop the
-    voice agent, validate data already held by the agent, or update in-memory
-    state. In LiveKit, this includes tools whose body invokes
-    `AgentTask.complete` or
-    advances a `TaskGroup`. Replacing their implementation can stop the
-    workflow.
-  - Where the project already has a mocked world in `egma/mock-tools.md`, a
-    block here replaces that world's answer for this test alone. Do not repeat
-    an answer the project file already gives.
-  - Where the project has no mocked world, a block here is the only answer Egma
-    will serve for that tool, and every tool without one runs for real.
-  - Name the real tool in a `###` heading. Put exactly one of `answer` or `error`
-    in its JSON block. Add `delay_ms` when the answer must be delayed; write it
-    as a whole number of milliseconds from 0 through 30000. For example, three
-    seconds is `"delay_ms": 3000`. Make `answer` the same JSON shape that the
-    real tool returns. Do not infer that shape from this example.
-
-## Name a persona
-
-Name at least one persona under `personas` in every test, because a test says
-who speaks to the agent. Egma refuses a test that names none, so a file without
-the line is a file the push turns away. Use a name or id already supplied by
-Egma or already present in this repository.
-
-Treat ids and sync pins as references, not prose. Inventing an id makes the
-file point at something that does not exist.
-
-## Edit an existing test
-
-Preserve every machine-owned field already in the frontmatter, including:
-
-- `format`
-- `version`
-- `identity_revision`
-- persona ids and their display names
-
-Preserve authored fields that the task does not change, including description,
-personas, expected behaviors, and mock tools. Make the
-smallest edit that completes the developer's request.
-
-## Write judgeable expected behaviors
-
-- When the task asks you to generate tests, write three expected behaviors by
-  default. Add a fourth only for a distinct critical safety or completion
-  requirement. Never write more than four expected behaviors in one generated
-  test.
-- Keep the behaviors specific to this test situation. Put a general requirement in
-  its own focused test instead of repeating it across every test in a suite.
-- Make each expected behavior judgeable in one simulation: write one observable,
-  unconditional claim per item.
-- Put the branch condition in `## Scenario`; use a separate test for each
-  other branch.
-- Ground each statement in the voice agent's prompt, tools, or stated product
-  requirement.
-- Cover the ordinary path, important refusals, weak tool answers, and difficult
-  user behavior when they matter to the task.
-- Keep transport details out of a behavioral test.
-
-An expected behavior is a product requirement, not a way to force a high
-grade score. Keep it strict when the requirement is real.
-
-## Finish locally
-
-Read every changed file back. A test file is complete only when:
-
-- its YAML frontmatter opens and closes and contains only `format`, `name`,
-  `description`, `personas`, `version`, and `identity_revision`;
-- `format` is `4`, its name matches the file name, and it names at least one
-  persona by a value supplied by Egma or already present in the repository;
-- `## Scenario` contains a situation, `## Expected behaviors` contains at least
-  one judgeable numbered statement, and both required headings exist; and
-- every mock-tool block is a JSON object with exactly one of `answer` or `error`
-  and, when present, a whole-number `delay_ms` from 0 through 30000.
-
-Use the current local validation operation after reading the changed files
-back. Fix every named local problem and repeat it until validation succeeds.
-Stop after the requested local files are valid unless the active task also asks
-to publish or run them. An end-to-end setup request already includes those
-normal next steps.
+The above example shows both retell_dynamic_variables & job_dispatch_metadata for reference. In reality, you should only supply the field corresponding to the platform the agent is built on.
