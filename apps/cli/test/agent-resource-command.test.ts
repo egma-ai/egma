@@ -98,14 +98,6 @@ const LIVEKIT_TOKEN = {
       help: "The worker.",
       afterCredentials: false,
     },
-    {
-      key: "metadata",
-      label: "Agent metadata",
-      kind: "json",
-      required: false,
-      help: "Optional job metadata.",
-      afterCredentials: true,
-    },
   ],
   credentialRule: "required",
   credentialHelp: "Stored sealed.",
@@ -219,7 +211,7 @@ describe("skills-led Agent commands", () => {
     expect(io.out).toContain(
       "  Required flags: --token-endpoint, --dispatch-name",
     );
-    expect(io.out).toContain("  Optional flags: --metadata");
+    expect(io.out).toContain("  Optional flags: none");
     expect(io.out).toContain(
       "  Credential environment: EGMA_LIVEKIT_TOKEN_HEADERS",
     );
@@ -387,7 +379,6 @@ describe("skills-led Agent commands", () => {
       livekitUrl: null,
       dispatchName: null,
       tokenEndpoint: null,
-      metadata: null,
       credentialsStdin: false,
       env: { EGMA_API_KEY: CONTROL_KEY, EGMA_RETELL_API_KEY: RETELL_KEY },
       signal: new AbortController().signal,
@@ -519,7 +510,6 @@ describe("skills-led Agent commands", () => {
       livekitUrl: null,
       dispatchName: null,
       tokenEndpoint: null,
-      metadata: null,
       credentialsStdin: true,
       stdin: Readable.from(["replacement-key-that-must-not-be-used"]),
       env: {
@@ -593,7 +583,6 @@ describe("skills-led Agent commands", () => {
       livekitUrl: null,
       dispatchName: "receptionist",
       tokenEndpoint: "https://example.com/livekit/token",
-      metadata: null,
       credentialsStdin: true,
       stdin: Readable.from([
         JSON.stringify({ headers: { Authorization: "Bearer secret" } }),

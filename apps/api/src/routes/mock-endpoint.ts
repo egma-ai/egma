@@ -2,11 +2,10 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 import {
   appendSpans,
-  isErrorAnswer,
   resolveMockToolCall,
   type MockToolCallTarget,
   type NewSpan,
-  type ResolvedMockTool,
+  type TestMockTool,
 } from "@egma/db";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -14,8 +13,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 /**
  * The mock endpoint: the one new **public** surface this seam adds.
  *
- * A mocked run points the agent's own tool URLs at this address, so the calls
- * arrive here from the agent's platform rather than from anything of egma's.
+ * A mocked run points the agent's own tool URLs at this address for exactly
+ * the tools a test names, so the calls arrive here from the agent's platform
+ * rather than from anything of egma's.
  * That is not a design choice: Retell refuses localhost and private addresses
  * for a tool URL, so a mocked run needs an address its infrastructure can
  * reach. Self-hosters are told this plainly, and it is the only new inbound
@@ -27,31 +27,51 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
  *
  * ## What is in the URL, and why
  *
- * `/mock-tools/{run}/{simulation}/{tool}`. A custom tool configured
- * args-at-root posts no call envelope at all, so the URL is the only channel
- * identity can ride. The run is written into the URL when the temporary version
- * is built; the simulation is a dynamic variable the platform fills per call;
- * the tool's name is percent-encoded on the way in and decoded here, and
- * matched byte-exactly — so any name the platform accepts routes correctly,
- * reserved characters included.
+ * `/mock-tools/{simulation}/{tool}`. A custom tool configured args-at-root
+ * posts no call envelope at all, so the URL is the only channel identity can
+ * ride. The whole address arrives as the value of that tool's own per-call
+ * variable — the temporary version carries no address of Egma's, only
+ * `{{egma_url_<tool>}}` in front of the customer's own URL — so which
+ * simulation is in the path is decided per call, in the claim (ADR-0022). The
+ * tool's name is percent-encoded on the way in and decoded here, and matched
+ * byte-exactly, so any name the platform accepts routes correctly, reserved
+ * characters included.
+ *
+ * The simulation names its own run, so there is no second identifier to agree
+ * with: a call cannot be moved from one customer's run to another's, because
+ * the run is read from the row rather than read off the URL.
+ *
+ * ## What is dropped at the door, and why
+ *
+ * **Every header and every query parameter that arrives, unread.** The
+ * temporary version keeps each tool's own headers and query params byte for
+ * byte, because that same version serves the tools a test does *not* mock and
+ * those calls have to authenticate exactly as production does. So on a mocked
+ * call the customer's backend credentials arrive here — and nothing here reads
+ * them, logs them, stores them or puts them on the record. The one header this
+ * endpoint reads is the platform's own signature.
+ *
+ * That has a cost, and it is paid deliberately: a tool the customer wrote as a
+ * **GET** carries the model's arguments in the same query string as their own
+ * static parameters, and Egma cannot tell one from the other — so a GET tool's
+ * arguments are not written down at all. The record shows the call, the answer
+ * and the provenance, and no arguments. A POST tool's arguments are its body,
+ * which is Egma's to read, and they land in full.
  *
  * ## Three gates, in order
  *
- * 1. **The run named is live.** A finished run's temporary version has been
- *    deleted and its numbers put back; an answer served after it would come
- *    from a world that no longer exists.
- * 2. **The simulation named is that run's.** Two unguessable identifiers that
- *    have to agree, so a call cannot be moved from one customer's run to
- *    another's by editing a URL.
- * 3. **The tool is in that simulation's resolved answers.** The project's
- *    defaults merged with the pinned test version's overrides — the same
- *    resolution everything else uses, applied per simulation at serve time, so
- *    a per-test override beats a project default here for free and one
- *    temporary version serves every override.
+ * 1. **The simulation named belongs to a live run.** A simulation nobody has
+ *    heard of and one whose run has finished are the same answer: a finished
+ *    run's temporary version has been deleted, so an answer served after it
+ *    would come from a world that no longer exists.
+ * 2. **The signature verifies**, where the platform sent one.
+ * 3. **The tool is one this simulation's own test named.** The pinned test
+ *    version carries the answers, so one temporary version serves every test of
+ *    the run and each simulation answers for exactly what its own test wrote.
  *
  * Everything else is refused, and **each refusal is its own answer**: a dead
- * run, a foreign simulation, an uncovered tool and a bad signature are four
- * different things and are never collapsed into one.
+ * run, an unmocked tool and a bad signature are three different things and are
+ * never collapsed into one.
  *
  * ## The signature, and the guess inside it
  *
@@ -69,8 +89,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
  *
  * So the check is conditional in the direction that fails safe for the product:
  * a signature that is present must verify, and a request that carries none is
- * admitted on the strength of the two unguessable identifiers and the liveness
- * gate. If the guess is wrong, the symptom is a wall of `bad_signature`
+ * admitted on the strength of the unguessable simulation identifier and the
+ * liveness gate. If the guess is wrong, the symptom is a wall of `bad_signature`
  * refusals rather than a silent hole — and the refusal names which key was
  * tried and which one to try instead, so whoever sees that wall knows what they
  * are looking at. The question is on the developer's live checklist beside the
@@ -80,12 +100,12 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
  * ## The record
  *
  * Every exchange is written onto the simulation's own record by the control
- * plane: the arguments as they arrived, the answer served, the elapsed time
- * bracketed by the span itself, and the provenance `mocked` naming the mock
- * tool that answered. A refused call for a simulation this endpoint could
- * identify lands as `refused` — no answer and no mock tool, but egma was in the
- * path and said no, and a span with no stamp would say the opposite: that the
- * call went past egma to a real backend.
+ * plane: the arguments as they arrived in the body, the answer served, the
+ * elapsed time bracketed by the span itself, and the provenance `mocked`
+ * naming the tool that answered. A refused call for a simulation this endpoint could identify
+ * lands as `refused` — no answer and no mock tool, but egma was in the path and
+ * said no, and a span with no stamp would say the opposite: that the call went
+ * past egma to a real backend.
  *
  * **This is the record's second tool-fact writer, deliberately.** The simulator
  * never sees these calls, because they travel platform → egma.
@@ -94,13 +114,13 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 /** Where the endpoint answers, under the deployment's own public origin. */
 export const MOCK_TOOL_PREFIX = "/mock-tools";
 
-export const MOCK_TOOL_PATH = `${MOCK_TOOL_PREFIX}/:runId/:simulationId/:toolName`;
+export const MOCK_TOOL_PATH = `${MOCK_TOOL_PREFIX}/:simulationId/:toolName`;
 
 /**
- * The base a temporary version's tool URLs are written against.
+ * The base a mocked call's routing value is built against.
  *
- * The one place the address is spelled, so the writer and the endpoint cannot
- * disagree about it.
+ * The one place the address is spelled, so the claim that fills it into a
+ * per-call variable and the endpoint that answers it cannot disagree about it.
  */
 export function mockToolBase(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/u, "")}${MOCK_TOOL_PREFIX}`;
@@ -118,10 +138,9 @@ export const SIGNATURE_HEADER = "x-retell-signature";
  */
 export const SIGNATURE_WINDOW_MILLISECONDS = 5 * 60 * 1000;
 
-/** How each refusal names itself, so four different things stay four. */
+/** How each refusal names itself, so three different things stay three. */
 export const MOCK_TOOL_REFUSALS = [
   "no_live_run",
-  "simulation_not_in_run",
   "tool_not_mocked",
   "bad_signature",
 ] as const;
@@ -143,30 +162,10 @@ const WRONG_SIGNING_KEY =
   "the account's separate webhook-signing key — the one carrying the Webhook " +
   "badge in the Retell dashboard's API Keys page — which is a different value.";
 
-export type MockEndpointOptions = {
-  /**
-   * How the endpoint waits out a mock tool's declared delay.
-   *
-   * A seam, because the delay is the market gap this whole seam exists to
-   * fill — nobody else can make a mock slow — and a proof of it that waited
-   * out real seconds would be a proof about a timer. A test hands in one that
-   * records what it was asked to wait.
-   */
-  readonly wait?: (milliseconds: number) => Promise<void>;
-};
-
 type Params = {
-  readonly runId: string;
   readonly simulationId: string;
   readonly toolName: string;
 };
-
-const sleep = (milliseconds: number): Promise<void> =>
-  milliseconds <= 0
-    ? Promise.resolve()
-    : new Promise((resolve) => {
-        setTimeout(resolve, milliseconds);
-      });
 
 /**
  * Whether a signature the platform sent is this request's.
@@ -223,16 +222,16 @@ export function signatureFor(
  * The same shape the in-process seam writes, field for field, because a reader
  * asking "what did egma answer this call" must not have to know which seam
  * answered it. The two ends bracket the exchange — the moment the call arrived
- * and the moment the answer went back, the declared delay included — so a delay
- * is readable as the time it really took, with no second field to disagree.
+ * and the moment the answer went back — so the elapsed time is readable as the
+ * time it really took, with no second field to disagree.
  */
 function exchangeSpan(input: {
   readonly target: MockToolCallTarget;
-  readonly simulation: NonNullable<MockToolCallTarget["simulation"]>;
+  readonly simulation: MockToolCallTarget["simulation"];
   readonly toolName: string;
   /** What the agent asked with, in the JSON form every reader parses. */
   readonly heardArguments: string;
-  readonly served: ResolvedMockTool | undefined;
+  readonly served: TestMockTool | undefined;
   readonly answer: string | undefined;
   readonly beganAtMicroseconds: bigint;
   readonly endedAtMicroseconds: bigint;
@@ -284,9 +283,9 @@ function exchangeSpan(input: {
         : {
             "egma.tool.result": input.answer,
             "egma.tool.provenance": "mocked",
-            // Null exactly when a test's own override answered: an override is
-            // the test's content and has no row of its own to name.
-            "egma.tool.mock_tool": input.served?.mockToolId ?? null,
+            // The tool's own name, which is the whole of how a mock tool is
+            // named now that the answers live on the test.
+            "egma.tool.mock_tool": input.toolName,
           }),
     }),
     endsTrace: false,
@@ -331,12 +330,7 @@ function refuse(
   return reply.code(status).send({ refusal, error: sentence });
 }
 
-export async function mockEndpointRoutes(
-  app: FastifyInstance,
-  options: MockEndpointOptions = {},
-): Promise<void> {
-  const wait = options.wait ?? sleep;
-
+export async function mockEndpointRoutes(app: FastifyInstance): Promise<void> {
   // The bytes that were sent, kept as they were sent. A signature is over the
   // raw body, and a body Fastify parsed and something else re-serialised is
   // different bytes. Registered inside this plugin's own scope, without
@@ -373,62 +367,47 @@ export async function mockEndpointRoutes(
     const beganAtMicroseconds = nowMicroseconds();
     const params = request.params as Params;
     const rawBody = typeof request.body === "string" ? request.body : "";
-    // What the agent asked with, in the one shape the record is read in.
+    // What the agent asked with, in the one shape the record is read in: the
+    // body's own bytes, exactly as they arrived.
     //
-    // A POST carries its arguments as the body's own bytes and they are kept
-    // exactly as they arrived. A GET carries them in the query string, and they
-    // are written down as the JSON object they are — because every reader of a
-    // tool call's arguments parses this column as JSON, and one row that was a
-    // query string instead would be the row that breaks them. The **signature**
-    // is a separate matter and is still checked over the raw body, which on a
-    // GET is empty; conflating the two would be checking a signature over bytes
-    // that never travelled.
-    const heardArguments =
-      request.method === "GET"
-        ? JSON.stringify(request.query ?? {})
-        : rawBody;
+    // **The query string is not read, on either method.** It is the customer's
+    // own — their static parameters travel in it, credentials among them —
+    // and on a GET tool the model's arguments are mixed into the same string
+    // with nothing to tell them apart. So a GET lands with no arguments rather
+    // than with the customer's secrets on the record, which is the trade this
+    // endpoint makes everywhere (see the note at the top of this file).
+    const heardArguments = rawBody;
     // Decoded here, and matched byte-exactly against the authored name from
     // here on. Fastify decodes a path segment for us; a segment that is not
     // valid percent-encoding arrives as it was sent and simply matches nothing.
     const toolName = params.toolName;
 
-    const target = await resolveMockToolCall(params.runId, params.simulationId);
+    const target = await resolveMockToolCall(params.simulationId);
 
-    // Gate one. A run nobody has heard of and a run that finished get the same
-    // answer, because to this caller they are the same thing.
+    // Gate one. A simulation nobody has heard of and one whose run finished get
+    // the same answer, because to this caller they are the same thing.
     if (target === undefined || !target.runIsLive) {
       return refuse(
         reply,
         404,
         "no_live_run",
-        "this address does not name a run Egma is conducting right now.",
+        "this address does not name a simulation Egma is conducting right now.",
       );
     }
-
-    // Gate two.
     const simulation = target.simulation;
-    if (simulation === undefined) {
-      return refuse(
-        reply,
-        404,
-        "simulation_not_in_run",
-        "this address names a simulation that is not part of that run.",
-      );
-    }
 
-    // The signature, **before** the tool is looked up, and before anything is
-    // written down.
+    // Gate two, the signature: **before** the tool is looked up, and before
+    // anything is written down.
     //
     // Both halves of that order are load-bearing. Checking it after gate three
-    // would answer a badly signed call about an uncovered tool with
+    // would answer a badly signed call about an unmocked tool with
     // `tool_not_mocked`, which is a sentence about the mocked world sent to
     // somebody who has not authenticated. And writing the record first would
-    // let anyone holding the two identifiers spray `refused` spans carrying any
-    // tool name they liked, by sending a signature that was never going to
-    // verify.
+    // let anyone holding the identifier spray `refused` spans carrying any tool
+    // name they liked, by sending a signature that was never going to verify.
     //
-    // A request carrying no signature at all is admitted on the two unguessable
-    // identifiers and the liveness gate — see the note at the top of this file
+    // A request carrying no signature at all is admitted on the unguessable
+    // identifier and the liveness gate — see the note at the top of this file
     // for why the check is conditional rather than required.
     const signature = request.headers[SIGNATURE_HEADER];
     if (typeof signature === "string" && signature.trim() !== "") {
@@ -444,7 +423,7 @@ export async function mockEndpointRoutes(
     // Gate three. From here on the caller has got past every gate there is, so
     // a refusal here is about the mocked world and lands on the record.
     const served = simulation.answers.find(
-      (candidate) => candidate.toolName === toolName,
+      (candidate) => candidate.tool === toolName,
     );
 
     if (served === undefined) {
@@ -470,13 +449,8 @@ export async function mockEndpointRoutes(
       );
     }
 
-    // The delay, and the market gap: a mocked backend takes as long as a real
-    // one, so a "let me check that for you" line is actually exercised and the
-    // latency numbers on the record stay honest.
-    await wait(served.delayMilliseconds);
-
-    const failing = isErrorAnswer(served.answer);
-    const body = failing ? { error: served.answer.error } : served.answer.answer;
+    const failing = "error" in served;
+    const body = failing ? { error: served.error } : served.answer;
     // Serialized once, and the one string is both what goes on the wire and
     // what goes on the record. Handing the value to `reply.send` instead would
     // send a bare scalar — a number, a string, `true` — as `text/plain`, while

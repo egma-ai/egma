@@ -30,7 +30,6 @@ export async function runPushCommand(options: FolderCommandOptions): Promise<num
     }
     options.out(`suites: ${report.suites}`);
     options.out(`tests: ${report.tests.length}`);
-    options.out(`mock-tools: ${report.mockTools}`);
     if (report.turnedAway.length > 0) {
       options.out("status: turned-away");
       options.fail("Fix the files named above, then push the whole repository again. Nothing was uploaded.");

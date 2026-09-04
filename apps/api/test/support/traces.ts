@@ -382,6 +382,8 @@ export type DetailSpan = {
   readonly toolName: string;
   readonly toolArguments: string;
   readonly toolResult: string;
+  /** `"mocked"` when egma answered the call. Absent on every real one. */
+  readonly toolProvenance?: "mocked";
   readonly spans: DetailSpan[];
 };
 

@@ -84,8 +84,8 @@ function retellConnection(overrides: Partial<NewConnection> = {}): NewConnection
  * hint, an envelope and a resolved pair can each be told apart at a glance.
  *
  * The agent name rides here rather than in each caller because every livekit
- * connection holds one: egma dispatches explicitly, always, so that dispatch
- * metadata reaches the worker at all.
+ * connection holds one: egma dispatches explicitly, always, so that a test's
+ * own dispatch metadata reaches the worker at all.
  */
 function livekitConnection(overrides: Partial<NewConnection> = {}): NewConnection {
   return {
@@ -635,26 +635,25 @@ describe("a livekit connection", () => {
     expect(fetched).not.toHaveProperty("credentials");
   });
 
-  it("lands with an agent name and metadata too, both read back whole", async () => {
+  it("refuses a config key the lane no longer holds, naming it", async () => {
     const agentId = await agentNamed("LiveKit Dispatched");
 
-    const added = await addConnection(
-      actingAsAcme(),
-      agentId,
-      livekitConnection({
-        config: {
-          url: "wss://acme.livekit.cloud",
-          agentName: "front-desk",
-          metadata: '{"tenant":"acme"}',
-        },
-      }),
-    );
-
-    expect(added?.config).toEqual({
-      url: "wss://acme.livekit.cloud",
-      agentName: "front-desk",
-      metadata: '{"tenant":"acme"}',
-    });
+    // The dispatch metadata that used to live here is a test's own
+    // `env.job_dispatch_metadata` now, so a connection carrying one is a
+    // request Egma would silently ignore — refused by name instead.
+    await expect(
+      addConnection(
+        actingAsAcme(),
+        agentId,
+        livekitConnection({
+          config: {
+            url: "wss://acme.livekit.cloud",
+            agentName: "front-desk",
+            metadata: '{"tenant":"acme"}',
+          },
+        }),
+      ),
+    ).rejects.toThrow(/has no key "metadata"/u);
   });
 
   it("defaults LiveKit names from the modality and leaves explicit names alone", async () => {

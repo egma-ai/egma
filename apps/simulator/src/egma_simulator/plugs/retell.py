@@ -103,6 +103,7 @@ class RetellChat:
         simulation_id: str | None = None,
         agent_version: object = None,
         dynamic_variables: object = None,
+        job_dispatch_metadata: object = None,
         mock_tools: object = None,
         media: object = None,
     ) -> None:
@@ -111,8 +112,9 @@ class RetellChat:
         # is not in this agent's tool path either — a chat over somebody
         # else's platform has no room to stand in — so its record honestly
         # claims nothing about tools. Retell carries its own audio, so the
-        # deployment's carrier is nothing to it either.
-        del simulation_id, mock_tools, media
+        # deployment's carrier is nothing to it either, and it dispatches
+        # no worker, so a test's job dispatch metadata has nowhere to go.
+        del simulation_id, mock_tools, media, job_dispatch_metadata
 
         if access_variant != "retell_chat_api.api_key":
             raise PlugError(

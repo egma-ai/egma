@@ -4,14 +4,13 @@ The exchange is two methods on egma's participant, and everything below
 is proved against the room-shaped LiveKit in :mod:`room_stub`, whose
 rooms now carry calls as well as audio. What answers those calls is
 egma's own code, unchanged — so what is proved here about a census, an
-answer, a delay, a late-attached call or a refusal is proved about the
-code a customer's server runs.
+answer, a late-attached call or a refusal is proved about the code a
+customer's server runs.
 
 The first test is the whole claim, black box: a spec naming mocked tools
-goes in at the top, and the record comes out carrying the census, the
-coverage stamp, and each mocked call with its arguments, its answer, its
-provenance and a duration that reflects the declared delay. Everything
-after it takes one part of that story apart.
+goes in at the top, and the record comes out carrying each mocked call
+with its arguments, its answer and its provenance. Everything after it
+takes one part of that story apart.
 """
 
 from __future__ import annotations
@@ -51,13 +50,6 @@ A_URL = "wss://lakeside-dental.livekit.cloud"
 A_KEY = "APIlakeside0000"
 A_SECRET = "SENTINEL-livekit-api-secret-7f3b0c19d2a4"
 A_SIMULATION = "sim_01K4RE2V6B8N0PZQTM5CHXW7JD"
-
-A_DECLARED_DELAY_MS = 60
-"""Short enough to cost CI nothing, long enough that a span holding it
-cannot be a rounding error. The delay is real time on a real clock, here
-as in a live room: it is the one thing about this exchange that cannot be
-rendered into the audio."""
-
 
 def mocked_spec(
     *,
@@ -99,13 +91,11 @@ def answers(
     answer: object = None,
     *,
     error: str | None = None,
-    delay_milliseconds: int = 0,
 ) -> dict:
     """One resolved answer, as the claimed spec spells it."""
     return {
         "tool_name": tool_name,
         "answer": {"error": error} if error is not None else {"answer": answer},
-        "delay_milliseconds": delay_milliseconds,
     }
 
 
@@ -263,11 +253,9 @@ async def test_a_spec_naming_mocked_tools_comes_back_as_a_record_of_them(
     """The whole claim, at the seam the contract draws.
 
     A spec goes in naming three answers. A session in the room reports
-    four tools, calls two of them, and what comes out is the record: a
-    coverage stamp naming what was discovered, covered and left running
-    real, and a span per call carrying the arguments it was made with, the
-    answer it was served, where that answer came from, and a duration that
-    holds the delay the mock tool declared.
+    four tools and calls two of them, and what comes out is the record: a
+    span per call carrying the arguments it was made with, the answer it
+    was served, and where that answer came from.
     """
     stub = RoomStub(greeting="Front desk.", replies=["One moment.", "All set."])
 
@@ -284,11 +272,7 @@ async def test_a_spec_naming_mocked_tools_comes_back_as_a_record_of_them(
         stub,
         mocked_spec(
             mock_tools=[
-                answers(
-                    "check_calendar",
-                    {"slots": []},
-                    delay_milliseconds=A_DECLARED_DELAY_MS,
-                ),
+                answers("check_calendar", {"slots": []}),
                 answers(
                     "book_appointment",
                     error="the booking service is not accepting requests",
@@ -299,19 +283,9 @@ async def test_a_spec_naming_mocked_tools_comes_back_as_a_record_of_them(
         session,
     )
 
-    # The coverage stamp: what the agent said it had, what egma stood
-    # ready for, and what ran its own implementation untouched.
-    assert terminal_facts(client)["mock_tool_coverage"] == {
-        "discovered": [
-            "check_calendar",
-            "book_appointment",
-            "lookup_customer",
-            "transfer_to_human",
-        ],
-        "covered": ["check_calendar", "book_appointment", "send_confirmation_sms"],
-        "uncovered": ["lookup_customer", "transfer_to_human"],
-    }
-
+    # Two calls reached egma, and neither of the agent's other two tools
+    # did: they ran their own implementations, untouched and with no span
+    # of egma's to show for them.
     calendar, booking = tool_spans(client)
     assert attributes_of(calendar) == {
         "egma.tool.name": "check_calendar",
@@ -325,9 +299,9 @@ async def test_a_spec_naming_mocked_tools_comes_back_as_a_record_of_them(
         "egma.tool.mock_tool": "check_calendar",
     }
     assert attributes_of(calendar)["egma.tool.result"] == '{"slots":[]}'
-    # The declared delay is readable as the time the exchange took, and
-    # there is no attribute repeating the number for the two to disagree.
-    assert milliseconds_of(calendar) >= A_DECLARED_DELAY_MS
+    # The round trip is readable as the time the exchange took, and there
+    # is no attribute repeating the number for the two to disagree.
+    assert milliseconds_of(calendar) >= 0
 
     # A failure has no return value, so the tag stays on: what a test that
     # wants the apology path gets is the words its author wrote, kept
@@ -344,10 +318,9 @@ async def test_a_simulation_that_mocks_nothing_records_exactly_what_it_used_to(
 ):
     """The ordinary case, and it has to stay the ordinary case.
 
-    No mock tools, and nobody in the room asking: no tool spans, and the
-    coverage stamp says the asking happened and nothing came back — which
-    is a different sentence from the stamp being absent, and the honest
-    one for a room egma really stood ready in.
+    No mock tools, and nobody in the room asking: no tool spans at all,
+    which is the record every simulation carried before mock tools
+    existed.
     """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
 
@@ -359,19 +332,20 @@ async def test_a_simulation_that_mocks_nothing_records_exactly_what_it_used_to(
     )
 
     assert tool_spans(client) == []
-    assert terminal_facts(client)["mock_tool_coverage"] == {
-        "discovered": [],
-        "covered": [],
-        "uncovered": [],
-    }
+    facts = terminal_facts(client)
+    assert facts["ending"] == "persona_concluded"
+    # And nothing counts the agent's tools for it. What egma answered is
+    # on the record as the calls it answered; what it did not answer for
+    # ran with egma nowhere near it, and the record says nothing about it
+    # rather than tallying an isolation nobody can vouch for.
+    assert not [name for name in facts if "coverage" in name], facts
 
 
-async def test_a_connection_egma_stands_outside_claims_nothing_about_tools(
+async def test_a_connection_egma_stands_outside_records_no_tool_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Absent, not empty. A chat over somebody else's platform never asked
-    the agent what tools it has, so its record says nothing rather than
-    saying nothing was found."""
+    """A chat over somebody else's platform never stood in the tool path,
+    so nothing about the agent's tools reaches its record."""
     monkeypatch.setattr(livekit_plug, "LiveKitRoomBackend", RoomStub().driver)
     monkeypatch.setattr(
         service_module,
@@ -406,7 +380,8 @@ async def test_a_connection_egma_stands_outside_claims_nothing_about_tools(
         blobs=FilesystemBlobStore(tmp_path / "blobs"),
     ).run()
 
-    assert "mock_tool_coverage" not in terminal_facts(client)
+    assert terminal_facts(client)["ending"] == "persona_concluded"
+    assert tool_spans(client) == []
 
 
 # -- The exchange, method by method ------------------------------------------
@@ -443,7 +418,6 @@ def a_mock(
     answer: object = None,
     *,
     error: str | None = None,
-    delay_milliseconds: int = 0,
 ) -> MockTool:
     """The same resolved answer, read as the simulator reads it.
 
@@ -451,13 +425,10 @@ def a_mock(
     the seam directly and one going in through a spec document cannot come
     to disagree about what an answer looks like.
     """
-    written = answers(
-        tool_name, answer, error=error, delay_milliseconds=delay_milliseconds
-    )
+    written = answers(tool_name, answer, error=error)
     return MockTool(
         tool_name=written["tool_name"],
         answer=written["answer"],
-        delay_milliseconds=written["delay_milliseconds"],
     )
 
 
@@ -477,16 +448,41 @@ async def test_hello_answers_the_names_this_simulation_answers_for():
     await plug.close()
 
 
+async def test_hello_answers_a_test_that_mocks_nothing_with_an_empty_list():
+    """A test naming no tools is answered, not ignored.
+
+    The rule is one rule: egma answers for exactly the tools the test
+    names, and a test that names none has egma answering for none. That is
+    an empty list rather than a silence, because the other side needs a
+    reply to learn to wrap nothing — a hello nobody answered would leave
+    it waiting, and the census would never reach the record.
+    """
+    stub = RoomStub(greeting="Front desk.")
+    plug = await opened(stub)
+
+    said = await stub.says_hello("check_calendar", "book_appointment")
+    assert said == {"protocol_version": PROTOCOL_VERSION, "mocked_tools": []}
+    await plug.close()
+
+
 async def test_a_second_hello_replaces_the_census_rather_than_adding_to_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """A census is a snapshot of the agent's tools, so an agent that
-    announces itself again is announcing what it has now."""
+    announces itself again is announcing what it has now.
+
+    What the census is *for* is the late-attached flag, so that is what
+    proves the replacement: the second census drops ``check_calendar``, so
+    the call that follows is a call for a tool the seam no longer knows the
+    agent has — and it lands flagged. A census that added up instead would
+    still name it, and the flag would be absent.
+    """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
 
     async def two_sessions(agent: RoomStub) -> None:
         await agent.says_hello("check_calendar", "lookup_customer")
-        await agent.says_hello("check_calendar", "transfer_to_human")
+        await agent.says_hello("transfer_to_human")
+        await agent.calls("check_calendar", {"date": "2026-08-13"})
 
     client = await conducted_record(
         tmp_path,
@@ -496,11 +492,9 @@ async def test_a_second_hello_replaces_the_census_rather_than_adding_to_it(
         two_sessions,
     )
 
-    assert terminal_facts(client)["mock_tool_coverage"] == {
-        "discovered": ["check_calendar", "transfer_to_human"],
-        "covered": ["check_calendar"],
-        "uncovered": ["transfer_to_human"],
-    }
+    (served,) = tool_spans(client)
+    assert attributes_of(served)["egma.tool.name"] == "check_calendar"
+    assert attributes_of(served)["egma.tool.late_attached"] is True
 
 
 async def test_a_call_the_census_never_reported_lands_late_attached(
@@ -539,12 +533,6 @@ async def test_a_call_the_census_never_reported_lands_late_attached(
         "egma.tool.provenance": "mocked",
         "egma.tool.mock_tool": "send_confirmation_sms",
         "egma.tool.late_attached": True,
-    }
-    # Covered names the whole set egma stood ready for, so a late-attached
-    # name is exactly one that is covered and was never discovered.
-    coverage = terminal_facts(client)["mock_tool_coverage"]
-    assert set(coverage["covered"]) - set(coverage["discovered"]) == {
-        "send_confirmation_sms"
     }
 
 
@@ -723,14 +711,14 @@ async def test_an_answer_too_large_for_the_wire_is_refused_naming_the_size():
     await plug.close()
 
 
-async def test_a_reply_too_large_to_send_covers_nothing_and_records_no_census():
-    """A project with more mocked tools than one message can name.
+async def test_a_reply_too_large_to_send_records_no_census():
+    """A test naming more mocked tools than one message can carry.
 
     Refused before anything is written down, which is the ordering that
     matters: the reply is what tells the other side which tools to wrap,
     so a reply that never arrives wrapped nothing — and a census recorded
-    ahead of the refusal would leave the stamp claiming an isolation that
-    did not happen.
+    ahead of the refusal would leave the seam treating the next call as
+    one the agent had announced.
     """
     stub = RoomStub(greeting="Front desk.")
     seam = MockToolSeam(
@@ -746,32 +734,15 @@ async def test_a_reply_too_large_to_send_covers_nothing_and_records_no_census():
     assert refusal.code == ANSWER_TOO_LARGE
     assert str(LARGEST_PAYLOAD_BYTES) in refusal.message
 
-    assert seam.coverage() == {
-        "discovered": [],
-        "covered": [],
-        "uncovered": [],
-    }
-    await plug.close()
-
-
-async def test_an_oversized_answer_is_refused_before_its_delay_is_waited_out():
-    """A fault to raise at once, not something to make a conversation wait
-    thirty seconds for."""
-    stub = RoomStub(greeting="Front desk.")
-    plug = await opened(
-        stub,
-        (
-            a_mock(
-                "read_the_file",
-                "x" * (LARGEST_PAYLOAD_BYTES + 1),
-                delay_milliseconds=30_000,
-            ),
-        ),
+    # The census the refused hello carried was never taken: a call for the
+    # one tool it named would land late-attached, which is the seam saying
+    # it was never told the agent had it.
+    answered = await stub.room.perform_rpc(
+        TOOL_METHOD, '{"name":"tool_number_0000"}'
     )
-
-    began = asyncio.get_running_loop().time()
-    await refused(stub, TOOL_METHOD, '{"name":"read_the_file"}')
-    assert asyncio.get_running_loop().time() - began < 1.0
+    assert json.loads(answered) == {"answer": {"ok": True}}
+    (served,) = seam.exchanged()
+    assert served.late_attached
     await plug.close()
 
 
@@ -811,16 +782,14 @@ async def test_no_credential_and_no_test_content_ever_rides_an_answer(
             assert kept not in answered
 
 
-async def test_a_hello_egma_refused_covers_nothing_at_all(
+async def test_a_hello_egma_refused_leaves_the_agent_wrapping_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The stamp never claims an isolation that did not happen.
+    """A session whose hello egma refused was told nothing.
 
-    A session whose hello egma refused was told nothing, so it wrapped
-    nothing, so every tool it has ran its own implementation. Naming those
-    tools covered would be the record saying the simulation was isolated
-    when it was not — which is the one thing this stamp exists to make
-    impossible.
+    So it wrapped nothing, and every tool it has ran its own
+    implementation — with no call reaching egma and no span of egma's on
+    the record to suggest otherwise.
     """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
 
@@ -839,11 +808,7 @@ async def test_a_hello_egma_refused_covers_nothing_at_all(
         a_session_egma_will_not_speak_to,
     )
 
-    assert terminal_facts(client)["mock_tool_coverage"] == {
-        "discovered": [],
-        "covered": [],
-        "uncovered": [],
-    }
+    assert tool_spans(client) == []
 
 
 async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
@@ -854,8 +819,8 @@ async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
     A room where egma answered for nothing is exactly the room every
     simulation was before mock tools existed, so a participant that will
     not take the methods costs the exchange and nothing else: it is said
-    loudly, the conversation goes on, and the record claims nothing about
-    tools — which is the truth, because egma never stood in their path.
+    loudly, the conversation goes on, and no call of the agent's reaches
+    egma — which is the truth, because egma never stood in their path.
     """
     caplog.set_level("ERROR")
     stub = RoomStub(
@@ -875,29 +840,22 @@ async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
         nobody_can_ask,
     )
 
-    facts = terminal_facts(client)
-    assert facts["ending"] == "persona_concluded"
-    assert "mock_tool_coverage" not in facts
+    assert terminal_facts(client)["ending"] == "persona_concluded"
+    assert tool_spans(client) == []
     assert any(
         "could not offer the mock-tool exchange" in record.getMessage()
         for record in caplog.records
     )
 
 
-# -- What the seam claims, and when ------------------------------------------
-
-
-def test_a_seam_nobody_stood_ready_with_claims_nothing():
-    """A room that was never joined has no stamp to make: egma was not
-    there, so it learned nothing and claims nothing."""
-    assert MockToolSeam((a_mock("check_calendar", {"slots": []}),)).coverage() is None
+# -- What the seam reads out of a spec ---------------------------------------
 
 
 async def test_a_spec_answering_one_tool_twice_is_refused():
     """Matching is by name and nothing else, so two answers for one name
     are two answers with no rule to choose between them. Taking either
-    silently would make the record's answer a matter of which the control
-    plane happened to write first."""
+    silently would make the record's answer a matter of which one the
+    control plane happened to write first."""
     document = mocked_spec(
         mock_tools=[
             answers("check_calendar", {"slots": []}),
@@ -922,7 +880,6 @@ def test_the_golden_fixture_is_a_spec_the_simulator_reads_whole(tmp_path: Path):
         "book_appointment",
         "send_confirmation_sms",
     ]
-    assert spec.mock_tools[0].delay_milliseconds == 250
     assert spec.mock_tools[1].fails
     # An authored `null` is an answer, and the tagged shape is what keeps
     # it tellable from no answer at all.
@@ -933,6 +890,8 @@ def test_the_golden_fixture_is_a_spec_the_simulator_reads_whole(tmp_path: Path):
         spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
     )
     assert assembled.conductor is not None
-    assert assembled.mock_tool_coverage is None, (
-        "no room was joined, so nothing is claimed"
-    )
+    assert [answer.tool_name for answer in assembled.mock_tools.answers()] == [
+        "check_calendar",
+        "book_appointment",
+        "send_confirmation_sms",
+    ]

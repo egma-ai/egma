@@ -39,13 +39,13 @@ EGMA_LIVEKIT_ENV=~/.egma-livekit.env:~/.egma-voice.env \
 
 | Tool | What it does | In the live test |
 | --- | --- | --- |
-| `check_availability(day)` | The booking-shaped one. Answers out of two times written into `agent.py`; there is no calendar behind it. | Answered by a **mock tool** — the calendar-is-full override, after a declared delay |
-| `opening_hours()` | Reads out fixed opening hours. | **Not** mocked: it runs its own implementation, and the record names it uncovered |
+| `check_availability(day)` | The booking-shaped one. Answers out of two times written into `agent.py`; there is no calendar behind it. | Answered by a **mock tool** — the calendar-is-full answer the test carries, served at once |
+| `opening_hours()` | Reads out fixed opening hours. | **Not** named by the test: it runs its own implementation, with Egma nowhere near it and no span on the record |
 
-Two rather than one, on purpose. A coverage stamp exists to say *this
-simulation was not fully isolated, and here is what was left out* — and
-with every tool covered it has nothing to say. The second tool is what
-gives the record both halves.
+Two rather than one, on purpose. The rule the live proof exists to show
+has two halves — Egma answers exactly the tools the test names, and every
+other tool runs for real, untouched and unobserved — and one tool can
+only show the first.
 
 Neither tool reads a clock, a network or a disk, so this worker can be
 left running against a real project without booking anything, and an
@@ -69,6 +69,20 @@ this agent to it rather than taking the SDK's word for it.
 The `egma` dependency here is the copy in `sdks/python`, not the published
 package, so this fixture always exercises the seam as it stands on this
 branch.
+
+## The line that reads the test's env
+
+```python
+world = json.loads(ctx.job.metadata or "{}")
+logger.info("dispatched %s=%r", "tenant", world.get("tenant"))
+```
+
+The other half of a test's world arrives on the job dispatch: whatever the
+test wrote under `## Env` as `job_dispatch_metadata`, as one compact JSON
+string, key for key and nothing of Egma's beside it. This fixture reads
+one key out of it and logs it, so a live run can read back the tenant the
+test said it was calling about. A test that names no env dispatches the
+empty string, which is what this worker meets in a production room.
 
 ## Run it by hand
 

@@ -31,11 +31,13 @@ creates the room, dispatches the worker and deletes the room at the end:
 - ``agentName`` (string, required) — the name the agent's worker
   registered under. Required rather than optional, because egma always
   dispatches explicitly: the record then names the agent it graded, and
-  the customer's configured metadata always has a dispatch to ride.
-- ``metadata`` (a JSON object in a string, optional) — the customer's
-  own, for the agent to read. It is carried on the room verbatim and on
-  the agent's dispatch too, which is where LiveKit's own documentation
-  teaches an agent to look for its per-session context.
+  the test's job dispatch metadata always has a dispatch to ride.
+
+There is no metadata key here and there is not meant to be. What the
+agent is dispatched with is the **test's** ``job_dispatch_metadata``, and
+it arrives with the simulation rather than with the connection: two tests
+of one suite start their worker in two different worlds, which one value
+on the connection could never do.
 
 Its credentials are the customer's LiveKit ``apiKey`` and ``apiSecret``.
 Unlike a phone connection, a room connection carries its own: the room is
@@ -53,12 +55,9 @@ customer's side:
   shape holds no ``url`` of its own.
 - ``agentName`` (string, required) — as above. egma cannot dispatch here, so
   it asks the endpoint for this worker by name, in the request's
-  ``room_config``; the endpoint copies that block into the token it mints and
-  LiveKit dispatches the worker when the room is created.
-- ``metadata`` (a JSON object in a string, optional) — as above, carried in
-  the same ``room_config`` as that dispatch's metadata. The job channel only:
-  egma does not create this room, so the room's own metadata is the
-  endpoint's.
+  ``room_config``, with the test's ``job_dispatch_metadata`` as that
+  dispatch's metadata; the endpoint copies that block into the token it
+  mints and LiveKit dispatches the worker when the room is created.
 
 Its credentials are that endpoint's auth ``headers``. They are required.
 **Dispatching is the endpoint's job** — egma names the worker, the endpoint
@@ -127,6 +126,7 @@ class LiveKitRoom:
         simulation_id: str,
         agent_version: object = None,
         dynamic_variables: object = None,
+        job_dispatch_metadata: dict[str, Any] | None = None,
         mock_tools: MockToolSeam | None = None,
         media: object = None,
         driver: Any = None,
@@ -134,8 +134,9 @@ class LiveKitRoom:
         # A room is reached with this connection's URL and authority. It does
         # not use the deployment's phone media bridge or the platform carrier
         # resolved for a phone simulation. A worker is whatever the customer
-        # is running: LiveKit keeps no versions of it, and the only thing egma
-        # tells it is the dispatch context below.
+        # is running: LiveKit keeps no versions of it, and it renders no
+        # variables — what egma tells it is the test's dispatch metadata,
+        # passed to the driver below.
         del media, agent_version, dynamic_variables
 
         if modality != "voice":
@@ -157,6 +158,7 @@ class LiveKitRoom:
             settings=read_connection(access_variant, config, credentials),
             simulation_id=simulation_id,
             mock_tools=mock_tools,
+            job_dispatch_metadata=job_dispatch_metadata,
         )
         self._media: VoiceMedia | None = None
         self._reference: str | None = None

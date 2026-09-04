@@ -3,14 +3,13 @@
  *
  * The format is the whole point of the folder: a test somebody reviews in a
  * pull request has to read like something a person wrote. So the frontmatter
- * carries only what a machine needs — what the test is called, who calls, what
- * a connection has to be able to do, and the two tokens this file was last
- * synced at — and the body is the two things a test says, under the two
- * headings it says them under.
+ * carries only what a machine needs — what the test is called, who calls, and
+ * the two tokens this file was last synced at — and the body is the four things
+ * a test says, under the four headings it says them under.
  *
  * ```markdown
  * ---
- * format: 4
+ * format: 5
  * name: missed-appointment-reschedule
  * description: The caller missed Thursday and wants any afternoon next week.
  * version: tstv_01K…
@@ -24,18 +23,20 @@
  * ## Expected behaviors
  * 1. …ordered statements, each one a plain sentence…
  * ## Mock tools
- * …the tools this test answers for itself…
+ * …what this test's own tools answer with…
+ * ## Env
+ * …the world this test is conducted in…
  * ```
  *
- * **Format 4 is the suite cutover.** It removes connection capability input.
- * The product is pre-production and supports one repository contract, so a
- * file that claims an older or newer format is refused. It is never guessed at
- * or rewritten through a compatibility reader.
+ * **Format 5 is the test-owned world.** A test carries its own mock tools and
+ * its own env; there is no project-wide list to override and no project file to
+ * read. The product is pre-production and supports one repository contract, so
+ * a file that claims an older or newer format is refused. It is never guessed
+ * at or rewritten through a compatibility reader.
  *
- * The third heading is there only when the test overrides one of the project's
- * mock tools. An override is test content — it versions with the test exactly
- * as an expected behavior does — which is why it lives in the test's own file
- * and not beside the project's.
+ * The last two headings are there only when the test says something under them.
+ * Both are test content — they version with the test exactly as an expected
+ * behavior does — which is why they live in the test's own file.
  *
  * **Two tokens rather than one, because a test has two halves that move
  * independently.** `version:` is the content a run is judged by; `identity_
@@ -47,7 +48,7 @@
  * this file claims to be a newer draft of.
  *
  * **A persona is named by identity, and the display name beside it is for the
- * reader.** The id is what a pulled file resolves. Format 4 also permits a new
+ * reader.** The id is what a pulled file resolves. Format 5 also permits a new
  * authored file to name a persona before the file has a stable persona ID;
  * the platform resolves that current name when the repository is pushed.
  *
@@ -55,6 +56,8 @@
  * makes `pull` immediately after `push` change zero bytes.
  */
 
+import { FolderProblem } from "./problem.ts";
+import { ENV_LINE, readEnv, writeEnv, type TestEnv } from "./env.ts";
 import {
   MOCK_TOOLS_LINE,
   readMockTools,
@@ -75,9 +78,9 @@ import { portableTestFileName } from "./portable-path.ts";
  *
  * A number rather than a feature list, because every folder-reading command
  * must decide the same thing before it writes: this exact shape is supported,
- * and every other shape is refused. The suite cutover has no legacy reader.
+ * and every other shape is refused. There is no legacy reader.
  */
-export const TEST_FILE_FORMAT = 4;
+export const TEST_FILE_FORMAT = 5;
 
 /**
  * One statement about what should happen — a plain sentence, and nothing else.
@@ -93,7 +96,7 @@ export type FileBehavior = string;
 
 /**
  * One persona a test names: who they are on the platform, and what a reviewer
- * reads. The id is authoritative when present. Format 4 permits an empty id on
+ * reads. The id is authoritative when present. Format 5 permits an empty id on
  * a newly authored name until a push and pull write the stable identity.
  */
 export type FilePersona = {
@@ -105,7 +108,7 @@ export type FilePersona = {
 
 /** What one file says. */
 export type TestFile = {
-  /** What the file itself claimed. Everything Egma writes says 4. */
+  /** What the file itself claimed. Everything Egma writes says 5. */
   readonly format: number;
   readonly name: string;
   /** Live metadata beside the name; `null` when the file names none. */
@@ -121,16 +124,18 @@ export type TestFile = {
   /** In the order they were authored. */
   readonly expectedBehaviors: readonly FileBehavior[];
   /**
-   * The tools this test answers for itself, overriding the project's for the
-   * length of this test. Empty leaves the project's mock tools the whole world.
+   * The tools this test answers for itself. Empty leaves every one of the
+   * agent's tools running for real.
    */
   readonly mockTools: readonly MockToolEntry[];
+  /** The world this test is conducted in, or `null` when it names none. */
+  readonly env: TestEnv | null;
 };
 
 export const SCENARIO_HEADING = "## Scenario";
 export const EXPECTED_BEHAVIORS_HEADING = "## Expected behaviors";
 
-/** Any of the three headings, however many hashes and in whatever case. */
+/** The first two headings, however many hashes and in whatever case. */
 const SCENARIO_LINE = /^#{1,6}\s*scenario\s*$/iu;
 const EXPECTED_BEHAVIORS_LINE = /^#{1,6}\s*expected\s+behaviou?rs\s*$/iu;
 
@@ -157,10 +162,23 @@ function frontmatterOf(document: string, where: string): {
   };
 }
 
+/** The last line matching one heading, inside one window of the body. */
+function lastHeadingIn(
+  lines: readonly string[],
+  heading: RegExp,
+  from: number,
+  to: number,
+): number {
+  for (let at = to - 1; at >= from; at -= 1) {
+    if (heading.test((lines[at] as string).trim())) return at;
+  }
+  return -1;
+}
+
 /**
- * The body's three parts.
+ * The body's four parts.
  *
- * The two headings after the scenario are the boundaries, so a scenario that
+ * The three headings after the scenario are the boundaries, so a scenario that
  * has headings of its own inside it keeps them. Anything before a scenario
  * heading — or a body with no heading at all — is read as the scenario, because
  * a file a person started typing is still a file egma should be able to push.
@@ -170,37 +188,45 @@ function frontmatterOf(document: string, where: string): {
  * writes each heading once, which makes first and last the same line in every
  * file egma has written.
  *
- * The mock tools heading is the one egma does not always write, so "the last
- * one" is not enough on its own: a test that overrides nothing and whose prose
+ * The last two headings are the ones egma does not always write, so "the last
+ * one" is not enough on its own: a test that mocks nothing and whose prose
  * quotes the heading has exactly one, and it is the prose's. What settles it is
- * the order egma writes the sections in — mock tools last — so the heading is
- * read as the section's only where it stands below the expected behaviors, and
- * anywhere above them it is prose the scenario keeps.
+ * **the order egma writes the sections in** — scenario, expected behaviors,
+ * mock tools, env. Each heading is read as the section's only inside the window
+ * its own place in that order leaves it, and anywhere above that window it is
+ * prose the section before it keeps.
  */
 function partsOf(body: string): {
   readonly scenario: string;
   readonly behaviors: string;
   readonly mockTools: readonly string[];
+  /** Null where the file carries no env heading at all, which is not `{}`. */
+  readonly env: readonly string[] | null;
 } {
   const lines = body.split("\n");
   const startsAt = lines.findIndex((line) => SCENARIO_LINE.test(line.trim()));
-  const behaviorsAt = lines.findLastIndex((line) =>
-    EXPECTED_BEHAVIORS_LINE.test(line.trim()),
+  const behaviorsAt = lastHeadingIn(lines, EXPECTED_BEHAVIORS_LINE, 0, lines.length);
+  const below = behaviorsAt + 1;
+  const envAt = lastHeadingIn(lines, ENV_LINE, below, lines.length);
+  const mockToolsAt = lastHeadingIn(
+    lines,
+    MOCK_TOOLS_LINE,
+    below,
+    envAt === -1 ? lines.length : envAt,
   );
-  const lastMockTools = lines.findLastIndex((line) => MOCK_TOOLS_LINE.test(line.trim()));
-  const mockToolsAt = lastMockTools > behaviorsAt ? lastMockTools : -1;
 
+  const ends = [behaviorsAt, mockToolsAt, envAt].filter((at) => at !== -1);
   const from = startsAt === -1 ? 0 : startsAt + 1;
-  const scenarioTo = Math.min(
-    behaviorsAt === -1 ? lines.length : behaviorsAt,
-    mockToolsAt === -1 ? lines.length : mockToolsAt,
-  );
-  const behaviorsTo = mockToolsAt === -1 ? lines.length : mockToolsAt;
+  const scenarioTo = ends.length === 0 ? lines.length : Math.min(...ends);
+  const behaviorsTo =
+    mockToolsAt !== -1 ? mockToolsAt : envAt !== -1 ? envAt : lines.length;
+  const mockToolsTo = envAt === -1 ? lines.length : envAt;
 
   return {
     scenario: lines.slice(from, Math.max(from, scenarioTo)).join("\n").trim(),
     behaviors: behaviorsAt === -1 ? "" : lines.slice(behaviorsAt + 1, behaviorsTo).join("\n"),
-    mockTools: mockToolsAt === -1 ? [] : lines.slice(mockToolsAt + 1),
+    mockTools: mockToolsAt === -1 ? [] : lines.slice(mockToolsAt + 1, mockToolsTo),
+    env: envAt === -1 ? null : lines.slice(envAt + 1),
   };
 }
 
@@ -212,11 +238,6 @@ function partsOf(body: string): {
  * empty list and never as a failure: a test with nothing to check is refused at
  * egma's door, in egma's own words, and reading it here is what lets it get
  * there to be refused.
- *
- * **A `[P0]` marker is stripped and the sentence behind it kept.** Format 2
- * wrote one on every line; nothing writes one now, and a file that still has
- * them is a file somebody's repository already holds. Reading it as the
- * sentence it always was is what lets that folder go on working.
  */
 function behaviorsIn(text: string): readonly FileBehavior[] {
   const behaviors: string[] = [];
@@ -238,7 +259,7 @@ function behaviorsIn(text: string): readonly FileBehavior[] {
 /**
  * The personas one file names, in the order it named them.
  *
- * Format 4 accepts a stable `id` plus display `name`, or a name-only authored
+ * Format 5 accepts a stable `id` plus display `name`, or a name-only authored
  * entry that has not been resolved by the platform yet.
  */
 function personasIn(mapping: YamlMapping): readonly FilePersona[] {
@@ -271,17 +292,19 @@ export function parseTestFile(
   fallbackName: string,
 ): TestFile {
   const { mapping, body } = frontmatterOf(document, where);
-  const { scenario, behaviors, mockTools } = partsOf(body);
+  const { scenario, behaviors, mockTools, env } = partsOf(body);
   const writtenFormat = mapping["format"];
   if (writtenFormat !== TEST_FILE_FORMAT) {
     const said =
       typeof writtenFormat === "string" || typeof writtenFormat === "number"
         ? String(writtenFormat)
         : "none";
-    throw new Error(
+    throw new FolderProblem(where, 
       `${where} uses test file format ${said}. This Egma requires format ${String(TEST_FILE_FORMAT)} and has no legacy reader.`,
     );
   }
+  // The env is a section rather than a frontmatter key: it is a whole JSON
+  // value, and the frontmatter carries only what a machine reads at a glance.
   const supported = [
     "format",
     "name",
@@ -292,7 +315,7 @@ export function parseTestFile(
   ];
   const unsupported = Object.keys(mapping).filter((key) => !supported.includes(key));
   if (unsupported.length > 0) {
-    throw new Error(`${where} has unsupported frontmatter: ${unsupported.join(", ")}.`);
+    throw new FolderProblem(where, `${where} has unsupported frontmatter: ${unsupported.join(", ")}.`);
   }
 
   return {
@@ -305,6 +328,7 @@ export function parseTestFile(
     scenario,
     expectedBehaviors: behaviorsIn(behaviors),
     mockTools: readMockTools(mockTools, where),
+    env: env === null ? null : readEnv(env, where),
   };
 }
 
@@ -336,7 +360,7 @@ function oneLine(behavior: string): string {
  * that would read as something else.
  *
  * **No priority marker is written, on any line.** Every expected behavior in
- * format 4 is one blocking statement. Older formats are refused by the parser.
+ * format 5 is one blocking statement. Older formats are refused by the parser.
  */
 export function serializeTestFile(file: TestFile): string {
   const personas = file.personas.filter(
@@ -360,7 +384,7 @@ export function serializeTestFile(file: TestFile): string {
     for (const persona of personas) {
       // The id opens the entry because it is the one egma resolves. A persona
       // Egma has no id for a newly authored persona name until push resolves
-      // it. The name-only mapping is part of format 4, not a legacy reader.
+      // it. The name-only mapping is part of format 5, not a legacy reader.
       const lines =
         persona.id.trim() === ""
           ? [`  - name: ${yamlScalar(persona.name)}`]
@@ -388,10 +412,11 @@ export function serializeTestFile(file: TestFile): string {
     ...(scenario === "" ? [] : [scenario]),
     EXPECTED_BEHAVIORS_HEADING,
     ...behaviors,
-    // Last, and absent altogether on the ordinary test that overrides nothing:
-    // a heading with nothing under it would read as a claim about a mocked
-    // world this test does not make.
+    // Last, and each absent altogether on the ordinary test that says nothing
+    // under it: a heading with nothing under it would read as a claim about a
+    // mocked world, or a world outside the call, that this test does not make.
     ...writeMockTools(file.mockTools),
+    ...writeEnv(file.env),
     "",
   ].join("\n");
 }

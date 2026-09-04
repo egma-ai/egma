@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   cancelRun,
   getRun,
+  getTestVersion,
   listRunEvents,
   listRunSimulations,
 } from "@egma/platform-api/client";
@@ -39,6 +40,7 @@ import {
   NotFound,
 } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
+import { RunNote, type RunNoteTest } from "../../../../../ui/run-note.tsx";
 import {
   RelativeInstant,
   useMinuteClock,
@@ -129,6 +131,163 @@ type LoadedSimulationPage = {
   readonly cursor: string;
   readonly value: RunSimulationPage;
 };
+
+/** How many pinned versions are read at once. Six is polite, not a limit. */
+const TEST_VERSIONS_AT_ONCE = 6;
+
+/**
+ * Every test version this run's simulations pin, from every page of them.
+ *
+ * **The note reads the whole run, and the list on the page does not.** The
+ * simulation list shows the first page and grows on the reader's own Load
+ * more, which is right for a list. The note says "1 of 3 tests carry mock
+ * tools" — a sentence with a denominator in it — so a note counted from the
+ * rows that happen to be on screen would put a wrong number in front of
+ * somebody quietly. It therefore walks the run's simulations to the end on its
+ * own, whatever the list is showing.
+ *
+ * `null` while the pages are still on their way, and `null` for good if one of
+ * them is refused: a run this page cannot count all of is a run it says
+ * nothing about.
+ */
+function usePinnedVersionIds(
+  projectId: string,
+  runId: string,
+  first: RunSimulationPage | null,
+): readonly string[] | null {
+  const [later, setLater] = useState<readonly string[] | null>(null);
+  const firstToken = first?.nextPageToken ?? null;
+
+  useEffect(() => {
+    if (firstToken === null) {
+      setLater([]);
+      return undefined;
+    }
+    let live = true;
+    setLater(null);
+    /*
+     * The read is its own function so the loop below cannot make the answer's
+     * type depend on the cursor the answer sets — a `pageToken` narrowed by
+     * the loop and written by the request is a circle TypeScript refuses to
+     * walk.
+     */
+    const readPage = (pageToken: string) =>
+      platformAnswer(
+        listRunSimulations(
+          { runId, projectId, pageToken },
+          { client: platformClient },
+        ),
+      );
+    void (async () => {
+      const held: string[] = [];
+      let pageToken: string | null = firstToken;
+      // Every page there is, and no cap on how many.
+      while (pageToken !== null) {
+        const next = await readPage(pageToken);
+        if (!live) return;
+        // Left null, which is the note undrawn: a page nobody could read is a
+        // denominator nobody can stand behind.
+        if (next.status !== "ready") return;
+        held.push(...next.value.simulations.map((one) => one.testVersionId));
+        pageToken = next.value.nextPageToken;
+      }
+      if (!live) return;
+      setLater(held);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [firstToken, projectId, runId]);
+
+  if (first === null || later === null) return null;
+  return [...first.simulations.map((one) => one.testVersionId), ...later];
+}
+
+/**
+ * The test versions this run's simulations pinned, read once each.
+ *
+ * **A run's note reads the versions, never the tests.** A simulation is frozen
+ * against the test as it was when the run started, so asking the test now would
+ * describe a run by content it never carried. Nothing is stored: the versions
+ * are read when the page is open and forgotten when it is closed.
+ *
+ * `null` until every version asked for has answered, so the note never counts
+ * "2 of 3" on its way to counting twelve — and `null` when the ids themselves
+ * are still being gathered. A version that is refused leaves the note undrawn
+ * as well: dropping it would quietly shrink the very total the note reads out,
+ * and a smaller number said with confidence is worse than nothing said.
+ */
+function usePinnedTestVersions(
+  projectId: string,
+  versionIds: readonly string[] | null,
+): readonly RunNoteTest[] | null {
+  const [read, setRead] = useState<ReadonlyMap<string, RunNoteTest | null>>(
+    new Map(),
+  );
+  const asked = useRef<Set<string>>(new Set());
+  /* The set as one string, so an effect re-runs on its contents, not its array. */
+  const wanted =
+    versionIds === null ? null : [...new Set(versionIds)].sort().join(",");
+
+  /**
+   * Whether this page is still open.
+   *
+   * **The reads are given up when the page closes, and never when the list of
+   * versions grows.** A version is immutable, so an answer that lands after
+   * another page of simulations has named more of them is still the right
+   * answer for the id it was asked about. Dropping it would leave that id
+   * asked for and never recorded, and the note — which waits for every id it
+   * asked about — would wait for it for as long as the page is open.
+   */
+  const open = useRef(true);
+  useEffect(() => {
+    open.current = true;
+    return () => {
+      open.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (wanted === null) return undefined;
+    const ids = wanted === "" ? [] : wanted.split(",");
+    const missing = ids.filter((id) => !asked.current.has(id));
+    if (missing.length === 0) return undefined;
+    for (const id of missing) asked.current.add(id);
+    void (async () => {
+      for (let at = 0; at < missing.length; at += TEST_VERSIONS_AT_ONCE) {
+        const answers = await Promise.all(
+          missing.slice(at, at + TEST_VERSIONS_AT_ONCE).map(async (versionId) => ({
+            versionId,
+            answer: await platformAnswer(
+              getTestVersion({ versionId, projectId }, { client: platformClient }),
+            ),
+          })),
+        );
+        if (!open.current) return;
+        setRead((held) => {
+          const next = new Map(held);
+          for (const { versionId, answer } of answers) {
+            next.set(
+              versionId,
+              answer.status === "ready"
+                ? { mockTools: answer.value.mockTools, env: answer.value.env }
+                : null,
+            );
+          }
+          return next;
+        });
+      }
+    })();
+    return undefined;
+  }, [wanted, projectId]);
+
+  if (wanted === null) return null;
+  const ids = wanted === "" ? [] : wanted.split(",");
+  if (ids.some((id) => !read.has(id))) return null;
+  const versions = ids.map((id) => read.get(id) ?? null);
+  if (versions.some((one) => one === null)) return null;
+  return versions.filter((one): one is RunNoteTest => one !== null);
+}
 
 function RunDetailView({
   projectId,
@@ -558,6 +717,18 @@ function RunDetailView({
     });
   }
 
+  /*
+   * The versions this run's rows pin, read before the page decides what to
+   * draw — a hook cannot sit past an early return. Every page of simulations
+   * is walked for them, not the pages the reader has asked the list for.
+   */
+  const pinnedVersionIds = usePinnedVersionIds(
+    projectId,
+    runId,
+    simulationPage?.status === "ready" ? simulationPage.value : null,
+  );
+  const noteTests = usePinnedTestVersions(projectId, pinnedVersionIds);
+
   if (answer === null || answer.status === "signed-out") {
     return (
       <ProductPage>
@@ -671,6 +842,17 @@ function RunDetailView({
       <PageBody>
         <div className="min-w-0 min-[901px]:flex min-[901px]:h-full min-[901px]:min-h-0 min-[901px]:flex-col">
           {refused === null ? null : <Refused message={refused.message} />}
+
+          {noteTests === null ? null : (
+            <RunNote
+              className="flex-none pb-4"
+              connection={{
+                connectionType: read.connectionType,
+                accessVariant: read.accessVariant,
+              }}
+              tests={noteTests}
+            />
+          )}
 
           <dl
             className="m-0 grid flex-none grid-cols-5 gap-px border border-border bg-border max-[1000px]:grid-cols-2 max-[40rem]:grid-cols-1"

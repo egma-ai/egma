@@ -78,14 +78,31 @@ In a simulation, `mockable`:
 1. Connects the worker to the room if it is not connected.
 2. Finds the one Egma participant.
 3. Reports the agent's real tool names and schemas.
-4. Installs LiveKit mock couriers only for the names Egma covers.
-5. Follows later agent handoffs in the same session.
-6. Removes all mock state when the session closes or the job stops.
+4. Asks Egma which tools this simulation answers for. Egma replies with exactly
+   the tool names the running test writes under `## Mock tools`.
+5. Installs LiveKit mock couriers for those names only.
+6. Follows later agent handoffs in the same session.
+7. Removes all mock state when the session closes or the job stops.
 
-Tools without a mock keep their real implementation. If Egma becomes
-unreachable during a tool call, that real implementation runs. If Egma receives
-the call and refuses it, the model sees a `ToolError`; the SDK does not hide an
-explicit refusal by causing a real side effect.
+**Egma wraps exactly the tools the running test names. Every other tool runs its
+real implementation, and Egma is not in that path.** A test that names none runs
+your agent against your real backend from end to end.
+
+A mock tool whose name never matches one of your agent's tools runs nothing and
+leaves no trace: the courier waits under a name the model never calls, and the
+record shows no call and no warning. Spell each tool exactly as your agent
+registers it.
+
+If Egma becomes unreachable during a tool call, the real implementation runs. If
+Egma receives the call and refuses it, the model sees a `ToolError`; the SDK does
+not hide an explicit refusal by causing a real side effect.
+
+Where Egma dispatches the job itself — a LiveKit connection that holds your
+project key pair — the worker reads the running test's `job_dispatch_metadata`
+at `ctx.job.metadata`, as one compact JSON string. Egma adds no key of its own
+there and leaves the room's metadata empty. A connection through your own token
+endpoint gets no dispatch from Egma and so carries none. See
+[Agents and connections](/concepts/agents-and-connections).
 
 ### Production safety and process isolation
 

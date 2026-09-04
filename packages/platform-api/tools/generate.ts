@@ -79,12 +79,13 @@ async function generateClient(target: string): Promise<void> {
     "utf8",
   );
 
-  // `oneOf` makes mock-tool answers and errors exclusive on the wire. This
-  // generator renders each closed branch as a structural union, where an
+  // `oneOf` makes a test mock tool's answer and error exclusive on the wire.
+  // This generator renders each closed branch as a structural union, where an
   // object carrying both members still type-checks unless the member forbidden
   // by that branch is `never`. Keep the generated client as strict as the
   // OpenAPI contract. The counts are tied to the pinned generator output so a
-  // new operation or an upstream rendering change must be reviewed.
+  // new operation or an upstream rendering change must be reviewed. One test
+  // mock tool renders one of each, so the two counts move together.
   const generatedTypes = join(target, "types.gen.ts");
   let types = await readFile(generatedTypes, "utf8");
 
@@ -106,20 +107,14 @@ async function generateClient(target: string): Promise<void> {
   replaceExactly(
     /error\?: unknown;/g,
     "error?: never;",
-    17,
+    10,
     "mock-tool forbidden error",
   );
   replaceExactly(
     /answer\?: unknown;(\n\s*error: string;)/g,
     "answer?: never;$1",
-    16,
+    10,
     "mock-tool forbidden answer",
-  );
-  replaceExactly(
-    /answer\?: unknown;(\n\s*error\?: never;)/g,
-    "answer?: never;$1",
-    1,
-    "mock-tool unchanged-answer branch",
   );
   await writeFile(generatedTypes, types, "utf8");
 }

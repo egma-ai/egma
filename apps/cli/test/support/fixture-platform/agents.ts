@@ -316,38 +316,6 @@ function authHeadersJson(what: string, field: string, value: unknown): string {
 }
 
 /**
- * What LiveKit accepts in one metadata field, which is the whole of what egma
- * accepts because egma adds nothing to it. Mirrored from the access layer so
- * the fixture refuses the oversize value the real platform refuses: a fixture
- * that admits what production rejects lets a CLI test register a connection
- * nobody could really have.
- */
-const METADATA_BYTES = 512 * 1024;
-
-/** A JSON object carried as the text it was written as, checked at create. */
-function jsonObjectText(key: string, value: unknown): string {
-  const candidate = typeof value === "string" ? value.trim() : "";
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(candidate);
-  } catch {
-    parsed = undefined;
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Refusal(
-      `the config's ${key} must be a JSON object written in a string, which looks like {"tenant":"acme"}`,
-    );
-  }
-  const bytes = Buffer.byteLength(candidate, "utf8");
-  if (bytes > METADATA_BYTES) {
-    throw new Refusal(
-      `the config's ${key} is ${bytes} bytes and egma admits at most ${METADATA_BYTES} on the room and the dispatch`,
-    );
-  }
-  return candidate;
-}
-
-/**
  * What each connection type is made of, mirroring the registry behind the seam.
  *
  * Phone and LiveKit are here although this Retell path writes neither. They
@@ -475,10 +443,11 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     topology: "agent-dials-out",
     /**
      * Two access variants answer one question: who mints the token that opens
-     * the room. Both name the worker and may carry its metadata: the key-pair
-     * variant dispatches it itself, the endpoint variant asks its endpoint for
-     * it by name in LiveKit's standard token request. Only the key-pair
-     * variant holds a server url — the endpoint's answer names the server.
+     * the room. Both name the worker: the key-pair variant dispatches it
+     * itself, the endpoint variant asks its endpoint for it by name in
+     * LiveKit's standard token request, with the test's job dispatch metadata
+     * on that dispatch. Only the key-pair variant holds a server url — the
+     * endpoint's answer names the server.
      */
     accessVariants: [
       {
@@ -489,11 +458,6 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
           // Demanded: every egma dispatch is explicit, so the record names
           // the agent it graded.
           agentName: nonEmptyString,
-          // Handed to the agent exactly as written, on both of the channels
-          // LiveKit gives an agent to read its per-session context from: the
-          // room's metadata always, and the dispatch's metadata too — the
-          // demanded `agentName` above always names a worker to dispatch.
-          metadata: optional(jsonObjectText),
         },
         credentials: {
           required: true,
@@ -512,11 +476,7 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
         named: "a token-endpoint livekit connection",
         // Speaks both, like the key pair: a chat room is asked for under its
         // marked name, which the endpoint's allowlist matches unchanged.
-        config: {
-          tokenEndpoint: tokenEndpointUrl,
-          agentName: nonEmptyString,
-          metadata: optional(jsonObjectText),
-        },
+        config: { tokenEndpoint: tokenEndpointUrl, agentName: nonEmptyString },
         credentials: {
           required: true,
           fields: ["headers"],

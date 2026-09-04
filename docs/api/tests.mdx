@@ -4,7 +4,7 @@ sidebarTitle: "Tests"
 description: "Create, edit, and list simulation test scenarios. Versioned content stays immutable, and optimistic locking prevents silent overwrites."
 ---
 
-Tests are the simulation scenarios Egma runs against your agents. Each test holds a natural-language scenario, a list of expected behaviors the agent should exhibit, and optional persona and mock-tool overrides. Saving versioned content mints a new immutable **test version** — a frozen record identified by its own `versionId`. A name-only edit does not mint a version. Simulations always execute against exact version IDs, so a later test edit never changes an earlier result.
+Tests are the simulation scenarios Egma runs against your agents. Each test holds a natural-language scenario, a list of expected behaviors the agent should exhibit, the personas who call, and the world the test carries: its `mockTools` and its `env`. Saving versioned content mints a new immutable **test version** — a frozen record identified by its own `versionId`. A name-only edit does not mint a version. Simulations always execute against exact version IDs, so a later test edit never changes an earlier result.
 
 An edit to versioned content requires the `expectedVersionId` you last read. If
 another writer has moved the test forward, Egma refuses with `409 Conflict` and
@@ -45,20 +45,42 @@ test object, including the first `versionId` to use in future edits.
 </ParamField>
 
 <ParamField body="mockTools" type="object[]">
-  Per-test mock-tool overrides. These version with the test and take precedence over the project-level mock tools during a run.
+  The tools this test answers for itself. Egma mocks exactly the tools this list
+  names; every other tool the agent calls runs for real. A test that names none
+  runs against your real tools.
 
-  <Expandable title="mock tool override fields">
+  <Expandable title="mock tool fields">
     <ParamField body="tool" type="string" required>
-      The tool name this override answers for.
+      The tool's name, exactly as the agent registers it. Matching is by name
+      only, so each tool is named at most once in the list.
     </ParamField>
     <ParamField body="answer" type="any">
-      The value to return when the agent calls this tool. Provide either `answer` or `error`, not both.
+      What the tool returns: any JSON value. Send either `answer` or `error`,
+      never both and never neither.
     </ParamField>
     <ParamField body="error" type="string">
-      An error string to return instead of a value.
+      The failure the tool raises, written as text. This is how a test forces
+      the failure branch.
     </ParamField>
-    <ParamField body="delayMs" type="integer">
-      Milliseconds to wait before returning the answer. Useful for testing timeout-handling behavior.
+  </Expandable>
+</ParamField>
+
+<ParamField body="env" type="object | null">
+  The world the test is conducted in: the data the call starts with. At most
+  two keys, each in its own platform's spelling. Send `null`, or leave the
+  field out, for a test that names none.
+
+  <Expandable title="env fields">
+    <ParamField body="retell_dynamic_variables" type="object">
+      The values Retell substitutes into the agent's prompt and tool
+      configuration for this call, as an object of text values, such as
+      `{"caller_name": "Margaret"}`. Every value is text. A name beginning
+      `egma_` is reserved and refused.
+    </ParamField>
+    <ParamField body="job_dispatch_metadata" type="object">
+      The JSON object your LiveKit worker reads at `ctx.job.metadata`, such as
+      `{"tenant": "acme"}`. Egma writes it to the dispatch as one compact JSON
+      string, byte for byte.
     </ParamField>
   </Expandable>
 </ParamField>
@@ -113,7 +135,14 @@ test object, including the first `versionId` to use in future edits.
 </ResponseField>
 
 <ResponseField name="mockTools" type="object[]">
-  Per-test mock-tool overrides. Each entry has `tool`, `answer` or `error`, and `delayMs`.
+  The tools this test answers for itself. Each entry has `tool` and exactly one
+  of `answer` and `error`. Always present; an empty array means the test mocks
+  nothing.
+</ResponseField>
+
+<ResponseField name="env" type="object | null">
+  The world the test carries, with the keys it named. Always present; `null`
+  means the test names none.
 </ResponseField>
 
 <ResponseField name="createdAt" type="string">
@@ -140,10 +169,18 @@ curl -X POST https://your-egma-host/v1/tests \
     ],
     "personas": ["impatient-caller"],
     "mockTools": [
-      { "tool": "check_availability", "answer": { "slots": ["2 p.m.", "4 p.m."] } }
-    ]
+      { "tool": "check_availability", "answer": { "slots": ["2 p.m.", "4 p.m."] } },
+      { "tool": "charge_card", "error": "the payment processor is unreachable" }
+    ],
+    "env": {
+      "retell_dynamic_variables": { "caller_name": "Margaret" },
+      "job_dispatch_metadata": { "tenant": "acme" }
+    }
   }'
 ```
+
+The agent's other tools — `send_confirmation`, whatever else it registers — run
+for real on this test, because the list does not name them.
 
 ---
 
@@ -152,11 +189,11 @@ curl -X POST https://your-egma-host/v1/tests \
 `PATCH /v1/tests/:testId`
 
 Update one or more fields of an existing test. Supply `expectedVersionId` when
-the request changes the scenario, expected behaviors, personas, or Mock Tool
-overrides. If the test has moved on since you read it, Egma returns `409
-Conflict` with both version IDs.
+the request changes the scenario, expected behaviors, personas, mock tools, or
+env. If the test has moved on since you read it, Egma returns `409 Conflict`
+with both version IDs.
 
-Fields you omit are kept as-is. Omitting `personas` leaves the current persona list unchanged; an explicit empty array (`[]`) is refused, because a test always says who calls.
+Fields you omit are kept as-is. Omitting `personas` leaves the current persona list unchanged; an explicit empty array (`[]`) is refused, because a test always says who calls. Omitting `mockTools` or `env` leaves each as it is; `"mockTools": []` mocks nothing, and `"env": null` clears the env.
 
 Sending content byte-identical to the current version mints no new version and
 returns the current version unchanged. Changing only the `name` or `description`
@@ -197,7 +234,13 @@ also mints no new test version because those fields describe the test identity.
 </ParamField>
 
 <ParamField body="mockTools" type="object[]">
-  Replacement mock-tool overrides. Same shape as on create.
+  Replacement list of mock tools. Same shape as on create; it replaces the whole
+  list, not a single entry. Send `[]` to mock nothing.
+</ParamField>
+
+<ParamField body="env" type="object | null">
+  Replacement env. Same shape as on create; it replaces the whole env, not a
+  single key. Send `null` to clear it.
 </ParamField>
 
 <ParamField query="projectId" type="string">
@@ -237,6 +280,31 @@ curl -X PATCH "https://your-egma-host/v1/tests/tst_01abc" \
     ]
   }'
 ```
+
+---
+
+## Mock tool and env refusals
+
+Both fields are checked at save, on create and on edit alike, so the CLI and the
+web app get the same answer. Every refusal is `422 Unprocessable Entity` and
+names what to change.
+
+| Egma refuses | The message |
+| --- | --- |
+| The same tool named twice | `this test answers for "check_availability" twice; mock each tool once` |
+| Both `answer` and `error` on one entry | `mock tool "check_availability" answers with one thing: this one sent both answer and error. Send whichever branch the test needs.` |
+| Neither `answer` nor `error` | `mock tool "check_availability" answers with something: send answer with what the tool returns, or error with the failure it raises. This one sent neither.` |
+| An answer over 15 KiB | `mock tool "check_availability": answer is 16104 bytes once serialized and tagged for the wire, and the exchange that carries it holds at most 15360. An answer that needs more than that is a document rather than a tool answer.` |
+| A key `env` does not carry | `env has no "livekit_room_metadata" in it. An env carries retell_dynamic_variables and job_dispatch_metadata, and nothing else.` |
+| A dynamic variable named `egma_…` | `env.retell_dynamic_variables names "egma_url_book", and Egma keeps every variable beginning "egma_" for the facts it writes into the conversation itself. Name the variable something else.` |
+| A dynamic variable that is not text | `env.retell_dynamic_variables.caller_id is the text Retell substitutes into the prompt, and this request sent number.` |
+| Dispatch metadata holding a lone surrogate | `env.job_dispatch_metadata holds a lone surrogate, which is valid JSON but has no UTF-8 form, so LiveKit could not carry it on the dispatch. Send well-formed text.` |
+| Dispatch metadata over 512 KiB | `env.job_dispatch_metadata is 526336 bytes once serialized, and LiveKit carries at most 524288 on the dispatch; hold a large value in your own store and put its id here instead.` |
+
+The two caps are the transports' own. A mock tool answer is measured as the
+whole `{"answer": …}` exchange the lane sends, in UTF-8 bytes. Dispatch metadata
+is measured on the exact compact JSON string Egma writes to the dispatch, so a
+value that saves can never fail when the job starts.
 
 ---
 
@@ -346,7 +414,11 @@ Retrieve a single frozen version by its `tstv_…` identifier. This is the shape
 </ResponseField>
 
 <ResponseField name="mockTools" type="object[]">
-  The frozen mock-tool overrides.
+  The frozen mock tools, in the shape the test object carries them.
+</ResponseField>
+
+<ResponseField name="env" type="object | null">
+  The frozen env, or `null` where this version names none.
 </ResponseField>
 
 <ResponseField name="createdAt" type="string">

@@ -53,6 +53,7 @@ function platformTest(): Record<string, unknown> {
     expectedBehaviors: ["The agent books Tuesday."],
     personas: [],
     mockTools: [],
+    env: null,
     versionId: VERSION_ID,
     version: 1,
     revision: REVISION,

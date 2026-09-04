@@ -54,10 +54,9 @@ class Assembled:
 
     mock_tools: MockToolSeam = field(default_factory=MockToolSeam)
     """egma's side of the mock-tool exchange, for whichever plug can offer
-    it. Always here and never ``None``, because whether egma really stood
-    in the agent's tool path is the seam's own answer to give — a plug
-    that cannot offer it simply never says it is standing ready, and the
-    record then claims nothing about tools."""
+    it. Always here and never ``None``: a plug that cannot offer it simply
+    never puts it in front of the agent, and the record then carries no
+    call egma answered, because there was none."""
 
     @property
     def recording(self) -> AudioFacts | None:
@@ -69,11 +68,6 @@ class Assembled:
         """The contract's audio block once the exchange is over, else ``None``."""
         measured = self.recording
         return None if measured is None else measured.as_report()
-
-    @property
-    def mock_tool_coverage(self) -> dict | None:
-        """The contract's coverage stamp, or ``None`` where nothing is claimed."""
-        return self.mock_tools.coverage()
 
     def tool_calls(self) -> list[ExchangedToolCall]:
         """Every mock-tool call since this was last asked, and then none."""
@@ -122,10 +116,12 @@ def assemble(
         simulation_id=spec.simulation_id,
         # Handed over exactly as the spec carried them, to every plug, for
         # the same reason the mock-tool seam is: which of them reaches a
-        # platform that keeps versions or renders variables is the plug's
-        # own answer, not a list kept here of the ones that do.
+        # platform that keeps versions, renders variables or dispatches a
+        # worker is the plug's own answer, not a list kept here of the ones
+        # that do.
         agent_version=spec.agent_version,
         dynamic_variables=spec.dynamic_variables,
+        job_dispatch_metadata=spec.job_dispatch_metadata,
         mock_tools=mock_tools,
         media=media,
     )

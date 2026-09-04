@@ -62,10 +62,11 @@ authorization: Bearer <the header you configured>
 | `participant_identity` | The identity Egma joins as. It always starts with `egma-persona-`. |
 | `participant_name` | The same value as the identity, on purpose. Endpoints written against Egma's earlier contract read this key as the identity, so they keep working. A standard endpoint uses it as the display name. |
 | `room_config.agents[0].agent_name` | The LiveKit agent name on the connection. Egma asks your endpoint to dispatch this worker. |
-| `room_config.agents[0].metadata` | The agent metadata on the connection, byte for byte. Sent only when the connection has one. Your worker reads it at `ctx.job.metadata`. |
+| `room_config.agents[0].metadata` | The running test's `job_dispatch_metadata`, as one compact JSON string. Sent only when the test has one. Your worker reads it at `ctx.job.metadata`, exactly as it does when Egma dispatches the worker itself. |
 
 Egma sends nothing else. No persona, no scenario, no participant metadata or
-attributes. The room name is the only signal that a simulation is running.
+attributes. Nothing from the connection rides along beyond the agent name. The
+room name is the only signal that a simulation is running.
 
 What you can hold Egma to:
 
@@ -194,13 +195,13 @@ ID can mint a token with any permissions.
 ## Registering the connection
 
 In the app, choose LiveKit, voice or chat, and the connection type **Token
-endpoint**.
-The form asks for the LiveKit agent name, the token endpoint, the auth headers,
-and optional agent metadata. It does not ask for your LiveKit server URL. Your
-endpoint answers with it.
+endpoint**. The form asks for three things: the LiveKit agent name, the token
+endpoint, and the auth headers. It does not ask for your LiveKit server URL.
+Your endpoint answers with it. What your worker reads at `ctx.job.metadata`
+belongs to each test, as its `job_dispatch_metadata`, not to the connection.
 
-Through the API, `tokenEndpoint` and `agentName` go in the config, `metadata`
-is optional, and the auth headers are a credential:
+Through the API, `tokenEndpoint` and `agentName` go in the config, and the auth
+headers are a credential:
 
 ```bash
 curl -sX POST https://<your egma>/v1/agents \
@@ -216,8 +217,7 @@ curl -sX POST https://<your egma>/v1/agents \
       "modality": "voice",
       "config": {
         "tokenEndpoint": "https://acme.example/egma/livekit-token",
-        "agentName": "front-desk",
-        "metadata": "{\"tenant\":\"acme\"}"
+        "agentName": "front-desk"
       },
       "credentials": {
         "headers": "{\"Authorization\":\"Bearer a-long-random-secret\"}"

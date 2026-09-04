@@ -77,8 +77,8 @@ export type ConfigFieldMetadata = {
   /**
    * Keep a supporting config field after the credential fields when that is
    * the order a person needs to fill the form in. Most config comes first;
-   * this is only for a field such as the agent metadata that completes the
-   * setup.
+   * this is only for a field that completes the setup once the credential is
+   * in, and no shipped field asks for it today.
    */
   readonly afterCredentials?: true;
 };
@@ -829,61 +829,17 @@ export function livekitServerOrigin(url: string): string {
   return parsed.port === "" ? host : `${host}:${parsed.port}`;
 }
 
-/**
- * What LiveKit accepts in any one metadata field, and so what egma accepts.
+/*
+ * **There is no dispatch-metadata config key here.** There was one: a LiveKit
+ * connection carried a JSON object that rode the room's metadata and the
+ * dispatch's, and every run over that connection carried the same one.
  *
- * The same 512 KiB ceiling covers room metadata, participant metadata and the
- * metadata a job is dispatched with. egma carries the stored string onto two
- * of those channels and adds nothing to either, so one number measures both
- * copies and this gate is exactly LiveKit's own.
+ * A test asks for its own now — `env.job_dispatch_metadata` — because what a
+ * worker should be told is a fact about the scenario rather than about the
+ * wiring, and one object per connection could not say two things for two tests.
+ * LiveKit's own 512 KiB ceiling moved with it, to
+ * `LARGEST_JOB_DISPATCH_METADATA_BYTES` beside the test that authors the value.
  */
-const METADATA_BYTES = 512 * 1024;
-
-/**
- * A JSON object, carried as the text it was written as.
- *
- * Text rather than a parsed object because both channels it rides carry it
- * verbatim: the room's metadata and the dispatch's are this string exactly as
- * it arrives, and re-serialising it here would hand the agent something the
- * customer never wrote. Checked all the same, and checked at create: a stray
- * comma refused here is a person looking at their own mistake, while the same
- * comma refused at dispatch is a run that has already started and an agent
- * left to make sense of it.
- *
- * Size is checked here for that same reason. A string LiveKit will not carry
- * is a connection that opens a room, bills for it, and then fails every
- * simulation on it at the dispatch — a refusal nobody can act on from the
- * record it leaves. Measured in UTF-8 bytes, because that is what goes on the
- * wire and not what a character count would suggest.
- */
-function jsonObjectText(key: string, value: unknown): string {
-  const candidate = typeof value === "string" ? value.trim() : "";
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(candidate);
-  } catch {
-    parsed = undefined;
-  }
-
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new AgentWriteRefusedError(
-      "not_admitted",
-      `the config's ${key} must be a JSON object written in a string, which ` +
-        `looks like {"tenant":"acme"}`,
-    );
-  }
-
-  const bytes = Buffer.byteLength(candidate, "utf8");
-  if (bytes > METADATA_BYTES) {
-    throw new AgentWriteRefusedError(
-      "not_admitted",
-      `the config's ${key} is ${bytes} bytes and livekit carries at most ` +
-        `${METADATA_BYTES} on the room and the dispatch; hold a large value ` +
-        `in your own store and put its id here instead`,
-    );
-  }
-  return candidate;
-}
 
 /**
  * Where egma asks the customer for a token, per simulation.
@@ -1294,21 +1250,23 @@ export const CONNECTION_REGISTRY: Readonly<
      * second is an advanced, customer-operated integration for a team that
      * must keep the token-signing secret on its side.
      *
-     * Both variants name the worker, and both may carry the JSON its job
-     * reads. On the key-pair variant egma dispatches the worker itself. On
+     * Both variants name the worker, and on both a test's
+     * `env.job_dispatch_metadata` reaches it. On the key-pair variant egma
+     * dispatches the worker itself and writes the string on that dispatch. On
      * the endpoint variant it asks the endpoint for that worker by name, in
-     * the `room_config` block of LiveKit's standard token request, and the
-     * endpoint copies the block into the token it mints — which is how every
-     * LiveKit frontend dispatches a named agent without holding the key
-     * pair. What the endpoint variant does not hold is a server url: the
-     * endpoint's answer names the server, exactly as LiveKit's standard
-     * token endpoint answers `server_url` beside `participant_token`.
+     * the `room_config` block of LiveKit's standard token request, with the
+     * test's string as that dispatch's metadata; the endpoint copies the
+     * block into the token it mints — which is how every LiveKit frontend
+     * dispatches a named agent without holding the key pair. What the
+     * endpoint variant does not hold is a server url: the endpoint's answer
+     * names the server, exactly as LiveKit's standard token endpoint answers
+     * `server_url` beside `participant_token`.
      *
      * What egma still cannot do on the endpoint variant is create or delete
-     * a room, so the room's own metadata stays the endpoint's. Both variants
-     * speak both modalities: the telling that a simulation is typed is the
-     * room's name, and on the endpoint variant egma asks the endpoint for the
-     * marked name exactly as it asks for the bare one.
+     * a room. Both variants speak both modalities: the telling that a
+     * simulation is typed is the room's name, and on the endpoint variant
+     * egma asks the endpoint for the marked name exactly as it asks for the
+     * bare one.
      */
     accessVariants: [
       {
@@ -1324,21 +1282,12 @@ export const CONNECTION_REGISTRY: Readonly<
           // Every egma dispatch is explicit. Automatic dispatch — the state a
           // blank name would leave the worker in — hands the room to
           // whichever workers are listening, so the record could never say
-          // which agent it graded, and no dispatch would exist for the
-          // configured metadata below to ride on. The name is also how egma
+          // which agent it graded, and no dispatch would exist for a test's
+          // own env to ride on. The name is also how egma
           // knows this worker again: one agent per server and name, however
           // many modalities it is tested in. Asked for once at create instead
           // of missed at run time.
           agentName: nonEmptyString,
-          // Handed to the agent on both of the channels LiveKit gives it to
-          // read its per-session context from, and byte for byte on each:
-          // this string is the room's metadata, and it is the metadata of the
-          // dispatch that names the worker above. egma adds nothing to either
-          // and writes neither out again, so an agent parsing `ctx.job.metadata`
-          // and an agent parsing `ctx.room.metadata` read the same object the
-          // customer configured — and read in a simulation exactly what they
-          // read in production.
-          metadata: optional(jsonObjectText),
         },
         fields: [
           {
@@ -1352,13 +1301,6 @@ export const CONNECTION_REGISTRY: Readonly<
             label: "LiveKit agent name",
             kind: "text",
             help: "The name your worker registers under. Egma dispatches that worker by name for every simulation, so the record names the agent it graded.",
-          },
-          {
-            key: "metadata",
-            label: "Agent metadata",
-            kind: "json",
-            help: 'A JSON object handed to your agent, like {"tenant":"acme"}. The room metadata at ctx.room.metadata carries your string byte for byte, and the dispatch metadata at ctx.job.metadata carries your keys unchanged as well. Egma writes nothing of its own over your keys.',
-            afterCredentials: true,
           },
         ],
         credentialHelp:
@@ -1406,17 +1348,13 @@ export const CONNECTION_REGISTRY: Readonly<
           // the LiveKit server to join, so no url is held here.
           tokenEndpoint: tokenEndpointUrl,
           // Which worker to dispatch. Egma asks the endpoint for it by name,
-          // in the `room_config` of LiveKit's standard token request, and the
-          // endpoint copies that block into the token it mints — so a named
-          // dispatch needs no key pair on egma's side. Demanded for the same
-          // reason as on the key-pair variant: the record names the agent it
-          // graded.
+          // in the `room_config` of LiveKit's standard token request — with
+          // the test's `env.job_dispatch_metadata` as that dispatch's
+          // metadata — and the endpoint copies that block into the token it
+          // mints, so a named dispatch needs no key pair on egma's side.
+          // Demanded for the same reason as on the key-pair variant: the
+          // record names the agent it graded.
           agentName: nonEmptyString,
-          // Handed to the worker as its job metadata, byte for byte, through
-          // the same `room_config` block: `ctx.job.metadata` carries this
-          // string. The job channel only — egma does not create the room on
-          // this variant, so the room's own metadata is the endpoint's.
-          metadata: optional(jsonObjectText),
         },
         fields: [
           {
@@ -1430,13 +1368,6 @@ export const CONNECTION_REGISTRY: Readonly<
             label: "LiveKit agent name",
             kind: "text",
             help: "The name your worker registers under. Egma asks your endpoint to dispatch that worker by name for every simulation, so the record names the agent it graded.",
-          },
-          {
-            key: "metadata",
-            label: "Agent metadata",
-            kind: "json",
-            help: 'A JSON object handed to your agent, like {"tenant":"acme"}. Egma sends it to your endpoint inside room_config, and the dispatch metadata at ctx.job.metadata carries your string byte for byte. Egma writes nothing of its own over your keys.',
-            afterCredentials: true,
           },
         ],
         credentialHelp:

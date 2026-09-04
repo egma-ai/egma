@@ -7,7 +7,8 @@
 # It starts this agent as a real LiveKit worker, conducts one real
 # simulation against it in a real room with `check_availability` answered
 # by a mock tool, and hands back the transcript and the record showing
-# which mock tool answered, with what, and how long it took.
+# which mock tool answered, with what, and how long it took — and the
+# test's own job dispatch metadata read back out of the worker's log.
 #
 # Everything it needs is in one environment file — by default
 # ~/.egma-livekit.env, the same one the README's two-step recipe sources.
@@ -95,9 +96,17 @@ echo "the worker is registered; conducting the simulation"
 # run on the run that went *wrong*: a refusal quoting somebody else's
 # words is the likeliest way a credential ever reaches a log, and that is
 # a thing only a failed run produces.
+#
+# The worker's log path goes to the test, because half of what this run
+# proves happens inside the *customer's* process: the test writes its own
+# job dispatch metadata, egma puts it on the dispatch, and the only place
+# the far side's reading of it is visible is the worker's own output. A
+# test handed the path reads the line back and asserts it; one run by hand
+# without the path says where to look instead.
 conducted=0
 cd "$root/apps/simulator"
-uv run --frozen pytest tests/test_live_mock_tools.py -v -s -rs || conducted=$?
+EGMA_DUMB_AGENT_LOG="$worker_log" \
+  uv run --frozen pytest tests/test_live_mock_tools.py -v -s -rs || conducted=$?
 
 # The one surface the test cannot reach: the log of the *customer's* own
 # process, which is where the SDK does its talking. Each value goes to

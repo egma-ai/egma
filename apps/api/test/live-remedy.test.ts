@@ -4,8 +4,10 @@ import {
   bindingsFor,
   bindingVerdictOf,
   canonicalJson,
-  coverageClassOf,
+  isIntercepted,
+  EGMA_URL_VARIABLE_DEFAULT,
   listRoutedNumbers,
+  mockToolVariable,
   numbersRouting,
   readEngineConfiguration,
   resolveAgentVersion,
@@ -17,8 +19,9 @@ import {
 import { afterAll, describe, expect, it } from "vitest";
 
 /**
- * The real ring: one mocked suite against a live Retell agent, and the proof
- * that production was untouched while it ran.
+ * The real ring: one run whose two tests mock **different** tools of a live
+ * Retell agent, in parallel, on one temporary version — and the proof that
+ * production was untouched while it ran.
  *
  * **Nobody but the developer runs this.** Agents test against fakes only
  * (ruling, 2026-08-28); the live account is the developer's to touch. Every
@@ -36,7 +39,7 @@ import { afterAll, describe, expect, it } from "vitest";
  * EGMA_LIVE_API_KEY=<an Egma project API key> \
  * EGMA_LIVE_AGENT_ID=agt_… \
  * EGMA_LIVE_CONNECTION_ID=con_…   # the agent's retell_web_call connection \
- * EGMA_LIVE_SUITE_ID=ste_…        # a suite with at least one test \
+ * EGMA_LIVE_SUITE_ID=ste_…        # a suite with at least two tests \
  *   npx vitest run --project fast apps/api/test/live-remedy.test.ts
  * ```
  *
@@ -54,56 +57,54 @@ import { afterAll, describe, expect, it } from "vitest";
  * - **Funded model keys** on that deployment, and a simulator running against
  *   it. The simulations are real voice conversations: they spend speech
  *   synthesis, transcription and LLM tokens.
- * - **A mocked lane** — `mockToolsEnabled` on the web-call connection
- *   given — and a `retell_web_call` connection on it. The suite refuses to
- *   turn the tick on for you: consent is the developer's to give.
+ * - **An agent with at least two custom tools**, and a suite with at least two
+ *   tests. The whole point of this proof is two tests mocking different tools
+ *   of one agent at the same time.
  *
  * ## What it does to the account
  *
- * On the **Retell** side it reads. Everything written there is written by Egma's
- * own run lifecycle — one temporary agent version, created and deleted — and the
- * suite's whole job is to watch that happen and check what is left afterwards.
- * It binds no number, publishes nothing, and creates no agent.
+ * On the **Retell** side it only reads. Everything written there is written by
+ * Egma's own run lifecycle — one temporary agent version, created and deleted
+ * — and the suite's whole job is to watch that happen and check what is left
+ * afterwards. It binds no number, publishes nothing, and creates no agent.
  *
- * On the **Egma** side it must leave the account exactly as found too, and it
- * does so **per row, by id — never a project-wide snapshot**. It seeds answers
- * for the interceptable tools and edits two of them — one into an error, one
- * into a delay — and starts one run. A real `finally` (in `afterAll`, so it
- * runs on every failure path) touches only what this suite itself created or
- * changed: it **deletes exactly the rows its own seed created** (identified by
- * the seed's own report of what it added) and **restores exactly the rows it
- * edited, by their id**, to the value each held before the edit — captured at
- * edit time so a rename cannot move the target.
+ * On the **Egma** side it edits the mock tools of the suite's first two tests,
+ * and puts them back. That is where a test's world lives now: there is no
+ * project list and no connection switch, so making one test mock `A` and
+ * another mock `B` **is** editing those two tests. Each edit mints a new test
+ * version, and so does the restore — that is what a versioned test does, and
+ * the developer sees two extra versions on each of the two tests afterwards.
  *
- * And it **reads each of those rows back before it writes**. It undoes a row
- * only while the row still holds exactly what the suite itself left it as; if
- * anyone — the developer, another process — changed even one of the two rows
- * the suite touched, in the window between the suite's edit and its cleanup, the
- * cleanup leaves that change in place and names the row in a warning rather than
- * reverting it. So a developer's own authored answers survive the proof, and a
- * concurrent write is never clobbered.
+ * The teardown (in `afterAll`, so it runs on every failure path) touches only
+ * those two tests, **by id**, and **reads each back before it writes**: it
+ * restores a test only while that test still holds exactly what this suite
+ * left it as. If anyone changed one of them in between, the change is left in
+ * place and named in a warning. The residual is a microsecond between the
+ * re-read and the write; closing it entirely would need a write precondition
+ * the product does not have.
  *
- * **The one residual, stated honestly so nobody re-opens it:** a true
- * microsecond TOCTOU between that re-read and the write remains. Closing it
- * entirely would need a write precondition on mock-tool rows — optimistic
- * concurrency — which the product does not have and which is out of scope for a
- * test. The read-before-write guard narrows the window to that microsecond and
- * never does a blind overwrite; that is as far as a test can take it.
+ * ## What is proved here, and what stays the developer's own hand step
  *
- * ## The script it follows
+ * Proved here: one temporary version for the whole run; every custom tool on
+ * it carrying its own `{{egma_url_…}}` in front of the customer's URL byte for
+ * byte, with the customer's headers and query params untouched; every routing
+ * default stored as exactly one space; both tests running against that one
+ * version; the serving version byte-identical before, during and after; and
+ * the temporary version deleted at the end.
  *
- * The developer's own hand-run of 2026-08-27, step for step:
- * number read → tag resolved → tools read → branch auto-forking the flow →
- * targeted swap → web call against the draft hitting the mock while production
- * stayed on the customer's backend → clean delete. Each step below names which
- * part of that trail it is checking.
+ * **The receiver is the developer's.** Which host each *unmocked* tool call
+ * reached is a fact about the customer's own backend, and no API of Egma's can
+ * read it. Point one of the agent's tools at a receiver you can watch
+ * (webhook.site is what the 2026-09-03 proof used), run this, and check that
+ * the receiver saw exactly the calls of the test that did **not** mock that
+ * tool. This file prints the two tests and the tool each of them mocked, so
+ * there is something to compare the receiver against.
  *
  * ## What to bank when it passes
  *
- * The run's URL, its record — tool facts with `mocked` provenance and the
- * three-class stamp — and the before/after readings of the serving version this
- * file prints. That is the artifact: Egma answered while production served the
- * customer's own backend.
+ * The run's URL, the two version readings this file prints, and the receiver's
+ * log. That is the artifact: two tests of one run answered by Egma for their
+ * own tools while every other call reached the customer's backend.
  */
 
 const NEEDED = [
@@ -129,81 +130,33 @@ const platformAgentId = named("EGMA_LIVE_RETELL_AGENT_ID");
 const RUN_DEADLINE_MILLISECONDS = 20 * 60 * 1000;
 const POLL_MILLISECONDS = 5_000;
 
-/** The delay the suite authors, long enough to be unmistakable on the record. */
-const AUTHORED_DELAY_MILLISECONDS = 3_000;
+/** One mock tool a test carries, in the shape the API reads and writes. */
+type MockTool =
+  | { readonly tool: string; readonly answer: unknown }
+  | { readonly tool: string; readonly error: string };
 
-/** One mock-tool row, in the shape a restore writes it back. */
-type MockToolRow = {
+/** The world one test carries, which is the whole of what this suite edits. */
+type TestWorld = {
   readonly id: string;
-  readonly tool: string;
-  readonly answer?: unknown;
-  readonly error?: unknown;
-  readonly delayMs: number;
+  readonly name: string;
+  readonly mockTools: readonly MockTool[];
+  readonly env: unknown;
 };
 
 /**
- * One row this suite touched, keyed by id, with **what the suite left it as** so
- * the teardown can read-before-write.
+ * One test this suite edited, with **what it left it as**, so the teardown can
+ * read before it writes.
  *
- * - `seeded` — this suite's own seed created it. The teardown deletes it, but
- *   only while it still holds `left`; if it was changed since, it is left alone.
- * - `edited` — a **pre-existing** row this suite changed. The teardown writes
- *   `prior` back, but only while the row still holds `left`; if it was changed
- *   since, `prior` is not written and the concurrent edit stays.
- *
- * `left` is captured after the suite's own edits, so a row the suite seeded and
- * then edited carries the edited value here, not the seed default.
+ * `prior` goes back; `left` is what the row must still hold for the restore to
+ * be safe. A test anyone changed after this suite did is left exactly as found
+ * and named in a warning.
  */
-type Touched =
-  | { readonly kind: "seeded"; left: MockToolRow }
-  | { readonly kind: "edited"; readonly prior: MockToolRow; left: MockToolRow };
+type Touched = { readonly prior: TestWorld; left: TestWorld };
 
-/**
- * What this suite touched on the Egma side, by id — and only that.
- *
- * Every entry is a row this suite itself created or edited. A row it never
- * touched is never here, so a concurrent write to an unrelated row is left
- * completely alone; and the teardown reads each of these back before it writes,
- * so a concurrent write to one of *these* is left alone too.
- */
 const made: {
   runId: string | null;
   readonly touched: Map<string, Touched>;
 } = { runId: null, touched: new Map() };
-
-/** Every mock-tool row the project holds right now, whole, by id. */
-async function mockToolsById(): Promise<Map<string, MockToolRow>> {
-  const listed = await egma("GET", "/v1/mock-tools?pageSize=200");
-  const rows = (listed.body["mockTools"] as MockToolRow[]) ?? [];
-  return new Map(rows.map((row) => [row.id, row]));
-}
-
-/** The body that writes one row back to exactly what it held. */
-function restoreBody(row: MockToolRow): Record<string, unknown> {
-  return {
-    ...("error" in row && row.error !== undefined
-      ? { error: row.error }
-      : { answer: row.answer }),
-    delayMs: row.delayMs,
-  };
-}
-
-/**
- * Whether two rows hold the same authored value — the fields a person edits,
- * plus the tool name, so a rename counts as a change too. `canonicalJson`
- * makes it insensitive to object key order. This is what read-before-write
- * compares: the teardown undoes a row only while it still equals what the suite
- * left it as.
- */
-function sameValue(a: MockToolRow, b: MockToolRow): boolean {
-  const shape = (row: MockToolRow) => [
-    row.tool,
-    row.answer ?? null,
-    row.error ?? null,
-    row.delayMs,
-  ];
-  return canonicalJson(shape(a)) === canonicalJson(shape(b));
-}
 
 async function egma(
   method: "GET" | "POST" | "PATCH" | "DELETE",
@@ -232,11 +185,34 @@ async function egma(
   return { status: response.status, body: held };
 }
 
+/** The suite's tests, in the shape this suite compares and restores them in. */
+async function testsInSuite(): Promise<readonly TestWorld[]> {
+  const listed = await egma(
+    "GET",
+    `/v1/tests?suiteId=${encodeURIComponent(named("EGMA_LIVE_SUITE_ID"))}` +
+      "&pageSize=200",
+  );
+  const rows = (listed.body["tests"] as Record<string, unknown>[]) ?? [];
+  return rows.map((row) => ({
+    id: String(row["id"]),
+    name: String(row["name"]),
+    mockTools: (row["mockTools"] ?? []) as readonly MockTool[],
+    env: row["env"] ?? null,
+  }));
+}
+
+/** Whether a test still holds the world this suite left it holding. */
+function sameWorld(a: TestWorld, b: TestWorld): boolean {
+  return (
+    canonicalJson([a.mockTools, a.env]) === canonicalJson([b.mockTools, b.env])
+  );
+}
+
 afterAll(async () => {
   if (missing.length > 0) return;
   // A run still moving is stopped, so nothing is left conducting against
   // somebody's real agent after the suite has gone. Its own teardown then
-  // deletes the temporary version and puts any pin back, in that order.
+  // deletes the temporary version.
   if (made.runId !== null) {
     const header = await egma("GET", `/v1/runs/${made.runId}`).catch(() => null);
     if (header !== null && header.body["finishedAt"] === null) {
@@ -246,33 +222,25 @@ afterAll(async () => {
     }
   }
 
-  // The Egma side, scoped to exactly the rows this suite created or edited, by
-  // id — never the whole project's table — and **read before it writes**. Each
-  // touched row is re-read; the suite undoes it only while it still holds what
-  // the suite itself left it as. A row anyone changed since is left exactly as
-  // found and named in a warning, so a developer's concurrent edit to even one
-  // of these two rows is never reverted.
-  const current = await mockToolsById().catch(
-    () => new Map<string, MockToolRow>(),
+  // The Egma side, scoped to exactly the two tests this suite edited, by id,
+  // and read before it writes. A test anyone changed since is left as found.
+  const current = new Map(
+    (await testsInSuite().catch(() => [])).map((one) => [one.id, one]),
   );
   for (const [id, touched] of made.touched) {
     const now = current.get(id);
     if (now === undefined) continue; // already gone — nothing to undo.
-    if (!sameValue(now, touched.left)) {
-      // Somebody changed it after the suite did. Leave the change in place.
+    if (!sameWorld(now, touched.left)) {
       console.warn(
-        `[live remedy] mock tool ${id} was changed after the suite left it; ` +
-          "left exactly as found, not reverted.",
+        `[live remedy] test ${id} was changed after the suite left it; left ` +
+          "exactly as found, not reverted.",
       );
       continue;
     }
-    if (touched.kind === "seeded") {
-      await egma("DELETE", `/v1/mock-tools/${id}`).catch(() => undefined);
-    } else {
-      await egma("PATCH", `/v1/mock-tools/${id}`, restoreBody(touched.prior)).catch(
-        () => undefined,
-      );
-    }
+    await egma("PATCH", `/v1/tests/${id}`, {
+      mockTools: touched.prior.mockTools,
+      env: touched.prior.env,
+    }).catch(() => undefined);
   }
 });
 
@@ -292,13 +260,8 @@ function toolPrint(document: Record<string, unknown>, type: string, id: string):
   );
 }
 
-live("a mocked suite against the live agent", () => {
-  it("leaves production exactly as it found it, and proves Egma answered", async () => {
-    // The Egma-side teardown is scoped per row, by id — see `made` and
-    // `afterAll`. Nothing is snapshotted project-wide, so a concurrent write to
-    // an unrelated mock-tool row is never touched. What this suite created is
-    // tracked at seed time (step 2) and what it edits is captured at edit time.
-
+live("two tests mocking different tools, on one temporary version", () => {
+  it("answers each test's own tools, leaves production as it found it", async () => {
     // ── 1. Capture. What the account looks like before Egma touches it. ──
     const listed = await listRoutedNumbers(key);
     expect(listed.kind, JSON.stringify(listed)).toBe("numbers");
@@ -330,85 +293,58 @@ live("a mocked suite against the live agent", () => {
       engine.engineId,
     );
     const declared = toolsOf(before.engine);
+    const interceptable = declared.filter((tool) => isIntercepted(tool));
+    expect(
+      interceptable.length,
+      "this proof needs a live agent with at least two custom tools, so two " +
+        "tests can mock different ones",
+    ).toBeGreaterThanOrEqual(2);
+    const answered = interceptable[0]?.name ?? "";
+    const failing = interceptable[1]?.name ?? "";
     console.log(
       `[live remedy] serving version ${servingVersion}, engine ${engine.type} ` +
         `${engine.engineId} v${String(engine.version)}, ` +
-        `${declared.length} tools`,
+        `${declared.length} tools, ${interceptable.length} of them custom`,
     );
 
-    // ── 2. Author the two answers the hand-run exercised. ──
-    const found = await egma(
-      "POST",
-      `/v1/agents/${named("EGMA_LIVE_AGENT_ID")}/mock-tools:discover`,
-      { seed: true },
-    );
-    expect(found.status, JSON.stringify(found.body)).toBe(200);
-    expect(found.body["mockable"], JSON.stringify(found.body["refusal"])).toBe(
-      true,
-    );
-    const interceptable = (
-      found.body["tools"] as { name: string; coverage: string }[]
-    ).filter((tool) => tool.coverage === "mocked");
+    // ── 2. Give two tests two different worlds. ──
+    //
+    // This is the whole shape the design turns on: one run, two tests, two
+    // different sets of mocked tools, and one temporary version serving both.
+    const tests = await testsInSuite();
     expect(
-      interceptable.length,
-      "the live agent must declare at least two interceptable tools for this suite",
+      tests.length,
+      "this proof needs a suite with at least two tests, so two of them can " +
+        "mock different tools",
     ).toBeGreaterThanOrEqual(2);
+    const first = tests[0];
+    const second = tests[1];
+    if (first === undefined || second === undefined) return;
 
-    // Exactly the rows this suite's own seed created, tracked by id so the
-    // teardown deletes those and nothing else. The seed reports the names it
-    // added — and it never overwrites an authored answer — so a name it reports
-    // is a row it made.
-    const authored = await mockToolsById();
-    const authoredByTool = new Map(
-      [...authored.values()].map((row) => [row.tool, row]),
-    );
-    const seededNames = new Set((found.body["seeded"] as string[]) ?? []);
-    for (const row of authored.values()) {
-      if (seededNames.has(row.tool)) {
-        made.touched.set(row.id, { kind: "seeded", left: row });
-      }
+    const worlds: readonly (readonly [TestWorld, readonly MockTool[]])[] = [
+      [first, [{ tool: answered, answer: { egma_live_remedy: "answered" } }]],
+      [second, [{ tool: failing, error: "the live proof's authored failure" }]],
+    ];
+    for (const [test, mockTools] of worlds) {
+      const patched = await egma("PATCH", `/v1/tests/${test.id}`, { mockTools });
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      made.touched.set(test.id, { prior: test, left: test });
     }
-
-    // The seed above has left one row per interceptable tool. Two of them are
-    // edited into the two answers the hand-run exercised: one that fails, so
-    // the agent's apology is exercised rather than assumed, and one that is
-    // slow, so the market gap — nobody else can make a mock slow — is exercised
-    // on a real call and the latency on the record stays honest.
-    const failing = interceptable[0]?.name ?? "";
-    const slow = interceptable[1]?.name ?? "";
-    // Resolve the row's id **and** record what it held, at edit time. A row the
-    // seed just created is already tracked as `seeded` (deleted at teardown); a
-    // pre-existing one is tracked as `edited` with the value to write back.
-    // Capturing the id here means a later rename cannot move the target.
-    const editTarget = (tool: string): string => {
-      const row = authoredByTool.get(tool);
-      expect(row, `no mock tool answers for ${tool}`).toBeDefined();
-      const id = String(row?.id);
-      if (row !== undefined && !made.touched.has(id)) {
-        made.touched.set(id, { kind: "edited", prior: row, left: row });
-      }
-      return id;
-    };
-
-    const errored = await egma("PATCH", `/v1/mock-tools/${editTarget(failing)}`, {
-      error: "the live proof's authored failure",
-    });
-    expect(errored.status, JSON.stringify(errored.body)).toBe(200);
-
-    const delayed = await egma("PATCH", `/v1/mock-tools/${editTarget(slow)}`, {
-      delayMs: AUTHORED_DELAY_MILLISECONDS,
-    });
-    expect(delayed.status, JSON.stringify(delayed.body)).toBe(200);
-
-    // Record exactly what the suite left every touched row as, now that the
-    // edits have landed. The teardown reads each of these back and undoes it
-    // only while it still equals this — never a blind overwrite of a value
-    // somebody changed since.
-    const afterEdits = await mockToolsById();
+    // What the suite left them as, read back, so the teardown never writes
+    // blind over somebody else's later edit.
+    const afterEdits = new Map(
+      (await testsInSuite()).map((one) => [one.id, one]),
+    );
     for (const [id, touched] of made.touched) {
       const left = afterEdits.get(id);
       if (left !== undefined) touched.left = left;
     }
+    console.log(
+      `[live remedy] test "${first.name}" mocks ${answered}; test ` +
+        `"${second.name}" mocks ${failing}. Every other tool of this agent ` +
+        "reaches your own backend on both — that is what your receiver should " +
+        "show.",
+    );
 
     // ── 3. The run. ──
     const started = await egma("POST", "/v1/runs", {
@@ -427,12 +363,15 @@ live("a mocked suite against the live agent", () => {
     expect(started.body["connectionType"]).toBe("retell_web_call");
     expect(started.body["modality"]).toBe("voice");
 
-    // ── 4. Mid-run: the draft exists, and production does not know about it. ──
+    // ── 4. Mid-run: one temporary version, and production does not know. ──
     const header = await egma("GET", `/v1/runs/${runId}`);
     expect(header.body["agentVersion"]).toBe(servingVersion);
     expect(header.body["tempMockAgentVersionCleanup"]).toBe(false);
     const draftVersion = header.body["tempMockAgentVersion"] as number;
-    expect(draftVersion).not.toBeNull();
+    expect(
+      draftVersion,
+      "the run branched no temporary version, so its tests carried no mock tools",
+    ).not.toBeNull();
     // Branched from the exact version the agent serves.
     expect(draftVersion).toBeGreaterThan(servingVersion);
 
@@ -453,26 +392,42 @@ live("a mocked suite against the live agent", () => {
     );
     expect(draftEngine.kind).toBe("engine");
     if (draftEngine.kind !== "engine") return;
+
+    const capturedByName = new Map(
+      declared.map((tool) => [tool.name, tool.verbatim]),
+    );
     for (const tool of toolsOf(draftEngine.engine)) {
-      if (coverageClassOf(tool) !== "mocked") continue;
-      // Pointed at Egma, with the customer's own credentials stripped.
-      expect(String(tool.verbatim["url"])).toContain(
-        `${named("EGMA_LIVE_API_URL").replace(/\/+$/u, "")}/mock-tools/${runId}/`,
+      if (!isIntercepted(tool)) continue;
+      const captured = capturedByName.get(tool.name);
+      // The one field that moved: the tool's own routing variable, in front of
+      // the customer's own URL, byte for byte.
+      expect(String(tool.verbatim["url"])).toBe(
+        `{{${mockToolVariable(tool.name)}}}${String(captured?.["url"] ?? "")}`,
       );
-      expect(tool.verbatim["headers"]).toEqual({});
-      // Query params go the same way: a static one is a backend constant, and
-      // secrets travel in them.
-      expect(tool.verbatim["query_params"]).toEqual({});
+      // And the two fields that did **not** move. They are what a call this
+      // run does not mock authenticates with, and this version serves those
+      // calls too.
+      expect(
+        canonicalJson(tool.verbatim["headers"]),
+        `${tool.name}'s headers were changed`,
+      ).toBe(canonicalJson(captured?.["headers"]));
+      expect(
+        canonicalJson(tool.verbatim["query_params"]),
+        `${tool.name}'s query params were changed`,
+      ).toBe(canonicalJson(captured?.["query_params"]));
     }
 
-    // Every tool Egma stood in front of, checked against Retell's own answer:
-    // the three classes are computed live and stored nowhere, so the proof is
-    // the draft's own configuration above rather than a record of it.
-    const truth = { mocked: [] as string[], notInterceptable: [] as string[], notInThisVersion: [] as string[] };
-    for (const tool of declared) truth[coverageClassOf(tool)].push(tool.name);
-    expect(truth.mocked.length + truth.notInterceptable.length).toBeGreaterThan(
-      0,
-    );
+    // Every routing variable is declared on the copy, defaulted to exactly one
+    // space — the value the run's own read-back guard refuses anything else
+    // for, checked here against Retell's own answer.
+    const defaults = (draftEngine.engine.document["default_dynamic_variables"] ??
+      {}) as Record<string, unknown>;
+    for (const tool of interceptable) {
+      expect(
+        defaults[mockToolVariable(tool.name)],
+        `${tool.name}'s routing default is not a single space`,
+      ).toBe(EGMA_URL_VARIABLE_DEFAULT);
+    }
 
     // The serving version, mid-run: byte-identical to the capture.
     const during = await readEngineConfiguration(key, engine);
@@ -482,18 +437,17 @@ live("a mocked suite against the live agent", () => {
       toolsBefore,
     );
 
-    // The tag binding, untouched — a tagged number was never pinned.
+    // The tag binding, untouched — Egma writes to no number of the customer's.
     const midRun = await listRoutedNumbers(key);
     expect(midRun.kind).toBe("numbers");
     if (midRun.kind !== "numbers") return;
     for (const captured of bindingsBefore) {
-      if (!captured.verdicts.includes("environment-tag")) continue;
       const now = numbersRouting(midRun.numbers, platformAgentId).find(
         (one) => one.number === captured.number,
       );
       expect(
         JSON.stringify(now?.bindings.map((one) => one.verbatim)),
-        `${captured.number} rides an environment tag and must not be touched`,
+        `${captured.number}'s routing must not be touched`,
       ).toBe(captured.bindings);
     }
 
@@ -530,33 +484,40 @@ live("a mocked suite against the live agent", () => {
       );
       expect(
         JSON.stringify(now?.bindings.map((one) => one.verbatim)),
-        `${captured.number}'s routing was not restored`,
+        `${captured.number}'s routing changed`,
       ).toBe(captured.bindings);
     }
 
-    // ── 7. The record: Egma answered, and says so. ──
-    const simulations = await egma("GET", `/v1/runs/${runId}/simulations?pageSize=200`);
-    const rows = simulations.body["simulations"] as {
+    // ── 7. Both tests really ran, on the one temporary version. ──
+    const simulations = await egma(
+      "GET",
+      `/v1/runs/${runId}/simulations?pageSize=200`,
+    );
+    const rows = (simulations.body["simulations"] ?? []) as {
       id: string;
       modality: string;
-      mockToolCoverage: Record<string, string[]> | null;
+      testId: string;
+      testName: string;
     }[];
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       // Its own unit: a web call, never the phone band.
       expect(row.modality).toBe("voice");
-      const stamp = row.mockToolCoverage;
-      expect(stamp, `simulation ${row.id} carries no coverage stamp`).not.toBeNull();
-      expect(stamp?.notInterceptable).toEqual(truth.notInterceptable);
-      expect(stamp?.notInThisVersion).toEqual(truth.notInThisVersion);
-      expect(stamp?.covered).toContain(failing);
-      expect(stamp?.covered).toContain(slow);
     }
+    const ran = new Set(rows.map((row) => row.testId));
+    expect(ran.has(first.id), `test "${first.name}" conducted nothing`).toBe(
+      true,
+    );
+    expect(ran.has(second.id), `test "${second.name}" conducted nothing`).toBe(
+      true,
+    );
 
     console.log(
-      `[live remedy] finished. ${rows.length} mocked web-call simulations, ` +
-        `temporary version ${draftVersion} deleted, serving version ` +
-        `${servingVersion} byte-identical before and after.`,
+      `[live remedy] finished. ${rows.length} mocked web-call simulations ` +
+        `across ${ran.size} tests, one temporary version (${draftVersion}) ` +
+        `deleted, serving version ${servingVersion} byte-identical before and ` +
+        "after. Now check your receiver: it should show the calls of the test " +
+        "that did not mock its tool, and none of the other's.",
     );
   }, RUN_DEADLINE_MILLISECONDS + 60_000);
 });
@@ -567,11 +528,13 @@ describe("the live suite's own gate", () => {
     // see that the live proof exists and exactly why it did not run.
     expect(NEEDED).toContain("EGMA_LIVE_RETELL_API_KEY");
     expect(NEEDED).toContain("EGMA_LIVE_API_URL");
+    expect(NEEDED).toContain("EGMA_LIVE_SUITE_ID");
     if (missing.length > 0) {
       console.log(
         `[live remedy] skipped — set ${missing.join(", ")} to run it, and put ` +
           "a public tunnel in front of the deployment so Retell can reach the " +
-          "mock endpoint.",
+          "mock endpoint. It edits the mock tools of the suite's first two " +
+          "tests and puts them back.",
       );
     }
   });

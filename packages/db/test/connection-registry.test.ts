@@ -408,8 +408,8 @@ describe("a LiveKit room connection's url", () => {
 describe("a LiveKit room connection's agent name", () => {
   /**
    * Demanded, because every egma dispatch is explicit: the record names the
-   * agent it graded, and the configured metadata always has a dispatch to
-   * ride — where a nameless connection would hand each room to whichever
+   * agent it graded, and a test's own dispatch metadata always has a dispatch
+   * to ride — where a nameless connection would hand each room to whichever
    * worker was listening.
    */
   it("is demanded, and the refusal names the key", () => {
@@ -438,7 +438,7 @@ describe("a LiveKit room connection's agent name", () => {
     ).toEqual(LIVEKIT_CONFIG);
   });
 
-  it("is the one key left that a livekit config no longer marks optional", () => {
+  it("is one of the two keys a livekit config holds, and there is no third", () => {
     expect(() =>
       validConfig("livekit_room", "livekit_room.project_credentials", {
         ...LIVEKIT_CONFIG,
@@ -446,93 +446,26 @@ describe("a LiveKit room connection's agent name", () => {
       }),
     ).toThrow(
       'a LiveKit room connection\'s config has no key "roomName"; it holds ' +
-        "url, agentName, metadata (optional)",
+        "url, agentName",
     );
   });
-});
-
-describe("a LiveKit room connection's metadata", () => {
-  /**
-   * It rides to the agent verbatim, on the room's metadata and on the
-   * dispatch's, so a typo has to die here. Refused at create, a person is
-   * looking at the mistake; refused at dispatch, a run has already started and
-   * the agent is the one confused.
-   */
-  it("may be left out, and is kept exactly as written when it is there", () => {
-    expect(
-      validConfig(
-        "livekit_room",
-        "livekit_room.project_credentials",
-        LIVEKIT_CONFIG,
-      ),
-    ).toEqual(LIVEKIT_CONFIG);
-    expect(
-      validConfig("livekit_room", "livekit_room.project_credentials", {
-        ...LIVEKIT_CONFIG,
-        metadata: '{"tenant":"acme","tier":2}',
-      }),
-    ).toEqual({ ...LIVEKIT_CONFIG, metadata: '{"tenant":"acme","tier":2}' });
-  });
-
-  it("refuses anything that is not a JSON object in a string", () => {
-    for (const metadata of [
-      "tenant=acme",
-      '{"tenant":"acme"',
-      "[1,2,3]",
-      '"acme"',
-      "null",
-      "7",
-      { tenant: "acme" },
-      "",
-    ]) {
-      expect(() =>
-        validConfig("livekit_room", "livekit_room.project_credentials", {
-          ...LIVEKIT_CONFIG,
-          metadata,
-        }),
-      ).toThrow(/config's metadata/);
-    }
-  });
 
   /**
-   * LiveKit carries at most 512 KiB in a metadata field, and egma carries the
-   * stored string onto both of its channels without adding to either, so the
-   * limit checked here is LiveKit's own. A value refused at the dispatch
-   * instead would be a room already opened and every simulation on the
-   * connection failing for a reason the record cannot act on.
-   *
-   * The refusal names the number, because a size refused without one leaves
-   * the customer guessing how much to cut.
+   * The key that used to sit beside these two, and the refusal a config still
+   * carrying it meets. What a worker should be told is a fact about the
+   * scenario, so a test asks for it — `env.job_dispatch_metadata` — and one
+   * object per connection could not have said two things for two tests.
    */
-  it("refuses a value too large for livekit to carry, and says the size", () => {
-    const roomy = `{"tenant":"${"a".repeat(520 * 1024)}"}`;
+  it("has no dispatch metadata beside it any more", () => {
     expect(() =>
       validConfig("livekit_room", "livekit_room.project_credentials", {
         ...LIVEKIT_CONFIG,
-        metadata: roomy,
+        metadata: '{"tenant":"acme"}',
       }),
-    ).toThrow(/the config's metadata is \d+ bytes and livekit carries at most 524288/);
-
-    // Measured in UTF-8 bytes rather than characters, because bytes are what
-    // goes on the wire: this one is under the ceiling in characters and over
-    // it in bytes, and a length check would let it through to the room.
-    const multibyte = `{"tenant":"${"€".repeat(200_000)}"}`;
-    expect(multibyte.length).toBeLessThan(512 * 1024);
-    expect(() =>
-      validConfig("livekit_room", "livekit_room.project_credentials", {
-        ...LIVEKIT_CONFIG,
-        metadata: multibyte,
-      }),
-    ).toThrow(/the config's metadata is \d+ bytes and livekit carries at most 524288/);
-
-    // What a real value looks like beside those two: admitted whole.
-    const ordinary = `{"tenant":"acme","locale":"en-GB"}`;
-    expect(
-      validConfig("livekit_room", "livekit_room.project_credentials", {
-        ...LIVEKIT_CONFIG,
-        metadata: ordinary,
-      }),
-    ).toEqual({ ...LIVEKIT_CONFIG, metadata: ordinary });
+    ).toThrow(
+      'a LiveKit room connection\'s config has no key "metadata"; it holds ' +
+        "url, agentName",
+    );
   });
 });
 
@@ -680,7 +613,7 @@ describe("a livekit connection that names a token endpoint", () => {
   it("holds no server url, and says which keys it holds", () => {
     expect(() => validConfig("livekit_room", "livekit_room.customer_token_endpoint", { ...AT, url: A_URL })).toThrow(
       'a token-endpoint livekit connection\'s config has no key "url"; ' +
-        "it holds tokenEndpoint, agentName, metadata (optional)",
+        "it holds tokenEndpoint, agentName",
     );
   });
 
@@ -695,15 +628,6 @@ describe("a livekit connection that names a token endpoint", () => {
     );
     expect(() => validConfig("livekit_room", "livekit_room.customer_token_endpoint", { tokenEndpoint: AN_ENDPOINT, agentName: "  " })).toThrow(
       /agentName/,
-    );
-  });
-
-  it("carries the worker's metadata when given, as a JSON object in a string", () => {
-    expect(
-      validConfig("livekit_room", "livekit_room.customer_token_endpoint", { ...AT, metadata: '{"tenant":"acme"}' }),
-    ).toEqual({ ...AT, metadata: '{"tenant":"acme"}' });
-    expect(() => validConfig("livekit_room", "livekit_room.customer_token_endpoint", { ...AT, metadata: "tenant=acme" })).toThrow(
-      "the config's metadata must be a JSON object written in a string",
     );
   });
 

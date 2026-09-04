@@ -97,7 +97,7 @@ describe("what a browser is told about a simulation connection", () => {
     expect(phone?.credentialHelp).not.toBe("");
   });
 
-  it("marks an optional config key optional and a demanded one demanded", () => {
+  it("marks every config key a form must demand, and lists no other", () => {
     const keyPair = connectionOptionMetadata().find(
       (one) => one.accessVariant === "livekit_room.project_credentials",
     );
@@ -117,19 +117,10 @@ describe("what a browser is told about a simulation connection", () => {
       label: "LiveKit agent name",
       required: true,
     });
-    // The label and the help both name two channels, because the value rides
-    // on two: the room always, and — the agent name above being demanded —
-    // the dispatch always too. A string promising only the room would send a
-    // customer looking for their JSON in one of the two places it can be.
-    // Metadata is also the optional one, the case that proves a form can
-    // still be told a key may be left out.
-    expect(fields.get("metadata")).toMatchObject({
-      label: "Agent metadata",
-      required: false,
-      afterCredentials: true,
-    });
-    expect(fields.get("metadata")?.help).toContain("ctx.room.metadata");
-    expect(fields.get("metadata")?.help).toContain("ctx.job.metadata");
+    // And nothing else. The dispatch metadata that used to sit here as the
+    // optional third key is a test's own `env.job_dispatch_metadata` now, so a
+    // form drawn from this catalog must not ask a connection for it.
+    expect([...fields.keys()]).toEqual(["url", "agentName"]);
 
     // The endpoint variant holds no server url — its endpoint answers with
     // one — and asks for the same worker name and metadata the key pair does.
@@ -139,21 +130,10 @@ describe("what a browser is told about a simulation connection", () => {
     expect(endpoint?.fields.map((field) => field.key)).toEqual([
       "tokenEndpoint",
       "agentName",
-      "metadata",
     ]);
     expect(
       endpoint?.fields.find((field) => field.key === "agentName"),
     ).toMatchObject({ label: "LiveKit agent name", required: true });
-    expect(
-      endpoint?.fields.find((field) => field.key === "metadata"),
-    ).toMatchObject({
-      label: "Agent metadata",
-      required: false,
-      afterCredentials: true,
-    });
-    expect(
-      endpoint?.fields.find((field) => field.key === "metadata")?.help,
-    ).toContain("ctx.job.metadata");
   });
 
   /**

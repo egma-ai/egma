@@ -8,12 +8,17 @@ Retell is an **agent platform**, not one connection type. Egma registers Retell
 voice agents and can create several simulation connections on one Egma agent.
 Production monitoring is a separate agent-level setup.
 
-| Purpose | Path | Connection | Default mock-tool state |
+| Purpose | Path | Connection | What the test's world does here |
 |---|---|---|---|
-| Simulation | Text | `retell_text_mode` | On; answers ride with each text request |
-| Simulation | Web call | `retell_web_call` | Raw setup creates the connection with mock tools off |
-| Simulation | Phone | `phone_number` | Never mockable; the call reaches real tools |
+| Simulation | Text | `retell_text_mode` | The test's mock tools ride every request; its `retell_dynamic_variables` ride with them |
+| Simulation | Web call | `retell_web_call` | The test's mock tools are routed to Egma per call; its `retell_dynamic_variables` ride on the call |
+| Simulation | Phone | `phone_number` | Neither. The call reaches your real tools, and the run says so |
 | Production monitoring | Retell call-history polling | No simulation connection | Not applicable |
+
+**Only what a test names is mocked. Every other tool runs for real**, against
+your own backend, on every lane. A test that names no mock tool runs against
+your serving agent exactly as a caller does. See
+[Test files](/cli/test-files) for how a test writes them.
 
 ## Before setup
 
@@ -122,9 +127,10 @@ product_label: Retell web call
 connection_modality: voice
 ```
 
-Raw connection setup creates a web-call connection with mock tools off.
-Turning them on requires a separate explicit platform change because a mocked run
-temporarily writes and later restores a Retell version.
+Whether a simulation is mocked is a fact of the test it runs: a test that names
+mock tools is mocked here, and a test that names none is placed against your
+serving agent. The connection itself holds no such setting. See
+[How a mocked web call reaches Egma](#how-a-mocked-web-call-reaches-egma).
 
 ### Retell phone
 
@@ -140,10 +146,12 @@ product_label: Retell phone
 connection_modality: voice
 ```
 
-Phone simulations reach the real public number and real tools. Before every
-phone run, the coding agent must state the suite, target, and expected
-simulation count, warn that real calls can cost money, and obtain fresh run
-approval.
+Phone simulations reach the real public number and real tools. **The phone lane
+never mocks**, and it carries no dynamic variables of a test's. A run over a
+phone connection whose tests carry either still runs, and the run says which
+tests reach real tools. Before every phone run, the coding agent must state the
+suite, target, and expected simulation count, warn that real calls can cost
+money, and obtain fresh run approval.
 
 The Egma deployment needs a complete telephony route before Egma can start a
 phone simulation.
@@ -210,19 +218,71 @@ you make while the run is in flight cannot change what it is testing, and the
 run record carries that number — which is how a result read months later still
 says which version of the agent it speaks for.
 
-## What a mocked run leaves behind
+## How a mocked web call reaches Egma
 
-A mocked web-call run creates a temporary draft version of your agent, points
-the tools it can intercept at Egma, and deletes that draft when the run ends.
-Deleting it leaves one thing: Retell keeps the unused copy of the conversation
-flow the draft ran on, and Retell offers no way to delete a single flow version.
-Nothing can route callers to that copy — a phone number or a tag can only point
-at a live agent version — and it does not appear in the Retell dashboard. Egma
-records its version number on the run so you can see exactly what was left.
+Retell calls the tool URLs written in your agent's configuration, so Egma routes
+a mocked call through that configuration. It decides which tools come to Egma
+per call, on one temporary version.
 
-While a mocked run is in flight the temporary draft is your agent's Latest
+**One temporary version per run.** At run start, and only when at least one
+test in the run names a mock tool, Egma branches one temporary version of your
+agent. Every custom tool's URL on it becomes its own per-call variable followed
+by your original URL, byte for byte — `{{egma_url_book_appointment}}` in front
+of what you wrote, your own variables inside it included. **Headers and query
+parameters are left exactly as they are**, because that same version also
+serves the tools your tests do not name, and those calls must authenticate as
+production does. Each routing variable is written with a single-space default.
+Egma reads the version back and refuses the run if a default came back trimmed.
+
+**Egma decides per call.** On every call it creates, Egma passes every routing
+variable explicitly: the address of Egma's own endpoint for the tools this
+simulation's test names, and the empty string for every other tool. An empty
+value renders to nothing and leaves your own URL exactly as you wrote it, so
+**an unmocked tool goes straight to your backend and never reaches Egma**. The
+mocked address ends in `#`, so your original URL trails behind it as a fragment
+that no HTTP client sends.
+
+**Your serving version is never changed.** The temporary version is a branch.
+Simulations of tests that mock are placed against it; a test that names no mock
+tool is placed against your serving version, the one a real caller reaches,
+even inside a run that branched a copy.
+
+**Two things Egma never intercepts.** Retell's built-in actions — transfer,
+SMS, digit press, end call, its own booking — run inside Retell's own
+infrastructure, and MCP tools are reached over their own protocol. Neither is a
+webhook with a URL, so both run for real on every simulation, mocked or not.
+
+**Before it writes anything, Egma can refuse the run.** Two custom tools whose
+names would route through one variable, or a tool whose routing variable name
+you already use as a dynamic variable of your own, both make a call land
+somewhere nobody chose. Egma writes nothing, stops, and names the tools to
+rename.
+
+### What a mocked run leaves behind
+
+Egma deletes the temporary version when the run ends, and reads the account back
+to prove it is gone. Deleting it leaves one thing: Retell keeps the unused copy
+of the response engine that version ran on, and offers no way to delete just
+that copy. Nothing can route callers to it — a phone number or a tag can only
+point at a live agent version — and it does not appear in the Retell dashboard.
+Egma records its version number on the run so you can see exactly what was left.
+
+While a mocked run is in flight the temporary version is your agent's Latest
 Created version. Make sure no phone number or tag sends real callers to Latest
 Created; leaving a number's version unset means Latest Created too.
+
+### Dynamic variables per test
+
+A test's `env` carries `retell_dynamic_variables`: the values Retell
+substitutes into the agent's prompt and tool configuration for that call, as
+text. Egma passes them on every text-mode request and on every web call it
+creates, so one test is a known caller and another is a stranger without
+touching your agent.
+
+**The `egma_` prefix is reserved.** Egma's own routing variables are named
+`egma_url_<tool>`, and they ride the same per-call variable set, so a test that
+names a variable beginning `egma_` is refused when it is saved. Name the
+variable something your own prompt uses.
 
 ## Author, validate, and run tests
 

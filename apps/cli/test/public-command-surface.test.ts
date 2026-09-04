@@ -124,6 +124,34 @@ describe("the skills-first public command surface", () => {
     );
   });
 
+  it.each([
+    { words: ["agent", "register"], named: ["--platform", "livekit"] },
+    { words: ["agent", "connection", "add"], named: ["--agent", "agt_one"] },
+  ])(
+    "refuses the removed --metadata option on `egma $words`",
+    async ({ words, named }) => {
+      // The LiveKit room's metadata field is gone from the catalog. What a test
+      // hands the job is the test's own env now, and it rides the test's file.
+      const help = await egma([...words, "--help"]);
+      expect(help.stdout).not.toContain("--metadata");
+
+      const result = await egma([
+        ...words,
+        ...named,
+        "--access",
+        "livekit-project-credentials",
+        "--modality",
+        "voice",
+        "--metadata",
+        "must-not-be-repeated",
+      ]);
+      expect(result.code).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("--metadata");
+      expect(result.stderr).not.toContain("must-not-be-repeated");
+    },
+  );
+
   it.each(["connect", "monitoring", "livekit", "validate", "status", "personas"])(
     "refuses the removed root command `%s`",
     async (command) => {

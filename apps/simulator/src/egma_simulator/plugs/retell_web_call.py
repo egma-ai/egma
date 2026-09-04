@@ -124,6 +124,7 @@ class RetellWebCall:
         simulation_id: str,
         agent_version: object = None,
         dynamic_variables: object = None,
+        job_dispatch_metadata: object = None,
         mock_tools: object = None,
         media: object = None,
         driver: Any = None,
@@ -133,8 +134,9 @@ class RetellWebCall:
         # path: a mocked Retell world answers from egma's own endpoint,
         # which the agent reaches over the internet and not across the
         # room, so the seam is taken and dropped and the record claims
-        # nothing about tools.
-        del media, mock_tools
+        # nothing about tools. It dispatches no worker either, so the half
+        # of the test's env that rides a job dispatch has nowhere to go.
+        del media, mock_tools, job_dispatch_metadata
 
         if access_variant != "retell_web_call.api_key":
             raise PlugError(

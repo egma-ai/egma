@@ -1,4 +1,4 @@
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -69,6 +69,7 @@ type RemoteTest = {
   readonly expectedBehaviors: readonly string[];
   readonly personas: readonly unknown[];
   readonly mockTools: readonly unknown[];
+  readonly env: unknown;
   readonly versionId: string;
   readonly version: number;
   readonly revision: string;
@@ -185,10 +186,6 @@ function remoteApi(input: {
         nextPageToken: null,
       });
     }
-    if (request.method === "GET" && requested.pathname === "/v1/mock-tools") {
-      return new JsonResponse({ mockTools: [], nextPageToken: null });
-    }
-
     throw new Error(`Unexpected request: ${request.method} ${request.url}`);
   };
 
@@ -226,7 +223,8 @@ const BOOKS_A_VISIT = {
   scenario: "The caller asks for Tuesday.",
   expectedBehaviors: ["The agent books Tuesday."],
   personas: [],
-  mockTools: [],
+  mockTools: [{ tool: "calendar", answer: { slots: [] } }],
+  env: { retell_dynamic_variables: { caller_name: "Margaret" } },
   versionId: VERSION_ID,
   version: 1,
   revision: REVISION,
@@ -461,10 +459,19 @@ describe("skills-first init and pull", () => {
       platform: "retell",
       connections: [{ id: FIRST_CONNECTION, name: "Text" }],
     });
-    expect(
-      (await readRepository(folderPathsIn(workspace.dir))).suites[0]?.tests[0]?.test
-        .name,
-    ).toBe("Books a visit");
+    // The test's own world comes down with it: init pulls both sections into
+    // the one file, and there is no second file for either.
+    const pulled = (await readRepository(folderPathsIn(workspace.dir))).suites[0]
+      ?.tests[0]?.test;
+    expect(pulled?.name).toBe("Books a visit");
+    expect(pulled?.mockTools).toEqual([{ tool: "calendar", answer: { slots: [] } }]);
+    expect(pulled?.env).toEqual({ retell_dynamic_variables: { caller_name: "Margaret" } });
+    // Nothing project-wide is written beside the tests: a test carries its own
+    // world, so there is no second file for a reader to wonder about.
+    expect((await readdir(folderPathsIn(workspace.dir).root)).sort()).toEqual([
+      "config.yaml",
+      "tests",
+    ]);
     expect(io.out.at(-1)).toBe("status: pulled");
   });
 

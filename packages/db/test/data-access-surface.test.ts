@@ -98,9 +98,9 @@ const WORK_DISPATCHING = [
   "resolveSimulationStanding",
   // The mock endpoint's own context, derived the same way and for the same
   // reason: the caller is the customer's agent platform, holding no credential
-  // of egma's, so the run and simulation the URL names are the whole authority.
-  // It answers the three gates and the answers this simulation is served, and
-  // nothing else about the customer.
+  // of egma's, so the simulation the URL names is the whole authority. It
+  // answers the gates and the answers that simulation's pinned test version
+  // carries, and nothing else about the customer.
   "resolveMockToolCall",
   "recordMockState",
   "claimMockDraftFor",
@@ -168,7 +168,6 @@ const CONTEXT_REQUIRING = [
   "createApiKey",
   "createInvitation",
   "createCustomLlmGrader",
-  "createMockTool",
   "createPersona",
   // A predefined definition grades nothing until a project has a
   // `project_grader` policy for it. Project creation adds the fixed Expected
@@ -179,14 +178,9 @@ const CONTEXT_REQUIRING = [
   "archiveAgent",
   "archiveConnection",
   "deactivateUser",
-  // The library's delete, which in v0 exists to refuse: every entry on the
-  // shelf is one egma ships, and egma's are undeletable because the next boot
-  // writes them again.
-  "deleteMockTool",
   "deleteTest",
   "deleteTestSuite",
   "editProjectGrader",
-  "editMockTool",
   "editPersona",
   "forkPersona",
   "editTest",
@@ -228,7 +222,6 @@ const CONTEXT_REQUIRING = [
   "listGradingJobsForSimulation",
   "listMembers",
   "listTestVersions",
-  "listMockTools",
   "listPendingInvitations",
   "listPersonas",
   "listPersonaVersions",
@@ -306,10 +299,10 @@ const CONTEXT_REQUIRING = [
   "renameTestSuite",
   "renewMonitoringLease",
   "runAlreadyStartedFor",
-  // The same translation for a mock tool's scope: names off a reviewed file
-  // turned into the agents it applies to. It reads agents and nothing else, and
-  // only ones the context already reaches.
-  "resolveMockToolAgents",
+  // Whether any simulation of one run pins a test version that mocks
+  // something — the question the run-start machinery asks before it branches a
+  // temporary copy of the customer's agent, asked of the run's own rows.
+  "runCarriesMockTools",
   // Names off a reviewed file turned into the identity a version names. It
   // reads personas and nothing else, and only ones the context already reaches.
   "resolvePersonaNames",
@@ -465,10 +458,6 @@ const VALUES = [
   // class because it is not a fault and not a bad request: the agent is busy,
   // and the next move is to wait and start again.
   "MockDraftFenceBusyError",
-  // A second answer for a tool this project already answers for. Its own class
-  // because nothing about the body is wrong and something is already there,
-  // which is a different answer in kind.
-  "MockToolTakenError",
   "NotPermittedError",
   // A record naming a field longer than the column it would be filed in. Its
   // own class because it is about the evidence rather than about the store:
@@ -540,12 +529,12 @@ const VALUES = [
   // for — never a config or a credential.
   "connectionTypeReadsPlatformAtRunStart",
   "connectionTypeBranchesMockDraft",
-  // Which kinds may carry the mock-tools switch at all, asked by the door that
-  // writes one. A phone connection can never hold it, and saying so from the
-  // registry keeps the write and the CHECK on the column agreeing.
-  "connectionTypeCarriesMockSwitch",
-  "MOCK_SWITCHED_CONNECTION_TYPES",
   "DRAFT_MOCK_CONNECTION_TYPES",
+  // The lanes on which Egma is in the tool path at all, so the claim that
+  // hands a simulator its answers and the package that decides who branches a
+  // copy read one list. A list of connection types, never a config or a
+  // credential.
+  "LANES_SERVING_MOCK_TOOLS",
   "connectionTypeUsesPlatformCarrier",
   // Which connection lanes a run over them builds a mocked world for. Two
   // names and no gate: the gate itself is a condition inside the claim, where
@@ -582,37 +571,32 @@ const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS"];
 const THE_RETELL_BUDGET = ["MOST_RETELL_CALL_ATTEMPTS", "DRAIN_ADVISORY_LOCK"];
 
 /**
- * What a mock tool's answer may cost the exchange that carries it, and the two
- * pure functions that read one.
+ * What a test's own world may cost the wire that carries it, and the record of
+ * the temporary agent a mocked run built.
  *
- * The two numbers are exported for the reason the read limits above are: a
- * refusal has to say what the cap is, and a cap named in two places is a cap
- * that will one day disagree with itself. `resolveMockTools` is the fold's
- * shape exactly — a snapshot a caller already holds goes in, the answers one
- * simulation is served come out — and it is exported because merging a project
- * default with a test override has to happen in exactly one place.
+ * The three numbers and the serializer are exported for the reason the read
+ * limits above are: a refusal has to say what the cap is, and a cap named in
+ * two places is a cap that will one day disagree with itself. The dispatch
+ * metadata is measured on the very string egma sends, so the serializer crosses
+ * the boundary with the number that measures it.
+ *
+ * The put-it-back note is pure both ways: a stored value or a set of classes
+ * goes in, a checked shape comes out, and no store is touched. It crosses
+ * because both halves of it are in two packages — a platform read produces the
+ * classes and this module stores them — and a second implementation would be a
+ * second answer about what a run promised to put back.
  */
 const THE_MOCKED_WORLD = [
   "LARGEST_MOCK_TOOL_ANSWER_BYTES",
-  "LONGEST_MOCK_TOOL_DELAY_MILLISECONDS",
-  "NO_MOCK_TOOLS",
-  "isErrorAnswer",
-  "resolveMockTools",
-  // The coverage stamp's vocabulary and its serialization, and the record of
-  // the temporary world a run built. Pure both ways: a stored value or a set of
-  // classes goes in, a checked shape comes out, and no store is touched. They
-  // cross the boundary because both halves of each are in two packages — a
-  // platform read produces the classes and this module stores them — and a
-  // second implementation of either would be a second answer about how isolated
-  // a simulation was.
-  "NO_MOCK_TOOL_COVERAGE",
-  // The world a version-pinned run reads rather than builds: the same two
-  // folds as the mocked world beside them, over the record that says which
-  // version a run conducts against and what that version's tools are.
-  "mockToolCoverageFrom",
-  "mockToolCoverageRow",
+  "LARGEST_JOB_DISPATCH_METADATA_BYTES",
+  "RESERVED_ENV_VARIABLE_PREFIX",
+  "serializedJobDispatchMetadata",
   "mockMetadataFrom",
   "mockMetadataRow",
+  // The note has two readers and two shapes: the run model keeps the routing
+  // variables, because the claim fills every one of them on every call it
+  // creates, and the API publishes the engine capture alone.
+  "mockMetadataAsPublished",
 ];
 
 /**

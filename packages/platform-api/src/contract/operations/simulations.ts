@@ -15,11 +15,7 @@ import {
   gradingStateSchema,
   normalizedScoreSchema,
 } from "./grades.ts";
-import {
-  mockToolCoverageSchema,
-  mockToolSchema,
-  simulationStatusSchema,
-} from "./runs.ts";
+import { simulationStatusSchema } from "./runs.ts";
 
 const stringSchema = { type: "string" } as const;
 const integerSchema = { type: "integer" } as const;
@@ -41,6 +37,15 @@ const traceSpanSchema = {
     toolName: stringSchema,
     toolArguments: stringSchema,
     toolResult: stringSchema,
+    /**
+     * That egma itself answered this tool call, when it did.
+     *
+     * The one value is `mocked`, and the key is absent on every other span. A
+     * real call is the ordinary case and says nothing extra; a mocked one is
+     * the fact a reader of a transcript needs, because the answer they are
+     * looking at came from the test rather than from their own backend.
+     */
+    toolProvenance: { type: "string", enum: ["mocked"] },
     spans: arrayOf(traceSpanReference),
   },
   required: [
@@ -124,20 +129,6 @@ const gradingPlanSchema = {
     items: arrayOf(planItemSchema),
   },
   required: ["state", "capturedAt", "items"],
-  additionalProperties: false,
-} as const;
-
-const mockToolDefaultSchema = {
-  type: "object",
-  properties: {
-    ...mockToolSchema.properties,
-    mockToolId: stringIdSchema,
-  },
-  required: [...mockToolSchema.required, "mockToolId"],
-  oneOf: [
-    { type: "object", required: ["answer"] },
-    { type: "object", required: ["error"] },
-  ],
   additionalProperties: false,
 } as const;
 
@@ -263,16 +254,6 @@ const simulationSchema = {
       ],
       additionalProperties: false,
     },
-    mockToolCoverage: nullable(mockToolCoverageSchema),
-    mockTools: {
-      type: "object",
-      properties: {
-        defaults: arrayOf(mockToolDefaultSchema),
-        overrides: arrayOf(mockToolSchema),
-      },
-      required: ["defaults", "overrides"],
-      additionalProperties: false,
-    },
     gradingPlan: nullable(gradingPlanSchema),
     transcript: nullable(transcriptSchema),
   },
@@ -300,8 +281,6 @@ const simulationSchema = {
     "agent",
     "connection",
     "connectionSnapshot",
-    "mockToolCoverage",
-    "mockTools",
     "gradingPlan",
     "transcript",
   ],

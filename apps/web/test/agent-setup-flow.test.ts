@@ -8,8 +8,6 @@ import {
   retellCandidateForLane,
   retellCandidateValue,
   retellCandidatesForPlan,
-  retellLaneBranchesDraft,
-  retellLaneMocksTools,
   RETELL_LANES,
   RETELL_LANE_HELP,
   RETELL_LANE_LABELS,
@@ -219,26 +217,13 @@ describe("the goal-first agent setup plan", () => {
     expect(RETELL_LANE_HELP.phone).toContain("real tools");
   });
 
-  it("says which lanes can answer tools with test data, and which branches a draft", () => {
-    // The phone lane dials the customer's own published number, so what
-    // answers is their real agent with their real tools: it is never asked the
-    // mock question rather than asked and refused.
-    expect(retellLaneMocksTools("text")).toBe(true);
-    expect(retellLaneMocksTools("web-call")).toBe(true);
-    expect(retellLaneMocksTools("phone")).toBe(false);
-
-    // Only the web call branches a version. A text run carries its mocked
-    // answers on each request, so nothing is written to the Retell account and
-    // there is no draft for a number or a tag to reach.
-    expect(retellLaneBranchesDraft("web-call")).toBe(true);
-    expect(retellLaneBranchesDraft("text")).toBe(false);
-    expect(retellLaneBranchesDraft("phone")).toBe(false);
-  });
-
-  it("says mocking is supported on the two lanes that support it", () => {
-    expect(RETELL_LANE_HELP.text).toContain("Supports mocking of tools");
-    expect(RETELL_LANE_HELP["web-call"]).toContain("Supports mocking of tools");
-    expect(RETELL_LANE_HELP.phone).not.toContain("mocking");
+  it("says nothing about mocking, because mock tools belong to the test", () => {
+    // What a lane does with a test's mock tools is a fact about a run, said by
+    // the run note where a run is started. A lane's help line answering it
+    // would be answering a question this flow no longer asks.
+    for (const lane of RETELL_LANES) {
+      expect(RETELL_LANE_HELP[lane]).not.toContain("mock");
+    }
   });
 
   it("maps every lane to the one candidate that saves it", () => {
@@ -280,14 +265,6 @@ describe("the goal-first agent setup plan", () => {
     expect(stepAfterRetellLanes("text")).toBeNull();
     expect(stepAfterRetellLanes("web-call")).toBeNull();
     expect(stepAfterRetellLanes("phone")).toBe("retell-phone");
-  });
-
-  it("never lets Back cross the write the mock question is about", () => {
-    // The connection exists before that screen appears, and its tools are read
-    // against it.
-    expect(
-      previousAgentSetupStep({ step: "retell-mocks", goal: "simulation" }),
-    ).toBeNull();
   });
 
   it("defines the approved screen graph without putting screen order in provider payloads", () => {

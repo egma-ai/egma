@@ -1,0 +1,59 @@
+{
+  "contract_version": 5,
+  "simulation_id": "sim_01K6VC6T5Q1H9NCEXR3WMB7JZD",
+  "modality": "voice",
+  "connection": {
+    "agent_platform": "livekit",
+    "connection_type": "livekit_room",
+    "access_variant": "livekit_room.project_credentials",
+    "config": {
+      "url": "wss://lakeside-dental.livekit.cloud",
+      "agentName": "front-desk"
+    },
+    "credentials": {
+      "apiKey": "APIexample0key0",
+      "apiSecret": "example0secret0value0not0a0real0one"
+    }
+  },
+  "persona": {
+    "name": "Eleanor",
+    "personality": "Retired teacher, 68, calling from a quiet kitchen. Polite, thorough, repeats details back to be sure she has them right.",
+    "language": "en-US"
+  },
+  "scenario": {
+    "instructions": "Your six-month check-up is on Tuesday and you now have to be somewhere else that morning. You want it moved to any Thursday in the next month. Find out what the practice offers you when the diary turns out to be full."
+  },
+  "limits": {
+    "max_duration_seconds": 600,
+    "max_turns": 40
+  },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "adapter": "openai_chat_completions",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": {
+      "provider": "deepgram",
+      "model": "nova-3-general",
+      "adapter": "deepgram",
+      "key": "fixture-not-a-real-secret-stt"
+    },
+    "tts": {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "adapter": "cartesia",
+      "voice_id": "measured-alto-3",
+      "speed": 0.95,
+      "key": "fixture-not-a-real-secret-tts"
+    }
+  },
+  "mock_tools": [
+    {
+      "tool_name": "check_calendar",
+      "answer": { "answer": { "slots": [] } },
+      "delay_milliseconds": 250
+    }
+  ]
+}

@@ -60,10 +60,8 @@ export async function runPullCommand(options: FolderCommandOptions): Promise<num
       options.out(`file: ${draft.shown}`);
       options.out(`reason: ${draft.reason}`);
     }
-    for (const tool of report.mockTools) options.out(`mock-tool: ${tool}`);
     options.out(`suites: ${report.suites.length}`);
     options.out(`tests: ${report.tests.length}`);
-    options.out(`mock-tools: ${report.mockTools.length}`);
     options.out(`agents: ${targets.agents.length}`);
     options.out("status: pulled");
     return FOLDER_EXIT.done;

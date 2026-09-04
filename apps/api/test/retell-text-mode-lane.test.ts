@@ -210,18 +210,23 @@ function retell(plan: RetellPlan = {}): {
   return { fetchImpl, asked };
 }
 
+/**
+ * What a test carries with it: the tools it mocks and the world it is
+ * conducted in. Absent means a test that carries neither, which is most.
+ */
+type TestWorld = {
+  readonly mockTools?: readonly Record<string, unknown>[];
+  readonly env?: Record<string, unknown> | null;
+};
+
 /** A customer with a suite, a persona and a test — everything a run needs. */
 async function aCustomerReadyToRun(
   label: string,
-  connection:
-    | typeof TEXT_MODE
-    | typeof RETELL_CHAT
-    | ((typeof TEXT_MODE | typeof RETELL_CHAT) & {
-        readonly mockToolsEnabled: boolean;
-      }),
+  connection: typeof TEXT_MODE | typeof RETELL_CHAT,
   plan: RetellPlan = {},
   /** A trace store, for the one test that lands a terminal report. */
   traceStore = false,
+  world: TestWorld = {},
 ): Promise<{
   ada: Customer;
   key: string;
@@ -264,6 +269,7 @@ async function aCustomerReadyToRun(
     expectedBehaviors: ["confirms the time back before finishing"],
     suiteId: String(suite.body.id),
     personas: ["Impatient Rita"],
+    ...world,
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
@@ -1039,21 +1045,15 @@ describe("the version a run resolved, on the record", () => {
 });
 
 describe("what a version-pinned run's landing records", () => {
-  it("leaves the coverage stamp to the seam that owns it, and takes no provider reference", async () => {
+  it("takes no provider reference, and keeps the version on the run", async () => {
     const { ada, key, agentId, connectionId, suiteId } =
       await aCustomerReadyToRun(
-        "text_mode_stamp_coverage",
+        "text_mode_landing_record",
         RETELL_CHAT,
         {},
         true,
+        { mockTools: [{ tool: "check_availability", answer: { ok: true } }] },
       );
-
-    const authored = await ask(api.app, "POST", "/v1/mock-tools", key, {
-      tool: "check_availability",
-      answer: { ok: true },
-      delayMs: 0,
-    });
-    expect(authored.statusCode, JSON.stringify(authored.body)).toBe(201);
 
     await startRun(contextFor(ada, "member"), {
       suiteId,
@@ -1120,14 +1120,6 @@ describe("what a version-pinned run's landing records", () => {
     expect(landed.statusCode, landed.body).toBe(200);
 
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
-    // **No stamp, and that is the settled answer.** The coverage stamp is the
-    // LiveKit in-room seam's, where the agent declares its tools per
-    // conversation and two simulations of one run can honestly differ. This
-    // lane decides what it answers for once per run and marks each answered
-    // call on the transcript, so a per-simulation copy would be a second
-    // version of a fact that cannot differ. Absent is the report saying nobody
-    // was ever asked — a different sentence from three empty lists.
-    expect(row?.mockToolCoverage).toBeNull();
     expect(row?.providerReference).toBeNull();
 
     // What the run conducted against lives on the run, once.
@@ -1137,28 +1129,26 @@ describe("what a version-pinned run's landing records", () => {
 });
 
 describe("the work order a version-pinned run hands over", () => {
-  it("carries the version, this simulation's variables, and what the run resolved", async () => {
-    // Mocks are off on every lane unless the door that made the connection
-    // said otherwise, so this one says so — the text lane used to be the one
-    // exception and is not any more.
+  it("carries the version, the test's own variables, and the test's own world", async () => {
+    // The test carries its world: one answer per class of tool the agent has,
+    // and the caller context this conversation is conducted with.
     const { key, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
       "text_mode_claim",
-      { ...TEXT_MODE, mockToolsEnabled: true },
+      TEXT_MODE,
+      {},
+      false,
+      {
+        mockTools: [
+          { tool: "check_availability", answer: { ok: "check_availability" } },
+          {
+            tool: "transfer_to_front_desk",
+            answer: { ok: "transfer_to_front_desk" },
+          },
+          { tool: "inventory", answer: { ok: "inventory" } },
+        ],
+        env: { retell_dynamic_variables: { caller_name: "Margaret" } },
+      },
     );
-
-    // One answer per class of tool the agent has.
-    for (const [toolName, delay] of [
-      ["check_availability", 250],
-      ["transfer_to_front_desk", 0],
-      ["inventory", 500],
-    ] as const) {
-      const authored = await ask(api.app, "POST", "/v1/mock-tools", key, {
-        tool: toolName,
-        answer: { ok: toolName },
-        delayMs: delay,
-      });
-      expect(authored.statusCode, JSON.stringify(authored.body)).toBe(201);
-    }
 
     // Started over the door, so the version on the work order is the one the
     // run-start read actually resolved from the platform rather than one this
@@ -1195,34 +1185,28 @@ describe("the work order a version-pinned run hands over", () => {
     // then choose its newest version, which a concurrent edit can move.
     expect(spec.agent_version).toBe(SERVING_VERSION);
 
-    // Egma's own attribution variable, carrying this simulation and nothing
-    // else — it is what a tool call the platform makes rides back on.
-    expect(spec.dynamic_variables).toEqual({
-      egma_simulation: spec.simulation_id,
-    });
+    // **The test's own caller context, and nothing of Egma's.** Text mode
+    // carries its answers on the request itself, so Egma is never in this
+    // lane's tool path and has nothing to route: no `egma_` variable rides
+    // here at all.
+    expect(spec.dynamic_variables).toEqual({ caller_name: "Margaret" });
 
-    // **What the run resolved, unfiltered.** The three-class read is computed
-    // live for the enable-time screen and stored nowhere, so there is no
-    // stored list here to filter by. Retell answers for a name or runs the
-    // customer's real implementation, and the record marks a call `mocked`
-    // when the run's snapshot covers its name — the live text-mode e2e is the
-    // gate that proves the wire.
+    // **What the test named, unfiltered.** Retell answers for a name or runs
+    // the customer's real implementation, and the record marks a call `mocked`
+    // when the test named it — the live text-mode e2e is the gate that proves
+    // the wire.
     expect(spec.mock_tools).toEqual([
       {
         tool_name: "check_availability",
         answer: { answer: { ok: "check_availability" } },
-        // Delays ride along on every lane and are never spent on chat.
-        delay_milliseconds: 250,
       },
       {
         tool_name: "transfer_to_front_desk",
         answer: { answer: { ok: "transfer_to_front_desk" } },
-        delay_milliseconds: 0,
       },
       {
         tool_name: "inventory",
         answer: { answer: { ok: "inventory" } },
-        delay_milliseconds: 500,
       },
     ]);
 
@@ -1237,29 +1221,12 @@ describe("the work order a version-pinned run hands over", () => {
     expect(JSON.stringify(withoutConnection)).not.toContain(SENTINEL_KEY);
   });
 
-  it("carries no answers at all when the connection's switch is off", async () => {
-    // **A text run with the switch off goes real.** The switch is on the
-    // connection and the run froze it at start, so whether a run is mocked is
-    // read from its own snapshot on every lane — never from the connection
-    // row, which may have moved since.
-    const { ada, key, agentId, connectionId, suiteId } =
+  it("carries no answers at all when the test names none", async () => {
+    // **A text run whose test mocks nothing goes real.** There is no switch to
+    // read and nothing frozen on the run: the test either named a tool or it
+    // did not, and this one did not.
+    const { key, agentId, connectionId, suiteId } =
       await aCustomerReadyToRun("text_mode_claim_unmocked", TEXT_MODE);
-
-    const authored = await ask(api.app, "POST", "/v1/mock-tools", key, {
-      tool: "check_availability",
-      answer: { ok: true },
-      delayMs: 0,
-    });
-    expect(authored.statusCode, JSON.stringify(authored.body)).toBe(201);
-
-    const untick = await ask(
-      api.app,
-      "PATCH",
-      `/v1/agents/${agentId}/connections/${connectionId}`,
-      key,
-      { mockToolsEnabled: false },
-    );
-    expect(untick.statusCode, JSON.stringify(untick.body)).toBe(200);
 
     const started = await ask(api.app, "POST", "/v1/runs", key, {
       suiteId,
@@ -1268,7 +1235,6 @@ describe("the work order a version-pinned run hands over", () => {
       idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-    expect(started.body.mockToolsEnabled).toBe(false);
 
     const claimed = await api.app.inject({
       method: "POST",
@@ -1281,9 +1247,11 @@ describe("the work order a version-pinned run hands over", () => {
 
     // No answers at all — an empty list would be a claim about tools where
     // there is nothing to claim. The version is still named, because a chat
-    // result speaks for the version real traffic reaches either way.
+    // result speaks for the version real traffic reaches either way. And a
+    // test that authored no variables carries no `dynamic_variables` key: this
+    // lane never adds one of Egma's own.
     expect(spec.mock_tools).toBeUndefined();
     expect(spec.agent_version).toBe(SERVING_VERSION);
-    void ada;
+    expect("dynamic_variables" in spec).toBe(false);
   });
 });

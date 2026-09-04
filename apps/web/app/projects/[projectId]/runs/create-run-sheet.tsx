@@ -45,6 +45,7 @@ import {
 } from "../../../../lib/test-suites.ts";
 import type { TestPage } from "../../../../lib/tests.ts";
 import { Field, Refused } from "../../../../ui/form.tsx";
+import { RunNote, type RunNoteTest } from "../../../../ui/run-note.tsx";
 import { Empty, Failure, Loading } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../ui/settings-read.ts";
@@ -99,6 +100,17 @@ export function CreateRunSheet({
     readonly ListedAgentWithConnections[]
   >([]);
   const [agentCursor, setAgentCursor] = useState<string | null>(null);
+  /**
+   * The suite's tests past the first page, for the run note's counts alone.
+   *
+   * The note says "3 of 12 tests", so a first page is not an answer: a suite
+   * with thirteen tests would have the note quietly speaking for twelve of
+   * them. The pages are followed to the end, bounded the way the persona
+   * picker's are, and the note simply says nothing until they have arrived.
+   */
+  const [laterSuiteTests, setLaterSuiteTests] = useState<
+    readonly RunNoteTest[] | null
+  >([]);
   const [loadingSuites, setLoadingSuites] = useState(false);
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [moreRefused, setMoreRefused] = useState<Refusal | null>(null);
@@ -184,6 +196,59 @@ export function CreateRunSheet({
   useEffect(() => {
     setConnectionId("");
   }, [agentId]);
+
+  /*
+   * The rest of the suite's tests, once the first page has said there are
+   * more. `null` while they are on their way, so the note can tell "no more
+   * pages" from "the later pages have not arrived", and say nothing until it
+   * can speak for the whole suite.
+   */
+  useEffect(() => {
+    if (suiteTests?.status !== "ready") {
+      setLaterSuiteTests([]);
+      return undefined;
+    }
+    const first = suiteTests.value.nextPageToken;
+    if (first === null) {
+      setLaterSuiteTests([]);
+      return undefined;
+    }
+    let live = true;
+    setLaterSuiteTests(null);
+    /*
+     * The read is its own function so the loop below cannot make the answer's
+     * type depend on the cursor the answer sets — a `pageToken` narrowed by
+     * the loop and written by the request is a circle TypeScript refuses to
+     * walk.
+     */
+    const readPage = (pageToken: string) =>
+      platformAnswer(
+        listTests({ suiteId, projectId, pageToken }, { client: platformClient }),
+      );
+    void (async () => {
+      const held: RunNoteTest[] = [];
+      let pageToken: string | null = first;
+      /*
+       * Every page there is, and no cap on how many. The note counts tests and
+       * says the total out loud, so a suite read halfway would put a wrong
+       * number in front of somebody quietly. A page that is refused leaves the
+       * held value null and the note undrawn, which says nothing rather than
+       * something untrue.
+       */
+      while (pageToken !== null) {
+        const next = await readPage(pageToken);
+        if (!live) return;
+        if (next.status !== "ready") return;
+        held.push(...next.value.tests);
+        pageToken = next.value.nextPageToken;
+      }
+      if (!live) return;
+      setLaterSuiteTests(held);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [suiteTests, suiteId, projectId]);
 
   useUnsavedChanges(
     suiteId !== "" || agentId !== "" || connectionId !== "" || name !== "",
@@ -482,8 +547,13 @@ export function CreateRunSheet({
           </div>
         )}
 
-        {chosenConnection === undefined ? null : (
-          <LaneNote connection={chosenConnection} />
+        {chosenConnection === undefined ||
+        suiteTests?.status !== "ready" ||
+        laterSuiteTests === null ? null : (
+          <RunNote
+            connection={chosenConnection}
+            tests={[...suiteTests.value.tests, ...laterSuiteTests]}
+          />
         )}
 
         {connectionId === "" ? null : (
@@ -589,60 +659,5 @@ export function CreateRunSheet({
         </form>
       </SheetContent>
     </Sheet>
-  );
-}
-
-/**
- * The three Retell lanes this note speaks for, and nothing else.
- *
- * **A LiveKit room is not one of them.** Its connection can never hold the
- * mock-tools switch, so reading its blank switch as "off" would tell a person
- * their run reaches real tools when a LiveKit run mocks through the in-room
- * seam instead. The LiveKit lanes are untouched by the Retell switch, so this
- * note says nothing about them at all.
- */
-const NOTED_LANES: readonly string[] = [
-  "retell_text_mode",
-  "retell_web_call",
-  "phone_number",
-];
-
-/**
- * Which lane this run will take, said before it starts.
- *
- * **A phone run says plainly that it reaches real tools.** It is the real
- * telephony lane by design and can never be mocked, so a person about to start
- * one must never believe otherwise — hitting a real backend believing it was
- * mocked is the failure this line exists to prevent. The other two Retell
- * lanes say whether their own switch is on, which is a fact about *that*
- * connection and never about the agent.
- */
-function LaneNote({
-  connection,
-}: {
-  readonly connection: {
-    readonly connectionType: string;
-    readonly mockToolsEnabled?: boolean;
-  };
-}) {
-  if (!NOTED_LANES.includes(connection.connectionType)) return null;
-  const phone = connection.connectionType === "phone_number";
-  const mocked = connection.mockToolsEnabled === true;
-  return (
-    <p
-      className={
-        phone || !mocked
-          ? "m-0 border border-warning-border bg-warning-surface p-4 text-sm text-foreground"
-          : "m-0 border border-border p-4 text-sm text-faint"
-      }
-      data-slot="run-lane-note"
-      role="note"
-    >
-      {phone
-        ? "This run dials the real number and reaches your real tools. A phone run is never mocked."
-        : mocked
-          ? "Mock tools are on for this connection, so this run is conducted with mocked tools. Tools Egma cannot intercept still run for real."
-          : "Mock tools are off for this connection, so this run reaches your real tools."}
-    </p>
   );
 }

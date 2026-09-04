@@ -235,26 +235,6 @@ export function AgentDetailsSheet({
                         {modalityLabel(connection.modality)}
                       </span>
                     </span>
-                    {/*
-                      A read-only fact about the connection, not a control:
-                      what a run over it meets. `DESIGN.md` asks every state to
-                      carry a word, so it is the word and no colour of its own.
-                    */}
-                    {connection.connectionType === "phone_number" ? (
-                      <span
-                        className="flex-none text-sm text-faint"
-                        data-slot="connection-tools-badge"
-                      >
-                        real tools
-                      </span>
-                    ) : connection.mockToolsEnabled ? (
-                      <span
-                        className="flex-none text-sm text-faint"
-                        data-slot="connection-tools-badge"
-                      >
-                        mocks on
-                      </span>
-                    ) : null}
                     <Link
                       className="flex-none text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground"
                       href={`${home}?sheet=connection&agent=${encodeURIComponent(agent.id)}&connection=${encodeURIComponent(connection.id)}`}

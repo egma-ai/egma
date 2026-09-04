@@ -106,6 +106,15 @@ const traceSpanSchema = {
     toolName: stringSchema,
     toolArguments: stringSchema,
     toolResult: stringSchema,
+    /**
+     * That egma itself answered this tool call, when it did.
+     *
+     * The one value is `mocked`, and the key is absent on every other span. A
+     * real call is the ordinary case and says nothing extra; a mocked one is
+     * the fact a reader of a transcript needs, because the answer they are
+     * looking at came from the test rather than from their own backend.
+     */
+    toolProvenance: { type: "string", enum: ["mocked"] },
     spans: arrayOf(traceSpanReference),
   },
   required: [

@@ -349,13 +349,11 @@ class RunningSimulation:
                         started_unix_nano=recording.started_unix_nano
                     )
                 # The same moment for the same reason: the exchange is
-                # over, so what egma was asked about the agent's tools and
-                # what it answered are both settled. Drained before the
-                # stamp is read and before anything is sealed, so a call
-                # served in the last breath of a conversation is on the
-                # record rather than in a buffer nobody empties.
+                # over, so every call egma answered is settled. Drained
+                # before anything is sealed, so a call served in the last
+                # breath of a conversation is on the record rather than in
+                # a buffer nobody empties.
                 self._record_mock_tool_calls()
-                reporter.mock_tool_coverage = assembled.mock_tool_coverage
                 await model.close()
         except asyncio.CancelledError:
             # The service itself is being torn down mid-conversation. Reporting a

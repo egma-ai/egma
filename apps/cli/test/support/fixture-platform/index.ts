@@ -11,7 +11,6 @@ import { agentRoutes, type AgentControls } from "./agents.ts";
 import { apiKeyRoutes, type ApiKeyControls } from "./api-keys.ts";
 import { controlRoutes } from "./controls.ts";
 import { deviceRoutes, type DeviceControls } from "./device.ts";
-import { mockToolRoutes, type MockToolControls } from "./mock-tools.ts";
 import { personaRoutes, type PersonaControls } from "./personas.ts";
 import { monitoringRoutes, type MonitoringControls } from "./monitoring.ts";
 import { runControlRoutes, runRoutes, type RunControls } from "./runs.ts";
@@ -27,7 +26,6 @@ export type {
   RetellAccountAgent,
   StartRefusalReason,
 } from "./monitoring.ts";
-export type { MockToolControls, SeedMockTool, SeededMockTool } from "./mock-tools.ts";
 export type { PersonaControls, SeededPersona } from "./personas.ts";
 export type {
   AdvanceStep,
@@ -41,7 +39,13 @@ export type {
   SimulationStatus,
 } from "./runs.ts";
 export type { FixturePlatform, Observation } from "./server.ts";
-export type { SeedBehavior, SeedTest, SeededTest, TestControls } from "./tests.ts";
+export type {
+  SeedBehavior,
+  SeedTest,
+  SeededTest,
+  SeededTestVersion,
+  TestControls,
+} from "./tests.ts";
 export type { SeededSuite, SuiteControls } from "./suites.ts";
 
 export type Platform = FixturePlatform & {
@@ -58,8 +62,6 @@ export type Platform = FixturePlatform & {
   /** What somebody authoring in the dashboard would do, done directly. */
   readonly tests: TestControls;
   readonly suites: SuiteControls;
-  /** The mock tools this project answers with, authored directly. */
-  readonly mocking: MockToolControls;
   /** Who can call: the shared default every project starts with, and any more. */
   readonly personas: PersonaControls;
   /** What the simulator would do to a run, done directly and in any order. */
@@ -83,7 +85,6 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
   let keys!: ApiKeyControls;
   let tests!: TestControls;
   let suites!: SuiteControls;
-  let mocking!: MockToolControls;
   let personas!: PersonaControls;
   let running!: RunControls;
   let projectId!: string;
@@ -139,25 +140,14 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     });
     keys = apiKeyGroup.controls;
 
-    // The scope a mock tool may name is read out of the agent group rather
-    // than copied, so an agent registered after this is wired is one a mock
-    // tool can still be scoped to.
-    const mockToolGroup = mockToolRoutes({
-      holdsKey,
-      projectId,
-      agentsHere: () => agentGroup.controls.agents,
-    });
-    mocking = mockToolGroup.controls;
-
-    // Tests and mock tools are committed by one repository change set. Each
-    // fixture group prepares its part before either part changes state.
+    // A mock tool and an env belong to the test that carries them, so the test
+    // group is the only place either is written or read.
     const testGroup = testRoutes({
       holdsKey,
       projectId,
       suiteById: suiteGroup.controls.byId,
       allSuites: () => suiteGroup.controls.suites,
       createSuite: suiteGroup.controls.add,
-      prepareMockTools: mockToolGroup.controls.prepareRepository,
     });
     tests = testGroup.controls;
 
@@ -184,7 +174,6 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
       suiteGroup.group,
       personaGroup.group,
       testGroup.group,
-      mockToolGroup.group,
       runGroup.group,
       controlRoutes(() => device),
       runControlRoutes(() => running),
@@ -200,7 +189,6 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     keys,
     tests,
     suites,
-    mocking,
     personas,
     running,
     signedInWith(key) {

@@ -31,14 +31,14 @@ export type YamlValue = YamlScalar | YamlSequence | YamlMapping | null;
 export type YamlMapping = { readonly [key: string]: YamlValue };
 
 /** A file egma could not read, said with enough to go and fix it. */
-export class YamlProblem extends Error {
-  readonly where: string;
+import { FolderProblem } from "./problem.ts";
+
+export class YamlProblem extends FolderProblem {
   readonly line: number;
 
   constructor(where: string, line: number, said: string) {
-    super(`${where}, line ${line}: ${said}`);
+    super(where, `${where}, line ${String(line)}: ${said}`);
     this.name = "YamlProblem";
-    this.where = where;
     this.line = line;
   }
 }

@@ -988,7 +988,7 @@ describe("a key minted for the whole organization", () => {
 
     // `ada.secret` is minted for the whole customer and names no project. The
     // organization holds one project, so the API resolves it — the same rule
-    // the graders, personas and mock tools follow — and nothing in the group
+    // the graders, personas and tests follow — and nothing in the group
     // reaches the data layer's project guard as a fault.
     const withKey = async (
       method: "POST" | "PATCH",

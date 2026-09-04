@@ -28,7 +28,6 @@ export {
   IdempotencyConflictError,
   IdentityConflictError,
   LastAdminError,
-  MockToolTakenError,
   NotPermittedError,
   OversizeRecordError,
   PersonaNameAmbiguousError,
@@ -286,34 +285,6 @@ export {
   type PersonaVersionPage,
 } from "./personas.ts";
 
-/**
- * Mock tools: what egma answers with when the agent calls one of its tools
- * during a simulation. Project-owned, one answer per tool name, and the one
- * authored thing with no version chain behind it — `editMockTool` overwrites,
- * and the schema file argues the exemption out in full.
- *
- * `resolveMockToolAgents` is the scope's name-to-identity translation, the
- * persona resolver's shape: a folder a team reads in pull requests names agents
- * rather than identifiers.
- */
-export {
-  createMockTool,
-  deleteMockTool,
-  editMockTool,
-  listMockTools,
-  resolveMockToolAgents,
-  type DeletedMockTool,
-  type MockTool,
-  type MockToolAgent,
-  type MockToolChanges,
-  type MockToolPage,
-  type NewMockTool,
-} from "./mock-tools.ts";
-export {
-  LARGEST_MOCK_TOOL_ANSWER_BYTES,
-  LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
-} from "../schema/mock-tools.ts";
-
 export {
   createTestSuite,
   deleteTestSuite,
@@ -332,6 +303,15 @@ export {
   type RepositoryChangeSet,
 } from "./repository-change-set.ts";
 
+/**
+ * Tests, and the world each one carries: the tools it answers for itself, and
+ * the env it asks the lane for. Both are versioned test content, so a change to
+ * either mints a version exactly as a changed behavior does.
+ *
+ * The two caps, the reserved prefix and the one serializer that measures the
+ * dispatch are exported beside the spans' own limits rather than here, because
+ * none of them reaches a store. See the package entry point.
+ */
 export {
   createTest,
   deleteTest,
@@ -341,11 +321,11 @@ export {
   listTests,
   listTestVersions,
   type ExpectedBehavior,
-  type MockOverride,
-  type MockOverrideInput,
   type NewTest,
   type Test,
   type TestChanges,
+  type TestEnv,
+  type TestMockTool,
   type TestPage,
   type TestPersona,
   type TestVersion,
@@ -416,6 +396,7 @@ export {
   owedMockCleanups,
   recordMockState,
   resolveMockToolCall,
+  runCarriesMockTools,
   resolveSimulationStanding,
   runAlreadyStartedFor,
   simulationStatusCountsOfRuns,
@@ -432,7 +413,6 @@ export {
   type MockDraftClaim,
   type MockRunState,
   type OwedMockCleanup,
-  type MockToolCoverage,
   type NewRun,
   type Run,
   type RunEvent,

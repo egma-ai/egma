@@ -94,7 +94,6 @@ type ConnectionFlags = {
   readonly livekitUrl: string | null;
   readonly dispatchName: string | null;
   readonly tokenEndpoint: string | null;
-  readonly metadata: string | null;
 };
 
 export type AgentRegisterCommandOptions = CommandIO &
@@ -290,8 +289,6 @@ function connectionFlag(key: string): string | null {
       return "--dispatch-name";
     case "tokenEndpoint":
       return "--token-endpoint";
-    case "metadata":
-      return "--metadata";
     case "retellAgentId":
       return "--retell-agent";
     default:
@@ -309,8 +306,6 @@ function flagValue(key: string, flags: ConnectionFlags): string {
       return clean(flags.dispatchName);
     case "tokenEndpoint":
       return clean(flags.tokenEndpoint);
-    case "metadata":
-      return clean(flags.metadata);
     default:
       return "";
   }

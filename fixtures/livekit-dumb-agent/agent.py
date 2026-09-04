@@ -21,11 +21,11 @@ running; it is also why an *unmocked* run of it says the same two times
 every day of the week.
 
 ``opening_hours`` is the second one, and it is here so a simulation has a
-tool egma is **not** answering for. A mock tool covers a name or it does
-not, and the interesting record is the one with both kinds in it: the
-coverage stamp then names one tool as covered and one as uncovered, which
-is how a reader learns a simulation was not fully isolated. With one tool
-there would be nothing for that half of the stamp to say.
+tool egma is **not** answering for. A test names a tool or it does not,
+and the interesting run is the one with both kinds in it: one call reaches
+egma and lands on the record stamped ``mocked``, and the other runs its
+own implementation with egma nowhere near it and leaves no span at all.
+With one tool there would be nothing to prove the second half of that.
 
 Both are harmless and deterministic when nobody mocks them. Neither reads
 a clock, a network or a disk.
@@ -43,6 +43,25 @@ room it does nothing at all** — no wrapper, no message, no connect, the
 same two callables — so this file behaves identically whether or not egma
 is anywhere near it, which is the property `tests/test_outside_egma.py`
 holds it to.
+
+## The one line that reads the test's own world
+
+``json.loads(ctx.job.metadata)`` is the customer-side half of a test's
+env. Egma writes the test's ``job_dispatch_metadata`` onto the agent
+dispatch, which is the channel LiveKit's own documentation teaches an
+agent to read for per-session context, so a worker that already does this
+keeps working under test — and reads a different tenant, caller or
+account per scenario. This fixture reads one key out of it and **logs**
+it, so the live proof can read the value back off the worker's own output
+and know the bytes crossed.
+
+Logged and never spoken. What a test writes here is the *world* the agent
+starts in and never the *script* it is about to be asked, so speaking it
+would put a value on the transcript that the caller never said. A
+production room carries whatever the practice's own dispatch carried, or
+nothing at all, and both are read the same careful way: nothing is
+required, nothing raises, and the agent behaves identically when the
+channel is empty or is not JSON.
 
 ## The six lines that make a chat simulation a chat simulation
 
@@ -90,6 +109,8 @@ Run it with the project's own values in the environment (see README):
     uv run agent.py dev
 """
 
+import json
+import logging
 import os
 
 from egma import mockable, monitor_livekit
@@ -107,6 +128,34 @@ INSTRUCTIONS = (
     "Keep every reply to one or two short sentences. "
     "When the caller is done, say goodbye politely."
 )
+
+logger = logging.getLogger("dumb-agent")
+
+TENANT_KEY = "tenant"
+"""The one key this fixture reads out of its job's dispatch metadata.
+
+An ordinary customer key and deliberately not an egma one: what the live
+proof watches for is a *test's* value arriving on the channel LiveKit
+teaches agents to read, and a key of egma's own would prove the wrong
+thing.
+"""
+
+
+def dispatched_world(metadata: str) -> dict:
+    """The job's dispatch metadata, read the way a real worker reads it.
+
+    Forgiving on purpose, and this is the shape a customer's own worker
+    should copy: outside a simulation this channel carries whatever the
+    practice's own dispatch carried — nothing at all, quite often, and
+    something that is not JSON now and then — and neither may stop the
+    agent from answering the phone.
+    """
+    try:
+        world = json.loads(metadata or "{}")
+    except ValueError:
+        return {}
+    return world if isinstance(world, dict) else {}
+
 
 MORNING_SLOT = "9:40"
 AFTERNOON_SLOT = "2:15"
@@ -162,6 +211,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # A partial setup still calls the helper and gets its direct setup error.
     if os.environ.get("EGMA_URL") or os.environ.get("EGMA_API_KEY"):
         monitor_livekit(ctx)
+    # The test's own world, off the channel LiveKit teaches agents to read.
+    # Logged rather than said: the live proof reads the value back here, and
+    # a value spoken aloud would be a word on the transcript nobody said.
+    world = dispatched_world(ctx.job.metadata)
+    logger.info("dispatched %s=%r", TENANT_KEY, world.get(TENANT_KEY))
     await ctx.connect()
     agent = FrontDesk()
     session = AgentSession(

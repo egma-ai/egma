@@ -6,11 +6,11 @@ reading it: the tools must be **attached before** that line, and there
 must be **two of them** — one for a mock tool to answer for, one for
 nothing to answer for.
 
-The second is the whole reason ``opening_hours`` exists. A coverage stamp
-with nothing uncovered on it cannot say the thing the stamp is for, which
-is *this simulation was not fully isolated, and here is what was left
-out*. Delete that tool and the live proof quietly loses half its record —
-so the count is asserted here rather than trusted to survive a tidy-up.
+The second is the whole reason ``opening_hours`` exists. A run where egma
+answers for everything cannot show the other half of the rule, which is
+*a tool this test did not name ran for real, and egma saw nothing of it*.
+Delete that tool and the live proof quietly loses that half — so the
+count is asserted here rather than trusted to survive a tidy-up.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ MOCKABLE_TOOL = "check_availability"
 """The booking-shaped one: what a live test mocks to force a branch."""
 
 UNMOCKED_TOOL = "opening_hours"
-"""The other one: what stays uncovered, so the stamp has both halves."""
+"""The other one: what no test names, so a run has both halves in it."""
 
 
 def test_the_agent_carries_both_tools_before_anything_is_wrapped():
@@ -128,10 +128,12 @@ def test_the_six_lines_key_on_the_marked_room_name_before_the_session_starts():
     six lines have decided their room options off it by the time the
     session starts. Read a failure here as the contract refusing to move.
 
-    The customer's metadata channels stay the customer's: nothing in the
-    entrypoint reads ``ctx.job.metadata`` or ``ctx.room.metadata``, so no
-    key anybody configures — a ``modality`` of their own included — can
-    reach into this decision.
+    The decision is made from that name **alone**. This agent does read
+    its dispatch metadata now — it is the test's own world and reading it
+    is the point — but no key a test writes may reach into this decision,
+    a ``modality`` of their own included. So the line that decides it is
+    read here and held to naming the room and nothing else, and the room's
+    own metadata is read by nobody at all.
     """
     from agent import entrypoint
 
@@ -146,6 +148,49 @@ def test_the_six_lines_key_on_the_marked_room_name_before_the_session_starts():
     decided = line_of('chat = ctx.job.room.name.startswith("egma-sim-chat-")')
     started = line_of("await session.start(")
     assert decided < started
+    assert "metadata" not in lines[decided]
 
-    assert "ctx.job.metadata" not in body
     assert "ctx.room.metadata" not in body
+
+
+def test_the_agent_reads_the_tests_own_world_off_its_dispatch():
+    """The customer-side half of a test's env, proved without a room.
+
+    Egma writes a test's ``job_dispatch_metadata`` onto the agent dispatch
+    as one compact JSON string, and this is the reading of it that the
+    live proof watches for on the far side. What is held here is the read
+    itself and its forgiveness, because a worker that raised on an empty
+    or malformed channel would be a worker that stopped answering the
+    phone in production over a value nobody sent.
+    """
+    from agent import TENANT_KEY, dispatched_world
+
+    # What egma writes for a test that wrote {"tenant": "acme"}.
+    assert dispatched_world('{"tenant":"acme","caller_id":"+15550100"}') == {
+        "tenant": "acme",
+        "caller_id": "+15550100",
+    }
+    assert dispatched_world('{"tenant":"acme"}')[TENANT_KEY] == "acme"
+
+    # And every shape a production room hands the same worker.
+    for nothing_to_read in ("", "   ", "not json at all", "[1, 2]", '"acme"'):
+        assert dispatched_world(nothing_to_read) == {}
+
+
+def test_the_dispatched_world_is_logged_and_never_spoken():
+    """A test's world goes to the log; the transcript stays the caller's.
+
+    What a test writes on this channel is the world the agent starts in,
+    never the script it is about to be asked — so a fixture that spoke it
+    would put a word on the transcript that nobody said, and the live
+    proof would then be reading its own value back out of the very
+    transcript it is grading.
+    """
+    from agent import entrypoint
+
+    body = inspect.getsource(entrypoint)
+    assert "logger.info(" in body
+    assert "dispatched_world(ctx.job.metadata)" in body
+    # The value never reaches anything the caller hears.
+    said = body[body.index("await session.generate_reply(") :]
+    assert "world" not in said

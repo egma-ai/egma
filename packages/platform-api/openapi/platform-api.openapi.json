@@ -598,10 +598,6 @@
                         "type": "boolean",
                         "description": "Start pulling this agent's production calls with the same save. Off unless the request says otherwise; the first switch-on imports the fixed 30-day history."
                       },
-                      "mockToolsEnabled": {
-                        "type": "boolean",
-                        "description": "Whether runs over this connection answer the agent's tools with your test data. Sent by the setup flow so mocking is always an explicit yes; absent leaves the lane's own default. Never true for a phone_number connection, which reaches your real tools."
-                      },
                       "agentPlatformSelection": {
                         "type": "object",
                         "description": "Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.",
@@ -871,9 +867,6 @@
                             }
                           ]
                         },
-                        "mockToolsEnabled": {
-                          "type": "boolean"
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -912,7 +905,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -1155,9 +1147,6 @@
                             }
                           ]
                         },
-                        "mockToolsEnabled": {
-                          "type": "boolean"
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -1196,7 +1185,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -1567,9 +1555,6 @@
                                     }
                                   ]
                                 },
-                                "mockToolsEnabled": {
-                                  "type": "boolean"
-                                },
                                 "archived": {
                                   "type": "boolean"
                                 },
@@ -1608,7 +1593,6 @@
                                 "config",
                                 "credentialPresent",
                                 "credentialsHint",
-                                "mockToolsEnabled",
                                 "archived",
                                 "archivedAt",
                                 "createdAt",
@@ -1985,9 +1969,6 @@
                               }
                             ]
                           },
-                          "mockToolsEnabled": {
-                            "type": "boolean"
-                          },
                           "archived": {
                             "type": "boolean"
                           },
@@ -2026,7 +2007,6 @@
                           "config",
                           "credentialPresent",
                           "credentialsHint",
-                          "mockToolsEnabled",
                           "archived",
                           "archivedAt",
                           "createdAt",
@@ -2488,10 +2468,6 @@
                     "type": "boolean",
                     "description": "Start pulling this agent's production calls with the same save. Off unless the request says otherwise; the first switch-on imports the fixed 30-day history."
                   },
-                  "mockToolsEnabled": {
-                    "type": "boolean",
-                    "description": "Whether runs over this connection answer the agent's tools with your test data. Sent by the setup flow so mocking is always an explicit yes; absent leaves the lane's own default. Never true for a phone_number connection, which reaches your real tools."
-                  },
                   "agentPlatformSelection": {
                     "type": "object",
                     "description": "Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.",
@@ -2631,9 +2607,6 @@
                             }
                           ]
                         },
-                        "mockToolsEnabled": {
-                          "type": "boolean"
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -2672,7 +2645,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -2683,324 +2655,6 @@
                   },
                   "required": [
                     "connection"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/agents/{agentId}/mock-tools:discover": {
-      "post": {
-        "operationId": "discoverMockTools",
-        "summary": "Discover the tools a mocked run would stand in front of",
-        "tags": [
-          "Agents"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "agentId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "projectId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "seed": {
-                    "type": "boolean",
-                    "description": "Also seed a mock tool for every interceptable tool this project does not answer for yet. Never overwrites an authored answer: a known name keeps its row. Absent is a read."
-                  }
-                },
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "What a mocked run over this agent would cover.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "mockable": {
-                      "type": "boolean"
-                    },
-                    "refusal": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "reason": {
-                              "type": "string",
-                              "enum": [
-                                "custom_llm_engine",
-                                "keys_disagree",
-                                "platform_unavailable",
-                                "never_published"
-                              ]
-                            },
-                            "message": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "reason",
-                            "message"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "engine": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "retell-llm",
-                            "conversation-flow",
-                            "custom-llm"
-                          ]
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "servingVersion": {
-                      "anyOf": [
-                        {
-                          "type": "integer"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "tools": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "name": {
-                            "type": "string"
-                          },
-                          "type": {
-                            "type": "string"
-                          },
-                          "coverage": {
-                            "type": "string",
-                            "enum": [
-                              "mocked",
-                              "notInterceptable",
-                              "notInThisVersion"
-                            ]
-                          },
-                          "answered": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "name",
-                          "type",
-                          "coverage",
-                          "answered"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "warnings": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "toolName": {
-                            "type": "string"
-                          },
-                          "toolType": {
-                            "type": "string"
-                          },
-                          "effect": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "toolName",
-                          "toolType",
-                          "effect"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "numbers": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "number": {
-                            "type": "string"
-                          },
-                          "label": {
-                            "type": "string"
-                          },
-                          "verdicts": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "enum": [
-                                "numeric",
-                                "environment-tag",
-                                "latest-published",
-                                "hijackable"
-                              ]
-                            }
-                          }
-                        },
-                        "required": [
-                          "number",
-                          "label",
-                          "verdicts"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "seeded": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  },
-                  "required": [
-                    "mockable",
-                    "refusal",
-                    "engine",
-                    "servingVersion",
-                    "tools",
-                    "warnings",
-                    "numbers",
-                    "seeded"
                   ],
                   "additionalProperties": false
                 }
@@ -3807,9 +3461,6 @@
                             }
                           ]
                         },
-                        "mockToolsEnabled": {
-                          "type": "boolean"
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -3848,7 +3499,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -3996,10 +3646,6 @@
                   "credentials": {
                     "type": "object",
                     "additionalProperties": true
-                  },
-                  "mockToolsEnabled": {
-                    "type": "boolean",
-                    "description": "Turn mock tools on or off for runs over this connection. Absent leaves it as it is, so renaming a connection never changes the world its next run meets. Turning it on for a retell_web_call connection is refused where the agent holds no platform identity and key, because Egma would have nothing to branch a temporary copy with; a phone_number connection can never hold true."
                   }
                 },
                 "additionalProperties": false
@@ -4108,9 +3754,6 @@
                             }
                           ]
                         },
-                        "mockToolsEnabled": {
-                          "type": "boolean"
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -4149,7 +3792,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -4415,9 +4057,6 @@
                             }
                           ]
                         },
-                        "mockToolsEnabled": {
-                          "type": "boolean"
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -4456,7 +4095,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -4764,9 +4402,6 @@
                             }
                           ]
                         },
-                        "mockToolsEnabled": {
-                          "type": "boolean"
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -4805,7 +4440,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -8889,992 +8523,6 @@
             }
           },
           "409": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/mock-tools": {
-      "get": {
-        "operationId": "listMockTools",
-        "summary": "List mock tools",
-        "tags": [
-          "Mock tools"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "pageToken",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Mock tools, newest first.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "mockTools": {
-                      "type": "array",
-                      "items": {
-                        "oneOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "tool": {
-                                "type": "string"
-                              },
-                              "delayMs": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "agents": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "id": {
-                                      "type": "string",
-                                      "minLength": 1
-                                    },
-                                    "name": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "id",
-                                    "name"
-                                  ],
-                                  "additionalProperties": false
-                                }
-                              },
-                              "createdAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "updatedAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "answer": {},
-                              "error": {
-                                "not": {}
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "tool",
-                              "delayMs",
-                              "agents",
-                              "createdAt",
-                              "updatedAt",
-                              "answer"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "tool": {
-                                "type": "string"
-                              },
-                              "delayMs": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "agents": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "id": {
-                                      "type": "string",
-                                      "minLength": 1
-                                    },
-                                    "name": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "id",
-                                    "name"
-                                  ],
-                                  "additionalProperties": false
-                                }
-                              },
-                              "createdAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "updatedAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "answer": {
-                                "not": {}
-                              },
-                              "error": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "tool",
-                              "delayMs",
-                              "agents",
-                              "createdAt",
-                              "updatedAt",
-                              "error"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      }
-                    },
-                    "nextPageToken": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  },
-                  "required": [
-                    "mockTools",
-                    "nextPageToken"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "operationId": "createMockTool",
-        "summary": "Create a mock tool",
-        "tags": [
-          "Mock tools"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "oneOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "tool": {
-                        "type": "string"
-                      },
-                      "delayMs": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "agents": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "projectId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "answer": {},
-                      "error": {
-                        "not": {}
-                      }
-                    },
-                    "required": [
-                      "tool",
-                      "answer"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "tool": {
-                        "type": "string"
-                      },
-                      "delayMs": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "agents": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "projectId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "answer": {
-                        "not": {}
-                      },
-                      "error": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "tool",
-                      "error"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "The new mock tool.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "tool": {
-                          "type": "string"
-                        },
-                        "delayMs": {
-                          "type": "integer",
-                          "minimum": 0
-                        },
-                        "agents": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "name": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "name"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "createdAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        "updatedAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        "answer": {},
-                        "error": {
-                          "not": {}
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "tool",
-                        "delayMs",
-                        "agents",
-                        "createdAt",
-                        "updatedAt",
-                        "answer"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "tool": {
-                          "type": "string"
-                        },
-                        "delayMs": {
-                          "type": "integer",
-                          "minimum": 0
-                        },
-                        "agents": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "name": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "name"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "createdAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        "updatedAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        "answer": {
-                          "not": {}
-                        },
-                        "error": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "tool",
-                        "delayMs",
-                        "agents",
-                        "createdAt",
-                        "updatedAt",
-                        "error"
-                      ],
-                      "additionalProperties": false
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/mock-tools/{mockToolId}": {
-      "patch": {
-        "operationId": "updateMockTool",
-        "summary": "Update a mock tool",
-        "tags": [
-          "Mock tools"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "mockToolId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "oneOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "tool": {
-                        "type": "string"
-                      },
-                      "delayMs": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "agents": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "projectId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "answer": {},
-                      "error": {
-                        "not": {}
-                      }
-                    },
-                    "required": [
-                      "answer"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "tool": {
-                        "type": "string"
-                      },
-                      "delayMs": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "agents": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "projectId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "answer": {
-                        "not": {}
-                      },
-                      "error": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "error"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "tool": {
-                        "type": "string"
-                      },
-                      "delayMs": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "agents": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "projectId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "answer": {
-                        "not": {}
-                      },
-                      "error": {
-                        "not": {}
-                      }
-                    },
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The updated mock tool.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "tool": {
-                          "type": "string"
-                        },
-                        "delayMs": {
-                          "type": "integer",
-                          "minimum": 0
-                        },
-                        "agents": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "name": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "name"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "createdAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        "updatedAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        "answer": {},
-                        "error": {
-                          "not": {}
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "tool",
-                        "delayMs",
-                        "agents",
-                        "createdAt",
-                        "updatedAt",
-                        "answer"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "tool": {
-                          "type": "string"
-                        },
-                        "delayMs": {
-                          "type": "integer",
-                          "minimum": 0
-                        },
-                        "agents": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "name": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "name"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "createdAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        "updatedAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        "answer": {
-                          "not": {}
-                        },
-                        "error": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "tool",
-                        "delayMs",
-                        "agents",
-                        "createdAt",
-                        "updatedAt",
-                        "error"
-                      ],
-                      "additionalProperties": false
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteMockTool",
-        "summary": "Delete a mock tool",
-        "tags": [
-          "Mock tools"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "mockToolId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "projectId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The deleted mock tool.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "tool": {
-                      "type": "string"
-                    },
-                    "deletedAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "tool",
-                    "deletedAt"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "404": {
             "description": "The request was refused.",
             "content": {
               "application/json": {
@@ -14092,7 +12740,7 @@
       "post": {
         "operationId": "applyRepositoryChangeSet",
         "summary": "Apply the complete authored state from a repository",
-        "description": "The complete authored suites, tests, and mock tools are applied atomically. Missing resources refuse rather than delete.",
+        "description": "The complete authored suites and tests are applied atomically. Each test carries its own mock tools and env. Missing resources refuse rather than delete.",
         "tags": [
           "Repository"
         ],
@@ -14185,10 +12833,6 @@
                                   "tool": {
                                     "type": "string"
                                   },
-                                  "delayMs": {
-                                    "type": "integer",
-                                    "minimum": 0
-                                  },
                                   "answer": {},
                                   "error": {
                                     "not": {}
@@ -14206,10 +12850,6 @@
                                   "tool": {
                                     "type": "string"
                                   },
-                                  "delayMs": {
-                                    "type": "integer",
-                                    "minimum": 0
-                                  },
                                   "answer": {
                                     "not": {}
                                   },
@@ -14225,6 +12865,29 @@
                               }
                             ]
                           }
+                        },
+                        "env": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "retell_dynamic_variables": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  }
+                                },
+                                "job_dispatch_metadata": {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "expectedVersionId": {
                           "type": "string",
@@ -14243,79 +12906,16 @@
                         "scenario",
                         "expectedBehaviors",
                         "personas",
-                        "mockTools"
+                        "mockTools",
+                        "env"
                       ],
                       "additionalProperties": false
-                    }
-                  },
-                  "mockTools": {
-                    "type": "array",
-                    "items": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "tool": {
-                              "type": "string"
-                            },
-                            "delayMs": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
-                            "answer": {},
-                            "error": {
-                              "not": {}
-                            },
-                            "agents": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            }
-                          },
-                          "required": [
-                            "tool",
-                            "answer"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "tool": {
-                              "type": "string"
-                            },
-                            "delayMs": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
-                            "answer": {
-                              "not": {}
-                            },
-                            "error": {
-                              "type": "string"
-                            },
-                            "agents": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            }
-                          },
-                          "required": [
-                            "tool",
-                            "error"
-                          ],
-                          "additionalProperties": false
-                        }
-                      ]
                     }
                   }
                 },
                 "required": [
                   "suites",
-                  "tests",
-                  "mockTools"
+                  "tests"
                 ],
                 "additionalProperties": false
               }
@@ -14425,10 +13025,6 @@
                                         "tool": {
                                           "type": "string"
                                         },
-                                        "delayMs": {
-                                          "type": "integer",
-                                          "minimum": 0
-                                        },
                                         "answer": {},
                                         "error": {
                                           "not": {}
@@ -14436,7 +13032,6 @@
                                       },
                                       "required": [
                                         "tool",
-                                        "delayMs",
                                         "answer"
                                       ],
                                       "additionalProperties": false
@@ -14447,10 +13042,6 @@
                                         "tool": {
                                           "type": "string"
                                         },
-                                        "delayMs": {
-                                          "type": "integer",
-                                          "minimum": 0
-                                        },
                                         "answer": {
                                           "not": {}
                                         },
@@ -14460,7 +13051,6 @@
                                       },
                                       "required": [
                                         "tool",
-                                        "delayMs",
                                         "error"
                                       ],
                                       "additionalProperties": false
@@ -14468,9 +13058,28 @@
                                   ]
                                 }
                               },
-                              "overrideCount": {
-                                "type": "integer",
-                                "minimum": 0
+                              "env": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "retell_dynamic_variables": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "job_dispatch_metadata": {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               },
                               "revision": {
                                 "type": "string",
@@ -14497,7 +13106,7 @@
                               "expectedBehaviors",
                               "personas",
                               "mockTools",
-                              "overrideCount",
+                              "env",
                               "revision",
                               "createdAt",
                               "updatedAt"
@@ -14776,9 +13385,6 @@
                         }
                       ]
                     },
-                    "mockToolsEnabled": {
-                      "type": "boolean"
-                    },
                     "expectedSimulationCount": {
                       "type": "integer"
                     },
@@ -14900,7 +13506,6 @@
                     "productLabel",
                     "environment",
                     "agentVersion",
-                    "mockToolsEnabled",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -15226,9 +13831,6 @@
                               }
                             ]
                           },
-                          "mockToolsEnabled": {
-                            "type": "boolean"
-                          },
                           "expectedSimulationCount": {
                             "type": "integer"
                           },
@@ -15350,7 +13952,6 @@
                           "productLabel",
                           "environment",
                           "agentVersion",
-                          "mockToolsEnabled",
                           "expectedSimulationCount",
                           "completedCount",
                           "failedCount",
@@ -15593,9 +14194,6 @@
                           "type": "null"
                         }
                       ]
-                    },
-                    "mockToolsEnabled": {
-                      "type": "boolean"
                     },
                     "expectedSimulationCount": {
                       "type": "integer"
@@ -15896,7 +14494,6 @@
                     "productLabel",
                     "environment",
                     "agentVersion",
-                    "mockToolsEnabled",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -16192,42 +14789,6 @@
                           },
                           "hasRecording": {
                             "type": "boolean"
-                          },
-                          "mockToolCoverage": {
-                            "anyOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "discovered": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "covered": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "uncovered": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string"
-                                    }
-                                  }
-                                },
-                                "required": [
-                                  "discovered",
-                                  "covered",
-                                  "uncovered"
-                                ],
-                                "additionalProperties": false
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
                           }
                         },
                         "required": [
@@ -16247,8 +14808,7 @@
                           "startedAt",
                           "endedAt",
                           "modality",
-                          "hasRecording",
-                          "mockToolCoverage"
+                          "hasRecording"
                         ],
                         "additionalProperties": false
                       }
@@ -16761,9 +15321,6 @@
                         }
                       ]
                     },
-                    "mockToolsEnabled": {
-                      "type": "boolean"
-                    },
                     "expectedSimulationCount": {
                       "type": "integer"
                     },
@@ -16885,7 +15442,6 @@
                     "productLabel",
                     "environment",
                     "agentVersion",
-                    "mockToolsEnabled",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -17694,131 +16250,6 @@
                       ],
                       "additionalProperties": false
                     },
-                    "mockToolCoverage": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "discovered": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "covered": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "uncovered": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            }
-                          },
-                          "required": [
-                            "discovered",
-                            "covered",
-                            "uncovered"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "mockTools": {
-                      "type": "object",
-                      "properties": {
-                        "defaults": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "tool": {
-                                "type": "string"
-                              },
-                              "answer": {},
-                              "error": {
-                                "type": "string"
-                              },
-                              "delayMs": {
-                                "type": "integer"
-                              },
-                              "mockToolId": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "required": [
-                              "tool",
-                              "delayMs",
-                              "mockToolId"
-                            ],
-                            "oneOf": [
-                              {
-                                "type": "object",
-                                "required": [
-                                  "answer"
-                                ]
-                              },
-                              {
-                                "type": "object",
-                                "required": [
-                                  "error"
-                                ]
-                              }
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "overrides": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "tool": {
-                                "type": "string"
-                              },
-                              "answer": {},
-                              "error": {
-                                "type": "string"
-                              },
-                              "delayMs": {
-                                "type": "integer"
-                              }
-                            },
-                            "required": [
-                              "tool",
-                              "delayMs"
-                            ],
-                            "oneOf": [
-                              {
-                                "type": "object",
-                                "required": [
-                                  "answer"
-                                ]
-                              },
-                              {
-                                "type": "object",
-                                "required": [
-                                  "error"
-                                ]
-                              }
-                            ],
-                            "additionalProperties": false
-                          }
-                        }
-                      },
-                      "required": [
-                        "defaults",
-                        "overrides"
-                      ],
-                      "additionalProperties": false
-                    },
                     "gradingPlan": {
                       "anyOf": [
                         {
@@ -17990,8 +16421,6 @@
                     "agent",
                     "connection",
                     "connectionSnapshot",
-                    "mockToolCoverage",
-                    "mockTools",
                     "gradingPlan",
                     "transcript"
                   ],
@@ -19146,10 +17575,6 @@
                                     "tool": {
                                       "type": "string"
                                     },
-                                    "delayMs": {
-                                      "type": "integer",
-                                      "minimum": 0
-                                    },
                                     "answer": {},
                                     "error": {
                                       "not": {}
@@ -19157,7 +17582,6 @@
                                   },
                                   "required": [
                                     "tool",
-                                    "delayMs",
                                     "answer"
                                   ],
                                   "additionalProperties": false
@@ -19168,10 +17592,6 @@
                                     "tool": {
                                       "type": "string"
                                     },
-                                    "delayMs": {
-                                      "type": "integer",
-                                      "minimum": 0
-                                    },
                                     "answer": {
                                       "not": {}
                                     },
@@ -19181,7 +17601,6 @@
                                   },
                                   "required": [
                                     "tool",
-                                    "delayMs",
                                     "error"
                                   ],
                                   "additionalProperties": false
@@ -19189,9 +17608,28 @@
                               ]
                             }
                           },
-                          "overrideCount": {
-                            "type": "integer",
-                            "minimum": 0
+                          "env": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "retell_dynamic_variables": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "job_dispatch_metadata": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "revision": {
                             "type": "string",
@@ -19218,7 +17656,7 @@
                           "expectedBehaviors",
                           "personas",
                           "mockTools",
-                          "overrideCount",
+                          "env",
                           "revision",
                           "createdAt",
                           "updatedAt"
@@ -19392,10 +17830,6 @@
                             "tool": {
                               "type": "string"
                             },
-                            "delayMs": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
                             "answer": {},
                             "error": {
                               "not": {}
@@ -19413,10 +17847,6 @@
                             "tool": {
                               "type": "string"
                             },
-                            "delayMs": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
                             "answer": {
                               "not": {}
                             },
@@ -19432,6 +17862,29 @@
                         }
                       ]
                     }
+                  },
+                  "env": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "retell_dynamic_variables": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
+                          "job_dispatch_metadata": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -19538,10 +17991,6 @@
                               "tool": {
                                 "type": "string"
                               },
-                              "delayMs": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
                               "answer": {},
                               "error": {
                                 "not": {}
@@ -19549,7 +17998,6 @@
                             },
                             "required": [
                               "tool",
-                              "delayMs",
                               "answer"
                             ],
                             "additionalProperties": false
@@ -19560,10 +18008,6 @@
                               "tool": {
                                 "type": "string"
                               },
-                              "delayMs": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
                               "answer": {
                                 "not": {}
                               },
@@ -19573,7 +18017,6 @@
                             },
                             "required": [
                               "tool",
-                              "delayMs",
                               "error"
                             ],
                             "additionalProperties": false
@@ -19581,9 +18024,28 @@
                         ]
                       }
                     },
-                    "overrideCount": {
-                      "type": "integer",
-                      "minimum": 0
+                    "env": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "retell_dynamic_variables": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "job_dispatch_metadata": {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "revision": {
                       "type": "string",
@@ -19610,7 +18072,7 @@
                     "expectedBehaviors",
                     "personas",
                     "mockTools",
-                    "overrideCount",
+                    "env",
                     "revision",
                     "createdAt",
                     "updatedAt"
@@ -19818,10 +18280,6 @@
                               "tool": {
                                 "type": "string"
                               },
-                              "delayMs": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
                               "answer": {},
                               "error": {
                                 "not": {}
@@ -19829,7 +18287,6 @@
                             },
                             "required": [
                               "tool",
-                              "delayMs",
                               "answer"
                             ],
                             "additionalProperties": false
@@ -19840,10 +18297,6 @@
                               "tool": {
                                 "type": "string"
                               },
-                              "delayMs": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
                               "answer": {
                                 "not": {}
                               },
@@ -19853,7 +18306,6 @@
                             },
                             "required": [
                               "tool",
-                              "delayMs",
                               "error"
                             ],
                             "additionalProperties": false
@@ -19861,9 +18313,28 @@
                         ]
                       }
                     },
-                    "overrideCount": {
-                      "type": "integer",
-                      "minimum": 0
+                    "env": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "retell_dynamic_variables": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "job_dispatch_metadata": {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "createdAt": {
                       "type": "string",
@@ -19881,7 +18352,7 @@
                     "expectedBehaviors",
                     "personas",
                     "mockTools",
-                    "overrideCount",
+                    "env",
                     "createdAt"
                   ],
                   "additionalProperties": false
@@ -20088,10 +18559,6 @@
                               "tool": {
                                 "type": "string"
                               },
-                              "delayMs": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
                               "answer": {},
                               "error": {
                                 "not": {}
@@ -20099,7 +18566,6 @@
                             },
                             "required": [
                               "tool",
-                              "delayMs",
                               "answer"
                             ],
                             "additionalProperties": false
@@ -20110,10 +18576,6 @@
                               "tool": {
                                 "type": "string"
                               },
-                              "delayMs": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
                               "answer": {
                                 "not": {}
                               },
@@ -20123,7 +18585,6 @@
                             },
                             "required": [
                               "tool",
-                              "delayMs",
                               "error"
                             ],
                             "additionalProperties": false
@@ -20131,9 +18592,28 @@
                         ]
                       }
                     },
-                    "overrideCount": {
-                      "type": "integer",
-                      "minimum": 0
+                    "env": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "retell_dynamic_variables": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "job_dispatch_metadata": {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "revision": {
                       "type": "string",
@@ -20160,7 +18640,7 @@
                     "expectedBehaviors",
                     "personas",
                     "mockTools",
-                    "overrideCount",
+                    "env",
                     "revision",
                     "createdAt",
                     "updatedAt"
@@ -20320,10 +18800,6 @@
                             "tool": {
                               "type": "string"
                             },
-                            "delayMs": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
                             "answer": {},
                             "error": {
                               "not": {}
@@ -20341,10 +18817,6 @@
                             "tool": {
                               "type": "string"
                             },
-                            "delayMs": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
                             "answer": {
                               "not": {}
                             },
@@ -20360,6 +18832,29 @@
                         }
                       ]
                     }
+                  },
+                  "env": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "retell_dynamic_variables": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
+                          "job_dispatch_metadata": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "expectedVersionId": {
                     "type": "string",
@@ -20467,10 +18962,6 @@
                               "tool": {
                                 "type": "string"
                               },
-                              "delayMs": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
                               "answer": {},
                               "error": {
                                 "not": {}
@@ -20478,7 +18969,6 @@
                             },
                             "required": [
                               "tool",
-                              "delayMs",
                               "answer"
                             ],
                             "additionalProperties": false
@@ -20489,10 +18979,6 @@
                               "tool": {
                                 "type": "string"
                               },
-                              "delayMs": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
                               "answer": {
                                 "not": {}
                               },
@@ -20502,7 +18988,6 @@
                             },
                             "required": [
                               "tool",
-                              "delayMs",
                               "error"
                             ],
                             "additionalProperties": false
@@ -20510,9 +18995,28 @@
                         ]
                       }
                     },
-                    "overrideCount": {
-                      "type": "integer",
-                      "minimum": 0
+                    "env": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "retell_dynamic_variables": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "job_dispatch_metadata": {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "revision": {
                       "type": "string",
@@ -20539,7 +19043,7 @@
                     "expectedBehaviors",
                     "personas",
                     "mockTools",
-                    "overrideCount",
+                    "env",
                     "revision",
                     "createdAt",
                     "updatedAt"
@@ -20939,10 +19443,6 @@
                                     "tool": {
                                       "type": "string"
                                     },
-                                    "delayMs": {
-                                      "type": "integer",
-                                      "minimum": 0
-                                    },
                                     "answer": {},
                                     "error": {
                                       "not": {}
@@ -20950,7 +19450,6 @@
                                   },
                                   "required": [
                                     "tool",
-                                    "delayMs",
                                     "answer"
                                   ],
                                   "additionalProperties": false
@@ -20961,10 +19460,6 @@
                                     "tool": {
                                       "type": "string"
                                     },
-                                    "delayMs": {
-                                      "type": "integer",
-                                      "minimum": 0
-                                    },
                                     "answer": {
                                       "not": {}
                                     },
@@ -20974,7 +19469,6 @@
                                   },
                                   "required": [
                                     "tool",
-                                    "delayMs",
                                     "error"
                                   ],
                                   "additionalProperties": false
@@ -20982,9 +19476,28 @@
                               ]
                             }
                           },
-                          "overrideCount": {
-                            "type": "integer",
-                            "minimum": 0
+                          "env": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "retell_dynamic_variables": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "job_dispatch_metadata": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "createdAt": {
                             "type": "string",
@@ -21002,7 +19515,7 @@
                           "expectedBehaviors",
                           "personas",
                           "mockTools",
-                          "overrideCount",
+                          "env",
                           "createdAt"
                         ],
                         "additionalProperties": false
@@ -22035,6 +20548,12 @@
           },
           "toolResult": {
             "type": "string"
+          },
+          "toolProvenance": {
+            "type": "string",
+            "enum": [
+              "mocked"
+            ]
           },
           "spans": {
             "type": "array",
