@@ -121,4 +121,4 @@ Call the recepionist to book an appointment at medspa "ABC" but ask for a specif
 ```
 ````
 
-The above example shows both retell_dynamic_variables & job_dispatch_metadata for reference. In reality, you should only supply the field corresponding to the platform the agent is built on.
+The above example shows both retell_dynamic_variables & job_dispatch_metadata only for reference. In reality, you should only supply the field corresponding to the platform the agent is built on.

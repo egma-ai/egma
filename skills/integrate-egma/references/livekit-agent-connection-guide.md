@@ -25,11 +25,11 @@ C. There are two modality strategies as well:
   1. Run full voice-to-voice simulations (invokes the full STT-LLM-TTS pipeline of the livekit agent being tested)
   2. Run the simulation in text mode (tests the LLM/ Harness of the agent). This is faster and cheaper.
 
-
 Now that you have the concepts clear - here's how to add the connection.
 
 1. Default to using project credential based access strategy. Do not use token endpoint method unless explicitly asked to do so in prior instructions.
 2. The next step is to get the credentials themselves. By default, you should use the credentials set up in the repo. That means livekit wss url, api key and api secret for the livekit project. Only if the developer asks to use a separate new credentials explicitly, should you stop to ask them to mint a new key. Otherwise continue with the default ones you know/ can access.
 2. You should also create two connections by default - one with voice modality and the second with text modality.
-3. Identify and set the right agent name. 
-4. Once you have all the above details, look at `egma agent connection add --help` and supply everything to add a connection. If there's any confusion, you can also use `egma agent connection options --help` to list available connection options for livekit and what all needs to be supplied to set up a successful connection. This should conclude step 2.
+3. Identify and set the right agent name.
+4. Identify and set the right job dispatch metadata defaults. 
+5. Once you have all the above details, look at `egma agent connection add --help` and supply everything to add a connection. If there's any confusion, you can also use `egma agent connection options --help` to list available connection options for livekit and what all needs to be supplied to set up a successful connection. This should conclude step 2.

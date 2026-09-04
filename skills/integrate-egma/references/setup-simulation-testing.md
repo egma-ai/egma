@@ -17,8 +17,8 @@ The broad order of things that need to be setup before we can run successful tes
  - The egma platform needs to reach the agent in this repo in order to run simulation tests with it. There are different connection strategies based on the agent platform and modality of connection. Example - retell agent with chat modality (i.e simulation testing a retell voice agent but without voice - just testing the behavior of the main LLM in a "STT-LLM-TTS" cascaded voice agent setup)
  - First off, identify which platform the agent in this repo built on. Currently egma supports connecting with agents built on livekit agents (python/ js) & retell.
  - Based on the platform - refer to the platform specific connection guides. Follow the guides and come back here for following the next step.
-  - For connecting a livekit agent - you must look at [guide to connect a livekit agent](references/livekit-agent-connection-guide.md) which is a part of this skill's references
-  - For connecting a retell agent - you must look at [guide to connect a retell agent](references/retell-agent-connection-guide.md) which is a part of this skill's references
+  - For connecting a livekit agent - you must look at [guide to connect a livekit agent](./livekit-agent-connection-guide.md) which is a part of this skill's references
+  - For connecting a retell agent - you must look at [guide to connect a retell agent](./retell-agent-connection-guide.md) which is a part of this skill's references
 
 3. Author tests
   - If this is the first time egma tests are being written in this repository, create at max four tests in one suite covering 4 most common scenrios the voice agent here encounters.
