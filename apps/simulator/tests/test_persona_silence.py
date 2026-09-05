@@ -50,6 +50,15 @@ class AgentScript(ScriptedTransport):
         self.answers = list(answers)
         self.resume_after_wordless_boundary = greeting == WORDLESS_AUDIO
 
+    async def next_input(self):
+        chunk = await super().next_input()
+        # Recording acknowledges an input frame before queued turn processing
+        # finishes. Pace each 20ms frame so the real conductor and persona tasks
+        # can run before the fixture advances the media clock again. A positive
+        # delay also yields to event-loop timers on Linux; sleep(0) does not.
+        await asyncio.sleep(0.001)
+        return chunk
+
     async def persona_stopped(self) -> None:
         self._hearing.clear()
         if not self.answers:
@@ -246,6 +255,19 @@ async def test_persona_follows_up_twice_after_ten_seconds_then_hangs_up(tmp_path
     for earlier, later in pairwise(walk.persona_turns):
         assert_ten_seconds(later[2] - earlier[3])
     assert_ten_seconds(walk.recording_ended - walk.persona_turns[-1][3])
+
+
+async def test_silence_instruction_uses_the_same_wait_as_the_timer(tmp_path):
+    walk = await walk_silence(
+        tmp_path, parameters=ConductParameters(agent_quiet_seconds=2.0)
+    )
+
+    assert walk.result is not None and walk.result.ending == "persona_concluded"
+    assert len(walk.requests) == 3
+    for request in walk.requests[1:]:
+        assert request.silence_on_media_clock is not None
+        assert Fraction(2) <= request.silence_on_media_clock < Fraction(9, 4)
+        assert "has not replied for 2 seconds" in request.messages[-1]["content"]
 
 
 async def test_silence_instruction_reaches_model_but_never_spoken_history(tmp_path):

@@ -124,6 +124,7 @@ OnAnswered = Callable[[], Awaitable[None]]
 class _AgentFinished(ControlFrame):
     heard_a_turn: bool = True
     silence_follow_up: int = 0
+    silence_wait_seconds: float = SILENCE_WAIT_SECONDS
 
 
 @dataclass(frozen=True)
@@ -722,9 +723,16 @@ class _PersonaBrain(FrameProcessor):
             self._heard.append(frame.text)
         await self.push_frame(frame, direction)
         if isinstance(frame, _AgentFinished):
-            await self._answer(frame.heard_a_turn, frame.silence_follow_up)
+            await self._answer(
+                frame.heard_a_turn, frame.silence_follow_up, frame.silence_wait_seconds
+            )
 
-    async def _answer(self, heard_a_turn: bool, silence_follow_up: int = 0) -> None:
+    async def _answer(
+        self,
+        heard_a_turn: bool,
+        silence_follow_up: int = 0,
+        silence_wait_seconds: float = SILENCE_WAIT_SECONDS,
+    ) -> None:
         try:
             said = " ".join(piece for piece in self._heard if piece)
             self._heard.clear()
@@ -733,7 +741,9 @@ class _PersonaBrain(FrameProcessor):
                 return
             await self._replies.request(
                 self._persona.context(
-                    self._conductor.history, silence_follow_up=silence_follow_up
+                    self._conductor.history,
+                    silence_follow_up=silence_follow_up,
+                    silence_wait_seconds=silence_wait_seconds,
                 ),
                 due,
                 self.push_frame,
@@ -1188,7 +1198,11 @@ class VoiceConductor:
             else 0
         )
         await self._worker.queue_frame(
-            _AgentFinished(heard_a_turn=heard_a_turn, silence_follow_up=follow_up)
+            _AgentFinished(
+                heard_a_turn=heard_a_turn,
+                silence_follow_up=follow_up,
+                silence_wait_seconds=self._parameters.agent_quiet_seconds,
+            )
         )
 
     async def the_agent_finished(

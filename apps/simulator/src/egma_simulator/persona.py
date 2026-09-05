@@ -125,7 +125,11 @@ class Persona:
         return messages_for(self._system_prompt, history)
 
     def context(
-        self, history: Sequence[Turn], *, silence_follow_up: int = 0
+        self,
+        history: Sequence[Turn],
+        *,
+        silence_follow_up: int = 0,
+        silence_wait_seconds: float = SILENCE_WAIT_SECONDS,
     ) -> LLMContext:
         """The provider-neutral messages and tools for one persona turn."""
         messages = self.messages(history)
@@ -134,7 +138,7 @@ class Persona:
                 {
                     "role": "user",
                     "content": (
-                        f"(The agent has not replied for {SILENCE_WAIT_SECONDS:g} "
+                        f"(The agent has not replied for {silence_wait_seconds:g} "
                         f"seconds. This is follow-up {silence_follow_up} of "
                         f"{SILENCE_FOLLOW_UP_LIMIT}. Stay in character and say a "
                         "brief follow-up to check whether the agent is still "
