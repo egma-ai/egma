@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     FunctionCallResultProperties,
     InputAudioRawFrame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -65,7 +66,7 @@ from .conversation import (
 )
 from .media import RemoteParticipantLeftFrame, VoiceMedia
 from .model import END_CALL_TOOL_NAME, ModelFailure, PersonaReply
-from .persona import Persona, Turn
+from .persona import SILENCE_FOLLOW_UP_LIMIT, SILENCE_WAIT_SECONDS, Persona, Turn
 from .platform_logging import log_event
 from .plugs import PlugError, VoiceConnection
 from .recording import AudioFacts, dual_channel_wav
@@ -91,12 +92,17 @@ class ConductParameters:
 
     agent_opening_seconds: float = 10.0
     persona_pause_seconds: float = 0.4
-    agent_quiet_seconds: float = 12.0
+    agent_quiet_seconds: float = SILENCE_WAIT_SECONDS
     agent_turn_backstop_seconds: float = 5.0
     yields_to_the_agent: bool = True
 
 
 DEFAULT_CONDUCT = ConductParameters()
+
+PERSONA_ENDED_SILENCE: Ending = (
+    "persona_concluded",
+    "the agent did not respond after two persona follow-ups",
+)
 
 ASKED_BEFORE_A_SILENCE_COUNTS = 2
 """How many persona turns an agent must go quiet through before its
@@ -117,6 +123,7 @@ OnAnswered = Callable[[], Awaitable[None]]
 @dataclass
 class _AgentFinished(ControlFrame):
     heard_a_turn: bool = True
+    silence_follow_up: int = 0
 
 
 @dataclass(frozen=True)
@@ -183,9 +190,7 @@ class _AgentEar(VADProcessor):
                 * self._analyzer.num_frames_required()
                 / self._analyzer.sample_rate
             )
-            await self.broadcast_frame(
-                VADUserStoppedSpeakingFrame, stop_secs=stop_secs
-            )
+            await self.broadcast_frame(VADUserStoppedSpeakingFrame, stop_secs=stop_secs)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         if isinstance(frame, RemoteParticipantLeftFrame):
@@ -194,9 +199,7 @@ class _AgentEar(VADProcessor):
             await self.finalize_active_utterance()
         if isinstance(frame, InputAudioRawFrame):
             source_start = self.position
-            source_end = source_start + Fraction(
-                frame.num_frames, frame.sample_rate
-            )
+            source_end = source_start + Fraction(frame.num_frames, frame.sample_rate)
             frame.metadata[_INPUT_SOURCE_RANGE] = (source_start, source_end)
             self.position = source_end
         await super().process_frame(frame, direction)
@@ -210,9 +213,8 @@ class _TurnBoundary(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
-        if (
-            direction == FrameDirection.DOWNSTREAM
-            and isinstance(frame, UserStoppedSpeakingFrame)
+        if direction == FrameDirection.DOWNSTREAM and isinstance(
+            frame, UserStoppedSpeakingFrame
         ):
             await self.push_frame(_AgentFinished())
 
@@ -321,9 +323,7 @@ class _EvidenceRecorder(AudioBufferProcessor):
                     "the pinned pipecat release skipped its recording resampler"
                 ) from changed
             if written:
-                represented_end_samples = (
-                    float(source_end * self.sample_rate) - pending
-                )
+                represented_end_samples = float(source_end * self.sample_rate) - pending
                 rounded_end = round(represented_end_samples)
                 if abs(represented_end_samples - rounded_end) > 1e-6:
                     raise SpeechFault(
@@ -437,9 +437,7 @@ class _EvidenceRecorder(AudioBufferProcessor):
         if not self.sample_rate:
             return None
         segments = (
-            reversed(self._input_segments)
-            if at_turn_start
-            else self._input_segments
+            reversed(self._input_segments) if at_turn_start else self._input_segments
         )
         for segment in segments:
             inside = (
@@ -448,9 +446,9 @@ class _EvidenceRecorder(AudioBufferProcessor):
                 else segment.source_start < source_position <= segment.source_end
             )
             if inside:
-                return Fraction(
-                    segment.recording_start_sample, self.sample_rate
-                ) + (source_position - segment.source_start)
+                return Fraction(segment.recording_start_sample, self.sample_rate) + (
+                    source_position - segment.source_start
+                )
         return None
 
     def _mapped_past(
@@ -620,18 +618,22 @@ class _PersonaReplyGate(FrameProcessor):
         self._due: MediaPosition | None = None
         self._collecting = False
         self._text: list[str] = []
+        self._silence_follow_up = 0
 
     async def request(
         self,
         context: LLMContext,
         due: MediaPosition,
         push: Callable[[Frame], Awaitable[None]],
+        *,
+        silence_follow_up: int = 0,
     ) -> None:
         if self._waiting is not None:
             raise RuntimeError("the persona model already has a reply in flight")
         waiting = asyncio.get_running_loop().create_future()
         self._waiting = waiting
         self._due = due
+        self._silence_follow_up = silence_follow_up
         try:
             await push(LLMContextFrame(context=context))
             await waiting
@@ -673,7 +675,9 @@ class _PersonaReplyGate(FrameProcessor):
                 await self._conductor.wait_until(due)
                 if not self._conductor.is_ending:
                     self._conductor.persona_will_speak(
-                        reply.text, concludes=reply.concluded
+                        reply.text,
+                        concludes=reply.concluded,
+                        silence_follow_up=self._silence_follow_up,
                     )
                     await self.push_frame(LLMFullResponseStartFrame())
                     await self.push_frame(TextFrame(reply.text))
@@ -693,6 +697,7 @@ class _PersonaReplyGate(FrameProcessor):
         self._due = None
         self._collecting = False
         self._text = []
+        self._silence_follow_up = 0
 
 
 class _PersonaBrain(FrameProcessor):
@@ -717,9 +722,9 @@ class _PersonaBrain(FrameProcessor):
             self._heard.append(frame.text)
         await self.push_frame(frame, direction)
         if isinstance(frame, _AgentFinished):
-            await self._answer(frame.heard_a_turn)
+            await self._answer(frame.heard_a_turn, frame.silence_follow_up)
 
-    async def _answer(self, heard_a_turn: bool) -> None:
+    async def _answer(self, heard_a_turn: bool, silence_follow_up: int = 0) -> None:
         try:
             said = " ".join(piece for piece in self._heard if piece)
             self._heard.clear()
@@ -727,9 +732,12 @@ class _PersonaBrain(FrameProcessor):
             if due is None:
                 return
             await self._replies.request(
-                self._persona.context(self._conductor.history),
+                self._persona.context(
+                    self._conductor.history, silence_follow_up=silence_follow_up
+                ),
                 due,
                 self.push_frame,
+                silence_follow_up=silence_follow_up,
             )
         except Exception as fault:
             self._conductor.the_brain_failed(fault)
@@ -762,6 +770,8 @@ class _Timeline(FrameProcessor):
             )
         elif isinstance(frame, TTSStoppedFrame):
             await self._conductor.persona_stopped()
+        elif isinstance(frame, InterruptionFrame):
+            self._conductor.persona_interrupted()
         elif isinstance(frame, RemoteParticipantLeftFrame):
             frame.completed.set()
             self._conductor.media_advanced()
@@ -775,6 +785,8 @@ class _Record:
     persona_last_stopped_at: MediaPosition | None = None
     quiet_since: MediaPosition = Fraction(0)
     first_answer_measured: bool = False
+    silence_follow_ups: int = 0
+    persona_response_pending: bool = False
 
 
 class PipelineGone(RuntimeError):
@@ -824,6 +836,7 @@ class VoiceConductor:
 
         self._pending_persona_text: str | None = None
         self._pending_persona_concludes = False
+        self._pending_silence_follow_up = 0
         self._persona_began: MediaPosition | None = None
         self._persona_ended: MediaPosition | None = None
 
@@ -1149,7 +1162,9 @@ class VoiceConductor:
         if self._heard_so_far < len(ear.utterances):
             return
 
-        if self._record.persona_last_stopped_at is None and not ear.utterances:
+        if self._record.persona_last_stopped_at is None and not any(
+            turn.speaker == "human" for turn in self._record.history
+        ):
             if self._position >= _seconds(self._parameters.agent_opening_seconds):
                 await self._ask_the_persona(heard_a_turn=False)
             return
@@ -1158,13 +1173,23 @@ class VoiceConductor:
         if self._position - self._record.quiet_since >= _seconds(
             self._parameters.agent_quiet_seconds
         ):
-            await self._ask_the_persona(heard_a_turn=False)
+            if self._record.silence_follow_ups >= SILENCE_FOLLOW_UP_LIMIT:
+                self._ending = PERSONA_ENDED_SILENCE
+            else:
+                await self._ask_the_persona(heard_a_turn=False)
 
     async def _ask_the_persona(self, *, heard_a_turn: bool) -> None:
         if self._worker is None:
             raise PipelineGone("the persona was asked before the pipeline started")
         self._owes_a_turn = True
-        await self._worker.queue_frame(_AgentFinished(heard_a_turn=heard_a_turn))
+        follow_up = (
+            self._record.silence_follow_ups + 1
+            if not heard_a_turn and self._record.persona_last_stopped_at is not None
+            else 0
+        )
+        await self._worker.queue_frame(
+            _AgentFinished(heard_a_turn=heard_a_turn, silence_follow_up=follow_up)
+        )
 
     async def the_agent_finished(
         self, said: str, heard_a_turn: bool
@@ -1173,6 +1198,7 @@ class VoiceConductor:
         if ear is None:
             return None
         stopped_at: MediaPosition | None = None
+        received_words = False
         if heard_a_turn and self._heard_so_far < len(ear.utterances):
             source_began = ear.utterances[self._heard_so_far].began
             source_ended = ear.utterances[-1].ended
@@ -1197,14 +1223,16 @@ class VoiceConductor:
                 if answering:
                     if not self._record.first_answer_measured:
                         self._record.first_answer_measured = True
-                        await self._measure(
-                            "first_response_latency", quiet_from, began
-                        )
+                        await self._measure("first_response_latency", quiet_from, began)
                     await self._measure("turn_response_latency", quiet_from, began)
             await self._took_a_turn("agent", said, began, ended)
             await self._measure("agent_speech_duration", began, ended)
-            self._record.persona_last_stopped_at = None
-            self._record.quiet_since = max(self._record.quiet_since, ended)
+            received_words = bool(said.strip())
+            if received_words:
+                self._record.silence_follow_ups = 0
+                self._record.persona_response_pending = True
+                self._record.persona_last_stopped_at = None
+                self._record.quiet_since = max(self._record.quiet_since, ended)
         if self._on_answered is not None:
             await self._on_answered()
         if self._ending is not None:
@@ -1216,6 +1244,17 @@ class VoiceConductor:
         if self._media is not None and self._media.ended.is_set():
             self._agent_departed = True
             self._ending = AGENT_ENDED
+            self._owes_a_turn = False
+            self.media_advanced()
+            return None
+        if (
+            heard_a_turn
+            and not received_words
+            and (stopped_at is None or not self._record.persona_response_pending)
+        ):
+            # A wordless or already-consumed boundary is not a new response.
+            # Keep waiting from the last persona turn without asking the model
+            # to answer an empty message or resetting its follow-up allowance.
             self._owes_a_turn = False
             self.media_advanced()
             return None
@@ -1231,9 +1270,16 @@ class VoiceConductor:
                 return
             await self._activity.wait()
 
-    def persona_will_speak(self, text: str, *, concludes: bool = False) -> None:
+    def persona_will_speak(
+        self,
+        text: str,
+        *,
+        concludes: bool = False,
+        silence_follow_up: int = 0,
+    ) -> None:
         self._pending_persona_text = text
         self._pending_persona_concludes = concludes
+        self._pending_silence_follow_up = silence_follow_up
         self._persona_began = None
         self._persona_ended = None
 
@@ -1248,11 +1294,32 @@ class VoiceConductor:
         if self._persona_began is None:
             duration = Fraction(frame.num_frames, frame.sample_rate)
             self._persona_began = max(Fraction(0), recorded_until - duration)
+            # Count an audible follow-up even if the agent interrupts it.
+            # A model request canceled before audio uses no allowance.
+            if self._pending_silence_follow_up:
+                self._record.silence_follow_ups += 1
+                self._pending_silence_follow_up = 0
         self._persona_ended = recorded_until
+        self.media_advanced()
+
+    def persona_interrupted(self) -> None:
+        """Start waiting from the last audio heard before an interruption."""
+        ended = self._persona_ended
+        if ended is None:
+            return
+        self._record.persona_last_stopped_at = ended
+        self._record.quiet_since = max(self._record.quiet_since, ended)
+        self._pending_persona_text = None
+        self._pending_persona_concludes = False
+        self._pending_silence_follow_up = 0
+        self._persona_began = None
+        self._persona_ended = None
+        self._owes_a_turn = False
         self.media_advanced()
 
     async def persona_stopped(self) -> None:
         text, self._pending_persona_text = self._pending_persona_text, None
+        self._pending_silence_follow_up = 0
         concludes, self._pending_persona_concludes = (
             self._pending_persona_concludes,
             False,
@@ -1272,6 +1339,7 @@ class VoiceConductor:
             "human", text, began, ended, apply_turn_limit=not concludes
         )
         self._record.persona_last_stopped_at = ended
+        self._record.persona_response_pending = False
         self._record.quiet_since = max(self._record.quiet_since, ended)
         if concludes and not self.is_ending:
             self._ending = PERSONA_CONCLUDED
@@ -1303,9 +1371,7 @@ class VoiceConductor:
         )
         self._record.turns += 1
         if self._on_utterance is not None:
-            await self._on_utterance(
-                speaker, text, self._at(began), self._at(ended)
-            )
+            await self._on_utterance(speaker, text, self._at(began), self._at(ended))
         if (
             apply_turn_limit
             and self._record.turns >= self._max_turns
@@ -1318,9 +1384,7 @@ class VoiceConductor:
         self, measure: str, began: MediaPosition, ended: MediaPosition
     ) -> None:
         if ended < began:
-            raise ValueError(
-                f"{measure} was measured over a backwards media interval"
-            )
+            raise ValueError(f"{measure} was measured over a backwards media interval")
         if self._on_measured is not None:
             await self._on_measured(measure, self._at(began), self._at(ended))
 
@@ -1360,13 +1424,9 @@ class VoiceConductor:
 
     def _transport_lost(self) -> PlugError:
         transport = (
-            self._media.transport_name
-            if self._media is not None
-            else "voice transport"
+            self._media.transport_name if self._media is not None else "voice transport"
         )
-        return PlugError(
-            f"the {transport} disconnected before the simulation ended"
-        )
+        return PlugError(f"the {transport} disconnected before the simulation ended")
 
     async def _agent_left(self) -> None:
         """Finish any active input turn before recording a normal departure."""

@@ -43,7 +43,7 @@ from egma_simulator.conversation import (
     ConversationControls,
     SilentAgent,
 )
-from egma_simulator.media import VoiceMedia
+from egma_simulator.media import VoiceMedia, scripted_transport
 from egma_simulator.media.scripted_transport import ScriptedTransport
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
@@ -809,8 +809,13 @@ async def test_transport_loss_is_a_platform_fault(tmp_path: Path):
     assert "voice transport disconnected" in str(lost.value)
 
 
-async def test_the_persona_opens_when_the_far_end_does_not(tmp_path: Path):
+async def test_the_persona_opens_when_the_far_end_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """No greeting is not a broken call: a persona may speak first."""
+    # Match this test's shortened opening wait so the fixture does not leave
+    # ten more seconds of queued silence in front of the agent's answer.
+    monkeypatch.setattr(scripted_transport, "OPENING_SILENCE_SECONDS", 2.0)
     observed = await voice_simulation(
         tmp_path,
         scenario="One point.",
@@ -1347,6 +1352,9 @@ async def test_a_turn_no_transcriber_finds_words_in_is_a_turn_without_words(
     """
 
     monkeypatch.setattr(conductor_module, "build_legs", deaf_legs)
+    # Keep the media clock running while the persona waits ten seconds after
+    # wordless agent speech. The usual fixture sends only 0.6 seconds of quiet.
+    monkeypatch.setattr(scripted_transport, "TRAILING_SILENCE_SECONDS", 13.0)
 
     spans: list[tuple[str, str, int, int]] = []
     with pytest.raises(SilentAgent) as silent:
@@ -1436,6 +1444,7 @@ async def test_a_cancel_outranks_a_silence(
     would be a defect nobody could act on.
     """
     monkeypatch.setattr(conductor_module, "build_legs", deaf_legs)
+    monkeypatch.setattr(scripted_transport, "TRAILING_SILENCE_SECONDS", 13.0)
 
     spans: list[tuple[str, str, int, int]] = []
     observed = await voice_simulation(

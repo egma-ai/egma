@@ -13,6 +13,7 @@ scripted client or a recording fake.
 
 from __future__ import annotations
 
+import pytest
 from conftest import load_fixture_spec
 from pipecat.processors.aggregators.llm_context import LLMContext
 
@@ -168,6 +169,27 @@ def test_an_empty_history_gets_the_opening_nudge():
         {"role": "system", "content": "the prompt"},
         {"role": "user", "content": OPENING_NUDGE},
     ]
+
+
+@pytest.mark.parametrize("follow_up", [1, 2])
+def test_silence_follow_up_explains_the_pause_without_changing_history(follow_up):
+    persona = Persona(
+        authored=AUTHORED,
+        scenario_instructions=SCENARIO,
+        model=ScriptedModel(SCENARIO),
+    )
+    history = [Turn("agent", "Hello."), Turn("human", "Can I book a tour?")]
+    ordinary = persona.messages(history)
+
+    context = persona.context(history, silence_follow_up=follow_up)
+    messages = context.get_messages()
+
+    assert messages[:-1] == ordinary
+    assert messages[-1]["role"] == "user"
+    assert "10 seconds" in messages[-1]["content"]
+    assert f"{follow_up} of 2" in messages[-1]["content"]
+    assert persona.messages(history) == ordinary
+    assert history[-1] == Turn("human", "Can I book a tour?")
 
 
 def test_every_persona_context_advertises_the_native_end_call_tool():
