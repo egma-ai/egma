@@ -56,11 +56,9 @@ from .conversation import (
     AGENT_ENDED,
     CANCEL_DIRECTIVE,
     PERSONA_CONCLUDED,
-    SAID_NOTHING,
     Conducted,
     ConversationControls,
     Ending,
-    SilentAgent,
     duration_limit_reached,
     turn_limit_reached,
 )
@@ -103,17 +101,6 @@ PERSONA_ENDED_SILENCE: Ending = (
     "persona_concluded",
     "the agent did not respond after two persona follow-ups",
 )
-
-ASKED_BEFORE_A_SILENCE_COUNTS = 2
-"""How many persona turns an agent must go quiet through before its
-silence is read as a failure rather than an ending.
-
-Only for the case where the agent took no turn at all. Two, because one
-persona turn is what a spec whose turn limit is one produces on its own —
-the persona speaks, the budget is spent, and the agent never had a
-chance. A limit is deliberate and is never the agent failing, so that run
-keeps its own ending. By the second turn nothing else explains the quiet.
-"""
 
 OnUtterance = Callable[[str, str, int, int], Awaitable[None]]
 OnMeasured = Callable[[str, int, int], Awaitable[None]]
@@ -925,56 +912,15 @@ class VoiceConductor:
             await self.close()
 
         if controls.cause == CANCEL_DIRECTIVE:
-            # A directive is somebody's own act, so it is answered before
-            # the silence below is even looked at: a run stopped on
-            # purpose is not a run that failed, whatever it had heard.
             return Conducted(
                 status="canceled",
                 ending="canceled",
                 reason=None,
                 provider_reference=self.provider_reference,
             )
-        self._refuse_a_silence()
         if controls.cause is not None:
             return self._ended(duration_limit_reached(max_duration_seconds))
         return self._ended(self._ending or turn_limit_reached(max_turns))
-
-    def _refuse_a_silence(self) -> None:
-        """A conversation the agent said no word in is a failure, not an ending.
-
-        Ahead of every deliberate ending on purpose. The endings below all
-        describe a conversation — the persona concluded one, the agent
-        ended one, a limit cut one short — and a call the agent was silent
-        through is none of those. It reported itself as one, and the
-        grader judged the silence as a finished conversation.
-
-        The bar is that the agent **had a real chance and said nothing**,
-        which is two shapes:
-
-        - it took turns, and every one of them was wordless. Whatever it
-          was doing, none of it reached the transcript, so there is
-          nothing for a grader to read.
-        - it took no turn at all, and the persona got through
-          :data:`ASKED_BEFORE_A_SILENCE_COUNTS` of its own waiting for
-          one. Two rather than one, because one is what a spec whose turn
-          limit *is* one produces by itself: the persona speaks, the
-          budget is spent, and the run ends before the agent could ever
-          have answered. A limit is deliberate and is never the agent
-          failing, so a run a limit ended that early keeps its own ending.
-
-        A record with no turns at all is left where its ending put it for
-        the same reason — nobody spoke, the exchange never got under way,
-        and a limit that tripped while the line was still ringing is that
-        record.
-        """
-        answers = [turn for turn in self._record.history if turn.speaker == "agent"]
-        if any(turn.text.strip() for turn in answers):
-            return
-        if not answers:
-            asked = sum(1 for turn in self._record.history if turn.speaker == "human")
-            if asked < ASKED_BEFORE_A_SILENCE_COUNTS:
-                return
-        raise SilentAgent(SAID_NOTHING)
 
     def _ended(self, named: Ending) -> Conducted:
         ending, reason = named

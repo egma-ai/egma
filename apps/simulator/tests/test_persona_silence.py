@@ -19,7 +19,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import ConductParameters, VoiceConductor
-from egma_simulator.conversation import Conducted, ConversationControls, SilentAgent
+from egma_simulator.conversation import Conducted, ConversationControls
 from egma_simulator.media import VoiceMedia
 from egma_simulator.media.scripted_transport import ScriptedTransport
 from egma_simulator.model import PersonaReply
@@ -101,7 +101,6 @@ class Walk:
     turns: list[tuple[str, str, int, int]] = field(default_factory=list)
     requests: list[Asked] = field(default_factory=list)
     result: Conducted | None = None
-    silent_error: SilentAgent | None = None
     canceled_requests: list[int] = field(default_factory=list)
     recording_started: int = 0
     recording_ended: int = 0
@@ -155,7 +154,8 @@ async def walk_silence(
     answers: list[tuple[float, str | None]] | None = None,
     conclude_at: int | None = None,
     max_turns: int = 12,
-    stop_after_first_persona: str | None = None,
+    stop: str | None = None,
+    stop_at_persona_turn: int = 1,
     parameters: ConductParameters | None = None,
     interrupt_second_request: bool = False,
 ) -> Walk:
@@ -184,10 +184,10 @@ async def walk_silence(
             # recorded, so queued media cannot outrun the pending turn.
             transport.resume_after_wordless_boundary = False
             transport._queue_audio(silence(13, transport._input_rate))
-        if speaker == "human" and len(walk.persona_turns) == 1:
-            if stop_after_first_persona == "cancel":
+        if speaker == "human" and len(walk.persona_turns) == stop_at_persona_turn:
+            if stop == "cancel":
                 controls.request_cancel()
-            elif stop_after_first_persona == "duration":
+            elif stop == "duration":
                 controls.trip_duration_limit()
 
     async def measured(*_args):
@@ -205,24 +205,19 @@ async def walk_silence(
             transport._queue_words(WORDLESS_AUDIO)
             await asyncio.Event().wait()  # Real VAD interrupts this model request.
 
-    try:
-        walk.result = await conductor.conduct(
-            persona=Persona(
-                authored=spec.persona,
-                scenario_instructions="Ask the agent one question.",
-                model=PersonaModel(
-                    walk, conclude_at, silence_on_media_clock, before_reply
-                ),
-            ),
-            max_turns=max_turns,
-            max_duration_seconds=20,
-            controls=controls,
-            name="sim:persona-silence-test",
-            on_utterance=utterance,
-            on_measured=measured,
-        )
-    except SilentAgent as error:
-        walk.silent_error = error
+    walk.result = await conductor.conduct(
+        persona=Persona(
+            authored=spec.persona,
+            scenario_instructions="Ask the agent one question.",
+            model=PersonaModel(walk, conclude_at, silence_on_media_clock, before_reply),
+        ),
+        max_turns=max_turns,
+        max_duration_seconds=20,
+        controls=controls,
+        name="sim:persona-silence-test",
+        on_utterance=utterance,
+        on_measured=measured,
+    )
     assert conductor.audio is not None
     with wave.open(io.BytesIO((tmp_path / "silence.wav").read_bytes())) as recording:
         duration = recording.getnframes() / recording.getframerate()
@@ -324,7 +319,12 @@ async def test_real_agent_answer_resets_two_followup_allowance(tmp_path):
 async def test_initial_opening_is_not_one_of_the_two_followups(tmp_path):
     walk = await walk_silence(tmp_path, greeting=None)
 
-    assert walk.silent_error is not None  # Preserve the entirely silent agent failure.
+    assert walk.result is not None
+    assert walk.result.status == "completed"
+    assert walk.result.ending == "persona_concluded"
+    assert (
+        walk.result.reason == "the agent did not respond after two persona follow-ups"
+    )
     assert len(walk.requests) == 3
     assert len(walk.persona_turns) == 3
     for earlier, later in pairwise(walk.persona_turns):
@@ -354,13 +354,37 @@ async def test_persona_does_not_follow_up_while_agent_is_still_speaking(tmp_path
 async def test_existing_stop_conditions_take_priority_over_followups(
     tmp_path, stop, max_turns, status, ending, requests
 ):
-    walk = await walk_silence(
-        tmp_path, stop_after_first_persona=stop, max_turns=max_turns
-    )
+    walk = await walk_silence(tmp_path, stop=stop, max_turns=max_turns)
 
     assert walk.result is not None
     assert (walk.result.status, walk.result.ending) == (status, ending)
     assert len(walk.requests) == requests
+
+
+@pytest.mark.parametrize(
+    ("stop", "max_turns", "status", "ending"),
+    [
+        ("cancel", 12, "canceled", "canceled"),
+        ("duration", 12, "completed", "limit_reached"),
+        (None, 2, "completed", "limit_reached"),
+    ],
+)
+async def test_silent_agent_keeps_explicit_stop_ending(
+    tmp_path, stop, max_turns, status, ending
+):
+    walk = await walk_silence(
+        tmp_path,
+        greeting=None,
+        stop=stop,
+        stop_at_persona_turn=2,
+        max_turns=max_turns,
+    )
+
+    assert walk.result is not None
+    assert (walk.result.status, walk.result.ending) == (status, ending)
+    assert len(walk.requests) == 2
+    assert len(walk.persona_turns) == 2
+    assert walk.recording_ended > walk.recording_started
 
 
 @pytest.fixture
@@ -409,7 +433,12 @@ async def test_wordless_opening_does_not_prevent_persona_opening(
         parameters=ConductParameters(agent_turn_backstop_seconds=0.5),
     )
 
-    assert walk.silent_error is not None
+    assert walk.result is not None
+    assert walk.result.status == "completed"
+    assert walk.result.ending == "persona_concluded"
+    assert (
+        walk.result.reason == "the agent did not respond after two persona follow-ups"
+    )
     assert walk.turns[0][0:2] == ("agent", "")
     assert len(walk.requests) == 3
     assert_ten_seconds(walk.persona_turns[0][2] - walk.recording_started)
