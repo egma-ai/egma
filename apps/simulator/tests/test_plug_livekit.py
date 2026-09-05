@@ -49,10 +49,8 @@ from token_endpoint_stub import serving
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR, contract_dir
 from egma_simulator.conversation import (
-    SAID_NOTHING,
     Conducted,
     ConversationControls,
-    SilentAgent,
 )
 from egma_simulator.media import MediaBackend, MediaBackendError, VoiceMedia
 from egma_simulator.media import livekit_room as livekit_room_module
@@ -871,8 +869,7 @@ async def test_a_muted_lead_hands_the_room_on_instead_of_deafening_it(
     not the end of a track: nothing is unsubscribed and the stream never
     ends, so a mix that only handed the clock on at those two events would
     hold it forever. The persona would then hear nothing while the other
-    track published — this lane's own defect by a second door, and one
-    that ends the run as a silent agent.
+    track published, losing the agent's speech from the simulation.
 
     LiveKit publishes the mute; Pipecat 1.7.0 registers no handler for it,
     so the room does.
@@ -2137,34 +2134,31 @@ async def test_a_dispatch_the_platform_refuses_is_a_fault_in_its_words(
     assert stub.deleted == [stub.rooms[0].name]
 
 
-async def test_an_agent_that_said_nothing_at_all_never_held_a_conversation(
+async def test_a_silent_agent_completes_after_two_persona_follow_ups(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """A worker that joins, publishes, and says no word in any turn.
-
-    The persona talks to it, gets nothing back, runs out of scenario and
-    concludes — so the simulation used to end ``persona_concluded`` and go
-    to grading, and a grader read ten minutes of silence as a finished
-    conversation. It is an execution failure now: nothing was tested, so
-    nothing is graded, and the sentence says what to go and look at.
-    """
+    """An agent's silence is recorded behavior, and the room still closes."""
     stub = RoomStub(greeting=None, replies=[])
 
-    with pytest.raises(SilentAgent) as silent:
-        await room_walk(tmp_path, stub, monkeypatch, scenario="One point.")
+    conducted, turns, _measures, assembled = await room_walk(
+        tmp_path,
+        stub,
+        monkeypatch,
+        scenario="One point. Two point. Three point. Four point.",
+    )
 
-    # What the record carries, asked the way the service asks it: a failed
-    # simulation, and an ending the contract never grades.
-    assert failed_ending(silent.value) == ERROR
-    assert ERROR in FAILED_ENDINGS
-    told = str(silent.value)
-    assert told == SAID_NOTHING
-    assert "said nothing" in told
-    assert "grade" in told
-    # And never one of the deliberate endings, which is the whole defect.
-    assert "persona_concluded" not in told
-    assert "limit_reached" not in told
-    # The room still went away, the way it does however a simulation ends.
+    assert conducted.status == "completed"
+    assert conducted.ending == "persona_concluded"
+    assert conducted.reason == (
+        "the agent did not respond after two persona follow-ups"
+    )
+    assert turns == [
+        ("human", "One point."),
+        ("human", "Two point."),
+        ("human", "Three point."),
+    ]
+    recording = (tmp_path / assembled.audio["recording"]).read_bytes()
+    assert_one_speaker_to_a_channel(recording, turns)
     assert stub.deleted == [stub.rooms[0].name]
 
 

@@ -31,6 +31,9 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from .model import PERSONA_TOOLS, ModelClient, PersonaReply
 from .spec import AuthoredPersona
 
+SILENCE_WAIT_SECONDS = 10.0
+SILENCE_FOLLOW_UP_LIMIT = 2
+
 OPENING_NUDGE = (
     "(The conversation is open and the agent is listening. Speak your first turn.)"
 )
@@ -90,9 +93,11 @@ def messages_for(system_prompt: str, history: Sequence[Turn]) -> list[dict[str, 
     """The conversation so far, in chat shape, from the persona's seat."""
     messages = [{"role": "system", "content": system_prompt}]
     for turn in history:
+        if not turn.text.strip():
+            continue
         role = "assistant" if turn.speaker == "human" else "user"
         messages.append({"role": role, "content": turn.text})
-    if not history:
+    if not any(turn.text.strip() for turn in history):
         messages.append({"role": "user", "content": OPENING_NUDGE})
     return messages
 
@@ -119,10 +124,31 @@ class Persona:
         """The exact provider input for this point in the conversation."""
         return messages_for(self._system_prompt, history)
 
-    def context(self, history: Sequence[Turn]) -> LLMContext:
+    def context(
+        self,
+        history: Sequence[Turn],
+        *,
+        silence_follow_up: int = 0,
+        silence_wait_seconds: float = SILENCE_WAIT_SECONDS,
+    ) -> LLMContext:
         """The provider-neutral messages and tools for one persona turn."""
+        messages = self.messages(history)
+        if silence_follow_up:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"(The agent has not replied for {silence_wait_seconds:g} "
+                        f"seconds. This is follow-up {silence_follow_up} of "
+                        f"{SILENCE_FOLLOW_UP_LIMIT}. Stay in character and say a "
+                        "brief follow-up to check whether the agent is still "
+                        "there. Do not repeat your full request or invent an "
+                        "agent response. Then wait for the agent to reply.)"
+                    ),
+                }
+            )
         return LLMContext(
-            messages=self.messages(history),
+            messages=messages,
             tools=PERSONA_TOOLS,
             tool_choice="auto",
         )

@@ -13,12 +13,9 @@ through :class:`ConversationControls`, and the first cause to land is the one th
 record shows — a cause arriving after the conversation already ended changes
 nothing, because what happened is the record.
 
-One outcome here is deliberately *not* an ending: :class:`SilentAgent`,
-raised where a voice simulation ran and the agent never said a word. It is
-an execution failure, so the run is reported failed rather than completed
-and is never graded. It lives beside the endings because it is the same
-question answered — how did this simulation turn out — and it is the one
-answer that is not a conversation.
+An agent that stays silent is an observed outcome of the conversation.
+The voice persona follows up at most twice, then concludes normally. The
+record is available to graders; silence alone is not an execution fault.
 """
 
 from __future__ import annotations
@@ -148,10 +145,6 @@ class Conducted:
 # comparing the same scenario over both modalities is comparing exactly
 # that. The sentences are asserted verbatim by the acceptance suite, so a
 # second copy of one is a way for the two to drift apart silently.
-#
-# The silent-agent failure below is the exception to both halves of that
-# sentence, and says so where it is defined: it is not an ending, and it
-# is the voice conductor's alone.
 
 Ending = tuple[str, str]
 """One ending: the contract's word for it, and the prose a report carries."""
@@ -161,46 +154,6 @@ PERSONA_CONCLUDED: Ending = (
     "the persona concluded the scenario",
 )
 AGENT_ENDED: Ending = ("agent_ended", "the agent ended the exchange")
-
-
-# -- The one outcome that is not an ending -----------------------------------
-#
-# Raised, never returned, and by the voice conductor only. A chat agent
-# that types nothing in any turn is the same shape of problem and is
-# deliberately left alone here: the decision that produced this rule was
-# written about voice, and a rule extended past what was decided is a
-# rule nobody agreed to.
-
-SAID_NOTHING = (
-    "the agent said nothing in this simulation: every one of its turns was "
-    "empty, so there is no conversation to grade — check that the agent's "
-    "worker speaks, and that the audio it publishes is its voice"
-)
-"""Why a simulation the agent was silent through is a failure, in the
-words the developer who has to fix it reads.
-
-Actionable on purpose: the two things it names are the two that were
-really wrong the day this rule was written — an agent whose worker was
-speaking fluently, and a second audio track that reached egma's ear
-instead of that voice. A reader of this sentence goes and looks at one of
-those rather than at the transcript, which says nothing by definition.
-"""
-
-
-class SilentAgent(Exception):
-    """The agent produced no words in any turn, so nothing was tested.
-
-    An execution failure and never an ending: the contract's failed
-    endings all mean "the test never ran" or "the test broke", and none of
-    them is ever graded. A silence reported as ``persona_concluded`` or
-    ``limit_reached`` is graded like any other conversation, which is the
-    one outcome worse than a failed run — the product would be judging an
-    agent on ten minutes of nothing.
-
-    It carries no ``ending`` of its own, so :func:`plugs.failed_ending`
-    reads it as ``error``: the simulator could not conduct through what it
-    was given.
-    """
 
 
 def turn_limit_reached(max_turns: int) -> Ending:

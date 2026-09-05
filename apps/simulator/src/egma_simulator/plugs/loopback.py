@@ -107,9 +107,8 @@ class LoopbackCounterpart:
             # The counterpart's default is to keep the conversation going
             # once its script runs out, because most tests want a far end
             # that stays available. ``goes_quiet_after_replies`` is the
-            # other real agent: one that is in the room, publishing, and
-            # saying nothing — which is what a broken worker looks like,
-            # and the case the silent-agent rule exists for.
+            # case where the agent stays in the room and sends no reply,
+            # so the persona must handle unanswered turns.
             fallback_reply=(
                 None if ends_after_replies or goes_quiet else FALLBACK_REPLY
             ),

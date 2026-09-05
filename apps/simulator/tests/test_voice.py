@@ -38,12 +38,10 @@ from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import ConductParameters, VoiceConductor
 from egma_simulator.contract import ERROR
 from egma_simulator.conversation import (
-    SAID_NOTHING,
     Conducted,
     ConversationControls,
-    SilentAgent,
 )
-from egma_simulator.media import VoiceMedia
+from egma_simulator.media import VoiceMedia, scripted_transport
 from egma_simulator.media.scripted_transport import ScriptedTransport
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
@@ -809,8 +807,13 @@ async def test_transport_loss_is_a_platform_fault(tmp_path: Path):
     assert "voice transport disconnected" in str(lost.value)
 
 
-async def test_the_persona_opens_when_the_far_end_does_not(tmp_path: Path):
+async def test_the_persona_opens_when_the_far_end_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """No greeting is not a broken call: a persona may speak first."""
+    # Match this test's shortened opening wait so the fixture does not leave
+    # ten more seconds of queued silence in front of the agent's answer.
+    monkeypatch.setattr(scripted_transport, "OPENING_SILENCE_SECONDS", 2.0)
     observed = await voice_simulation(
         tmp_path,
         scenario="One point.",
@@ -1291,10 +1294,8 @@ async def test_a_leg_that_refuses_a_turn_fails_the_simulation_in_its_own_words(
 class DeafEars(FrameProcessor):
     """A listening leg that carries audio but emits no transcription.
 
-    What a transcriber handed a stretch of audio it finds no words in
-    really does: it pushes no frame at all. Every agent turn is then
-    recorded with no words, which is the shape of the dead call the
-    silence rule exists for, and the cheapest way to script one.
+    A transcriber that finds no words can push no frame at all. The
+    pipeline must still close the agent turn and record it without words.
     """
 
     async def process_frame(self, frame, direction) -> None:
@@ -1303,7 +1304,7 @@ class DeafEars(FrameProcessor):
 
 
 def deaf_legs(providers, *, voice):
-    """The scripted legs, with nobody listening on the agent's side."""
+    """Scripted speech with no transcription of the agent's audio."""
     return SpeechLegs(stt=DeafEars(), tts=ScriptedTTS(voice=voice), voice=voice)
 
 
@@ -1327,38 +1328,26 @@ async def test_a_brain_that_refuses_a_turn_fails_in_its_own_words(
 async def test_a_turn_no_transcriber_finds_words_in_is_a_turn_without_words(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The other way a turn goes wrong, and the one a phone call makes
-    ordinary: audio arrives and nobody can read it.
+    """Audio without recognized words remains conversation evidence.
 
-    A transcriber handed a stretch of audio it finds no words in pushes no
-    frame at all — there is no empty transcript, only silence — and the
-    turn model will not call a turn over until it has one. So the turn
-    would stay open forever, and without a backstop the simulation runs to
-    its duration limit and the record says "limit reached" about hold
-    music. What the record should say is that the turn carried no words,
-    which is what it did.
-
-    That backstop is the subject here, and it holds: the turn closes, it
-    is recorded with no words, and the persona carries on rather than
-    waiting out the clock. What the whole simulation is then *worth* is
-    the second half of the story — every one of the agent's turns empty is
-    the dead call this product must never grade, so the run fails instead
-    of ending.
+    The backstop closes the turn even when the transcriber emits no frame.
+    The persona can then continue and end the conversation normally. The
+    agent's lack of words does not turn that ending into an execution error.
     """
 
     monkeypatch.setattr(conductor_module, "build_legs", deaf_legs)
+    # Keep the media clock running while the persona waits ten seconds after
+    # wordless agent speech. The usual fixture sends only 0.6 seconds of quiet.
+    monkeypatch.setattr(scripted_transport, "TRAILING_SILENCE_SECONDS", 13.0)
 
     spans: list[tuple[str, str, int, int]] = []
-    with pytest.raises(SilentAgent) as silent:
-        await voice_simulation(
-            tmp_path,
-            scenario="One point.",
-            replies=["Noted."],
-            # Only the waiting is shortened; what is given up on is exactly
-            # what a deployment gives up on.
-            parameters=ConductParameters(agent_turn_backstop_seconds=0.3),
-            spans=spans,
-        )
+    observed = await voice_simulation(
+        tmp_path,
+        scenario="One point.",
+        replies=["Noted."],
+        parameters=ConductParameters(agent_turn_backstop_seconds=0.3),
+        spans=spans,
+    )
 
     # The backstop did its work: the turn was closed and recorded, and the
     # persona spoke on both sides of it rather than the clock running out.
@@ -1369,22 +1358,16 @@ async def test_a_turn_no_transcriber_finds_words_in_is_a_turn_without_words(
     # what says the turn really was given up on rather than waited out —
     # the run got all the way to its natural end inside the limits.
     assert turns[-1] == ("human", GOODBYE), turns
-    # And the simulation is a failure the contract never grades, never one
-    # of the deliberate endings it used to claim.
-    assert failed_ending(silent.value) == ERROR
-    assert str(silent.value) == SAID_NOTHING
+    assert observed.conducted.status == "completed"
+    assert observed.conducted.ending == "persona_concluded"
+    assert observed.conducted.reason == "the persona concluded the scenario"
+    audio = observed.assembled.audio
+    assert audio is not None
+    assert (tmp_path / audio["recording"]).is_file()
 
 
 async def test_a_turn_limit_of_one_keeps_its_own_ending(tmp_path: Path):
-    """A spec that allows one turn ends before the agent could answer.
-
-    The persona speaks, the budget is spent, and the run stops — with no
-    agent turn on the record, which looks exactly like an agent that said
-    nothing. It is not: the limit is deliberate and is never the agent
-    failing, so the run keeps ``limit_reached`` rather than being called
-    a silence. One persona turn is the whole of the difference, which is
-    why the silence rule waits for a second one.
-    """
+    """The turn limit keeps its normal ending even before the agent answers."""
     observed = await voice_simulation(
         tmp_path,
         scenario="One point. Two point.",
@@ -1401,12 +1384,8 @@ async def test_a_turn_limit_of_one_keeps_its_own_ending(tmp_path: Path):
 class CancelsOnce(ConversationControls):
     """A cancel directive that lands the moment the record says to.
 
-    A directive really arrives on a heartbeat answer, mid-exchange, and
-    *when* it lands is the whole subject of the test below. A cancel that
-    landed before the agent had taken a turn would be answered the same
-    way whichever order the two answers were decided in, so it would
-    prove nothing: the record has to already hold what the silence rule
-    fires on at the moment the directive arrives.
+    The test can cancel after a wordless agent turn is recorded, so it
+    exercises cancellation during that conversation state.
     """
 
     def __init__(self, when: Callable[[], bool]) -> None:
@@ -1422,20 +1401,9 @@ class CancelsOnce(ConversationControls):
 async def test_a_cancel_outranks_a_silence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """A run stopped on purpose is not a run that failed.
-
-    Both answers are true of this run at once. Nobody is listening on the
-    agent's side, so every turn it takes is recorded with no words — the
-    dead call the silence rule fails runs for — and the directive lands
-    only once one of those turns is on the record, so the rule really
-    would fire if it were asked first.
-
-    The cancel is the answer. It is somebody's own act, and a run stopped
-    before it could finish is not a run that failed: reporting a defect
-    there would put one on the record where a decision belongs, and it
-    would be a defect nobody could act on.
-    """
+    """Cancellation keeps its own ending after a wordless agent turn."""
     monkeypatch.setattr(conductor_module, "build_legs", deaf_legs)
+    monkeypatch.setattr(scripted_transport, "TRAILING_SILENCE_SECONDS", 13.0)
 
     spans: list[tuple[str, str, int, int]] = []
     observed = await voice_simulation(
@@ -1449,9 +1417,7 @@ async def test_a_cancel_outranks_a_silence(
         spans=spans,
     )
 
-    # The record really did hold a wordless agent turn when the directive
-    # landed — without this the test would pass on an empty record, which
-    # the silence rule leaves alone anyway.
+    # The directive lands after a wordless turn is part of the record.
     turns = [(speaker, text) for speaker, text, _began, _ended in spans]
     assert ("agent", "") in turns, turns
     # And the cancel is still what the run is reported as.

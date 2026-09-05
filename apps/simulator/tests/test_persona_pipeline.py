@@ -189,7 +189,9 @@ class ConductorProbe:
     async def wait_until(self, _due: Fraction) -> None:
         return None
 
-    def persona_will_speak(self, text: str, *, concludes: bool = False) -> None:
+    def persona_will_speak(
+        self, text: str, *, concludes: bool = False, silence_follow_up: int = 0
+    ) -> None:
         self.spoken.append(text)
         self.history.append(Turn("human", text))
         if concludes:
