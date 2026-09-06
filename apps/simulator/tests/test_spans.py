@@ -390,13 +390,11 @@ def test_the_two_stamps_of_one_moment_are_never_written_together():
     [
         "first_response_latency",
         "turn_response_latency",
-        "time_to_first_word",
         "agent_speech_duration",
-        "persona_speech_duration",
     ],
 )
 def test_a_timing_spans_own_duration_is_the_measurement(measure):
-    """All five of the catalog's timing measures, each one its own span."""
+    """All three of the catalog's timing measures, each one its own span."""
     spans, sink, _clock = emitter()
     spans.opened()
     spans.measure(measure, 1214.0)

@@ -719,7 +719,7 @@ describe.skipIf(!storage.available)("the same path in the other encoding", () =>
         traceId: VOICE_TRACE,
         spanId: "bb20000000000006",
         parentSpanId: "bb20000000000001",
-        name: "time_to_first_word",
+        name: "turn_response_latency",
         kind: "SPAN_KIND_INTERNAL",
         startTimeUnixNano: "1785924902100000000",
         endTimeUnixNano: "1785924902950000000",
