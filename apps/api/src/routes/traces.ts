@@ -288,6 +288,24 @@ declare module "fastify" {
 const A_TRACE_ID = /^[0-9a-f]{32}$/u;
 
 /**
+ * A provider reference as a refusal may quote it back.
+ *
+ * A reference is a room name or a call id — a few dozen characters. What
+ * arrives on the wire is whatever a resource attribute held, and a refusal is
+ * built before anything has looked at its size, so quoting it whole would let a
+ * one-line mistake in an exporter's configuration turn a megabyte of attribute
+ * into a megabyte of error message. The prefix is enough to recognise which
+ * reference was meant, which is the whole job the quote does.
+ */
+const LONGEST_QUOTED_REFERENCE = 200;
+
+function shortened(reference: string): string {
+  return reference.length <= LONGEST_QUOTED_REFERENCE
+    ? reference
+    : `${reference.slice(0, LONGEST_QUOTED_REFERENCE)}…`;
+}
+
+/**
  * The resources of one simulation, gathered before anything is normalised.
  *
  * One export may carry several simulations — even, on the service path,
@@ -797,7 +815,7 @@ export async function traceRoutes(
           400,
           RPC_INVALID_ARGUMENT,
           `no simulation in this project carries the provider reference ` +
-            `"${reference}". Spans posted with ${PROVIDER_REFERENCE_ATTRIBUTE} ` +
+            `"${shortened(reference)}". Spans posted with ${PROVIDER_REFERENCE_ATTRIBUTE} ` +
             `on the resource are a simulation's agent POV, and the reference ` +
             `is the room or call the conversation ran in — check the key names ` +
             `the project the run belongs to, and that the SDK stamps the same ` +
