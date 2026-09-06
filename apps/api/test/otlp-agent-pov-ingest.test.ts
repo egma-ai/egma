@@ -1069,5 +1069,46 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
     );
     expect(reported?.reportedBy).toBe("retell");
     expect(reported?.samples).toEqual([820, 910, 760]);
+
+    /*
+     * And the resend an at-least-once reporter makes does not pull again.
+     *
+     * The duplicate is absorbed and answers `completed`, exactly as the
+     * landing it repeats did — so a door reading the status alone would ask
+     * Retell a second time, minutes later, and Retell fills a call document in
+     * after the call ends. That second reading would land as *changed* content
+     * under the same deterministic span ids, which is the integrity error
+     * ADR-0014 names rather than an update.
+     */
+    const askedSoFar = askedOfRetell.length;
+    const again = await api.app.inject({
+      method: "POST",
+      url: reportPathFor(simulation.id),
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: {
+        contract_version: 1,
+        simulation_id: simulation.id,
+        events: [
+          {
+            kind: "status",
+            event_id: "evt-000002",
+            at: CONVERSATION_ENDED_AT.toISOString(),
+            status: "completed",
+            reason: null,
+            facts: {
+              ending: "agent_ended",
+              started_at: CONVERSATION_STARTED_AT.toISOString(),
+              ended_at: CONVERSATION_ENDED_AT.toISOString(),
+              turn_count: 3,
+              audio: null,
+              provider_reference: RETELL_CALL_ID,
+            },
+          },
+        ],
+      },
+    });
+    // Absorbed, not refused: the record already says what the document says.
+    expect(again.statusCode, again.body).toBe(200);
+    expect(askedOfRetell).toHaveLength(askedSoFar);
   }, 120_000);
 });

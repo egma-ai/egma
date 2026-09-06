@@ -323,6 +323,23 @@ const CONTEXT_REQUIRING = [
   // simulation claim, because conducting is the only thing egma does with a
   // connection's credentials at this seam.
   "resolveSimulationConnection",
+  // The same door one moment later, for the platform that exports nothing of
+  // its own: a Retell simulation's record is pulled by egma when the
+  // conversation ends, so this unseals the same key to collect the record of
+  // what was conducted over it. On the sibling's exact terms — the simulator's
+  // own context, refused out loud for any other, and only for a row that has
+  // finished conducting.
+  "resolveRetellSimulationPull",
+  // Which simulation in this project carries one provider reference — how the
+  // agent's own POV of a conversation is matched to the simulation it belongs
+  // to. It answers inside the caller's project alone, so a reference another
+  // customer's simulation carries is as absent here as one nobody carries.
+  "resolveSimulationByProviderReference",
+  // And the batched form of the same question, which production ingestion asks
+  // of one page of provider calls before it files any of them: a conversation
+  // egma's own simulator conducted is a simulation, and Monitoring shows
+  // production.
+  "simulationProviderReferencesIn",
   "revokeApiKey",
   // egma's own graders, written onto the shelf from egma's own catalog at
   // start-up. The deployment configuring itself again, one table over: no
