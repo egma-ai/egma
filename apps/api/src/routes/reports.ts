@@ -25,6 +25,12 @@ import {
   settleOwedMockCleanups,
   type MockedWorldReach,
 } from "../mocked-world.ts";
+import { platformEvent, safeExceptionType } from "../platform-log.ts";
+import {
+  pullRetellSimulationRecord,
+  type RetellSimulationPullOptions,
+  type RetellSimulationPullReach,
+} from "../retell-simulation-ingestion.ts";
 
 /**
  * The report door: `POST /v1/simulations/:simulationId/reports`, where the
@@ -70,6 +76,18 @@ export type ReportRoutesOptions = {
    * sweep, which is the same act.
    */
   readonly mockedWorldReach?: MockedWorldReach | undefined;
+  /**
+   * Where a Retell simulation's own call record is pulled from once its
+   * conversation has ended. Absent leaves the Retell lane with no agent POV,
+   * which the record then says — the same state a push that never arrived
+   * leaves behind.
+   */
+  readonly simulationPullReach?: RetellSimulationPullReach | undefined;
+  /**
+   * How patient the pull is with a thin record. A deployment uses the module's
+   * own bounded waits; a suite whose claim is not the waiting shortens them.
+   */
+  readonly simulationPullOptions?: RetellSimulationPullOptions | undefined;
 };
 
 export const REPORTS_PATH = "/v1/simulations/:simulationId/reports";
@@ -272,10 +290,69 @@ export async function reportRoutes(
     // above has already refused anything else: a conversation's turns, tool
     // calls and measurements arrive as spans at the OTLP door, and a report
     // claiming to carry one does not validate.
+    // Whether anything in this document actually moved the row to completed.
+    // A resend answers `completed` too, and the pull below must not run twice.
+    let completedNow = false;
     for (const event of report.events) {
       const applied = await applyStatusEvent(reply, simulationId, event);
-      if (typeof applied !== "string") return applied;
-      lastKnownStatus = applied;
+      if (!("status" in applied)) return applied;
+      lastKnownStatus = applied.status;
+      completedNow ||= applied.moved && applied.status === "completed";
+    }
+
+    /*
+     * The agent's POV of a Retell simulation, pulled the moment the
+     * conversation ends.
+     *
+     * Retell exports nothing, so this is where the second POV of a Retell
+     * simulation comes from at all (ADR-0015 §2). It runs on a **completed**
+     * landing only: a conversation that never ran has no call record to fetch,
+     * and asking Retell about one would be a request per failed dispatch.
+     *
+     * **Once per conversation, on the landing that moved the row** — never on
+     * a resend of it. A reporter delivers at least once and an absorbed
+     * duplicate answers `completed` exactly as the transition it repeats did,
+     * so a condition reading the status alone would pull again minutes later.
+     * Retell fills a call document in after the call ends, so that second pull
+     * can normalise *changed* content under the same deterministic span ids —
+     * which is not an update but the integrity error ADR-0014 names, and the
+     * drainer would rightly retain the pair for repair. The bit that says this
+     * document is what moved the row is threaded out of the landing for
+     * exactly this.
+     *
+     * The first attempt is awaited, so an ordinary call's record is durable
+     * before this request answers and grading starts on a record that already
+     * holds the agent's POV. A record that came back thin retries in the
+     * background and never reaches this request; the module says why.
+     *
+     * The context is the standing's own — the conducting context the row's
+     * tenancy built, which is the one thing a connection's credential is
+     * unsealed for. Nothing here is answered with: the module logs every
+     * failure itself, and this catch is the last resort for a throw it did not
+     * expect, said out loud rather than swallowed. The simulator is waiting to
+     * be told its landing was accepted, and what Retell owes egma is not that
+     * landing's problem — a POV that never arrived is a state the record
+     * already has a word for.
+     */
+    if (options.simulationPullReach !== undefined && completedNow) {
+      await pullRetellSimulationRecord(
+        standing.auth,
+        simulationId,
+        options.simulationPullReach,
+        request.log,
+        options.simulationPullOptions ?? {},
+      ).catch((cause: unknown) => {
+        request.log.warn(
+          platformEvent(
+            "egma.simulation.retell.pull.failed",
+            "A Retell simulation's record was not filed after its landing",
+            {
+              simulation_id: simulationId,
+              exception_type: safeExceptionType(cause),
+            },
+          ),
+        );
+      });
     }
 
     // The teardown, when this document may have been the last thing a mocked
@@ -318,11 +395,36 @@ export async function reportRoutes(
  * where it landed. Each read is one indexed select; a document carries a
  * handful of events at most.
  */
+/**
+ * What one status event did to the row: where it stands afterwards, and
+ * whether **this** document is what moved it there.
+ *
+ * The second half exists because an at-least-once reporter resends, and an
+ * absorbed resend answers the same status as the transition it repeats. Every
+ * effect that must happen once per conversation — the Retell pull below is the
+ * first — has to tell the two apart, and reading the status alone cannot.
+ */
+type Applied = {
+  readonly status: string;
+  /** True only where a guarded transition in this request moved the row. */
+  readonly moved: boolean;
+};
+
+/** This document moved the row. */
+function moved(status: string): Applied {
+  return { status, moved: true };
+}
+
+/** The row already said this; the resend is absorbed. */
+function absorbed(status: string): Applied {
+  return { status, moved: false };
+}
+
 async function applyStatusEvent(
   reply: FastifyReply,
   simulationId: string,
   event: StatusEvent,
-): Promise<FastifyReply | string> {
+): Promise<FastifyReply | Applied> {
   const standing = await resolveSimulationStanding(simulationId);
   if (standing === undefined) {
     // It answered moments ago and is gone: the run was deleted mid-request.
@@ -347,10 +449,10 @@ async function applyStatusEvent(
 async function applyRunning(
   reply: FastifyReply,
   standing: SimulationStanding,
-): Promise<FastifyReply | string> {
+): Promise<FastifyReply | Applied> {
   // The duplicate the at-least-once client is owed: already running is what
   // this event says, so it is absorbed rather than refused.
-  if (standing.status === "running") return "running";
+  if (standing.status === "running") return absorbed("running");
 
   if (standing.status === "claimed" && standing.claimedBy !== null) {
     const started = await startSimulation(
@@ -358,13 +460,13 @@ async function applyRunning(
       standing.id,
       standing.claimedBy,
     );
-    if (started !== undefined) return started.status;
+    if (started !== undefined) return moved(started.status);
     // The guarded update matched nothing, so the row moved between the read
     // and the write — a duplicate racing this one, or the sweep. Read again
     // and answer as the first read would have, one race later.
-    const moved = await resolveSimulationStanding(standing.id);
-    if (moved?.status === "running") return "running";
-    return refusedByTheRecord(reply, moved ?? standing, "running");
+    const since = await resolveSimulationStanding(standing.id);
+    if (since?.status === "running") return absorbed("running");
+    return refusedByTheRecord(reply, since ?? standing, "running");
   }
 
   return refusedByTheRecord(reply, standing, "running");
@@ -382,7 +484,7 @@ async function applyTerminal(
   reply: FastifyReply,
   standing: SimulationStanding,
   event: StatusEvent,
-): Promise<FastifyReply | string> {
+): Promise<FastifyReply | Applied> {
   // A terminal row answers from what it already says: the matching resend
   // is absorbed, anything else is a document trying to rewrite the record.
   if (
@@ -390,7 +492,7 @@ async function applyTerminal(
     standing.status === "failed" ||
     standing.status === "canceled"
   ) {
-    if (matchesTerminalRow(event, standing)) return standing.status;
+    if (matchesTerminalRow(event, standing)) return absorbed(standing.status);
     return refusedByTheRecord(reply, standing, event.status);
   }
 
@@ -426,14 +528,14 @@ async function applyTerminal(
   }
 
   const landed = await applyLanding(standing, event, facts.ending);
-  if (landed !== undefined) return landed.status;
+  if (landed !== undefined) return moved(landed.status);
 
   // The guarded landing matched nothing. Either a duplicate raced this
   // request and the row now says what this document says — absorbed — or
   // the record genuinely disagrees, and the freshest reading names how.
-  const moved = await resolveSimulationStanding(standing.id);
-  if (moved !== undefined && matchesTerminalRow(event, moved)) {
-    return moved.status;
+  const since = await resolveSimulationStanding(standing.id);
+  if (since !== undefined && matchesTerminalRow(event, since)) {
+    return absorbed(since.status);
   }
   // A cancel that raced this document: at the attempt the intent was not
   // yet stamped, and by this read it is — the guard's refusal is stale, not
@@ -445,19 +547,19 @@ async function applyTerminal(
   // stamped, but nothing entitles this door to assume its caller.
   if (
     event.status === "canceled" &&
-    moved !== undefined &&
-    (moved.status === "claimed" || moved.status === "running") &&
-    moved.cancelRequestedAt !== null
+    since !== undefined &&
+    (since.status === "claimed" || since.status === "running") &&
+    since.cancelRequestedAt !== null
   ) {
-    const relanded = await applyLanding(moved, event, facts.ending);
-    if (relanded !== undefined) return relanded.status;
+    const relanded = await applyLanding(since, event, facts.ending);
+    if (relanded !== undefined) return moved(relanded.status);
     const settled = await resolveSimulationStanding(standing.id);
     if (settled !== undefined && matchesTerminalRow(event, settled)) {
-      return settled.status;
+      return absorbed(settled.status);
     }
-    return refusedByTheRecord(reply, settled ?? moved, event.status);
+    return refusedByTheRecord(reply, settled ?? since, event.status);
   }
-  if (event.status === "canceled" && moved?.cancelRequestedAt === null) {
+  if (event.status === "canceled" && since?.cancelRequestedAt === null) {
     return conflict(
       reply,
       `nobody asked to cancel simulation ${standing.id}: no cancellation ` +
@@ -466,7 +568,7 @@ async function applyTerminal(
         `report it failed with its honest reason.`,
     );
   }
-  return refusedByTheRecord(reply, moved ?? standing, event.status);
+  return refusedByTheRecord(reply, since ?? standing, event.status);
 }
 
 /** The landing itself, chosen by the event's status. */

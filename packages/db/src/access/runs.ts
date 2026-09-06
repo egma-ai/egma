@@ -2189,6 +2189,261 @@ export async function resolveSimulationStanding(
 }
 
 /**
+ * Which simulation **in this project** carries one provider reference, and
+ * where it stands — the lookup simulation ingestion is matched on.
+ *
+ * The agent's own process knows the room it is running in, never a simulation
+ * id, so the agent's POV names its conversation by the platform's identifier
+ * and egma turns that into the simulation it belongs to (ADR-0015 §2). This is
+ * the whole of that turning.
+ *
+ * **The project is a parameter, and it comes from the credential.** The
+ * caller's own organization and project narrow the read, so a reference another
+ * customer's simulation carries resolves to `undefined` here exactly as a
+ * reference nobody carries does — and the door tells both the same thing.
+ * That is deliberate: a sender holding a copied key learns nothing about whose
+ * rooms exist, and there is no argument on this function by which one could
+ * name a project it does not hold. Contrast `resolveSimulationStanding`, whose
+ * caller is the deployment's own simulator and holds no customer credential at
+ * all; there the row is the authority, and here the credential is.
+ *
+ * **The row is looked up and never inspected.** Evidence for a simulation this
+ * project owns is filed whatever the row's standing — a POV that arrives after
+ * the sweep called the conversation orphaned is still that conversation's, and
+ * the service path has kept late evidence on the same reasoning since it was
+ * written.
+ *
+ * A provider reference is one conversation's identifier, so at most one row in
+ * a project should hold any given value. Nothing enforces that, and a reference
+ * a platform reissued would otherwise make the answer depend on row order — so
+ * the newest simulation carrying it wins, by the created moment and then by id,
+ * and two readings of one export agree.
+ */
+export async function resolveSimulationByProviderReference(
+  auth: AuthContext,
+  providerReference: string,
+): Promise<SimulationStanding | undefined> {
+  authorize(auth, "read", here(auth));
+  // A reference is matched exactly or not at all. An empty one is what a
+  // resource that named none reads as, and it must never match the rows whose
+  // column is null — nor, if the column ever held one, an empty string.
+  if (auth.projectId === undefined || providerReference === "") return undefined;
+
+  const [row] = await db()
+    .select({
+      id: simulation.id,
+      runId: simulation.runId,
+      organizationId: simulation.organizationId,
+      projectId: simulation.projectId,
+      agentId: simulation.agentId,
+      testVersionId: simulation.testVersionId,
+      personaVersionId: simulation.personaVersionId,
+      modality: simulation.modality,
+      status: simulation.status,
+      endingReason: simulation.endingReason,
+      executionFailure: simulation.executionFailure,
+      claimedBy: simulation.claimedBy,
+      cancelRequestedAt: simulation.cancelRequestedAt,
+    })
+    .from(simulation)
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          eq(simulation.projectId, auth.projectId),
+          eq(simulation.providerReference, providerReference),
+        ),
+      ),
+    )
+    .orderBy(desc(simulation.createdAt), desc(simulation.id))
+    .limit(1);
+
+  if (row === undefined) return undefined;
+
+  return {
+    id: row.id,
+    runId: row.runId,
+    agentId: row.agentId,
+    testVersionId: row.testVersionId,
+    personaVersionId: row.personaVersionId,
+    modality: row.modality as Modality,
+    status: row.status as SimulationStatus,
+    endingReason: row.endingReason as SimulationEndingReason | null,
+    executionFailure: row.executionFailure,
+    claimedBy: row.claimedBy,
+    cancelRequestedAt: row.cancelRequestedAt,
+    auth: conductingContext(row.organizationId, row.projectId),
+  };
+}
+
+/**
+ * What a Retell simulation's own call record is pulled with, once the
+ * conversation has ended: the simulation, the call to ask for, and the key to
+ * ask with.
+ *
+ * **Simulation ingestion by pull.** Retell exports nothing and no SDK runs
+ * inside its agents, so the agent's POV of a Retell simulation is fetched by
+ * egma the moment the conversation ends — with the connection's own stored
+ * credential, which ADR-0015 §2 names as what a pull authenticates with. This
+ * is the whole of that read.
+ *
+ * **The narrow door beside `resolveSimulationConnection`, on that door's exact
+ * terms and one moment later.** That one opens a connection's plaintext to
+ * assemble a spec and answers only while the row stands `claimed`; this one
+ * opens the same plaintext to fetch the record of the conversation that just
+ * ran, and answers only for a row standing `completed` — a simulation that has
+ * finished conducting. The two together are the whole of what egma ever does
+ * with a connection's credentials: conduct a simulation over it, and collect
+ * the record of what it conducted. Nothing else may knock at either.
+ *
+ * **The gate is how the context came to exist, not what its role permits**, for
+ * the reason the sibling gives: the only thing egma does with these credentials
+ * is conduct and collect, and the only thing that conducts is the simulator. So
+ * a context built by a claim — `via: "simulator"` — is the one this answers
+ * for, and a person's session and an API key alike are refused out loud. The
+ * report door holds exactly such a context already: the standing it resolved
+ * before anything else carries the conducting context the row's own tenancy
+ * built, and there is no argument here by which a caller could name a customer,
+ * a connection, or a call.
+ *
+ * `undefined` answers every absence alike, and none of them is an error: a
+ * simulation outside this context's tenancy, one not standing completed, one
+ * that ran over a connection which is not Retell or has since been archived,
+ * one whose conversation never reported a call id, and one whose connection
+ * holds no usable key. A lane with no pull is the ordinary case — LiveKit
+ * pushes instead.
+ */
+export type RetellSimulationPull = {
+  readonly standing: SimulationStanding;
+  /** Retell's own id for the conversation, off the simulation's own row. */
+  readonly providerReference: string;
+  /** The connection's Retell key, unsealed. */
+  readonly apiKey: string;
+  /** Where Retell answers for this connection, when the config names one. */
+  readonly baseUrl: string | null;
+};
+
+export async function resolveRetellSimulationPull(
+  auth: AuthContext,
+  simulationId: string,
+): Promise<RetellSimulationPull | undefined> {
+  authorize(auth, "read", here(auth));
+
+  if (auth.via !== "simulator") {
+    throw new Error(
+      "a connection's credentials are unsealed for Egma's own simulator and for nothing else, because conducting is the only thing Egma does with them",
+    );
+  }
+
+  const [row] = await db()
+    .select({
+      providerReference: simulation.providerReference,
+      accessVariant: connection.accessVariant,
+      config: connection.config,
+      credentials: connection.credentials,
+    })
+    .from(simulation)
+    .innerJoin(connection, eq(connection.id, simulation.connectionId))
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          eq(simulation.id, simulationId),
+          // Finished conducting, which is the one moment there is a record to
+          // fetch: before it the conversation is still happening, and Retell
+          // has nothing complete to answer with.
+          eq(simulation.status, "completed"),
+          isNull(connection.archivedAt),
+          inActingProject(auth, simulation),
+        ),
+      ),
+    )
+    .limit(1);
+
+  if (row === undefined) return undefined;
+  const providerReference = row.providerReference?.trim() ?? "";
+  if (providerReference === "") return undefined;
+  // Every Retell access variant is one key against Retell's API. A connection
+  // of any other kind has no call record to pull and is not asked for one.
+  if (!row.accessVariant.startsWith("retell_")) return undefined;
+  if (row.credentials === null) return undefined;
+
+  const apiKey = openedApiKey(row.credentials);
+  if (apiKey === null || apiKey === "") return undefined;
+
+  const standing = await resolveSimulationStanding(simulationId);
+  if (standing === undefined) return undefined;
+
+  // The chat lane lets a customer point at their own Retell-compatible host,
+  // and the pull must ask wherever the conversation was held. A config nobody
+  // can read is not worth failing a landing over: Retell's own host is where
+  // every connection that named none is answered from anyway.
+  let baseUrl = "";
+  try {
+    baseUrl =
+      stringRecordFromRow(row.config, () => new Error("unreadable"))[
+        "baseUrl"
+      ]?.trim() ?? "";
+  } catch {
+    baseUrl = "";
+  }
+
+  return {
+    standing,
+    providerReference,
+    apiKey,
+    baseUrl: baseUrl === "" ? null : baseUrl,
+  };
+}
+
+/**
+ * Which of these provider references a simulation in this project already
+ * carries — the one batched question production ingestion asks before it files
+ * a page of provider calls.
+ *
+ * A call egma's own simulator conducted is a simulation, and its record belongs
+ * under that simulation rather than a second time under Monitoring: one
+ * conversation is one trace, and production is the traffic nobody asked egma to
+ * create. The poller asks this once per page, beside the committed-identity and
+ * transient-state lookups it already makes, and skips what comes back.
+ *
+ * Scoped by the project the polling target belongs to, because a provider
+ * reference means nothing outside one — the target's own narrowed context is
+ * what the poller asks with, and a context naming no project can carry no
+ * answer, so it is given none.
+ */
+export async function simulationProviderReferencesIn(
+  auth: AuthContext,
+  providerReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  authorize(auth, "read", here(auth));
+  const asked = [...new Set(providerReferences.filter((one) => one !== ""))];
+  if (auth.projectId === undefined || asked.length === 0) return new Set();
+
+  const rows = await db()
+    .select({ providerReference: simulation.providerReference })
+    .from(simulation)
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          eq(simulation.projectId, auth.projectId),
+          inArray(simulation.providerReference, asked),
+        ),
+      ),
+    );
+
+  return new Set(
+    rows
+      .map((row) => row.providerReference)
+      .filter((one): one is string => one !== null),
+  );
+}
+
+/**
  * Everything the mock endpoint needs to answer one tool call, in one read.
  *
  * The request arrives from the agent's platform with no credential of egma's,
