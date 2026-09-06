@@ -554,6 +554,12 @@ async function aLiveKitCall(
   turns: readonly Turn[],
   timed: Measured = {},
   reported: readonly ReportedMeasurement[] = [],
+  /**
+   * egma's own account of the same conversation, filed beside the agent's under
+   * one trace id — which is what a simulation stores. Empty is the ordinary
+   * production trace, which has one account and no second POV.
+   */
+  personaTurns: readonly Turn[] = [],
 ): Promise<TraceDetail> {
   const id = traceId();
   const root = spanId();
@@ -599,6 +605,39 @@ async function aLiveKitCall(
           kind: "speaking",
           startedAtMicroseconds: at + BigInt(from) * MILLISECOND,
           durationNanoseconds: BigInt(to - from) * 1_000_000n,
+        }),
+      );
+    }
+  }
+
+  // egma's own POV of the same conversation: its own root and its own
+  // transcript turns, stamped `egma-runtime` the way the simulator's are.
+  if (personaTurns.length > 0) {
+    const ownRoot = spanId();
+    spans.push(
+      span({
+        traceId: id,
+        spanId: ownRoot,
+        emitter: "egma-runtime",
+        source: "simulation",
+        name: "simulation",
+        kind: "root",
+        startedAtMicroseconds: at,
+        durationNanoseconds: BigInt(ends) * 1_000_000n,
+      }),
+    );
+    for (const turn of personaTurns) {
+      spans.push(
+        span({
+          traceId: id,
+          spanId: spanId(),
+          parentSpanId: ownRoot,
+          emitter: "egma-runtime",
+          source: "simulation",
+          name: turn.who === "human" ? "human_turn" : "agent_turn",
+          kind: turn.who === "human" ? "turn:human" : "turn:agent",
+          startedAtMicroseconds: at + BigInt(turn.from) * MILLISECOND,
+          durationNanoseconds: BigInt(turn.to - turn.from) * 1_000_000n,
         }),
       );
     }
@@ -887,6 +926,43 @@ describe("measures derived from a recognised framework's own spans", () => {
     // 3000 − 1400, from the agent's own speaking span.
     expect(measured?.otherPov?.origin).toBe("derived");
     expect(measured?.otherPov?.samples.map((one) => one.value)).toEqual([1_600]);
+  });
+
+  /**
+   * **The derivation reads the agent's turns and only the agent's.**
+   *
+   * A simulation's trace holds two accounts of one conversation under one id.
+   * egma's own account carries transcript turns too — the same exchanges, from
+   * egma's side of the connection, on egma's own clock — so a derivation that
+   * walked every `turn:human` row would measure each wait twice over, and each
+   * one wrongly: egma's turns speak no `speaking` spans, so they would sit
+   * between the agent's turns as barriers that answer nothing.
+   *
+   * The conversation below is that arrangement exactly: the agent's two turns
+   * with speech, and egma's own record of the same exchange filed beside them,
+   * off by a fraction of a second as two clocks always are.
+   */
+  it("derives from the agent's own turns, never from both POVs at once", async () => {
+    const trace = await aLiveKitCall(
+      [
+        { who: "human", from: 0, to: 1_550, spoke: [[0, 1_000]] },
+        { who: "agent", from: 1_600, to: 3_000, spoke: [[1_900, 3_000]] },
+      ],
+      {},
+      [],
+      // egma's own account of the same one exchange, on its own clock.
+      [
+        { who: "human", from: 120, to: 1_400 },
+        { who: "agent", from: 2_050, to: 3_100 },
+      ],
+    );
+
+    const measured = measureIn(trace, "turn_response_latency");
+    expect(measured?.origin).toBe("derived");
+    // One wait, and the agent's own: 1900 − 1000. Never two, and never the
+    // 500 that egma's turn end and the agent's first word would have made.
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([900]);
+    expect(measured?.otherPov).toBeUndefined();
   });
 
   /**

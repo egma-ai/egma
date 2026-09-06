@@ -314,6 +314,18 @@ export type TraceSpan = {
   readonly toolArguments: string;
   readonly toolResult: string;
   /**
+   * Whose account of the conversation this span is: the persona's, which is
+   * what egma said, heard and measured, or the agent's, which is what the
+   * agent's own process reported. A simulation stores both under one trace id;
+   * a production trace has one.
+   *
+   * The glossary word, answered from the `emitter` column, so `emitter` stays a
+   * storage word that never reaches a reader. It does not go on the wire: what
+   * the run view shows is decided by the run view, and the shared measure
+   * module reads this to keep two accounts from becoming one series.
+   */
+  readonly pov: "persona" | "agent";
+  /**
    * That egma answered this tool call itself, when it did.
    *
    * The only value is `"mocked"`, and it is absent everywhere else. A tool that
@@ -900,6 +912,8 @@ type PageMeasureSpanRow = {
   readonly kind: string;
   readonly started_at_micros: string;
   readonly duration_ns: string;
+  /** Whose account each row is, so the projection derives from one of them. */
+  readonly emitter: string;
 };
 
 type PageRootSliceRow = RootSliceRow & {
@@ -947,7 +961,8 @@ async function turnResponseLatencyP90sFor(
        name,
        kind,
        started_at_micros,
-       duration_ns
+       duration_ns,
+       emitter
      from (
        select
          trace_id,
@@ -955,6 +970,7 @@ async function turnResponseLatencyP90sFor(
          parent_span_id,
          name,
          kind,
+         emitter,
          toString(toUnixTimestamp64Micro(started_at)) as started_at_micros,
          toString(duration_ns) as duration_ns,
          row_number() over (
@@ -1126,6 +1142,8 @@ type SpanRow = {
   readonly provider_tool_id: string;
   /** `mocked` when egma answered this call, and `''` on every other span. */
   readonly tool_provenance: string;
+  /** The storage word for whose account this span is. `pov` is the read's. */
+  readonly emitter: string;
 };
 
 /** A turn is a span whose kind says somebody was speaking. */
@@ -1237,7 +1255,11 @@ export async function readTrace(
          kind = 'tool',
          JSONExtractString(payload, 'egma.tool.provenance'),
          ''
-       ) as tool_provenance
+       ) as tool_provenance,
+       -- Whose account this span is. A simulation stores both under one trace
+       -- id, and the shared measure module has to derive from one of them:
+       -- reading both would measure every wait twice over, each one wrongly.
+       emitter
      from ${SPANS_TABLE} final
      where ${where}
      order by started_at asc, span_id asc
@@ -1480,6 +1502,9 @@ function spanOf(row: SpanRow): Omit<TraceSpan, "spans"> {
     toolName: row.tool_name,
     toolArguments: row.tool_arguments,
     toolResult: row.tool_result,
+    // The glossary's word for the storage column, answered here so that
+    // `emitter` stays a storage word and never reaches a reader.
+    pov: row.emitter === "egma-runtime" ? "persona" : "agent",
     // Present only when egma answered the call. The key is left off entirely
     // otherwise, so nothing downstream has to tell "not mocked" from "the
     // reader forgot to ask".

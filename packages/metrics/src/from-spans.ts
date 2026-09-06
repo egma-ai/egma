@@ -632,6 +632,15 @@ function derivedFromFrameworkSpans(
   let root: TimedSpan | undefined;
 
   for (const span of everySpanIn(conversation)) {
+    // **The agent's own spans, and only the agent's.** A simulation stores both
+    // accounts of one conversation under one trace id, and egma's account
+    // carries transcript turns too — the same exchanges, from egma's side, on
+    // egma's own clock. Reading both would measure every wait twice over and
+    // each one wrongly: the persona's turns speak no `speaking` spans, so they
+    // would sit between the agent's turns as barriers that answer nothing.
+    // What egma measured itself is not lost by this — it arrives as timing
+    // spans, which are the persona's POV and are read above.
+    if (span.pov === "persona") continue;
     if (span.kind === HUMAN_TURN || span.kind === AGENT_TURN) {
       // **Every turn joins the list, whatever its timings are worth.** What this
       // list carries is the conversational order, and the walk below reads it
