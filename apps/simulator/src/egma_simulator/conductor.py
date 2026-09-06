@@ -229,13 +229,26 @@ class _RecordedTrack:
     left quiet keeps its cursor where its own last audio ended while the
     other channel runs on.
 
-    ``quiet_owed`` is how much of the quiet at ``quiet_ends_at`` the
-    recorder put there itself, at a re-anchor, and can still take back.
+    ``owed`` is every stretch of quiet the recorder put there itself, at
+    a re-anchor, and can still take back — each as the sample it ends at
+    and how much of it is left, oldest first. A channel can fall behind
+    twice before it catches up at all, and a burst that could only reach
+    the newer of the two would leave the older one in the recording for
+    good.
     """
 
     written_through: int | None = None
-    quiet_owed: int = 0
-    quiet_ends_at: int = 0
+    owed: list[tuple[int, int]] = field(default_factory=list)
+
+
+LONGEST_QUIET_LEDGER = 64
+"""How many outstanding stretches of re-anchor quiet one channel keeps.
+
+Every real silence in a call opens one that will never be claimed, so
+the ledger is bounded and the oldest entries go first. Sixty-four is far
+more than the stalls of one call, and forgetting the oldest costs only
+the chance to close a gap opened minutes ago.
+"""
 
 
 RESYNC_TOLERANCE_SECONDS = 0.1
@@ -443,6 +456,11 @@ class _EvidenceRecorder(AudioBufferProcessor):
         not yet played. A recording that kept it would say the persona
         spoke for as long as the queue was deep, and would start the next
         wait that much late.
+
+        Cutting the tail off also settles the quiet this channel was
+        owed: some of that quiet may have gone with the tail, and quiet
+        given back out of a ledger describing a recording that no longer
+        exists would pull the channel back over audio that was heard.
         """
         cleared = transport_time(frame, TRANSPORT_PLAYOUT)
         if cleared is None or self._origin_seconds is None:
@@ -453,6 +471,7 @@ class _EvidenceRecorder(AudioBufferProcessor):
             return
         del self._bot_audio_buffer[heard_through * 2 :]
         self._persona.written_through = heard_through
+        self._persona.owed.clear()
 
     def _place(
         self,
@@ -478,8 +497,8 @@ class _EvidenceRecorder(AudioBufferProcessor):
             # so. Remember the quiet, in case what follows shows it was a
             # delivery holding audio back rather than a far end holding
             # its tongue.
-            track.quiet_owed = wanted - cursor
-            track.quiet_ends_at = wanted
+            track.owed.append((wanted, wanted - cursor))
+            del track.owed[:-LONGEST_QUIET_LEDGER]
             began = wanted
         elif cursor - wanted > self._tolerance:
             self._give_the_quiet_back(buffer, track, cursor - wanted)
@@ -497,33 +516,39 @@ class _EvidenceRecorder(AudioBufferProcessor):
         """Close up quiet the recorder wrote that the audio has caught up on.
 
         A channel writing faster than its clock has been fed a burst, and
-        a burst is a delivery catching up on a stall. The stall is the
-        quiet at ``quiet_ends_at``, so the burst is given as much of it
-        back as it needs, and the recording holds the call end to end
-        again. Only quiet this recorder put there is taken, and only from
-        the one stretch it last put there, so nothing a listener could
-        hear is written over.
+        a burst is a delivery catching up on a stall. The stalls are the
+        quiet on the ledger, so the burst is given as much of it back as
+        it needs — the newest stretch first, because that is the stall it
+        is catching up on, and back through older ones while it is still
+        ahead. Only quiet this recorder put there is taken, so nothing a
+        listener could hear is written over. Closing a newer stretch does
+        not move an older one, which is why the ledger is walked from the
+        end.
         """
-        given = min(ahead, track.quiet_owed)
-        if given <= 0:
-            return
-        closed_from = (track.quiet_ends_at - given) * 2
-        del buffer[closed_from : track.quiet_ends_at * 2]
-        if track is self._agent:
-            # The agent's channel is the one a turn is looked up on, so
-            # closing quiet on it moves every place already mapped past
-            # the quiet. The persona's channel carries no such map.
-            for position, segment in enumerate(self._input_segments):
-                if segment.recording_start_sample >= track.quiet_ends_at:
-                    self._input_segments[position] = replace(
-                        segment,
-                        recording_start_sample=segment.recording_start_sample - given,
-                        recording_end_sample=segment.recording_end_sample - given,
-                    )
-        track.quiet_owed -= given
-        track.quiet_ends_at -= given
-        if track.written_through is not None:
-            track.written_through -= given
+        while ahead > 0 and track.owed:
+            ends_at, owed = track.owed[-1]
+            given = min(ahead, owed)
+            del buffer[(ends_at - given) * 2 : ends_at * 2]
+            if track is self._agent:
+                # The agent's channel is the one a turn is looked up on,
+                # so closing quiet on it moves every place already mapped
+                # past the quiet. The persona's channel carries no map.
+                for position, segment in enumerate(self._input_segments):
+                    if segment.recording_start_sample >= ends_at:
+                        self._input_segments[position] = replace(
+                            segment,
+                            recording_start_sample=(
+                                segment.recording_start_sample - given
+                            ),
+                            recording_end_sample=segment.recording_end_sample - given,
+                        )
+            if track.written_through is not None:
+                track.written_through -= given
+            ahead -= given
+            if given < owed:
+                track.owed[-1] = (ends_at - given, owed - given)
+            else:
+                track.owed.pop()
 
     def _wall_clock_zero(self, starts_at: float) -> int:
         """The wall-clock instant the recording's first sample stands for.

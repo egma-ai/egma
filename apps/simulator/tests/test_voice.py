@@ -809,6 +809,7 @@ class _TransportLost:
             ended=media.ended,
             failed=self.failed,
             input_recorded=media.input_recorded,
+            real_time=media.real_time,
         )
 
     async def open(self) -> None:

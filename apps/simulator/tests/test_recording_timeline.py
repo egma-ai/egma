@@ -455,3 +455,98 @@ async def test_a_media_clock_has_no_wall_clock_instant_to_give(
     )
 
     assert recorder.started_unix_nano == filed_at
+
+
+async def test_an_interruption_settles_the_quiet_the_recorder_owes() -> None:
+    """A cut tail takes some of the owed quiet with it.
+
+    The persona speaks, the line is quiet for a while, and the transport
+    takes a second utterance it has not started playing. The agent talks
+    over it, so that whole second utterance is thrown away — and the cut
+    lands inside the quiet the recorder opened for the pause, so most of
+    that quiet is gone too.
+
+    A ledger still claiming the quiet would hand it to the next burst,
+    and the channel would be pulled back over the first utterance, which
+    the caller certainly did hear. The account is settled at the cut.
+    """
+    recorder = await recorder_started()
+
+    for step in range(10):
+        await persona_said(
+            recorder, playing_at=step * FRAME_SECONDS, audio=tone()
+        )
+
+    # A pause long enough to re-anchor, then audio the transport queues.
+    for step in range(10):
+        await persona_said(
+            recorder, playing_at=1.0 + step * FRAME_SECONDS, audio=tone()
+        )
+
+    cleared = InterruptionFrame()
+    played_out_at(cleared, 0.5)
+    await recorder._process_recording(cleared)
+    cut_at = recorder.bot_position
+
+    # The persona answers, and the transport plays it from the top: a
+    # burst of frames stamped behind where the channel has been written.
+    for step in range(10):
+        await persona_said(
+            recorder, playing_at=0.1 + step * 0.0002, audio=tone()
+        )
+
+    assert recorder.bot_position >= cut_at
+    persona_track, _agent_track = tracks(recorder)
+    assert audible(persona_track)[0] == pytest.approx((0.0, 0.2), abs=0.01)
+
+
+async def test_two_stalls_before_one_catch_up_both_close() -> None:
+    """A channel can fall behind twice before it catches up at all.
+
+    The line stalls, one frame gets through, and the line stalls again.
+    Only then does the burst arrive, carrying everything both stalls held
+    back. A recorder that remembered only the newer stall would give that
+    quiet back and leave the older gap in the file for good — and every
+    position after it, audio and transcript alike, would sit that far
+    away from the transport clock for the rest of the call.
+    """
+    recorder = await recorder_started()
+
+    # A fifth of a second of speech, delivered as it is spoken.
+    for step in range(10):
+        await agent_said(
+            recorder,
+            arriving_at=step * FRAME_SECONDS,
+            source_from=step * FRAME_SECONDS,
+            audio=tone(),
+        )
+
+    # Half a second of nothing running, then one frame gets through.
+    await agent_said(
+        recorder, arriving_at=0.70, source_from=0.20, audio=tone()
+    )
+
+    # Half a second more, then a whole second of frames at once.
+    for step in range(50):
+        await agent_said(
+            recorder,
+            arriving_at=1.22 + step * 0.0002,
+            source_from=0.22 + step * FRAME_SECONDS,
+            audio=tone(),
+        )
+
+    # Delivery back to its senses.
+    for step in range(10):
+        await agent_said(
+            recorder,
+            arriving_at=1.24 + step * FRAME_SECONDS,
+            source_from=1.22 + step * FRAME_SECONDS,
+            audio=tone(),
+        )
+
+    _persona_track, agent_track = tracks(recorder)
+    assert len(audible(agent_track)) == 1, "a stall stayed in the recording"
+    arrived_through = 1.24 + 10 * FRAME_SECONDS
+    assert speaking(agent_track)[1] == pytest.approx(
+        arrived_through, abs=RESYNC_TOLERANCE
+    )
