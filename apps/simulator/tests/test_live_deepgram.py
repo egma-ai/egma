@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 import wave
 from pathlib import Path
 
@@ -41,7 +42,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import VoiceConductor
 from egma_simulator.conversation import ConversationControls
-from egma_simulator.media import VoiceMedia
+from egma_simulator.media import PlayoutStamp, VoiceMedia, arrived_at
 from egma_simulator.model import ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.spec import AuthoredPersona
@@ -113,13 +114,16 @@ class _OneSentenceInput(FrameProcessor):
         for position, audio in enumerate(chunks):
             if position == len(chunks) - 1:
                 self.ended.set()
-            await self.push_frame(
-                InputAudioRawFrame(
-                    audio=audio,
-                    sample_rate=self._band,
-                    num_channels=1,
-                )
+            frame = InputAudioRawFrame(
+                audio=audio,
+                sample_rate=self._band,
+                num_channels=1,
             )
+            # The line runs in real time here, one frame every twenty
+            # milliseconds, so the clock is the honest arrival time and
+            # the recording is built on it like any other transport's.
+            arrived_at(frame, time.monotonic())
+            await self.push_frame(frame)
             await asyncio.sleep(FRAME_SECONDS)
 
     def open(self) -> None:
@@ -141,7 +145,11 @@ class OneSentenceConnection:
         return self._input.ended.is_set()
 
     async def prepare(self) -> VoiceMedia:
-        return VoiceMedia(input=(self._input,), output=(), ended=self._input.ended)
+        return VoiceMedia(
+            input=(self._input,),
+            output=(PlayoutStamp(),),
+            ended=self._input.ended,
+        )
 
     async def open(self) -> None:
         self._input.open()

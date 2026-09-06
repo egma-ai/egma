@@ -13,12 +13,20 @@ are ``error``.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from importlib import import_module
 from typing import Protocol
 
-from pipecat.frames.frames import ControlFrame, UninterruptibleFrame
+from pipecat.frames.frames import (
+    ControlFrame,
+    Frame,
+    InterruptionFrame,
+    OutputAudioRawFrame,
+    UninterruptibleFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from ..contract import ERROR, NOT_ANSWERED
 
@@ -158,6 +166,40 @@ class PlayoutClock:
     def cleared(self) -> None:
         """The transport dropped whatever it had not played yet."""
         self._playing_through = None
+
+
+class PlayoutStamp(FrameProcessor):
+    """Say when a real-time transport plays out what it has been handed.
+
+    Goes after the transport's own output processor, where a frame has
+    been written out and is on its way to the far end. A transport takes
+    audio faster than it plays it — a whole utterance can go over in a
+    moment and then play for seconds — so a frame that has just been
+    written is not audio anybody has heard yet. It is audio that starts
+    once everything written before it has finished.
+
+    An interruption throws away whatever was written and not yet played,
+    so this says when that happened too, and the recording lets that
+    audio go instead of claiming the persona spoke it.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._playout = PlayoutClock()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, OutputAudioRawFrame):
+            played_out_at(
+                frame,
+                self._playout.place(
+                    time.monotonic(), frame.num_frames / frame.sample_rate
+                ),
+            )
+        elif isinstance(frame, InterruptionFrame):
+            played_out_at(frame, time.monotonic())
+            self._playout.cleared()
+        await self.push_frame(frame, direction)
 
 
 @dataclass(frozen=True)

@@ -17,11 +17,10 @@ from ..contract import ERROR
 from ..mock_tools import MockToolRefusal
 from . import (
     MediaBackendError,
-    PlayoutClock,
+    PlayoutStamp,
     RemoteParticipantLeftFrame,
     VoiceMedia,
     arrived_at,
-    played_out_at,
 )
 
 logger = logging.getLogger(__name__)
@@ -985,12 +984,7 @@ class JoinedRoom:
 
     def create_transport(self) -> VoiceMedia:
         """Create stock LiveKit input and output processors without rates."""
-        from pipecat.frames.frames import (
-            Frame,
-            InputAudioRawFrame,
-            InterruptionFrame,
-            OutputAudioRawFrame,
-        )
+        from pipecat.frames.frames import Frame, InputAudioRawFrame
         from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
         from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 
@@ -1082,44 +1076,9 @@ class JoinedRoom:
                     room.carrying_audio.set()
                 await self.push_frame(frame, direction)
 
-        class _Playout(FrameProcessor):
-            """When the persona's audio is heard, on the same clock.
-
-            LiveKit takes audio faster than it plays it: a whole utterance
-            can be handed over in a moment and then plays out over
-            seconds. So the frame that has just gone to the room is not
-            audio the caller has heard — it is audio that starts when
-            everything handed over before it has finished.
-
-            An interruption clears what LiveKit was holding, so what it
-            had not played is never heard at all and the recording is told
-            to let it go.
-            """
-
-            def __init__(self) -> None:
-                super().__init__()
-                self._playout = PlayoutClock()
-
-            async def process_frame(
-                self, frame: Frame, direction: FrameDirection
-            ) -> None:
-                await super().process_frame(frame, direction)
-                if isinstance(frame, OutputAudioRawFrame):
-                    played_out_at(
-                        frame,
-                        self._playout.place(
-                            time.monotonic(),
-                            frame.num_frames / frame.sample_rate,
-                        ),
-                    )
-                elif isinstance(frame, InterruptionFrame):
-                    played_out_at(frame, time.monotonic())
-                    self._playout.cleared()
-                await self.push_frame(frame, direction)
-
         return VoiceMedia(
             input=(input_transport, _Arrival()),
-            output=(transport.output(), _Playout()),
+            output=(transport.output(), PlayoutStamp()),
             ended=self.ended,
             failed=self.failed,
             transport_name=f"livekit server at {self._quotable(self._url)}",
