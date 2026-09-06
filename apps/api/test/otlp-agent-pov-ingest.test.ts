@@ -1050,6 +1050,73 @@ describe.skipIf(!storage.available)("the booking that opened this effort", () =>
       ),
     ).toBe(APPOINTMENT_TRACE.spans);
   });
+
+  /**
+   * **The number this whole effort is about**, on the conversation that opened
+   * it, read back through the contract a customer reads.
+   *
+   * Five human turns, four of them answered. Each wait starts where the caller
+   * stopped being audible — the end of that `user_turn`'s last `user_speaking`
+   * child, which is the VAD's own detected end — and stops at the first
+   * `agent_speaking` before the next human turn. Hand-computed once from the
+   * export's raw nanosecond timestamps, held as the store keeps them: starts
+   * truncated to the microsecond, durations exact.
+   *
+   *   1. caller stops being audible 1788544388880703312, agent speaks
+   *      1788544392672227000 → 3791.523688 ms
+   *   2. 1788544412831362936 → 1788544414353803000 → 1522.440064 ms
+   *   3. 1788544429283150472 → 1788544431499003000 → 2215.852528 ms
+   *   4. 1788544442631104016 → 1788544444538535000 → 1907.430984 ms
+   *
+   * From `user_turn`'s own end — the endpointing commit, which is where the
+   * derivation stopped before catalog version 8 — the same four turns read
+   * 3334.056376, 1108.662037, 1770.409112 and 1394.444331 ms. That difference,
+   * about half a second a turn, is time the caller really waited.
+   *
+   * The fifth human turn is never answered: two agent turns follow it and
+   * neither speaks, so it measures nothing rather than borrowing the next
+   * conversation's silence.
+   */
+  it("measures the four answered waits from the caller's last audible sample", async () => {
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${landed.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    const metrics = (
+      read.json() as {
+        metrics: {
+          measure: string;
+          pov: string;
+          derived: boolean;
+          samples: number[];
+          otherPov?: unknown;
+        }[];
+      }
+    ).metrics;
+
+    const latency = metrics.find(
+      (metric) => metric.measure === "turn_response_latency",
+    );
+    expect(latency?.samples).toEqual([
+      3791.523688, 1522.440064, 2215.852528, 1907.430984,
+    ]);
+    // The agent's own POV, and it is the headline: egma timed nothing here, so
+    // there is no second series beside it either.
+    expect(latency?.pov).toBe("agent");
+    expect(latency?.derived).toBe(true);
+    expect(latency?.otherPov).toBeUndefined();
+
+    // And the first answer, from the moment the conversation opened to the
+    // agent's first word: `agent_session` at 1788544385416091000, first
+    // `agent_speaking` at 1788544388880227000.
+    const first = metrics.find(
+      (metric) => metric.measure === "first_response_latency",
+    );
+    expect(first?.samples).toEqual([3464.136]);
+    expect(first?.pov).toBe("agent");
+  });
 });
 
 /**
