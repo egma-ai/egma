@@ -1,5 +1,10 @@
 import type { TraceDetail } from "@egma/db";
-import { aggregateOf, measuresFromSpans } from "@egma/metrics";
+import {
+  aggregateOf,
+  measuresFromSpans,
+  povOf,
+  type MeasuredByOnePov,
+} from "@egma/metrics";
 
 /**
  * What a conversation measured — the one projection of the observed metrics
@@ -46,6 +51,12 @@ export function describedMetrics(
       // or a number the platform handed egma — is `reportedBy` below, present
       // only on the second.
       derived: measured.origin !== "timed",
+      // Whose account this number is — the persona's, measured off egma's own
+      // recording, or the agent's, off its own process. `derived` says which
+      // machinery produced it; this says whose conversation it describes, and
+      // catalog version 8 makes that the fact that decides whether two numbers
+      // may be compared at all.
+      pov: povOf(measured.origin),
       ...(measured.origin === "reported"
         ? { reportedBy: measured.reportedBy }
         : {}),
@@ -61,6 +72,33 @@ export function describedMetrics(
       p50: p50 ?? 0,
       p90: p90 ?? 0,
       partial: measured.origin === "reported" ? false : detail.truncated,
+      // **The second POV, where a conversation has one.** A simulation is
+      // measured twice — by egma off its own recording, and by the agent off
+      // its own spans — and the two differ by the VAD's detection lag and the
+      // playback hop. Both series ride the wire, the headline above and the
+      // other here, so a reader can show either and nothing has to average
+      // them into a number nobody measured. Absent on every conversation only
+      // one POV measured, which is every production trace.
+      ...(measured.otherPov === undefined
+        ? {}
+        : { otherPov: describedPov(measured.otherPov, detail.truncated) }),
     };
   });
+}
+
+/** One POV's series on the wire, named the way the headline names its own. */
+function describedPov(
+  measured: MeasuredByOnePov,
+  truncated: boolean,
+): Record<string, unknown> {
+  return {
+    pov: povOf(measured.origin),
+    derived: measured.origin !== "timed",
+    ...(measured.origin === "reported"
+      ? { reportedBy: measured.reportedBy }
+      : {}),
+    samples: measured.samples.map((sample) => sample.value),
+    spanIds: measured.samples.map((sample) => sample.spanId),
+    partial: measured.origin === "reported" ? false : truncated,
+  };
 }

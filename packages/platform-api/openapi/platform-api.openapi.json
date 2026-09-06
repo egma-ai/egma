@@ -15970,6 +15970,13 @@
                           "derived": {
                             "type": "boolean"
                           },
+                          "pov": {
+                            "type": "string",
+                            "enum": [
+                              "persona",
+                              "agent"
+                            ]
+                          },
                           "reportedBy": {
                             "type": "string"
                           },
@@ -15996,12 +16003,54 @@
                           },
                           "partial": {
                             "type": "boolean"
+                          },
+                          "otherPov": {
+                            "type": "object",
+                            "properties": {
+                              "pov": {
+                                "type": "string",
+                                "enum": [
+                                  "persona",
+                                  "agent"
+                                ]
+                              },
+                              "derived": {
+                                "type": "boolean"
+                              },
+                              "reportedBy": {
+                                "type": "string"
+                              },
+                              "samples": {
+                                "type": "array",
+                                "items": {
+                                  "type": "number"
+                                }
+                              },
+                              "spanIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "partial": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "pov",
+                              "derived",
+                              "samples",
+                              "spanIds",
+                              "partial"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
                           "measure",
                           "unit",
                           "derived",
+                          "pov",
                           "samples",
                           "spanIds",
                           "mean",
@@ -20168,6 +20217,13 @@
                           "derived": {
                             "type": "boolean"
                           },
+                          "pov": {
+                            "type": "string",
+                            "enum": [
+                              "persona",
+                              "agent"
+                            ]
+                          },
                           "reportedBy": {
                             "type": "string"
                           },
@@ -20194,12 +20250,54 @@
                           },
                           "partial": {
                             "type": "boolean"
+                          },
+                          "otherPov": {
+                            "type": "object",
+                            "properties": {
+                              "pov": {
+                                "type": "string",
+                                "enum": [
+                                  "persona",
+                                  "agent"
+                                ]
+                              },
+                              "derived": {
+                                "type": "boolean"
+                              },
+                              "reportedBy": {
+                                "type": "string"
+                              },
+                              "samples": {
+                                "type": "array",
+                                "items": {
+                                  "type": "number"
+                                }
+                              },
+                              "spanIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "partial": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "pov",
+                              "derived",
+                              "samples",
+                              "spanIds",
+                              "partial"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
                           "measure",
                           "unit",
                           "derived",
+                          "pov",
                           "samples",
                           "spanIds",
                           "mean",

@@ -350,7 +350,7 @@ describe("the same spans, filed as a simulation and as production", () => {
   const MEASURED: Measured = {
     first_response_latency: [1_214],
     turn_response_latency: [862.5, 1_100, 2_400],
-    time_to_first_word: [310.25],
+    agent_speech_duration: [310.25],
   };
 
   it("produce identical numbers", async () => {
@@ -382,7 +382,11 @@ describe("the same spans, filed as a simulation and as production", () => {
         unit: "milliseconds",
         samples: [862.5, 1_100, 2_400],
       },
-      { measure: "time_to_first_word", unit: "milliseconds", samples: [310.25] },
+      {
+        measure: "agent_speech_duration",
+        unit: "milliseconds",
+        samples: [310.25],
+      },
     ]);
   });
 
@@ -797,13 +801,56 @@ describe("measures derived from a recognised framework's own spans", () => {
   });
 
   /**
-   * **egma's own timing vocabulary wins absolutely.** The conversation below
-   * carries both — turns a derivation could read and a timing span that measured
-   * the same thing — and the answer is the timed one, alone. Appending both
-   * would double one turn's samples and move every percentile a grader reduces
-   * by.
+   * **The wait starts where the caller stopped being audible.** ADR-0015 §5
+   * defines the measure from the last audible sample of the caller's speech,
+   * and in the agent's own spans that instant is the end of the human turn's
+   * last `speaking` child — the VAD's detected end — never the turn's own end,
+   * which is the endpointing commit about a second later. Starting from the
+   * commit deletes a second the caller actually waited and makes a slow agent
+   * look fast.
    */
-  it("never derives a measure the conversation already timed itself", async () => {
+  it("starts each wait at the caller's last audible sample, not the endpointing commit", async () => {
+    const trace = await aLiveKitCall([
+      // The VAD hears speech end at 1000; the turn is not committed until 1550.
+      { who: "human", from: 0, to: 1_550, spoke: [[0, 1_000]] },
+      { who: "agent", from: 1_600, to: 3_000, spoke: [[1_900, 3_000]] },
+      { who: "human", from: 4_000, to: 5_400, spoke: [[4_000, 4_500], [4_700, 5_000]] },
+      { who: "agent", from: 5_450, to: 7_000, spoke: [[5_600, 7_000]] },
+    ]);
+
+    const measured = measureIn(trace, "turn_response_latency");
+    expect(measured?.origin).toBe("derived");
+    // 1900 − 1000, then 5600 − 5000: the caller's last audible sample to the
+    // agent's first word. From the turn ends it would have read 350 and 200.
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([900, 600]);
+  });
+
+  /**
+   * A framework that records only word-bounded turns writes no `speaking` span
+   * for the caller, and the turn's own end is then the only instant the trace
+   * holds for "the caller stopped". Retell's turns are exactly that, and the
+   * chat lane's are too.
+   */
+  it("falls back to the human turn's end where the caller's speech was never recorded", async () => {
+    const trace = await aLiveKitCall([
+      { who: "human", from: 0, to: 1_000 },
+      { who: "agent", from: 1_100, to: 3_000, spoke: [[1_400, 3_000]] },
+    ]);
+
+    const measured = measureIn(trace, "turn_response_latency");
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([400]);
+  });
+
+  /**
+   * **Both POVs, and neither blended into the other.** The conversation below
+   * carries both — turns a derivation reads, which is the agent's own account,
+   * and a timing span egma measured off its own recording, which is the
+   * persona's. Version 8 headlines the agent's for the two response latencies
+   * while ticket 08's recorder fix is open; the persona's series is still
+   * computed and handed back beside it. Nothing is averaged and nothing is
+   * appended: two series, each saying which POV measured it.
+   */
+  it("hands back both POVs, the agent's first, for a simulation's response latency", async () => {
     const turns: readonly Turn[] = [
       { who: "human", from: 0, to: 1_000 },
       { who: "agent", from: 1_100, to: 3_000, spoke: [[1_400, 3_000]] },
@@ -811,13 +858,49 @@ describe("measures derived from a recognised framework's own spans", () => {
     const both = await aLiveKitCall(turns, { turn_response_latency: [862.5] });
 
     const measured = measureIn(both, "turn_response_latency");
-    expect(measured?.origin).toBe("timed");
-    // The timed number, and not the 400 the same spans would have derived.
-    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([862.5]);
+    expect(measured?.origin).toBe("derived");
+    // The agent's own account of the wait: 1400 − 1000.
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([400]);
+    // And the persona's, beside it rather than mixed into it.
+    expect(measured?.otherPov?.origin).toBe("timed");
+    expect(measured?.otherPov?.samples.map((one) => one.value)).toEqual([862.5]);
+  });
 
-    // The measures it did **not** time are still derived, so precedence is per
-    // measure rather than a switch that turns the whole conversation off.
-    expect(measureIn(both, "agent_speech_duration")?.origin).toBe("derived");
+  /**
+   * **The flip is per measure, and the version is the switch.** Everything but
+   * the two response latencies still leads with what egma timed itself, so a
+   * measure egma's own vocabulary took is the headline and the derivation sits
+   * beside it.
+   */
+  it("still headlines egma's own timing for every other measure", async () => {
+    const both = await aLiveKitCall(
+      [
+        { who: "human", from: 0, to: 1_000 },
+        { who: "agent", from: 1_100, to: 3_000, spoke: [[1_400, 3_000]] },
+      ],
+      { agent_speech_duration: [1_500] },
+    );
+
+    const measured = measureIn(both, "agent_speech_duration");
+    expect(measured?.origin).toBe("timed");
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([1_500]);
+    // 3000 − 1400, from the agent's own speaking span.
+    expect(measured?.otherPov?.origin).toBe("derived");
+    expect(measured?.otherPov?.samples.map((one) => one.value)).toEqual([1_600]);
+  });
+
+  /**
+   * One POV is one entry with nothing beside it — the ordinary production
+   * trace, where egma timed nothing and only the agent's spans exist.
+   */
+  it("names no other POV for a conversation only one POV measured", async () => {
+    const trace = await aLiveKitCall([
+      { who: "human", from: 0, to: 1_000 },
+      { who: "agent", from: 1_100, to: 3_000, spoke: [[1_400, 3_000]] },
+    ]);
+
+    expect(measureIn(trace, "turn_response_latency")?.otherPov).toBeUndefined();
+    expect(measureIn(trace, "agent_speech_duration")?.otherPov).toBeUndefined();
   });
 });
 
@@ -1047,21 +1130,47 @@ describe("measures an agent platform reported about its own conversation", () =>
   });
 
   /**
-   * **egma's own observation outranks the platform's account of itself**, by
-   * the same absolute rule that puts a timed measure over a derived one. The
-   * conversation below carries both, and the answer is the timed one alone —
-   * never the two appended, which would file one turn's wait twice and move
-   * every percentile.
+   * **Two POVs, and the version says which one leads.** The platform's block is
+   * the agent's own account of itself; egma's timing span is the persona's,
+   * measured off the recording. Version 8 leads with the agent's for the two
+   * response latencies, and the persona's rides beside it — never appended to
+   * it, which would file one turn's wait twice and move every percentile.
    */
-  it("lets a measure egma timed itself win over the one the platform reported", async () => {
+  it("leads with the platform's own account of a response latency, keeping egma's beside it", async () => {
     const trace = await aReportedTrace(AS_RETELL_MEASURED, {
       turn_response_latency: [862.5],
     });
 
     const measured = measureIn(trace, "turn_response_latency");
+    expect(measured?.origin).toBe("reported");
+    expect(measured?.reportedBy).toBe("retell");
+    expect(measured?.otherPov?.origin).toBe("timed");
+    expect(measured?.otherPov?.samples.map((one) => one.value)).toEqual([862.5]);
+  });
+
+  /**
+   * **egma's own observation still outranks the platform's for every measure
+   * version 8 did not flip.** One entry, the timed one, and the platform's
+   * account of the same measure is what sits beside it.
+   */
+  it("lets a measure egma timed itself win over the one the platform reported", async () => {
+    const trace = await aReportedTrace(
+      [
+        {
+          measure: "agent_speech_duration",
+          unit: "milliseconds",
+          values: [1_900],
+        },
+      ],
+      { agent_speech_duration: [862.5] },
+    );
+
+    const measured = measureIn(trace, "agent_speech_duration");
     expect(measured?.origin).toBe("timed");
     expect(measured?.reportedBy).toBe("");
     expect(measured === undefined ? [] : valuesOf(measured)).toEqual([862.5]);
+    expect(measured?.otherPov?.origin).toBe("reported");
+    expect(measured?.otherPov?.reportedBy).toBe("retell");
   });
 
   /**
@@ -1095,6 +1204,11 @@ describe("measures an agent platform reported about its own conversation", () =>
     expect(measured?.reportedBy).toBe("");
     // 1400 − 1000, worked out from the turns, and not the platform's series.
     expect(measured === undefined ? [] : valuesOf(measured)).toEqual([400]);
+    // **And no second series beside it.** Both accounts are the agent's own
+    // POV, so the better-grained one is the whole answer: two entries here
+    // would be one POV told twice, which is what the POV qualifier exists to
+    // make impossible.
+    expect(measured?.otherPov).toBeUndefined();
   });
 
   /**

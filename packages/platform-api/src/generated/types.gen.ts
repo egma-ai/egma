@@ -4331,6 +4331,7 @@ export type GetSimulationResponses = {
             measure: string;
             unit: string;
             derived: boolean;
+            pov: 'persona' | 'agent';
             reportedBy?: string;
             samples: Array<number>;
             spanIds: Array<string>;
@@ -4338,6 +4339,14 @@ export type GetSimulationResponses = {
             p50: number;
             p90: number;
             partial: boolean;
+            otherPov?: {
+                pov: 'persona' | 'agent';
+                derived: boolean;
+                reportedBy?: string;
+                samples: Array<number>;
+                spanIds: Array<string>;
+                partial: boolean;
+            };
         }>;
         test: {
             id: string;
@@ -5534,6 +5543,7 @@ export type GetTraceResponses = {
             measure: string;
             unit: string;
             derived: boolean;
+            pov: 'persona' | 'agent';
             reportedBy?: string;
             samples: Array<number>;
             spanIds: Array<string>;
@@ -5541,6 +5551,14 @@ export type GetTraceResponses = {
             p50: number;
             p90: number;
             partial: boolean;
+            otherPov?: {
+                pov: 'persona' | 'agent';
+                derived: boolean;
+                reportedBy?: string;
+                samples: Array<number>;
+                spanIds: Array<string>;
+                partial: boolean;
+            };
         }>;
         simulationId: string | null;
         gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error';

@@ -1,6 +1,6 @@
 # The measure catalog
 
-**Catalog version: 7**
+**Catalog version: 8**
 
 Every metric a conversation produces, named once and defined once, so that a
 grader references a known metric instead of guessing a string — and so that the
@@ -52,10 +52,8 @@ number was timed or counted.
 | Measure | Unit | Taken | Emitted by | Arrives as | What it is |
 | --- | --- | --- | --- | --- | --- |
 | `first_response_latency` | milliseconds | once | every simulation | timing span | How long the agent took to say anything at all, from the moment the simulation began. |
-| `turn_response_latency` | milliseconds | per turn | every simulation | timing span | How long the agent took to answer: from the persona's turn going out to the agent beginning its answer. One sample per persona turn the agent began answering; a turn it never began answering takes none. |
-| `time_to_first_word` | milliseconds | per turn | voice simulations | timing span | The quiet before the agent's first word of an answer, measured out of the audio rather than off a clock. |
+| `turn_response_latency` | milliseconds | per turn | every simulation | timing span | How long the agent took to answer: from the last audible sample of the caller's speech in the turn to the first audible sample of the agent's reply as it reaches the caller. One sample per caller turn the agent answered; a turn it never answered takes none. |
 | `agent_speech_duration` | milliseconds | per turn | voice simulations | timing span | How long the agent spoke for, silence inside the answer excluded. |
-| `persona_speech_duration` | milliseconds | per turn | voice simulations | timing span | How long Egma's own synthetic caller spoke for — what the agent was made to listen to, not anything the agent did. |
 | `asr_latency` | milliseconds | per turn | the agent's platform | the platform's own telemetry | How long the agent's platform spent turning the caller's speech into text, by the platform's own account. |
 | `llm_latency` | milliseconds | per turn | the agent's platform | the platform's own telemetry | How long the agent's platform spent thinking — the language-model step of an answer, by the platform's own account. |
 | `tts_latency` | milliseconds | per turn | the agent's platform | the platform's own telemetry | How long the agent's platform spent turning the answer's text into speech, by the platform's own account. |
@@ -85,9 +83,7 @@ switches on exhaustively. A rule nothing implements stops the build.
 | --- | --- | --- |
 | `first_response_latency` | `timing_spans_named_for_it` | Every span named `first_response_latency`; each span's own duration is one sample. |
 | `turn_response_latency` | `timing_spans_named_for_it` | Every span named `turn_response_latency`; each span's own duration is one sample. |
-| `time_to_first_word` | `timing_spans_named_for_it` | Every span named `time_to_first_word`; each span's own duration is one sample. |
 | `agent_speech_duration` | `timing_spans_named_for_it` | Every span named `agent_speech_duration`; each span's own duration is one sample. |
-| `persona_speech_duration` | `timing_spans_named_for_it` | Every span named `persona_speech_duration`; each span's own duration is one sample. |
 | `asr_latency` | `platform_telemetry_carries_it` | Never egma's own timing span. Reported per call by Retell (its `asr` stage); no recognised framework span carries it today, so it is never derived. |
 | `llm_latency` | `platform_telemetry_carries_it` | Never egma's own timing span. Derived as the sum of a `turn:agent` span's own `model` children per turn, or read from the platform's reported `llm` stage. |
 | `tts_latency` | `platform_telemetry_carries_it` | Never egma's own timing span. Derived as the sum of a `turn:agent` span's own `tts` children per turn, or read from the platform's reported `tts` stage. |
@@ -104,6 +100,28 @@ and the write door refuses it. `turn_count` already arrives on the terminal
 transition and is read back off the simulation row; deriving it a second time
 from the spans would be a second answer about one simulation. The turn spans
 could be counted, and they are deliberately not.
+
+## Two POVs, and the version says which one leads
+
+A simulation is measured twice. Egma measures it off its own recording and its
+own clock — the **persona's POV**, which arrives as the timing spans above. The
+agent measures it off its own process — the **agent's POV**, which arrives as a
+derivation off the framework's spans or as the block the platform reported. The
+two differ by the VAD's own detection lag at the front and the playback hop at
+the back, so they are two units and never one series.
+
+`origin` on every measure says which POV took it: `timed` is the persona's,
+`derived` and `reported` are the agent's. A conversation both POVs measured
+hands back **both series** — the headline, and the other beside it. Nothing is
+averaged across them and nothing is appended.
+
+**Catalog version 8 leads with the agent's POV for `turn_response_latency` and
+`first_response_latency`**, and with the persona's for everything else. The
+version is the switch and there is no flag: a run graded under version 8 was
+graded against the agent's own account of its waits, and the release that
+returns the persona's recording to the front is a catalog version of its own.
+On a production trace the question does not arise — Egma conducted nothing, so
+there is one POV.
 
 ## Derived measures: a framework's own spans, read as these numbers
 
@@ -134,9 +152,11 @@ Three rules hold over all of them.
   whatever word its platform uses — `root` on Egma's own traces and LiveKit's,
   `conversation` on a Retell one — so the derivations find it the way the trace
   read does, by the empty parent.
-- **Egma's own timing vocabulary wins absolutely.** When a conversation carries
-  timing spans for a measure, no derivation for that measure runs. A
-  conversation carrying both has one answer, never two appended.
+- **A derivation outranks a reported block, and neither outranks the other
+  POV.** Both are the agent's own account of itself, so a conversation carrying
+  both answers with the better-grained one alone. What Egma timed itself is a
+  different POV, not a better source, and it rides beside the agent's rather
+  than replacing it — see **Two POVs** below.
 - **A measurement that runs backwards is not kept.** Turn spans overlap on a
   real captured call — five of twelve neighbouring pairs — and the overlap is
   the framework's turn bookkeeping, not audible talk-over: the same call's
@@ -150,7 +170,7 @@ the store gains these on the next read.
 
 | Measure | Derived from recognised turn spans as | Taken |
 | --- | --- | --- |
-| `turn_response_latency` | From each `turn:human` span's **end** to the first later `turn:agent` span's first `speaking` child, before another human turn begins. A silent agent turn on the way is model or tool work, not the spoken answer. Where the entire trace carries no `speaking` spans, the first agent turn's own start stands in for a framework that records only word-bounded turns. **An agent answer belongs only to the nearest human turn before it: a human turn followed by another human turn before any agent speech was not answered, and measures nothing.** | One sample per human turn, in trace order. A human turn nobody answered, one the caller spoke over with a second turn, and one whose sample runs backwards contribute none. |
+| `turn_response_latency` | From the **end of each `turn:human` span's last `speaking` child** — the VAD's detected end of the caller's speech — to the first later `turn:agent` span's first `speaking` child, before another human turn begins. Where the framework recorded no speech for the caller, the human turn's own end stands in. Never the human turn's end where speech was recorded: that is the endpointing commit, about a second later, and starting there deletes a second the caller waited. A silent agent turn on the way is model or tool work, not the spoken answer. Where the entire trace carries no `speaking` spans, the first agent turn's own start stands in for a framework that records only word-bounded turns. **An agent answer belongs only to the nearest human turn before it: a human turn followed by another human turn before any agent speech was not answered, and measures nothing.** | One sample per human turn, in trace order. A human turn nobody answered, one the caller spoke over with a second turn, and one whose sample runs backwards contribute none. |
 | `first_response_latency` | From the root span's start — the earliest parentless span — to the first `turn:agent` span's first `speaking` child's start. Where the conversation carries no `speaking` spans at all, the first agent turn's own start stands in — a word-bounded Retell turn begins at its first word; a framework that does write speech makes a speechless first turn unmeasurable. A first agent turn with neither speech nor width measures nothing. | Once. |
 | `agent_speech_duration` | The sum of a `turn:agent` span's own `speaking` children's durations — so a turn that thought for two seconds and then talked for one spoke for one. | One sample per agent turn **that spoke**. A turn with no speech in it has no speech duration; a zero would measure something that never happened. |
 | `llm_latency` | The sum of a `turn:agent` span's own `model` children's durations — LiveKit's `llm_node`/`llm_request` family, as the door files it — so a turn whose model was asked twice accounts for both askings. | One sample per agent turn that carried a model step. A turn with none has no model latency; a zero would measure something that never happened. |
@@ -159,13 +179,6 @@ the store gains these on the next read.
 Each sample cites the span its number came from: the span whose start closed the
 interval for a latency, and the turn itself for a duration summed over its
 children.
-
-**Two measures are deliberately not derived.**
-
-- `time_to_first_word` — defined out of audio Egma does not hold for production
-  traffic.
-- `persona_speech_duration` — Egma's synthetic caller is not in a production
-  conversation, so the measure has no production meaning.
 
 **The Retell derivations were checked against Retell's own ruler** on a live
 production call (2026-08-22): the word-bound gaps Egma derives — 2218 ms,
