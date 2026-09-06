@@ -472,13 +472,14 @@ class RetellTextMode:
                 if kept:
                     noted.append(kept)
                 continue
-            role = message.get("role")
-            if role == AGENT_ROLE:
+            # A tool-call role is understood and taken no further. egma
+            # writes no tool row of its own: this lane's tool record is
+            # Retell's own call record, pulled and filed under the
+            # simulation the moment the call ends.
+            if message.get("role") == AGENT_ROLE:
                 spoken = message.get("content")
                 if isinstance(spoken, str) and spoken.strip():
                     said.append(spoken.strip())
-            elif role == INVOCATION_ROLE:
-                self._observed(message)
 
         self._resume_from(answered)
         self._variables_from(answered)
@@ -486,32 +487,11 @@ class RetellTextMode:
         return AgentReply(
             text="\n".join(said) or None,
             ended=self._ended,
-            # Deliberately empty: every tool fact this lane sees goes to
-            # the mock-tool seam, which is the only writer that can stamp
-            # a call `mocked` and say what it was given. Reporting them
-            # here as well would put each call on the record twice.
+            # Deliberately empty: egma writes no tool row of its own, and
+            # this lane's tool record is Retell's own call record, pulled
+            # and filed under the simulation when the call ends.
             tool_calls=(),
             platform_notes=tuple(noted),
-        )
-
-    def _observed(self, message: dict) -> None:
-        """One tool call Retell reported, handed to the seam that stamps it.
-
-        A call whose name the run's snapshot covers is stamped ``mocked``
-        on that basis and on no other. What goes on the record is egma's
-        own rendering — the seam holds the copy that says which branch the
-        answer was — and an uncovered call lands as the bare observation
-        it is, because its return value is the customer's backend's and
-        nothing egma can vouch for.
-        """
-        name = message.get("name")
-        if not isinstance(name, str) or not name.strip():
-            return
-        called = name.strip()
-        arguments = message.get("arguments")
-        self._mock_tools.reported(
-            called,
-            arguments=arguments if isinstance(arguments, str) and arguments else None,
         )
 
     def _resume_from(self, answered: dict) -> None:

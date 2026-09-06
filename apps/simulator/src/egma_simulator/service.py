@@ -321,7 +321,6 @@ class RunningSimulation:
                         max_duration_seconds=(self._spec.limits.max_duration_seconds),
                         on_turn=self._on_turn,
                         on_timing=self._on_timing,
-                        on_tool_call=self._on_tool_call,
                         on_answered=self._on_answered,
                         controls=self._controls,
                         name=f"sim:{self.simulation_id}",
@@ -342,12 +341,6 @@ class RunningSimulation:
                     self._spans.recording(
                         started_unix_nano=recording.started_unix_nano
                     )
-                # The same moment for the same reason: the exchange is
-                # over, so every call egma answered is settled. Drained
-                # before anything is sealed, so a call served in the last
-                # breath of a conversation is on the record rather than in
-                # a buffer nobody empties.
-                self._record_mock_tool_calls()
                 await model.close()
         except asyncio.CancelledError:
             # The service itself is being torn down mid-conversation. Reporting a
@@ -462,9 +455,9 @@ class RunningSimulation:
 
     async def _on_answered(self) -> None:
         """One flush per answer, which is where the conversation actually
-        has a seam: the persona's turn, whatever the agent did while
-        answering, and the answer itself go together, and the flush after
-        them is the moment a reader could watch this simulation live.
+        has a seam: the persona's turn and the answer itself go together,
+        and the flush after them is the moment a reader could watch this
+        simulation live.
         Finer would be a request per span; coarser would be a transcript
         that only exists once it is over.
 
@@ -474,38 +467,10 @@ class RunningSimulation:
         precisely that answer whose evidence must not sit in a buffer
         waiting for the agent to speak again.
         """
-        self._record_mock_tool_calls()
         self._spans.flush()
-
-    def _record_mock_tool_calls(self) -> None:
-        """Every mock-tool call egma has exchanged since this last asked.
-
-        Taken rather than pushed: the exchange happens in whatever task the
-        room hands it to, and a span authored from over there would be
-        minted between two the conversation was in the middle of. Drained
-        here instead, at the seams the conversation already has, so the
-        order of the record is the order the simulation observed things in.
-        """
-        assembled = self._assembled
-        if assembled is None:
-            return
-        for call in assembled.tool_calls():
-            self._spans.tool_exchange(
-                call.name,
-                arguments=call.arguments,
-                answer=call.answer,
-                mock_tool=call.mock_tool,
-                late_attached=call.late_attached,
-                refused=call.refused,
-                began_unix_nano=call.began_unix_nano,
-                ended_unix_nano=call.ended_unix_nano,
-            )
 
     async def _on_timing(self, measure: str, milliseconds: float) -> None:
         self._spans.measure(measure, milliseconds)
-
-    async def _on_tool_call(self, name: str, arguments: str | None) -> None:
-        self._spans.tool_call(name, arguments)
 
     async def _heartbeat_forever(self) -> None:
         while True:

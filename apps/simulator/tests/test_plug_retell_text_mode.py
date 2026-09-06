@@ -8,11 +8,11 @@ resume state threaded turn by turn. The counterpart is a real HTTP server
 shaped like the completion API, on loopback — no account, no key, no
 network.
 
-What the plug **saw** is pinned beside it, at the seam that writes it down:
-every tool call the platform reported reaches the mock-tool seam, marked
-``mocked`` exactly where the run's snapshot covers the name. The record
-those become is proved end to end in the acceptance suite; here the
-question is what the plug hands over.
+What the plug **sends** about tools is pinned beside it: egma's own
+answers ride every request as native mocks, matched by name. What the
+plug reports about tools is nothing at all — egma writes no tool row of
+its own, and this lane's tool record is Retell's own call record, pulled
+and filed under the simulation when the call ends.
 
 The failure paths get the same treatment, because they are where a
 credential leaks if it ever does: a throttle, a billing wall, a key the
@@ -595,12 +595,17 @@ async def test_a_run_that_mocks_nothing_sends_no_mocks(start_text_mode_stub):
     assert "tool_mocks" not in running.stub.requests[0]["body"]
 
 
-async def test_a_covered_call_is_marked_mocked_and_an_uncovered_one_is_not(
+async def test_a_tool_call_the_platform_reports_becomes_no_row_of_egmas(
     start_text_mode_stub,
 ):
-    """The whole honesty claim of this lane, at the tool grain: the platform
-    served egma's answer for the covered name and the customer's own backend
-    for the other, and the record says which was which."""
+    """The lane's tool record is Retell's own, and egma keeps no copy.
+
+    The platform serves egma's answer for the covered name and the
+    customer's own backend for the other, and reports both. Egma writes
+    no tool row of its own for either: the agent's POV of this simulation
+    is Retell's call record, pulled and filed when the call ends, and a
+    second copy here would be one call on the record twice.
+    """
     answers = seam(answering("check_calendar", {"slots": ["thu-1430"]}))
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY,
@@ -627,89 +632,21 @@ async def test_a_covered_call_is_marked_mocked_and_an_uncovered_one_is_not(
     answered = await plug.deliver("Anything Thursday?")
     await plug.close()
 
-    # Nothing rides back on the reply itself: the seam is the one writer
-    # that can stamp a call, and two writers would record each call twice.
+    # Nothing rides back on the reply, and nothing is kept at the seam.
     assert answered.tool_calls == ()
-
-    exchanged = answers.exchanged()
-    assert [(call.name, call.mock_tool) for call in exchanged] == [
-        ("check_calendar", "check_calendar"),
-        ("lookup_customer", None),
+    # The words the agent said are still the turn: a reply carrying tool
+    # calls is read for its speech exactly as one without them is.
+    assert answered.text == "Thursday at half two?"
+    # And egma's answer still went out on the request, which is the whole
+    # of what this lane does about tools.
+    assert running.stub.mocks()[0] == [
+        {
+            "tool_name": "check_calendar",
+            "input_match_rule": MATCH_ANYTHING,
+            "output": '{"slots":["thu-1430"]}',
+            "result": True,
+        },
     ]
-    mocked, real = exchanged
-    assert mocked.arguments == '{"day":"thu"}'
-    assert mocked.answer == '{"slots":["thu-1430"]}'
-    assert mocked.refused is False and mocked.late_attached is False
-    # The call the test did not name is on the record as the observation it
-    # is: what was called, with what — and no stamp, which is the record's
-    # own way of saying a real backend did the work.
-    assert real.arguments == '{"phone":"+1"}'
-    assert real.answer is None
-
-
-async def test_a_mocked_failure_reads_back_as_a_failure_not_a_string(
-    start_text_mode_stub,
-):
-    """The tag stays on the record for the failure branch, exactly as it
-    does on the room lane, so one authored world reads the same on both."""
-    answers = seam(failing("book_appointment", {"code": 503}))
-    running = await start_text_mode_stub(
-        api_key=SENTINEL_KEY,
-        replies=[Reply(), Reply(words="Sorry — I could not book that.",
-                                tools=[ToolTurn(name="book_appointment")])],
-    )
-    plug = text_mode(
-        {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
-    )
-
-    await plug.open()
-    await plug.deliver("Book it.")
-    await plug.close()
-
-    (call,) = answers.exchanged()
-    assert call.answer == '{"error":{"code":503}}'
-    assert call.mock_tool == "book_appointment"
-async def test_an_answer_spelled_differently_by_the_platform_still_counts(
-    start_text_mode_stub,
-):
-    """Two equivalent JSON documents are one answer. A platform that
-    re-serializes egma's answer with spaces in it, or its keys the other
-    way round, has still served it — and failing a working simulation over
-    whitespace would be the check doing more harm than the hole it
-    closes."""
-    answers = seam(answering("check_calendar", {"slots": [], "open": True}))
-    running = await start_text_mode_stub(
-        api_key=SENTINEL_KEY,
-        replies=[
-            Reply(),
-            Reply(
-                words="Checked.",
-                extra=[
-                    {
-                        "role": "tool_call_invocation",
-                        "tool_call_id": "respelled",
-                        "name": "check_calendar",
-                        "arguments": "{}",
-                    },
-                    {
-                        "role": "tool_call_result",
-                        "tool_call_id": "respelled",
-                        "content": '{"open": true,  "slots": []}',
-                    },
-                ],
-            ),
-        ],
-    )
-    plug = text_mode(
-        {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
-    )
-
-    await plug.open()
-    await plug.deliver("Anything Thursday?")
-    await plug.close()
-
-    (call,) = answers.exchanged()
-    assert call.mock_tool == "check_calendar"
 
 
 # -- Errors, loud and without the key ----------------------------------------

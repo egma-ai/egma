@@ -49,43 +49,36 @@ the tool path there — the agent's real backend was never reached — but
 there is no exchange to conduct, so :meth:`MockToolSeam.hello` and
 :meth:`MockToolSeam.tool` have nothing to do.
 
-That lane uses these other doors: :meth:`MockToolSeam.answers` for the
-answers to send, and :meth:`MockToolSeam.reported` for each call the
-platform tells egma about afterwards. The answers are rendered here, once,
-so the bytes a tool is given are the same bytes on every lane and one
-record reads across them.
+That lane uses one other door: :meth:`MockToolSeam.answers`, which
+renders the answers to send. Rendered here, once, so the bytes a tool is
+given are the same bytes on every lane.
 
-## What lands on the record
+## Nothing here lands on the record
 
-Every call egma answers becomes a ``tool_call`` span: the name, the
-arguments as they arrived, what the call was given, the provenance stamp,
-and the mock tool that answered. The span brackets the exchange — the
-round trip, from the call arriving to the answer going back — so the time
-it really took is the span's own duration, with no second field to
-disagree with it.
+**egma writes no tool row of its own.** The record of what the agent's
+tools did is the agent's own POV of the simulation, which arrives by
+simulation ingestion — every call the agent made, with the arguments the
+model emitted and the result it received. One call is one row, so the two
+sides can never disagree about it. Whether a call was answered by a mock
+tool is read at display time, by name, from the pinned test version's
+mock tools; a call egma refused shows as the error the SDK raised, on the
+agent's own span for that call. See ADR-0015 §3.
 
-A call served for a tool the census never named is flagged
-**late-attached**: answers stand ready for every name this simulation
-covers whether or not the census mentioned it, which is the safe way
-round, and the flag carries the caveat that such a call's arguments may
-be thin.
+So the seam serves and refuses, and remembers only what it must to serve:
+the answers, and the census it was told. Answers stand ready for every
+name this simulation covers whether or not the census mentioned it, which
+is the safe way round.
 
-A call for a name **outside** this simulation's answers is refused, on
-the wire and on the record. It is a protocol error — the other side was
-told exactly which names egma answers for — and quietly letting it
-through would put a call egma never answered on the record as one it did.
-Its span carries the provenance ``refused``: no result and no mock tool,
-because nothing answered it, but a stamp all the same. A span with no
-stamp means egma watched the call go past to a real backend, and a
-refused call is the opposite of that.
+A call for a name **outside** this simulation's answers is refused. It is
+a protocol error — the other side was told exactly which names egma
+answers for — and quietly letting it through would run the customer's
+real tool from inside a test that asked egma to stand in front of it.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import time
-from collections.abc import Callable
 from dataclasses import dataclass
 
 from .spec import MockTool
@@ -172,51 +165,6 @@ class MockToolRefusal(Exception):
 
 
 @dataclass(frozen=True)
-class ExchangedToolCall:
-    """One call that reached egma, and what egma did with it.
-
-    Both ends are instants on the wall clock: an exchange egma conducted
-    is timed by egma, unlike a turn, which is read off the audio. The span
-    it becomes brackets exactly this — the round trip.
-    """
-
-    name: str
-    """The tool's name, exactly as the call reported it."""
-
-    arguments: str | None
-    """The arguments as JSON, or ``None`` where the call carried none."""
-
-    answer: str | None
-    """What the call was given, JSON-encoded: the tool's own return value,
-    or the tagged failure where the mock tool answered with one — a
-    failure has no return value, and a record that could not tell the two
-    apart would read a mocked failure as a tool that returned a string.
-    ``None`` for a call egma refused, which is a call nobody was answered
-    about at all."""
-
-    mock_tool: str | None
-    """The mock tool that answered, by name. ``None`` exactly where
-    :attr:`answer` is: a result is never recorded without the stamp that
-    says where it came from."""
-
-    late_attached: bool
-    """True where the census never named this tool. Absent from the record
-    otherwise: a stamp for the ordinary case would ride every span."""
-
-    refused: bool
-    """True where egma was asked and said no — a call for a name outside
-    this simulation's answers.
-
-    Its own fact on the record, because the alternative reading is the
-    opposite one. A call carrying no stamp at all means egma watched it go
-    past to a real backend; a refused call never reached a backend at all.
-    Told apart here so a reader is never left to guess which happened."""
-
-    began_unix_nano: int
-    ended_unix_nano: int
-
-
-@dataclass(frozen=True)
 class AuthoredAnswer:
     """One mock tool's answer, rendered for a platform that serves it.
 
@@ -245,42 +193,19 @@ class AuthoredAnswer:
     """Whether this answer is the failure branch."""
 
 
-Clock = Callable[[], int]
-"""Wall-clock nanoseconds, which is what a span's two ends are."""
-
-
 class MockToolSeam:
     """egma's side of the mock-tool exchange, for one simulation.
 
     Built from the claimed spec's resolved answers and handed to whatever
-    puts it in front of the agent. It holds three things and no more: the
-    answers, the census it was told, and the calls it has exchanged since
-    somebody last took them.
+    puts it in front of the agent. It holds two things and no more: the
+    answers, and the census it was told. It writes nothing down — the
+    record of a tool call is the agent's own POV of the simulation.
     """
 
-    def __init__(
-        self,
-        mock_tools: tuple[MockTool, ...] = (),
-        *,
-        clock: Clock = time.time_ns,
-    ) -> None:
+    def __init__(self, mock_tools: tuple[MockTool, ...] = ()) -> None:
         self._answers = {mock.tool_name: mock for mock in mock_tools}
-        self._clock = clock
         self._censuses = 0
         self._discovered: tuple[str, ...] = ()
-        self._exchanged: list[ExchangedToolCall] = []
-
-    # -- What the driver does with it -----------------------------------------
-
-    def exchanged(self) -> list[ExchangedToolCall]:
-        """Every call since this was last asked, and then none.
-
-        Drained rather than accumulated, so whoever authors spans from
-        them can ask as often as it likes and no call is ever written
-        down twice.
-        """
-        taken, self._exchanged = self._exchanged, []
-        return taken
 
     # -- What a platform that serves egma's answers itself uses ---------------
 
@@ -300,51 +225,6 @@ class MockToolSeam:
                 fails=mock.fails,
             )
             for mock in self._answers.values()
-        )
-
-    def reported(self, name: str, *, arguments: str | None = None) -> None:
-        """One tool call the platform says it made.
-
-        Written down the way a call egma served itself is, with two
-        differences that are both the truth about this lane. It is one
-        instant, because egma did not conduct the exchange and did not time
-        it. And the result rides **only** where this simulation has an
-        answer for the name: such a call was answered from egma's own
-        authored answer, so recording that answer invents nothing, while
-        a call for any other name ran the customer's real implementation
-        and its return value is neither egma's to vouch for nor the
-        record's to stamp. That one lands as the observation it is — the
-        name, the arguments, and no stamp at all, which is the record's own
-        way of saying a real backend did the work.
-
-        The answer recorded for a covered call is **egma's own rendering**
-        and never the platform's echo of it, even where the platform
-        reports one. The two are the same value, and only egma's carries
-        the tag that tells a mocked failure from a tool that returned a
-        string — the platform says that part in its own field, which the
-        record has no room for.
-
-        Never *refused*: nothing here was asked of egma, so there was
-        nothing for egma to say no to.
-        """
-        called = name.strip()
-        if not called:
-            raise ValueError("a tool call the platform reported must name a tool")
-        now = self._clock()
-        if called not in self._discovered:
-            self._discovered = (*self._discovered, called)
-        mock = self._answers.get(called)
-        self._write_down(
-            ExchangedToolCall(
-                name=called,
-                arguments=arguments,
-                answer=None if mock is None else _recorded(mock),
-                mock_tool=None if mock is None else mock.tool_name,
-                late_attached=False,
-                refused=False,
-                began_unix_nano=now,
-                ended_unix_nano=now,
-            )
         )
 
     # -- The two methods ------------------------------------------------------
@@ -387,10 +267,10 @@ class MockToolSeam:
                 "mocked_tools": list(self._answers),
             }
         )
-        # Measured before anything here is written down: a reply that
-        # cannot be sent tells the other side nothing, so it wraps nothing,
-        # and a census recorded ahead of the refusal would leave the record
-        # claiming egma was asked and answered. A test naming more mocked
+        # Measured before the census is kept: a reply that cannot be sent
+        # tells the other side nothing, so it wraps nothing, and a census
+        # taken ahead of the refusal would leave this side believing it
+        # had been told what the agent holds. A test naming more mocked
         # tools than one message can carry is also a fault worth naming,
         # where the transport's own complaint would arrive as a hello that
         # mysteriously failed.
@@ -409,9 +289,9 @@ class MockToolSeam:
         if replaced:
             # A census is a snapshot of the agent's tools, so a second one
             # is the agent saying what it has *now*. Said out loud because
-            # only the last one is kept, and an operator reading a
-            # late-attached call that surprises them deserves to find the
-            # moment the census changed.
+            # only the last one is kept, and an operator surprised by which
+            # tools egma answered for deserves to find the moment the
+            # census changed.
             logger.info(
                 "a second census replaced the first: %d tool(s) became %d",
                 len(replacing),
@@ -420,8 +300,12 @@ class MockToolSeam:
         return reply
 
     async def tool(self, payload: str) -> str:
-        """One tool call: answered at once, and written down."""
-        began = self._clock()
+        """One tool call: answered at once, and written down nowhere.
+
+        What the agent asked for and what it was given is on the agent's
+        own POV of the simulation, one row per call. This side only
+        serves.
+        """
         asked = _object(TOOL_METHOD, payload)
 
         name = asked.get("name")
@@ -440,31 +324,17 @@ class MockToolSeam:
                 f"{TOOL_METHOD} carries the call's arguments as a JSON "
                 f"object or not at all, and {name} carried {_kind_of(arguments)}",
             )
-        written = None if arguments is None else _serialized(arguments)
 
         mock = self._answers.get(name)
         if mock is None:
-            # Never a pass-through — and the record says so out loud. The
-            # other side was told which names egma answers for, so a call
-            # for any other name is that side asking for something it was
-            # never offered; answering it anyway, or waving it through,
-            # would put a tool egma had no answer for on the record as one
-            # it served. Written down as *refused* rather than as a bare
-            # observation, because a bare observation is the record's way
-            # of saying the real tool ran with egma nowhere near it, and
-            # here the opposite happened.
-            self._write_down(
-                ExchangedToolCall(
-                    name=name,
-                    arguments=written,
-                    answer=None,
-                    mock_tool=None,
-                    late_attached=False,
-                    refused=True,
-                    began_unix_nano=began,
-                    ended_unix_nano=self._clock(),
-                )
-            )
+            # Never a pass-through. The other side was told which names
+            # egma answers for, so a call for any other name is that side
+            # asking for something it was never offered; answering it
+            # anyway, or waving it through, would run the customer's real
+            # tool from inside a test that asked egma to stand in front of
+            # it. The refusal reaches the model as that tool failing, and
+            # the agent's own span for the call carries the error — which
+            # is where a reader finds it.
             offered = ", ".join(self._answers) or "no tools at all"
             logger.warning(
                 "a call for %r reached Egma, which has no answer for it; the "
@@ -479,35 +349,14 @@ class MockToolSeam:
                 f"nothing to answer with. It answers for: {offered}",
             )
 
-        # Two shapes, and the difference is the whole of why the answer is
-        # tagged. The **wire** carries the tag, because the other side has
-        # to know whether to return this to the model or raise it, and an
-        # authored value that happened to look like a failure would
-        # otherwise be one. The **record** carries what the call was given
-        # — the tool's own return value, untagged, because that is what
-        # the agent received and what a grader reads. A failure has no
-        # return value to record, so there the tag stays: it is what keeps
-        # a mocked failure from reading as a tool that returned a string.
+        # The answer travels tagged — ``{"answer": …}`` or
+        # ``{"error": …}`` — because the other side has to know whether to
+        # return this to the model or raise it, and an authored value that
+        # happened to look like a failure would otherwise be one. What the
+        # agent then did with it is the agent's own span to say.
         served = _serialized(mock.answer)
         _fits_on_the_wire(f"the mock tool for {name!r}", served)
-        recorded = _recorded(mock)
-
-        self._write_down(
-            ExchangedToolCall(
-                name=name,
-                arguments=written,
-                answer=recorded,
-                mock_tool=mock.tool_name,
-                late_attached=name not in self._discovered,
-                refused=False,
-                began_unix_nano=began,
-                ended_unix_nano=self._clock(),
-            )
-        )
         return served
-
-    def _write_down(self, call: ExchangedToolCall) -> None:
-        self._exchanged.append(call)
 
 
 # -- Reading one message of the exchange -------------------------------------
@@ -553,26 +402,6 @@ def _speaks_this_version(asked: dict) -> None:
         f"{HELLO_METHOD} declares which version of this exchange it speaks; "
         f"Egma speaks {PROTOCOL_VERSION} and this one declared {declared}",
     )
-
-
-def _recorded(mock: MockTool) -> str:
-    """What the record carries for a call one mock tool answered.
-
-    The **wire** carries the tag — ``{"answer": …}`` or ``{"error": …}`` —
-    because whoever serves the answer has to know whether to return it to
-    the model or raise it, and an authored value that happened to look
-    like a failure would otherwise be one. The **record** carries what the
-    call was given: the tool's own return value, untagged, because that is
-    what the agent received and what a grader reads. A failure has no
-    return value to record, so there the tag stays — it is what keeps a
-    mocked failure from reading as a tool that returned a string.
-
-    Known and accepted: a tool whose own return value is an object with an
-    ``error`` key records the same bytes a mocked failure does. The
-    record's vocabulary gives the branch no slot of its own, and inventing
-    one here would be this file deciding what the contract says.
-    """
-    return _serialized(mock.answer if mock.fails else mock.answer["answer"])
 
 
 def _serialized(value: object) -> str:

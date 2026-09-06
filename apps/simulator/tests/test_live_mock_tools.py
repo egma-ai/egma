@@ -68,7 +68,6 @@ failing, never waiting on anybody — when any of them is missing.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 from pathlib import Path
 
@@ -80,8 +79,6 @@ from conftest import (
     credential,
     direct_models,
     has_terminal,
-    milliseconds_of,
-    span_attribute,
     spans_for,
     terminal_event_for,
     turns_for,
@@ -351,10 +348,11 @@ def _worker_wrote() -> str:
 
 
 def tool_calls_in(records: list[dict]) -> list[dict]:
-    """Every call egma answered, as the spans they landed as.
+    """Every tool row egma wrote, which must always be none of them.
 
-    A tool egma does not answer for has no span here at all, by design:
-    egma is not in its path and never sees it. That absence is a fact this
+    A simulation's tool record is the agent's own POV of the conversation,
+    filed under the simulation by simulation ingestion. egma serves the
+    answer and writes nothing, so this list being empty is the fact the
     test asserts rather than a gap it works around.
     """
     return [
@@ -364,27 +362,21 @@ def tool_calls_in(records: list[dict]) -> list[dict]:
     ]
 
 
-def hand_back(spoken: list[tuple[str, str]], call: dict) -> None:
-    """Print the transcript and the record showing the mock answered.
+def hand_back(spoken: list[tuple[str, str]]) -> None:
+    """Print the transcript the mocked world produced.
 
     On stdout rather than in an assertion message, because the point of
     the one command this test backs is watching it work rather than
     reading what failed. pytest keeps this to itself unless the run asks
     for it with ``-s``, which is what that command does.
+
+    The mocked call itself is not printed here and cannot be: egma writes
+    no tool row. What the answer did is in the words below, and the call
+    is on the agent's own POV of the simulation.
     """
     print("\n--- the transcript ---")
     for speaker, text in spoken:
         print(f"{speaker:>6}: {text}")
-    print("\n--- the mocked call, on the record ---")
-    for attribute in (
-        "egma.tool.name",
-        "egma.tool.arguments",
-        "egma.tool.result",
-        "egma.tool.provenance",
-        "egma.tool.mock_tool",
-    ):
-        print(f"{attribute}: {span_attribute(call, attribute)}")
-    print(f"duration: {milliseconds_of(call):.0f}ms, served at once")
     print(
         "\n--- the test's own world, as egma wrote it onto the dispatch ---\n"
         f"{SERIALISED_WORLD}\n"
@@ -429,50 +421,21 @@ async def test_a_mock_tool_answers_a_real_agent_in_a_real_room(
     #    claiming an isolation nobody can vouch for.
     assert not [name for name in facts if "coverage" in name], facts
 
-    calls = tool_calls_in(records)
-    assert calls, (
-        "no tool call reached egma: the agent either never called its tool "
-        "or the SDK never stood in front of it"
+    # 2. And egma wrote no tool row of its own. The agent called its tool
+    #    and egma answered — the conversation below is the proof of that —
+    #    but the record of the call belongs to the agent's own POV of this
+    #    simulation, which arrives by simulation ingestion. One call, one
+    #    row, and never two that can disagree.
+    assert tool_calls_in(records) == [], (
+        "egma authored a tool row: the seam serves the answer and writes "
+        "nothing, so the tool record can only be the agent's own"
     )
     spoken = turns_for(records, SIMULATION)
 
     # Handed back before anything else is asserted, because this is what
     # the one command exists to show — and a run that then fails an
     # assertion about it is exactly the run where seeing it matters.
-    hand_back(spoken, calls[0])
-
-    # 2. The tool this test did not name has no span, in either direction.
-    #    egma is not in its path and does not observe it, so a span naming
-    #    it would mean the record had invented one.
-    assert [span_attribute(call, "egma.tool.name") for call in calls] == [
-        BOOKING_TOOL
-    ] * len(calls), "a tool egma answers for nothing landed on the record"
-
-    call = calls[0]
-    assert span_attribute(call, "egma.tool.arguments"), (
-        "the call arrived with no arguments: the stand-in lost the real "
-        "tool's signature, and LiveKit trimmed the call to nothing"
-    )
-    assert "day" in json.loads(span_attribute(call, "egma.tool.arguments"))
-
-    # 3. The answer the spec carried is the answer the agent got, byte for
-    #    byte, with the stamp that says where it came from. A result
-    #    never rides without its provenance, so all three are read.
-    assert json.loads(span_attribute(call, "egma.tool.result")) == CALENDAR_IS_FULL
-    assert span_attribute(call, "egma.tool.provenance") == "mocked"
-    assert span_attribute(call, "egma.tool.mock_tool") == BOOKING_TOOL
-
-    # 4. The answer was served at once, in the middle of a live
-    #    conversation, and the record carries the round trip as the call's
-    #    own duration — the span's two ends being the moment the call
-    #    reached egma and the moment the answer went back. Nothing holds an
-    #    answer back any more, so what this bounds is a driver that did.
-    took = milliseconds_of(call)
-    assert 0 <= took < SERVED_AT_ONCE_MS, (
-        f"the mocked call took {took:.0f}ms, which is not being served at "
-        "once: something stood between the call arriving and the answer "
-        "going back"
-    )
+    hand_back(spoken)
 
     # 5. The test's own env reached the worker, read back off the far
     #    side's own output. This is the only half of the run that happens
