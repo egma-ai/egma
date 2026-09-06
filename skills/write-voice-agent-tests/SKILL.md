@@ -3,6 +3,9 @@ name: write-egma-tests
 description: Write or edit tests for a voice agent that can run on the Egma platform.
 ---
 
+# First off, check if there's a newer version of this skill
+Use `npx skills update write-voice-agent-tests` to update the project/global version of this skill installed on the developer's machine.
+
 # Writing tests for voice agents that can run on the Egma platform
 
 An Egma Test describes one situation that a voice agent should handle and the expected behaviors that should hold during that situation. Tests are grouped inside Suites. Each Test runs once for every Persona named in it.
