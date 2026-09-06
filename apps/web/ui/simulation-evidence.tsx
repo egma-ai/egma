@@ -88,6 +88,30 @@ export type RecordingSpeakerTimeline = {
   >[];
 };
 
+/**
+ * The speaker bands drawn over the recording, from the POV that recorded it.
+ *
+ * The recording is egma's own: the persona's POV heard this conversation,
+ * timed it and wrote the audio, so its turn boundaries are measured on the
+ * recording's own clock and land where the sound is. The agent's clock is a
+ * different clock — near enough to read a transcript by and not near enough to
+ * draw on a waveform — so the bands stay the persona's even while the
+ * transcript beside them is the agent's. This, and the origin a row seeks
+ * against, is the whole of what the persona's POV is still drawn for.
+ *
+ * A record with no persona turns is drawn with the turns it has.
+ */
+export function recordingSpeakerTimeline(
+  transcript: EvidenceTranscript,
+): RecordingSpeakerTimeline {
+  const persona = transcript.turns.filter((turn) => turn.pov === "persona");
+  return {
+    startedAt: recordingOriginOf(transcript) ?? transcript.startedAt,
+    endedAt: transcript.endedAt,
+    turns: persona.length === 0 ? transcript.turns : persona,
+  };
+}
+
 function durationOf(evidence: SimulationEvidence): number | null {
   const measured = evidence.measures.durationMs;
   if (typeof measured === "number" && Number.isFinite(measured)) return measured;
@@ -1344,7 +1368,37 @@ export function RecordingEvidence({
   );
 }
 
-/** Every recorded tool call, once, in the order it happened. */
+/**
+ * The agent's account of the conversation, where the record holds one.
+ *
+ * A simulation stores both POVs under one trace — the persona's, which is what
+ * egma's own simulator said, heard, measured and recorded, and the agent's,
+ * which is what the agent's own process reported. **What a reader is shown is
+ * the agent's**, because that is the conversation as the agent had it: every
+ * tool call with the arguments its model emitted and the result it received.
+ * Showing both would be one conversation told twice, and comparing them is not
+ * this view's job.
+ *
+ * A record with only one account is shown whole: a chat simulation, a platform
+ * that reports nothing of its own, a production transcript, or a conversation
+ * whose agent never reached egma. There is nothing to choose between, so
+ * nothing is dropped.
+ */
+function agentPov<Step extends { readonly pov: EvidenceStep["pov"] }>(
+  steps: readonly Step[],
+): readonly Step[] {
+  const agent = steps.filter((step) => step.pov === "agent");
+  return agent.length === 0 ? steps : agent;
+}
+
+/**
+ * Every tool call a reader is shown, once, in the order it happened.
+ *
+ * The agent's own, where the record holds them. egma files a tool row of its
+ * own on the lanes where a platform serves egma's answers, and those are shown
+ * only where the agent reported none — so a call is on the transcript once,
+ * never twice, and never paired or deduplicated by guesswork.
+ */
 export function transcriptToolCalls(
   transcript: EvidenceTranscript,
 ): readonly EvidenceStep[] {
@@ -1355,7 +1409,7 @@ export function transcriptToolCalls(
   };
   for (const turn of transcript.turns) visit(turn);
   for (const step of transcript.spans) visit(step);
-  return [...found.values()].sort(
+  return agentPov([...found.values()]).toSorted(
     (left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt),
   );
 }
@@ -1616,6 +1670,12 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
       ? "Succeeded"
       : "Status not recorded";
   const name = step.toolName === "" ? humanizeIdentifier(step.name) : step.toolName;
+  // The mock tool that answered, by the name the pinned test version holds.
+  // Absent on every call that ran for real, which is the ordinary case.
+  const mockTool =
+    step.toolProvenance === "mocked" && step.mockTool !== undefined
+      ? step.mockTool
+      : undefined;
   const seconds = secondsInto(step.startedAt, timelineStartedAt);
   const shownTime = seconds === null ? "Time unavailable" : clockText(seconds);
   const Container = nested ? "div" : "li";
@@ -1634,7 +1694,11 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
       role={nested ? "group" : undefined}
       data-active={active ? "true" : "false"}
       data-selected={selected ? "true" : "false"}
-      aria-label={`Tool call, ${name}`}
+      aria-label={
+        mockTool === undefined
+          ? `Tool call, ${name}`
+          : `Tool call, ${name}, mocked by ${mockTool}`
+      }
       aria-current={active ? "true" : undefined}
     >
       {onSeek === undefined || seconds === null ? (
@@ -1690,16 +1754,17 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
             )}
           >
             {/*
-              **Who answered, beside what happened.** Egma stamps the span it
-              files for a call it served itself, so a reader knows the answer in
-              front of them came from the test rather than from their own
-              backend. One muted word at the same size — no chip and no colour
-              of its own, because a real call is the ordinary case and says
-              nothing extra.
+              **Who answered, beside what happened.** A call a mock tool
+              answered is named for it, so a reader knows the answer in front of
+              them came from the test rather than from their own backend — and
+              knows which authored answer it was, read by name off the test
+              version this simulation pinned. Muted text at the same size — no
+              chip and no colour of its own, because a real call is the ordinary
+              case and says nothing extra.
             */}
-            {step.toolProvenance === "mocked" ? (
-              <span className="text-muted-foreground">mocked · </span>
-            ) : null}
+            {mockTool === undefined ? null : (
+              <span className="text-muted-foreground">mocked by {mockTool} · </span>
+            )}
             {statusLabel} · {howLong(step.durationNs)}
           </span>
           <ChevronRightIcon
@@ -1913,13 +1978,20 @@ export function ChatTranscript({
   readonly emptyState?: TranscriptEmptyState;
 }) {
   const timelineStartedAt = recordingStartedAt ?? transcript.startedAt;
+  // The turns the agent's own process reported, where it reported any. The
+  // persona's POV still supplies the recording underneath and the origin these
+  // rows seek against; it is not a second transcript beside this one.
+  const shown = useMemo(
+    () => ({ ...transcript, turns: [...agentPov(transcript.turns)] }),
+    [transcript],
+  );
   const events = useMemo(
-    () => timedConversationEvents(transcript, toolCalls, timelineStartedAt),
-    [timelineStartedAt, toolCalls, transcript],
+    () => timedConversationEvents(shown, toolCalls, timelineStartedAt),
+    [timelineStartedAt, toolCalls, shown],
   );
   const groups = useMemo(
-    () => conversationGroups(transcript, toolCalls, events),
-    [events, toolCalls, transcript],
+    () => conversationGroups(shown, toolCalls, events),
+    [events, toolCalls, shown],
   );
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
   const selectAndSeek = useCallback<TranscriptSeek>(
@@ -2291,13 +2363,7 @@ function SimulationEvidencePanel({
                   speakerTimeline={
                     evidence.transcript === null
                       ? null
-                      : {
-                          startedAt:
-                            recordingOriginOf(evidence.transcript) ??
-                            evidence.transcript.startedAt,
-                          endedAt: evidence.transcript.endedAt,
-                          turns: evidence.transcript.turns,
-                        }
+                      : recordingSpeakerTimeline(evidence.transcript)
                   }
                 />
               </section>

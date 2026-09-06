@@ -1,4 +1,5 @@
 import { defineOperation } from "../definition.ts";
+import { traceSpanReference, traceSpanSchema } from "./trace-span.ts";
 import {
   arrayOf,
   dateTimeSchema,
@@ -21,50 +22,6 @@ const stringSchema = { type: "string" } as const;
 const integerSchema = { type: "integer" } as const;
 const booleanSchema = { type: "boolean" } as const;
 
-const traceSpanReference = { $ref: "#/$defs/traceSpan" } as const;
-const traceSpanSchema = {
-  type: "object",
-  properties: {
-    spanId: stringSchema,
-    parentSpanId: stringSchema,
-    name: stringSchema,
-    kind: stringSchema,
-    status: stringSchema,
-    startedAt: dateTimeSchema,
-    durationNs: stringSchema,
-    text: stringSchema,
-    audioUrl: stringSchema,
-    toolName: stringSchema,
-    toolArguments: stringSchema,
-    toolResult: stringSchema,
-    /**
-     * That egma itself answered this tool call, when it did.
-     *
-     * The one value is `mocked`, and the key is absent on every other span. A
-     * real call is the ordinary case and says nothing extra; a mocked one is
-     * the fact a reader of a transcript needs, because the answer they are
-     * looking at came from the test rather than from their own backend.
-     */
-    toolProvenance: { type: "string", enum: ["mocked"] },
-    spans: arrayOf(traceSpanReference),
-  },
-  required: [
-    "spanId",
-    "parentSpanId",
-    "name",
-    "kind",
-    "status",
-    "startedAt",
-    "durationNs",
-    "text",
-    "audioUrl",
-    "toolName",
-    "toolArguments",
-    "toolResult",
-    "spans",
-  ],
-  additionalProperties: false,
-} as const;
 
 const transcriptSchema = {
   type: "object",

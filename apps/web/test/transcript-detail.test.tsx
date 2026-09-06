@@ -121,6 +121,7 @@ function step(over: Partial<Step> & { readonly spanId: string }): Step {
     toolName: "",
     toolArguments: "",
     toolResult: "",
+    pov: "agent",
     spans: [],
     ...over,
   };

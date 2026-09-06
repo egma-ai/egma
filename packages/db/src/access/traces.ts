@@ -12,7 +12,7 @@ import {
 import type { AuthContext } from "./context.ts";
 import { UnreadableTraceQueryError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
-import type { SpanSource } from "./spans.ts";
+import type { SpanEmitter, SpanSource } from "./spans.ts";
 import {
   withRetellToolTimeline,
   type RetellToolTimelineSlice,
@@ -314,15 +314,19 @@ export type TraceSpan = {
   readonly toolArguments: string;
   readonly toolResult: string;
   /**
-   * That egma answered this tool call itself, when it did.
+   * **Whose account of the conversation this row is** — the storage column
+   * `emitter`, read as the product word.
    *
-   * The only value is `"mocked"`, and it is absent everywhere else. A tool that
-   * ran for real is the ordinary case and carries nothing, so a reader who sees
-   * this word knows the answer came from the test rather than from the
-   * customer's own backend. Written by the mock endpoint and by the simulator,
-   * both on the span's own payload.
+   * `egma-runtime` is the persona's POV: what egma's own simulator said, heard,
+   * measured and recorded. `agent` is the agent's: what the agent's own process
+   * reported about its turns, its tool calls and its timings. A simulation
+   * holds both under one trace, and a production trace holds only the agent's.
+   *
+   * Returned on every span because the read returns both POVs and the surface
+   * above chooses: a run view shows the agent's, and mixing the two into one
+   * transcript would be one conversation told twice.
    */
-  readonly toolProvenance?: "mocked";
+  readonly emitter: SpanEmitter;
   /** This span's own children, in time order. A turn is never nested here. */
   readonly spans: readonly TraceSpan[];
 };
@@ -1030,7 +1034,9 @@ function measureSpanRowAsSpanRow(row: PageMeasureSpanRow): SpanRow {
     tool_arguments: "",
     tool_result: "",
     provider_tool_id: "",
-    tool_provenance: "",
+    // Not read either: this projection feeds the metric arithmetic, which
+    // asks what was measured and never whose account it was.
+    emitter: "",
   };
 }
 
@@ -1124,8 +1130,8 @@ type SpanRow = {
   readonly tool_result: string;
   /** Retell's structural correlation id, extracted without the tool payload. */
   readonly provider_tool_id: string;
-  /** `mocked` when egma answered this call, and `''` on every other span. */
-  readonly tool_provenance: string;
+  /** `egma-runtime` or `agent` — whose account of the conversation this is. */
+  readonly emitter: string;
 };
 
 /** A turn is a span whose kind says somebody was speaking. */
@@ -1228,16 +1234,16 @@ export async function readTrace(
          JSONExtractString(payload, 'id'),
          ''
        ) as provider_tool_id,
-       -- Who answered this tool call. Egma writes the word on the span it
-       -- files for a call it served — the mock endpoint on the Retell lanes,
-       -- the simulator on LiveKit — and writes nothing at all for a real one,
-       -- so an empty string here honestly means "not mocked" rather than
-       -- "unknown".
-       if(
-         kind = 'tool',
-         JSONExtractString(payload, 'egma.tool.provenance'),
-         ''
-       ) as tool_provenance
+       -- Whose account of the conversation each row is. A simulation holds
+       -- both POVs under one trace, so the surface above has to be able to
+       -- tell them apart; nothing here chooses between them.
+       --
+       -- Deliberately **not** a payload stamp saying who answered a tool
+       -- call. Whether a mock tool answered is read by name from the
+       -- simulation's pinned test version, where the authored world actually
+       -- lives — a second copy on the span could only come to disagree with
+       -- it, and this read has no simulation to ask.
+       emitter
      from ${SPANS_TABLE} final
      where ${where}
      order by started_at asc, span_id asc
@@ -1480,11 +1486,10 @@ function spanOf(row: SpanRow): Omit<TraceSpan, "spans"> {
     toolName: row.tool_name,
     toolArguments: row.tool_arguments,
     toolResult: row.tool_result,
-    // Present only when egma answered the call. The key is left off entirely
-    // otherwise, so nothing downstream has to tell "not mocked" from "the
-    // reader forgot to ask".
-    ...(row.tool_provenance === "mocked"
-      ? { toolProvenance: "mocked" as const }
-      : {}),
+    // The storage word, passed through. `agent` is anything a customer's own
+    // process reported; every other value is egma's own simulator, and a row
+    // written before the column had a second value reads as the persona's POV
+    // because that is the only POV those rows could hold.
+    emitter: row.emitter === "agent" ? "agent" : "egma-runtime",
   };
 }

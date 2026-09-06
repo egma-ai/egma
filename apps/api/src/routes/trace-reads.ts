@@ -303,12 +303,14 @@ function describedSpan(span: TraceSpan): Record<string, unknown> {
     toolName: span.toolName,
     toolArguments: span.toolArguments,
     toolResult: span.toolResult,
-    // Only when egma answered the call itself. A real call carries no key at
-    // all, so nothing on the wire has to tell "ran for real" from "nobody
-    // recorded who answered".
-    ...(span.toolProvenance === undefined
-      ? {}
-      : { toolProvenance: span.toolProvenance }),
+    // The storage column read as the product word. Every production span is
+    // the agent's own account of the conversation; the persona's POV exists
+    // only inside a simulation.
+    pov: span.emitter === "agent" ? "agent" : "persona",
+    // No mocked mark here. Whether a mock tool answered a call is read by
+    // name from a simulation's pinned test version, and this read has no
+    // simulation to ask: every call on a production conversation ran for
+    // real. The simulation read is where the mark belongs.
     spans: span.spans.map(describedSpan),
   };
 }

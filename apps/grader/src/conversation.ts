@@ -383,18 +383,23 @@ function speakerOf(kind: string): string {
  * off the list.
  */
 function toolCallsIn(trace: TraceDetail): readonly ToolCall[] {
-  const called: (ToolCall & { readonly at: string })[] = [];
-
-  for (const span of everySpanIn(trace)) {
-    if (span.toolName === "") continue;
-    called.push({
+  const tools = [...everySpanIn(trace)].filter((span) => span.toolName !== "");
+  // **One call, once.** A simulation holds both POVs under one trace, and on
+  // the lanes where a platform serves egma's answers egma files a tool row of
+  // its own beside the agent's. The agent's own account is the tool record, so
+  // it wins whenever it is there; egma's rows answer only for a conversation
+  // whose agent reported none. A grader asking "was the refund tool called
+  // before the confirmation" must never see one call twice.
+  const reported = tools.filter((span) => span.emitter === "agent");
+  const called = (reported.length === 0 ? tools : reported).map(
+    (span): ToolCall & { readonly at: string } => ({
       kind: "tool_call",
       at: span.startedAt,
       name: span.toolName,
       arguments: span.toolArguments,
       result: span.toolResult,
-    });
-  }
+    }),
+  );
 
   return called.sort(byWhenItStarted);
 }

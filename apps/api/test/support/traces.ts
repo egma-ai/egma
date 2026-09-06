@@ -382,8 +382,16 @@ export type DetailSpan = {
   readonly toolName: string;
   readonly toolArguments: string;
   readonly toolResult: string;
-  /** `"mocked"` when egma answered the call. Absent on every real one. */
+  /** Whose account of the conversation this row is. */
+  readonly pov: "persona" | "agent";
+  /**
+   * `"mocked"` when a mock tool of the simulation's pinned test version
+   * answered this call. Absent on every real one, and on every span of a
+   * production conversation, which has no test version to read.
+   */
   readonly toolProvenance?: "mocked";
+  /** The mock tool that answered, by name. Only beside `toolProvenance`. */
+  readonly mockTool?: string;
   readonly spans: DetailSpan[];
 };
 

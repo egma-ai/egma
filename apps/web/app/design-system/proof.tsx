@@ -290,6 +290,7 @@ const TRANSCRIPT: EvidenceTranscript = {
       toolName: "",
       toolArguments: "",
       toolResult: "",
+      pov: "agent",
       spans: [],
     },
     {
@@ -305,6 +306,7 @@ const TRANSCRIPT: EvidenceTranscript = {
       toolName: "",
       toolArguments: "",
       toolResult: "",
+      pov: "agent",
       spans: [],
     },
   ],

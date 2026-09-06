@@ -87,6 +87,7 @@ function step(overrides: Partial<Step> = {}): Step {
     toolName: "",
     toolArguments: "",
     toolResult: "",
+    pov: "agent",
     spans: [],
     ...overrides,
   };

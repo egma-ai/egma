@@ -20615,11 +20615,21 @@
           "toolResult": {
             "type": "string"
           },
+          "pov": {
+            "type": "string",
+            "enum": [
+              "persona",
+              "agent"
+            ]
+          },
           "toolProvenance": {
             "type": "string",
             "enum": [
               "mocked"
             ]
+          },
+          "mockTool": {
+            "type": "string"
           },
           "spans": {
             "type": "array",
@@ -20641,6 +20651,7 @@
           "toolName",
           "toolArguments",
           "toolResult",
+          "pov",
           "spans"
         ],
         "additionalProperties": false
