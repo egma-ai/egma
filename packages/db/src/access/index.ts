@@ -441,6 +441,7 @@ export type {
   RunEventKind,
   RunStatus,
   RunTrigger,
+  SimulationAgentPov,
   SimulationEndingReason,
   SimulationStatus,
 } from "../schema/runs.ts";
@@ -470,6 +471,7 @@ export {
 export type { GradingPlanState } from "../schema/plans.ts";
 
 export {
+  AGENT_POV_BOUND_SECONDS,
   GRADING_WORK_CHANNEL,
   claimGradingJobs,
   finishGradingJob,
@@ -486,8 +488,10 @@ export {
   regradeTrace,
   requestGrading,
   releaseGradingJob,
+  settleSimulationsPastTheAgentPovBound,
   traceEvidenceStartedAt,
   watchGradingWork,
+  type SimulationPastTheAgentPovBound,
   type GradingClaim,
   type GradingClaimRequest,
   type GradingJob,

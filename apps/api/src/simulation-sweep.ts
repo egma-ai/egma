@@ -1,5 +1,7 @@
 import {
+  settleSimulationsPastTheAgentPovBound,
   sweepOrphanedSimulations,
+  type SimulationPastTheAgentPovBound,
   type SweptSimulation,
 } from "@egma/db";
 
@@ -13,6 +15,15 @@ import {
  * call to the seam that marks every simulation silent past the staleness
  * window `failed` with reason `orphaned` and finalizes the runs that were
  * waiting on them.
+ *
+ * **A second silence rides the same tick**: the agent's own POV of a completed
+ * simulation, which arrives by a push from inside the room or a pull from the
+ * platform — and which, when the exporter is broken or the pull failed, arrives
+ * never. Grading waits 30 seconds for it and no longer (ADR-0015 §6), and that
+ * bound is the same kind of fact as an orphan's: nobody sends it, so a loop has
+ * to read it. Two seams, one interval, one in-flight promise — because a second
+ * timer would be a second copy of everything below for a question of exactly
+ * the same shape.
  *
  * **Every replica runs one, and nothing elects a leader.** That is safe
  * because the seam itself makes racing sweeps collide harmlessly — the
@@ -64,6 +75,13 @@ export type OrphanSweepOptions = {
    * own to hold a tick open or fail one on cue, which no real store does.
    */
   readonly sweep?: () => Promise<readonly SweptSimulation[]>;
+  /**
+   * The other seam, on the same terms: which completed simulations waited out
+   * the bound on the agent's own POV. The default is the real one.
+   */
+  readonly settleAgentPovBound?: () => Promise<
+    readonly SimulationPastTheAgentPovBound[]
+  >;
 };
 
 export type OrphanSweep = {
@@ -82,6 +100,8 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
   }
 
   const sweep = options.sweep ?? sweepOrphanedSimulations;
+  const settleAgentPovBound =
+    options.settleAgentPovBound ?? settleSimulationsPastTheAgentPovBound;
 
   // True from the moment a tick is called — synchronously, before its first
   // await — until it settles, so the timer callback's read of it can never
@@ -101,6 +121,19 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
             runIds: [...new Set(swept.map((simulation) => simulation.runId))],
           },
           `swept ${swept.length} orphaned simulation(s) whose simulator went silent`,
+        );
+      }
+      // A conversation graded without the agent's own account of it is news:
+      // the record says so, and an operator reading this line knows an
+      // exporter or a pull is not delivering.
+      const bounded = await settleAgentPovBound();
+      if (bounded.length > 0) {
+        options.log.info(
+          {
+            simulationIds: bounded.map((simulation) => simulation.id),
+            runIds: [...new Set(bounded.map((simulation) => simulation.runId))],
+          },
+          `graded ${bounded.length} simulation(s) whose agent POV never arrived`,
         );
       }
     } catch (fault) {

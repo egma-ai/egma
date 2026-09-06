@@ -12,6 +12,7 @@ import {
   createTestSuite,
   disconnectClickHouse,
   listSimulations,
+  settleSimulationsPastTheAgentPovBound,
   startRun,
   startSimulation,
 } from "@egma/db";
@@ -1118,12 +1119,36 @@ describe.skipIf(!storage.available)("the simulation grading handoff", () => {
    * Completion and evidence readiness can arrive in either order. The drainer
    * requests grading only after ClickHouse can return the evidence, and the
    * per-trace request is replay safe across later segments.
+   *
+   * **And on this lane it also waits for the agent's own POV** (ADR-0015 §6).
+   * Everything this suite posts is egma's own account of the conversation; the
+   * agent's arrives by a Retell pull, and nothing pulls Retell here. So the
+   * wait can only end on the bound, which the sweep is asked for directly —
+   * with the bound already spent, because what is proved here is the handoff
+   * and not how long a clock takes.
    */
   it("mints exactly one job after the completed simulation is queryable", async () => {
+    const waiting = await api.database.sql<{ n: string }>(
+      "select count(*) as n from grading_job where trace_id = $1",
+      [CHAT_TRACE],
+    );
+    expect(Number(waiting.rows[0]?.n)).toBe(0);
+
+    await settleSimulationsPastTheAgentPovBound({
+      boundSeconds: 0,
+      withinSeconds: 365 * 24 * 60 * 60,
+    });
+
     const jobs = await api.database.sql<{ n: string }>(
       "select count(*) as n from grading_job where trace_id = $1",
       [CHAT_TRACE],
     );
     expect(Number(jobs.rows[0]?.n)).toBe(1);
+    // Graded without the agent's account of it, and the record says so.
+    const row = await api.database.sql<{ agent_pov: string | null }>(
+      "select agent_pov from simulation where id = $1",
+      [CHAT_SIMULATION],
+    );
+    expect(row.rows[0]?.agent_pov).toBe("incomplete");
   });
 });

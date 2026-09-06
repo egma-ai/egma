@@ -60,6 +60,40 @@ export const CONNECTION_TYPES = [
 ] as const;
 export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 
+/**
+ * The connection kinds whose conversations produce an **agent's POV**.
+ *
+ * ADR-0015 §2: a simulation stores both POVs, and the agent's arrives one of
+ * two ways — pushed by the egma SDK over OpenTelemetry from inside a LiveKit
+ * room, or pulled from the platform's own API the moment the conversation ends
+ * on a Retell lane. A `phone_number` connection is neither: egma dials a number
+ * and nothing of egma's runs on the other end of the line, so there is no
+ * second account of that conversation to wait for and grading starts the moment
+ * the row is complete.
+ *
+ * **A fact about the lane, never about the spans**, which is what makes it
+ * answerable before any evidence has arrived: the question grading asks at
+ * completion is "is a second account coming?", and only the connection can
+ * answer that.
+ *
+ * Written against `ConnectionType` so that a lane added to the product is a
+ * decision made here as well: a new kind that produces an agent POV is added by
+ * hand, and a name that is not a connection type at all does not compile.
+ */
+export const LANES_WITH_AN_AGENT_POV = [
+  "retell_chat_api",
+  "retell_text_mode",
+  "retell_web_call",
+  "livekit_room",
+] as const satisfies readonly ConnectionType[];
+
+/** Whether a conversation over this connection has a second account coming. */
+export function laneProducesAnAgentPov(connectionType: string): boolean {
+  return (LANES_WITH_AN_AGENT_POV as readonly string[]).includes(
+    connectionType,
+  );
+}
+
 /** The authority and configuration used inside one connection type. */
 export const ACCESS_VARIANTS = [
   "retell_chat_api.api_key",

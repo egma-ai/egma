@@ -69,7 +69,11 @@ function simulationSpan(
     spanId: "1111111111111111",
     parentSpanId: "",
     source: "simulation",
-    emitter: "egma-runtime",
+    // **The agent's own POV**, which is what a provider span is: this case is
+    // about a provider clock that runs ahead of egma's, and the provider is
+    // the agent's platform. It is also what grading waits for on this lane
+    // (ADR-0015 §6), so the landing below finds its evidence ready.
+    emitter: "agent",
     environment: "default",
     startedAtMicroseconds,
     durationNanoseconds: 1_000_000_000n,

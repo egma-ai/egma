@@ -5,7 +5,9 @@ import {
   createPersona,
   createTest,
   createTestSuite,
+  getGradingJobForTrace,
   listSimulations,
+  settleSimulationsPastTheAgentPovBound,
   startRun,
   startSimulation,
 } from "@egma/db";
@@ -665,6 +667,129 @@ describe.skipIf(!storage.available)("the row caps, across an export naming two",
          where trace_id in ('${first.traceId}', '${second.traceId}')`,
       ),
     ).toBe(10_000);
+  }, 120_000);
+});
+
+/**
+ * **When grading is asked for, and never before.**
+ *
+ * ADR-0015 §6: a simulation's evidence is ready when the row is complete *and*
+ * the agent's own POV has been filed — or when 30 seconds have passed since
+ * completion on a lane that produces one. Grading a conversation before the
+ * account it will be judged on has arrived is grading the wrong evidence, and
+ * the wait must end anyway, because a broken exporter cannot be allowed to hold
+ * a simulation open forever.
+ *
+ * The three cases below are the whole rule: the wait, its end when the POV
+ * lands, and its end when the bound expires. Each reads the queue through the
+ * data-access seam the grading service claims from, because a job row is the
+ * whole of what "grading was asked for" means.
+ */
+describe.skipIf(!storage.available)("when a simulation's grading is asked for", () => {
+  it("waits: a landing files no grading work while the agent's POV is still coming", async () => {
+    const room = "egma-grading-waits-1";
+    const landed = await aLandedSimulation(acme, "waits", room, {
+      ...A_LIVEKIT_AGENT,
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk-waits" },
+    });
+
+    const auth = contextFor(acme, "member");
+    // The row is complete and its graders are planned, and still nothing is
+    // queued: the agent has not said anything about this conversation yet.
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+    const [row] = (await listSimulations(auth, landed.runId, { limit: 1 }))
+      ?.items ?? [];
+    expect(row?.status).toBe("completed");
+    expect(row?.agentPov).toBeNull();
+  }, 120_000);
+
+  it("asks the moment the agent's POV lands, and says the record has it", async () => {
+    const room = "egma-grading-lands-1";
+    const landed = await aLandedSimulation(acme, "lands", room, {
+      ...A_LIVEKIT_AGENT,
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk-lands" },
+    });
+    const auth = contextFor(acme, "member");
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+
+    await exportTheCapture(acmeKey, room);
+
+    const job = await getGradingJobForTrace(auth, landed.traceId);
+    expect(job?.traceId).toBe(landed.traceId);
+    expect(job?.source).toBe("simulation");
+    const [row] = (await listSimulations(auth, landed.runId, { limit: 1 }))
+      ?.items ?? [];
+    expect(row?.agentPov).toBe("filed");
+  }, 120_000);
+
+  /**
+   * The bound, and the record it leaves. Nothing is exported for this
+   * conversation at all — the agent's exporter is broken, or its platform never
+   * answered — so the wait can only end on a clock.
+   *
+   * The sweep is called directly rather than waited for: the loop that runs it
+   * on an interval is the API's, and what is proved here is the seam's own
+   * decision. Its window is widened because the fixture's conversation ended a
+   * month before this suite runs, and the standing sweep deliberately looks
+   * back only an hour so a deployment returning from an outage does not grade a
+   * day of backlog in one tick.
+   */
+  it("stops waiting at the bound, grades anyway, and says the POV is incomplete", async () => {
+    const room = "egma-grading-bound-1";
+    const landed = await aLandedSimulation(acme, "bound", room, {
+      ...A_LIVEKIT_AGENT,
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk-bound" },
+    });
+    const auth = contextFor(acme, "member");
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+
+    const settled = await settleSimulationsPastTheAgentPovBound({
+      withinSeconds: 365 * 24 * 60 * 60,
+    });
+    expect(settled.map((one) => one.id)).toContain(landed.simulationId);
+
+    const job = await getGradingJobForTrace(auth, landed.traceId);
+    expect(job?.traceId).toBe(landed.traceId);
+    const [row] = (await listSimulations(auth, landed.runId, { limit: 1 }))
+      ?.items ?? [];
+    expect(row?.agentPov).toBe("incomplete");
+
+    // **And never twice.** A second sweep finds the wait already settled and
+    // asks for nothing, which is what keeps one conversation to one handoff
+    // however many replicas are reading the clock.
+    const again = await settleSimulationsPastTheAgentPovBound({
+      withinSeconds: 365 * 24 * 60 * 60,
+    });
+    expect(again.map((one) => one.id)).not.toContain(landed.simulationId);
+  }, 120_000);
+
+  /**
+   * A lane egma dials rather than joins produces no agent POV at all: nothing
+   * of egma's runs on the far end of a phone call. There is no second account
+   * coming, so there is nothing to wait for and grading starts at completion.
+   */
+  it("does not wait at all for a lane that produces no agent POV", async () => {
+    const landed = await aLandedSimulation(acme, "phone", "", {
+      agentPlatform: "retell",
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+15551230000" },
+    });
+
+    const auth = contextFor(acme, "member");
+    const [row] = (await listSimulations(auth, landed.runId, { limit: 1 }))
+      ?.items ?? [];
+    expect(row?.status).toBe("completed");
+    // Nothing to record, because nothing was waited for.
+    expect(row?.agentPov).toBeNull();
+    // And the completion probe found no evidence at all — no simulator ran —
+    // so the drain handoff is what will start grading, exactly as before this
+    // effort. What matters here is that the *wait* was never entered.
+    const bounded = await settleSimulationsPastTheAgentPovBound({
+      withinSeconds: 365 * 24 * 60 * 60,
+    });
+    expect(bounded.map((one) => one.id)).not.toContain(landed.simulationId);
   }, 120_000);
 });
 
