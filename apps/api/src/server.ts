@@ -49,6 +49,7 @@ import {
   type RetellProductionIngestion,
 } from "./retell-production-ingestion.ts";
 import type { RetellReach } from "./retell/api.ts";
+import type { RetellSimulationPullOptions } from "./retell-simulation-ingestion.ts";
 import { startOrphanSweep, type OrphanSweep } from "./simulation-sweep.ts";
 import type { Config } from "./config.ts";
 import {
@@ -100,6 +101,12 @@ export type ServerOptions = {
    * a test stands a Retell-shaped server on loopback.
    */
   readonly retellReach?: RetellReach;
+  /**
+   * How patient a Retell simulation's pull is with a thin record. A deployment
+   * uses the module's own bounded waits; a suite whose claim is not the waiting
+   * shortens them so a landing does not carry a background timer past its life.
+   */
+  readonly simulationPullOptions?: RetellSimulationPullOptions | undefined;
   /** Test-only device-flow pace; a production server uses five seconds. */
   readonly deviceAuthorizationInterval?: IdentityOptions["deviceAuthorizationInterval"];
   /** Test seam for Retell account reads. Production uses the global fetch. */
@@ -471,6 +478,9 @@ export function buildApi(options: ServerOptions): Api {
     // platform that exports nothing of its own. It asks where every other
     // Retell read in this deployment asks.
     simulationPullReach: options.retellReach ?? {},
+    ...(options.simulationPullOptions === undefined
+      ? {}
+      : { simulationPullOptions: options.simulationPullOptions }),
   });
 
   // The mock endpoint: the seam's one new public surface. Registered without

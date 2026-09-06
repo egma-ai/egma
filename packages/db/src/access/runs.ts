@@ -2288,25 +2288,31 @@ export async function resolveSimulationByProviderReference(
  * credential, which ADR-0015 §2 names as what a pull authenticates with. This
  * is the whole of that read.
  *
- * **The narrow door beside `unsealSimulationConnection`, on the same terms and
- * one moment later.** That one opens a connection's plaintext to assemble a
- * spec and answers only while the row stands `claimed`; this one opens the same
- * plaintext to fetch the record of the conversation that just ran, and answers
- * only for a row that has *finished conducting*. The two together are the whole
- * of what egma ever does with a connection's credentials: conduct a simulation
- * over it, and collect the record of what it conducted.
+ * **The narrow door beside `resolveSimulationConnection`, on that door's exact
+ * terms and one moment later.** That one opens a connection's plaintext to
+ * assemble a spec and answers only while the row stands `claimed`; this one
+ * opens the same plaintext to fetch the record of the conversation that just
+ * ran, and answers only for a row standing `completed` — a simulation that has
+ * finished conducting. The two together are the whole of what egma ever does
+ * with a connection's credentials: conduct a simulation over it, and collect
+ * the record of what it conducted. Nothing else may knock at either.
  *
- * **It takes no `AuthContext` and cannot be given one**, exactly as
- * `resolveSimulationStanding` beside it does not: the caller is the report door
- * serving egma's own simulator, which holds no credential, and the row is the
- * authority. There is no argument here by which a caller could name a customer,
- * a connection, or a call — the simulation names all three.
+ * **The gate is how the context came to exist, not what its role permits**, for
+ * the reason the sibling gives: the only thing egma does with these credentials
+ * is conduct and collect, and the only thing that conducts is the simulator. So
+ * a context built by a claim — `via: "simulator"` — is the one this answers
+ * for, and a person's session and an API key alike are refused out loud. The
+ * report door holds exactly such a context already: the standing it resolved
+ * before anything else carries the conducting context the row's own tenancy
+ * built, and there is no argument here by which a caller could name a customer,
+ * a connection, or a call.
  *
  * `undefined` answers every absence alike, and none of them is an error: a
- * simulation this egma never issued, one still conducting, one that ran over a
- * connection which is not Retell, one whose conversation never reported a call
- * id, and one whose connection holds no usable key. A lane with no pull is the
- * ordinary case — LiveKit pushes instead.
+ * simulation outside this context's tenancy, one not standing completed, one
+ * that ran over a connection which is not Retell or has since been archived,
+ * one whose conversation never reported a call id, and one whose connection
+ * holds no usable key. A lane with no pull is the ordinary case — LiveKit
+ * pushes instead.
  */
 export type RetellSimulationPull = {
   readonly standing: SimulationStanding;
@@ -2319,8 +2325,17 @@ export type RetellSimulationPull = {
 };
 
 export async function resolveRetellSimulationPull(
+  auth: AuthContext,
   simulationId: string,
 ): Promise<RetellSimulationPull | undefined> {
+  authorize(auth, "read", here(auth));
+
+  if (auth.via !== "simulator") {
+    throw new Error(
+      "a connection's credentials are unsealed for Egma's own simulator and for nothing else, because conducting is the only thing Egma does with them",
+    );
+  }
+
   const [row] = await db()
     .select({
       providerReference: simulation.providerReference,
@@ -2330,7 +2345,21 @@ export async function resolveRetellSimulationPull(
     })
     .from(simulation)
     .innerJoin(connection, eq(connection.id, simulation.connectionId))
-    .where(eq(simulation.id, simulationId))
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          eq(simulation.id, simulationId),
+          // Finished conducting, which is the one moment there is a record to
+          // fetch: before it the conversation is still happening, and Retell
+          // has nothing complete to answer with.
+          eq(simulation.status, "completed"),
+          isNull(connection.archivedAt),
+          inActingProject(auth, simulation),
+        ),
+      ),
+    )
     .limit(1);
 
   if (row === undefined) return undefined;

@@ -41,11 +41,14 @@ import {
   type OtlpResourceSpans,
 } from "../otlp/decode.ts";
 import {
+  budgetForOneRequest,
+  namesAProviderReference,
   normaliseOtlpExport,
   providerReferenceNamedBy,
   simulationNamedBy,
   PROVIDER_REFERENCE_ATTRIBUTE,
   SIMULATION_ID_ATTRIBUTE,
+  type NormalisationBudget,
 } from "../otlp/normalise.ts";
 import {
   EXPORT_TRACE_SERVICE_RESPONSE,
@@ -299,6 +302,17 @@ const A_TRACE_ID = /^[0-9a-f]{32}$/u;
  */
 const LONGEST_QUOTED_REFERENCE = 200;
 
+/**
+ * How many conversations one project-key export may speak for.
+ *
+ * The egma SDK exports from one agent process, which is in one room, so one is
+ * the ordinary number and a handful covers a process that has moved on to the
+ * next simulation before its exporter flushed. More than that is a
+ * misconfiguration, and it is bounded because each distinct reference costs a
+ * store lookup before anything is normalised.
+ */
+const MOST_SIMULATIONS_PER_EXPORT = 8;
+
 function shortened(reference: string): string {
   return reference.length <= LONGEST_QUOTED_REFERENCE
     ? reference
@@ -349,20 +363,23 @@ function gatheredBySimulation(
  * One simulation's gathered resources, normalised and ready for the filing
  * step, with whatever the normaliser refused counted alongside.
  *
- * Normalised per simulation, so the row caps bound each conversation's append
- * rather than the request. That is a looser total bound than gathering by
- * customer was, and deliberately: what a cap protects is the memory one append
- * can ask for, a simulation is the unit that is filed, and only egma's own
- * simulator can name more than one of them in a request anyway.
+ * Normalised per simulation, because a simulation is the unit that is filed and
+ * two of them must never be blended. **The row caps still bound the request**,
+ * not the call: the budget is made once where the request starts and carried
+ * through every one of these calls, so an export naming several simulations
+ * cannot buy several times the bound by naming them.
  */
 function normalisedFilings(
   gathered: readonly SimulationResources[],
   emitter: "egma-runtime" | "agent",
   rejected: { count: number; firstReason: string },
+  budget: NormalisationBudget,
 ): SimulationFiling[] {
   return gathered.map((one) => {
-    const normalised = normaliseOtlpExport({ resourceSpans: one.resources }, () =>
-      attributionOf(one.standing, emitter),
+    const normalised = normaliseOtlpExport(
+      { resourceSpans: one.resources },
+      () => attributionOf(one.standing, emitter),
+      budget,
     );
     rejected.count += normalised.rejected.length;
     rejected.firstReason ||= normalised.rejected[0]?.reason ?? "";
@@ -534,6 +551,7 @@ async function simulatorExport(
     ),
     "egma-runtime",
     rejected,
+    budgetForOneRequest(),
   );
 
   // Every filing in one call, and one answer for all of them: a batch naming
@@ -788,12 +806,61 @@ export async function traceRoutes(
      * nobody has finds nothing, and both are told the same thing.
      */
     const resources = decoded.resourceSpans ?? [];
-    const naming = resources.filter(
-      (resourceSpans) => providerReferenceNamedBy(resourceSpans) !== "",
-    );
+    // Carrying the key, not holding a value: the two filters below are
+    // complements and must be built from one predicate, or a resource that
+    // carries the key with nothing in it would fall through both into
+    // production. `namesAProviderReference` says why that matters.
+    const naming = resources.filter(namesAProviderReference);
+
+    // A malformed export before anything is looked up, because an empty
+    // reference has nothing to look up: the sender said these spans are a
+    // simulation's and left out which. Refused whole, like every other
+    // attribution failure at this door, and told apart from a reference that
+    // simply matched nothing — quoting an empty string back would name nothing
+    // for the developer to go and fix.
+    if (naming.some((one) => providerReferenceNamedBy(one) === "")) {
+      return statusResponse(
+        reply,
+        encoding,
+        400,
+        RPC_INVALID_ARGUMENT,
+        `a resource in this export carries ${PROVIDER_REFERENCE_ATTRIBUTE} ` +
+          `with no value. The attribute says these spans are a simulation's ` +
+          `agent POV, and its value is the room or call the conversation ran ` +
+          `in — so an empty one names no conversation to file them under. ` +
+          `Stamp the room name the simulation was reported with, or leave the ` +
+          `attribute off entirely and the spans are production. Nothing from ` +
+          `this request was stored.`,
+      );
+    }
+
+    const references = new Set(naming.map(providerReferenceNamedBy));
+    /*
+     * How many conversations one export may speak for.
+     *
+     * The SDK exports one room from one agent process, so a request naming more
+     * than a handful of them is a misconfiguration rather than a use. The bound
+     * is here because everything after it costs: one store lookup per distinct
+     * reference before a byte is normalised, and one segment per simulation
+     * after. The row caps below bound the bytes; this bounds the lookups.
+     */
+    if (references.size > MOST_SIMULATIONS_PER_EXPORT) {
+      return statusResponse(
+        reply,
+        encoding,
+        400,
+        RPC_INVALID_ARGUMENT,
+        `this export names ${references.size} conversations by ` +
+          `${PROVIDER_REFERENCE_ATTRIBUTE}, and Egma files at most ` +
+          `${MOST_SIMULATIONS_PER_EXPORT} from one request. An agent process ` +
+          `runs one room at a time, so an export naming more than a few is a ` +
+          `configuration mistake rather than a batch — export each room from ` +
+          `the process running it. Nothing from this request was stored.`,
+      );
+    }
 
     const carriers = new Map<string, SimulationStanding>();
-    for (const reference of new Set(naming.map(providerReferenceNamedBy))) {
+    for (const reference of references) {
       const standing = await resolveSimulationByProviderReference(auth, reference);
       if (standing === undefined) {
         /*
@@ -830,16 +897,24 @@ export async function traceRoutes(
       count: 0,
       firstReason: "",
     };
+    // One budget for the whole request, spent by every call below: the caps
+    // bound what one request can ask this side for, and naming several
+    // simulations must not buy several times the bound.
+    const budget: NormalisationBudget = budgetForOneRequest();
 
-    // Production, exactly as today: one normalisation of everything that named
-    // no reference, under the credential's own context. An export with no
-    // simulation resources at all — every export before this branch existed —
-    // reaches acceptance as the one group it always was.
-    const production = normaliseOtlpExport({
-      resourceSpans: resources.filter(
-        (resourceSpans) => providerReferenceNamedBy(resourceSpans) === "",
-      ),
-    });
+    // Production, exactly as today: one normalisation of everything that
+    // carried no reference at all, under the credential's own context. An
+    // export with no simulation resources — every export before this branch
+    // existed — reaches acceptance as the one group it always was.
+    const production = normaliseOtlpExport(
+      {
+        resourceSpans: resources.filter(
+          (resourceSpans) => !namesAProviderReference(resourceSpans),
+        ),
+      },
+      undefined,
+      budget,
+    );
     rejected.count += production.rejected.length;
     rejected.firstReason ||= production.rejected[0]?.reason ?? "";
     const alongside: EvidenceGroup[] = [{ auth, spans: production.spans }];
@@ -850,6 +925,7 @@ export async function traceRoutes(
       ),
       "agent",
       rejected,
+      budget,
     );
 
     // Handed over once and complete, and answered only when it is durable in

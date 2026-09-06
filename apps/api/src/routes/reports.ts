@@ -25,8 +25,10 @@ import {
   settleOwedMockCleanups,
   type MockedWorldReach,
 } from "../mocked-world.ts";
+import { platformEvent, safeExceptionType } from "../platform-log.ts";
 import {
   pullRetellSimulationRecord,
+  type RetellSimulationPullOptions,
   type RetellSimulationPullReach,
 } from "../retell-simulation-ingestion.ts";
 
@@ -81,6 +83,11 @@ export type ReportRoutesOptions = {
    * leaves behind.
    */
   readonly simulationPullReach?: RetellSimulationPullReach | undefined;
+  /**
+   * How patient the pull is with a thin record. A deployment uses the module's
+   * own bounded waits; a suite whose claim is not the waiting shortens them.
+   */
+  readonly simulationPullOptions?: RetellSimulationPullOptions | undefined;
 };
 
 export const REPORTS_PATH = "/v1/simulations/:simulationId/reports";
@@ -298,22 +305,42 @@ export async function reportRoutes(
      * landing only: a conversation that never ran has no call record to fetch,
      * and asking Retell about one would be a request per failed dispatch.
      *
-     * Awaited, so grading starts on a record that already holds the agent's
-     * POV rather than one that will hold it in a moment — and its failure is
-     * caught for the reason the teardown below is: the simulator is waiting to
+     * The first attempt is awaited, so an ordinary call's record is durable
+     * before this request answers and grading starts on a record that already
+     * holds the agent's POV. A record that came back thin retries in the
+     * background and never reaches this request; the module says why.
+     *
+     * The context is the standing's own — the conducting context the row's
+     * tenancy built, which is the one thing a connection's credential is
+     * unsealed for. Nothing here is answered with: the module logs every
+     * failure itself, and this catch is the last resort for a throw it did not
+     * expect, said out loud rather than swallowed. The simulator is waiting to
      * be told its landing was accepted, and what Retell owes egma is not that
-     * landing's problem. A POV that never arrived is a state the record already
-     * has a word for.
+     * landing's problem — a POV that never arrived is a state the record
+     * already has a word for.
      */
     if (
       options.simulationPullReach !== undefined &&
       lastKnownStatus === "completed"
     ) {
       await pullRetellSimulationRecord(
+        standing.auth,
         simulationId,
         options.simulationPullReach,
         request.log,
-      ).catch(() => undefined);
+        options.simulationPullOptions ?? {},
+      ).catch((cause: unknown) => {
+        request.log.warn(
+          platformEvent(
+            "egma.simulation.retell.pull.failed",
+            "A Retell simulation's record was not filed after its landing",
+            {
+              simulation_id: simulationId,
+              exception_type: safeExceptionType(cause),
+            },
+          ),
+        );
+      });
     }
 
     // The teardown, when this document may have been the last thing a mocked

@@ -22,7 +22,10 @@ import {
 } from "../src/otlp/normalise.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
+  appointmentExport,
   capturedRequests,
+  APPOINTMENT_ROOM,
+  APPOINTMENT_TRACE,
   FIXTURE_PROVIDER_CALL_ID,
   FIXTURE_TRACE,
 } from "./support/fixture.ts";
@@ -92,6 +95,67 @@ let globexKey: string;
 
 /** Every captured request, already decoded, so a resource can be stamped. */
 let captured: OtlpExport[] = [];
+
+/** The other capture: the booking, with the three tool calls, as one export. */
+let booking: OtlpExport | undefined;
+
+/**
+ * The Retell call this file's Retell simulation ran, as Retell's own document.
+ *
+ * At module scope because the deployment's Retell reach is settled when the one
+ * instance is built, and this file has one instance: a second `createApi` finds
+ * Postgres already connected.
+ */
+const RETELL_CALL_ID = "call_9f2b7a1c4e6d8b0a";
+const RETELL_CALL = {
+  call_id: RETELL_CALL_ID,
+  agent_id: "agent_front_desk",
+  agent_name: "Front desk",
+  agent_version: 4,
+  call_status: "ended",
+  start_timestamp: new Date("2026-08-02T18:04:40.000Z").getTime(),
+  end_timestamp: new Date("2026-08-02T18:05:54.000Z").getTime(),
+  disconnection_reason: "agent_hangup",
+  // What Retell measured about the conversation. It rides Retell's own root
+  // span as the reported-measurements block, and it is the observable half of
+  // the parentless-row ranking below.
+  latency: {
+    e2e: { values: [820, 910, 760] },
+    llm: { values: [410, 460] },
+  },
+  transcript_with_tool_calls: [
+    { role: "agent", content: "Hello, how can I help?" },
+    { role: "user", content: "What is the weather in Lisbon?" },
+    {
+      role: "tool_call_invocation",
+      tool_call_id: "tool_1",
+      name: "lookup_weather",
+      arguments: '{"city":"Lisbon"}',
+    },
+    {
+      role: "tool_call_result",
+      tool_call_id: "tool_1",
+      content: '{"temperature":70,"sky":"sunny"}',
+    },
+    { role: "agent", content: "It is sunny and seventy degrees." },
+  ],
+} as const;
+
+/** Every address Retell was asked for, so the pull can be seen happening. */
+const askedOfRetell: string[] = [];
+
+/** Retell, answering for that one call and for nothing else. */
+const retellAnswering = (async (input: unknown) => {
+  const asking = String(input);
+  askedOfRetell.push(asking);
+  if (asking.includes(`/v2/get-call/${RETELL_CALL_ID}`)) {
+    return new Response(JSON.stringify(RETELL_CALL), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  return new Response("", { status: 404 });
+}) as typeof fetch;
 
 function store(): NonNullable<TestApi["traceStore"]> {
   const traceStore = api.traceStore;
@@ -170,6 +234,12 @@ async function aLandedSimulation(
   label: string,
   reference: string,
   connection: Record<string, unknown>,
+  // The moments the row reports, which is what the v1 read's window is built
+  // from — so a capture's own spans have to fall inside them.
+  moments: { startedAt: Date; endedAt: Date } = {
+    startedAt: CONVERSATION_STARTED_AT,
+    endedAt: CONVERSATION_ENDED_AT,
+  },
 ): Promise<{ simulationId: string; runId: string; traceId: string }> {
   const auth = contextFor(person, "member");
   const created = await createAgent(auth, {
@@ -211,8 +281,8 @@ async function aLandedSimulation(
     endingReason: "agent_ended",
     turnCount: 13,
     providerReference: reference,
-    startedAt: CONVERSATION_STARTED_AT,
-    endedAt: CONVERSATION_ENDED_AT,
+    startedAt: moments.startedAt,
+    endedAt: moments.endedAt,
   });
 
   return {
@@ -239,6 +309,15 @@ beforeAll(async () => {
   api = await createApi("otlp_agent_pov", {
     traceStore: true,
     ingestStore: storage.ingestStore,
+    // One instance for the file: a second `createApi` would find Postgres
+    // already connected. Retell answers here too, because the Retell lane's
+    // own ingestion is a pull rather than an export and the same instance has
+    // to be able to make it.
+    retellReach: { fetchImpl: retellAnswering },
+    // The waits between attempts at a thin record are the module's own bound,
+    // and nothing in this file is a claim about them — the record it answers
+    // with is whole, so the first attempt is the only one.
+    simulationPullOptions: { retryWaitsMilliseconds: [] },
   });
   acme = await signUp(api.app, "ada@acme.example", "Acme");
   globex = await signUp(api.app, "grace@globex.example", "Globex");
@@ -248,6 +327,7 @@ beforeAll(async () => {
   captured = (await capturedRequests()).map((request) =>
     decodeOtlpExport("protobuf", request.body),
   );
+  booking = JSON.parse(await appointmentExport()) as OtlpExport;
 }, 120_000);
 
 afterAll(async () => {
@@ -329,18 +409,6 @@ describe.skipIf(!storage.available)(
       expect(only?.test_version_id).not.toBe("");
       expect(only?.persona_version_id).not.toBe("");
       expect(Number(only?.n)).toBe(FIXTURE_TRACE.spans);
-
-      // And no span of it claims the conversation ended. LiveKit's own session
-      // root says so on a production trace, and that statement is what
-      // automatic grading runs on there — under a simulation the run lifecycle
-      // already produces that fact, and a second producer of it is how one
-      // conversation comes to be graded twice.
-      expect(
-        await countOf(
-          `select count() as n from spans final
-           where trace_id = '${landed.traceId}' and ends_trace`,
-        ),
-      ).toBe(0);
     });
 
     it("keeps the framework's trace id on the payload and leaves span ids alone", async () => {
@@ -447,6 +515,56 @@ describe.skipIf(!storage.available)("a reference that names no simulation", () =
         `select count() as n from spans final
          where JSONExtractString(payload, 'span', 'traceId') = '${wireTraceIdOfCapture()}'
            and source = 'production'`,
+      ),
+    ).toBe(0);
+  });
+
+  it("refuses a reference that is there and empty, rather than filing it as production", async () => {
+    const [first] = captured;
+    if (first === undefined) throw new Error("the capture is empty");
+
+    // The attribute carried, with nothing in it: the sender said these spans
+    // are a simulation's and left out which. Reading the value alone cannot
+    // tell this from a resource that never carried the key, and treating the
+    // two alike would file a misconfigured SDK's simulation under Monitoring.
+    const answered = await post(naming(first, ""), globexKey);
+    expect(answered.statusCode).toBe(400);
+    const refusal = answered.json() as { message: string };
+    expect(refusal.message).toContain("with no value");
+    expect(refusal.message).toContain("Nothing from this request was stored");
+
+    await api.drainEvidence();
+    expect(
+      await countOf(
+        `select count() as n from spans final
+         where project_id = '${globex.projectId}'`,
+      ),
+    ).toBe(0);
+  });
+
+  it("refuses an export naming more conversations than one process can run", async () => {
+    const [first] = captured;
+    if (first === undefined) throw new Error("the capture is empty");
+
+    // Nine rooms in one export, each on its own resource. An agent process is
+    // in one room, so this is a configuration mistake — and each distinct
+    // reference would otherwise cost a store lookup before a byte is read.
+    const many = JSON.stringify({
+      resourceSpans: Array.from({ length: 9 }, (_, at) =>
+        JSON.parse(naming(first, `room-${String(at)}`)).resourceSpans[0],
+      ),
+    });
+    const answered = await post(many, globexKey);
+    expect(answered.statusCode).toBe(400);
+    const refusal = answered.json() as { message: string };
+    expect(refusal.message).toContain("names 9 conversations");
+    expect(refusal.message).toContain("Nothing from this request was stored");
+
+    await api.drainEvidence();
+    expect(
+      await countOf(
+        `select count() as n from spans final
+         where project_id = '${globex.projectId}'`,
       ),
     ).toBe(0);
   });
@@ -596,8 +714,17 @@ describe.skipIf(!storage.available)("both POVs under one trace", () => {
     const roots = (body.transcript?.spans ?? []).filter(
       (span) => span.parentSpanId === "",
     );
+    // Exactly two, and both named: egma's own, and LiveKit's session root.
+    // Neither is hidden to make the tree look like it has one root, and
+    // neither displaced the other.
+    expect(roots).toHaveLength(2);
     expect(roots.map((root) => root.spanId)).toContain(own);
-    expect(roots.length).toBeGreaterThanOrEqual(2);
+    const agentRoot = await store().rows<{ span_id: string }>(
+      `select span_id from spans final
+       where trace_id = '${landed.traceId}' and parent_span_id = ''
+         and emitter = 'agent'`,
+    );
+    expect(roots.map((root) => root.spanId)).toContain(agentRoot[0]?.span_id);
   }, 120_000);
 });
 
@@ -610,158 +737,277 @@ describe.skipIf(!storage.available)("both POVs under one trace", () => {
  * drives it here is the real report door: a landing arrives, and the record is
  * in the store afterwards.
  */
-describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
-  const CALL_ID = "call_9f2b7a1c4e6d8b0a";
-  let retellApi: TestApi;
-  let asked: string[] = [];
 
-  const RETELL_CALL = {
-    call_id: CALL_ID,
-    agent_id: "agent_front_desk",
-    agent_name: "Front desk",
-    agent_version: 4,
-    call_status: "ended",
-    start_timestamp: CONVERSATION_STARTED_AT.getTime(),
-    end_timestamp: CONVERSATION_ENDED_AT.getTime(),
-    disconnection_reason: "agent_hangup",
-    transcript_with_tool_calls: [
-      { role: "agent", content: "Hello, how can I help?" },
-      { role: "user", content: "What is the weather in Lisbon?" },
-      {
-        role: "tool_call_invocation",
-        tool_call_id: "tool_1",
-        name: "lookup_weather",
-        arguments: '{"city":"Lisbon"}',
-      },
-      {
-        role: "tool_call_result",
-        tool_call_id: "tool_1",
-        content: '{"temperature":70,"sky":"sunny"}',
-      },
-      { role: "agent", content: "It is sunny and seventy degrees." },
-    ],
-  } as const;
+/**
+ * The booking, and the three tool calls that opened this effort.
+ *
+ * `fixtures/livekit-appointment-trace` is the export of the run that found the
+ * hole: its agent called `list_providers`, `check_availability` and
+ * `book_appointment`, and egma's record of the simulation showed one of them,
+ * because a tool egma did not answer ran unobserved. Every one of the three is
+ * on the transcript now, because the agent itself reported it.
+ */
+describe.skipIf(!storage.available)("the booking that opened this effort", () => {
+  let landed: { simulationId: string; runId: string; traceId: string };
 
   beforeAll(async () => {
-    if (!storage.available) throw new Error("this suite has no object store");
-    retellApi = await createApi("retell_agent_pov", {
-      traceStore: true,
-      ingestStore: storage.ingestStore,
-      retellReach: {
-        fetchImpl: (async (input: unknown) => {
-          const asking = String(input);
-          asked.push(asking);
-          if (asking.includes(`/v2/get-call/${CALL_ID}`)) {
-            return new Response(JSON.stringify(RETELL_CALL), {
-              status: 200,
-              headers: { "content-type": "application/json" },
-            });
-          }
-          return new Response("", { status: 404 });
-        }) as typeof fetch,
+    landed = await aLandedSimulation(
+      acme,
+      "booking",
+      APPOINTMENT_ROOM,
+      {
+        ...A_LIVEKIT_AGENT,
+        config: {
+          url: "wss://acme.livekit.cloud",
+          agentName: "appointment-scheduling",
+        },
       },
-    });
-  }, 120_000);
-
-  afterAll(async () => {
-    await retellApi?.close();
-  });
-
-  it("pulls its call record and files it under the simulation", async () => {
-    const held = api;
-    // The seeding helpers drive the API this file holds, and this case runs
-    // against its own instance because only that one has Retell answering.
-    api = retellApi;
-    let landedSimulationId = "";
-    let landedTraceId = "";
-    try {
-      const person = await signUp(api.app, "ada@acme.example", "Acme");
-      const auth = contextFor(person, "member");
-      const created = await createAgent(auth, {
-        agentPlatform: "retell",
-        name: "Front desk",
-        connection: {
-          agentPlatform: "retell",
-          connectionType: "retell_chat_api",
-          accessVariant: "retell_chat_api.api_key",
-          modality: "chat",
-          config: { retellAgentId: "agent_front_desk" },
-          credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
-        },
-      });
-      const personaId = (
-        await createPersona(auth, { name: "Impatient Rita", ...NEUTRAL_PERSON })
-      ).id;
-      const suiteId = (await createTestSuite(auth, { name: "Weather" })).id;
-      await createTest(auth, {
-        suiteId,
-        name: "Asks about the weather",
-        scenario: "They want today's weather before they go out.",
-        expectedBehaviors: ["gives the weather that was asked about"],
-        personaIds: [personaId],
-      });
-      const started = await startRun(auth, {
-        suiteId,
-        agentId: created.id,
-        connectionId: created.connection?.id ?? "",
-        idempotencyKey: newId("run"),
-      });
-      const page = await listSimulations(auth, started.id, { limit: 1 });
-      const simulation = page?.items[0];
-      if (simulation === undefined) throw new Error("the run has no simulation");
-      landedSimulationId = simulation.id;
-      landedTraceId = traceIdOfSimulation(simulation.id) ?? "";
-
-      const [claimed] = await claimSimulations({
-        claimant: CONDUCTOR,
-        capacity: 1,
-      });
-      expect(claimed?.id).toBe(simulation.id);
-      await startSimulation(auth, simulation.id, CONDUCTOR);
-
-      // And the landing itself, through the door the simulator reports at.
-      const landed = await api.app.inject({
-        method: "POST",
-        url: reportPathFor(simulation.id),
-        headers: {
-          authorization: `Bearer ${api.config.simulatorServiceToken}`,
-        },
-        payload: {
-          contract_version: 1,
-          simulation_id: simulation.id,
-          events: [
-            {
-              kind: "status",
-              event_id: "evt-000001",
-              at: CONVERSATION_ENDED_AT.toISOString(),
-              status: "completed",
-              reason: null,
-              facts: {
-                ending: "agent_ended",
-                started_at: CONVERSATION_STARTED_AT.toISOString(),
-                ended_at: CONVERSATION_ENDED_AT.toISOString(),
-                turn_count: 3,
-                audio: null,
-                provider_reference: CALL_ID,
-              },
-            },
-          ],
-        },
-      });
-      expect(landed.statusCode, landed.body).toBe(200);
-      await api.drainEvidence();
-    } finally {
-      api = held;
-    }
-
-    // Retell was asked for that one call, with the connection's own key.
-    expect(asked.some((one) => one.includes(`/v2/get-call/${CALL_ID}`))).toBe(
-      true,
+      {
+        startedAt: new Date("2026-09-04T17:52:00.000Z"),
+        endedAt: new Date("2026-09-04T17:55:00.000Z"),
+      },
     );
 
-    const traceStore = retellApi.traceStore;
-    if (traceStore === undefined) throw new Error("no trace store");
-    const rows = await traceStore.rows<{
+    if (booking === undefined) throw new Error("the booking capture is missing");
+    const answered = await post(naming(booking, APPOINTMENT_ROOM), acmeKey);
+    expect(answered.statusCode, answered.body).toBe(200);
+    expect(answered.json()).toEqual({});
+    await api.drainEvidence();
+  }, 120_000);
+
+  it("shows all three tool calls, with their arguments and their results", async () => {
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${landed.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    const body = read.json() as {
+      transcript: {
+        traceId: string;
+        spanCount: number;
+        toolSpanCount: number;
+        turnCounts: { human: number; agent: number };
+      } | null;
+    };
+
+    expect(body.transcript?.traceId).toBe(landed.traceId);
+    expect(body.transcript?.spanCount).toBe(APPOINTMENT_TRACE.spans);
+    expect(body.transcript?.toolSpanCount).toBe(APPOINTMENT_TRACE.toolSpans);
+    expect(body.transcript?.turnCounts).toEqual({
+      human: APPOINTMENT_TRACE.humanTurns,
+      agent: APPOINTMENT_TRACE.agentTurns,
+    });
+
+    const tools = await store().rows<{
+      tool_name: string;
+      tool_arguments: string;
+      tool_result: string;
+    }>(
+      `select tool_name, tool_arguments, tool_result
+       from spans final
+       where trace_id = '${landed.traceId}' and kind = 'tool'
+       order by started_at asc, span_id asc`,
+    );
+    expect(tools.map((tool) => tool.tool_name)).toEqual([
+      ...APPOINTMENT_TRACE.tools,
+    ]);
+
+    // Every one of them carries what it was handed back.
+    expect(tools[0]?.tool_result).toContain("Doctor Alvarez");
+    expect(tools[1]?.tool_result).toContain("Thursday");
+    expect(tools[2]?.tool_result).toContain("Booked");
+
+    // And the arguments the model emitted, on the two tools that take any.
+    // `list_providers` takes none, so its span carries none — an absent fact
+    // stays absent rather than becoming an empty object nobody wrote.
+    expect(tools[0]?.tool_arguments).toBe("");
+    expect(tools[1]?.tool_arguments).toContain("preferred_date");
+    expect(tools[1]?.tool_arguments).toContain("Tuesday");
+    expect(tools[2]?.tool_arguments).toContain("appointment_slot");
+    expect(tools[2]?.tool_arguments).toContain("Doctor Alvarez");
+  });
+
+  it("files it under the simulation, as the agent's POV, and keeps LiveKit's id", async () => {
+    const rows = await store().rows<{
+      source: string;
+      emitter: string;
+      run_id: string;
+      n: string;
+    }>(
+      `select source, emitter, run_id, count() as n from spans final
+       where trace_id = '${landed.traceId}'
+       group by source, emitter, run_id`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.source).toBe("simulation");
+    expect(rows[0]?.emitter).toBe("agent");
+    expect(rows[0]?.run_id).toBe(landed.runId);
+    expect(Number(rows[0]?.n)).toBe(APPOINTMENT_TRACE.spans);
+
+    expect(
+      await countOf(
+        `select count() as n from spans final
+         where trace_id = '${landed.traceId}'
+           and JSONExtractString(payload, '${WIRE_TRACE_ID_PAYLOAD_KEY}') = '${APPOINTMENT_TRACE.wireTraceId}'`,
+      ),
+    ).toBe(APPOINTMENT_TRACE.spans);
+  });
+});
+
+/**
+ * The Retell lane, where nothing exports and egma pulls instead.
+ *
+ * Retell runs no egma SDK, so the agent's POV of a Retell simulation is fetched
+ * by egma the moment the conversation ends, with the connection's own stored
+ * credential, and filed through the same step the push goes through. What
+ * drives it here is the real report door: a landing arrives, and the record is
+ * in the store afterwards.
+ */
+describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
+  it("pulls its call record and files it under the simulation", async () => {
+    const auth = contextFor(acme, "member");
+    const created = await createAgent(auth, {
+      agentPlatform: "retell",
+      name: "Front desk retell",
+      connection: {
+        agentPlatform: "retell",
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+        modality: "chat",
+        config: { retellAgentId: "agent_front_desk" },
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
+    });
+    const personaId = (
+      await createPersona(auth, {
+        name: "Impatient Rita retell",
+        ...NEUTRAL_PERSON,
+      })
+    ).id;
+    const suiteId = (await createTestSuite(auth, { name: "Weather retell" })).id;
+    await createTest(auth, {
+      suiteId,
+      name: "Asks about the weather retell",
+      scenario: "They want today's weather before they go out.",
+      expectedBehaviors: ["gives the weather that was asked about"],
+      personaIds: [personaId],
+    });
+    const started = await startRun(auth, {
+      suiteId,
+      agentId: created.id,
+      connectionId: created.connection?.id ?? "",
+      idempotencyKey: newId("run"),
+    });
+    const page = await listSimulations(auth, started.id, { limit: 1 });
+    const simulation = page?.items[0];
+    if (simulation === undefined) throw new Error("the run has no simulation");
+    const traceId = traceIdOfSimulation(simulation.id) ?? "";
+
+    const [claimed] = await claimSimulations({
+      claimant: CONDUCTOR,
+      capacity: 1,
+    });
+    expect(claimed?.id).toBe(simulation.id);
+    await startSimulation(auth, simulation.id, CONDUCTOR);
+
+    /*
+     * The persona's POV, filed **before** the agent's and opening **earlier**
+     * than it.
+     *
+     * This is what makes the parentless-row ranking observable through the
+     * contract. Retell's own root is the row carrying the reported-measurements
+     * block, and under the reader's old rule — the earliest parentless row wins
+     * — this egma root would have taken its place and the block would have gone
+     * missing from a conversation Retell had measured. The ranking asks whether
+     * a row carries the block first, so it does not.
+     */
+    const own = `${traceId.slice(0, 14)}01`;
+    const before = new Date(CONVERSATION_STARTED_AT.getTime() - 30_000);
+    const posted = await api.app.inject({
+      method: "POST",
+      url: OTLP_TRACES_PATH,
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${api.config.simulatorServiceToken}`,
+      },
+      payload: JSON.stringify({
+        resourceSpans: [
+          {
+            resource: {
+              attributes: [
+                { key: "service.name", value: { stringValue: "egma-simulator" } },
+                {
+                  key: "egma.simulation_id",
+                  value: { stringValue: simulation.id },
+                },
+              ],
+            },
+            scopeSpans: [
+              {
+                scope: { name: "egma-simulator", version: "1" },
+                spans: [
+                  {
+                    traceId,
+                    spanId: own,
+                    parentSpanId: "",
+                    name: "simulation",
+                    kind: "SPAN_KIND_INTERNAL",
+                    startTimeUnixNano: String(
+                      BigInt(before.getTime()) * 1_000_000n,
+                    ),
+                    endTimeUnixNano: String(
+                      BigInt(before.getTime() + 1000) * 1_000_000n,
+                    ),
+                    attributes: [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    expect(posted.statusCode, posted.body).toBe(200);
+
+    // And the landing itself, through the door the simulator reports at.
+    const landed = await api.app.inject({
+      method: "POST",
+      url: reportPathFor(simulation.id),
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: {
+        contract_version: 1,
+        simulation_id: simulation.id,
+        events: [
+          {
+            kind: "status",
+            event_id: "evt-000001",
+            at: CONVERSATION_ENDED_AT.toISOString(),
+            status: "completed",
+            reason: null,
+            facts: {
+              ending: "agent_ended",
+              started_at: CONVERSATION_STARTED_AT.toISOString(),
+              ended_at: CONVERSATION_ENDED_AT.toISOString(),
+              turn_count: 3,
+              audio: null,
+              provider_reference: RETELL_CALL_ID,
+            },
+          },
+        ],
+      },
+    });
+    expect(landed.statusCode, landed.body).toBe(200);
+    await api.drainEvidence();
+
+    // Retell was asked for that one call, with the connection's own key.
+    expect(
+      askedOfRetell.some((one) =>
+        one.includes(`/v2/get-call/${RETELL_CALL_ID}`),
+      ),
+    ).toBe(true);
+
+    const rows = await store().rows<{
       source: string;
       emitter: string;
       run_id: string;
@@ -770,7 +1016,7 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
     }>(
       `select source, emitter, run_id, provider_call_id, count() as n
        from spans final
-       where trace_id = '${landedTraceId}'
+       where trace_id = '${traceId}' and emitter = 'agent'
        group by source, emitter, run_id, provider_call_id`,
     );
     expect(rows).toHaveLength(1);
@@ -779,15 +1025,49 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
     // call id kept, because that is what the two records are joined on.
     expect(only?.source).toBe("simulation");
     expect(only?.emitter).toBe("agent");
-    expect(only?.run_id).not.toBe("");
-    expect(only?.provider_call_id).toBe(CALL_ID);
+    expect(only?.run_id).toBe(started.id);
+    expect(only?.provider_call_id).toBe(RETELL_CALL_ID);
     expect(Number(only?.n)).toBeGreaterThan(1);
 
-    const toolNames = await traceStore.rows<{ tool_name: string }>(
+    const toolNames = await store().rows<{ tool_name: string }>(
       `select tool_name from spans final
-       where trace_id = '${landedTraceId}' and kind = 'tool'`,
+       where trace_id = '${traceId}' and kind = 'tool'`,
     );
     expect(toolNames.map((one) => one.tool_name)).toEqual(["lookup_weather"]);
-    expect(landedSimulationId).not.toBe("");
+
+    // Both POVs are here, and there are two parentless rows to choose between.
+    const roots = await store().rows<{ emitter: string; span_id: string }>(
+      `select emitter, span_id from spans final
+       where trace_id = '${traceId}' and parent_span_id = ''
+       order by started_at asc`,
+    );
+    expect(roots.map((root) => root.emitter)).toEqual(["egma-runtime", "agent"]);
+    expect(roots[0]?.span_id).toBe(own);
+
+    /*
+     * **And the ranking picked the right one.**
+     *
+     * `reportedBy` on a measure is present only where the read found the
+     * reported-measurements block, and that block rides Retell's root — the
+     * *later* of the two parentless rows. So this one field is the whole proof:
+     * the reader ranked the row carrying the block above the row that merely
+     * opened first, and Retell's own measurements are still on the simulation.
+     */
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${simulation.id}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    const metrics = (
+      read.json() as {
+        metrics: { measure: string; reportedBy?: string; samples: number[] }[];
+      }
+    ).metrics;
+    const reported = metrics.find(
+      (metric) => metric.measure === "turn_response_latency",
+    );
+    expect(reported?.reportedBy).toBe("retell");
+    expect(reported?.samples).toEqual([820, 910, 760]);
   }, 120_000);
 });
