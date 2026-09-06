@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import math
 import time
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field, replace
@@ -62,7 +61,13 @@ from .conversation import (
     duration_limit_reached,
     turn_limit_reached,
 )
-from .media import RemoteParticipantLeftFrame, VoiceMedia
+from .media import (
+    TRANSPORT_ARRIVAL,
+    TRANSPORT_PLAYOUT,
+    RemoteParticipantLeftFrame,
+    VoiceMedia,
+    transport_time,
+)
 from .model import END_CALL_TOOL_NAME, ModelFailure, PersonaReply
 from .persona import SILENCE_FOLLOW_UP_LIMIT, SILENCE_WAIT_SECONDS, Persona, Turn
 from .platform_logging import log_event
@@ -215,68 +220,111 @@ class _RecordedInputSegment:
     recording_end_sample: int
 
 
-class _EvidenceRecorder(AudioBufferProcessor):
-    """Expose Pipecat's canonical recording cursor to the transcript."""
+@dataclass
+class _RecordedTrack:
+    """How far one channel of the recording has been written.
 
-    def __init__(self, **kwargs: Any) -> None:
+    ``written_through`` is the sample the next audio follows, which is not
+    the same as the length of the buffer: a channel the conversation has
+    left quiet keeps its cursor where its own last audio ended while the
+    other channel runs on.
+
+    ``owed`` is every stretch of quiet the recorder put there itself, at
+    a re-anchor, and can still take back — each as the sample it ends at
+    and how much of it is left, oldest first. A channel can fall behind
+    twice before it catches up at all, and a burst that could only reach
+    the newer of the two would leave the older one in the recording for
+    good.
+    """
+
+    written_through: int | None = None
+    owed: list[tuple[int, int]] = field(default_factory=list)
+
+
+LONGEST_QUIET_LEDGER = 64
+"""How many outstanding stretches of re-anchor quiet one channel keeps.
+
+Every real silence in a call opens one that will never be claimed, so
+the ledger is bounded and the oldest entries go first. Sixty-four is far
+more than the stalls of one call, and forgetting the oldest costs only
+the chance to close a gap opened minutes ago.
+"""
+
+
+RESYNC_TOLERANCE_SECONDS = 0.1
+"""How far a channel may run from its own transport clock before the
+recorder puts it back where the clock says.
+
+Under the tolerance the audio is written end to end. That is what keeps a
+jittery delivery — one frame late, the next one early — from chopping a
+single utterance into pieces, and it is why the recorder does not simply
+seek on every frame. Over it, the count and the clock disagree about the
+passing of time itself, and time wins: the audio goes where the transport
+says it belongs and the recording holds quiet across the difference.
+LiveKit's own in-process recorder re-anchors at the same tenth of a
+second.
+
+A channel that has run *ahead* of its clock is pulled back only into
+quiet the recorder itself wrote. Audio arriving faster than real time is
+a delivery that stalled and caught up, and the stall is why that quiet is
+there: the audio the burst carries was spoken while the line was silent,
+so taking the quiet back and closing the two together is what puts it
+where it was said. Real audio is never written over to obey a clock, so a
+channel with no quiet left to give back stays where it is — a sender
+genuinely producing more audio than time keeps all of it.
+"""
+
+
+class _EvidenceRecorder(AudioBufferProcessor):
+    """One recording, on one timeline, written by the clock and not by the
+    count.
+
+    Pipecat's recorder keeps time by buffer length: whichever side writes
+    first pads the other side up to its own position. That makes a file
+    whose two channels are the same length and whose content is in the
+    wrong place — the agent's reply lands wherever the persona's buffer
+    had already reached, and the lead accumulates, so the whole recording
+    slides later than the call it came from.
+
+    This recorder places every frame where its transport says it happened.
+    The agent's audio goes at the instant it arrived at the transport; the
+    persona's goes at the instant the transport plays it out, which is
+    after the transport's own pacing and not when the speech leg made it.
+    Silence is whatever nothing was written over. Both channels read one
+    clock, so a distance measured across them on the file is the distance
+    the caller lived through — which is what every latency egma reads off
+    a recording claims to be.
+    """
+
+    def __init__(self, *, real_time: bool = True, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         # Pipecat's recorder clears its resampler after 0.2s of *wall-clock*
         # quiet, to keep stale history out of audio that really did pause.
-        # This recorder must not: the map from a turn's source time to its
-        # place in the recording is read out of that same resampler's
-        # `delay()`, and a clear discards samples the delay had accounted
-        # for. The map then carries a hole, and a turn boundary landing in
-        # it cannot be placed at all — which is a SpeechFault and a failed
-        # simulation, over audio the recording actually holds.
-        #
-        # The trigger is wall-clock, not conversation: a loaded machine
-        # deschedules this process past 0.2s between two frames of one
-        # continuous utterance. Nothing paused; only the CPU did.
+        # This recorder must not: a clear discards the samples the resampler
+        # still holds, which is audio the recording then never carries at
+        # all, and the trigger is wall-clock rather than conversation — a
+        # loaded machine deschedules this process past 0.2s between two
+        # frames of one continuous utterance. Nothing paused; only the CPU
+        # did.
         #
         # `None` is Pipecat's own documented answer — its docstring
         # recommends it "for telephony providers that have irregular gaps
         # between chunks", which is this case exactly, and the artefact it
         # protects against needs a real silence to appear across.
         self._input_resampler = SOXRStreamAudioResampler(clear_after_secs=None)
-        # The persona's channel, for the same reason and with a different
-        # symptom. Nothing reads a delay on this side — `bot_position` counts
-        # the buffer — so a clear here raises nothing at all. It simply drops
-        # the tail of an utterance out of the recording a customer plays
-        # back, on any machine, at any load, and says nothing about it. The
-        # agent's side at least failed loudly.
         self._output_resampler = SOXRStreamAudioResampler(clear_after_secs=None)
         self._recording_ready = asyncio.Condition()
-        self._resampled_input: dict[int, tuple[int, float]] = {}
         self._processed_source_end = Fraction(0)
+        self._represented_source_end = Fraction(0)
         self._last_input_frame_duration = Fraction(0)
         self._input_segments: list[_RecordedInputSegment] = []
         self._closing_source_end: MediaPosition | None = None
         self._input_closed = False
-
-    async def _resample_input_audio(self, frame: InputAudioRawFrame) -> bytes:
-        audio = await super()._resample_input_audio(frame)
-        self._resampled_input[frame.id] = (
-            len(audio) // 2,
-            self._input_resampler_delay(),
-        )
-        return audio
-
-    def _input_resampler_delay(self) -> float:
-        """Read the exact pending output from Pipecat's pinned recorder."""
-        resampler = getattr(self, "_input_resampler", None)
-        if not isinstance(resampler, SOXRStreamAudioResampler):
-            raise SpeechFault(
-                "the pinned pipecat release changed its recording resampler"
-            )
-        stream = getattr(resampler, "_soxr_stream", None)
-        if stream is None:
-            return 0.0
-        delay = float(stream.delay())
-        if delay < 0 or not math.isfinite(delay):
-            raise SpeechFault(
-                "the pinned pipecat release returned an invalid resampler delay"
-            )
-        return delay
+        self._agent = _RecordedTrack()
+        self._persona = _RecordedTrack()
+        self._origin_seconds: float | None = None
+        self._origin_unix_nano = 0
+        self._real_time = real_time
 
     @staticmethod
     def _source_range(
@@ -291,61 +339,261 @@ class _EvidenceRecorder(AudioBufferProcessor):
             raise SpeechFault("agent audio reached the recorder without its position")
         return cast(tuple[MediaPosition, MediaPosition], source_range)
 
+    @staticmethod
+    def _transport_time(frame: Frame, named: str, whose: str) -> float:
+        stamped = transport_time(frame, named)
+        if stamped is None:
+            raise SpeechFault(
+                f"{whose} reached the recorder without its transport time"
+            )
+        return stamped
+
+    async def start_recording(self) -> None:
+        """Begin a recording, and a timeline for it to be written on.
+
+        Pipecat empties its buffers from both ends of a recording, so the
+        timeline is started here rather than there: the recording's zero
+        is read after the pipeline has stopped, by whoever files the
+        audio, and a zero cleared on the way out is a whole transcript
+        stamped from the moment the line opened instead of from the first
+        sample of the call.
+        """
+        starting = not self._recording
+        await super().start_recording()
+        if starting:
+            self._agent = _RecordedTrack()
+            self._persona = _RecordedTrack()
+            self._origin_seconds = None
+            self._origin_unix_nano = 0
+
     async def _process_recording(self, frame: Frame) -> None:
-        # Input audio is a Pipecat SystemFrame while output audio is a normal
-        # frame, so Pipecat can present both to this processor at once. Keep
-        # each recorder update and its position map indivisible.
+        """Put one frame on the recording, at the time it happened.
+
+        Pipecat's own placement is replaced outright rather than extended:
+        its padding rule is the defect, and running both would pad the
+        very gaps this fills. Input audio is a Pipecat SystemFrame while
+        output audio is an ordinary frame, so Pipecat can present both to
+        this processor at once. Keep each write and its position map
+        indivisible.
+        """
         async with self._recording_ready:
-            if isinstance(frame, InputAudioRawFrame) and self._input_closed:
-                raise SpeechFault("agent audio arrived after its recorded input ended")
-            await super()._process_recording(frame)
-            if not isinstance(frame, InputAudioRawFrame):
+            if isinstance(frame, InputAudioRawFrame):
+                await self._record_agent(frame)
+            elif isinstance(frame, OutputAudioRawFrame):
+                await self._record_persona(frame)
+            elif isinstance(frame, InterruptionFrame):
+                self._drop_what_was_never_played(frame)
+            else:
                 return
-            source_start, source_end = self._source_range(frame)
-            if source_start != self._processed_source_end or source_end < source_start:
-                raise SpeechFault("agent audio reached the recorder out of order")
-            try:
-                written, pending = self._resampled_input.pop(frame.id)
-            except KeyError as changed:
-                raise SpeechFault(
-                    "the pinned pipecat release skipped its recording resampler"
-                ) from changed
-            if written:
-                represented_end_samples = float(source_end * self.sample_rate) - pending
-                rounded_end = round(represented_end_samples)
-                if abs(represented_end_samples - rounded_end) > 1e-6:
-                    raise SpeechFault(
-                        "pipecat's recording resampler returned an invalid position"
-                    )
-                represented_end = Fraction(rounded_end, self.sample_rate)
-                represented_start = represented_end - Fraction(
-                    written, self.sample_rate
-                )
-                recording_end = len(self._user_audio_buffer) // 2
-                recording_start = recording_end - written
-                if represented_start < 0 or represented_end > source_end:
-                    raise SpeechFault(
-                        "pipecat's recording resampler returned an invalid position"
-                    )
-                if (
-                    self._input_segments
-                    and represented_start < self._input_segments[-1].source_end
-                ):
-                    raise SpeechFault(
-                        "pipecat's recording resampler moved agent audio backwards"
-                    )
-                self._input_segments.append(
-                    _RecordedInputSegment(
-                        source_start=represented_start,
-                        source_end=represented_end,
-                        recording_start_sample=recording_start,
-                        recording_end_sample=recording_end,
-                    )
-                )
-            self._processed_source_end = source_end
-            self._last_input_frame_duration = source_end - source_start
-            self._maybe_close_input()
             self._recording_ready.notify_all()
+
+    async def _record_agent(self, frame: InputAudioRawFrame) -> None:
+        """The agent's audio, where it arrived at the transport."""
+        if self._input_closed:
+            raise SpeechFault("agent audio arrived after its recorded input ended")
+        source_start, source_end = self._source_range(frame)
+        if source_start != self._processed_source_end or source_end < source_start:
+            raise SpeechFault("agent audio reached the recorder out of order")
+        arrived = self._transport_time(frame, TRANSPORT_ARRIVAL, "agent audio")
+        audio = await self._resample_input_audio(frame)
+        written = len(audio) // 2
+        if written:
+            # A resampler emits its samples in order and holds part of a
+            # frame back to give out with the next one. So what it just
+            # returned is the audio that *ends* with this frame rather
+            # than the audio that starts with it, and one chunk after
+            # another covers the source with no gap and no overlap,
+            # trailing it by whatever is held. Placing each chunk by its
+            # end keeps every sample inside the frame it came from, and
+            # carrying the boundary forward keeps the map from a turn's
+            # source time to its place in the recording whole from one end
+            # of a call to the other.
+            through = arrived + float(source_end - source_start)
+            began, ended = self._place(
+                self._user_audio_buffer,
+                self._agent,
+                through - written / self.sample_rate,
+                audio,
+            )
+            represented_start = self._represented_source_end
+            represented_end = represented_start + Fraction(written, self.sample_rate)
+            if represented_end > source_end:
+                raise SpeechFault(
+                    "pipecat's recording resampler returned more audio than it was fed"
+                )
+            self._represented_source_end = represented_end
+            self._input_segments.append(
+                _RecordedInputSegment(
+                    source_start=represented_start,
+                    source_end=represented_end,
+                    recording_start_sample=began,
+                    recording_end_sample=ended,
+                )
+            )
+        self._processed_source_end = source_end
+        self._last_input_frame_duration = source_end - source_start
+        self._maybe_close_input()
+
+    async def _record_persona(self, frame: OutputAudioRawFrame) -> None:
+        """The persona's audio, where the transport plays it out."""
+        played = self._transport_time(frame, TRANSPORT_PLAYOUT, "persona audio")
+        audio = await self._resample_output_audio(frame)
+        written = len(audio) // 2
+        if not written:
+            return
+        through = played + frame.num_frames / frame.sample_rate
+        self._place(
+            self._bot_audio_buffer,
+            self._persona,
+            through - written / self.sample_rate,
+            audio,
+        )
+
+    def _drop_what_was_never_played(self, frame: Frame) -> None:
+        """Forget persona audio the transport threw away unheard.
+
+        An interruption clears whatever the transport had queued and had
+        not yet played. A recording that kept it would say the persona
+        spoke for as long as the queue was deep, and would start the next
+        wait that much late.
+
+        Cutting the tail off also settles the quiet this channel was
+        owed: some of that quiet may have gone with the tail, and quiet
+        given back out of a ledger describing a recording that no longer
+        exists would pull the channel back over audio that was heard.
+        """
+        cleared = transport_time(frame, TRANSPORT_PLAYOUT)
+        if cleared is None or self._origin_seconds is None:
+            return
+        heard_through = self._sample_at(cleared)
+        written_through = self._persona.written_through
+        if written_through is None or written_through <= heard_through:
+            return
+        del self._bot_audio_buffer[heard_through * 2 :]
+        self._persona.written_through = heard_through
+        self._persona.owed.clear()
+
+    def _place(
+        self,
+        buffer: bytearray,
+        track: _RecordedTrack,
+        starts_at: float,
+        audio: bytes,
+    ) -> tuple[int, int]:
+        """Write one channel's audio where its transport clock puts it.
+
+        The first frame anybody writes fixes the recording's own zero, so
+        a file always starts with the audio that opened the call.
+        """
+        if self._origin_seconds is None:
+            self._origin_seconds = starts_at
+            self._origin_unix_nano = self._wall_clock_zero(starts_at)
+        wanted = self._sample_at(starts_at)
+        cursor = track.written_through
+        if cursor is None:
+            began = wanted
+        elif wanted - cursor > self._tolerance:
+            # Behind its clock: the line was quiet, and the recording says
+            # so. Remember the quiet, in case what follows shows it was a
+            # delivery holding audio back rather than a far end holding
+            # its tongue.
+            track.owed.append((wanted, wanted - cursor))
+            del track.owed[:-LONGEST_QUIET_LEDGER]
+            began = wanted
+        elif cursor - wanted > self._tolerance:
+            self._give_the_quiet_back(buffer, track, cursor - wanted)
+            began = cast(int, track.written_through)
+        else:
+            began = cursor
+        ended = began + len(audio) // 2
+        self._write(buffer, began, audio)
+        track.written_through = ended
+        return began, ended
+
+    def _give_the_quiet_back(
+        self, buffer: bytearray, track: _RecordedTrack, ahead: int
+    ) -> None:
+        """Close up quiet the recorder wrote that the audio has caught up on.
+
+        A channel writing faster than its clock has been fed a burst, and
+        a burst is a delivery catching up on a stall. The stalls are the
+        quiet on the ledger, so the burst is given as much of it back as
+        it needs — the newest stretch first, because that is the stall it
+        is catching up on, and back through older ones while it is still
+        ahead. Only quiet this recorder put there is taken, so nothing a
+        listener could hear is written over. Closing a newer stretch does
+        not move an older one, which is why the ledger is walked from the
+        end.
+        """
+        while ahead > 0 and track.owed:
+            ends_at, owed = track.owed[-1]
+            given = min(ahead, owed)
+            del buffer[(ends_at - given) * 2 : ends_at * 2]
+            if track is self._agent:
+                # The agent's channel is the one a turn is looked up on,
+                # so closing quiet on it moves every place already mapped
+                # past the quiet. The persona's channel carries no map.
+                for position, segment in enumerate(self._input_segments):
+                    if segment.recording_start_sample >= ends_at:
+                        self._input_segments[position] = replace(
+                            segment,
+                            recording_start_sample=(
+                                segment.recording_start_sample - given
+                            ),
+                            recording_end_sample=segment.recording_end_sample - given,
+                        )
+            if track.written_through is not None:
+                track.written_through -= given
+            ahead -= given
+            if given < owed:
+                track.owed[-1] = (ends_at - given, owed - given)
+            else:
+                track.owed.pop()
+
+    def _wall_clock_zero(self, starts_at: float) -> int:
+        """The wall-clock instant the recording's first sample stands for.
+
+        A real-time transport stamps the clock this machine reads, so the
+        distance from the stamp to now is the distance from the first
+        sample to now, whatever the pipeline did in between. Reading the
+        wall clock at placement instead would charge the recording every
+        millisecond the frame spent getting here, and every span with it.
+
+        A media clock counts audio rather than seconds, so nothing can be
+        derived from it and the moment of placement is the only answer
+        there is.
+        """
+        if not self._real_time:
+            return _now()
+        return _now() - round((_monotonic() - starts_at) * 1_000_000_000)
+
+    def _sample_at(self, seconds: float) -> int:
+        """One instant on the transport's clock, as a recording position.
+
+        Audio stamped before the recording's own zero is held at its
+        start. Only a frame that crossed the pipeline beside the very
+        first one can be, and holding it there costs the interleave of
+        those two rather than anything a listener would find.
+        """
+        origin = self._origin_seconds
+        if origin is None or not self.sample_rate:
+            return 0
+        return max(0, round((seconds - origin) * self.sample_rate))
+
+    @property
+    def _tolerance(self) -> int:
+        return round(RESYNC_TOLERANCE_SECONDS * self.sample_rate)
+
+    @staticmethod
+    def _write(buffer: bytearray, at_sample: int, audio: bytes) -> None:
+        """Audio at one position, with quiet wherever nothing was written."""
+        at = at_sample * 2
+        if len(buffer) < at:
+            buffer.extend(bytes(at - len(buffer)))
+        through = at + len(audio)
+        if len(buffer) < through:
+            buffer.extend(bytes(through - len(buffer)))
+        buffer[at:through] = audio
 
     async def close_input_at(self, source_end: MediaPosition) -> None:
         """Close input after the recorder has written every earlier frame."""
@@ -367,19 +615,32 @@ class _EvidenceRecorder(AudioBufferProcessor):
             self._input_closed = True
 
     @property
+    def started_unix_nano(self) -> int:
+        """When the recording's own zero was, on the wall clock.
+
+        Every transcript position is an offset from here, so this is what
+        makes a seek into the file land on the words the turn names.
+        """
+        return self._origin_unix_nano
+
+    @property
     def bot_position(self) -> MediaPosition:
-        if not self.sample_rate:
+        """Where the persona's audio has been played out through."""
+        if not self.sample_rate or self._persona.written_through is None:
             return Fraction(0)
-        # Pipecat 1.7.0 has no public current-output cursor. This one access is
-        # pinned in uv.lock and covered by the frame-level alignment test.
-        return Fraction(len(self._bot_audio_buffer) // 2, self.sample_rate)
+        return Fraction(self._persona.written_through, self.sample_rate)
 
     @property
     def position(self) -> MediaPosition:
+        """The last instant either side put audio on the recording."""
         if not self.sample_rate:
             return Fraction(0)
-        samples = max(len(self._user_audio_buffer), len(self._bot_audio_buffer)) // 2
-        return Fraction(samples, self.sample_rate)
+        written = [
+            track.written_through
+            for track in (self._agent, self._persona)
+            if track.written_through is not None
+        ]
+        return Fraction(max(written, default=0), self.sample_rate)
 
     async def agent_interval(
         self,
@@ -388,7 +649,7 @@ class _EvidenceRecorder(AudioBufferProcessor):
         *,
         observed_through: MediaPosition,
     ) -> tuple[MediaPosition, MediaPosition]:
-        """Place one agent turn on Pipecat's canonical recorded track."""
+        """Place one agent turn on the recording's own timeline."""
         async with self._recording_ready:
             while True:
                 if self._processed_source_end < observed_through:
@@ -768,7 +1029,9 @@ class _Timeline(FrameProcessor):
         elif isinstance(frame, TTSStoppedFrame):
             await self._conductor.persona_stopped()
         elif isinstance(frame, InterruptionFrame):
-            self._conductor.persona_interrupted()
+            self._conductor.persona_interrupted(
+                heard_through=self._recorder.bot_position
+            )
         elif isinstance(frame, RemoteParticipantLeftFrame):
             frame.completed.set()
             self._conductor.media_advanced()
@@ -951,8 +1214,12 @@ class VoiceConductor:
         model = _PersonaLLMService(persona=self._persona)
         replies = _PersonaReplyGate(service=model, conductor=self)
         brain = _PersonaBrain(persona=self._persona, conductor=self, replies=replies)
-        recorder = _EvidenceRecorder(num_channels=2, auto_start_recording=True)
         media = self._media
+        recorder = _EvidenceRecorder(
+            num_channels=2,
+            auto_start_recording=True,
+            real_time=media.real_time,
+        )
         timeline = _Timeline(self, media, recorder)
 
         @recorder.event_handler("on_track_audio_data")
@@ -1083,7 +1350,7 @@ class VoiceConductor:
             return
         self.audio = AudioFacts(
             recording=reference,
-            started_unix_nano=self._opened_unix_nano,
+            started_unix_nano=self._recording_began_unix_nano,
         )
 
     async def _run(self) -> None:
@@ -1262,11 +1529,20 @@ class VoiceConductor:
         self._persona_ended = recorded_until
         self.media_advanced()
 
-    def persona_interrupted(self) -> None:
-        """Start waiting from the last audio heard before an interruption."""
+    def persona_interrupted(self, *, heard_through: MediaPosition) -> None:
+        """Start waiting from the last audio heard before an interruption.
+
+        The transport throws away what it had queued and not yet played,
+        so the persona stopped where the recording stops holding it — not
+        where the speech leg had already run to.
+        """
         ended = self._persona_ended
         if ended is None:
             return
+        began = self._persona_began
+        ended = min(ended, heard_through)
+        if began is not None and ended < began:
+            ended = began
         self._record.persona_last_stopped_at = ended
         self._record.quiet_since = max(self._record.quiet_since, ended)
         self._pending_persona_text = None
@@ -1350,7 +1626,22 @@ class VoiceConductor:
 
     def _at(self, position: MediaPosition) -> int:
         nanos = position.numerator * 1_000_000_000 // position.denominator
-        return self._opened_unix_nano + nanos
+        return self._recording_began_unix_nano + nanos
+
+    @property
+    def _recording_began_unix_nano(self) -> int:
+        """The instant the recording's own zero stands for.
+
+        Positions are offsets into the recording, so a transcript span
+        only seeks to the right words while this is the wall-clock time
+        of the recording's first sample. Until the first audio is placed
+        there is no recording yet, and the moment the line was opened is
+        the closest honest answer.
+        """
+        recorder = self._recorder
+        if recorder is not None and recorder.started_unix_nano:
+            return recorder.started_unix_nano
+        return self._opened_unix_nano
 
     def media_advanced(self) -> None:
         self._activity.set()
@@ -1518,3 +1809,8 @@ def _seconds(value: float) -> Fraction:
 
 def _now() -> int:
     return time.time_ns()
+
+
+def _monotonic() -> float:
+    """The clock a real-time transport stamps its frames from."""
+    return time.monotonic()
