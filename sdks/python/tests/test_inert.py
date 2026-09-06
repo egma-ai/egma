@@ -2,7 +2,10 @@
 
 Not "adds negligible latency", not "wraps harmlessly" — **nothing**. The
 same tool objects, no side table written, not one message put on the
-wire, and no connect the agent was not already making. Everything else
+wire, no exporter built, and no connect the agent was not already
+making. The exporter matters as much as the rest: ``egma.simulation``
+sends a room's spans to Egma, and a production room that built one would
+export a real customer conversation as a simulation. Everything else
 this SDK does is worth having only if a customer can install it and have
 their production behavior be literally unchanged, so this file comes first
 and is read as the whole safety argument.
@@ -25,7 +28,7 @@ from livekit.agents import AgentTask, ConversationItemAddedEvent, function_tool
 from livekit.agents.llm import AgentHandoff
 from room_stub import PRODUCTION_ROOM, SIMULATION_ROOM, StubContext, StubRoom
 
-from egma import mockable
+from egma import export, simulation
 
 NOT_A_SIMULATION_ROOM = [
     pytest.param("", id="no room name at all"),
@@ -72,7 +75,7 @@ async def test_a_room_egma_did_not_name_is_left_alone(room_name, metadata, sessi
     room = StubRoom(connected=False, mocked_tools=("check_calendar",))
     ctx = StubContext(room, room_name, metadata)
 
-    await mockable(agent, ctx, session)
+    await simulation(agent, ctx, session)
 
     # The very same objects. Not equal, not equivalent — the identical
     # callables the agent was built with, which is the only claim that
@@ -91,6 +94,10 @@ async def test_a_room_egma_did_not_name_is_left_alone(room_name, metadata, sessi
     assert ctx.connect_calls == 0
     # Nor was anything left listening for somebody to walk in.
     assert room.listeners == {}
+    # And no exporter was built, so this conversation cannot reach Egma
+    # as somebody's simulation.
+    assert export._state is None
+    assert ctx.shutdown_callbacks == []
 
 
 @pytest.mark.parametrize("metadata", THE_CUSTOMER_S_OWN_METADATA)
@@ -114,20 +121,21 @@ async def test_the_customers_dispatch_metadata_is_never_read_as_an_instruction(
     room = StubRoom(connected=False, mocked_tools=("check_calendar",))
     ctx = StubContext(room, PRODUCTION_ROOM, metadata)
 
-    await mockable(agent, ctx, session)
+    await simulation(agent, ctx, session)
 
     assert couriers_on(session, agent) == {}
     assert room.asked == []
     assert ctx.connect_calls == 0
+    assert export._state is None
 
 
-async def test_a_production_handoff_stays_inert_after_mockable_returns(session):
+async def test_a_production_handoff_stays_inert_after_the_verb_returns(session):
     """A production room also means no listener waiting to wrap a later task."""
     agent = ReceptionAgent()
     task = ProductionTask()
     room = StubRoom(connected=False)
 
-    await mockable(agent, StubContext(room, PRODUCTION_ROOM), session)
+    await simulation(agent, StubContext(room, PRODUCTION_ROOM), session)
     session.update_agent(task)
     session.emit(
         "conversation_item_added",
@@ -139,6 +147,7 @@ async def test_a_production_handoff_stays_inert_after_mockable_returns(session):
     assert couriers_on(session, task) == {}
     assert await task.book_appointment("Tuesday") == "really booked Tuesday"
     assert room.asked == []
+    assert export._state is None
 
 
 async def test_a_production_room_is_answered_without_a_job_room_object(session):
@@ -154,14 +163,17 @@ async def test_a_production_room_is_answered_without_a_job_room_object(session):
     ctx = StubContext(room, PRODUCTION_ROOM)
     ctx.job.room = None
 
-    await mockable(agent, ctx, session)
+    await simulation(agent, ctx, session)
 
     assert couriers_on(session, agent) == {}
     assert room.asked == []
     assert ctx.connect_calls == 0
+    assert export._state is None
 
 
-async def test_an_agent_with_no_tools_still_reports_and_wraps_nothing(session):
+async def test_an_agent_with_no_tools_still_reports_and_wraps_nothing(
+    session, egma_export
+):
     """The census is sent even when it is empty.
 
     An agent with no tools is a fact egma wants on the record — it is how
@@ -173,7 +185,7 @@ async def test_an_agent_with_no_tools_still_reports_and_wraps_nothing(session):
     agent = ToollessAgent()
     room = StubRoom()
 
-    await mockable(agent, StubContext(room, SIMULATION_ROOM), session)
+    await simulation(agent, StubContext(room, SIMULATION_ROOM), session)
 
     assert [asked.method for asked in room.asked] == ["egma.hello"]
     assert room.asked[0].body["tools"] == []
