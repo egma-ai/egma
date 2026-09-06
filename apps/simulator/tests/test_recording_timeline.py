@@ -13,6 +13,7 @@ recorder that reads the clock puts it where it arrived.
 from __future__ import annotations
 
 import sys
+import time
 from array import array
 from fractions import Fraction
 
@@ -25,13 +26,20 @@ from pipecat.frames.frames import (
 )
 
 from egma_simulator import conductor as conductor_module
-from egma_simulator.media import arrived_at, played_out_at
+from egma_simulator.media import (
+    TRANSPORT_ARRIVAL,
+    arrived_at,
+    arrived_now,
+    played_out_at,
+    transport_time,
+)
 
 BAND = 24_000
 """The recording's band, and the band both sides are fed at, so nothing
 below turns on a resampler's own rounding."""
 
 FRAME_SECONDS = 0.02
+RESYNC_TOLERANCE = conductor_module.RESYNC_TOLERANCE_SECONDS
 LOUD = 8_000
 """One sample value nothing else writes, so a track's own audio can be
 told apart from the quiet the recorder puts around it."""
@@ -47,10 +55,15 @@ def quiet(seconds: float = FRAME_SECONDS) -> bytes:
     return bytes(2 * round(seconds * BAND))
 
 
-async def recorder_started() -> conductor_module._EvidenceRecorder:
+async def recorder_started(
+    *, real_time: bool = True
+) -> conductor_module._EvidenceRecorder:
     """One recorder, recording, with nothing on either track yet."""
     made = conductor_module._EvidenceRecorder(
-        num_channels=2, sample_rate=BAND, auto_start_recording=True
+        num_channels=2,
+        sample_rate=BAND,
+        auto_start_recording=True,
+        real_time=real_time,
     )
     made._update_sample_rate(StartFrame(audio_out_sample_rate=BAND))
     await made.start_recording()
@@ -304,3 +317,141 @@ async def test_audio_the_transport_threw_away_is_not_in_the_recording(
 
     persona_track, _agent_track = tracks(recorder)
     assert speaking(persona_track) == pytest.approx((0.0, 0.4), abs=0.01)
+
+
+async def test_a_delivery_that_stalls_and_catches_up_stays_on_time() -> None:
+    """A burst is a stall catching up, and the recording holds it whole.
+
+    Pipecat queues inbound audio, so a machine that stops running the
+    loop for a second wakes to a second of frames and stamps them all at
+    once. Nothing was quiet: the agent spoke through the stall and the
+    audio is only now being handed over.
+
+    A recorder that opened a second of quiet for the stall and then wrote
+    the burst after it would put a second of nothing where the agent was
+    talking, *and* leave the channel a second late for the rest of the
+    call — the very defect this recorder exists to fix, walked back in
+    through delivery. So the quiet it opened is given back to the burst
+    as the burst catches up, and the channel comes out where its clock
+    says it is.
+    """
+    recorder = await recorder_started()
+
+    frames = 50
+    for step in range(frames):
+        await agent_said(
+            recorder,
+            arriving_at=step * FRAME_SECONDS,
+            source_from=step * FRAME_SECONDS,
+            audio=tone(),
+        )
+
+    # A second of nothing running, then a second of frames at once.
+    woke_at = frames * FRAME_SECONDS + 1.0
+    for step in range(frames):
+        await agent_said(
+            recorder,
+            arriving_at=woke_at + step * 0.0002,
+            source_from=(frames + step) * FRAME_SECONDS,
+            audio=tone(),
+        )
+
+    # Delivery back to its senses.
+    for step in range(frames):
+        await agent_said(
+            recorder,
+            arriving_at=woke_at + FRAME_SECONDS * (step + 1),
+            source_from=(2 * frames + step) * FRAME_SECONDS,
+            audio=tone(),
+        )
+
+    _persona_track, agent_track = tracks(recorder)
+    assert len(audible(agent_track)) == 1, "the recording opened a hole in speech"
+    arrived_through = woke_at + FRAME_SECONDS * frames
+    assert speaking(agent_track)[1] == pytest.approx(
+        arrived_through, abs=RESYNC_TOLERANCE
+    )
+
+
+async def test_the_recordings_zero_outlives_the_recording() -> None:
+    """Whoever files the audio reads the zero after the pipeline stops.
+
+    Pipecat empties its buffers at both ends of a recording. If the
+    timeline went with them, the file would be filed with the moment the
+    line opened as its zero, and every transcript position — measured
+    from the first sample — would seek past the words it names by the
+    whole of the wait for the first frame.
+    """
+    recorder = await recorder_started()
+    await agent_said(
+        recorder, arriving_at=1.0, source_from=0.0, audio=tone()
+    )
+
+    zero = recorder.started_unix_nano
+    assert zero
+
+    await recorder.stop_recording()
+    assert recorder.started_unix_nano == zero
+
+
+def test_a_real_time_transport_stamps_the_frames_first_sample(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clock read when a frame is whole has already run its length.
+
+    The stamp names the frame's first sample, because that is what the
+    recorder places. Reading the clock and writing it down unchanged
+    charges the recording one frame per frame, and every latency read off
+    it carries the charge.
+    """
+    monkeypatch.setattr(time, "monotonic", lambda: 1000.0)
+    frame = InputAudioRawFrame(audio=tone(), sample_rate=BAND, num_channels=1)
+
+    arrived_now(frame)
+
+    assert transport_time(frame, TRANSPORT_ARRIVAL) == pytest.approx(
+        1000.0 - FRAME_SECONDS
+    )
+
+
+async def test_the_wall_clock_zero_is_when_the_first_sample_arrived(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The zero is derived from the stamp, not from when work got done.
+
+    A frame can wait in the pipeline before the recorder sees it. Reading
+    the wall clock at that moment would move the recording's zero by the
+    wait, and with it every span the transcript stamps — against an
+    agent's own spans, which waited for nothing.
+    """
+    filed_at = 1_800_000_000_000_000_000
+    monkeypatch.setattr(conductor_module, "_now", lambda: filed_at)
+    monkeypatch.setattr(conductor_module, "_monotonic", lambda: 1005.0)
+
+    recorder = await recorder_started()
+    await agent_said(
+        recorder, arriving_at=1000.0, source_from=0.0, audio=tone()
+    )
+
+    assert recorder.started_unix_nano == filed_at - 5_000_000_000
+
+
+async def test_a_media_clock_has_no_wall_clock_instant_to_give(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scripted far end counts audio, not seconds.
+
+    Its stamps are positions in a stream nobody lived through, so no
+    instant can be derived from them and the moment of filing is the only
+    honest answer.
+    """
+    filed_at = 1_800_000_000_000_000_000
+    monkeypatch.setattr(conductor_module, "_now", lambda: filed_at)
+    monkeypatch.setattr(conductor_module, "_monotonic", lambda: 1005.0)
+
+    recorder = await recorder_started(real_time=False)
+    await agent_said(
+        recorder, arriving_at=1000.0, source_from=0.0, audio=tone()
+    )
+
+    assert recorder.started_unix_nano == filed_at

@@ -228,9 +228,14 @@ class _RecordedTrack:
     the same as the length of the buffer: a channel the conversation has
     left quiet keeps its cursor where its own last audio ended while the
     other channel runs on.
+
+    ``quiet_owed`` is how much of the quiet at ``quiet_ends_at`` the
+    recorder put there itself, at a re-anchor, and can still take back.
     """
 
     written_through: int | None = None
+    quiet_owed: int = 0
+    quiet_ends_at: int = 0
 
 
 RESYNC_TOLERANCE_SECONDS = 0.1
@@ -246,11 +251,14 @@ says it belongs and the recording holds quiet across the difference.
 LiveKit's own in-process recorder re-anchors at the same tenth of a
 second.
 
-A channel that runs *ahead* of its clock is never pulled back. Audio
-arriving faster than real time is a delivery that stalled and caught up,
-and a second of speech is a second of speech whenever it reaches here;
-overwriting it to obey the clock would destroy evidence to correct a
-timestamp.
+A channel that has run *ahead* of its clock is pulled back only into
+quiet the recorder itself wrote. Audio arriving faster than real time is
+a delivery that stalled and caught up, and the stall is why that quiet is
+there: the audio the burst carries was spoken while the line was silent,
+so taking the quiet back and closing the two together is what puts it
+where it was said. Real audio is never written over to obey a clock, so a
+channel with no quiet left to give back stays where it is — a sender
+genuinely producing more audio than time keeps all of it.
 """
 
 
@@ -275,7 +283,7 @@ class _EvidenceRecorder(AudioBufferProcessor):
     a recording claims to be.
     """
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, *, real_time: bool = True, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         # Pipecat's recorder clears its resampler after 0.2s of *wall-clock*
         # quiet, to keep stale history out of audio that really did pause.
@@ -303,6 +311,7 @@ class _EvidenceRecorder(AudioBufferProcessor):
         self._persona = _RecordedTrack()
         self._origin_seconds: float | None = None
         self._origin_unix_nano = 0
+        self._real_time = real_time
 
     @staticmethod
     def _source_range(
@@ -326,13 +335,23 @@ class _EvidenceRecorder(AudioBufferProcessor):
             )
         return stamped
 
-    def _reset_recording(self) -> None:
-        """Start the timeline over with the buffers Pipecat just emptied."""
-        super()._reset_recording()
-        self._agent = _RecordedTrack()
-        self._persona = _RecordedTrack()
-        self._origin_seconds = None
-        self._origin_unix_nano = 0
+    async def start_recording(self) -> None:
+        """Begin a recording, and a timeline for it to be written on.
+
+        Pipecat empties its buffers from both ends of a recording, so the
+        timeline is started here rather than there: the recording's zero
+        is read after the pipeline has stopped, by whoever files the
+        audio, and a zero cleared on the way out is a whole transcript
+        stamped from the moment the line opened instead of from the first
+        sample of the call.
+        """
+        starting = not self._recording
+        await super().start_recording()
+        if starting:
+            self._agent = _RecordedTrack()
+            self._persona = _RecordedTrack()
+            self._origin_seconds = None
+            self._origin_unix_nano = 0
 
     async def _process_recording(self, frame: Frame) -> None:
         """Put one frame on the recording, at the time it happened.
@@ -449,15 +468,79 @@ class _EvidenceRecorder(AudioBufferProcessor):
         """
         if self._origin_seconds is None:
             self._origin_seconds = starts_at
-            self._origin_unix_nano = _now()
-        began = self._sample_at(starts_at)
-        written_through = track.written_through
-        if written_through is not None and began - written_through <= self._tolerance:
-            began = written_through
+            self._origin_unix_nano = self._wall_clock_zero(starts_at)
+        wanted = self._sample_at(starts_at)
+        cursor = track.written_through
+        if cursor is None:
+            began = wanted
+        elif wanted - cursor > self._tolerance:
+            # Behind its clock: the line was quiet, and the recording says
+            # so. Remember the quiet, in case what follows shows it was a
+            # delivery holding audio back rather than a far end holding
+            # its tongue.
+            track.quiet_owed = wanted - cursor
+            track.quiet_ends_at = wanted
+            began = wanted
+        elif cursor - wanted > self._tolerance:
+            self._give_the_quiet_back(buffer, track, cursor - wanted)
+            began = cast(int, track.written_through)
+        else:
+            began = cursor
         ended = began + len(audio) // 2
         self._write(buffer, began, audio)
         track.written_through = ended
         return began, ended
+
+    def _give_the_quiet_back(
+        self, buffer: bytearray, track: _RecordedTrack, ahead: int
+    ) -> None:
+        """Close up quiet the recorder wrote that the audio has caught up on.
+
+        A channel writing faster than its clock has been fed a burst, and
+        a burst is a delivery catching up on a stall. The stall is the
+        quiet at ``quiet_ends_at``, so the burst is given as much of it
+        back as it needs, and the recording holds the call end to end
+        again. Only quiet this recorder put there is taken, and only from
+        the one stretch it last put there, so nothing a listener could
+        hear is written over.
+        """
+        given = min(ahead, track.quiet_owed)
+        if given <= 0:
+            return
+        closed_from = (track.quiet_ends_at - given) * 2
+        del buffer[closed_from : track.quiet_ends_at * 2]
+        if track is self._agent:
+            # The agent's channel is the one a turn is looked up on, so
+            # closing quiet on it moves every place already mapped past
+            # the quiet. The persona's channel carries no such map.
+            for position, segment in enumerate(self._input_segments):
+                if segment.recording_start_sample >= track.quiet_ends_at:
+                    self._input_segments[position] = replace(
+                        segment,
+                        recording_start_sample=segment.recording_start_sample - given,
+                        recording_end_sample=segment.recording_end_sample - given,
+                    )
+        track.quiet_owed -= given
+        track.quiet_ends_at -= given
+        if track.written_through is not None:
+            track.written_through -= given
+
+    def _wall_clock_zero(self, starts_at: float) -> int:
+        """The wall-clock instant the recording's first sample stands for.
+
+        A real-time transport stamps the clock this machine reads, so the
+        distance from the stamp to now is the distance from the first
+        sample to now, whatever the pipeline did in between. Reading the
+        wall clock at placement instead would charge the recording every
+        millisecond the frame spent getting here, and every span with it.
+
+        A media clock counts audio rather than seconds, so nothing can be
+        derived from it and the moment of placement is the only answer
+        there is.
+        """
+        if not self._real_time:
+            return _now()
+        return _now() - round((_monotonic() - starts_at) * 1_000_000_000)
 
     def _sample_at(self, seconds: float) -> int:
         """One instant on the transport's clock, as a recording position.
@@ -1106,8 +1189,12 @@ class VoiceConductor:
         model = _PersonaLLMService(persona=self._persona)
         replies = _PersonaReplyGate(service=model, conductor=self)
         brain = _PersonaBrain(persona=self._persona, conductor=self, replies=replies)
-        recorder = _EvidenceRecorder(num_channels=2, auto_start_recording=True)
         media = self._media
+        recorder = _EvidenceRecorder(
+            num_channels=2,
+            auto_start_recording=True,
+            real_time=media.real_time,
+        )
         timeline = _Timeline(self, media, recorder)
 
         @recorder.event_handler("on_track_audio_data")
@@ -1697,3 +1784,8 @@ def _seconds(value: float) -> Fraction:
 
 def _now() -> int:
     return time.time_ns()
+
+
+def _monotonic() -> float:
+    """The clock a real-time transport stamps its frames from."""
+    return time.monotonic()

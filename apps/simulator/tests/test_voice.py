@@ -545,6 +545,49 @@ async def test_every_span_points_at_the_audio_it_names(
     )
 
 
+async def test_the_recording_is_stamped_from_its_own_first_sample(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The filed zero is the first sample, not the moment the line opened.
+
+    Every transcript position is an offset into the recording, so the
+    instant that zero stands for is what makes a seek land on the words a
+    turn names. The line opens first and the first frame arrives after
+    it, and the two are not the same moment.
+
+    The clock moves here on purpose. Pinning it, as the alignment test
+    above does to read positions off the audio, hides a zero that was
+    read at the wrong moment or thrown away before it was filed.
+    """
+    readings: list[int] = []
+    reading = 1_800_000_000_000_000_000
+
+    def a_clock_that_moves() -> int:
+        nonlocal reading
+        reading += 1_000_000_000
+        readings.append(reading)
+        return reading
+
+    monkeypatch.setattr(conductor_module, "_now", a_clock_that_moves)
+    spec = spec_for(
+        scenario="First point.",
+        greeting="Front desk, hello.",
+        replies=["Certainly."],
+    )
+    assembled = assemble(
+        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
+    )
+    conductor = assembled.conductor
+    assert conductor is not None
+
+    await observe(conductor, assembled, spec, controls=ConversationControls())
+
+    assert conductor.audio is not None
+    line_opened = readings[0]
+    assert conductor.audio.started_unix_nano in readings
+    assert conductor.audio.started_unix_nano > line_opened
+
+
 async def test_every_turn_is_measured_and_the_measures_never_run_backwards(
     tmp_path: Path,
 ):

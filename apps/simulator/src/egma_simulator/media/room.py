@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import logging
 import sys
-import time
 import uuid
 from array import array
 from collections.abc import Awaitable, Callable
@@ -20,7 +19,7 @@ from . import (
     PlayoutStamp,
     RemoteParticipantLeftFrame,
     VoiceMedia,
-    arrived_at,
+    arrived_now,
 )
 
 logger = logging.getLogger(__name__)
@@ -1072,7 +1071,7 @@ class JoinedRoom:
             ) -> None:
                 await super().process_frame(frame, direction)
                 if isinstance(frame, InputAudioRawFrame):
-                    arrived_at(frame, time.monotonic())
+                    arrived_now(frame)
                     room.carrying_audio.set()
                 await self.push_frame(frame, direction)
 

@@ -20,6 +20,7 @@ from importlib import import_module
 from typing import Protocol
 
 from pipecat.frames.frames import (
+    AudioRawFrame,
     ControlFrame,
     Frame,
     InterruptionFrame,
@@ -118,17 +119,35 @@ that wait, not when the speech leg made it.
 
 
 def arrived_at(frame: object, seconds: float) -> None:
-    """Say when this inbound frame reached the transport."""
-    metadata = getattr(frame, "metadata", None)
-    if isinstance(metadata, dict):
-        metadata[TRANSPORT_ARRIVAL] = float(seconds)
+    """Say when this inbound frame's first sample reached the transport."""
+    _stamp(frame, TRANSPORT_ARRIVAL, seconds)
+
+
+def arrived_now(frame: AudioRawFrame) -> None:
+    """Say that this inbound frame has just finished arriving.
+
+    A real-time transport reads its clock once the frame is whole, so
+    the instant it reads is the frame's *last* sample. The stamp names
+    the first, which is that instant less the frame's own length. Getting
+    this backwards charges the recording one frame per frame, and the
+    charge lands on every latency read off it.
+    """
+    arrived_at(frame, time.monotonic() - frame.num_frames / frame.sample_rate)
 
 
 def played_out_at(frame: object, seconds: float) -> None:
-    """Say when this outbound frame is heard at the far end."""
+    """Say when this outbound frame's first sample is heard at the far end."""
+    _stamp(frame, TRANSPORT_PLAYOUT, seconds)
+
+
+def _stamp(frame: object, named: str, seconds: float) -> None:
     metadata = getattr(frame, "metadata", None)
-    if isinstance(metadata, dict):
-        metadata[TRANSPORT_PLAYOUT] = float(seconds)
+    if not isinstance(metadata, dict):
+        raise MediaBackendError(
+            f"a {type(frame).__name__} reached the recording with nowhere to "
+            "carry its transport time"
+        )
+    metadata[named] = float(seconds)
 
 
 def transport_time(frame: object, named: str) -> float | None:
@@ -218,6 +237,15 @@ class VoiceMedia:
     failed: asyncio.Event = field(default_factory=asyncio.Event)
     transport_name: str = "voice transport"
     input_recorded: Callable[[object], None] = lambda _frame: None
+    real_time: bool = True
+    """Whether the times this transport stamps are the wall clock's.
+
+    A transport that carries a call runs on the clock everybody else
+    reads, so the recording it makes can say what time its first sample
+    was. A scripted far end keeps a media clock of its own, which counts
+    the audio it has written rather than the seconds that have passed,
+    and a wall-clock instant read off it would be a made-up one.
+    """
 
 
 class MediaBackend(Protocol):

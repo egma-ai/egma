@@ -106,6 +106,7 @@ class ScriptedTransport:
             output=(self._output,),
             ended=self.ended,
             input_recorded=self.acknowledge,
+            real_time=False,
         )
 
     async def activate(self) -> None:
