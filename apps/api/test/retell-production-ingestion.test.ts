@@ -88,6 +88,10 @@ type StoreRecord = {
   rows: Map<string, RetryRow>;
   sweeps: number;
   deletes: string[];
+  /** Every batched "which of these did a simulation carry" the poller asked. */
+  simulationLookups: string[][];
+  /** The call ids a simulation in this project carries as its reference. */
+  simulated: Set<string>;
 };
 
 function record(rows: Map<string, RetryRow> = new Map()): StoreRecord {
@@ -102,6 +106,8 @@ function record(rows: Map<string, RetryRow> = new Map()): StoreRecord {
     releases: [],
     rows,
     sweeps: 0,
+    simulationLookups: [],
+    simulated: new Set<string>(),
     deletes: [],
   };
 }
@@ -173,6 +179,12 @@ function store(
         found.set(providerCallId, transientOf(providerCallId, row));
       }
       return found;
+    },
+    async simulationProviderReferencesIn(_auth, providerReferences) {
+      recorded.simulationLookups.push([...providerReferences]);
+      return new Set(
+        [...providerReferences].filter((one) => recorded.simulated.has(one)),
+      );
     },
     async dueRetellCallRetries(_auth, input) {
       const now = input.now ?? BASE;

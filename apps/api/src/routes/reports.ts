@@ -25,6 +25,10 @@ import {
   settleOwedMockCleanups,
   type MockedWorldReach,
 } from "../mocked-world.ts";
+import {
+  pullRetellSimulationRecord,
+  type RetellSimulationPullReach,
+} from "../retell-simulation-ingestion.ts";
 
 /**
  * The report door: `POST /v1/simulations/:simulationId/reports`, where the
@@ -70,6 +74,13 @@ export type ReportRoutesOptions = {
    * sweep, which is the same act.
    */
   readonly mockedWorldReach?: MockedWorldReach | undefined;
+  /**
+   * Where a Retell simulation's own call record is pulled from once its
+   * conversation has ended. Absent leaves the Retell lane with no agent POV,
+   * which the record then says — the same state a push that never arrived
+   * leaves behind.
+   */
+  readonly simulationPullReach?: RetellSimulationPullReach | undefined;
 };
 
 export const REPORTS_PATH = "/v1/simulations/:simulationId/reports";
@@ -276,6 +287,33 @@ export async function reportRoutes(
       const applied = await applyStatusEvent(reply, simulationId, event);
       if (typeof applied !== "string") return applied;
       lastKnownStatus = applied;
+    }
+
+    /*
+     * The agent's POV of a Retell simulation, pulled the moment the
+     * conversation ends.
+     *
+     * Retell exports nothing, so this is where the second POV of a Retell
+     * simulation comes from at all (ADR-0015 §2). It runs on a **completed**
+     * landing only: a conversation that never ran has no call record to fetch,
+     * and asking Retell about one would be a request per failed dispatch.
+     *
+     * Awaited, so grading starts on a record that already holds the agent's
+     * POV rather than one that will hold it in a moment — and its failure is
+     * caught for the reason the teardown below is: the simulator is waiting to
+     * be told its landing was accepted, and what Retell owes egma is not that
+     * landing's problem. A POV that never arrived is a state the record already
+     * has a word for.
+     */
+    if (
+      options.simulationPullReach !== undefined &&
+      lastKnownStatus === "completed"
+    ) {
+      await pullRetellSimulationRecord(
+        simulationId,
+        options.simulationPullReach,
+        request.log,
+      ).catch(() => undefined);
     }
 
     // The teardown, when this document may have been the last thing a mocked

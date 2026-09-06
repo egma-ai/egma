@@ -185,6 +185,17 @@ const WORK_DISPATCHING = [
   // live, whether the simulation is its, and the answers that simulation was
   // already frozen with.
   "resolveMockToolCall",
+  // The Retell lane's simulation ingestion, added on 2026-09-06 with the
+  // agent's POV and after the rule stopped the build. It is
+  // `resolveSimulationStanding`'s shape one moment later again: Retell exports
+  // nothing, so the record of a Retell simulation is pulled by egma when the
+  // conversation ends, and the caller is the same report door serving the same
+  // credential-less simulator. Its one argument is a simulation id the claim
+  // itself handed out; it answers that row's standing, the call id the
+  // conversation reported, and the key the connection was already conducted
+  // over — and the rule still refuses this name the day somebody gives it an
+  // organization or a project.
+  "resolveRetellSimulationPull",
 ];
 
 /**

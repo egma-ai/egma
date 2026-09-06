@@ -253,6 +253,62 @@ export function simulationNamedBy(resourceSpans: OtlpResourceSpans): string {
   return attribute(resourceSpans.resource?.attributes, SIMULATION_ID_ATTRIBUTE);
 }
 
+/**
+ * How a resource on the **project-key** path names the simulation its spans are
+ * the agent's POV of: the **provider reference** — the identifier the agent
+ * platform gave that one conversation, a LiveKit room name or a Retell call id.
+ *
+ * **A different attribute from `egma.simulation_id`, because a different thing
+ * knows the answer.** The simulator is handed a simulation id and echoes it
+ * back; the customer's own agent has never heard of one. What the agent's
+ * process does hold is the room it is running in, and that is the one key on
+ * which the agent's POV is matched to its simulation — for every platform and
+ * framework (ADR-0015 §2). The egma SDK stamps it on the resource of every span
+ * it exports from a simulation room.
+ *
+ * **A reference is not a tenancy claim and is never read as one.** The
+ * organization and the project come from the credential, exactly as they do for
+ * production traffic; the reference is looked up *inside* that project, so an
+ * export naming a room another customer owns resolves to nothing and is
+ * refused. Absent, the resource is production traffic and takes the path it
+ * always took.
+ *
+ * In the `egma.` namespace, like every attribute this product owns, so it can
+ * never collide with a semantic convention or a framework's own key.
+ */
+export const PROVIDER_REFERENCE_ATTRIBUTE = "egma.provider_reference";
+
+/** Which conversation this resource is the agent's POV of, or `""` for none. */
+export function providerReferenceNamedBy(
+  resourceSpans: OtlpResourceSpans,
+): string {
+  return attribute(
+    resourceSpans.resource?.attributes,
+    PROVIDER_REFERENCE_ATTRIBUTE,
+  );
+}
+
+/**
+ * Where the framework's own trace id is kept once egma files the spans under
+ * the simulation's trace instead.
+ *
+ * **One conversation is one trace, so one of the two ids has to move.** A
+ * simulation's trace id is the 128 bits its simulation id spells, and every
+ * reader in the product turns one into the other; the agent's exporter knows
+ * nothing of that and files under whatever id its framework minted. Filing the
+ * agent's POV under the simulation is what puts both POVs in front of one
+ * reader — and it would throw away LiveKit's own id if the id were simply
+ * overwritten. So it is kept, byte for byte, at the top of the span's payload,
+ * and a developer can still paste it into their framework's own tooling.
+ *
+ * Named in the `egma.` namespace and written by egma, never by an emitter — a
+ * payload that arrived carrying this key had it added by the sender, and the
+ * filing step overwrites nothing it did not put there itself: the key is
+ * prepended, and the first occurrence is the one every JSON reader answers
+ * with.
+ */
+export const WIRE_TRACE_ID_PAYLOAD_KEY = "egma.wire_trace_id";
+
 /** A scope proves the framework, not how the caller reached the agent. */
 const AGENT_PLATFORM_BY_SCOPE: Readonly<Record<string, string>> = {
   [LIVEKIT_SCOPE]: "livekit",

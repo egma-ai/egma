@@ -128,6 +128,41 @@ const LIVEKIT_LIFECYCLE_SPAN_NAMES = [
 const [NORMALISED_KEY = ""] = REPORTED_MEASUREMENTS_PAYLOAD_PATH.split(".");
 
 /**
+ * How the parentless rows of one trace are ordered when the reader has to pick
+ * the one carrying the report block.
+ *
+ * **Two parentless rows are normal now, and this is the rule that makes them
+ * safe.** A simulation holds both POVs under one trace (ADR-0015 §1): egma's
+ * own root and the agent's session root sit side by side, and before this a
+ * reader took whichever opened first — so an agent whose exporter started a
+ * millisecond earlier would have moved the block out from under the reader and
+ * a measured trace would have read as one that measured nothing.
+ *
+ * Three keys, in the order the questions actually matter:
+ *
+ * 1. **A row that carries the block beats one that does not.** The block only
+ *    ever rides the row a normalizer wrote it on, so a parentless row holding
+ *    one is the answer to this question by construction — nothing is guessed
+ *    and no kind is named. On a Retell simulation this is what keeps the
+ *    platform's own reported latencies reachable: they ride the agent's root,
+ *    because Retell measured them.
+ * 2. **Then egma's own root.** Where no parentless row carries a block — a
+ *    LiveKit simulation, where neither POV reports aggregates — the persona's
+ *    root is the row this reader has always answered with, and it stays so
+ *    whatever order the two arrived in.
+ * 3. **Then earliest, then the span id.** The tie-breakers the query already
+ *    had, so two readings of one trace answer with one row.
+ *
+ * Production is untouched by all three: a production trace has no
+ * `egma-runtime` row at all, and at most one of its parentless rows was written
+ * by a normalizer.
+ */
+const PARENTLESS_ROW_ORDER =
+  `JSONExtractRaw(payload, '${NORMALISED_KEY}') != '' desc, ` +
+  `emitter = 'egma-runtime' desc, ` +
+  `started_at asc, span_id asc`;
+
+/**
  * A window of time, closed at the start and open at the end, counted in
  * **microseconds since the epoch**.
  *
@@ -944,7 +979,7 @@ async function turnResponseLatencyP90sFor(
          span_id,
          JSONExtractRaw(payload, '${NORMALISED_KEY}') as normalised,
          row_number() over (
-           partition by trace_id order by started_at asc, span_id asc
+           partition by trace_id order by ${PARENTLESS_ROW_ORDER}
          ) as root_position
        from ${SPANS_TABLE} final
        where ${where}
@@ -1222,16 +1257,15 @@ export async function readTrace(
       //
       // The same predicate also catches a span whose unusable parent id
       // normalised away at the door — the orphan `transcriptOf` files at the
-      // top, below — so this is honestly *the first parentless row* and not
-      // "the root" by any stronger claim. **That is a read concern and never a
+      // top, below — so this is honestly *one parentless row* and not "the
+      // root" by any stronger claim. **That is a read concern and never a
       // completion authority**: whether a trace has ended is a fact its platform
-      // states, and no query here may be read as answering it. Nothing is lost
-      // by it: a block only
-      // ever rides the row a normalizer wrote it on, and a trace holding
-      // several parentless rows is a flush whose parent never came, which
-      // began at the earliest of them. The span id breaks a tie exactly as the
-      // row order above does, so two readings of one trace answer with one span
-      // rather than with whichever row came back first.
+      // states, and no query here may be read as answering it.
+      //
+      // Which of several it is, is `PARENTLESS_ROW_ORDER`'s decision and is
+      // explained there: a simulation now holds both POVs under one trace, so a
+      // second parentless row is ordinary rather than the sign of a lost flush
+      // it once was.
       `select
        span_id,
        span_id as root_span_id,
@@ -1255,7 +1289,7 @@ export async function readTrace(
      from ${SPANS_TABLE} final
      where ${where}
        and parent_span_id = ''
-     order by started_at asc, span_id asc
+     order by ${PARENTLESS_ROW_ORDER}
      limit 1`,
       parameters,
     ),

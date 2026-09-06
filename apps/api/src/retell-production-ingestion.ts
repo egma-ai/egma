@@ -9,6 +9,7 @@ import {
   recordRetellCallAttempt,
   releaseMonitoringLease,
   renewMonitoringLease,
+  simulationProviderReferencesIn,
   sweepExpiredRetellCallMarkers,
   transientRetellCallState,
   yieldMonitoringLease,
@@ -259,6 +260,11 @@ export type RetellProductionIngestionStore = {
   readonly failMonitoringPull: typeof failMonitoringPull;
   readonly releaseMonitoringLease: typeof releaseMonitoringLease;
   readonly transientRetellCallState: typeof transientRetellCallState;
+  /**
+   * Which of a page's call ids a simulation in this project already carries as
+   * its provider reference — the calls Monitoring must not file a second time.
+   */
+  readonly simulationProviderReferencesIn: typeof simulationProviderReferencesIn;
   readonly dueRetellCallRetries: typeof dueRetellCallRetries;
   readonly recordRetellCallAttempt: typeof recordRetellCallAttempt;
   readonly deleteRetellCallRetry: typeof deleteRetellCallRetry;
@@ -291,6 +297,7 @@ const STORE: RetellProductionIngestionStore = {
   failMonitoringPull,
   releaseMonitoringLease,
   transientRetellCallState,
+  simulationProviderReferencesIn,
   dueRetellCallRetries,
   recordRetellCallAttempt,
   deleteRetellCallRetry,
@@ -1258,6 +1265,30 @@ async function runTarget(
           },
         );
 
+        /*
+         * The calls egma's own simulator made, which are simulations and not
+         * production.
+         *
+         * A Retell simulation's record is pulled the moment the conversation
+         * ends and filed under its simulation — one conversation, one trace,
+         * both POVs (ADR-0015 §2). Listing it here again would put the same
+         * conversation under Monitoring a second time, where a team reads its
+         * *production* traffic, and would judge it as live traffic nobody asked
+         * egma to create.
+         *
+         * **A gate, not an optimization**, which is the difference between this
+         * lookup and the committed-identity probe above: that one may fail and
+         * the calls are simply accepted again, harmlessly, under one immutable
+         * identity. Filing a simulation as production is not harmless, so this
+         * question is asked of Postgres — the same store the poller already
+         * reads its transient state from, in the same batched step — and a
+         * failure to answer it stops the turn rather than guessing.
+         */
+        const simulated = await options.store.simulationProviderReferencesIn(
+          target.auth,
+          identities,
+        );
+
         // What this page still owes, decided in listed order before any of it
         // is fetched. Nothing here reaches the provider or the store, so the
         // two batched answers above settle every identity that is already
@@ -1277,6 +1308,13 @@ async function runTarget(
           // and the drainer would rightly retain the pair as an integrity defect
           // that nothing outside this loop caused.
           if (committed.has(traceId) || options.accepted.has(traceId)) {
+            counts.settled += 1;
+            continue;
+          }
+          // A simulation carries this call, so Monitoring owes it nothing: the
+          // record is filed under that simulation by simulation ingestion, and
+          // production is the other surface over the one store.
+          if (simulated.has(providerCallId)) {
             counts.settled += 1;
             continue;
           }
