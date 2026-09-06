@@ -596,6 +596,78 @@ describe.skipIf(!storage.available)("a reference that names no simulation", () =
   });
 });
 
+describe.skipIf(!storage.available)("the row caps, across an export naming two", () => {
+  it("bounds the request rather than each simulation it names", async () => {
+    // Two conversations of this project, and one export speaking for both.
+    // Each simulation is normalised on its own — two must never be blended —
+    // so before the budget was carried, each got the whole ten thousand and an
+    // export naming N simulations bought N times the bound.
+    const first = await aLandedSimulation(acme, "cap-one", "room-cap-1", {
+      ...A_LIVEKIT_AGENT,
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk-cap-1" },
+    });
+    const second = await aLandedSimulation(acme, "cap-two", "room-cap-2", {
+      ...A_LIVEKIT_AGENT,
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk-cap-2" },
+    });
+
+    const at = String(BigInt(CONVERSATION_STARTED_AT.getTime()) * 1_000_000n);
+    const resourceOf = (reference: string, from: number, count: number) => ({
+      resource: {
+        attributes: [
+          {
+            key: PROVIDER_REFERENCE_ATTRIBUTE,
+            value: { stringValue: reference },
+          },
+        ],
+      },
+      scopeSpans: [
+        {
+          scope: { name: "livekit-agents", version: "1" },
+          spans: Array.from({ length: count }, (_, index) => ({
+            traceId: "cafe0000cafe0000cafe0000cafe0000",
+            spanId: `cafe0000${(from + index).toString(16).padStart(8, "0")}`,
+            parentSpanId: "",
+            name: "llm_request",
+            kind: "SPAN_KIND_INTERNAL",
+            startTimeUnixNano: at,
+            endTimeUnixNano: at,
+            attributes: [],
+          })),
+        },
+      ],
+    });
+
+    // Ten thousand and six spans, split across the two.
+    const answered = await post(
+      JSON.stringify({
+        resourceSpans: [
+          resourceOf("room-cap-1", 0, 5_003),
+          resourceOf("room-cap-2", 5_003, 5_003),
+        ],
+      }),
+      acmeKey,
+    );
+    expect(answered.statusCode, answered.body).toBe(200);
+    const partial = answered.json() as {
+      partialSuccess?: { rejectedSpans: string; errorMessage: string };
+    };
+    // Six over the one bound, reported once — not zero, which is what two
+    // fresh budgets would have answered.
+    expect(partial.partialSuccess?.rejectedSpans).toBe("6");
+    expect(partial.partialSuccess?.errorMessage).toContain("10,000");
+    await api.drainEvidence();
+
+    // And what was stored is the bound, counted across both conversations.
+    expect(
+      await countOf(
+        `select count() as n from spans final
+         where trace_id in ('${first.traceId}', '${second.traceId}')`,
+      ),
+    ).toBe(10_000);
+  }, 120_000);
+});
+
 describe.skipIf(!storage.available)("a project-key export naming nothing", () => {
   it("is production, exactly as it was before the branch existed", async () => {
     const [first] = captured;
