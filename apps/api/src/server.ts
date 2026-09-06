@@ -468,11 +468,9 @@ export function buildApi(options: ServerOptions): Api {
         : { retellFetch: options.retellFetch },
     // And a completed landing on the Retell lane pulls that conversation's own
     // call record and files it under the simulation: the agent's POV, for a
-    // platform that exports nothing of its own.
-    simulationPullReach:
-      options.retellFetch === undefined
-        ? {}
-        : { retellFetch: options.retellFetch },
+    // platform that exports nothing of its own. It asks where every other
+    // Retell read in this deployment asks.
+    simulationPullReach: options.retellReach ?? {},
   });
 
   // The mock endpoint: the seam's one new public surface. Registered without

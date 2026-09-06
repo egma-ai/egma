@@ -4,7 +4,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { IngestionUnavailableError } from "./ingestion/accept.ts";
 import { fileSimulationEvidence } from "./ingestion/simulation-ingestion.ts";
 import { platformEvent, safeExceptionType } from "./platform-log.ts";
-import { getRetellCall } from "./retell/api.ts";
+import { getRetellCall, type RetellReach } from "./retell/api.ts";
 import { normaliseRetellCall, type RetellCall } from "./retell/normalise.ts";
 
 /**
@@ -38,10 +38,12 @@ import { normaliseRetellCall, type RetellCall } from "./retell/normalise.ts";
  * inside the bound, and Regrade is what a late one is picked up by.
  */
 
-/** Where the pull asks, and what does the asking. Substituted in tests. */
-export type RetellSimulationPullReach = {
-  readonly retellFetch?: typeof fetch | undefined;
-};
+/**
+ * Where the pull asks, and what does the asking — the deployment's own Retell
+ * reach, the same one every other Retell read in the API is given. A connection
+ * that names its own host overrides the address; nothing overrides the fetch.
+ */
+export type RetellSimulationPullReach = RetellReach;
 
 function providerText(value: unknown): string {
   return typeof value === "string" || typeof value === "number"
@@ -88,7 +90,7 @@ export async function pullRetellSimulationRecord(
   if (pull === undefined) return;
 
   const answered = await getRetellCall(pull.apiKey, pull.providerReference, {
-    ...(reach.retellFetch === undefined ? {} : { fetchImpl: reach.retellFetch }),
+    ...reach,
     ...(pull.baseUrl === null ? {} : { url: pull.baseUrl }),
   });
 
