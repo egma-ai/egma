@@ -1,5 +1,7 @@
 import { type JobContext, llm, voice } from "@livekit/agents";
+import { type BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
 
+import { flushNow, installExport, type ExportOptions } from "./export.ts";
 import {
   HELLO_METHOD,
   HELLO_TIMEOUT_SECONDS,
@@ -9,13 +11,13 @@ import {
   fitsOnTheWire,
   helloRequest,
   isEgmaNotListeningYet,
-  isEgmaNotReached,
   mockedToolsIn,
   servedIn,
   toolRequest,
 } from "./mock-tool-seam.ts";
+import { SIMULATION_ROOM_PREFIX } from "./room.ts";
 
-const SIMULATION_ROOM_PREFIX = "egma-sim-";
+export const SIMULATION_VERB = "egma.simulation";
 const EGMA_PERSONA = "egma-persona";
 const STARTUP_SECONDS = 45;
 const POLL_MILLISECONDS = 250;
@@ -38,15 +40,51 @@ type Seat = {
 let processOwner: voice.AgentSession | undefined;
 
 /**
- * Let Egma answer selected tool calls during one simulation.
+ * This agent could not report to Egma, so this simulation must not run.
  *
- * Call this once after constructing the agent and session, and before
- * `AgentSession.start`. Production rooms return without any side effect.
+ * Thrown out of {@link simulation}, in a simulation room only, whenever the
+ * exchange did not end with a hello Egma answered. It stops the session from
+ * starting, which is the point: an agent that runs anyway calls its real
+ * backends where a mock tool was meant to answer, and Egma's record of the
+ * simulation would claim nothing about tools that in fact ran.
+ *
+ * Never thrown in a production room. There is nothing there to report to, and
+ * nothing there to stop.
  */
-export async function mockable(
+export class NotReported extends Error {
+  override readonly name = "NotReported";
+}
+
+export type SimulationOptions = ExportOptions;
+
+/**
+ * Report this simulation to Egma, and let Egma answer for its tools.
+ *
+ * Await it once after constructing the agent and session, and before
+ * `AgentSession.start`.
+ *
+ * In a production room it returns having touched nothing: no wrapping, no
+ * exporter, not one message on the wire, and no connect the agent was not
+ * already making.
+ *
+ * In a simulation room it fails closed. Every way this call can end without a
+ * hello Egma answered throws {@link NotReported}, so the session never starts
+ * and Egma ends the simulation with the same finding from its own side. The
+ * endpoint and key are `EGMA_URL` and `EGMA_API_KEY`, or the matching options;
+ * a setting that is missing or malformed throws before anything is sent.
+ *
+ * **One LiveKit job per process.** Two things in this package are process-wide
+ * and cannot be made per-job: the mock-tool table, which LiveKit keys by agent
+ * class, and the exporter's resource, which is fixed when the provider is
+ * built and carries the room this process files spans under. So a second job
+ * in this process is refused rather than served wrongly. LiveKit runs one job
+ * per process by default; keep it that way.
+ */
+export async function simulation(
   agent: voice.Agent,
   ctx: JobContext,
   session: voice.AgentSession,
+  options: SimulationOptions = {},
 ): Promise<void> {
   const roomName = ctx?.job?.room?.name;
   if (
@@ -59,23 +97,33 @@ export async function mockable(
   claimProcess(session);
   let lifecycleInstalled = false;
   try {
+    // First, because this is the part Egma cannot do without. The agent's
+    // spans are this simulation's record of what the agent did, and they are
+    // arranged for before anything that can fail.
+    const processor = installExport(ctx, options, SIMULATION_VERB, roomName);
+    flushWhenTheSessionCloses(session, processor);
+
     const census = censusMessage([agent]);
-    fitsOnTheWire("this agent's census of tools", census);
+    try {
+      fitsOnTheWire("this agent's census of tools", census);
+    } catch (error) {
+      throw notReported(
+        roomName,
+        "this agent's tools do not fit in one message",
+        error,
+      );
+    }
     const deadline = Date.now() + STARTUP_SECONDS * 1_000;
 
     if (!ctx.room.isConnected) {
       try {
         await ctx.connect();
       } catch (error) {
-        warnFailOpen(roomName, "the room could not be connected", error);
-        return;
+        throw notReported(roomName, "this room could not be connected", error);
       }
     }
 
     const identity = await findEgmaPersona(ctx, deadline, roomName);
-    if (identity === undefined) {
-      return;
-    }
 
     const seat: Seat = { ctx, identity };
     let mockedTools: string[];
@@ -83,23 +131,50 @@ export async function mockable(
       const reply = await helloWhenListening(seat, census, deadline);
       mockedTools = mockedToolsIn(reply);
     } catch (error) {
-      warnFailOpen(roomName, "Egma did not accept the tool census", error);
-      return;
+      throw notReported(roomName, "Egma did not accept the tool census", error);
     }
 
     installLifecycle({ agent, ctx, mockedTools, roomName, seat, session });
     lifecycleInstalled = true;
-  } catch (error) {
-    if (error instanceof SeamError) {
-      warnFailOpen(roomName, "the tool census could not be sent", error);
-      return;
-    }
-    throw error;
   } finally {
     if (!lifecycleInstalled) {
       releaseProcess(session);
     }
   }
+}
+
+/**
+ * The one sentence every unreported simulation ends on.
+ *
+ * One wording for every branch, with that branch's own finding inside it,
+ * because what a developer has to do about all of them is the same: look at
+ * the room, then look at the installation. The two halves are named in the
+ * order they can be checked.
+ */
+function notReported(
+  roomName: string,
+  why: string,
+  cause: unknown,
+): NotReported {
+  return new NotReported(
+    `simulation ${roomName}: this agent did not report to Egma (${why}: ${messageOf(cause)}), so its session was not started. A LiveKit simulation needs ${SIMULATION_VERB} to reach Egma's participant in the room: check that this worker can reach the LiveKit room and that Egma's own side of this simulation is running, and check that the @egma/livekit package installed here is the one that shipped with this Egma deployment.`,
+    { cause },
+  );
+}
+
+/**
+ * Send the tail of the conversation the moment the session ends.
+ *
+ * The job's own shutdown flush is the backstop and runs later; this one is
+ * what puts the last turn in front of a grader that is already waiting on it.
+ */
+function flushWhenTheSessionCloses(
+  session: voice.AgentSession,
+  processor: BatchSpanProcessor,
+): void {
+  session.once(voice.AgentSessionEventTypes.Close, () => {
+    void flushNow(processor, "session close");
+  });
 }
 
 function claimProcess(session: voice.AgentSession): void {
@@ -152,7 +227,7 @@ async function findEgmaPersona(
   ctx: JobContext,
   deadline: number,
   roomName: string,
-): Promise<string | undefined> {
+): Promise<string> {
   let wake: (() => void) | undefined;
   const participantConnected = () => wake?.();
   ctx.room.on(PARTICIPANT_CONNECTED, participantConnected);
@@ -163,22 +238,29 @@ async function findEgmaPersona(
         .filter(answersToEgma)
         .sort();
 
-      if (found.length === 1) {
-        return found[0];
+      const only = found[0];
+      if (found.length === 1 && only !== undefined) {
+        return only;
       }
       if (found.length > 1) {
-        console.error(
-          `Egma: ${JSON.stringify(roomName)} has more than one participant using Egma's reserved persona identity, so no tools were wrapped.`,
+        // Refused rather than resolved. Whichever this side picked would
+        // receive every tool name and schema this agent has.
+        throw notReported(
+          roomName,
+          `${found.length} participants in this room answer to Egma's name (${found.join(", ")}), so which one is Egma is not knowable`,
+          new Error("and this SDK will hand a tool inventory to neither"),
         );
-        return undefined;
       }
 
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
-        console.error(
-          `Egma: no ${EGMA_PERSONA} participant joined simulation ${JSON.stringify(roomName)} within ${STARTUP_SECONDS} seconds, so no tools were wrapped.`,
+        throw notReported(
+          roomName,
+          `no Egma participant joined this room within ${STARTUP_SECONDS} seconds`,
+          new Error(
+            `Egma joins as ${EGMA_PERSONA}, or as that name with the simulation after it`,
+          ),
         );
-        return undefined;
       }
 
       await new Promise<void>((resolve) => {
@@ -277,7 +359,7 @@ function installLifecycle({
   const bind = (selected: voice.Agent): void => {
     const couriers: Record<string, MockTool> = {};
     for (const name of mockedTools) {
-      couriers[name] = courier(name, selected, seat);
+      couriers[name] = courier(name, seat);
     }
     bindings.push(
       voice.testing.withMockTools(
@@ -390,7 +472,7 @@ function installLifecycle({
   }
 }
 
-function courier(name: string, agent: voice.Agent, seat: Seat): MockTool {
+function courier(name: string, seat: Seat): MockTool {
   return async (...invocation: unknown[]): Promise<unknown> => {
     const arguments_ = recordOrUndefined(invocation[0]);
     let asking: string;
@@ -412,10 +494,13 @@ function courier(name: string, agent: voice.Agent, seat: Seat): MockTool {
         RESPONSE_TIMEOUT_SECONDS,
       );
     } catch (error) {
-      const code = rpcCode(error);
-      if (code !== undefined && isEgmaNotReached(code)) {
-        return runRealTool(name, agent, invocation, error);
-      }
+      // Every refusal ends the call, and none of them runs the real tool.
+      // This courier only exists in a simulation room, and a real backend
+      // that runs there books a real appointment and charges a real card —
+      // so an Egma this side cannot reach mid-conversation is the one moment
+      // a real tool must not be touched, not the moment to touch it. The
+      // five transport codes that used to mean "run the real one" are read
+      // the same way as every other refusal here.
       throw new llm.ToolError(
         `Egma could not answer ${name}: ${messageOf(error)}`,
       );
@@ -436,22 +521,6 @@ function courier(name: string, agent: voice.Agent, seat: Seat): MockTool {
   };
 }
 
-async function runRealTool(
-  name: string,
-  agent: voice.Agent,
-  invocation: readonly unknown[],
-  refused: unknown,
-): Promise<unknown> {
-  const real = agent.toolCtx.getFunctionTool(name);
-  if (real === undefined) {
-    throw new llm.ToolError(`${name} could not be run`);
-  }
-  console.warn(
-    `Egma: its participant was not reached for ${JSON.stringify(name)}, so the agent's own tool ran. ${messageOf(refused)}`,
-  );
-  return real.execute(invocation[0] as never, invocation[1] as never);
-}
-
 function recordOrUndefined(value: unknown): Record<string, unknown> | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
@@ -469,12 +538,6 @@ function rpcCode(error: unknown): number | undefined {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function warnFailOpen(roomName: string, reason: string, error: unknown): void {
-  console.warn(
-    `Egma: ${reason} for simulation ${JSON.stringify(roomName)}, so no tools were wrapped and the agent's own tools will run. ${messageOf(error)}`,
-  );
 }
 
 function delay(milliseconds: number): Promise<void> {
