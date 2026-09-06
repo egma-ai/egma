@@ -329,6 +329,18 @@ describe.skipIf(!storage.available)(
       expect(only?.test_version_id).not.toBe("");
       expect(only?.persona_version_id).not.toBe("");
       expect(Number(only?.n)).toBe(FIXTURE_TRACE.spans);
+
+      // And no span of it claims the conversation ended. LiveKit's own session
+      // root says so on a production trace, and that statement is what
+      // automatic grading runs on there — under a simulation the run lifecycle
+      // already produces that fact, and a second producer of it is how one
+      // conversation comes to be graded twice.
+      expect(
+        await countOf(
+          `select count() as n from spans final
+           where trace_id = '${landed.traceId}' and ends_trace`,
+        ),
+      ).toBe(0);
     });
 
     it("keeps the framework's trace id on the payload and leaves span ids alone", async () => {

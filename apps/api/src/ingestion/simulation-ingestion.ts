@@ -152,6 +152,23 @@ export function filedUnderSimulation(
     ...span,
     ...attribution,
     traceId,
+    /*
+     * **A simulation's completion is its lifecycle's fact, never its
+     * evidence's.**
+     *
+     * Both normalisers set this where a platform they recognise states an
+     * ending: LiveKit's `agent_session` root and Retell's `retell_call` root
+     * each say the conversation is over, and for production that statement is
+     * the completion authority automatic grading runs on (ADR-0014). Filed
+     * under a simulation it would be a *second* producer of a fact the run
+     * lifecycle already produces when the report lands — and one conversation
+     * with two producers of "it ended" is one conversation graded twice.
+     *
+     * So it is cleared here, for every source, rather than left to each
+     * adapter to remember. The original statement is still in the payload,
+     * where every other thing the columns do not carry stays.
+     */
+    endsTrace: false,
     // Only where the two genuinely differ. egma's own simulator already files
     // under the derived id, and adding a key that repeated it would put noise
     // on every span of every run for nothing.
