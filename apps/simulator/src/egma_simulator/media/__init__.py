@@ -91,6 +91,75 @@ class RemoteParticipantLeftFrame(ControlFrame, UninterruptibleFrame):
     completed: asyncio.Event
 
 
+TRANSPORT_ARRIVAL = "egma.transport_arrival"
+"""When one inbound frame's first sample reached the transport.
+
+Seconds on the transport's own clock. A real transport reads its clock
+off the wall; a scripted one carries a media clock of its own. Either
+way the two directions are stamped from the same clock, so the recording
+they make is one timeline.
+"""
+
+TRANSPORT_PLAYOUT = "egma.transport_playout"
+"""When one outbound frame's first sample is heard at the far end.
+
+The transport paces what it is handed: audio written while earlier audio
+is still playing waits its turn. This is where the frame lands after
+that wait, not when the speech leg made it.
+"""
+
+
+def arrived_at(frame: object, seconds: float) -> None:
+    """Say when this inbound frame reached the transport."""
+    metadata = getattr(frame, "metadata", None)
+    if isinstance(metadata, dict):
+        metadata[TRANSPORT_ARRIVAL] = float(seconds)
+
+
+def played_out_at(frame: object, seconds: float) -> None:
+    """Say when this outbound frame is heard at the far end."""
+    metadata = getattr(frame, "metadata", None)
+    if isinstance(metadata, dict):
+        metadata[TRANSPORT_PLAYOUT] = float(seconds)
+
+
+def transport_time(frame: object, named: str) -> float | None:
+    """One of the two transport times, or ``None`` if nobody stamped it."""
+    metadata = getattr(frame, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    stamped = metadata.get(named)
+    return float(stamped) if isinstance(stamped, (int, float)) else None
+
+
+class PlayoutClock:
+    """When the transport will play the audio it is handed next.
+
+    Audio handed to a transport does not start playing when it arrives:
+    it starts when everything already queued has finished. So the first
+    frame of an utterance plays now and the rest follow it end to end,
+    which is what makes a recording of the persona the caller's own
+    experience rather than the speech leg's output rate.
+
+    ``cleared`` is a queue thrown away — an interruption — after which
+    the next frame plays immediately again.
+    """
+
+    def __init__(self) -> None:
+        self._playing_through: float | None = None
+
+    def place(self, now: float, seconds: float) -> float:
+        """Where the next ``seconds`` of audio start, and take that room."""
+        waiting = self._playing_through
+        start = now if waiting is None or waiting < now else waiting
+        self._playing_through = start + seconds
+        return start
+
+    def cleared(self) -> None:
+        """The transport dropped whatever it had not played yet."""
+        self._playing_through = None
+
+
 @dataclass(frozen=True)
 class VoiceMedia:
     """The Pipecat processors and lifecycle signals for one voice connection.

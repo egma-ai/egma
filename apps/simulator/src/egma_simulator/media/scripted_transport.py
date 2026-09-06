@@ -24,7 +24,13 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from ..speech import decode_speech, encode_speech, silence
-from . import RemoteParticipantLeftFrame, VoiceMedia
+from . import (
+    PlayoutClock,
+    RemoteParticipantLeftFrame,
+    VoiceMedia,
+    arrived_at,
+    played_out_at,
+)
 
 FRAME_SECONDS = 0.02
 TRAILING_SILENCE_SECONDS = 0.6
@@ -36,6 +42,14 @@ IDLE_SILENCE_SECONDS = 13.0
 @dataclass(frozen=True)
 class _InputChunk:
     audio: bytes
+    arrival: float = 0.0
+    """Where this piece sits on the far end's own clock.
+
+    A scripted far end keeps a media clock instead of a wall clock: its
+    audio is written out in one go and carried into the pipeline a frame
+    at a time, so the moment a frame is *pushed* says nothing about when
+    it was spoken. Its place in the stream says everything.
+    """
     hang_up_after: bool = False
 
 
@@ -69,6 +83,12 @@ class ScriptedTransport:
         self._pending: asyncio.Queue[_InputChunk] = asyncio.Queue()
         self._acks: dict[int, asyncio.Event] = {}
         self.ended = asyncio.Event()
+
+        self._queued_seconds = 0.0
+        """How much audio the far end has written out, ever."""
+        self._carried_seconds = 0.0
+        """How much of it has entered the pipeline: the far end's now."""
+        self._playout = PlayoutClock()
 
         self.heard: list[bytes] = []
         """Each complete persona utterance accepted by the transport."""
@@ -117,6 +137,17 @@ class ScriptedTransport:
         await self._active.wait()
         return await self._pending.get()
 
+    def carried(self, chunk: _InputChunk) -> None:
+        """One piece of the far end's stream is in the pipeline."""
+        self._carried_seconds = chunk.arrival + self._seconds(len(chunk.audio))
+
+    def playing_out(self, seconds: float) -> float:
+        """Where the next persona audio is heard on the far end's clock."""
+        return self._playout.place(self._carried_seconds, seconds)
+
+    def _seconds(self, audio_bytes: int) -> float:
+        return audio_bytes / 2 / self._input_rate if self._input_rate else 0.0
+
     def wait_for_ack(self, frame: InputAudioRawFrame) -> asyncio.Event:
         acknowledged = asyncio.Event()
         self._acks[frame.id] = acknowledged
@@ -136,6 +167,11 @@ class ScriptedTransport:
         self._queue_audio(silence(seconds, self._input_rate))
 
     async def persona_stopped(self) -> None:
+        # The far end takes the persona's audio as it is handed over — the
+        # carry below puts every frame of it into the stream — so when an
+        # utterance ends nothing of it is left waiting to be played, and
+        # the next one starts wherever the line has got to by then.
+        self._playout.cleared()
         spoken = bytes(self._hearing)
         self._hearing.clear()
         if spoken:
@@ -197,9 +233,11 @@ class ScriptedTransport:
             self._pending.put_nowait(
                 _InputChunk(
                     audio=piece,
+                    arrival=self._queued_seconds,
                     hang_up_after=hang_up_after and position == len(pieces) - 1,
                 )
             )
+            self._queued_seconds += self._seconds(len(piece))
 
 
 class _ScriptedInput(FrameProcessor):
@@ -229,8 +267,10 @@ class _ScriptedInput(FrameProcessor):
                 sample_rate=self._transport._input_rate,
                 num_channels=1,
             )
+            arrived_at(frame, chunk.arrival)
             acknowledged = self._transport.wait_for_ack(frame)
             self._transport.input_frames += 1
+            self._transport.carried(chunk)
             await self.push_frame(frame)
             if chunk.hang_up_after:
                 marker = RemoteParticipantLeftFrame(
@@ -254,6 +294,10 @@ class _ScriptedOutput(FrameProcessor):
             self._transport.started(output_rate=frame.audio_out_sample_rate)
         elif isinstance(frame, OutputAudioRawFrame):
             await self._transport.accepted_output(frame)
+            played_out_at(
+                frame,
+                self._transport.playing_out(frame.num_frames / frame.sample_rate),
+            )
 
         await self.push_frame(frame, direction)
 

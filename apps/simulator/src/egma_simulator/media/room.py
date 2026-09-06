@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import sys
+import time
 import uuid
 from array import array
 from collections.abc import Awaitable, Callable
@@ -14,7 +15,14 @@ from typing import Any
 
 from ..contract import ERROR
 from ..mock_tools import MockToolRefusal
-from . import MediaBackendError, RemoteParticipantLeftFrame, VoiceMedia
+from . import (
+    MediaBackendError,
+    PlayoutClock,
+    RemoteParticipantLeftFrame,
+    VoiceMedia,
+    arrived_at,
+    played_out_at,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -977,7 +985,12 @@ class JoinedRoom:
 
     def create_transport(self) -> VoiceMedia:
         """Create stock LiveKit input and output processors without rates."""
-        from pipecat.frames.frames import Frame, InputAudioRawFrame
+        from pipecat.frames.frames import (
+            Frame,
+            InputAudioRawFrame,
+            InterruptionFrame,
+            OutputAudioRawFrame,
+        )
         from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
         from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 
@@ -1051,17 +1064,62 @@ class JoinedRoom:
         room = self
 
         class _Arrival(FrameProcessor):
+            """When the agent's audio reached egma, on egma's own clock.
+
+            The first thing in the pipeline that sees inbound audio, so
+            the stamp it writes is as close to arrival as this side can
+            honestly get. The recording is built on these stamps, which
+            is what makes a wait measured on the file the wait the caller
+            lived through instead of a count of what was buffered.
+            """
+
             async def process_frame(
                 self, frame: Frame, direction: FrameDirection
             ) -> None:
                 await super().process_frame(frame, direction)
                 if isinstance(frame, InputAudioRawFrame):
+                    arrived_at(frame, time.monotonic())
                     room.carrying_audio.set()
+                await self.push_frame(frame, direction)
+
+        class _Playout(FrameProcessor):
+            """When the persona's audio is heard, on the same clock.
+
+            LiveKit takes audio faster than it plays it: a whole utterance
+            can be handed over in a moment and then plays out over
+            seconds. So the frame that has just gone to the room is not
+            audio the caller has heard — it is audio that starts when
+            everything handed over before it has finished.
+
+            An interruption clears what LiveKit was holding, so what it
+            had not played is never heard at all and the recording is told
+            to let it go.
+            """
+
+            def __init__(self) -> None:
+                super().__init__()
+                self._playout = PlayoutClock()
+
+            async def process_frame(
+                self, frame: Frame, direction: FrameDirection
+            ) -> None:
+                await super().process_frame(frame, direction)
+                if isinstance(frame, OutputAudioRawFrame):
+                    played_out_at(
+                        frame,
+                        self._playout.place(
+                            time.monotonic(),
+                            frame.num_frames / frame.sample_rate,
+                        ),
+                    )
+                elif isinstance(frame, InterruptionFrame):
+                    played_out_at(frame, time.monotonic())
+                    self._playout.cleared()
                 await self.push_frame(frame, direction)
 
         return VoiceMedia(
             input=(input_transport, _Arrival()),
-            output=(transport.output(),),
+            output=(transport.output(), _Playout()),
             ended=self.ended,
             failed=self.failed,
             transport_name=f"livekit server at {self._quotable(self._url)}",

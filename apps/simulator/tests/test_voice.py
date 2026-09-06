@@ -425,6 +425,14 @@ async def test_every_span_points_at_the_audio_it_names(
     span on that shared timeline. Its transcript boundary stays within one
     media frame, and the offset at the final spoken turn does not grow from
     the first. The check uses the audio, not a second transcript clock.
+
+    Two things that go wrong on a real call are done here on purpose. The
+    line stalls for a second between two of the agent's frames, so the
+    audio after it arrives a second later than the audio before it — a
+    gap, which the recording must hold as a second of quiet rather than
+    close up. And the recorder itself is held back while one early frame
+    waits, because a busy machine is not a pause in the conversation and
+    must not move anything on the file.
     """
     opened_unix_nano = 1_800_000_000_000_000_000
     monkeypatch.setattr(conductor_module, "_now", lambda: opened_unix_nano)
@@ -449,26 +457,11 @@ async def test_every_span_points_at_the_audio_it_names(
     monkeypatch.setattr(transport, "wait_for_ack", no_recorder_backpressure)
     input_processor = transport.media.input[0]
     push_frame = input_processor.push_frame
-    arrival_clock = [0.0]
-    recording_clock = [0.0]
     quiet_after_speech = 0
-    inserted_gap = False
+    stalled = False
 
-    class RecordingTime:
-        @staticmethod
-        def monotonic() -> float:
-            return recording_clock[0]
-
-        @staticmethod
-        def time() -> float:
-            return recording_clock[0]
-
-    from pipecat.audio.resamplers import soxr_stream_resampler
     from pipecat.frames.frames import InputAudioRawFrame
-    from pipecat.processors.audio import audio_buffer_processor
 
-    monkeypatch.setattr(audio_buffer_processor, "time", RecordingTime)
-    monkeypatch.setattr(soxr_stream_resampler, "time", RecordingTime)
     process_recording = conductor_module._EvidenceRecorder._process_recording
     held_one_frame = False
 
@@ -477,8 +470,6 @@ async def test_every_span_points_at_the_audio_it_names(
         if isinstance(frame, InputAudioRawFrame) and not held_one_frame:
             held_one_frame = True
             await asyncio.sleep(0.3)
-        if isinstance(frame, InputAudioRawFrame):
-            recording_clock[0] = frame.metadata["test.recorded_at"]
         await process_recording(recorder, frame)
 
     monkeypatch.setattr(
@@ -487,28 +478,32 @@ async def test_every_span_points_at_the_audio_it_names(
         briefly_hold_the_recorder,
     )
 
-    async def carry_one_transport_gap(frame, direction=None):
-        nonlocal inserted_gap, quiet_after_speech
+    async def stall_the_line_for_a_second(frame, direction=None):
+        """Hold the far end's line for a second in the middle of the call.
+
+        Everything the far end sends after the stall reaches the transport
+        a second later than what it sends before, while its own audio runs
+        on without a break. The recording must hold that second.
+        """
+        nonlocal stalled, quiet_after_speech
         if isinstance(frame, InputAudioRawFrame):
-            arrival_clock[0] += frame.num_frames / frame.sample_rate
             if carries_speech(frame.audio):
                 quiet_after_speech = max(quiet_after_speech, 1)
             elif quiet_after_speech:
                 quiet_after_speech += 1
-                if quiet_after_speech == 11:
-                    arrival_clock[0] += 1.0
-                    inserted_gap = True
-            frame.metadata["test.recorded_at"] = arrival_clock[0]
+                if quiet_after_speech == 11 and not stalled:
+                    stalled = True
+                    transport._queued_seconds += 1.0
         if direction is None:
             await push_frame(frame)
         else:
             await push_frame(frame, direction)
 
-    monkeypatch.setattr(input_processor, "push_frame", carry_one_transport_gap)
+    monkeypatch.setattr(input_processor, "push_frame", stall_the_line_for_a_second)
     observed = await observe(
         conductor, assembled, spec, controls=ConversationControls()
     )
-    assert inserted_gap
+    assert stalled
     audio = observed.assembled.audio
     assert audio is not None
     persona_audio, agent_audio, band = channels_of(
@@ -1482,20 +1477,19 @@ async def test_a_wall_clock_gap_inside_one_utterance_loses_no_audio(
     """A slow machine is not a silence, and the recorder must not treat it
     as one.
 
-    Pipecat's recorder resamples the agent's audio, and this recorder maps
-    each turn onto that recording by reading the resampler's own
-    ``delay()`` — the samples it has consumed and not yet emitted. The map
-    is only true while every consumed sample is still accounted for.
+    Pipecat's recorder resamples both directions, and a resampler holds
+    part of a frame back to give out with the next one. Every sample it
+    holds is audio the recording will carry — as long as it is still
+    there.
 
     Pipecat clears that held state after 0.2 seconds of **wall-clock**
     quiet, which is the right default for audio that really did pause. It
     is the wrong one here, and the trigger is not the conversation: a
     loaded machine can be descheduled for longer than that between two
     frames of one continuous utterance. Nothing paused; only the CPU did.
-    The clear then discards samples ``delay()`` had counted, the map grows
-    a hole where they were, and a turn boundary landing inside it cannot
-    be placed on the recording at all — a ``SpeechFault``, and a whole
-    simulation failed over audio the recording actually holds.
+    The clear then throws those samples away, and the recording loses the
+    join between two frames of speech a customer plays back — quietly, on
+    either channel, on any machine, at any load.
 
     So this feeds one unbroken utterance across a clock jump far past that
     window and counts the samples out the other side. Sixteen kilohertz in
@@ -1519,11 +1513,8 @@ async def test_a_wall_clock_gap_inside_one_utterance_loses_no_audio(
     recorder = conductor_module._EvidenceRecorder(sample_rate=24_000)
     frame = b"\x00\x01" * 320  # 20 ms at 16 kHz
 
-    # Both channels, because the two fail differently and only one of them
-    # says so. A clear on the agent's side breaks the map and raises; a
-    # clear on the persona's side raises nothing, because `bot_position`
-    # counts the buffer rather than reading a delay — it just drops the
-    # tail of an utterance out of the recording and stays quiet about it.
+    # Both channels, because a clear on either one drops the tail of an
+    # utterance out of the recording and says nothing about it.
     for channel, resampler in (
         ("agent", recorder._input_resampler),
         ("persona", recorder._output_resampler),
