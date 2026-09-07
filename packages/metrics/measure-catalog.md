@@ -156,7 +156,13 @@ Three rules hold over all of them.
   POV.** Both are the agent's own account of itself, so a conversation carrying
   both answers with the better-grained one alone. What Egma timed itself is a
   different POV, not a better source, and it rides beside the agent's rather
-  than replacing it — see **Two POVs** below.
+  than replacing it — see **Two POVs** above.
+- **A derivation reads the agent's spans and only the agent's.** A simulation
+  stores both accounts of one conversation under one trace id, and Egma's own
+  account carries transcript turns too — the same exchanges, from Egma's side,
+  on Egma's own clock. Reading both would measure every wait twice over and each
+  one wrongly. What Egma measured itself is not lost by this: it arrives as the
+  timing spans above, which are the persona's POV.
 - **A measurement that runs backwards is not kept.** Turn spans overlap on a
   real captured call — five of twelve neighbouring pairs — and the overlap is
   the framework's turn bookkeeping, not audible talk-over: the same call's

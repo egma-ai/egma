@@ -40,6 +40,13 @@ import type { ReportedOnTrace, TraceSpan } from "./spans.ts";
  * platform said about one conversation, read on its own terms and last of the
  * three, and a simulation carrying one would be read exactly the same way.
  *
+ * **The POV is an input, and it is not the source wearing another name.**
+ * `source` says who *conducted* the conversation and is deliberately unreadable
+ * here; a span's POV says whose *account* it is, which is a property of the
+ * evidence itself. A simulation's trace holds two accounts of one conversation
+ * under one id, so a reader that could not tell them apart would fold both into
+ * one series — which is the exact blending every rule below exists to prevent.
+ *
  * **The catalog decides what is computed and how.** Every measure carries its
  * span-level definition beside its name
  * (`packages/metrics/measure-catalog.md`), the rule is one of a
