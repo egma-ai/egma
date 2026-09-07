@@ -8,6 +8,7 @@ WORKDIR /app
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
+COPY ee/package.json ee/
 COPY packages/db/package.json packages/db/
 COPY packages/ids/package.json packages/ids/
 COPY packages/lint/package.json packages/lint/
@@ -25,8 +26,9 @@ COPY packages/provider-credentials packages/provider-credentials
 COPY packages/retell packages/retell
 COPY packages/simulation-contract packages/simulation-contract
 COPY packages/db packages/db
+COPY ee ee
 COPY apps/api apps/api
-RUN pnpm exec tsc -b packages/ids packages/platform-api packages/provider-credentials packages/retell packages/db apps/api
+RUN pnpm exec tsc -b packages/ids packages/platform-api packages/provider-credentials packages/retell packages/db ee apps/api
 
 ENV NODE_ENV=production
 EXPOSE 3100
