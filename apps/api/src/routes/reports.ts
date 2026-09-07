@@ -246,7 +246,11 @@ export async function reportRoutes(
       !/^egma-sim-(?:chat-)?[A-Za-z0-9_-]+$/.test(body.provider_reference)) {
       return invalid(reply, "Room registration requires a claimant and a non-empty Egma LiveKit room name.");
     }
-    const registered = await registerSimulationProviderReference({
+    const standing = await resolveSimulationStanding(simulationId);
+    if (standing === undefined) {
+      return conflict(reply, "This active LiveKit claim cannot register that room reference.");
+    }
+    const registered = await registerSimulationProviderReference(standing.auth, {
       simulationId,
       claimant: body.claimant.trim(),
       providerReference: body.provider_reference,

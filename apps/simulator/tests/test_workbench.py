@@ -6,8 +6,10 @@ import asyncio
 import json
 
 import aiohttp
+import pytest
 from conftest import scripted_spec, spans_for
 
+from egma_simulator.client import ControlPlaneClient, DocumentRejected
 from egma_simulator.spans import SIMULATION_ID_ATTRIBUTE
 
 
@@ -46,6 +48,26 @@ async def test_a_claim_never_grants_more_than_the_declared_capacity(workbench):
                 spec["simulation_id"] for spec in (await response.json())["specs"]
             ]
     assert granted == ["sim-wb-cap-0", "sim-wb-cap-1"]
+
+
+async def test_provider_reference_is_acknowledged_before_terminal_report(workbench):
+    await workbench.offer(scripted_spec("sim-wb-reference"))
+    async with ControlPlaneClient(
+        workbench.base_url, claim_wait_seconds=1
+    ) as client:
+        await client.claim("test", 1)
+        await client.register_provider_reference(
+            "sim-wb-reference", "test", "egma-sim-room"
+        )
+        with pytest.raises(DocumentRejected):
+            await client.register_provider_reference(
+                "sim-wb-unknown", "test", "egma-sim-missing"
+            )
+    records = await workbench.records()
+    references = [r for r in records if r["kind"] == "provider_reference"]
+    assert len(references) == 1
+    assert references[0]["provider_reference"] == "egma-sim-room"
+    assert not any(r["kind"] == "report" for r in records)
 
 
 async def test_the_workbench_refuses_a_spec_that_breaks_the_contract(workbench):

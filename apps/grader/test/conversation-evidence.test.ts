@@ -51,14 +51,14 @@ const mock = span("persona", { kind: "tool", text: "", toolName: "book_appointme
 
 describe("the evidence used to grade a platform simulation", () => {
   it.each(["retell_web_call", "livekit_room"])("does not substitute simulator evidence when %s evidence is missing", (lane) => {
-    const conversation = conversationOfSimulation(simulation, trace(lane, [span("persona")], [mock]));
+    const conversation = conversationOfSimulation(simulation, trace(lane, [span("persona")], [mock]), lane);
     expect(conversation.transcript).toEqual([]);
     expect(conversation.events).toEqual([]);
     expect(conversation.nothingToJudgeBecause).toMatch(/platform.*unavailable/i);
   });
 
   it("does not invent a platform tool call from the mock server's record", () => {
-    const conversation = conversationOfSimulation(simulation, trace("retell_web_call", [span("agent"), span("persona")], [mock]));
+    const conversation = conversationOfSimulation(simulation, trace("retell_web_call", [span("agent"), span("persona")], [mock]), "retell_web_call");
     expect(conversation.nothingToJudgeBecause).toBeNull();
     expect(conversation.transcript).toEqual([expect.objectContaining({ text: "The platform's words" })]);
     expect(conversation.events).toEqual([]);
@@ -66,13 +66,13 @@ describe("the evidence used to grade a platform simulation", () => {
 
   it("uses the actual platform tool result when both records exist", () => {
     const actual = span("agent", { kind: "tool", text: "", toolName: "get_availability", toolResult: '{"slots":["10:30"]}' });
-    const conversation = conversationOfSimulation(simulation, trace("retell_web_call", [span("agent")], [mock, actual]));
+    const conversation = conversationOfSimulation(simulation, trace("retell_web_call", [span("agent")], [mock, actual]), "retell_web_call");
     expect(conversation.events).toEqual([expect.objectContaining({ name: "get_availability", result: '{"slots":["10:30"]}' })]);
   });
 
   it("does not issue a score from an incomplete platform record", () => {
     const partial = { ...trace("retell_web_call", [span("agent")]), agentEvidenceIncomplete: true };
-    const conversation = conversationOfSimulation(simulation, partial);
+    const conversation = conversationOfSimulation(simulation, partial, "retell_web_call");
     expect(conversation.nothingToJudgeBecause).toMatch(/platform.*unavailable/i);
     expect(conversation.transcript).toHaveLength(1);
   });
@@ -82,14 +82,23 @@ describe("the evidence used to grade a platform simulation", () => {
       ...trace("livekit_room", [span("agent")], [span("persona", { kind: "root" })]),
       agentEvidenceComplete: false,
     };
-    expect(evidenceIsStillArriving(simulation, partial)).toBe(true);
-    expect(conversationOfSimulation(simulation, partial).nothingToJudgeBecause)
+    expect(evidenceIsStillArriving(simulation, partial, "livekit_room")).toBe(true);
+    expect(conversationOfSimulation(simulation, partial, "livekit_room").nothingToJudgeBecause)
       .toMatch(/platform.*incomplete/i);
   });
 
   it.each(["phone_number", "retell_text_mode"])("keeps the native record for %s", (lane) => {
-    const conversation = conversationOfSimulation(simulation, trace(lane, [span("persona")]));
+    const conversation = conversationOfSimulation(simulation, trace(lane, [span("persona")]), lane);
     expect(conversation.nothingToJudgeBecause).toBeNull();
     expect(conversation.transcript).toHaveLength(1);
+  });
+
+  it.each(["retell_web_call", "livekit_room"])("uses the frozen %s lane when provider spans omit it", (lane) => {
+    const providerTrace = trace("", [span("agent"), span("persona")], [mock]);
+    expect(conversationOfSimulation(simulation, providerTrace, lane).events).toEqual([]);
+    const partial = { ...providerTrace, agentEvidenceComplete: false };
+    expect(evidenceIsStillArriving(simulation, partial, lane)).toBe(true);
+    expect(conversationOfSimulation(simulation, partial, lane).nothingToJudgeBecause)
+      .toMatch(/platform.*incomplete/i);
   });
 });

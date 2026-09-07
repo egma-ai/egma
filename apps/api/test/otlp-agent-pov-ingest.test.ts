@@ -375,6 +375,7 @@ async function aLandedSimulation(
   // here which tool the world covers.
   mockTools: readonly { readonly tool: string; readonly answer: unknown }[] = [],
   land = true,
+  begin = true,
 ): Promise<{ simulationId: string; runId: string; traceId: string }> {
   const auth = contextFor(person, "member");
   const created = await createAgent(auth, {
@@ -411,7 +412,7 @@ async function aLandedSimulation(
   expect(claimed?.id, "this run's conversation was the one to claim").toBe(
     simulation.id,
   );
-  await startSimulation(auth, simulation.id, CONDUCTOR);
+  if (begin) await startSimulation(auth, simulation.id, CONDUCTOR);
   if (land) await completeSimulation(auth, simulation.id, CONDUCTOR, {
     endingReason: "agent_ended",
     turnCount: 13,
@@ -484,9 +485,9 @@ function wireTraceIdOfCapture(): string {
 }
 
 describe.skipIf(!storage.available)("LiveKit evidence while the call is running", () => {
-  it("registers the room before SDK exports and preserves project isolation", async () => {
-    const running = await aLandedSimulation(acme, "early livekit export", "", A_LIVEKIT_AGENT,
-      undefined, [], false);
+  it.each(["claimed", "running"])("registers the room for a %s claim before SDK exports", async (status) => {
+    const running = await aLandedSimulation(acme, `early livekit export ${status}`, "", A_LIVEKIT_AGENT,
+      undefined, [], false, status === "running");
     const room = `egma-sim-${running.simulationId}`;
     const register = (claimant = CONDUCTOR, reference = room, token = api.config.simulatorServiceToken) =>
       api.app.inject({ method: "POST", url: `/v1/simulations/${running.simulationId}/provider-reference`,
@@ -503,21 +504,69 @@ describe.skipIf(!storage.available)("LiveKit evidence while the call is running"
     expect((await register(CONDUCTOR, `${room}-different`)).statusCode).toBe(409);
     expect((await post(naming(first, room), globexKey)).statusCode).toBe(400);
     await exportTheCapture(acmeKey, room);
-    expect(await agentRowsIn(running.traceId)).toBeGreaterThan(1);
+    expect(await countOf(`select count() as n from spans final where trace_id = '${running.traceId}' and emitter = 'agent'`)).toBeGreaterThan(1);
     const page = await listSimulations(contextFor(acme, "member"), running.runId, { limit: 1 });
-    expect(page?.items[0]).toMatchObject({ status: "running", providerReference: room });
+    expect(page?.items[0]).toMatchObject({ status, providerReference: room });
+    if (status === "claimed") await startSimulation(contextFor(acme, "member"), running.simulationId, CONDUCTOR);
     await completeSimulation(contextFor(acme, "member"), running.simulationId, CONDUCTOR,
       { endingReason: "agent_ended", providerReference: room });
     expect((await register()).statusCode).toBe(409);
+  });
+
+  it("rejects room registration after cancellation and outside the LiveKit lane", async () => {
+    const canceled = await aLandedSimulation(acme, "canceled registration", "", A_LIVEKIT_AGENT,
+      undefined, [], false);
+    await cancelRun(contextFor(acme, "member"), canceled.runId);
+    const register = (simulationId: string) => api.app.inject({ method: "POST",
+      url: `/v1/simulations/${simulationId}/provider-reference`,
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: { claimant: CONDUCTOR, provider_reference: `egma-sim-${simulationId}` } });
+    expect((await register(canceled.simulationId)).statusCode).toBe(409);
+    const otherLane = await aLandedSimulation(acme, "non-livekit registration", "", {
+      agentPlatform: "retell", connectionType: "retell_chat_api", accessVariant: "retell_chat_api.api_key",
+      modality: "chat", config: { retellAgentId: "agent_non_livekit_registration" },
+      credentials: { apiKey: "retell-secret-for-registration-test" },
+    }, undefined, [], false);
+    expect((await register(otherLane.simulationId)).statusCode).toBe(409);
+  });
+
+  it("does not queue grading until the final LiveKit session root arrives", async () => {
+    const endedAt = new Date();
+    const delta = BigInt(endedAt.getTime() - CONVERSATION_ENDED_AT.getTime()) * 1_000_000n;
+    const current = captured.map(exported => ({ resourceSpans: (exported.resourceSpans ?? []).map(resource => ({
+      ...resource, scopeSpans: (resource.scopeSpans ?? []).map(scope => ({ ...scope,
+        spans: (scope.spans ?? []).map(span => ({ ...span,
+          startTimeUnixNano: (BigInt(span.startTimeUnixNano ?? "0") + delta).toString(),
+          endTimeUnixNano: (BigInt(span.endTimeUnixNano ?? "0") + delta).toString(),
+        })) })) })) }));
+    const room = "egma-sim-final-root-grading";
+    const landed = await aLandedSimulation(acme, "final root grading", room, A_LIVEKIT_AGENT, {
+      startedAt: new Date(CONVERSATION_STARTED_AT.getTime() + Number(delta / 1_000_000n)), endedAt,
+    });
+    const auth = contextFor(acme, "member");
+    for (const exported of current) {
+      const partial: OtlpExport = { resourceSpans: (exported.resourceSpans ?? []).map(resource => ({ ...resource,
+        scopeSpans: (resource.scopeSpans ?? []).map(scope => ({ ...scope,
+          spans: (scope.spans ?? []).filter(span => span.name !== "agent_session") })) })) };
+      expect((await post(naming(partial, room), acmeKey)).statusCode).toBe(200);
+    }
+    await api.drainEvidence();
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+    const pending = await api.app.inject({ method: "GET", url: `/v1/simulations/${landed.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` } });
+    expect(pending.json()).toMatchObject({ agentPovComplete: false, agentPovIncomplete: false });
+    for (const exported of current) expect((await post(naming(exported, room), acmeKey)).statusCode).toBe(200);
+    await api.drainEvidence();
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toMatchObject({ traceId: landed.traceId });
   });
 
   it("does not treat partial agent spans as the final agent record", async () => {
     const room = "egma-sim-partial-agent-record";
     const landed = await aLandedSimulation(acme, "partial livekit export", room, A_LIVEKIT_AGENT);
     for (const exported of captured) {
-      const partial: OtlpExport = { resourceSpans: exported.resourceSpans?.map(resource => ({ ...resource,
-        scopeSpans: resource.scopeSpans?.map(scope => ({ ...scope,
-          spans: scope.spans?.filter(span => span.name !== "agent_session") })) })) };
+      const partial: OtlpExport = { resourceSpans: (exported.resourceSpans ?? []).map(resource => ({ ...resource,
+        scopeSpans: (resource.scopeSpans ?? []).map(scope => ({ ...scope,
+          spans: (scope.spans ?? []).filter(span => span.name !== "agent_session") })) })) };
       expect((await post(naming(partial, room), acmeKey)).statusCode).toBe(200);
     }
     await api.drainEvidence();
@@ -1914,7 +1963,7 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
     const connectionId = created.connection?.id ?? "";
     const reach = await resolveRunStartReach(auth, created.id, connectionId);
     const started = await startRun(auth, {
-      suiteId, agentId: created.id, connectionId, idempotencyKey: newId("run"),
+      suiteId, agentId: created.id, connectionId,
       ...(reach === undefined ? {} : {
         agentVersion: RETELL_CALL.agent_version,
         conductedConnectionIdentity: reach.connectionIdentity,

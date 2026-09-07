@@ -231,8 +231,6 @@ function agentPovIncomplete(
     simulation.status !== "failed" &&
     simulation.status !== "canceled"
   ) return false;
-  const reference = simulation.providerReference;
-  if (reference === null || reference === "") return false;
   if (!laneProducesAnAgentPov(run.connectionSnapshot.connectionType)) {
     return false;
   }

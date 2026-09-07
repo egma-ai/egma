@@ -870,11 +870,13 @@ class RoomLifecycle:
         job_dispatch_metadata: dict[str, Any] | None = None,
         endpoint_resolver: Any = None,
         confirm_remote_end: Callable[[], Awaitable[bool]] | None = None,
+        on_provider_reference: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._settings = settings
         self._mock_tools = mock_tools
         self._endpoint_resolver = endpoint_resolver
         self._confirm_remote_end = confirm_remote_end
+        self._on_provider_reference = on_provider_reference
         # Written out once, here, rather than at the dispatch: the string
         # is what goes on the wire, and one serialisation means there is
         # no second spelling of the test's object to disagree with the
@@ -1004,6 +1006,10 @@ class RoomLifecycle:
         platform opened itself — and everything after this is the same
         whichever it was.
         """
+        if self._on_provider_reference is not None:
+            # The token endpoint may dispatch immediately. Persist the room
+            # association before either it or CreateRoom can start a worker.
+            await self._on_provider_reference(self._room_name)
         if self._settings.given_token:
             # Nothing is reached for here: the room is already open and the
             # way in was part of whatever opened it. One token, one join —
@@ -1852,11 +1858,17 @@ class TextRoom:
                 logging.INFO,
                 "egma.media.disconnected",
                 "livekit chat room disconnected",
-                attributes={"livekit.disconnect_reason": disconnect_reason_name(reason)},
+                attributes={
+                    "livekit.disconnect_reason": disconnect_reason_name(reason)
+                },
             )
             if self._leaving or self.failed.is_set() or self.ended.is_set():
                 return
-            if self._room is not None and self.arrivals.is_set() and room_was_deleted(reason):
+            if (
+                self._room is not None
+                and self.arrivals.is_set()
+                and room_was_deleted(reason)
+            ):
                 # DeleteRoom is LiveKit's supported way to end a session.
                 # next_utterance still settles text already on its way in.
                 self.ended.set()

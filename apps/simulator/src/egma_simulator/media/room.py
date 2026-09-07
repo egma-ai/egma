@@ -33,7 +33,9 @@ def disconnect_reason_name(reason: object) -> str:
     from livekit import rtc
 
     try:
-        return rtc.DisconnectReason.Name(reason) if isinstance(reason, int) else "UNKNOWN"
+        return (
+            rtc.DisconnectReason.Name(reason) if isinstance(reason, int) else "UNKNOWN"
+        )
     except ValueError:
         return "UNKNOWN"
 
@@ -42,6 +44,7 @@ def room_was_deleted(reason: object) -> bool:
     from livekit import rtc
 
     return reason == rtc.DisconnectReason.ROOM_DELETED
+
 
 ROOM_PREFIX = "egma-sim"
 """The stem of the name every room egma conducts a simulation in.
@@ -367,9 +370,7 @@ class _RoomAudioMix:
             return None
         waiting = self._backlog[key]
         under = [
-            other
-            for other in self._backlog
-            if other != key and self._backlog[other]
+            other for other in self._backlog if other != key and self._backlog[other]
         ]
         if not under and not waiting:
             # Read before anything is copied: the single-track lanes must
@@ -1165,6 +1166,14 @@ class JoinedRoom:
                 else:
                     confirmed = room_was_deleted(self._disconnect_reason)
             if self._leaving:
+                return
+            # Participant events can arrive while the provider request is in
+            # flight. Keep their completed/pending drain instead of starting a
+            # second marker or replacing that ending with an unconfirmed drop.
+            if self.failed.is_set() or self.ended.is_set():
+                return
+            if drain.departure_started:
+                await drain.finish_departures()
                 return
             if confirmed:
                 # This check and every drain check preserve independent media

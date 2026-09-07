@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
@@ -13,10 +13,10 @@ from retell_stub import RetellStub, serving
 from test_plug_livekit import ScriptedRtcRoom
 from test_plug_retell_web_call import AN_AGENT, SENTINEL_KEY
 
-from egma_simulator.media.room import JoinedRoom
 from egma_simulator.media.livekit_room import TextRoom
-from egma_simulator.plugs.retell_web_call import RetellWebCall
+from egma_simulator.media.room import JoinedRoom
 from egma_simulator.plugs import retell_web_call
+from egma_simulator.plugs.retell_web_call import RetellWebCall
 
 
 @dataclass
@@ -27,6 +27,7 @@ class FinalCallStub(RetellStub):
     checks: int = 0
     pending_checks: int = 0
     response_delay: float = 0
+    checking: asyncio.Event = field(default_factory=asyncio.Event)
 
     def build_app(self) -> web.Application:
         app = super().build_app()
@@ -34,6 +35,7 @@ class FinalCallStub(RetellStub):
         async def get_call(request: web.Request) -> web.Response:
             self._authorized(request)
             self.checks += 1
+            self.checking.set()
             if self.response_delay:
                 await asyncio.sleep(self.response_delay)
             return web.json_response(
@@ -171,7 +173,9 @@ async def test_unconfirmed_livekit_disconnect_remains_failure(
 
 
 @pytest.mark.parametrize("media_error", [False, True])
-async def test_room_close_waits_for_departure_and_preserves_drain_errors(media_error: bool):
+async def test_room_close_waits_for_departure_and_preserves_drain_errors(
+    media_error: bool,
+):
     room = JoinedRoom(url="wss://livekit.test", token="test", room_name="room")
     media = room.create_transport()
     client, markers = connected_room(room, media)
@@ -181,7 +185,9 @@ async def test_room_close_waits_for_departure_and_preserves_drain_errors(media_e
     left = transport._event_handlers["on_participant_disconnected"].handlers[0]
     departure = asyncio.create_task(left(transport, "agent"))
     await asyncio.sleep(0)
-    closing = asyncio.create_task(disconnect(client, media, rtc.DisconnectReason.UNKNOWN_REASON))
+    closing = asyncio.create_task(
+        disconnect(client, media, rtc.DisconnectReason.UNKNOWN_REASON)
+    )
     try:
         await asyncio.sleep(0)
         await asyncio.sleep(0)
@@ -194,7 +200,14 @@ async def test_room_close_waits_for_departure_and_preserves_drain_errors(media_e
             media.failed.set()
         queue.get_nowait()
         queue.task_done()
-        await asyncio.wait_for(asyncio.gather(departure, closing), 1)
+        results = await asyncio.wait_for(
+            asyncio.gather(departure, closing, return_exceptions=True), 1
+        )
+        assert all(
+            result is None
+            or (media_error and isinstance(result, asyncio.CancelledError))
+            for result in results
+        )
         assert media.failed.is_set() is media_error
         assert media.ended.is_set() is not media_error
         assert len(markers) == (0 if media_error else 1)
@@ -204,7 +217,8 @@ async def test_room_close_waits_for_departure_and_preserves_drain_errors(media_e
 
 
 @pytest.mark.parametrize(
-    ("status", "returned_id"), [("error", None), ("ongoing", None), ("ended", "another-call")]
+    ("status", "returned_id"),
+    [("error", None), ("ongoing", None), ("ended", "another-call")],
 )
 async def test_retell_cannot_confirm_a_failed_unfinished_or_different_call(
     status: str, returned_id: str | None, monkeypatch: pytest.MonkeyPatch
@@ -266,16 +280,52 @@ async def test_local_teardown_cancels_a_pending_provider_status_check():
         media = await plug.prepare()
         room = plug._room._room
         client, markers = connected_room(room, media)
-        closing = asyncio.create_task(disconnect(client, media, rtc.DisconnectReason.CLIENT_INITIATED))
+        closing = asyncio.create_task(
+            disconnect(client, media, rtc.DisconnectReason.CLIENT_INITIATED)
+        )
         try:
-            async with asyncio.timeout(1):
-                while not stub.checks:
-                    await asyncio.sleep(0)
+            await asyncio.wait_for(stub.checking.wait(), 1)
             await asyncio.wait_for(plug.close(), 0.1)
             await closing
             assert not media.failed.is_set()
-            assert not markers, "a canceled simulation must not complete from provider status"
+            assert not markers, (
+                "a canceled simulation must not complete from provider status"
+            )
             assert room._remote_close.done()
+        finally:
+            await plug.close()
+            await asyncio.gather(closing, return_exceptions=True)
+
+
+@pytest.mark.parametrize("status", ["ended", "error"])
+async def test_participant_departure_during_provider_check_keeps_one_ending(
+    status: str,
+):
+    stub = FinalCallStub(api_key=SENTINEL_KEY, response_delay=0.05, status=status)
+    async with serving(stub) as server:
+        plug = RetellWebCall(
+            modality="voice",
+            access_variant="retell_web_call.api_key",
+            config={"retellAgentId": AN_AGENT, "baseUrl": server.base_url},
+            credentials={"apiKey": SENTINEL_KEY},
+            simulation_id="sim-completion",
+        )
+        media = await plug.prepare()
+        room = plug._room._room
+        client, markers = connected_room(room, media)
+        closing = asyncio.create_task(
+            disconnect(client, media, rtc.DisconnectReason.CLIENT_INITIATED)
+        )
+        try:
+            await asyncio.wait_for(stub.checking.wait(), 1)
+            transport = room._transport
+            left = transport._event_handlers["on_participant_disconnected"].handlers[0]
+            await left(transport, "agent")
+            await closing
+            await room._remote_close
+            assert media.ended.is_set()
+            assert not media.failed.is_set()
+            assert len(markers) == 1
         finally:
             await plug.close()
             await asyncio.gather(closing, return_exceptions=True)

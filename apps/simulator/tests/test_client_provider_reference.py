@@ -13,7 +13,12 @@ async def registration_server() -> AsyncIterator[tuple[str, list[dict]]]:
     seen: list[dict] = []
 
     async def register(request: web.Request) -> web.Response:
-        seen.append({"body": await request.json(), "authorization": request.headers.get("Authorization")})
+        seen.append(
+            {
+                "body": await request.json(),
+                "authorization": request.headers.get("Authorization"),
+            }
+        )
         if request.match_info["simulation_id"] == "not-my-claim":
             return web.json_response({"error": "claim refused"}, status=409)
         return web.json_response({"simulation_id": request.match_info["simulation_id"]})
@@ -30,16 +35,30 @@ async def registration_server() -> AsyncIterator[tuple[str, list[dict]]]:
         await runner.cleanup()
 
 
-async def test_room_registration_is_acknowledged_with_the_service_credential(registration_server):
+async def test_room_registration_is_acknowledged_with_the_service_credential(
+    registration_server,
+):
     url, seen = registration_server
-    async with ControlPlaneClient(url, claim_wait_seconds=1, service_token="service-secret") as client:
+    async with ControlPlaneClient(
+        url, claim_wait_seconds=1, service_token="service-secret"
+    ) as client:
         await client.register_provider_reference("sim-a", "worker-a", "egma-sim-room-a")
-    assert seen == [{"body": {"claimant": "worker-a", "provider_reference": "egma-sim-room-a"},
-                     "authorization": "Bearer service-secret"}]
+    assert seen == [
+        {
+            "body": {"claimant": "worker-a", "provider_reference": "egma-sim-room-a"},
+            "authorization": "Bearer service-secret",
+        }
+    ]
 
 
-async def test_a_refused_registration_does_not_allow_the_caller_to_continue(registration_server):
+async def test_a_refused_registration_does_not_allow_the_caller_to_continue(
+    registration_server,
+):
     url, _ = registration_server
-    async with ControlPlaneClient(url, claim_wait_seconds=1, service_token="service-secret") as client:
+    async with ControlPlaneClient(
+        url, claim_wait_seconds=1, service_token="service-secret"
+    ) as client:
         with pytest.raises(DocumentRejected, match="409"):
-            await client.register_provider_reference("not-my-claim", "worker-a", "egma-sim-room-a")
+            await client.register_provider_reference(
+                "not-my-claim", "worker-a", "egma-sim-room-a"
+            )

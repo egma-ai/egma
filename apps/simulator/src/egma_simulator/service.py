@@ -257,6 +257,12 @@ class RunningSimulation:
                 # process-wide provider holding this simulation's route.
                 self._spans.abort()
 
+    async def _register_provider_reference(self, reference: str) -> None:
+        await self._client.register_provider_reference(
+            self.simulation_id, self._config.claimant, reference
+        )
+        self._reporter.provider_reference = reference
+
     async def _conduct_and_report(self) -> None:
         reporter = self._reporter
         reporter.running()
@@ -289,6 +295,7 @@ class RunningSimulation:
                 media=MediaSettings.for_simulation(
                     self._config.media, self._spec.platform.carrier
                 ),
+                on_provider_reference=self._register_provider_reference,
             )
             self._assembled = assembled
             persona = Persona(
@@ -329,7 +336,7 @@ class RunningSimulation:
                 # Keep the platform call reference on every terminal report,
                 # including faults that stopped conducting before an ending.
                 conducting = assembled.conductor or assembled.plug
-                if conducting is not None:
+                if conducting is not None and conducting.provider_reference is not None:
                     reporter.provider_reference = conducting.provider_reference
                 # Conducting closed the pipeline on its way out, whatever
                 # happened, so whatever was recorded is measured by now.

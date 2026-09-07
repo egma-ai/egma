@@ -7,9 +7,9 @@ one, against a **named version** of it, with this simulation's variables
 attached — and Retell answers with a way into a room. That room is a
 LiveKit one: the way in is a server URL and an access token, which is
 exactly what :mod:`egma_simulator.media.livekit_room` already joins, so
-this module is thin. Creating the call is the only place it touches
-Retell's API; everything after it is the room media the simulator already
-has.
+this module is thin. It creates the call through Retell's API and checks
+the final call status if the room closes before participant departure.
+The conversation itself uses the simulator's existing room media.
 
 Its config keys, like every plug's, are its own:
 
@@ -329,10 +329,13 @@ class RetellWebCall:
             return False
         url = f"{self._base_url}/v2/get-call/{quote(call_id, safe='')}"
         try:
-            async with asyncio.timeout(FINAL_STATUS_SECONDS), aiohttp.ClientSession(
-                headers={"Authorization": f"Bearer {self._api_key}"},
-                timeout=aiohttp.ClientTimeout(total=1.0),
-            ) as session:
+            async with (
+                asyncio.timeout(FINAL_STATUS_SECONDS),
+                aiohttp.ClientSession(
+                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    timeout=aiohttp.ClientTimeout(total=1.0),
+                ) as session,
+            ):
                 while True:
                     try:
                         async with session.get(url) as response:
@@ -361,7 +364,10 @@ class RetellWebCall:
                                         },
                                     )
                                     return status == "ended"
-                            elif response.status not in {404, 408, 429} and response.status < 500:
+                            elif (
+                                response.status not in {404, 408, 429}
+                                and response.status < 500
+                            ):
                                 return False
                     except UNREACHABLE:
                         pass

@@ -116,6 +116,7 @@ export type Conversation = {
 export function conversationOfSimulation(
   simulation: Simulation,
   trace: TraceDetail | undefined,
+  connectionType: string,
 ): Conversation {
   // Execution status decides whether grading is allowed. Failed simulations
   // may still hold a transcript, but late evidence does not change their status.
@@ -140,7 +141,7 @@ export function conversationOfSimulation(
   };
 
   if (trace !== undefined && !trace.truncated) {
-    const requiresAgentPov = laneProducesAnAgentPov(trace.connectionType);
+    const requiresAgentPov = laneProducesAnAgentPov(connectionType);
     const agentEvidenceMissing = requiresAgentPov &&
       trace.agentEvidenceComplete !== true;
     return {
@@ -206,10 +207,11 @@ function rootArrivedIn(trace: TraceDetail): boolean {
 export function evidenceIsStillArriving(
   simulation: Simulation,
   trace: TraceDetail | undefined,
+  connectionType: string,
 ): boolean {
   if (simulation.status !== "completed") return false;
   if (trace === undefined) return true;
-  if (laneProducesAnAgentPov(trace.connectionType)) {
+  if (laneProducesAnAgentPov(connectionType)) {
     return !trace.truncated && trace.agentEvidenceIncomplete !== true &&
       trace.agentEvidenceComplete !== true;
   }

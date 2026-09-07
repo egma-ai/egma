@@ -2118,11 +2118,13 @@ export async function resolveSimulationStanding(
  * Only the service's current claim can write the first reference. The row and
  * frozen run supply tenancy and lane; a request cannot choose either.
  */
-export async function registerSimulationProviderReference(input: {
+export async function registerSimulationProviderReference(auth: AuthContext, input: {
   readonly simulationId: string;
   readonly claimant: string;
   readonly providerReference: string;
 }): Promise<boolean> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  if (auth.via !== "simulator") return false;
   const reference = input.providerReference;
   if (!/^egma-sim-(?:chat-)?[A-Za-z0-9_-]+$/.test(reference) || reference.length > 512) {
     return false;
@@ -2130,7 +2132,7 @@ export async function registerSimulationProviderReference(input: {
   const [written] = await db()
     .update(simulation)
     .set({ providerReference: reference })
-    .where(and(
+    .where(within(auth, simulation, and(
       eq(simulation.id, input.simulationId),
       eq(simulation.claimedBy, validClaimant(input.claimant)),
       inArray(simulation.status, ["claimed", "running"]),
@@ -2139,8 +2141,9 @@ export async function registerSimulationProviderReference(input: {
       sql`exists (select 1 from ${run} where ${run.id} = ${simulation.runId}
         and ${run.organizationId} = ${simulation.organizationId}
         and ${run.projectId} = ${simulation.projectId}
-        and ${run.connectionSnapshot}->>'connectionType' in ('livekit_room', 'livekit_chat'))`,
-    ))
+        and ${run.connectionSnapshot}->>'connectionType' = 'livekit_room')`,
+      inActingProject(auth, simulation),
+    )))
     .returning({ id: simulation.id });
   return written !== undefined;
 }

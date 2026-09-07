@@ -108,6 +108,7 @@ an empty list has always meant here.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ..contract import AGENT_NEVER_JOINED
@@ -286,6 +287,7 @@ class LiveKitChat:
         mock_tools: MockToolSeam | None = None,
         media: object = None,
         driver: Any = None,
+        on_provider_reference: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         # A room is reached with this connection's URL and authority, and a
         # typed one reaches the telephone network not at all. A worker is
@@ -311,6 +313,7 @@ class LiveKitChat:
             simulation_id=simulation_id,
             mock_tools=mock_tools,
             job_dispatch_metadata=job_dispatch_metadata,
+            on_provider_reference=on_provider_reference,
         )
         self._reference: str | None = None
         # Kept as well as handed over, for the voice plug's reason: this

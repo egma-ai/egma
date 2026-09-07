@@ -1,7 +1,7 @@
 """The workbench: a fake control plane that speaks the contract from fixtures.
 
-Dev and test only. It serves the four endpoints the simulator dials —
-claim, heartbeat, report, and the OTLP ingest the conversation's spans go
+Dev and test only. It serves the endpoints the simulator dials —
+claim, heartbeat, provider reference, report, and the OTLP ingest the spans go
 to — from spec documents loaded off disk, validates everything both ways
 against the contract schemas, and records every observation in order. The
 records are the whole point: the acceptance suite asserts against nothing
@@ -255,6 +255,29 @@ def build_app(state: WorkbenchState) -> web.Application:
             raise web.HTTPBadRequest(text=str(refusal)) from refusal
         return web.Response(status=204)
 
+    async def provider_reference(request: web.Request) -> web.Response:
+        simulation_id = request.match_info["simulation_id"]
+        if not state.known(simulation_id):
+            raise web.HTTPNotFound(text=f"unknown simulation {simulation_id}")
+        body = await request.json()
+        claimant = body.get("claimant")
+        reference = body.get("provider_reference")
+        if not isinstance(claimant, str) or not claimant:
+            raise web.HTTPBadRequest(text="claimant must be a non-empty string")
+        if not isinstance(reference, str) or not reference:
+            raise web.HTTPBadRequest(
+                text="provider_reference must be a non-empty string"
+            )
+        state._record(
+            "provider_reference",
+            simulation_id=simulation_id,
+            claimant=claimant,
+            provider_reference=reference,
+        )
+        return web.json_response(
+            {"simulation_id": simulation_id, "provider_reference": reference}
+        )
+
     async def traces(request: web.Request) -> web.Response:
         try:
             state.spans(await request.read())
@@ -294,6 +317,9 @@ def build_app(state: WorkbenchState) -> web.Application:
     app.router.add_post("/v1/claims", claim)
     app.router.add_post("/v1/simulations/{simulation_id}/heartbeats", heartbeat)
     app.router.add_post("/v1/simulations/{simulation_id}/reports", report)
+    app.router.add_post(
+        "/v1/simulations/{simulation_id}/provider-reference", provider_reference
+    )
     app.router.add_post("/v1/traces", traces)
     app.router.add_get("/workbench/records", records)
     app.router.add_post("/workbench/specs", offer)

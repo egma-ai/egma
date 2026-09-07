@@ -1345,11 +1345,6 @@ export async function readTrace(
       `select
        span_id,
        span_id as root_span_id,
-       if(
-         emitter = 'agent',
-         JSONExtractBool(payload, '${NORMALISED_KEY}', 'degraded'),
-         0
-       ) as agent_evidence_incomplete,
        JSONExtractRaw(payload, '${NORMALISED_KEY}') as normalised,
        toJSONString(arrayMap(
          event -> tuple(
@@ -1400,7 +1395,6 @@ export async function readTrace(
 /** The root id, egma-owned block, and bounded Retell structural projections. */
 type RootSliceRow = RetellToolTimelineSlice & {
   readonly span_id: string;
-  readonly agent_evidence_incomplete: number;
   readonly normalised: string;
 };
 

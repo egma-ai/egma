@@ -1,15 +1,16 @@
-"""The simulator's side of the wire: four outbound calls, nothing inbound.
+"""The simulator's side of the wire: outbound calls, nothing inbound.
 
 The simulator pulls its own work rather than being sent it. It claims
 simulations with a capacity declaration, on a request the control plane may
 hold open until there is something to give; it heartbeats each running
 simulation and receives any directive on the answer; it posts report
-documents as events happen; and it posts the conversation itself as OTLP
+documents as events happen; it registers LiveKit room references before
+workers start; and it posts the conversation itself as OTLP
 span batches, at the same ingest door a customer's agent exports to. Every
 arrow points out, so the simulator needs no inbound network surface at all
 — which is what makes it one more container that only dials out.
 
-All four reach the same deployment, so there is one address to configure
+All calls reach the same deployment, so there is one address to configure
 and the telemetry path is derived from it rather than named separately: a
 simulator that can claim work can always file the evidence of it.
 
@@ -149,7 +150,9 @@ class ControlPlaneClient:
         """Acknowledge the room association before the agent can export into it."""
         await self._post_document(
             f"{self._base_url}/v1/simulations/{simulation_id}/provider-reference",
-            json.dumps({"claimant": claimant, "provider_reference": provider_reference}).encode(),
+            json.dumps(
+                {"claimant": claimant, "provider_reference": provider_reference}
+            ).encode(),
             accepted_statuses=(200,),
         )
 
@@ -163,8 +166,7 @@ class ControlPlaneClient:
             ) as response:
                 if response.status != 200:
                     raise HeartbeatFailure(
-                        f"heartbeat answered {response.status}: "
-                        f"{await response.text()}"
+                        f"heartbeat answered {response.status}: {await response.text()}"
                     )
                 body = await response.json()
         except UNREACHABLE as error:
