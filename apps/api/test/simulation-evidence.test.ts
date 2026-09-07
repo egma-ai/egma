@@ -3,6 +3,7 @@ import {
   claimGradingJobs,
   finishGradingJob,
   getSimulation,
+  recordProviderUsage,
   requestGrading,
   type AuthContext,
   type GradingClaim,
@@ -322,5 +323,107 @@ describe("one simulation's grades", () => {
         { score: 0.75, result: "failed" },
       ],
     });
+  });
+});
+
+/**
+ * What one simulation cost, on the browser's own path.
+ *
+ * **Not on `/v1`.** The published contract gains nothing from the billing
+ * effort: usage is a product surface the pages read, and a shape in the public
+ * API is a shape Egma has to keep. So the read lives beside `/api/me` and is
+ * asserted here as what it is — a browser read, inside the same credentialed
+ * scope, answering about one customer's own conversation and no other's.
+ */
+describe("what one simulation cost", () => {
+  const USAGE = "/api/simulations";
+
+  it("answers the spend of the caller's own simulation, by provider and model", async () => {
+    const { standing, run } = await aCustomerWhoRan("simulation_cost_surface");
+
+    const empty = await request(
+      api.app,
+      "GET",
+      `${USAGE}/${run.heard}/usage`,
+      standing.key,
+    );
+    expect(empty.statusCode, JSON.stringify(empty.body)).toBe(200);
+    // A simulation nobody has recorded a provider request for spent nothing,
+    // and says so rather than being absent.
+    expect(empty.body).toMatchObject({
+      simulationId: run.heard,
+      amountMicros: 0,
+      requests: 0,
+      byModel: [],
+    });
+
+    const simulation = await getSimulation(standing.auth, run.heard);
+    if (simulation === undefined) throw new Error("the run has no simulation");
+    await recordProviderUsage(
+      {
+        ...standing.auth,
+        projectId: simulation.projectId,
+        via: "simulator",
+      },
+      [
+        {
+          identity: {
+            work: "simulation",
+            simulationId: run.heard,
+            spanId: "aaaaaaaaaaaaaaa1",
+          },
+          occurredAt: new Date(),
+          runId: simulation.runId,
+          provider: "openai",
+          model: "gpt-4o-mini",
+          operation: "openai_chat_completions",
+          quantities: { input_tokens: 1_000, output_tokens: 100 },
+          measurement: "provider_reported",
+          providerRef: "chatcmpl-1",
+          paymentSource: "platform",
+          rawUsage: { prompt_tokens: 1_000, completion_tokens: 100 },
+        },
+      ],
+    );
+
+    const spent = await request(
+      api.app,
+      "GET",
+      `${USAGE}/${run.heard}/usage`,
+      standing.key,
+    );
+    expect(spent.statusCode, JSON.stringify(spent.body)).toBe(200);
+    expect(spent.body).toMatchObject({
+      simulationId: run.heard,
+      // $0.15/1M in and $0.60/1M out: 150 plus 60 micros.
+      amountMicros: 210,
+      requests: 1,
+      byModel: [
+        {
+          provider: "openai",
+          model: "gpt-4o-mini",
+          unit: "tokens",
+          requests: 1,
+          quantities: { input_tokens: 1_000, output_tokens: 100 },
+          amountMicros: 210,
+        },
+      ],
+    });
+  });
+
+  it("does not answer about another customer's conversation", async () => {
+    const { run } = await aCustomerWhoRan("simulation_cost_tenancy");
+    const globex = await signUp(api.app, "grace@globex.example", "Globex");
+    const theirs = await projectKeyFor(api.app, globex);
+
+    const refused = await request(
+      api.app,
+      "GET",
+      `${USAGE}/${run.heard}/usage`,
+      theirs,
+    );
+    // Not here and not yours are one answer, so following a stranger's link
+    // never says whether the thing on the other end exists.
+    expect(refused.statusCode).toBe(404);
   });
 });

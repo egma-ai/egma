@@ -246,19 +246,54 @@ function evidence(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** What one simulation cost, as the browser's own read answers it. */
+function spend(overrides: Record<string, unknown> = {}) {
+  return {
+    simulationId: "sim_1",
+    amountMicros: 52_100,
+    requests: 3,
+    byModel: [
+      {
+        provider: "cartesia",
+        model: "sonic-3.5",
+        unit: "characters",
+        requests: 1,
+        quantities: { characters: 1_000 },
+        amountMicros: 50_000,
+      },
+      {
+        provider: "openai",
+        model: "gpt-4o-mini",
+        unit: "tokens",
+        requests: 2,
+        quantities: {
+          input_tokens: 2_000,
+          cached_input_tokens: 800,
+          output_tokens: 200,
+        },
+        amountMicros: 2_100,
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function page({
   role = "admin",
   read = evidence(),
   regrade = { simulationId: "sim_1", reopened: 1, alreadyWaiting: 0 },
+  cost = { status: 200, body: spend() } as Stubbed,
 }: {
   readonly role?: string;
   readonly read?: Record<string, unknown>;
   readonly regrade?: Record<string, unknown>;
+  readonly cost?: Stubbed;
 } = {}): void {
   apiAnswers({
     "/api/me": { status: 200, body: meWith(role) },
     "/v1/simulations/sim_1": { status: 200, body: read },
     "/v1/simulations/sim_1/regrade": { status: 200, body: regrade },
+    "/api/simulations/sim_1/usage": cost,
   });
 }
 
@@ -1468,5 +1503,106 @@ describe("recording evidence", () => {
     expect(
       screen.getByText("No audio recording is available for this trace."),
     ).toBeTruthy();
+  });
+});
+
+/**
+ * What a simulation cost, on the page that shows the simulation.
+ *
+ * The grain is the model rather than the request, because the question
+ * somebody opens this for is which model is expensive — and forty turns of a
+ * voice conversation are a hundred and twenty requests. The quantities stay in
+ * the unit the provider bills, so the number here and the number on a
+ * provider's invoice are the same number.
+ */
+/**
+ * The cost block, found by its heading.
+ *
+ * A `<section>` earns the `region` role only when it has an accessible name,
+ * and the shared `Section` names itself with a visible heading rather than an
+ * `aria-label` — so the heading is what a reader finds it by, and it is what
+ * this finds it by too.
+ */
+async function costSection(settledOn: string | RegExp): Promise<HTMLElement> {
+  // Waited for by what the block finally says rather than by its heading: the
+  // heading is there while the read is still in flight, so finding it proves
+  // only that the page drew a placeholder.
+  const settled = await screen.findByText(settledOn);
+  const section = settled.closest('[data-slot="section"]');
+  if (section === null) throw new Error("the cost block is in no section");
+  return section as HTMLElement;
+}
+
+describe("what one simulation cost", () => {
+  it("shows the total and a row per provider and model, in the units the providers bill", async () => {
+    page();
+    render(<SimulationEvidencePage />);
+
+    // Fractions of a cent, so four decimal places: two would round every
+    // honest number to $0.00 and read as free.
+    const cost = await costSection("$0.0521 · 3 requests");
+
+    const table = within(cost).getByRole("table");
+    expect(within(table).getByText("sonic-3.5")).toBeTruthy();
+    expect(within(table).getByText("cartesia")).toBeTruthy();
+    expect(within(table).getByText("1,000 characters")).toBeTruthy();
+    // Every amount at the same grain, rows and total alike: a table where one
+    // line is rounded and its neighbour is not does not add up on the page.
+    expect(within(table).getByText("$0.0500")).toBeTruthy();
+    expect(within(table).getByText("$0.0021")).toBeTruthy();
+
+    expect(within(table).getByText("gpt-4o-mini")).toBeTruthy();
+    // The cached half of the prompt is named separately, because it is priced
+    // separately — that is the whole reason the record keeps the two apart.
+    expect(
+      within(table).getByText(
+        "2,000 input tokens, 800 cached input tokens, 200 output tokens",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("says plainly when a simulation made no provider request at all", async () => {
+    page({
+      cost: {
+        status: 200,
+        body: spend({ amountMicros: 0, requests: 0, byModel: [] }),
+      },
+    });
+    render(<SimulationEvidencePage />);
+
+    const cost = await costSection(/recorded no provider requests/i);
+    expect(within(cost).getByRole("heading", { name: "Cost" })).toBeTruthy();
+  });
+
+  it("keeps every grade and every turn readable when the cost read fails", async () => {
+    page({
+      cost: {
+        status: 503,
+        body: {
+          error: "unavailable",
+          message: "Egma could not read this simulation's cost. Try again.",
+        },
+      },
+    });
+    render(<SimulationEvidencePage />);
+
+    // The evidence is the page's subject and is unaffected: a cost that could
+    // not be read is a quiet line, never a page that refuses to show a run.
+    expect(
+      await screen.findByText("You are all set for Tuesday."),
+    ).toBeTruthy();
+    const cost = await costSection(/could not read this simulation's cost/i);
+    expect(within(cost).getByRole("heading", { name: "Cost" })).toBeTruthy();
+  });
+
+  it("shows the cost to a viewer, who may read it and change nothing", async () => {
+    page({ role: "viewer" });
+    render(<SimulationEvidencePage />);
+
+    const cost = await costSection("$0.0521 · 3 requests");
+    expect(within(cost).getByRole("heading", { name: "Cost" })).toBeTruthy();
+    // A run that paused for money has to explain itself to whoever started it,
+    // whatever they are allowed to change.
+    expect(screen.queryByRole("button", { name: "Regrade" })).toBeNull();
   });
 });

@@ -46,15 +46,17 @@ export function readSimulationSpend(
  * Money, in the smallest amount worth showing.
  *
  * A simulation costs fractions of a cent, so two decimal places would round
- * every honest number to `$0.00` and read as free. Four is where a cent's
- * hundredth becomes visible, which is the grain these numbers actually have;
- * a total that has grown past a cent is shown at two, because trailing
- * precision on a real amount is noise.
+ * every honest number to `$0.00` and read as free. Four is where a hundredth
+ * of a cent becomes visible, which is the grain these numbers actually have,
+ * and it is the same grain in every row and in the total — a table where one
+ * line is rounded and its neighbour is not does not add up on the page.
+ *
+ * A dollar is where that stops being useful: an amount that large is read in
+ * cents like any other price, and four places on it would be noise.
  */
 export function costLabel(amountMicros: number): string {
   const dollars = amountMicros / 1_000_000;
-  const places = dollars >= 0.01 ? 2 : 4;
-  return `$${dollars.toFixed(places)}`;
+  return `$${dollars.toFixed(dollars >= 1 ? 2 : 4)}`;
 }
 
 /** `input_tokens` as a person reads it, without inventing a new word for it. */
