@@ -9,7 +9,7 @@ dependencies = [
     "boto3>=1.42.0",
     "jsonschema>=4.25.1",
     "loguru>=0.7.3",
-    "nltk>=3.10.2",
+    "nltk>=3.10.3",
     "livekit==1.1.14",
     "opentelemetry-exporter-otlp-proto-common==1.44.0",
     "opentelemetry-sdk==1.44.0",
