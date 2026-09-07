@@ -247,12 +247,42 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
       (metric) => metric.measure === "turn_response_latency",
     );
 
-    // This production capture has no Egma timing span. Its three spoken
-    // answers waited 2346.236638, 1808.245039, and 1994.917806 ms. Both
-    // endpoints derive that series from the same recognised framework spans,
-    // then use the shared nearest-rank percentile.
+    /*
+     * This production capture has no Egma timing span, so both endpoints derive
+     * the series from the same recognised framework spans and then use the
+     * shared nearest-rank percentile.
+     *
+     * Three spoken answers, each measured from the caller's last audible
+     * sample — the end of that `user_turn`'s last `user_speaking` child, which
+     * is the VAD's own detected end (catalog version 8) — and hand-computed
+     * from the capture's raw timestamps, held as the store keeps them: starts
+     * truncated to the microsecond, durations exact.
+     *
+     * 1. human `baac22a26a96fa9b` carries no `user_speaking` child, so its own
+     *    end stands in: it starts 1785693902082961920 → 1785693902082961 µs and
+     *    runs 297806362 ns, ending 1785693902380767362. Agent speech
+     *    `1b8cc4d1064a766d` begins 1785693904727004928 → 1785693904727004 µs.
+     *    1785693904727004000 − 1785693902380767362 = 2346236638 ns.
+     * 2. human `c35b92a87f8121a1`'s last `user_speaking` `b30dd00e322f2443`
+     *    starts 1785693920313752320 → 1785693920313752 µs and runs
+     *    1710489600 ns, so the caller stops being audible at
+     *    1785693922024241600. Agent speech `42b9d5797f17aa9d` begins
+     *    1785693924924691968 → 1785693924924691 µs.
+     *    1785693924924691000 − 1785693922024241600 = 2900449400 ns.
+     * 3. human `9839f5ef664bc919`'s `user_speaking` `45e924b089cd919f` starts
+     *    1785693942114222080 → 1785693942114222 µs and runs 908797440 ns, so
+     *    the caller stops being audible at 1785693943023019440. Agent speech
+     *    `11a1eaca219437a9` begins 1785693946089613312 →
+     *    1785693946089613 µs.
+     *    1785693946089613000 − 1785693943023019440 = 3066593560 ns.
+     *
+     * So the series is 2346.236638, 2900.4494 and 3066.59356 ms, and the
+     * nearest-rank p90 of three samples is the third of them sorted — a
+     * measurement that actually happened, and the slowest answer the caller
+     * waited through.
+     */
     expect(turnLatency?.derived).toBe(true);
-    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(2346.236638);
+    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(3066.59356);
     expect(trace?.turnResponseLatencyP90Milliseconds).toBe(turnLatency?.p90);
     expect(trace?.turnResponseLatencyP90Partial).toBe(false);
   });

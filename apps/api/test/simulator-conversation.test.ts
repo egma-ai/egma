@@ -10,7 +10,6 @@ import {
   createPersona,
   listProjectGraders,
   readTraceGrades,
-  settleSimulationsPastTheAgentPovBound,
   type AuthContext,
   type CurrentGrade,
 } from "@egma/db";
@@ -1029,19 +1028,6 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       expect(refusedRun.status).toBe("completed");
       expect(refusedRun.completedCount).toBe(0);
       expect(refusedRun.failedCount).toBe(1);
-
-      // **Grading waited for the agent's own POV, and here nothing sends one.**
-      // This conversation ran over a Retell lane, so a second account of it is
-      // coming — egma pulls Retell's own call record when the conversation ends
-      // (ADR-0015 §2) — and the walking counterpart this suite drives is not
-      // Retell and answers no call record. So the wait can only end on the
-      // 30-second bound, asked for here with the bound already spent rather
-      // than waited out: what this pass proves is the conversation and its
-      // grade, not a clock.
-      await settleSimulationsPastTheAgentPovBound({
-        boundSeconds: 0,
-        withinSeconds: 365 * 24 * 60 * 60,
-      });
 
       // And the grade, which is what the whole pass was for. The Expected
       // behaviors grader scored this trace from the spans above.

@@ -147,7 +147,8 @@ const INSTANCE_SCOPED: ReadonlyMap<string, string> = new Map([
  * every claim arrives with the `AuthContext` narrowed to that row's own
  * organization and project — which is what the work itself goes through.
  *
- * A tenth name here is a decision somebody has to make on purpose.
+ * Another name here is a decision somebody has to make on purpose, and every
+ * one of them below was made after this rule stopped the build.
  */
 const WORK_DISPATCHING = [
   "claimGradingJobs",
@@ -185,6 +186,21 @@ const WORK_DISPATCHING = [
   // live, whether the simulation is its, and the answers that simulation was
   // already frozen with.
   "resolveMockToolCall",
+  // The agent-POV bound, added on 2026-09-06 with the grading wait and after
+  // the rule stopped the build. It is the orphan sweep's exact shape and stands
+  // on the orphan sweep's exact ground: a simulation's second account of itself
+  // — the agent's own — arrives by a push or a pull, and one that never arrives
+  // sends nothing at all. Silence has no sender, so nobody in particular reads
+  // it, and a bound is read by egma standing behind every organization at once
+  // for the same reason a dead simulator's silence is.
+  //
+  // It names no customer and cannot be made to: a bound in seconds and a window
+  // in seconds say how patient this tick is, and neither says whose data to
+  // bring back. The only rows it reads are completed simulations egma's own
+  // claim machinery stamped, each one's grading requested under the
+  // `AuthContext` that row's own organization and project build, and the answer
+  // is identifiers and no content.
+  "settleSimulationsPastTheAgentPovBound",
 ];
 
 /**

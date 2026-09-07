@@ -80,18 +80,6 @@ export const SIMULATION_STATUSES = [
 export type SimulationStatus = (typeof SIMULATION_STATUSES)[number];
 
 /**
- * The two ways grading's wait for the agent's POV can end.
- *
- * `filed` — the agent's own account of the conversation was query-visible, so
- * grading read both POVs. `incomplete` — the 30-second bound (ADR-0015 §6)
- * expired first, so grading proceeded on what there was and the record says
- * which account is missing. Null is "still waiting, or nothing to wait for".
- */
-export const SIMULATION_AGENT_POV_STATES = ["filed", "incomplete"] as const;
-export type SimulationAgentPov =
-  (typeof SIMULATION_AGENT_POV_STATES)[number];
-
-/**
  * How a completed conversation ended — a fact about the conversation, not a
  * grade of it. An agent that hung up mid-sentence completed its
  * simulation; whether that was acceptable is the graders' question, later.
@@ -447,23 +435,6 @@ export const simulation = pgTable(
      * never parsed; null when the plug had none to offer.
      */
     providerReference: text("provider_reference"),
-    /**
-     * How grading's wait for the **agent's POV** ended: `filed` when the
-     * agent's own account of this conversation was query-visible, `incomplete`
-     * when the 30-second bound expired before it arrived.
-     *
-     * Null while grading is still waiting, and null forever on a lane that
-     * produces no agent POV at all — a `phone_number` connection has no second
-     * account coming, so there is nothing to wait for and nothing to record.
-     *
-     * **It is what stops the wait happening twice.** The bound is settled by a
-     * guarded update on this column, so of two sweeps reaching one row the
-     * second finds it already settled and asks for no second grading. And
-     * `incomplete` is the record ADR-0015 §6 asks for: a simulation graded
-     * without the agent's account says so, rather than looking like one that
-     * had one.
-     */
-    agentPov: text("agent_pov"),
     /*
      * **There is no coverage stamp here.** There was one — three name lists
      * saying which of the agent's tools Egma answered for and which reached
@@ -575,18 +546,6 @@ export const simulation = pgTable(
     check(
       "simulation_turn_count_is_a_count",
       sql`${table.turnCount} is null or ${table.turnCount} >= 0`,
-    ),
-    check(
-      "simulation_agent_pov_allowed",
-      sql`${table.agentPov} is null or ${table.agentPov} in ${quoted(
-        SIMULATION_AGENT_POV_STATES,
-      )}`,
-    ),
-    // Grading waits only for a conversation that happened, so the wait can
-    // only have ended on a row that completed.
-    check(
-      "simulation_agent_pov_only_when_completed",
-      sql`${table.agentPov} is null or ${table.status} = 'completed'`,
     ),
     // A chat has no audio, so its row refuses a recording.
     check(

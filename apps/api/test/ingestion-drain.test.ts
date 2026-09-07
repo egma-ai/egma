@@ -939,12 +939,7 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
       span_id: `${traceId.slice(0, 14)}01`,
       parent_span_id: "",
       source: "simulation",
-      // **The agent's own account of the conversation**, which is the evidence
-      // grading waits for on a lane that files one (ADR-0015 §6). Egma's own
-      // POV arrives while the conversation runs; the agent's is what can still
-      // be in flight when the row closes, so it is the late evidence this case
-      // is about.
-      emitter: "agent",
+      emitter: "egma-runtime",
       started_at_microseconds: String(BigInt(simulation.startedAt.getTime()) * 1_000n),
       duration_nanoseconds: "1000000",
       name: "simulation",

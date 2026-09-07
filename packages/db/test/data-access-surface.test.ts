@@ -589,6 +589,14 @@ const READ_LIMITS = [
 ];
 
 const THE_AGENT_PLATFORMS = ["AGENT_PLATFORMS"];
+
+/**
+ * Whether a conversation over this connection kind could ever produce the
+ * agent's own account of itself. A pure question about a word, reaching
+ * nothing — exported because the read that tells a customer their record is
+ * missing that account has to ask the same list grading waits on.
+ */
+const THE_AGENT_POV_LANES = ["laneProducesAnAgentPov"];
 const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS"];
 
 /**
@@ -683,6 +691,7 @@ describe("the data-access module's surface", () => {
         ...VALUES,
         ...READ_LIMITS,
         ...THE_AGENT_PLATFORMS,
+        ...THE_AGENT_POV_LANES,
         ...THE_GRADING_BUDGET,
         ...THE_AGENT_POV_BOUND,
         ...THE_RETELL_BUDGET,

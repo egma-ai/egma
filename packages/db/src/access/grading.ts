@@ -574,23 +574,25 @@ export async function traceEvidenceStartedAt(
 export const AGENT_POV_BOUND_SECONDS = 30;
 
 /**
- * Whether a simulation's evidence is ready to grade, and what the record should
- * say about the wait.
+ * Whether a simulation's evidence is ready to grade, and whether the agent's
+ * own account of it was there.
  *
- * **Two questions, and which one is asked depends on the lane.** A lane that
- * produces no agent POV — egma dials a phone number and nothing of egma's runs
- * on the far end — has one account of the conversation, so its evidence is
- * ready as soon as that account is query-visible, which is what completion
- * already probed for. A lane that produces one is not ready until the agent's
- * own account has landed, or until the bound above has passed since completion.
+ * **Two questions, and which one is asked depends on the row.** A simulation
+ * with no second account coming — egma dials a phone number and nothing of
+ * egma's runs on the far end, or the platform gave egma no reference to fetch
+ * one by — has one account of the conversation, so its evidence is ready as
+ * soon as that account is query-visible. A simulation expecting one is not
+ * ready until the agent's own account has landed, or until the bound above has
+ * passed since the conversation ended.
  *
- * `settles` is what the row should record when grading is asked for: `filed`
- * where the agent's account arrived, `incomplete` where the bound ran out
- * first, and nothing at all on a lane with no second account to wait for.
+ * `agentPovFiled` says which of the two made it ready, so a caller can say out
+ * loud that a conversation was graded without the agent's account of it. It is
+ * false on every row that never waited for one, which is the honest answer:
+ * nothing was missing.
  */
 export type SimulationEvidenceReadiness = {
   readonly ready: boolean;
-  readonly settles: "filed" | "incomplete" | undefined;
+  readonly agentPovFiled: boolean;
   /** The earliest span of this trace, whichever POV wrote it. */
   readonly traceStartedAt: Date | undefined;
 };
@@ -633,7 +635,7 @@ export async function simulationEvidenceReadiness(
     const traceStartedAt = await probe();
     return {
       ready: traceStartedAt !== undefined,
-      settles: undefined,
+      agentPovFiled: false,
       traceStartedAt,
     };
   }
@@ -643,7 +645,7 @@ export async function simulationEvidenceReadiness(
     const traceStartedAt = await probe();
     return {
       ready: true,
-      settles: "filed",
+      agentPovFiled: true,
       traceStartedAt: traceStartedAt ?? agentPovStartedAt,
     };
   }
@@ -651,11 +653,11 @@ export async function simulationEvidenceReadiness(
   const now = input.now ?? new Date();
   const waited = now.getTime() - input.completedAt.getTime();
   if (waited < (input.boundSeconds ?? AGENT_POV_BOUND_SECONDS) * 1_000) {
-    return { ready: false, settles: undefined, traceStartedAt: undefined };
+    return { ready: false, agentPovFiled: false, traceStartedAt: undefined };
   }
   return {
     ready: true,
-    settles: "incomplete",
+    agentPovFiled: false,
     traceStartedAt: await probe(),
   };
 }
@@ -702,14 +704,20 @@ function simulationTracesIn(
  * `completeSimulation`: the row committed first, then its accepted evidence
  * drained. Replays reach the frozen run plan and the same trace-level job.
  *
- * **This is where grading starts for a simulation whose agent has a POV of its
- * own** (ADR-0015 §6). Completion no longer asks for grading on those lanes —
+ * **This is where grading starts for a simulation expecting an agent POV of its
+ * own** (ADR-0015 §6). Completion no longer asks for grading on those rows —
  * the agent's account had not arrived when the row closed, and grading a
  * conversation without the account it will be judged on is grading the wrong
  * evidence. So the request waits here, for the drain that carries the agent's
  * own spans. A drain carrying only egma's own POV finds the readiness answer
  * still `false` and asks for nothing, which is the ordinary case for every
  * flush during the conversation.
+ *
+ * **Asking twice is already harmless**, and nothing here adds a second guard
+ * for it: `requestGradingIn` takes a per-trace advisory lock and hands back the
+ * job a pending or claimed request already made, or `terminal` once every
+ * grader has a result. Two drains of one segment, two replicas and a replay all
+ * converge on one job.
  */
 export async function recordSimulationTraces(
   auth: AuthContext,
@@ -725,7 +733,8 @@ export async function recordSimulationTraces(
       runId: simulation.runId,
       modality: simulation.modality,
       endedAt: simulation.endedAt,
-      agentPov: simulation.agentPov,
+      heartbeatAt: simulation.heartbeatAt,
+      providerReference: simulation.providerReference,
       connectionSnapshot: run.connectionSnapshot,
     })
     .from(simulation)
@@ -747,10 +756,8 @@ export async function recordSimulationTraces(
       traceId: trace.traceId,
       runId: row.runId,
       window,
-      producesAnAgentPov:
-        row.agentPov === null &&
-        laneProducesAnAgentPov(connectionTypeOf(row.connectionSnapshot)),
-      completedAt: row.endedAt ?? new Date(0),
+      producesAnAgentPov: simulationExpectsAnAgentPov(row),
+      completedAt: theWaitBeganAt(row),
     });
     if (!readiness.ready) continue;
     if (readiness.traceStartedAt === undefined) {
@@ -758,31 +765,62 @@ export async function recordSimulationTraces(
         `completed simulation trace ${trace.traceId} is not query-visible`,
       );
     }
-    const settles = readiness.settles;
-    const traceStartedAt = readiness.traceStartedAt;
-    // **The settle and the handoff commit together.** The guarded write is what
-    // makes one conversation one handoff — a second drain of the same segment
-    // finds the wait already settled and asks for nothing — so a crash between
-    // the two would leave a row saying its wait ended and no work to end it.
-    await db().transaction(async (tx) => {
-      if (
-        settles !== undefined &&
-        !(await settleAgentPovWait(tx, row.id, settles))
-      ) {
-        return;
-      }
-      await requestGradingIn(tx, auth, {
-        source: "simulation",
-        traceId: trace.traceId,
-        traceStartedAt,
-        runId: row.runId,
-        // Ignored for simulations: the completed row above is the authority.
-        endsTrace: false,
-        evidenceReady: true,
-        modality: row.modality as Modality,
-      });
+    await requestGrading(auth, {
+      source: "simulation",
+      traceId: trace.traceId,
+      traceStartedAt: readiness.traceStartedAt,
+      runId: row.runId,
+      // Ignored for simulations: the completed row above is the authority.
+      endsTrace: false,
+      evidenceReady: true,
+      modality: row.modality as Modality,
     });
   }
+}
+
+/**
+ * Whether a second account of this conversation is coming — a fact about the
+ * **row**, answerable before any evidence has arrived.
+ *
+ * Two halves, and both are needed. The lane says whether egma has a way to
+ * receive one at all: the SDK exports from inside a LiveKit room, and a Retell
+ * web call is fetched back by its call id. And the row's **provider reference**
+ * says whether this particular conversation gave egma the handle to file or
+ * fetch it under — a room name, a call id. A landing that reported none has
+ * nothing to wait for however capable its lane is, so it grades at completion
+ * rather than waiting out a bound nothing could ever end.
+ */
+function simulationExpectsAnAgentPov(row: {
+  readonly providerReference: string | null;
+  readonly connectionSnapshot: unknown;
+}): boolean {
+  return (
+    laneProducesAnAgentPov(connectionTypeOf(row.connectionSnapshot)) &&
+    row.providerReference !== null &&
+    row.providerReference !== ""
+  );
+}
+
+/**
+ * When the wait for the agent's POV began: the earlier of what the report said
+ * and when egma stamped the landing.
+ *
+ * **The earlier of the two, because a report cannot postpone its own bound.**
+ * The conduction's own `ended_at` is the honest moment and is what the record
+ * shows, but it comes from a machine egma does not own — and a clock running
+ * ahead would hold a simulation open past every window that could ever settle
+ * it. egma's landing stamp is the backstop, and on every ordinary landing the
+ * two are within milliseconds of each other.
+ */
+function theWaitBeganAt(row: {
+  readonly endedAt: Date | null;
+  readonly heartbeatAt: Date | null;
+}): Date {
+  const reported = row.endedAt;
+  const stamped = row.heartbeatAt;
+  if (reported === null) return stamped ?? new Date(0);
+  if (stamped === null) return reported;
+  return reported < stamped ? reported : stamped;
 }
 
 /**
@@ -800,50 +838,17 @@ function connectionTypeOf(snapshot: unknown): string {
   return typeof named === "string" ? named : "";
 }
 
-/**
- * Write how the wait for the agent's POV ended, once.
- *
- * **The guarded update is the whole arbiter of "never twice".** Of two writers
- * reaching one row — a drain and a bound sweep, or two replicas' sweeps — the
- * second re-reads it after the first commits, finds `agent_pov` already said,
- * and gets `false` back. It then asks for no grading, so one simulation's
- * evidence-ready handoff is made once whatever raced for it.
- *
- * Takes no `AuthContext`: it is called from inside a project-scoped handoff
- * that has already found the row, and from the sweep, which stands behind every
- * organization at once exactly as the orphan sweep does. The row id is the
- * whole of what it may move.
- */
-async function settleAgentPovWait(
-  on: Queryable,
-  simulationId: string,
-  settles: "filed" | "incomplete",
-): Promise<boolean> {
-  const [row] = await on
-    .update(simulation)
-    .set({ agentPov: settles })
-    .where(
-      and(
-        eq(simulation.id, simulationId),
-        eq(simulation.status, "completed"),
-        isNull(simulation.agentPov),
-      ),
-    )
-    .returning({ id: simulation.id });
-  return row !== undefined;
-}
-
 /** What the bound sweep answers with: which rows it settled, and how. */
 export type SimulationPastTheAgentPovBound = {
   readonly id: string;
   readonly runId: string;
   /**
-   * How the wait ended. `incomplete` is the ordinary answer here and the one
-   * worth saying out loud — a conversation graded without the agent's own
-   * account of it. `filed` happens where the account landed but the drain's own
-   * handoff did not complete, and the sweep is the backstop that notices.
+   * Whether the agent's own account was there after all. `false` is the
+   * ordinary answer here and the one worth saying out loud — a conversation
+   * graded without it. `true` happens where the account landed but the drain's
+   * own handoff never ran, and the sweep is the backstop that notices.
    */
-  readonly agentPov: "filed" | "incomplete";
+  readonly agentPovFiled: boolean;
 };
 
 /**
@@ -855,21 +860,27 @@ export type SimulationPastTheAgentPovBound = {
  * loop — the same argument the orphan sweep is built on, and it runs on the
  * same tick.
  *
- * Each row is settled and its grading asked for in one
- * transaction, so a crash between the two is impossible: a row that says the
- * agent's POV is incomplete is a row grading was asked for. The row that loses
- * the guarded write — a second replica reading the same clock — asks for
- * nothing and reports nothing.
+ * **What it looks for is a simulation nobody has asked grading about.** The
+ * queue row is the record of that asking, so a completed simulation with no
+ * grading job is a simulation still waiting — and once a job exists, whether it
+ * is pending, claimed or already answered, this sweep has nothing to add.
+ * Successful work deletes its job row, and such a row reappears here: the
+ * request that follows finds every grader answered and comes back `terminal`,
+ * which creates nothing and is reported as nothing. So this is a backstop and
+ * never an arbiter — asking twice is made harmless by `requestGradingIn`'s own
+ * per-trace lock, not by anything here.
  *
  * **It takes no `AuthContext` and cannot be given one**, on the orphan sweep's
  * exact terms: a bound is read by egma standing behind every organization at
- * once, the only rows it moves are ones egma's own claim machinery stamped, and
+ * once, the only rows it reads are ones egma's own claim machinery stamped, and
  * the answer is identifiers and no content.
  *
- * **Bounded on both sides.** Rows older than the recent window are left alone:
- * a simulation whose bound expired days ago while nothing was running is not
- * work this tick invented, and scanning every completed simulation forever to
- * find none is a query that grows without end.
+ * **Bounded on both sides, and on a clock egma owns.** The floor reads the
+ * landing's own heartbeat stamp rather than the conduction's reported
+ * `ended_at`: the report supplies that moment, and a simulator whose clock is an
+ * hour behind would otherwise write a row this sweep could never see. What
+ * `ended_at` is still used for is the thirty seconds themselves, which is the
+ * conversation's own moment and the one a person reads.
  */
 export async function settleSimulationsPastTheAgentPovBound(options?: {
   /**
@@ -883,12 +894,13 @@ export async function settleSimulationsPastTheAgentPovBound(options?: {
 }): Promise<readonly SimulationPastTheAgentPovBound[]> {
   const boundSeconds = options?.boundSeconds ?? AGENT_POV_BOUND_SECONDS;
   if (!Number.isInteger(boundSeconds) || boundSeconds < 0) {
-    throw new Error("an agent-POV bound is a whole number of seconds, and never negative");
+    throw new Error(
+      "an agent-POV bound is a whole number of seconds, and never negative",
+    );
   }
   const withinSeconds = options?.withinSeconds ?? MOST_RECENT_BOUND_SECONDS;
 
   const now = new Date();
-  const expiredBefore = new Date(now.getTime() - boundSeconds * 1_000);
   const notBefore = new Date(now.getTime() - withinSeconds * 1_000);
 
   const waiting = await db()
@@ -899,17 +911,20 @@ export async function settleSimulationsPastTheAgentPovBound(options?: {
       projectId: simulation.projectId,
       modality: simulation.modality,
       endedAt: simulation.endedAt,
+      heartbeatAt: simulation.heartbeatAt,
       startedAt: simulation.startedAt,
+      providerReference: simulation.providerReference,
       connectionSnapshot: run.connectionSnapshot,
     })
     .from(simulation)
     .innerJoin(run, eq(run.id, simulation.runId))
+    // Grading was never asked for. The queue row is the whole of that record.
+    .leftJoin(gradingJob, eq(gradingJob.simulationId, simulation.id))
     .where(
       and(
         eq(simulation.status, "completed"),
-        isNull(simulation.agentPov),
-        lt(simulation.endedAt, expiredBefore),
-        gt(simulation.endedAt, notBefore),
+        isNull(gradingJob.id),
+        gt(simulation.heartbeatAt, notBefore),
       ),
     )
     .orderBy(asc(simulation.id))
@@ -917,11 +932,10 @@ export async function settleSimulationsPastTheAgentPovBound(options?: {
 
   const settled: SimulationPastTheAgentPovBound[] = [];
   for (const row of waiting) {
-    if (!laneProducesAnAgentPov(connectionTypeOf(row.connectionSnapshot))) {
-      continue;
-    }
+    if (!simulationExpectsAnAgentPov(row)) continue;
     const traceId = traceIdOfSimulation(row.id);
-    if (traceId === undefined || row.endedAt === null) continue;
+    if (traceId === undefined) continue;
+    const completedAt = theWaitBeganAt(row);
     const auth = gradingContext(row.organizationId, row.projectId);
     const readiness = await simulationEvidenceReadiness(auth, {
       traceId,
@@ -930,44 +944,44 @@ export async function settleSimulationsPastTheAgentPovBound(options?: {
         // The row's own clock, widened the way completion widens it: the
         // provider's spans and egma's rows do not share one.
         from:
-          BigInt((row.startedAt ?? row.endedAt).getTime() - 5 * 60 * 1_000) *
+          BigInt((row.startedAt ?? completedAt).getTime() - 5 * 60 * 1_000) *
           1_000n,
         to: BigInt(now.getTime() + 1_000) * 1_000n,
       },
       producesAnAgentPov: true,
-      completedAt: row.endedAt,
+      completedAt,
       now,
       boundSeconds,
     });
-    // Not ready is a row whose bound has not really expired — a clock that
-    // moved under this sweep — and it waits for the next tick.
-    if (!readiness.ready || readiness.settles === undefined) continue;
-    const settles = readiness.settles;
-    const traceStartedAt =
-      readiness.traceStartedAt ?? row.startedAt ?? row.endedAt;
-    const took = await db().transaction(async (tx) => {
-      if (!(await settleAgentPovWait(tx, row.id, settles))) return false;
-      await requestGradingIn(tx, auth, {
-        source: "simulation",
-        traceId,
-        traceStartedAt,
-        runId: row.runId,
-        endsTrace: false,
-        evidenceReady: true,
-        modality: row.modality as Modality,
-      });
-      return true;
+    // Not ready is a row still inside its bound, which waits for a later tick.
+    if (!readiness.ready) continue;
+    const asked = await requestGrading(auth, {
+      source: "simulation",
+      traceId,
+      traceStartedAt: readiness.traceStartedAt ?? row.startedAt ?? completedAt,
+      runId: row.runId,
+      endsTrace: false,
+      evidenceReady: true,
+      modality: row.modality as Modality,
     });
-    if (took) settled.push({ id: row.id, runId: row.runId, agentPov: settles });
+    // Reported only where this tick actually created the work. A request that
+    // found the graders already answered made nothing and is nothing to say.
+    if (asked.kind === "queued" && asked.created) {
+      settled.push({
+        id: row.id,
+        runId: row.runId,
+        agentPovFiled: readiness.agentPovFiled,
+      });
+    }
   }
   return settled;
 }
 
 /**
- * How far back one tick looks for a bound that expired, and how many rows it
- * settles at a time. An hour is far more than the thirty seconds a healthy
- * wait takes, and short enough that a deployment coming back after a long
- * outage does not grade a day of backlog in one tick.
+ * How far back one tick looks for a simulation nobody asked grading about, and
+ * how many it settles at a time. An hour is far more than the thirty seconds a
+ * healthy wait takes, and short enough that a deployment coming back after a
+ * long outage does not grade a day of backlog in one tick.
  */
 const MOST_RECENT_BOUND_SECONDS = 60 * 60;
 const MOST_ROWS_PER_BOUND_SWEEP = 200;

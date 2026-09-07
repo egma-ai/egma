@@ -145,7 +145,7 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
       const bounded = await settleAgentPovBound();
       if (bounded.length > 0) {
         const without = bounded.filter(
-          (simulation) => simulation.agentPov === "incomplete",
+          (simulation) => !simulation.agentPovFiled,
         ).length;
         options.log.info(
           {

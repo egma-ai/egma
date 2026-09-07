@@ -650,10 +650,6 @@ describe("every enumerated value", () => {
       { table: "simulation", column: "status" },
       { table: "simulation", column: "ending_reason" },
       { table: "simulation", column: "modality" },
-      // How grading's wait for the agent's POV ended. Null is a real value
-      // here — the wait is open, or there was nothing to wait for — so the
-      // check admits it beside the two words.
-      { table: "simulation", column: "agent_pov" },
       { table: "run_event", column: "kind" },
       { table: "monitoring_state", column: "scan_kind" },
     ];

@@ -1,4 +1,5 @@
 import {
+  AGENT_POV_BOUND_SECONDS,
   getAgent,
   getConnection,
   getGradingPlan,
@@ -7,15 +8,18 @@ import {
   getRun,
   getSimulation,
   getSimulationExecutionEvidence,
+  laneProducesAnAgentPov,
   NotPermittedError,
   readTrace,
   readTraceGrading,
   regradeTrace,
   type GradingPlan,
+  type Run,
   type Simulation,
   type TraceDetail,
   type TraceSpan,
 } from "@egma/db";
+import { everySpanIn } from "@egma/metrics";
 import { simulationOperations } from "@egma/platform-api/contract";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
@@ -150,6 +154,58 @@ function describedMeasures(
   return measures;
 }
 
+/**
+ * Whether this conversation was graded without the agent's own account of it.
+ *
+ * **Read rather than stored**, because everything it needs is already in hand
+ * here and a stored answer would be a second record to keep honest. Four facts,
+ * and all four have to hold:
+ *
+ * - the conversation **completed** — nothing else was ever waited for;
+ * - a second account was **coming**: the lane can deliver one and this landing
+ *   reported the reference to deliver it under (ADR-0015 §2);
+ * - **none arrived** — no span under the trace is the agent's;
+ * - and the **bound has passed**, so grading has stopped waiting (§6). Inside
+ *   the bound nothing is missing yet; it is simply not here yet.
+ *
+ * **A reader that shows the agent's POV needs this and cannot infer it.** Such
+ * a reader takes the rows filed as the agent's and shows them as the
+ * conversation, so a partial export — or none — would quietly become the whole
+ * record with nothing saying it was a fragment. Regrade is what picks up a late
+ * arrival.
+ */
+function agentPovIncomplete(
+  simulation: Simulation,
+  run: Run,
+  transcript: TraceDetail | undefined,
+): boolean {
+  if (simulation.status !== "completed") return false;
+  const reference = simulation.providerReference;
+  if (reference === null || reference === "") return false;
+  if (!laneProducesAnAgentPov(run.connectionSnapshot.connectionType)) {
+    return false;
+  }
+  if (transcript !== undefined) {
+    for (const span of everySpanIn(transcript)) {
+      if (span.pov === "agent") return false;
+    }
+  }
+  // The wait began when the conversation ended, on the earlier of the two
+  // clocks that answer for that — the same reading grading itself takes, so a
+  // report from a machine running ahead cannot make this say "still waiting"
+  // forever.
+  const reported = simulation.endedAt;
+  const stamped = simulation.heartbeatAt;
+  const began =
+    reported === null
+      ? stamped
+      : stamped === null || reported < stamped
+        ? reported
+        : stamped;
+  if (began === null) return false;
+  return Date.now() - began.getTime() >= AGENT_POV_BOUND_SECONDS * 1_000;
+}
+
 export async function simulationRoutes(
   app: FastifyInstance,
   options: SimulationRoutesOptions,
@@ -246,7 +302,7 @@ export async function simulationRoutes(
         // showing the agent's POV would otherwise show whatever fragment
         // arrived as if it were the conversation. False is the ordinary answer
         // — the account landed, or the lane files none.
-        agentPovIncomplete: simulation.agentPov === "incomplete",
+        agentPovIncomplete: agentPovIncomplete(simulation, run, transcript),
         measures: describedMeasures(simulation, transcript),
         // The observed metrics, off the one shared projection the transcript
         // answers with — so the strip on a simulation's evidence and the strip

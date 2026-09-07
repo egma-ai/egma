@@ -441,7 +441,6 @@ export type {
   RunEventKind,
   RunStatus,
   RunTrigger,
-  SimulationAgentPov,
   SimulationEndingReason,
   SimulationStatus,
 } from "../schema/runs.ts";

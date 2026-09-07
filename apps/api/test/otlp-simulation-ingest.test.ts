@@ -12,7 +12,6 @@ import {
   createTestSuite,
   disconnectClickHouse,
   listSimulations,
-  settleSimulationsPastTheAgentPovBound,
   startRun,
   startSimulation,
 } from "@egma/db";
@@ -487,7 +486,10 @@ describe.skipIf(!storage.available)("the contract's golden flushes, posted with 
         organization_id: globex.organizationId,
         project_id: globex.projectId,
         run_id: voiceRunId,
-        n: 4,
+        // Two turns and the agent's speech duration beside them. The persona's
+        // own speech duration left the catalog with version 8, and the golden
+        // fixture with it.
+        n: 3,
       },
     ]);
 
@@ -636,7 +638,7 @@ describe.skipIf(!storage.available)("the same path in the other encoding", () =>
     const turnsBefore = await countOf(
       `select count() as n from turns final where trace_id = '${VOICE_TRACE}'`,
     );
-    expect(before).toBe(4);
+    expect(before).toBe(3);
     expect(turnsBefore).toBe(2);
 
     const changed = JSON.parse(
@@ -1120,35 +1122,14 @@ describe.skipIf(!storage.available)("the simulation grading handoff", () => {
    * requests grading only after ClickHouse can return the evidence, and the
    * per-trace request is replay safe across later segments.
    *
-   * **And on this lane it also waits for the agent's own POV** (ADR-0015 §6).
-   * Everything this suite posts is egma's own account of the conversation; the
-   * agent's arrives by a Retell pull, and nothing pulls Retell here. So the
-   * wait can only end on the bound, which the sweep is asked for directly —
-   * with the bound already spent, because what is proved here is the handoff
-   * and not how long a clock takes.
+   * A chat-API conversation has one account of itself — egma's — so nothing is
+   * waited for beyond it becoming query-visible.
    */
   it("mints exactly one job after the completed simulation is queryable", async () => {
-    const waiting = await api.database.sql<{ n: string }>(
-      "select count(*) as n from grading_job where trace_id = $1",
-      [CHAT_TRACE],
-    );
-    expect(Number(waiting.rows[0]?.n)).toBe(0);
-
-    await settleSimulationsPastTheAgentPovBound({
-      boundSeconds: 0,
-      withinSeconds: 365 * 24 * 60 * 60,
-    });
-
     const jobs = await api.database.sql<{ n: string }>(
       "select count(*) as n from grading_job where trace_id = $1",
       [CHAT_TRACE],
     );
     expect(Number(jobs.rows[0]?.n)).toBe(1);
-    // Graded without the agent's account of it, and the record says so.
-    const row = await api.database.sql<{ agent_pov: string | null }>(
-      "select agent_pov from simulation where id = $1",
-      [CHAT_SIMULATION],
-    );
-    expect(row.rows[0]?.agent_pov).toBe("incomplete");
   });
 });

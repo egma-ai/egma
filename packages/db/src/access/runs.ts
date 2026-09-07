@@ -49,7 +49,6 @@ import {
   type RunEventKind,
   type RunStatus,
   type RunTrigger,
-  type SimulationAgentPov,
   type SimulationEndingReason,
   type SimulationStatus,
 } from "../schema/runs.ts";
@@ -203,13 +202,6 @@ export type Simulation = {
   readonly recordingReference: string | null;
   readonly turnCount: number | null;
   readonly providerReference: string | null;
-  /**
-   * How grading's wait for the agent's own POV ended: `filed`, `incomplete`,
-   * or null while it is still open — and null forever on a lane that produces
-   * no agent POV to wait for. `incomplete` is the record ADR-0015 §6 asks for:
-   * this conversation was graded without the agent's own account of it.
-   */
-  readonly agentPov: SimulationAgentPov | null;
   readonly createdAt: Date;
 };
 
@@ -287,7 +279,6 @@ const SIMULATION_COLUMNS = {
   recordingReference: simulation.recordingReference,
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
-  agentPov: simulation.agentPov,
   createdAt: simulation.createdAt,
 } as const;
 
@@ -315,14 +306,10 @@ type RunRow = {
   readonly createdAt: Date;
 };
 
-type SimulationRow = Omit<
-  Simulation,
-  "status" | "endingReason" | "modality" | "agentPov"
-> & {
+type SimulationRow = Omit<Simulation, "status" | "endingReason" | "modality"> & {
   readonly status: string;
   readonly endingReason: string | null;
   readonly modality: string;
-  readonly agentPov: string | null;
 };
 
 const LARGEST_CLAIM_CAPACITY = 50;
@@ -419,7 +406,6 @@ function simulationFromRow(row: SimulationRow): Simulation {
     status: row.status as SimulationStatus,
     endingReason: row.endingReason as SimulationEndingReason | null,
     modality: row.modality as Modality,
-    agentPov: row.agentPov as SimulationAgentPov | null,
   };
 }
 
@@ -2864,20 +2850,28 @@ async function landSimulation(
       }
       if (hasPlannedGraders) {
         // **Whether a second account of this conversation is still coming.**
-        // ADR-0015 §6: grading waits for the agent's own POV on a lane that
-        // produces one, because a conversation graded without the account it
-        // will be judged on is graded on the wrong evidence. The question is
-        // answered by the lane, off the run's own frozen snapshot, because at
-        // this moment no evidence has to have arrived for it to be answerable.
+        // ADR-0015 §6: grading waits for the agent's own POV where one is
+        // coming, because a conversation graded without the account it will be
+        // judged on is graded on the wrong evidence. Two halves, both facts
+        // about this row: the lane says whether egma has any way to receive one
+        // — read off the run's own frozen snapshot rather than the connection,
+        // which can be edited or archived after the run — and the reference
+        // this landing reported says whether *this* conversation gave egma the
+        // handle to file or fetch it under. Neither needs any evidence to have
+        // arrived, which is what makes the question answerable here.
         const [executed] = await tx
           .select({ connectionSnapshot: run.connectionSnapshot })
           .from(run)
           .where(eq(run.id, row.runId))
           .limit(1);
-        const producesAnAgentPov = laneProducesAnAgentPov(
-          (executed?.connectionSnapshot as { connectionType?: string })
-            ?.connectionType ?? "",
-        );
+        const reference = row.providerReference;
+        const producesAnAgentPov =
+          laneProducesAnAgentPov(
+            (executed?.connectionSnapshot as { connectionType?: string })
+              ?.connectionType ?? "",
+          ) &&
+          reference !== null &&
+          reference !== "";
         // Evidence may have drained before this lifecycle transition. Probe the
         // bounded trace window, then request work inside this same Postgres
         // transaction. A crash cannot commit "completed" without also
@@ -2898,17 +2892,6 @@ async function landSimulation(
           completedAt: now,
           now,
         });
-        // The wait is settled in this same transaction where it ends here — an
-        // SDK that flushed during the conversation has already filed the
-        // agent's POV, so there is nothing left to wait for.
-        if (readiness.settles !== undefined) {
-          await tx
-            .update(simulation)
-            .set({ agentPov: readiness.settles })
-            .where(
-              and(eq(simulation.id, row.id), isNull(simulation.agentPov)),
-            );
-        }
         await requestGradingIn(tx, auth, {
           source: "simulation",
           traceId,

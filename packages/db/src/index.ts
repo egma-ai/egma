@@ -95,6 +95,18 @@ export {
 } from "./grader-library/policy.ts";
 
 /**
+ * Whether a conversation over this connection kind could ever produce the
+ * agent's own account of itself (ADR-0015 §2).
+ *
+ * A pure question about a word, reaching nothing. It is exported because the
+ * read that tells a customer their record is missing the agent's POV has to ask
+ * the same list grading waits on: two lists would one day disagree about which
+ * conversations were ever owed a second account, and the record would say one
+ * thing while the queue did another.
+ */
+export { laneProducesAnAgentPov } from "./schema/agents.ts";
+
+/**
  * Pure grading decisions over policy or rows that a tenant-scoped read already
  * returned. These helpers do not create a quality verdict above one grader.
  */
