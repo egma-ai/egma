@@ -220,7 +220,10 @@ export async function priceUsageSpans(
       if (!isUsageType(type) || !Number.isFinite(quantity) || quantity < 0)
         throw new TypeError("invalid provider usage quantity");
       const rate = priceAt(rates, record, type);
-      if (!rate) continue;
+      if (!rate)
+        throw new Error(
+          `missing effective rate for ${usage.provider}/${usage.model} ${type} at ${usage.occurredAt}`,
+        );
       amountMicros += micros(quantity, rate.usdPerMillion);
       pricedBy[type] = rate.id;
     }
