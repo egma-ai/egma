@@ -87,3 +87,33 @@ it.each(["grader", "persona"] as const)("selects a coherent run after waiting fo
     await Promise.allSettled([publication, ...(launch === undefined ? [] : [launch])]);
   }
 });
+
+it("serializes an optional grader removal with a concurrent settings save", async () => {
+  api = await createApi("concurrent_grader_removal");
+  const who = await signUp(api.app, "grader-removal@example.test", "Concurrent removal");
+  const headers = { cookie: who.cookie };
+  const used = await api.app.inject({ method: "POST", url: `/v1/grader-library/${PREDEFINED_GRADERS.responseLatency}/use?projectId=${who.projectId}`, headers, payload: {
+    scope: { simulations: [{ kind: "all" }], production: null }, settings: { maximum_response_time_ms: 2_500 }, passThreshold: 1,
+  } });
+  expect(used.statusCode, used.body).toBe(201);
+  const graderId = used.json().id as string;
+  const gate = await openSingleConnection(api.database.url);
+  await gate.sql("begin");
+  const { rows } = await gate.sql<{ pid: number }>("select pg_backend_pid() as pid");
+  await gate.sql("select id from project_grader where id=$1 for update", [graderId]);
+  const removed = api.app.inject({ method: "DELETE", url: `/v1/graders/${graderId}?projectId=${who.projectId}`, headers }).then((answer) => answer);
+  let saved: typeof removed | undefined;
+  try {
+    const removalPid = await blockedBy(rows[0]!.pid);
+    saved = api.app.inject({ method: "PATCH", url: `/v1/graders/${graderId}?projectId=${who.projectId}`, headers, payload: { settings: { maximum_response_time_ms: 3_000 } } }).then((answer) => answer);
+    await blockedBy(removalPid);
+    await gate.sql("commit");
+    const [removal, edit] = await Promise.all([removed, saved]);
+    expect(removal.statusCode, removal.body).toBe(204);
+    expect(edit.statusCode, edit.body).toBe(404);
+  } finally {
+    await gate.sql("rollback");
+    await gate.close();
+    await Promise.allSettled([removed, ...(saved === undefined ? [] : [saved])]);
+  }
+});

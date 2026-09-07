@@ -8,6 +8,8 @@ import {
   connectClickHouse,
   disconnectClickHouse,
   finishGradingJob,
+  editProjectGrader,
+  getProjectGrader,
   getGradingJob,
   getGradingJobForTrace,
   readProductionGradingPlan,
@@ -821,7 +823,7 @@ describe("regrading uses frozen history", () => {
     }]);
   });
 
-  it("stores an empty selection as not requested and creates no job", async () => {
+  it("keeps an empty selection after later activation and preserves new selected values after job cleanup", async () => {
     await database.sql(
       `update project_grader
           set scope = '{"simulations":[],"production":null}'::jsonb
@@ -839,5 +841,40 @@ describe("regrading uses frozen history", () => {
         current: [],
         combinedScore: null,
       });
+    const empty = await readProductionGradingPlan(auth, traceId);
+    expect(empty?.entries).toEqual([]);
+    const before = await getProjectGrader(auth, projectGraderId);
+    await editProjectGrader(auth, projectGraderId, {
+      scope: { simulations: [], production: { sample_percent: 100 } },
+      parameterValues: { maximum: 9 }, passThreshold: 0.95,
+    });
+    await reconcileGraderCatalog([{
+      id: definitionId, name: "Policy quality", description: "A later compatible core", type: "code", scopeEditable: true,
+      prompt: null, parameterContract: [{ key: "maximum", label: "Maximum after release", valueType: "integer", defaultValue: 8, unit: null, minimum: 1, maximum: null }],
+      modalities: ["chat", "voice"], createdAt: TRACE_START,
+    }]);
+    await expect(request(traceId)).resolves.toEqual({ kind: "not_requested" });
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toEqual(empty);
+    await expect(getGradingJobForTrace(auth, traceId)).resolves.toBeUndefined();
+
+    const laterTrace = "4444444444444444444444444444ddde";
+    await expect(request(laterTrace)).resolves.toMatchObject({ kind: "queued", created: true });
+    const selected = await claimTrace(laterTrace, "after-later-activation");
+    expect(selected.entries).toMatchObject([{
+      graderDefinitionVersion: before!.currentDefinitionVersion + 1,
+      graderPassThreshold: 0.95, parameterValues: { maximum: 9 },
+    }]);
+    await appendOne(selected, 1, 1_777_100_100_000_000n);
+    await finishGradingJob(selected.auth, selected.id, selected.claimedBy);
+    await expect(getGradingJobForTrace(auth, laterTrace)).resolves.toBeUndefined();
+    const retained = await readProductionGradingPlan(auth, laterTrace);
+    expect(retained?.entries).toMatchObject([{ parameterValues: { maximum: 9 }, graderPassThreshold: 0.95 }]);
+    await editProjectGrader(auth, projectGraderId, {
+      scope: { simulations: [], production: null }, parameterValues: { maximum: 11 }, passThreshold: 1,
+    });
+    await expect(request(laterTrace)).resolves.toEqual({ kind: "terminal", outcome: "complete" });
+    await expect(readProductionGradingPlan(auth, laterTrace)).resolves.toEqual(retained);
+    const completed = await readTraceGrades(auth, { source: "production", traceId: laterTrace });
+    expect(completed.current).toMatchObject([{ parameterValues: { maximum: 9 }, graderPassThreshold: 0.95, score: 1 }]);
   });
 });
