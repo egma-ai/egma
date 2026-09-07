@@ -108,7 +108,7 @@ own clock — the **persona's POV**, which arrives as the timing spans above. Th
 agent measures it off its own process — the **agent's POV**, which arrives as a
 derivation off the framework's spans or as the block the platform reported. The
 two differ by the VAD's own detection lag at the front and the playback hop at
-the back — half a second to seven tenths per turn on the live rig, constant
+the back — half a second to six tenths per turn on the live rig, constant
 across a call — so they are two units and never one series.
 
 `origin` on every measure says which POV took it: `timed` is the persona's,
@@ -119,12 +119,14 @@ averaged across them and nothing is appended.
 **Catalog version 9 leads with the persona's POV for every measure**, and the
 agent's account rides beside it as the other POV. Version 8 led with the
 agent's for the two response latencies while Egma's own clock was being fixed;
-the fix is in, and the persona's stop is now the last audible sample of its
-speech rather than the last frame the transport played, which is the definition
-above measured rather than approached. Its acceptance is the constant above: a
-recording that differs from the agent's own account by the lag the two clocks
-are known to differ by, and by nothing that grows across a call, is the number
-to lead with. Version 9 also reads the agent's own spans one way more
+the fix is in: the recorder places each channel where its transport says it
+happened. The persona's stop is the pipeline's own mark for the end of its
+played audio, the mouth's trailing padding included — about a tenth of a second
+past the last audible sample, a constant per voice, and by decision not trimmed
+by any code of Egma's own. Its acceptance is the constant above: a recording
+that differs from the agent's own account by the lag the two clocks are known to
+differ by (0.5 to 0.6 s per turn on the live rig), and by nothing that grows
+across a call, is the number to lead with. Version 9 also reads the agent's own spans one way more
 carefully: a caller turn with no speech of its own that opened while the
 agent's previous turn still ran is the rest of the caller's last sentence,
 delivered late, and the reply it cut off is no answer — one sentence the

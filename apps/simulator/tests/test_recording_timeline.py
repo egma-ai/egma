@@ -319,53 +319,6 @@ async def test_audio_the_transport_threw_away_is_not_in_the_recording(
     assert speaking(persona_track) == pytest.approx((0.0, 0.4), abs=0.01)
 
 
-async def test_a_persona_utterance_stops_at_its_last_voiced_frame() -> None:
-    """A speech leg's trailing silence is not the persona still talking.
-
-    A real mouth closes every utterance with about half a second of
-    quiet, and the transport plays that out like any other audio. The
-    wait for the agent's answer starts at the last audible sample of the
-    caller's speech, so a stop stamped where the transport ran out of
-    audio hands the agent half a second of the caller's own silence and
-    reads that much quicker than the call was.
-    """
-    recorder = await recorder_started()
-
-    spoke_for = 0.5
-    frames = round(1.0 / FRAME_SECONDS)
-    for step in range(frames):
-        await persona_said(
-            recorder,
-            playing_at=step * FRAME_SECONDS,
-            audio=tone() if step * FRAME_SECONDS < spoke_for else quiet(),
-        )
-
-    played_through = recorder.bot_position
-    assert float(played_through) == pytest.approx(1.0, abs=0.01)
-
-    stopped = recorder.persona_voiced_through(Fraction(0), played_through)
-    assert float(stopped) == pytest.approx(spoke_for, abs=FRAME_SECONDS)
-
-
-async def test_an_utterance_that_ends_on_its_words_keeps_its_stop() -> None:
-    """Nothing to take off is nothing taken off.
-
-    A mouth that stops making audio where the speaking stops has already
-    said where the persona stopped, and the gate leaves it exactly there.
-    """
-    recorder = await recorder_started()
-
-    for step in range(25):
-        await persona_said(
-            recorder, playing_at=step * FRAME_SECONDS, audio=tone()
-        )
-
-    played_through = recorder.bot_position
-    assert recorder.persona_voiced_through(Fraction(0), played_through) == (
-        played_through
-    )
-
-
 async def test_a_delivery_that_stalls_and_catches_up_stays_on_time() -> None:
     """A burst is a stall catching up, and the recording holds it whole.
 

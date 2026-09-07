@@ -109,17 +109,17 @@
  * left and no definition changed: a conversation both POVs measured hands back
  * the same two series version 8 handed back, in the other order, with the
  * agent's as `otherPov`. What did change is the clock the persona's series is
- * taken on. The recorder places each channel where its transport says it
- * happened, and the persona's stop is now the last audible sample of its
- * speech rather than the last frame the transport played — the definition
- * above, measured rather than approached, so egma's own numbers move as well
- * as their order. Its acceptance against the agent's own account of the same
- * calls: egma's clock reads 0.5 to 0.7 s longer per turn and stays in that band
- * across the call — the detection lag at the front and the playback hop at the
- * back, and nothing that grows — where the old recorder was 1.5 to 1.8 s out
- * and drifting. A number measured off the audio the caller heard, differing
- * from the agent's own by a constant a reader can name, is the one to lead
- * with. A production trace answers exactly as it did at version 8: egma
+ * taken on: the recorder places each channel where its transport says it
+ * happened. The persona's stop is the pipeline's own mark for the end of its
+ * played audio, the mouth's trailing padding included — about a tenth of a
+ * second past the last audible sample, a constant per voice, and by decision
+ * not trimmed by any code of egma's own. Its acceptance against the agent's
+ * own account of the same calls: egma's clock reads 0.5 to 0.6 s longer per
+ * turn and stays in that band across the call — the detection lag at the
+ * front and the playback hop at the back, and nothing that grows — where the
+ * old recorder was 1.5 to 1.8 s out and drifting. A number measured off the
+ * audio the caller heard, differing from the agent's own by a constant a
+ * reader can name, is the one to lead with. A production trace answers exactly as it did at version 8: egma
  * conducted nothing there, so the agent's POV is the only POV and still the
  * headline. Version 9 also reads the agent's own spans one way more carefully:
  * a caller turn with no speech of its own that opened inside the agent turn
