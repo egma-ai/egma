@@ -24,6 +24,19 @@ gives a direct version error. You do not need to pin to `1.6.4`.
 The upper bound is LiveKit's next major release, not its next minor release:
 Egma uses these public v1 APIs as one compatible line. CI pins the exact
 minimum, each available minor boundary, and the latest tested v1 release.
+One compatibility job builds the package once and checks those versions in
+parallel, using a separate installation for each version.
+
+## Upgrading from 0.2
+
+Version 0.3 replaces `mockable` with `simulation` and `monitorLiveKit` with
+`monitor`. The options type is now `MonitorOptions`. Update the imports and
+calls; the old names are no longer exported.
+
+`simulation` now also exports the agent's traces. Set `EGMA_URL` and
+`EGMA_API_KEY`, or pass `endpoint` and `apiKey`, before calling it. Both
+functions require LiveKit Agents JS 1.5.5 or newer within v1. A simulation
+that cannot report its tools raises `NotReported` before the session starts.
 
 ## Run a simulation
 
