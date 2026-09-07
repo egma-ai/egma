@@ -430,7 +430,13 @@ export function buildApi(options: ServerOptions): Api {
   // the other account routes rather than inside the platform boundary below,
   // because it is not in the published contract and must not be able to enter
   // the OpenAPI document by sharing a prefix with something that is.
-  void app.register(usageRoutes, { provider: identity.provider, rateLimit });
+  void app.register(usageRoutes, {
+    provider: identity.provider,
+    rateLimit,
+    // The run page's own question about queued work. On a deployment with no
+    // billing this answers yes and the page shows nothing.
+    entitlements: config.billing.entitlements,
+  });
 
   // The Billing section's reads, on a deployment that selected the cloud
   // adapter. Registered here for the reason the usage routes above are: they

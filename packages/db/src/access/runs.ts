@@ -39,7 +39,7 @@ import {
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
-import { persona } from "../schema/personas.ts";
+import { persona, personaVersion } from "../schema/personas.ts";
 import { idempotentOperation } from "../schema/plans.ts";
 import {
   COMPLETED_ENDING_REASONS,
@@ -62,6 +62,7 @@ import {
   type MockMetadata,
 } from "../mock-tools/record.ts";
 import { runIsReadyToConduct } from "../mock-tools/lanes.ts";
+import { providersNeededBy } from "../models/selections.ts";
 import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import {
@@ -2800,6 +2801,68 @@ export async function failSimulationDispatch(
       executionFailure: executionFailureWrite(message),
     },
   });
+}
+
+/**
+ * What a run's still-queued work needs Egma's key to fund.
+ *
+ * **The run page's question, and it is asked of the deployment rather than
+ * answered here.** A conversation the claim door refused stays queued with a
+ * named reason, and nothing writes that reason down: no shared table gains a
+ * column for the cloud, and a stored reason would go stale the moment the
+ * month reset or credit arrived. So the page asks the same two questions the
+ * claim door asks — is the allowance spent, can the providers be funded — and
+ * this read answers the second half's input: the distinct providers the
+ * conversations still waiting would need a key for.
+ *
+ * Distinct and small: a run's conversations share two or three persona
+ * versions, and the modality is the run's own frozen lane, so this is one
+ * indexed read of one customer's rows.
+ */
+export async function readQueuedWorkProviders(
+  auth: AuthContext,
+  runId: string,
+): Promise<readonly string[]> {
+  authorize(auth, "read", here(auth));
+
+  const rows = await db()
+    .selectDistinct({
+      modality: simulation.modality,
+      llmProvider: personaVersion.llmProvider,
+      sttProvider: personaVersion.sttProvider,
+      ttsProvider: personaVersion.ttsProvider,
+    })
+    .from(simulation)
+    .innerJoin(
+      personaVersion,
+      eq(simulation.personaVersionId, personaVersion.id),
+    )
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          eq(simulation.runId, runId),
+          eq(simulation.status, "queued"),
+          inActingProject(auth, simulation),
+        ),
+      ),
+    );
+
+  const needed = new Set<string>();
+  for (const row of rows) {
+    for (const provider of providersNeededBy(
+      {
+        llm: { provider: row.llmProvider },
+        stt: { provider: row.sttProvider },
+        tts: { provider: row.ttsProvider },
+      },
+      row.modality === "chat" ? "chat" : "voice",
+    )) {
+      needed.add(provider);
+    }
+  }
+  return [...needed];
 }
 
 /**

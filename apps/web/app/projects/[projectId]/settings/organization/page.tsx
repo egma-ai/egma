@@ -6,6 +6,10 @@ import { getOrganization, updateOrganization } from "@egma/platform-api/client";
 
 import type { Answer, Refusal } from "../../../../../lib/api.ts";
 import {
+  readBillingAccount,
+  type BillingAccount,
+} from "../../../../../lib/billing.ts";
+import {
   readPeriodUsage,
   type PeriodUsage,
 } from "../../../../../lib/organization-usage.ts";
@@ -23,6 +27,7 @@ import {
   Problem,
   Refused,
 } from "../../../../../ui/form.tsx";
+import { BillingSection } from "../../../../../ui/billing.tsx";
 import { OrganizationUsage } from "../../../../../ui/organization-usage.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
@@ -70,6 +75,28 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
     let current = true;
     void readPeriodUsage().then((answer) => {
       if (current) setUsage(answer);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
+
+  /**
+   * The plan and the inference balance, on a deployment that bills.
+   *
+   * Its own read for the same reason the usage one is: it is a different kind
+   * of fact, and it is the one read on this page that a self-hosted Egma does
+   * not answer at all. `undefined` is "still reading" and `null` is "this
+   * deployment does not bill" — two different silences, told apart so the
+   * section can draw nothing for the second rather than a spinner forever.
+   */
+  const [billing, setBilling] = useState<
+    Answer<BillingAccount> | null | undefined
+  >(undefined);
+  useEffect(() => {
+    let current = true;
+    void readBillingAccount().then((answer) => {
+      if (current) setBilling(answer);
     });
     return () => {
       current = false;
@@ -235,6 +262,12 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
               * sees it and no role acts on it.
               */}
             <OrganizationUsage usage={usage} />
+
+            {/*
+              * Under the month, because the month is the fact every deployment
+              * has and this is the one only a deployment that bills does.
+              */}
+            <BillingSection billing={billing} />
           </div>
         </SettingsLayout>
       </PageBody>

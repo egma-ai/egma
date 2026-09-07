@@ -307,6 +307,7 @@ const CONTEXT_REQUIRING = [
   "requestGrading",
   "releaseMonitoringLease",
   "releaseGradingJob",
+  "readQueuedWorkProviders",
   "releaseSimulationClaim",
   "removeMember",
   // Archive's other half, for an agent and for one way of reaching it. They

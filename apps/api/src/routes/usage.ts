@@ -1,10 +1,14 @@
 import {
   ALLOWANCE_KINDS,
   ALLOWANCE_UNITS,
+  allowanceKindOf,
+  getRun,
   getSimulation,
   NotPermittedError,
+  readQueuedWorkProviders,
   readSimulationUsage,
   readUsageThisPeriod,
+  type EntitlementSource,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
@@ -35,7 +39,17 @@ import { notFound, notPermitted } from "../http/refusals.ts";
 export type UsageRoutesOptions = {
   readonly provider: SessionIdentityProvider;
   readonly rateLimit: RateLimit;
+  /**
+   * The deployment's entitlement source, for the run page's own question:
+   * why is this run's queued work waiting. On a deployment with no billing it
+   * answers yes without reaching anything, and the page shows nothing.
+   */
+  readonly entitlements: EntitlementSource;
 };
+
+const NO_SUCH_RUN =
+  "no run of yours has that id. Check the id, or list the runs in this " +
+  "project with GET /v1/runs.";
 
 const NO_SUCH_SIMULATION =
   "no simulation of yours has that id. Check the id, or open the run it " +
@@ -118,6 +132,84 @@ export async function usageRoutes(
         used: usage.used[kind],
       })),
     });
+  });
+
+  /**
+   * Why this run's queued work is waiting, if it is waiting for money.
+   *
+   * **Asked, never stored.** A conversation the claim door refused stays
+   * queued and nothing writes the reason down: no shared table gains a column
+   * for the cloud, and a stored reason would go stale the moment the month
+   * reset, the plan changed or credit arrived. So this asks the deployment the
+   * same two questions the claim door asks, about the same run, and answers
+   * what a person would be told now.
+   *
+   * **It is the whole run's answer and not one conversation's**, because the
+   * two questions are about a customer and a lane: every conversation in a run
+   * goes over one connection, and a spent allowance or an empty balance stops
+   * all of them or none of them.
+   *
+   * Every role may read it, for the reason every role may read the usage: a run
+   * that paused for money has to explain itself to whoever started it.
+   */
+  app.get("/api/runs/:runId/billing-hold", async (request, reply) => {
+    const query = (request.query ?? {}) as Record<string, unknown>;
+    const { runId } = request.params as { runId: string };
+    const acting = await reachingIn(
+      requesterOf(request).auth,
+      given(text(query.projectId)),
+    );
+    if ("refusal" in acting) return refuseActing(reply, acting);
+
+    const run = await getRun(acting.auth, runId);
+    if (run === undefined) return notFound(reply, NO_SUCH_RUN);
+
+    const auth =
+      acting.auth.projectId === run.projectId
+        ? acting.auth
+        : { ...acting.auth, projectId: run.projectId };
+    const providers = await readQueuedWorkProviders(auth, runId);
+    // A run with nothing queued is waiting for nobody. Asking anyway would
+    // show a refusal beside a run that has already finished.
+    if (providers.length === 0) {
+      return reply.send({ runId, holds: [] });
+    }
+
+    const kind = allowanceKindOf({
+      modality: run.connectionSnapshot.modality,
+      connectionType: run.connectionSnapshot.connectionType,
+    });
+    const [start, funding] = await Promise.all([
+      options.entitlements.mayStart({
+        organizationId: auth.organizationId,
+        allowances: [kind],
+      }),
+      options.entitlements.mayPlatformKeyFund({
+        organizationId: auth.organizationId,
+        providers: [...providers],
+      }),
+    ]);
+
+    const holds: Record<string, unknown>[] = [];
+    if (!start.allowed) {
+      for (const refusal of start.refusals) {
+        holds.push({
+          held: "allowance",
+          allowance: refusal.allowance,
+          unit: ALLOWANCE_UNITS[refusal.allowance],
+          resetsAt: refusal.resetsAt.toISOString(),
+          message: refusal.message,
+        });
+      }
+    }
+    if (!funding.funded) {
+      holds.push({
+        held: "funding",
+        providers: funding.providers,
+        message: funding.message,
+      });
+    }
+    return reply.send({ runId, holds });
   });
 
   app.setErrorHandler(async (error, _request, reply) => {

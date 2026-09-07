@@ -387,6 +387,7 @@ export {
   listRuns,
   listSimulations,
   markSimulationCanceled,
+  readQueuedWorkProviders,
   recordSimulationHeartbeat,
   releaseSimulationClaim,
   resolveRunStartReach,

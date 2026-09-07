@@ -233,7 +233,11 @@ export const RECOMMENDED_GRADER_MODEL: GraderModel =
  * it with the same list — one provider serving two legs is one provider.
  */
 export function providersNeededBy(
-  models: PersonaModels,
+  models: {
+    readonly llm: { readonly provider: string };
+    readonly stt: { readonly provider: string };
+    readonly tts: { readonly provider: string };
+  },
   modality: "chat" | "voice",
 ): readonly string[] {
   const needed =
