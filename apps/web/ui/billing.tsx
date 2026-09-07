@@ -1,158 +1,54 @@
 "use client";
-
-import { useState } from "react";
-
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-
 import type { Answer } from "../lib/api.ts";
 import {
-  allowedLabel,
   buyCredit,
   creditMicrosFromDollars,
   downgradeAtPeriodEnd,
-  feeLabel,
   moneyLabel,
   openPaymentPortal,
-  planLabel,
   upgradeToPro,
   type BillingAccount,
   type BillingActions,
-  type PeriodCharge,
 } from "../lib/billing.ts";
-import { allowanceLabel } from "../lib/organization-usage.ts";
 import { asListInstant } from "../lib/instants.ts";
-import { DataTable, type Column } from "./data-table.tsx";
 import { Dialog } from "./dialog.tsx";
-import { Facts, Section } from "./section.tsx";
 
-/**
- * This organization's plan and inference balance.
- *
- * **It is here only on a deployment that bills.** A self-hosted Egma has no
- * plan and no balance, so the read answers "not available" and the page draws
- * nothing at all rather than an empty panel implying there is a plan to see.
- * The usage panel above it stays on every deployment, because counting a month
- * is the product and charging for it is not.
- *
- * **Every role reads the plan and the balance.** A run that paused for money
- * has to explain itself to whoever started it, whatever they are allowed to
- * change. What only an admin reads is where the money went, which is a fact
- * about the account rather than about the limit.
- *
- * **Only an admin sees a button, and only where one can work.** The four
- * actions appear for whoever may manage the organization, on a deployment
- * whose Stripe adapter is in place — the read says which, because a page
- * cannot tell that from a plan. A member sees the same facts and no controls.
- *
- * **Every button opens a page Stripe hosts.** Egma never asks for a card, so
- * pressing one takes the person to Checkout or the Customer Portal and the
- * plan moves when Stripe says the subscription exists. The one exception is
- * Downgrade, which settles here because nothing is being paid: it asks Stripe
- * to stop at the end of the period and the organization stays on Pro until
- * then.
- *
- * **Loading, unavailable and failed are separate states**, as `DESIGN.md`
- * asks, and a balance of zero is a fact rather than an empty state.
- */
-export function BillingSection({
-  billing,
-}: {
-  /** `null` before the read answers, or once it says this deployment does not bill. */
-  readonly billing: Answer<BillingAccount> | null | undefined;
-}) {
-  // `undefined` is "still reading"; `null` is "this deployment does not bill".
-  if (billing === null) return null;
-
-  if (billing === undefined) {
-    return (
-      <Section title="Billing" lead={BILLING_IS}>
-        <p className="m-0 text-sm text-muted-foreground">
-          Reading this organization&rsquo;s plan and balance…
-        </p>
-      </Section>
-    );
-  }
-
-  if (billing.status !== "ready") {
-    // A refusal keeps its own sentence: it was written to be shown and it
-    // names the next move.
-    return (
-      <Section title="Billing" lead={BILLING_IS}>
-        <p className="m-0 text-sm text-muted-foreground">
-          {billing.status === "signed-out"
-            ? "Sign in again to read this organization’s plan and balance."
-            : billing.refusal.message}
-        </p>
-      </Section>
-    );
-  }
-
-  const account = billing.value;
-  const plan = account.plan;
-
-  return (
-    <Section
-      title="Billing"
-      lead={BILLING_IS}
-      action={
-        <p className="m-0 text-sm tabular-nums text-muted-foreground">
-          {`${asListInstant(account.periodStartedAt)} — resets ${asListInstant(
-            account.resetsAt,
-          )}`}
-        </p>
-      }
-    >
-      <Facts
-        facts={[
-          { label: "Plan", value: planLabel(plan) },
-          { label: "Plan fee", value: feeLabel(plan) },
-          {
-            label: "Inference balance",
-            value: (
-              <span className="tabular-nums">
-                {moneyLabel(account.balanceMicros)}
-              </span>
-            ),
-          },
-          ...plan.allowances.map((allowance) => ({
-            label: `${allowanceLabel(allowance.kind)} included`,
-            value: (
-              <span className="tabular-nums">{allowedLabel(allowance)}</span>
-            ),
-          })),
-        ]}
-      />
-
-      {account.mayManageBilling ? (
-        <>
-          <BillingActionsRow account={account} />
-          <Charges charges={account.charges} />
-        </>
-      ) : null}
-    </Section>
-  );
-}
-
-/**
- * The four things an admin does, and whatever the last one said.
- *
- * **A refusal is shown word for word.** Each of these can be refused for a
- * reason a person can act on — a role that may not spend, an organization that
- * is not on Pro, a deployment whose Stripe has no Pro product yet — and every
- * one of those sentences was written to be read.
- */
-function BillingActionsRow({
+export function BillingActionsRow({
   account,
+  onRefresh,
+  onBusyChange,
 }: {
   readonly account: BillingAccount;
+  readonly onRefresh: () => void;
+  readonly onBusyChange: (busy: boolean) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [said, setSaid] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [stopping, setStopping] = useState(false);
   const actions = account.actions;
-  if (actions === undefined || !actions.available) return null;
+  useEffect(() => {
+    onBusyChange(busy !== null);
+    return () => onBusyChange(false);
+  }, [busy, onBusyChange]);
+  useEffect(() => {
+    const returned = () => {
+      setBusy(null);
+      onRefresh();
+    };
+    window.addEventListener("pageshow", returned);
+    return () => window.removeEventListener("pageshow", returned);
+  }, [onRefresh]);
+  if (!actions.available)
+    return (
+      <p className="m-0 text-sm text-muted-foreground">
+        Payment actions are unavailable. Ask your administrator to check billing
+        setup.
+      </p>
+    );
 
   const onPro = account.plan.code === "pro";
 
@@ -171,8 +67,14 @@ function BillingActionsRow({
     setSaid(null);
     const answer = await ask();
     if (answer.status === "ready") {
-      window.location.assign(answer.value.url);
-      return;
+      try {
+        window.location.assign(answer.value.url);
+        return;
+      } catch {
+        setBusy(null);
+        setSaid("The payment page could not open. Try again.");
+        return;
+      }
     }
     setBusy(null);
     setSaid(
@@ -235,17 +137,11 @@ function BillingActionsRow({
           disabled={busy !== null}
           onClick={() => void follow("portal", openPaymentPortal)}
         >
-          {busy === "portal" ? "Opening Stripe…" : "Manage payment and invoices"}
+          {busy === "portal"
+            ? "Opening Stripe…"
+            : "Manage payment and invoices"}
         </Button>
         {onPro ? (
-          /*
-           * Ending a paid plan is the destructive action on this surface, so it
-           * is a quiet text action kept at the far end of the row from the one
-           * that spends — `DESIGN.md`, "keep destructive actions separate from
-           * normal save actions". It needs no confirmation dialog because it
-           * destroys nothing now: the organization keeps Pro until the period
-           * ends, and pressing Upgrade again before then is the way back.
-           */
           <Button
             type="button"
             variant="ghost"
@@ -257,7 +153,9 @@ function BillingActionsRow({
               setStopping(true);
             }}
           >
-            {busy === "downgrade" ? "Asking Stripe…" : "Downgrade at period end"}
+            {busy === "downgrade"
+              ? "Asking Stripe…"
+              : "Downgrade at period end"}
           </Button>
         ) : null}
       </div>
@@ -281,7 +179,7 @@ function BillingActionsRow({
 
       {stopping ? (
         <StopProDialog
-          plan={planLabel(account.plan)}
+          plan={account.plan.name}
           endsAt={account.resetsAt}
           onClose={() => setStopping(false)}
           onConfirmed={() => {
@@ -324,16 +222,18 @@ function StopProDialog({
           <p className="m-0 text-sm text-muted-foreground">
             {`This organization stays on ${plan} until ${stops}. Everything the ` +
               "plan includes — its allowances and its overage — stays " +
-              "available until then, and nothing is charged after it."}
+              "available until then. Any usage already incurred is still payable."}
           </p>
           <p className="m-0 text-sm text-muted-foreground">
-            {`On ${stops} it returns to the Hobby plan, and its month starts ` +
-              "counting from the day the organization was created again. " +
-              "Inference credit is untouched: it never expires and it is " +
-              "separate from the plan."}
+            {`On ${stops} this organization returns to Hobby with a full monthly allowance. Its monthly reset date starts from that change. Inference credit stays available and does not expire.`}
           </p>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button type="button" variant="secondary" size="lg" onClick={dismiss}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="lg"
+              onClick={dismiss}
+            >
               {`Keep ${plan}`}
             </Button>
             <Button
@@ -449,55 +349,3 @@ function BuyCreditDialog({
     </Dialog>
   );
 }
-
-/**
- * What the balance paid for this period, by provider and model.
- *
- * Only what Egma's own keys paid for: a provider request a customer's own key
- * paid for cost this balance nothing and belongs on the simulation's own usage,
- * not here.
- */
-function Charges({ charges }: { readonly charges: readonly PeriodCharge[] }) {
-  if (charges.length === 0) {
-    return (
-      <p className="m-0 text-sm text-muted-foreground">
-        Nothing has been charged to the inference balance this period.
-      </p>
-    );
-  }
-
-  const columns: readonly Column<PeriodCharge>[] = [
-    {
-      key: "model",
-      header: "Model",
-      primary: true,
-      cell: (charge) => `${charge.provider}/${charge.model}`,
-    },
-    {
-      key: "requests",
-      header: "Requests",
-      mono: true,
-      hideOnMobile: true,
-      cell: (charge) => charge.requests.toLocaleString("en-US"),
-    },
-    {
-      key: "amount",
-      header: "Charged",
-      mono: true,
-      cell: (charge) => moneyLabel(charge.amountMicros),
-    },
-  ];
-
-  return (
-    <DataTable
-      label="What the inference balance paid for this period"
-      columns={columns}
-      rows={charges}
-      keyOf={(charge) => `${charge.provider}/${charge.model}`}
-    />
-  );
-}
-
-const BILLING_IS =
-  "The plan this organization is on, what it includes each period, and the " +
-  "inference balance that pays for model usage made with Egma's provider keys.";

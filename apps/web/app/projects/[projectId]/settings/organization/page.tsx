@@ -4,15 +4,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { getOrganization, updateOrganization } from "@egma/platform-api/client";
 
-import type { Answer, Refusal } from "../../../../../lib/api.ts";
-import {
-  readBillingAccount,
-  type BillingAccount,
-} from "../../../../../lib/billing.ts";
-import {
-  readPeriodUsage,
-  type PeriodUsage,
-} from "../../../../../lib/organization-usage.ts";
+import type { Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
 import type { OrganizationSettings } from "../../../../../lib/settings.ts";
@@ -27,8 +19,6 @@ import {
   Problem,
   Refused,
 } from "../../../../../ui/form.tsx";
-import { BillingSection } from "../../../../../ui/billing.tsx";
-import { OrganizationUsage } from "../../../../../ui/organization-usage.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
 import {
@@ -61,47 +51,6 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   );
   const settled = answer?.status === "ready" ? answer.value : null;
   const mayAdminister = settled?.mayManageOrganization === true;
-
-  /**
-   * What this organization has used this period.
-   *
-   * Its own read rather than a field on the organization: it is a different
-   * kind of fact — a measurement that moves every minute, beside a name that
-   * changes when somebody types — and folding it in would make saving the name
-   * re-read a month of usage and reading the month depend on the form.
-   */
-  const [usage, setUsage] = useState<Answer<PeriodUsage> | null>(null);
-  useEffect(() => {
-    let current = true;
-    void readPeriodUsage().then((answer) => {
-      if (current) setUsage(answer);
-    });
-    return () => {
-      current = false;
-    };
-  }, []);
-
-  /**
-   * The plan and the inference balance, on a deployment that bills.
-   *
-   * Its own read for the same reason the usage one is: it is a different kind
-   * of fact, and it is the one read on this page that a self-hosted Egma does
-   * not answer at all. `undefined` is "still reading" and `null` is "this
-   * deployment does not bill" — two different silences, told apart so the
-   * section can draw nothing for the second rather than a spinner forever.
-   */
-  const [billing, setBilling] = useState<
-    Answer<BillingAccount> | null | undefined
-  >(undefined);
-  useEffect(() => {
-    let current = true;
-    void readBillingAccount().then((answer) => {
-      if (current) setBilling(answer);
-    });
-    return () => {
-      current = false;
-    };
-  }, []);
 
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -255,19 +204,6 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
                 </Button>
               </FormActions>
             </Form>
-
-            {/*
-              * Under the form, because the form is what somebody came to this
-              * page to change and this is a fact about the month. Every role
-              * sees it and no role acts on it.
-              */}
-            <OrganizationUsage usage={usage} />
-
-            {/*
-              * Under the month, because the month is the fact every deployment
-              * has and this is the one only a deployment that bills does.
-              */}
-            <BillingSection billing={billing} />
           </div>
         </SettingsLayout>
       </PageBody>

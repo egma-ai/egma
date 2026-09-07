@@ -28,7 +28,8 @@ const config: NextConfig = {
   // that quietly report nothing.
   env: {
     NEXT_PUBLIC_EGMA_TELEMETRY: (() => {
-      const on = (process.env.EGMA_TELEMETRY ?? "").trim().toLowerCase() === "on";
+      const on =
+        (process.env.EGMA_TELEMETRY ?? "").trim().toLowerCase() === "on";
       if (on && !process.env.NEXT_PUBLIC_POSTHOG_KEY) {
         throw new Error(
           "EGMA_TELEMETRY is on, so NEXT_PUBLIC_POSTHOG_KEY must be set where the pages build — " +
@@ -49,6 +50,14 @@ const config: NextConfig = {
         {
           source: "/api/signup/:path*",
           destination: `${api}/api/signup/:path*`,
+        },
+        {
+          source: "/api/organization/:path*",
+          destination: `${api}/api/organization/:path*`,
+        },
+        {
+          source: "/api/billing/:path*",
+          destination: `${api}/api/billing/:path*`,
         },
         { source: "/api/me", destination: `${api}/api/me` },
         { source: "/api/sign-out", destination: `${api}/api/sign-out` },

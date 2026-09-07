@@ -18,7 +18,8 @@ export type SettingsSection =
   | "project"
   | "organization"
   | "people"
-  | "keys";
+  | "keys"
+  | "billing";
 
 type Item = {
   readonly id: SettingsSection;
@@ -32,6 +33,7 @@ const PROJECT_SETTINGS: readonly Item[] = [
 ];
 
 const ORGANIZATION_SETTINGS: readonly Item[] = [
+  { id: "billing", label: "Usage and billing", rest: ["billing"] },
   { id: "organization", label: "Organization", rest: ["organization"] },
   { id: "people", label: "People", rest: ["people"] },
   { id: "keys", label: "API keys", rest: ["keys"] },
