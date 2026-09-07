@@ -14,6 +14,7 @@ import {
 
 import { agent, connection, MODALITIES } from "./agents.ts";
 import type { PersonaParameterValues } from "../persona-library/parameters.ts";
+import type { FrozenRunGradingPlan } from "../grading/plan.ts";
 import { personaVersion } from "./personas.ts";
 import { test, testSuite, testVersion } from "./tests.ts";
 import { organization, project } from "./tenancy.ts";
@@ -214,6 +215,8 @@ export const run = pgTable(
      * never move a binding the customer has since changed.
      */
     mockMetadata: jsonb("mock_metadata"),
+    /** Immutable grader selection captured before the initial run insert. */
+    gradingPlan: jsonb("grading_plan").$type<FrozenRunGradingPlan>().notNull(),
     /** Set at start; the denominator a progress page divides by. */
     expectedSimulationCount: integer("expected_simulation_count").notNull(),
     /**
