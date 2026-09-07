@@ -129,6 +129,12 @@ A test carries its own world: the **mock tools** it answers for itself, and the
 | LiveKit key pair, chat or voice | Yes, with the Egma SDK in your worker | Not used | Yes |
 | LiveKit token endpoint | Yes, with the Egma SDK in your worker | Not used | Yes, inside the `room_config` your endpoint copies into the token |
 
+A LiveKit connection needs the Egma SDK in the worker whether or not a test
+names a mock tool. The agent reports to Egma as the session starts, and a
+simulation whose agent never reports fails instead of running against your real
+tools. See the [Python SDK](/integrations/python-sdk) or the
+[JavaScript SDK](/integrations/javascript-sdk).
+
 **A run proceeds whatever its connection can carry, and says what it could not
 use.** Egma reads the connection and the tests' pinned versions and shows a
 short note when a run picks up something this connection cannot carry, such as

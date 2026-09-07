@@ -724,8 +724,8 @@ describe("the suite-first Tests route", () => {
       },
       [MOCKING, PLAIN],
       [
-        "Mock tools on LiveKit need the Egma SDK in your agent.",
-        "1 of 2 tests carries mock tools. They are served only when your agent runs mockable(...). Tools a test does not mock run real.",
+        "A LiveKit simulation needs the Egma SDK in your agent.",
+        "1 of 2 tests carries mock tools. They are served only when your agent runs simulation(...). Tools a test does not mock run real, and every call is on the transcript.",
       ],
     );
 

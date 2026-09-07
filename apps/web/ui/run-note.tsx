@@ -212,11 +212,11 @@ export function runNoteLines(
     groups.push({
       accent: "brand",
       lines: [
-        "Mock tools on LiveKit need the Egma SDK in your agent.",
+        "A LiveKit simulation needs the Egma SDK in your agent.",
         <>
           {`${carryOf(mocks, total)} mock tools. They are served only when your agent runs `}
-          <Key>mockable(...)</Key>
-          {". Tools a test does not mock run real."}
+          <Key>simulation(...)</Key>
+          {". Tools a test does not mock run real, and every call is on the transcript."}
         </>,
       ],
     });

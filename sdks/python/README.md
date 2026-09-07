@@ -138,8 +138,14 @@ own agent's process and lets Egma answer.
 **Egma answers for exactly the tools the running test names. Every other
 tool runs its real implementation, untouched, and Egma is not in that
 path.** A test that names none runs your agent against your real backend
-from end to end. The record shows the calls Egma answered and nothing
-about the rest, because Egma never saw them.
+from end to end.
+
+**Unmocked tools run real, and are recorded from the agent's POV.** The
+record of a simulation is your agent's own account of the conversation, so
+every call it made is on it, with the arguments the model sent and the
+result it received. A call a mock tool answered is marked `mocked`, beside
+the tool's own name; a call Egma refused shows as the error this package
+raised on it; a call carrying neither is a real one that ran.
 
 A mock tool whose name never matches one of your agent's tools runs
 nothing and leaves no trace: the model never calls that name, and the
