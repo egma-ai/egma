@@ -569,8 +569,8 @@ describe("what the claim door does when a customer's month is spent", () => {
       },
     });
     expect(claimed.statusCode, claimed.body).toBe(200);
-    const handed = (claimed.json() as { simulations?: unknown[] }).simulations;
-    expect(handed ?? []).toEqual([]);
+    const handed = (claimed.json() as { specs: unknown[] }).specs;
+    expect(handed).toEqual([]);
 
     // Back on the queue, not failed: nothing is wrong with it.
     const { rows } = await api.database.sql<{ status: string }>(
@@ -607,7 +607,7 @@ describe("what the claim door does when a customer's month is spent", () => {
     });
     expect(claimed.statusCode, claimed.body).toBe(200);
     expect(
-      (claimed.json() as { simulations?: unknown[] }).simulations ?? [],
+      (claimed.json() as { specs: unknown[] }).specs,
     ).toEqual([]);
 
     const { rows } = await api.database.sql<{ status: string }>(
