@@ -23,9 +23,8 @@ export type PlanCode = schema.PlanCode;
  * reader that refuses a file which drifted from it. Nothing here reaches a
  * store.
  *
- * **Every refusal below is a boot failure by design.** A deployment that
- * started with a plan it could not read would enforce an allowance nobody set,
- * which is worse than not starting.
+ * Invalid plan data raises a billing fault. The process can keep serving while
+ * the billing initialization retries.
  */
 
 /** One plan, exactly as a row of `cloud_plan` holds it. */
@@ -46,6 +45,7 @@ export type PlanEntry = {
 /** The whole file: the plans, and the credit every organization starts with. */
 export type PlanCatalog = {
   readonly welcomeCreditMicros: number;
+  readonly chargingIntervalSeconds: number;
   readonly plans: readonly PlanEntry[];
 };
 
@@ -92,7 +92,11 @@ export async function readPlanCatalog(
     throw new Error(`${file} states one plan code twice`);
   }
 
-  return { welcomeCreditMicros, plans };
+  const chargingIntervalSeconds = read["chargingIntervalSeconds"];
+  if (typeof chargingIntervalSeconds !== "number" || !Number.isSafeInteger(chargingIntervalSeconds) || chargingIntervalSeconds <= 0) {
+    throw new Error(`${file} needs a positive whole charging interval`);
+  }
+  return { welcomeCreditMicros, chargingIntervalSeconds, plans };
 }
 
 function planFrom(read: Record<string, unknown>, file: string): PlanEntry {

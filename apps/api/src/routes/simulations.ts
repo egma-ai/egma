@@ -11,6 +11,7 @@ import {
   LANES_SERVING_MOCK_TOOLS,
   laneProducesAnAgentPov,
   NotPermittedError,
+  FundingRefusedError,
   readTrace,
   readTraceGrading,
   regradeTrace,
@@ -446,6 +447,7 @@ export async function simulationRoutes(
   );
 
   app.setErrorHandler(async (error, _request, reply) => {
+    if (error instanceof FundingRefusedError) return unprocessable(reply, error.message);
     if (error instanceof NotPermittedError) {
       return notPermitted(reply, error.message);
     }

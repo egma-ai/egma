@@ -8,12 +8,15 @@ import {
   type FundingRequest,
   type StartDecision,
   type StartRequest,
-  type StoredUsageRecord,
+  faultTolerantEntitlements,
+  discardingUsageSink,
   type UsageSink,
 } from "@egma/db";
 
+import { readPlanCatalog } from "./plans.ts";
+
 import {
-  chargeForStoredUsage,
+  createBillingAccount,
   openBillingAccount,
   readEntitlementFacts,
   type CloudPlan,
@@ -127,7 +130,7 @@ function allowanceSpentMessage(
   return (
     `This organization has used all ${counted} of its ${what} on the ` +
     `${plan.name} plan for this period. It resets on ${dateLabel(resetsAt)}. ` +
-    `${next} Open Settings → Organization to see the plan and this period's ` +
+    `${next} Open Settings → Usage and billing to see the plan and this period's ` +
     "usage."
   );
 }
@@ -144,7 +147,7 @@ function unfundedMessage(
   return (
     `Egma's provider keys cannot fund ${named}: this organization's ` +
     `inference balance is ${moneyLabel(balanceMicros)}. Add inference credit ` +
-    "under Settings → Organization, or use your own provider keys, and this " +
+    "under Settings → Usage and billing, or use your own provider keys, and this " +
     "work runs on its own."
   );
 }
@@ -156,11 +159,9 @@ function refusalsAmong(
 ): readonly AllowanceRefusal[] {
   const refusals: AllowanceRefusal[] = [];
   for (const kind of asked) {
+    // Pro voice continues beyond its included minutes and incurs metered overage.
+    if (facts.plan.code === "pro" && kind !== "chat_simulations") continue;
     const allowed = allowanceOf(facts.plan, kind);
-    // Unlimited by allowance. Pro's minutes are unlimited here because the
-    // overage is metered and billed, not because they are free; Pro's chat is
-    // unlimited because a chat's only marginal cost is inference, which the
-    // balance or the customer's own key pays for.
     if (allowed === null) continue;
     if (facts.usage.used[kind] < allowed) continue;
     refusals.push({
@@ -179,13 +180,14 @@ export function cloudEntitlementSource(
   const customerFunded =
     options.customerFundedProviders ?? NOBODY_HAS_THEIR_OWN_KEY;
 
-  return {
+  return faultTolerantEntitlements({
     async mayStart(request: StartRequest): Promise<StartDecision> {
       // Nothing was asked about, so nothing can be refused. The contract says
       // so and it is the honest answer: an empty batch spends no allowance.
       if (request.allowances.length === 0) return { allowed: true };
 
       const facts = await readEntitlementFacts(request.organizationId, now());
+      if (facts.account.settlementFailedAt !== null) return { allowed: true };
       const refusals = refusalsAmong(request.allowances, facts);
       return refusals.length === 0 ? { allowed: true } : { allowed: false, refusals };
     },
@@ -206,13 +208,13 @@ export function cloudEntitlementSource(
       // balance — a month's allowance is the other question's business. Asking
       // for the whole entitlement picture here would run the period aggregate
       // over a customer's conversations to read one integer beside it.
-      const account = await openBillingAccount(request.organizationId, now());
+      const account = await openBillingAccount(request.organizationId);
 
       // **Above zero, and not "enough".** Egma cannot know what a simulation
       // will cost before it runs, so the rule is the one the founders set: new
       // balance-funded work is refused at zero, and work already claimed
       // finishes and is charged.
-      if (account.balanceMicros > 0) return { funded: true };
+      if (account.settlementFailedAt !== null || account.balanceMicros > 0) return { funded: true };
 
       return {
         funded: false,
@@ -220,42 +222,12 @@ export function cloudEntitlementSource(
         message: unfundedMessage(onEgmasKey, account.balanceMicros),
       };
     },
-  };
+  });
 }
 
-/**
- * The cloud usage sink: one ledger charge per record Egma's own key paid for.
- *
- * It is handed only what the store actually wrote, so a redelivered
- * measurement never reaches it; and each row it writes is keyed on the usage
- * record, so even a replayed delivery charges nothing twice.
- */
+/** Charging runs on observed intervals; notifications need no cloud action. */
 export function cloudUsageSink(): UsageSink {
-  return {
-    async receive(records: readonly StoredUsageRecord[]): Promise<void> {
-      try {
-        await chargeForStoredUsage(records);
-      } catch (fault) {
-        // **A sink must not fail a write, and this one is no exception.** The
-        // records are already durable rows when this runs, so a charge that
-        // could not be written is a delivery lost and not a fact: every one of
-        // them can be rebuilt from `usage_record`, which is exactly why the
-        // records are the product's and the charging is not. Letting it out
-        // would turn a billing fault into a simulator that cannot record what
-        // it spent.
-        //
-        // Reported rather than swallowed, on standard error, because this
-        // package has no logger of its own and a charge that silently stopped
-        // being written is money nobody is collecting.
-        console.error(
-          `the inference balance could not be charged for ${records.length} ` +
-            "stored usage record(s); they are stored and can be replayed from " +
-            "usage_record",
-          fault,
-        );
-      }
-    },
-  };
+  return discardingUsageSink();
 }
 
 /** Both cloud adapters, as one deployment holds them. */
@@ -265,5 +237,8 @@ export function cloudBillingPlugIn(
   return {
     entitlements: cloudEntitlementSource(options),
     usage: cloudUsageSink(),
+    async organizationCreated(on, organizationId) {
+      await createBillingAccount(on, organizationId, await readPlanCatalog());
+    },
   };
 }

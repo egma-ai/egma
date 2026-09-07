@@ -21,7 +21,12 @@ export async function loadCloudBilling(
   if (!billingIsConfigured(settings)) return undefined;
 
   // Resolve the optional package only at runtime, after billing is selected.
-  const packageName: string = "@egma/ee";
-  const billing: BillingModule = await import(packageName);
-  return billing.loadCloudBilling();
+  try {
+    const packageName: string = "@egma/ee";
+    const billing: BillingModule = await import(packageName);
+    return await billing.loadCloudBilling();
+  } catch (fault) {
+    console.error("Billing could not load; customer work continues", fault);
+    return undefined;
+  }
 }

@@ -242,8 +242,7 @@ export function usageSinkContract(
     {
       name: "takes the same record again without failing",
       async run() {
-        // The store collapses a resend, so this should not happen — and a sink
-        // that threw when it did would turn a redelivery into a lost write.
+        // Notifications can repeat with the same durable usage identity.
         const receiving = await sink();
         const delivered = await record();
         await receiving.receive([delivered]);
@@ -294,7 +293,7 @@ function storedRecord(
   overrides: Partial<StoredUsageRecord> = {},
 ): StoredUsageRecord {
   return {
-    id: newId("usg"),
+    id: JSON.stringify([THE_MADE_UP_ORGANIZATION, "project", "trace", newId("sim")]),
     organizationId: THE_MADE_UP_ORGANIZATION,
     projectId: newId("prj"),
     occurredAt: new Date("2026-09-07T10:00:00.000Z"),

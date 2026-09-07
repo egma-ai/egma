@@ -118,9 +118,9 @@ export function allowanceTotalsSelection(): {
  * A conversation queued in one month and begun in the next belongs to the
  * month it ran in, which is the only reading that never counts one twice.
  */
-export function begunInThePeriod(period: AllowancePeriod): SQL {
+export function begunInThePeriod(period: AllowancePeriod, countingFloor?: Date): SQL {
   const clause = and(
-    gte(simulation.startedAt, period.startedAt),
+    gte(simulation.startedAt, new Date(Math.max(period.startedAt.getTime(), countingFloor?.getTime() ?? -Infinity))),
     lt(simulation.startedAt, period.resetsAt),
   );
   if (clause === undefined) throw new Error("a period predicate is never empty");
@@ -131,10 +131,11 @@ export function begunInThePeriod(period: AllowancePeriod): SQL {
 export function organizationInThePeriod(
   organizationId: string,
   period: AllowancePeriod,
+  countingFloor?: Date,
 ): SQL {
   const clause = and(
     eq(simulation.organizationId, organizationId),
-    begunInThePeriod(period),
+    begunInThePeriod(period, countingFloor),
   );
   if (clause === undefined) throw new Error("a period predicate is never empty");
   return clause;

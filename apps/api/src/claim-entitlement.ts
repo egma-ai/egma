@@ -1,5 +1,6 @@
 import {
   allowanceKindOf,
+  faultTolerantEntitlements,
   allowanceKindsAmong,
   type AllowanceKind,
   type EntitlementSource,
@@ -79,6 +80,7 @@ export async function claimsWithheldByEntitlement(
   providersOf: ProvidersOfClaim = () => [],
 ): Promise<WithheldClaims> {
   if (claims.length === 0) return new Map();
+  const source = faultTolerantEntitlements(entitlements);
 
   const byOrganization = new Map<string, SimulationClaim[]>();
   for (const claim of claims) {
@@ -94,13 +96,13 @@ export async function claimsWithheldByEntitlement(
         ...new Set(theirs.flatMap((claim) => providersOf(claim))),
       ];
       const [start, funding] = await Promise.all([
-        entitlements.mayStart({
+        source.mayStart({
           organizationId,
           allowances: allowanceKindsAmong(theirs),
         }),
         providers.length === 0
           ? Promise.resolve({ funded: true as const })
-          : entitlements.mayPlatformKeyFund({ organizationId, providers }),
+          : source.mayPlatformKeyFund({ organizationId, providers }),
       ]);
       return { theirs, start, funding };
     }),

@@ -92,6 +92,7 @@ export {
 } from "./billing/period-usage.ts";
 export {
   billingIsConfigured,
+  faultTolerantEntitlements,
   discardingUsageSink,
   installBillingPlugIn,
   openBillingPlugIn,

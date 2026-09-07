@@ -1,3 +1,4 @@
+import type { Transaction } from "../client.ts";
 import type { UsagePaymentSource } from "../schema/billing.ts";
 import type { AllowanceKind } from "./allowance.ts";
 
@@ -111,10 +112,8 @@ export type EntitlementSource = {
  * One stored, priced provider request, as the usage sink receives it.
  *
  * **Stored, and that word is load-bearing.** The sink receives what the write
- * actually put in the table — a resend that collapsed onto an existing row
- * hands over nothing — so an adapter that charges a balance for what it
- * receives cannot charge twice for one request however many times the
- * measurement arrives.
+ * durably stored. Notifications are at least once: exact replay retains the
+ * same identity and an adapter must tolerate receiving it again.
  *
  * The record's own id travels with it because it is the stable name of this
  * piece of spend: a ledger row keyed on it can be written once and only once.
@@ -150,6 +149,7 @@ export type UsageSink = {
 export type BillingPlugIn = {
   readonly entitlements: EntitlementSource;
   readonly usage: UsageSink;
+  organizationCreated(on: Transaction, organizationId: string): Promise<void>;
 };
 
 /**
@@ -177,7 +177,7 @@ export function discardingUsageSink(): UsageSink {
 
 /** The plug-in a deployment with no billing runs on. */
 export function openBillingPlugIn(): BillingPlugIn {
-  return { entitlements: openEntitlementSource(), usage: discardingUsageSink() };
+  return { entitlements: openEntitlementSource(), usage: discardingUsageSink(), organizationCreated: () => Promise.resolve() };
 }
 
 /**
@@ -226,7 +226,7 @@ let installed: BillingPlugIn = openBillingPlugIn();
  */
 export function installBillingPlugIn(plugIn: BillingPlugIn): () => void {
   const previous = installed;
-  installed = plugIn;
+  installed = { ...plugIn, entitlements: faultTolerantEntitlements(plugIn.entitlements) };
   return () => {
     installed = previous;
   };
@@ -239,4 +239,24 @@ export function installBillingPlugIn(plugIn: BillingPlugIn): () => void {
  */
 export function billing(): BillingPlugIn {
   return installed;
+}
+
+/** Isolate adapter faults at the work-admission boundary. */
+export function faultTolerantEntitlements(source: EntitlementSource): EntitlementSource {
+  return {
+    async mayStart(request) {
+      try { return await source.mayStart(request); }
+      catch (fault) {
+        console.error("Billing admission failed; customer work continues", fault);
+        return { allowed: true };
+      }
+    },
+    async mayPlatformKeyFund(request) {
+      try { return await source.mayPlatformKeyFund(request); }
+      catch (fault) {
+        console.error("Billing funding check failed; customer work continues", fault);
+        return { funded: true };
+      }
+    },
+  };
 }

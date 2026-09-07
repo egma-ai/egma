@@ -461,3 +461,11 @@ export type ConnectionRestoreRefusal =
   | "credential_forbidden"
   | "credential_choice_required"
   | "parent_agent_archived";
+
+/** New model work cannot start from a reliably exhausted balance. */
+export class FundingRefusedError extends Error {
+  constructor(message: string) {
+    super(message.trim() || "Add inference credit or provider keys before starting this work.");
+    this.name = "FundingRefusedError";
+  }
+}
