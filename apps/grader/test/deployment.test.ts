@@ -73,7 +73,7 @@ function serviceBlock(compose: string, service: string): string | undefined {
 
 describe("every variable the grader reads", () => {
   it("is in the full environment reference", async () => {
-    const documented = await read("docs/configuration/environment-variables.mdx");
+    const documented = await read("docs/self-hosting/configuration.mdx");
     for (const name of await variablesTheCodeReads()) {
       expect(documented).toContain(name);
     }
@@ -104,7 +104,7 @@ describe("every variable the grader reads", () => {
   it("is the only one anything documents", async () => {
     const read_ = await variablesTheCodeReads();
     for (const named of [
-      "docs/configuration/environment-variables.mdx",
+      "docs/self-hosting/configuration.mdx",
       "apps/grader/README.md",
       ...(await composeFiles()),
     ]) {

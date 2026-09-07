@@ -85,19 +85,56 @@ describe("the public skill source", () => {
   });
 
   it("keeps the documented complete test in the shape the real parser reads", async () => {
-    const docs = await readFile(path.join(CODE_ROOT, "docs", "cli", "test-files.mdx"), "utf8");
-    const example = markdownExamples(docs).find(
-      (shown) => shown.includes("identity_revision:"),
+    const documentedPath = "docs/guides/write-a-test.mdx";
+    const docs = await readFile(path.join(CODE_ROOT, documentedPath), "utf8");
+    const examples = markdownExamples(docs);
+    const example = examples.find(
+      (shown) => shown.startsWith("---\nformat: 5\n"),
     );
     expect(example).toBeDefined();
 
-    const test = parseTestFile(example ?? "", "docs/cli/test-files.mdx", "fallback");
+    const test = parseTestFile(example ?? "", documentedPath, "fallback");
     expect(test.format).toBe(5);
-    expect(test.expectedBehaviors).toHaveLength(2);
-    expect(test.mockTools).toEqual([{ tool: "check_availability", answer: { slots: [] } }]);
+    expect(test.expectedBehaviors).toHaveLength(4);
+    expect(test.mockTools).toEqual([
+      {
+        tool: "check_availability",
+        answer: {
+          date: "2026-10-14",
+          slots: ["15:00", "16:30"],
+          timezone: "America/Los_Angeles",
+        },
+      },
+      {
+        tool: "book_appointment",
+        answer: {
+          appointment_id: "demo-booking-001",
+          status: "confirmed",
+          date: "2026-10-14",
+          time: "15:00",
+        },
+      },
+    ]);
     expect(test.env).toEqual({
-      retell_dynamic_variables: { caller_name: "Margaret" },
-      job_dispatch_metadata: { tenant: "acme" },
+      retell_dynamic_variables: {
+        clinic_name: "Harbor Clinic",
+        current_date: "2026-10-12",
+      },
+    });
+
+    const livekitEnv = examples.find((shown) => shown.startsWith("## Env\n"));
+    expect(livekitEnv).toBeDefined();
+    const livekitTest = parseTestFile(
+      (example ?? "").replace(/^## Env\n[\s\S]*$/mu, livekitEnv ?? ""),
+      documentedPath,
+      "fallback",
+    );
+    expect(livekitTest.env).toEqual({
+      job_dispatch_metadata: {
+        clinic_name: "Harbor Clinic",
+        tenant_id: "demo-clinic",
+        current_date: "2026-10-12",
+      },
     });
   });
 });

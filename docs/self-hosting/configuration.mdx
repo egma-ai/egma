@@ -208,6 +208,7 @@ The bundled values are sufficient for a local installation. Change these when yo
     | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Each defaults to `egma`; Compose builds the API's `DATABASE_URL` from them. |
     | `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DB` | Each defaults to `egma`; Compose builds `CLICKHOUSE_URL` from them. |
     | `EGMA_API_ORIGIN` | Internal API origin used when building the web image. Compose uses `http://api:3100`. |
+    | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | API URL the simulator uses to claim work and report results. Compose uses `http://api:3100`; set an HTTP or HTTPS URL when launching the simulator directly. |
     | `EGMA_SIMULATOR_CAPACITY` | Concurrent simulations per simulator process; default `2`. |
     | `EGMA_GRADER_CAPACITY` | Concurrent grading jobs per grader process; default `4`. |
     | `EGMA_SIMULATOR_LIVEKIT_URL`, `EGMA_SIMULATOR_LIVEKIT_API_KEY`, `EGMA_SIMULATOR_LIVEKIT_API_SECRET` | Replace the bundled media server used by the simulator. These do not configure the customer's LiveKit connection. |
@@ -243,6 +244,11 @@ The bundled values are sufficient for a local installation. Change these when yo
     | `EGMA_LIVEKIT_LOG_LEVEL` | `info`. |
 
     `EGMA_SIMULATOR_CLAIMANT` and `EGMA_GRADER_CLAIMANT` override the process identities. Compose keeps the simulator's report log in its named volume. A directly launched simulator can set `EGMA_SIMULATOR_WAL_DIR` and use `EGMA_SIMULATOR_BLOB_DIR` for local recordings when no S3 endpoint is set.
+  </Accordion>
+  <Accordion title="Local contributor workbench">
+    The optional `docker-compose.workbench.yml` overlay runs a fixture control plane for local simulator development. `EGMA_WORKBENCH_PORT` sets its host port; the default is `8085`, bound to `127.0.0.1`. The overlay sets `EGMA_SIMULATOR_CONTROL_PLANE_URL` to `http://workbench:8085` inside the Compose network.
+
+    Keep the workbench on loopback because its fixture routes have no authentication. The normal self-hosted setup uses the real API and does not start this service.
   </Accordion>
   <Accordion title="Egma platform telemetry">
     Egma's own platform telemetry is off by default. It is separate from the customer traces collected through monitoring.

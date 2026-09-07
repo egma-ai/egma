@@ -147,7 +147,7 @@ describe("the API's deployment story", () => {
 
   it("documents every variable the API reads in the full environment reference", () => {
     const documented = readFileSync(
-      path.join(ROOT, "docs/configuration/environment-variables.mdx"),
+      path.join(ROOT, "docs/self-hosting/configuration.mdx"),
       "utf8",
     );
     const missing = [...variablesReadByTheCode()]
