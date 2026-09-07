@@ -36,6 +36,7 @@ export async function currentSubscription(
   gateway: StripeGateway,
   customerId: string,
   needsHobbyTransition = true,
+  previousSubscriptionId: string | null = null,
 ): Promise<CanonicalSubscription> {
   const subscriptions = await relevantSubscriptions(gateway, customerId);
   const payable = subscriptions.filter((subscription) =>
@@ -95,7 +96,13 @@ export async function currentSubscription(
     periodStartedAt: instant(first[0]),
     periodEndsAt: instant(first[1]),
     hobbyStartedAt: needsHobbyTransition
-      ? await hobbyTransitionAt(gateway, selected)
+      ? await hobbyTransitionAt(
+          gateway,
+          !isPaying(selected.status) && previousSubscriptionId !== null
+            ? (subscriptions.find((one) => one.id === previousSubscriptionId) ??
+                selected)
+            : selected,
+        )
       : null,
   };
 }
@@ -147,6 +154,7 @@ export async function currentStripeCustomer(
   customerId: string,
   at: Date,
   needsHobbyTransition: boolean,
+  previousSubscriptionId: string | null,
 ): Promise<StripeCustomerFacts> {
   const credits: PurchasedCreditFact[] = [];
   for await (const session of gateway.api.checkout.sessions.list({
@@ -163,6 +171,7 @@ export async function currentStripeCustomer(
       gateway,
       customerId,
       needsHobbyTransition,
+      previousSubscriptionId,
     ),
   };
 }

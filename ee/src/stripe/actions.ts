@@ -60,6 +60,8 @@ export function creditAmountRefusal(amountMicros: number): string | undefined {
   if (!Number.isInteger(amountMicros)) {
     return "An amount of inference credit is a whole number of micro-dollars.";
   }
+  if (amountMicros % 10_000 !== 0)
+    return "Choose an amount of inference credit in whole cents.";
   if (amountMicros < SMALLEST_CREDIT_MICROS) {
     return `The smallest amount of inference credit is ${dollars(
       SMALLEST_CREDIT_MICROS,
@@ -404,7 +406,7 @@ export async function openBillingPortal(
 function requireWebhook(gateway: StripeGateway, paymentsReady: boolean): void {
   if (!gateway.hasWebhookSecret || !paymentsReady) {
     throw new BillingStateError(
-      "Billing payments are unavailable while the webhook connection is being configured.",
+      "Billing payments are unavailable while the webhook connection is being configured. Try again later, or ask your administrator to check the Stripe connection.",
     );
   }
 }

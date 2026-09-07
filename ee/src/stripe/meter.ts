@@ -5,6 +5,7 @@ import {
 import { previousHour, type MeteredHour } from "./facts.ts";
 import { refreshStripePaymentsReady, type StripeGateway } from "./gateway.ts";
 import { currentStripeCustomer, stripeMeterPeriods } from "./periods.ts";
+import { recoverLateUsage } from "./late-invoice.ts";
 
 export const METER_EVENT_NAMES = {
   web_call_minutes: "egma_web_call_minutes",
@@ -25,6 +26,7 @@ export type MeterReport = {
   readonly uncertain: number;
   readonly needsAttention: number;
   readonly unresolved: number;
+  readonly laterInvoices: number;
 };
 const HOUR = 3_600_000;
 // Stop before Stripe's minimum duplicate window, allowing clock/request latency.
@@ -46,13 +48,20 @@ export async function reportOverageOwed(
     uncertain: 0,
     needsAttention: 0,
     unresolved: 0,
+    laterInvoices: 0,
   };
   await visitMeterAccounts(
     async (account, progress) => {
       const version = await progress.failureVersion();
       await progress.reconcile(
-        (customerId, needsHobbyTransition) =>
-          currentStripeCustomer(gateway, customerId, at, needsHobbyTransition),
+        (customerId, needsHobbyTransition, previousSubscriptionId) =>
+          currentStripeCustomer(
+            gateway,
+            customerId,
+            at,
+            needsHobbyTransition,
+            previousSubscriptionId,
+          ),
         at,
       );
       const periods = await stripeMeterPeriods(
@@ -66,6 +75,31 @@ export async function reportOverageOwed(
       const stoppedChannels = new Set<string>();
       for (const period of periods) {
         if (stoppedChannels.has(period.channel)) continue;
+        if (!period.acceptingUsage) {
+          try {
+            await progress.next(period, latestClosedHour, at);
+            if (
+              (await progress.hasLateUsage(period)) &&
+              (await recoverLateUsage(
+                gateway,
+                account,
+                progress,
+                period,
+                latestClosedHour,
+                at,
+              ))
+            )
+              report.laterInvoices += 1;
+          } catch (err) {
+            needsRecovery = true;
+            report.needsAttention += 1;
+            log.error(
+              { err, organizationId: account.organizationId, period },
+              "known original-period usage remains pending for invoice reconciliation",
+            );
+          }
+          continue;
+        }
         for (let count = 0; count < MOST_HOURS_CAUGHT_UP_AT_ONCE; count += 1) {
           const next = await progress.next(period, latestClosedHour, at);
           if (next.kind === "idle") break;
@@ -76,7 +110,7 @@ export async function reportOverageOwed(
             needsRecovery = true;
             log.error(
               { organizationId: account.organizationId, period, ...next },
-              "known usage needs a billing decision because its original invoice cannot accept it",
+              "known usage is waiting for its original finalized invoice evidence",
             );
             break;
           }
@@ -144,7 +178,8 @@ export async function reportOverageOwed(
         }
       }
       if (needsRecovery) await progress.failed();
-      else if (!(await progress.recovered(version, latestClosedHour, at))) report.unresolved += 1;
+      else if (!(await progress.recovered(version, latestClosedHour, at)))
+        report.unresolved += 1;
     },
     (account, fault) => {
       report.failed += 1;

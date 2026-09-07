@@ -259,6 +259,196 @@ async function conversation(
 }
 
 describe("durable period meter progress", () => {
+  it("freezes and resumes later invoice obligations using the original allowance and cumulative currency rounding", async () => {
+    const closed = {
+      ...period,
+      invoiceId: "in_original",
+      acceptingUsage: false,
+    };
+    const evidence = {
+      invoiceId: "in_original",
+      includedSeconds: 300,
+      centsPerMinute: 1,
+      invoicedSeconds: 360,
+      invoicedCents: 1,
+    };
+    await conversation(acme, {
+      connectionType: "livekit_room",
+      endedAt: new Date("2026-09-20T13:40:00Z"),
+      seconds: 450,
+    });
+    await visit(async (progress) => {
+      await progress.next(closed, latest, AT);
+      const first = await progress.late(closed, evidence, latest, AT);
+      expect(first).toMatchObject({
+        throughSeconds: 450,
+        amountCents: 2,
+        invoiceId: null,
+      });
+      if (first === null) throw new Error("missing later obligation");
+      await expect(
+        progress.finishLate(closed, first.identifier, AT),
+      ).rejects.toThrow("durably identified");
+      await progress.lateWriteStarted(closed, first.identifier, "invoice", AT);
+      const recovered = await progress.lateWriteStarted(
+        closed,
+        first.identifier,
+        "invoice",
+        new Date(AT.getTime() + 2 * 86_400_000),
+      );
+      expect(recovered.invoiceCreateStartedAt).toEqual(AT);
+      await progress.lateResource(
+        closed,
+        first.identifier,
+        "invoice",
+        "in_later_1",
+        AT,
+      );
+      await expect(
+        progress.lateResource(
+          closed,
+          first.identifier,
+          "invoice",
+          "in_duplicate",
+          AT,
+        ),
+      ).rejects.toThrow("multiple Stripe resources");
+      await conversation(acme, {
+        connectionType: "livekit_room",
+        endedAt: new Date("2026-09-20T14:00:00Z"),
+        seconds: 60,
+      });
+      expect(await progress.late(closed, evidence, latest, AT)).toMatchObject({
+        identifier: first.identifier,
+        throughSeconds: 450,
+        amountCents: 2,
+      });
+      await progress.lateWriteStarted(closed, first.identifier, "item", AT);
+      await progress.lateResource(
+        closed,
+        first.identifier,
+        "item",
+        "ii_later_1",
+        AT,
+      );
+      await progress.finishLate(closed, first.identifier, AT);
+      await progress.finishLate(closed, first.identifier, AT);
+      expect(await row()).toMatchObject({
+        late_invoiced_cents: "2",
+        late_observed_seconds: "450",
+        late_pending_identifier: null,
+      });
+      const second = await progress.late(closed, evidence, latest, AT);
+      expect(second).toMatchObject({ throughSeconds: 510, amountCents: 1 });
+      if (second === null) throw new Error("missing second later obligation");
+      expect(second.identifier).not.toBe(first.identifier);
+      await progress.lateWriteStarted(closed, second.identifier, "invoice", AT);
+      await progress.lateResource(
+        closed,
+        second.identifier,
+        "invoice",
+        "in_later_2",
+        AT,
+      );
+      await progress.lateWriteStarted(closed, second.identifier, "item", AT);
+      await progress.lateResource(
+        closed,
+        second.identifier,
+        "item",
+        "ii_later_2",
+        AT,
+      );
+      await progress.finishLate(closed, second.identifier, AT);
+      expect(await progress.late(closed, evidence, latest, AT)).toBeNull();
+      expect(await row()).toMatchObject({
+        late_invoiced_cents: "3",
+        late_observed_seconds: "510",
+      });
+    });
+  });
+  it("does not bill an ambiguous meter payload again when the original invoice covers it", async () => {
+    await conversation(acme, {
+      connectionType: "livekit_room",
+      endedAt: new Date("2026-09-20T13:40:00Z"),
+      seconds: 450,
+    });
+    await visit(async (progress) => {
+      pending(await progress.next(period, latest, AT));
+      const closed = {
+        ...period,
+        invoiceId: "in_original_accepted",
+        acceptingUsage: false,
+      };
+      await progress.next(closed, latest, AT);
+      expect(
+        await progress.late(
+          closed,
+          {
+            invoiceId: closed.invoiceId,
+            includedSeconds: 300,
+            centsPerMinute: 1,
+            invoicedSeconds: 450,
+            invoicedCents: 3,
+          },
+          latest,
+          AT,
+        ),
+      ).toBeNull();
+      expect(await row()).toMatchObject({
+        late_invoiced_cents: "0",
+        late_observed_seconds: "450",
+        uncertain_seconds: "450",
+        pending_identifier: null,
+        state: "closed",
+      });
+    });
+  });
+  it("keeps a finalized-period shortfall unresolved when known usage is below invoiced evidence", async () => {
+    const closed = {
+      ...period,
+      invoiceId: "in_original",
+      acceptingUsage: false,
+    };
+    await visit(async (progress) => {
+      await progress.next(closed, latest, AT);
+      await expect(
+        progress.late(
+          closed,
+          {
+            invoiceId: "in_original",
+            includedSeconds: 300,
+            centsPerMinute: 1,
+            invoicedSeconds: 360,
+            invoicedCents: 1,
+          },
+          latest,
+          AT,
+        ),
+      ).rejects.toThrow("below its recorded invoice evidence");
+      expect(await row()).toMatchObject({
+        late_invoiced_cents: "0",
+        late_observed_seconds: "0",
+      });
+    });
+  });
+  it("splits a large fractional catch-up within Stripe's fifteen significant digits", async () => {
+    await conversation(acme, {
+      connectionType: "livekit_room",
+      endedAt: new Date(START.getTime() + 60_010_000),
+      seconds: 60_010,
+    });
+    await visit(async (progress) => {
+      const first = pending(await progress.next(period, latest, AT));
+      expect(first.value).toBe("999.000000000000");
+      await progress.finish(first, "accepted", AT);
+      const second = pending(await progress.next(period, latest, AT));
+      expect(second.value).toBe("1.166666666667");
+      expect(second.hour).toEqual(first.hour);
+      expect(second.identifier).not.toBe(first.identifier);
+      await progress.finish(second, "accepted", AT);
+      expect(Number((await row())?.accepted_seconds)).toBe(60_010);
+    });
+  });
   it("keeps fractional minutes, the ten-second minimum, and the activation floor", async () => {
     await conversation(acme, {
       connectionType: "livekit_room",

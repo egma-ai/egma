@@ -140,15 +140,35 @@ describe("Stripe's own door", () => {
   });
 
   it("does not let an unauthenticated bad signature change billing health", async () => {
-    await aBillingDeployment("stripe-untrusted-health", { withWebhookDoor: true });
+    await aBillingDeployment("stripe-untrusted-health", {
+      withWebhookDoor: true,
+    });
     const admin = await anAdmin("untrusted-health@example.test", "Acme");
-    const response = await api.app.inject({ method: "POST", url: BILLING_WEBHOOK_PATH,
-      headers: { "content-type": "application/json", "stripe-signature": "t=1757000000,v1=bad" },
-      payload: JSON.stringify({ id: "evt_untrusted", type: "checkout.session.completed", data: { object: { customer: "cus_untrusted" } } }) });
+    const response = await api.app.inject({
+      method: "POST",
+      url: BILLING_WEBHOOK_PATH,
+      headers: {
+        "content-type": "application/json",
+        "stripe-signature": "t=1757000000,v1=bad",
+      },
+      payload: JSON.stringify({
+        id: "evt_untrusted",
+        type: "checkout.session.completed",
+        data: { object: { customer: "cus_untrusted" } },
+      }),
+    });
     expect(response.statusCode).toBe(400);
-    const { rows } = await api.database.sql("select stripe_failed_at, stripe_failure_version from cloud_billing_account where organization_id = $1", [admin.organizationId]);
-    expect(rows[0]).toEqual({ stripe_failed_at: null, stripe_failure_version: "0" });
-    const readiness = await api.database.sql("select stripe_payments_ready from cloud_plan where code = 'hobby'");
+    const { rows } = await api.database.sql(
+      "select stripe_failed_at, stripe_failure_version from cloud_billing_account where organization_id = $1",
+      [admin.organizationId],
+    );
+    expect(rows[0]).toEqual({
+      stripe_failed_at: null,
+      stripe_failure_version: "0",
+    });
+    const readiness = await api.database.sql(
+      "select stripe_payments_ready from cloud_plan where code = 'hobby'",
+    );
     expect(readiness.rows[0]?.stripe_payments_ready).toBe(true);
   });
 
@@ -227,6 +247,11 @@ describe("what the four billing actions ask before they ask Stripe anything", ()
     });
     expect(tooSmall.statusCode).toBe(400);
     expect(tooSmall.body).toMatchObject({ error: "invalid_request" });
+    const subCent = await ask(api.app, "POST", CREDIT_PATH, key, {
+      amountMicros: 5_000_001,
+    });
+    expect(subCent.statusCode).toBe(400);
+    expect(String(subCent.body["message"])).toContain("whole cents");
 
     const missing = await ask(api.app, "POST", CREDIT_PATH, key, {});
     expect(missing.statusCode).toBe(400);

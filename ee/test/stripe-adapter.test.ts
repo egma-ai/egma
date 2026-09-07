@@ -205,10 +205,20 @@ describe("verified Stripe domain facts", () => {
   it("starts the fresh Hobby cycle at the proven downgrade time and never at delivery time", async () => {
     const downgradeAt = new Date("2026-10-02T10:35:00Z");
     await applyStripeEvent(trigger, PERIOD, async () => active);
-    await applyStripeEvent(trigger, RESET, async () => ({
-      ...canceled,
-      hobbyStartedAt: downgradeAt,
-    }));
+    await applyStripeEvent(
+      trigger,
+      RESET,
+      async (_, needsTransition, previousSubscriptionId) => {
+        expect(needsTransition).toBe(true);
+        expect(previousSubscriptionId).toBe(active.subscriptionId);
+        return {
+          ...canceled,
+          subscriptionId: "sub_new_incomplete",
+          status: "incomplete",
+          hobbyStartedAt: downgradeAt,
+        };
+      },
+    );
     expect((await account()).period_anchor).toEqual(downgradeAt);
     await applyStripeEvent(
       trigger,

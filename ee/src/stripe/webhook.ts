@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 
-import { applyStripeEvent } from "../access/index.ts";
+import { applyStripeEvent, markStripeCustomerFailed } from "../access/index.ts";
 import { type AppliedDelivery, type StripeDelivery } from "./facts.ts";
 import type { StripeGateway } from "./gateway.ts";
 import { creditFactFrom } from "./credit.ts";
@@ -78,10 +78,29 @@ export async function applyStripeDelivery(
   at: Date = new Date(),
 ): Promise<AppliedDelivery> {
   const event = gateway.verify(payload, signature);
+  let delivery: StripeDelivery;
+  try {
+    delivery = deliveryFrom(event);
+  } catch (fault) {
+    if (
+      event.type === "checkout.session.completed" ||
+      event.type === "checkout.session.async_payment_succeeded"
+    ) {
+      const customer = event.data.object.customer;
+      const customerId = typeof customer === "string" ? customer : customer?.id;
+      if (customerId !== undefined) await markStripeCustomerFailed(customerId);
+    }
+    throw fault;
+  }
   return applyStripeEvent(
-    deliveryFrom(event),
+    delivery,
     at,
-    (customerId, needsHobbyTransition) =>
-      currentSubscription(gateway, customerId, needsHobbyTransition),
+    (customerId, needsHobbyTransition, previousSubscriptionId) =>
+      currentSubscription(
+        gateway,
+        customerId,
+        needsHobbyTransition,
+        previousSubscriptionId,
+      ),
   );
 }

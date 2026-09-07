@@ -1,6 +1,24 @@
 import { randomUUID } from "node:crypto";
 
-import type Stripe from "stripe";
+import Stripe from "stripe";
+import { newId } from "@egma/ids";
+import {
+  createAgent,
+  createPersona,
+  createTest,
+  createTestSuite,
+  startRun,
+} from "@egma/db";
+import {
+  visitMeterAccounts,
+  type MeterAccount,
+} from "../../src/access/meter.ts";
+import { recoverLateUsage } from "../../src/stripe/late-invoice.ts";
+import {
+  currentSubscription,
+  stripeMeterPeriods,
+} from "../../src/stripe/periods.ts";
+import { hourAround } from "../../src/stripe/facts.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -301,6 +319,175 @@ let subscriptionId: string;
 let creditSessionId: string;
 let creditCheckoutUrl: string;
 
+type SeededRun = {
+  readonly runId: string;
+  readonly agentId: string;
+  readonly connectionId: string;
+  readonly personaId: string;
+  readonly personaVersionId: string;
+  readonly testId: string;
+  readonly testVersionId: string;
+};
+
+const runs = new Map<string, SeededRun>();
+
+async function seedRun(who: Customer): Promise<SeededRun> {
+  const held = runs.get(who.organizationId);
+  if (held !== undefined) return held;
+
+  const auth = contextFor(who, "admin");
+  const label = newId("run").slice(-8).toLowerCase();
+  const agent = await createAgent(auth, {
+    agentPlatform: "retell",
+    name: `Front desk ${label}`,
+    connection: {
+      agentPlatform: "retell",
+      connectionType: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
+      modality: "chat",
+      config: { retellAgentId: `agent_${label}` },
+      credentials: { apiKey: `retell-secret-${label}` },
+    },
+  });
+  const chatConnectionId = agent.connection?.id ?? "";
+
+  const voiceConnectionId = newId("con");
+  await api.database.sql(
+    `insert into connection
+       (id, organization_id, project_id, agent_id, name, connection_type,
+        access_variant, modality, topology, config)
+     values ($1, $2, $3, $4, $5, 'livekit_room',
+             'livekit_room.project_credentials', 'voice', 'hosted-broker',
+             '{}'::jsonb)`,
+    [
+      voiceConnectionId,
+      who.organizationId,
+      who.projectId,
+      agent.id,
+      `lk-${label}`,
+    ],
+  );
+
+  const personaId = (
+    await createPersona(auth, {
+      name: `Impatient Rita ${label}`,
+      identityName: "Sam Poole",
+      personality: "Speaks plainly and asks one question at a time.",
+      language: "en-US",
+    })
+  ).id;
+  const suite = await createTestSuite(auth, { name: `Metering ${label}` });
+  await createTest(auth, {
+    suiteId: suite.id,
+    name: `Reschedules ${label}`,
+    scenario: "Their cleaning has to move to any afternoon next week.",
+    expectedBehaviors: ["confirms the new time back before finishing"],
+    personaIds: [personaId],
+  });
+  const started = await startRun(auth, {
+    suiteId: suite.id,
+    agentId: agent.id,
+    connectionId: chatConnectionId,
+  });
+  const { rows } = await api.database.sql<{
+    persona_version_id: string;
+    test_id: string;
+    test_version_id: string;
+  }>(
+    `select persona_version_id, test_id, test_version_id from simulation
+     where run_id = $1 limit 1`,
+    [started.id],
+  );
+  const pins = rows[0];
+  if (pins === undefined) throw new Error("the run has no simulation");
+
+  const made: SeededRun = {
+    runId: started.id,
+    agentId: agent.id,
+    connectionId: voiceConnectionId,
+    personaId,
+    personaVersionId: pins.persona_version_id,
+    testId: pins.test_id,
+    testVersionId: pins.test_version_id,
+  };
+  runs.set(who.organizationId, made);
+  return made;
+}
+
+let position = 500;
+
+/** One voice conversation of exactly this many seconds, ending at this instant. */
+async function conversation(
+  who: Customer,
+  lane: {
+    readonly connectionType: "livekit_room" | "phone_number";
+    readonly endedAt: Date;
+    readonly seconds: number;
+  },
+): Promise<void> {
+  const run = await seedRun(who);
+  position += 1;
+  await api.database.sql(
+    `insert into simulation
+       (id, run_id, organization_id, project_id, agent_id, connection_id,
+        persona_id, persona_version_id, test_id, test_version_id,
+        position, modality, connection_type, status, ending_reason,
+        started_at, ended_at, persona_parameter_values)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'voice', $12,
+             'completed', 'persona_concluded',
+             $13::timestamptz - make_interval(secs => $14::double precision),
+             $13::timestamptz,
+             (select persona_parameter_values from simulation where run_id = $2 limit 1))`,
+    [
+      newId("sim"),
+      run.runId,
+      who.organizationId,
+      who.projectId,
+      run.agentId,
+      run.connectionId,
+      run.personaId,
+      run.personaVersionId,
+      run.testId,
+      run.testVersionId,
+      position,
+      lane.connectionType,
+      lane.endedAt,
+      lane.seconds,
+    ],
+  );
+}
+
+/** Drop a real successful HTTP response; Stripe still performs the write. */
+function loseResponse(pathMatches: (path: string) => boolean): StripeGateway {
+  const transport = Stripe.createNodeHttpClient();
+  let dropped = false;
+  const httpClient = {
+    getClientName: () => "egma-real-response-loss",
+    async makeRequest(...args: Parameters<typeof transport.makeRequest>) {
+      const response = await transport.makeRequest(...args);
+      if (
+        !dropped &&
+        args[3] === "POST" &&
+        pathMatches(args[2]) &&
+        response.getStatusCode() < 300
+      ) {
+        dropped = true;
+        await response.toJSON();
+        throw new Error("deliberately lost a real Stripe response");
+      }
+      return response;
+    },
+  };
+  return {
+    ...gateway,
+    api: new Stripe(SECRET_KEY, {
+      httpClient,
+      maxNetworkRetries: 0,
+      timeout: 10000,
+    }),
+  };
+}
+
 describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
   beforeAll(async () => {
     if (!isSandboxKey(SECRET_KEY)) {
@@ -600,6 +787,123 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     expect(["active", "past_due"]).toContain(rolled.status);
   }, 300_000);
 
+  it("recovers late invoices after real create, item and finalize responses are lost", async () => {
+    const at = new Date(daysOn(32) * 1000);
+    const hour = hourAround(new Date(at.getTime() - 3600000));
+    let account: MeterAccount | undefined;
+    await visitMeterAccounts(
+      async (current) => {
+        if (current.organizationId === paying.organizationId) account = current;
+      },
+      (_, fault) => {
+        throw fault;
+      },
+    );
+    if (account === undefined) throw new Error("missing paying meter account");
+    const periods = await stripeMeterPeriods(gateway, account, at);
+    const period = periods.find(
+      (one) =>
+        one.channel === "web_call_minutes" &&
+        one.invoiceId !== null &&
+        !one.acceptingUsage,
+    );
+    if (period === undefined)
+      throw new Error("missing finalized original web period");
+    const original = await stripe.invoices.retrieve(period.invoiceId!);
+    expect(original.status).not.toBe("draft");
+    const originalLines = await stripe.invoices.listLineItems(original.id, {
+      limit: 100,
+    });
+    const originalWeb = originalLines.data.filter(
+      (line) => priceIdOf(line) === period.priceId,
+    );
+    expect(
+      originalWeb.reduce(
+        (total, line) => total + Number(line.quantity_decimal),
+        0,
+      ),
+    ).toBe(5400.5);
+    expect(originalWeb.reduce((total, line) => total + line.subtotal, 0)).toBe(
+      401,
+    );
+    const start = new Date(period.periodStartedAt.getTime() + 3 * 3600000);
+    await conversation(paying, {
+      connectionType: "livekit_room",
+      seconds: 5401.5 * 60,
+      endedAt: new Date(start.getTime() + 5401.5 * 60000),
+    });
+    const runRecovery = async (using: StripeGateway, when: Date) => {
+      let posted = false;
+      await visitMeterAccounts(
+        async (current, progress) => {
+          if (current.organizationId !== paying.organizationId) return;
+          await progress.next(period, hour, when);
+          posted = await recoverLateUsage(
+            using,
+            current,
+            progress,
+            period,
+            hour,
+            when,
+          );
+        },
+        (_, fault) => {
+          throw fault;
+        },
+      );
+      return posted;
+    };
+    await expect(
+      runRecovery(
+        loseResponse((path) => path === "/v1/invoices"),
+        at,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      runRecovery(
+        loseResponse((path) => path === "/v1/invoiceitems"),
+        new Date(at.getTime() + 2 * 86400000),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      runRecovery(
+        loseResponse((path) => path.endsWith("/finalize")),
+        new Date(at.getTime() + 4 * 86400000),
+      ),
+    ).rejects.toThrow();
+    expect(
+      await runRecovery(gateway, new Date(at.getTime() + 6 * 86400000)),
+    ).toBe(true);
+    expect(
+      await runRecovery(gateway, new Date(at.getTime() + 7 * 86400000)),
+    ).toBe(false);
+    const later: Stripe.Invoice[] = [];
+    for await (const invoice of stripe.invoices.list({
+      customer: payingCustomerId,
+      limit: 100,
+    })) {
+      if (invoice.metadata?.egma_original_invoice === original.id)
+        later.push(invoice);
+    }
+    expect(later).toHaveLength(1);
+    expect(later[0]?.subtotal).toBe(1);
+    expect(later[0]?.automatic_tax.enabled).toBe(true);
+    const lines = await stripe.invoices.listLineItems(later[0]!.id);
+    expect(lines.data).toHaveLength(1);
+    expect(lines.data[0]?.period).toEqual({
+      start: period.periodStartedAt.getTime() / 1000,
+      end: period.periodEndsAt.getTime() / 1000,
+    });
+    // Stripe may carry an amount below its card minimum in customer balance.
+    console.info("Late invoice proof", {
+      id: later[0]?.id,
+      status: later[0]?.status,
+      subtotal: later[0]?.subtotal,
+      amountDue: later[0]?.amount_due,
+      endingBalance: later[0]?.ending_balance,
+    });
+  }, 240_000);
+
   it("stops at period end rather than now, and lands on Hobby when it does", async () => {
     const stopping = await scheduleDowngrade(
       gateway,
@@ -629,6 +933,28 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     expect(account.plan_code).toBe("hobby");
     const canceled = await stripe.subscriptions.retrieve(subscriptionId);
     expect(account.period_anchor.getTime()).toBe(
+      (canceled.ended_at ?? 0) * 1000,
+    );
+    const declining = await stripe.paymentMethods.attach(
+      "pm_card_chargeCustomerFail",
+      { customer: payingCustomerId },
+    );
+    const retrySignup = await stripe.subscriptions.create({
+      customer: payingCustomerId,
+      default_payment_method: declining.id,
+      payment_behavior: "default_incomplete",
+      items: [{ price: (await proPrices()).fee }],
+      metadata: { ...TEST_METADATA, egma_plan: "pro" },
+    });
+    expect(retrySignup.status).toBe("incomplete");
+    const refreshed = await currentSubscription(
+      gateway,
+      payingCustomerId,
+      true,
+      subscriptionId,
+    );
+    expect(refreshed.subscriptionId).toBe(retrySignup.id);
+    expect(refreshed.hobbyStartedAt?.getTime()).toBe(
       (canceled.ended_at ?? 0) * 1000,
     );
   }, 300_000);
@@ -664,7 +990,7 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     expect((await accountRow(lapsing.organizationId)).plan_code).toBe("pro");
 
     await stripe.testHelpers.testClocks.advance(made.clockId, {
-      frozen_time: daysOn(30) + 3_600,
+      frozen_time: daysOn(32),
     });
     await whenReady(made.clockId);
 

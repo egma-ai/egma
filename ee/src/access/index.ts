@@ -31,6 +31,7 @@ export {
   applyStripeEvent,
   recordStripeCustomer,
   recordStripeOperationFailure,
+  markStripeCustomerFailed,
   setStripePaymentsReady,
   recordStripePlanObjects,
   type BillingActor,

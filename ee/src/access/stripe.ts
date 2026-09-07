@@ -97,6 +97,7 @@ export async function applyStripeEvent(
   readCanonical?: (
     customerId: string,
     needsHobbyTransition: boolean,
+    previousSubscriptionId: string | null,
   ) => Promise<CanonicalSubscription>,
 ): Promise<AppliedDelivery> {
   const fact = delivery.fact;
@@ -115,6 +116,7 @@ export async function applyStripeEvent(
           organizationId: cloudBillingAccount.organizationId,
           planCode: cloudBillingAccount.planCode,
           periodAnchor: cloudBillingAccount.periodAnchor,
+          stripeSubscriptionId: cloudBillingAccount.stripeSubscriptionId,
         })
         .from(cloudBillingAccount)
         .where(eq(cloudBillingAccount.stripeCustomerId, fact.customerId))
@@ -132,6 +134,7 @@ export async function applyStripeEvent(
       const current = await readCanonical(
         fact.customerId,
         account.planCode === "pro",
+        account.stripeSubscriptionId,
       );
       await applyCanonical(tx, account, current, at);
       return { applied: true, effect: "plan_changed" };
@@ -243,6 +246,7 @@ export async function reconcileStripeAccount(
   read: (
     customerId: string,
     needsHobbyTransition: boolean,
+    previousSubscriptionId: string | null,
   ) => Promise<StripeCustomerFacts>,
   at: Date,
 ): Promise<void> {
@@ -256,12 +260,17 @@ export async function reconcileStripeAccount(
         organizationId: cloudBillingAccount.organizationId,
         planCode: cloudBillingAccount.planCode,
         periodAnchor: cloudBillingAccount.periodAnchor,
+        stripeSubscriptionId: cloudBillingAccount.stripeSubscriptionId,
       })
       .from(cloudBillingAccount)
       .where(eq(cloudBillingAccount.stripeCustomerId, customerId));
     if (account === undefined)
       throw new Error("Stripe reconciliation has no linked billing account");
-    const facts = await read(customerId, account.planCode === "pro");
+    const facts = await read(
+      customerId,
+      account.planCode === "pro",
+      account.stripeSubscriptionId,
+    );
     for (const credit of facts.credits) {
       if (credit.customerId !== customerId)
         throw new Error("Stripe credit reconciliation crossed customers");

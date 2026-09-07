@@ -11,11 +11,14 @@ import {
 } from "../stripe/facts.ts";
 
 import { markStripeCustomerFailed, reconcileStripeAccount } from "./stripe.ts";
+import { lateInvoiceProgress } from "./late-invoice.ts";
 
 const { cloudBillingAccount, cloudMeterPeriod, cloudPlan, simulation } = schema;
 const HOUR = 3_600_000;
 export const METER_TIMESTAMP_WINDOW_DAYS = 35;
 export const MOST_HOURS_CAUGHT_UP_AT_ONCE = 48;
+// Twelve fractional places leave room for three whole digits in Stripe's limit.
+const MAX_SECONDS_PER_REPORT = 999 * 60;
 
 export type MeterAccount = {
   readonly organizationId: string;
@@ -53,17 +56,22 @@ export type NextMeterReport =
       readonly seconds: number;
     }
   | { readonly kind: "send"; readonly report: PendingMeterReport };
-export type MeterProgress = {
+export type MeterProgress = ReturnType<typeof lateInvoiceProgress> & {
   failureVersion(): Promise<number>;
   reconcile(
     read: (
       customerId: string,
       needsHobbyTransition: boolean,
+      previousSubscriptionId: string | null,
     ) => Promise<StripeCustomerFacts>,
     at: Date,
   ): Promise<void>;
   failed(): Promise<void>;
-  recovered(version: number, latestClosedHour: MeteredHour, at: Date): Promise<boolean>;
+  recovered(
+    version: number,
+    latestClosedHour: MeteredHour,
+    at: Date,
+  ): Promise<boolean>;
   periods(): Promise<MeterPeriodFact[]>;
   next(
     period: MeterPeriodFact,
@@ -134,6 +142,7 @@ function keyOf(account: MeterAccount, period: MeterPeriodFact) {
 function progressFor(account: MeterAccount): MeterProgress {
   let reconciled = false;
   return {
+    ...lateInvoiceProgress(account),
     async failureVersion() {
       const [row] = await fencedDatabase()
         .select({ version: cloudBillingAccount.stripeFailureVersion })
@@ -159,7 +168,7 @@ function progressFor(account: MeterAccount): MeterProgress {
           .where(
             and(
               eq(cloudMeterPeriod.organizationId, account.organizationId),
-              sql`(${cloudMeterPeriod.pendingIdentifier} is not null or ${cloudMeterPeriod.state} = 'needs_attention' or ${cloudMeterPeriod.uncertainSeconds} > 0 or (greatest(${cloudMeterPeriod.periodStartedAt}, ${account.activatedAt}::timestamptz) < ${latestClosedHour.endedAt}::timestamptz and (${cloudMeterPeriod.observedThroughHour} is null or ${cloudMeterPeriod.observedThroughHour} < ${latestClosedHour.startedAt}::timestamptz)))`,
+              sql`(${cloudMeterPeriod.pendingIdentifier} is not null or ${cloudMeterPeriod.latePendingIdentifier} is not null or ${cloudMeterPeriod.state} = 'needs_attention' or (${cloudMeterPeriod.uncertainSeconds} > 0 and ${cloudMeterPeriod.lateObservedSeconds} < ${cloudMeterPeriod.lastObservedSeconds}) or (greatest(${cloudMeterPeriod.periodStartedAt}, ${account.activatedAt}::timestamptz) < ${latestClosedHour.endedAt}::timestamptz and (${cloudMeterPeriod.observedThroughHour} is null or ${cloudMeterPeriod.observedThroughHour} < ${latestClosedHour.startedAt}::timestamptz)))`,
             ),
           )
           .limit(1);
@@ -274,6 +283,7 @@ function progressFor(account: MeterAccount): MeterProgress {
           row.observedThroughHour === null
             ? hourAround(floor).startedAt
             : new Date(row.observedThroughHour.getTime() + HOUR);
+        if (!period.acceptingUsage) hour = latestClosedHour.startedAt;
         if (hour > latestClosedHour.startedAt) return { kind: "idle" };
         // Once the period ended, only newly visible completions can change its total.
         if (hour >= period.periodEndsAt) hour = latestClosedHour.startedAt;
@@ -293,9 +303,13 @@ function progressFor(account: MeterAccount): MeterProgress {
             ? (totals?.phoneSeconds ?? 0)
             : (totals?.webCallSeconds ?? 0),
         );
-        const offset = row.acceptedSeconds + row.uncertainSeconds;
-        const value = minuteValueAdded(offset, seconds);
-        const delta = seconds - offset;
+        const offset = Math.max(
+          row.acceptedSeconds + row.uncertainSeconds,
+          row.lateObservedSeconds,
+        );
+        const outstanding = seconds - offset;
+        const delta = Math.min(outstanding, MAX_SECONDS_PER_REPORT);
+        const value = minuteValueAdded(offset, offset + delta);
         await tx
           .update(cloudMeterPeriod)
           .set({
@@ -327,7 +341,7 @@ function progressFor(account: MeterAccount): MeterProgress {
             ? "timestamp_expired"
             : undefined;
         if (reason !== undefined) {
-          // Known usage remains outstanding until the late-invoice policy is settled.
+          // A finalized original invoice must prove the amount still owed.
           await tx
             .update(cloudMeterPeriod)
             .set({ state: "needs_attention", lastOutcome: reason })
@@ -343,6 +357,7 @@ function progressFor(account: MeterAccount): MeterProgress {
               period.periodEndsAt.toISOString(),
               period.channel,
               hour.toISOString(),
+              offset,
             ].join(":"),
           )
           .digest("hex");
@@ -393,7 +408,11 @@ function progressFor(account: MeterAccount): MeterProgress {
             uncertainSeconds:
               row.uncertainSeconds +
               (outcome === "uncertain" ? row.pendingSeconds : 0),
-            observedThroughHour: row.pendingHour,
+            observedThroughHour:
+              row.acceptedSeconds + row.uncertainSeconds + row.pendingSeconds >=
+              row.lastObservedSeconds
+                ? row.pendingHour
+                : row.observedThroughHour,
             pendingIdentifier: null,
             pendingSeconds: null,
             pendingValue: null,
