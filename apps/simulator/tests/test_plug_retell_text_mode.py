@@ -8,11 +8,11 @@ resume state threaded turn by turn. The counterpart is a real HTTP server
 shaped like the completion API, on loopback — no account, no key, no
 network.
 
-What the plug **sends** about tools is pinned beside it: egma's own
-answers ride every request as native mocks, matched by name. What the
-plug reports about tools is nothing at all — egma writes no tool row of
-its own, and this lane's tool record is Retell's own call record, pulled
-and filed under the simulation when the call ends.
+What the plug **saw** is pinned beside it, at the seam that writes it
+down. This lane is the one that still keeps a tool record of egma's own:
+Retell serves egma's answers itself and reports the calls afterwards,
+nothing of egma's runs inside the agent, and this lane offers no provider
+reference — so a call the seam did not keep would land nowhere at all.
 
 The failure paths get the same treatment, because they are where a
 credential leaks if it ever does: a throttle, a billing wall, a key the
@@ -595,17 +595,13 @@ async def test_a_run_that_mocks_nothing_sends_no_mocks(start_text_mode_stub):
     assert "tool_mocks" not in running.stub.requests[0]["body"]
 
 
-async def test_a_tool_call_the_platform_reports_becomes_no_row_of_egmas(
+async def test_a_covered_call_carries_egmas_answer_and_an_uncovered_one_does_not(
     start_text_mode_stub,
 ):
-    """The lane's tool record is Retell's own, and egma keeps no copy.
-
-    The platform serves egma's answer for the covered name and the
-    customer's own backend for the other, and reports both. Egma writes
-    no tool row of its own for either: the agent's POV of this simulation
-    is Retell's call record, pulled and filed when the call ends, and a
-    second copy here would be one call on the record twice.
-    """
+    """The whole honesty claim of this lane, at the tool grain: the platform
+    served egma's answer for the covered name and the customer's own backend
+    for the other, and the record says which was which — by carrying egma's
+    own answer on the one it authored, and nothing on the one it did not."""
     answers = seam(answering("check_calendar", {"slots": ["thu-1430"]}))
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY,
@@ -632,21 +628,72 @@ async def test_a_tool_call_the_platform_reports_becomes_no_row_of_egmas(
     answered = await plug.deliver("Anything Thursday?")
     await plug.close()
 
-    # Nothing rides back on the reply, and nothing is kept at the seam.
+    # Nothing rides back on the reply itself: the seam is the one writer of
+    # this lane's tool record, and two writers would record each call twice.
     assert answered.tool_calls == ()
-    # The words the agent said are still the turn: a reply carrying tool
-    # calls is read for its speech exactly as one without them is.
-    assert answered.text == "Thursday at half two?"
-    # And egma's answer still went out on the request, which is the whole
-    # of what this lane does about tools.
-    assert running.stub.mocks()[0] == [
-        {
-            "tool_name": "check_calendar",
-            "input_match_rule": MATCH_ANYTHING,
-            "output": '{"slots":["thu-1430"]}',
-            "result": True,
-        },
+
+    reported = answers.exchanged()
+    assert [(call.name, call.answer) for call in reported] == [
+        ("check_calendar", '{"slots":["thu-1430"]}'),
+        # The call the test did not name is on the record as the observation
+        # it is: what was called, with what — and no answer, which is the
+        # record's own way of saying a real backend did the work.
+        ("lookup_customer", None),
     ]
+    assert [call.arguments for call in reported] == [
+        '{"day":"thu"}',
+        '{"phone":"+1"}',
+    ]
+
+
+async def test_a_mocked_failure_reads_back_as_a_failure_not_a_string(
+    start_text_mode_stub,
+):
+    """The tag stays on the record for the failure branch, exactly as it
+    does on the wire, so one authored world reads the same on both."""
+    answers = seam(failing("book_appointment", {"code": 503}))
+    running = await start_text_mode_stub(
+        api_key=SENTINEL_KEY,
+        replies=[Reply(), Reply(words="Sorry — I could not book that.",
+                                tools=[ToolTurn(name="book_appointment")])],
+    )
+    plug = text_mode(
+        {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
+    )
+
+    await plug.open()
+    await plug.deliver("Book it.")
+    await plug.close()
+
+    (call,) = answers.exchanged()
+    assert call.answer == '{"error":{"code":503}}'
+
+
+async def test_a_reported_call_is_one_instant_and_carries_no_stamp(
+    start_text_mode_stub,
+):
+    """egma did not conduct this exchange and did not time it, so the row is
+    one instant. And nothing on it says who answered: whether a mock tool did
+    is read at display time, by name, from the pinned test version."""
+    answers = seam(answering("check_calendar", {"slots": []}))
+    running = await start_text_mode_stub(
+        api_key=SENTINEL_KEY,
+        replies=[Reply(), Reply(words="Checked.",
+                                tools=[ToolTurn(name="check_calendar")])],
+    )
+    plug = text_mode(
+        {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
+    )
+
+    await plug.open()
+    await plug.deliver("Anything Thursday?")
+    await plug.close()
+
+    (call,) = answers.exchanged()
+    assert call.at_unix_nano > 0
+    assert not hasattr(call, "mock_tool")
+    assert not hasattr(call, "refused")
+    assert not hasattr(call, "late_attached")
 
 
 # -- Errors, loud and without the key ----------------------------------------

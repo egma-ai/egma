@@ -104,11 +104,10 @@ export type RecordingSpeakerTimeline = {
 export function recordingSpeakerTimeline(
   transcript: EvidenceTranscript,
 ): RecordingSpeakerTimeline {
-  const persona = transcript.turns.filter((turn) => turn.pov === "persona");
   return {
     startedAt: recordingOriginOf(transcript) ?? transcript.startedAt,
     endedAt: transcript.endedAt,
-    turns: persona.length === 0 ? transcript.turns : persona,
+    turns: fromOnePov(transcript.turns, "persona"),
   };
 }
 
@@ -1369,26 +1368,33 @@ export function RecordingEvidence({
 }
 
 /**
- * The agent's account of the conversation, where the record holds one.
+ * **One conversation, told once**: the steps of one POV where the record holds
+ * any, and every step where it holds none.
  *
- * A simulation stores both POVs under one trace — the persona's, which is what
- * egma's own simulator said, heard, measured and recorded, and the agent's,
- * which is what the agent's own process reported. **What a reader is shown is
- * the agent's**, because that is the conversation as the agent had it: every
- * tool call with the arguments its model emitted and the result it received.
- * Showing both would be one conversation told twice, and comparing them is not
- * this view's job.
+ * A simulation stores both POVs of the same conversation under one trace — the
+ * persona's, which is what egma's own simulator said, heard, measured and
+ * recorded, and the agent's, which is what the agent's own process reported.
+ * They describe the same turns and the same calls, so every reader that shows,
+ * counts or judges them chooses one, and they all choose the same way or one
+ * surface says a thirteen-turn conversation had twenty-six while another says
+ * thirteen.
  *
- * A record with only one account is shown whole: a chat simulation, a platform
- * that reports nothing of its own, a production transcript, or a conversation
- * whose agent never reached egma. There is nothing to choose between, so
- * nothing is dropped.
+ * **The same rule as `fromOnePov` in `@egma/db`**, which the trace facts and
+ * the graders read by, written again here for one reason: this module is a
+ * browser bundle and reaches only `@egma/platform-api`, so it cannot import the
+ * package that owns the read. Change one and change the other.
+ *
+ * Falling back to every step is what makes it safe. A chat simulation, a
+ * production transcript and a conversation whose agent never reached egma each
+ * hold one POV, and it is the one to show — asking for a POV that is not there
+ * must never empty a transcript.
  */
-function agentPov<Step extends { readonly pov: EvidenceStep["pov"] }>(
+function fromOnePov<Step extends { readonly pov: EvidenceStep["pov"] }>(
   steps: readonly Step[],
+  pov: EvidenceStep["pov"],
 ): readonly Step[] {
-  const agent = steps.filter((step) => step.pov === "agent");
-  return agent.length === 0 ? steps : agent;
+  const own = steps.filter((step) => step.pov === pov);
+  return own.length === 0 ? steps : own;
 }
 
 /**
@@ -1409,7 +1415,7 @@ export function transcriptToolCalls(
   };
   for (const turn of transcript.turns) visit(turn);
   for (const step of transcript.spans) visit(step);
-  return agentPov([...found.values()]).toSorted(
+  return fromOnePov([...found.values()], "agent").toSorted(
     (left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt),
   );
 }
@@ -1670,12 +1676,7 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
       ? "Succeeded"
       : "Status not recorded";
   const name = step.toolName === "" ? humanizeIdentifier(step.name) : step.toolName;
-  // The mock tool that answered, by the name the pinned test version holds.
-  // Absent on every call that ran for real, which is the ordinary case.
-  const mockTool =
-    step.toolProvenance === "mocked" && step.mockTool !== undefined
-      ? step.mockTool
-      : undefined;
+  const mocked = step.toolProvenance === "mocked";
   const seconds = secondsInto(step.startedAt, timelineStartedAt);
   const shownTime = seconds === null ? "Time unavailable" : clockText(seconds);
   const Container = nested ? "div" : "li";
@@ -1694,11 +1695,7 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
       role={nested ? "group" : undefined}
       data-active={active ? "true" : "false"}
       data-selected={selected ? "true" : "false"}
-      aria-label={
-        mockTool === undefined
-          ? `Tool call, ${name}`
-          : `Tool call, ${name}, mocked by ${mockTool}`
-      }
+      aria-label={`Tool call, ${name}`}
       aria-current={active ? "true" : undefined}
     >
       {onSeek === undefined || seconds === null ? (
@@ -1754,17 +1751,18 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
             )}
           >
             {/*
-              **Who answered, beside what happened.** A call a mock tool
-              answered is named for it, so a reader knows the answer in front of
-              them came from the test rather than from their own backend — and
-              knows which authored answer it was, read by name off the test
-              version this simulation pinned. Muted text at the same size — no
-              chip and no colour of its own, because a real call is the ordinary
-              case and says nothing extra.
+              **Who answered, beside what happened.** A mock tool answered this
+              call, read by name off the test version this simulation pinned, so
+              a reader knows the answer in front of them came from the test
+              rather than from their own backend. The mock tool's own name is
+              not repeated here: it is the tool's name, already on this row in
+              mono one slot away. One muted word at the same size — no chip and
+              no colour of its own, because a real call is the ordinary case and
+              says nothing extra.
             */}
-            {mockTool === undefined ? null : (
-              <span className="text-muted-foreground">mocked by {mockTool} · </span>
-            )}
+            {mocked ? (
+              <span className="text-muted-foreground">mocked · </span>
+            ) : null}
             {statusLabel} · {howLong(step.durationNs)}
           </span>
           <ChevronRightIcon
@@ -1982,7 +1980,7 @@ export function ChatTranscript({
   // persona's POV still supplies the recording underneath and the origin these
   // rows seek against; it is not a second transcript beside this one.
   const shown = useMemo(
-    () => ({ ...transcript, turns: [...agentPov(transcript.turns)] }),
+    () => ({ ...transcript, turns: [...fromOnePov(transcript.turns, "agent")] }),
     [transcript],
   );
   const events = useMemo(

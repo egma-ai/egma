@@ -211,31 +211,65 @@ def test_a_chat_turn_is_one_instant():
     assert turn["startTimeUnixNano"] == turn["endTimeUnixNano"]
 
 
-def test_the_emitter_offers_no_way_to_author_a_tool_call_at_all():
-    """egma writes no tool row of its own, and there is no door to one.
+def test_the_seams_own_exchange_has_no_door_to_a_span_at_all():
+    """A call egma conducts is written down nowhere.
 
-    A simulation's tool record is the agent's own POV of the conversation
-    — every call the agent made, with the arguments the model emitted and
-    the result it received — filed under the simulation by simulation
-    ingestion. egma's mock-tool seam still serves and still refuses; it
-    writes nothing down. So the way to keep one call from becoming two
-    records is that this emitter has no method that could write the
-    second, and no vocabulary for it.
+    Where the agent's own process runs the egma SDK, that process reports
+    every call it made and that report is the tool record. So the way to
+    keep one call from becoming two records is that this emitter has no
+    method that could write the second, and no vocabulary for it: no
+    round-trip span, and no stamp saying who answered.
     """
     spans, sink, _clock = emitter()
     spans.opened()
     spans.turn("agent", "One moment.")
     spans.flush()
 
-    for gone in ("tool_call", "tool_exchange"):
-        assert not hasattr(spans, gone), f"the emitter still authors {gone}"
-    assert not hasattr(spans_module, "TOOL_CALL_SPAN")
+    assert not hasattr(spans, "tool_exchange")
+    for gone in (
+        "TOOL_PROVENANCE_ATTRIBUTE",
+        "MOCK_TOOL_ATTRIBUTE",
+        "TOOL_LATE_ATTACHED_ATTRIBUTE",
+    ):
+        assert not hasattr(spans_module, gone), f"the vocabulary still holds {gone}"
 
     authored = spans_of(sink.documents[0])
     assert [span["name"] for span in authored] == ["agent_turn"]
     for span in authored:
         for entry in span.get("attributes", []):
             assert not entry["key"].startswith("egma.tool.")
+
+
+def test_a_reported_tool_call_is_the_golden_flushs_bytes():
+    """The one lane that still writes a tool row, held to the contract.
+
+    ``chat-flush-2-tools.json`` is the vocabulary as bytes for a call a
+    platform reported making: the name, the arguments where it reported
+    any, and — only for a tool this simulation covers — the answer egma
+    itself authored. What the emitter produces has to be those attributes
+    exactly, or the two sides of the contract have drifted.
+    """
+    golden = [
+        span
+        for span in spans_of(fixture("chat-flush-2-tools.json"))
+        if span["name"] == "tool_call"
+    ]
+    spans, sink, _clock = emitter()
+    spans.opened()
+    for reported in golden:
+        spans.tool_call(
+            attribute(reported, "egma.tool.name"),
+            arguments=attribute(reported, "egma.tool.arguments"),
+            answer=attribute(reported, "egma.tool.result"),
+            at_unix_nano=int(reported["startTimeUnixNano"]),
+        )
+    spans.flush()
+
+    authored = named(sink.documents[0], "tool_call")
+    for mine, theirs in zip(authored, golden, strict=True):
+        assert mine["attributes"] == theirs["attributes"]
+        # One instant: egma neither conducted the exchange nor timed it.
+        assert mine["startTimeUnixNano"] == mine["endTimeUnixNano"]
 
 
 @pytest.mark.parametrize(

@@ -789,7 +789,12 @@ describe.skipIf(!storage.available)("both POVs under one trace", () => {
         spans: { spanId: string; parentSpanId: string }[];
       } | null;
     };
-    expect(body.transcript?.spanCount).toBe(FIXTURE_TRACE.spans + 1);
+    // **One conversation, counted once.** Both POVs are stored and both come
+    // back in the tree, but the counts beside them are the agent's POV alone —
+    // otherwise a reader would be told this conversation held one more step
+    // than the agent ever took, and on a trace with two full POVs, twice as
+    // many turns as anybody spoke.
+    expect(body.transcript?.spanCount).toBe(FIXTURE_TRACE.spans);
     const roots = (body.transcript?.spans ?? []).filter(
       (span) => span.parentSpanId === "",
     );
@@ -940,12 +945,10 @@ describe.skipIf(!storage.available)("the booking that opened this effort", () =>
 
     const all = everySpan([...transcript.turns, ...transcript.spans]);
     const tools = all.filter((span) => span.kind === "tool");
-    expect(
-      tools.map((span) => [span.toolName, span.toolProvenance, span.mockTool]),
-    ).toEqual([
-      ["list_providers", undefined, undefined],
-      ["check_availability", "mocked", "check_availability"],
-      ["book_appointment", undefined, undefined],
+    expect(tools.map((span) => [span.toolName, span.toolProvenance])).toEqual([
+      ["list_providers", undefined],
+      ["check_availability", "mocked"],
+      ["book_appointment", undefined],
     ]);
 
     // Every span of this transcript is the agent's own account of the

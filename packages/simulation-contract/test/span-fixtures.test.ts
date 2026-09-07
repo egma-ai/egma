@@ -39,6 +39,7 @@ const CONVERSATION_SPAN_NAMES = [
   "recording",
   "human_turn",
   "agent_turn",
+  "tool_call",
 ] as const;
 
 /**
@@ -50,21 +51,27 @@ const MEASURE_SPAN_NAMES = MEASURE_CATALOG.filter(
   (entry) => entry.origin === "timing_span",
 ).map((entry) => entry.measure);
 
-const SPAN_ATTRIBUTE_KEYS = ["egma.turn.text"] as const;
-
-/**
- * The tool shapes this vocabulary used to carry, and no longer may.
- *
- * A simulation's tool record is the agent's own POV of the conversation, one
- * row per call, and egma writes no tool row of its own. So a fixture naming a
- * tool span or a tool attribute would be egma claiming the tool record again —
- * which is exactly the drift the golden files exist to catch.
- */
-const RETIRED_TOOL_SHAPES = [
-  "tool_call",
+const SPAN_ATTRIBUTE_KEYS = [
+  "egma.turn.text",
   "egma.tool.name",
   "egma.tool.arguments",
   "egma.tool.result",
+] as const;
+
+/**
+ * The shapes the mock-tool seam used to author, and no longer may.
+ *
+ * Where the agent's own process runs the egma SDK, that process reports every
+ * call it made and that report is the tool record; the seam serves the answer
+ * and writes no row. So the stamp saying who answered, the mock tool's own
+ * name, and the late-attached caveat all went with it — whether a mock tool
+ * answered is read at display time, by name, from the pinned test version.
+ *
+ * A `tool_call` span itself is not retired: the lane where a platform serves
+ * egma's answers itself reports its calls afterwards, and nothing else records
+ * them.
+ */
+const RETIRED_TOOL_SHAPES = [
   "egma.tool.provenance",
   "egma.tool.mock_tool",
   "egma.tool.late_attached",
@@ -247,6 +254,12 @@ describe("the golden span fixtures", () => {
             `${fixture.name} ${span.name}`,
           ).toBeTypeOf("string");
         }
+        if (span.name === "tool_call") {
+          expect(
+            attributeOf(span.attributes, "egma.tool.name"),
+            fixture.name,
+          ).toBeTruthy();
+        }
         if (MEASURE_SPAN_NAMES.includes(span.name ?? "")) {
           // A measure span's value is its duration; an attribute repeating the
           // number would be a second copy free to disagree.
@@ -280,38 +293,74 @@ describe("the golden span fixtures", () => {
   });
 
   /**
-   * The shapes this effort retired, held out of the fixtures for good.
+   * The shapes the seam retired, held out of the fixtures for good.
    *
-   * egma's simulator used to author a `tool_call` span for every call it
-   * served or refused. It writes none now: the tool record is the agent's own
-   * POV, one row per call, and whether a mock tool answered is read by name
-   * from the pinned test version's mock tools at display time. A fixture that
-   * grew one of these shapes back would be two records of one call, which is
-   * the disagreement the change exists to remove.
+   * egma's simulator used to author a `tool_call` span for every call the seam
+   * served or refused, stamped with who answered. It authors none of those
+   * now: the agent's own process reports its calls, and whether a mock tool
+   * answered is read by name from the pinned test version at display time. A
+   * fixture that grew one of these stamps back would be a second copy of a
+   * fact the pinned version already holds, free to disagree with it.
    */
-  it("carry no tool span and no tool attribute, on either side of the contract", () => {
+  it("carry none of the stamps the seam used to write", () => {
     for (const fixture of [...valid, ...invalid]) {
       for (const span of spansOf(fixture)) {
-        expect(span.name, `${fixture.name} authors a ${span.name} span`).not.toBe(
-          "tool_call",
-        );
-        for (const attribute of span.attributes ?? []) {
+        for (const shape of RETIRED_TOOL_SHAPES) {
           expect(
-            (RETIRED_TOOL_SHAPES as readonly string[]).includes(attribute.key),
-            `${fixture.name} ${span.name} carries ${attribute.key}`,
+            (span.attributes ?? []).some((one) => one.key === shape),
+            `${fixture.name} ${span.name} carries ${shape}`,
           ).toBe(false);
         }
       }
     }
-    // And the document says so too, so a reader finds the reason rather than
-    // an absence they have to interpret.
-    expect(document).toContain("Why there is no tool span here");
-    for (const shape of RETIRED_TOOL_SHAPES) {
-      if (shape === "tool_call") continue;
-      expect(document, `span-vocabulary.md still declares ${shape}`).not.toContain(
-        shape,
-      );
-    }
+    // And the document says why, so a reader finds the reason rather than an
+    // absence they have to interpret.
+    expect(document).toContain(
+      "Why there is no tool span for a call Egma served itself",
+    );
+  });
+
+  /**
+   * The one lane that still writes a tool row, read back attribute by
+   * attribute: what the platform reported, and — only for a tool the pinned
+   * version covers — the answer egma itself authored.
+   */
+  it("read the reported flush's calls back exactly", () => {
+    const flush = valid.find(
+      (fixture) => fixture.name === "chat-flush-2-tools.json",
+    );
+    expect(flush).toBeDefined();
+    const calls = spansOf(flush as Fixture)
+      .filter((span) => span.name === "tool_call")
+      .map((span) => ({
+        name: attributeOf(span.attributes, "egma.tool.name"),
+        arguments: attributeOf(span.attributes, "egma.tool.arguments"),
+        result: attributeOf(span.attributes, "egma.tool.result"),
+        // One instant: egma did not conduct this exchange and did not time it.
+        instant: span.startTimeUnixNano === span.endTimeUnixNano,
+      }));
+
+    expect(calls).toEqual([
+      {
+        name: "reschedule_appointment",
+        arguments:
+          '{"appointment_id":"apt-88213","from":"2026-08-11T15:00:00Z","to":"2026-08-13T15:00:00Z"}',
+        // A tool this simulation covers, so egma authored the answer and
+        // recording it invents nothing.
+        result: '{"moved":true}',
+        instant: true,
+      },
+      {
+        name: "send_confirmation_sms",
+        // The platform reported the invocation and not its arguments, and an
+        // absent fact stays absent.
+        arguments: undefined,
+        // A tool nothing covers: the real implementation ran, and its return
+        // value is not egma's to claim.
+        result: undefined,
+        instant: true,
+      },
+    ]);
   });
 
   it("show a voice flush whose turns genuinely overlap, because the shape has to permit it", () => {

@@ -341,6 +341,12 @@ class RunningSimulation:
                     self._spans.recording(
                         started_unix_nano=recording.started_unix_nano
                     )
+                # The same moment for the same reason: the conversation is
+                # over, so every call a platform has reported is settled.
+                # Drained before anything is sealed, so a call reported in
+                # the last breath of a conversation is on the record rather
+                # than in a buffer nobody empties.
+                self._record_reported_tool_calls()
                 await model.close()
         except asyncio.CancelledError:
             # The service itself is being torn down mid-conversation. Reporting a
@@ -455,9 +461,9 @@ class RunningSimulation:
 
     async def _on_answered(self) -> None:
         """One flush per answer, which is where the conversation actually
-        has a seam: the persona's turn and the answer itself go together,
-        and the flush after them is the moment a reader could watch this
-        simulation live.
+        has a seam: the persona's turn, whatever the agent did while
+        answering, and the answer itself go together, and the flush after
+        them is the moment a reader could watch this simulation live.
         Finer would be a request per span; coarser would be a transcript
         that only exists once it is over.
 
@@ -467,7 +473,32 @@ class RunningSimulation:
         precisely that answer whose evidence must not sit in a buffer
         waiting for the agent to speak again.
         """
+        self._record_reported_tool_calls()
         self._spans.flush()
+
+    def _record_reported_tool_calls(self) -> None:
+        """Every tool call a platform has reported since this last asked.
+
+        Taken rather than pushed: a report arrives in whatever task the
+        plug reads it in, and a span authored from over there would be
+        minted between two the conversation was in the middle of. Drained
+        here instead, at the seams the conversation already has, so the
+        order of the record is the order the simulation learned things in.
+
+        Empty on every lane but one. Where the agent's own process runs the
+        egma SDK, that process reports its own calls and egma writes no row
+        at all.
+        """
+        assembled = self._assembled
+        if assembled is None:
+            return
+        for call in assembled.tool_calls():
+            self._spans.tool_call(
+                call.name,
+                arguments=call.arguments,
+                answer=call.answer,
+                at_unix_nano=call.at_unix_nano,
+            )
 
     async def _on_timing(self, measure: str, milliseconds: float) -> None:
         self._spans.measure(measure, milliseconds)

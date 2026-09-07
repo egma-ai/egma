@@ -84,9 +84,9 @@ function describedSpan(
   // Only a tool span can carry the mark, and only for a name the pinned
   // version answers for. Whichever POV reported the call is marked the same
   // way: what egma stood in front of is a fact about the test, not about who
-  // wrote the row down.
-  const mockTool =
-    span.kind === "tool" && mocked.has(span.toolName) ? span.toolName : undefined;
+  // wrote the row down. The mock tool's own name is not written beside it —
+  // matching is by tool name and by nothing else, so it is `toolName`.
+  const answeredByAMockTool = span.kind === "tool" && mocked.has(span.toolName);
   return {
     spanId: span.spanId,
     parentSpanId: span.parentSpanId,
@@ -100,14 +100,12 @@ function describedSpan(
     toolName: span.toolName,
     toolArguments: span.toolArguments,
     toolResult: span.toolResult,
-    // The storage column read as the product word. `emitter` never reaches a
-    // screen; POV is what a reader is told.
-    pov: span.emitter === "agent" ? "agent" : "persona",
+    // Whose POV this row is. `emitter` is the storage word and never reaches
+    // a screen.
+    pov: span.pov,
     // Absent on a real call, so nothing downstream has to tell "ran for real"
     // from "nobody recorded who answered".
-    ...(mockTool === undefined
-      ? {}
-      : { toolProvenance: "mocked" as const, mockTool }),
+    ...(answeredByAMockTool ? { toolProvenance: "mocked" as const } : {}),
     spans: span.spans.map((nested) => describedSpan(nested, mocked)),
   };
 }

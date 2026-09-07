@@ -272,16 +272,20 @@ def _transitions(records: list[dict]) -> list[str]:
 
 
 def _hand_back(records: list[dict], banked: Path) -> None:
-    """Show the founder the promise working: the transcript, the transitions,
-    and where the whole record was banked.
-
-    The tool calls are not here and cannot be: egma writes no tool row. The
-    agent's own POV of this simulation carries them, pulled from Retell's
-    call record when the conversation ends."""
+    """Show the founder the promise working: the transcript, the mocked calls,
+    the transitions, and where the whole record was banked."""
     print(f"\n--- banked proof ---\n{banked}")
     print("\n--- the transcript ---")
     for speaker, text in turns_for(records, SIMULATION):
         print(f"{speaker:>6}: {text}")
+
+    print("\n--- the tool calls, on the record ---")
+    for call in _tool_calls(records):
+        print(
+            f"{span_attribute(call, 'egma.tool.name')}: "
+            f"arguments={span_attribute(call, 'egma.tool.arguments')}, "
+            f"result={span_attribute(call, 'egma.tool.result')}"
+        )
 
     print("\n--- the transitions, on the record ---")
     for note in _transitions(records):
@@ -362,16 +366,31 @@ async def test_a_real_retell_voice_agent_is_conducted_in_text(
         "whose conversation moves through its flow or its states"
     )
 
-    # The other half: egma's answers rode every request as native mocks, so
-    # the covered tools were served rather than run for real — and egma
-    # wrote no tool row about any of it. The record of a tool call on this
-    # lane is Retell's own call record, pulled and filed under the
-    # simulation when the conversation ends.
-    assert tool_names, "this run mocked nothing, so nothing could be served"
-    assert _tool_calls(records) == [], (
-        "egma authored a tool row: the seam renders the answers and writes "
-        "nothing, so the tool record can only be the agent's own"
+    # A mocked tool answer on the record: the other half. Nothing of egma
+    # runs inside a Retell agent and this lane offers no provider reference,
+    # so the seam's own record is this lane's whole tool record — and a
+    # covered call carries the answer egma authored for it.
+    calls = _tool_calls(records)
+    assert calls, (
+        "the agent called no tool, so no mocked answer could land: set "
+        "TEST_RETELL_SCENARIO to something that leads your agent to a tool"
     )
+    covered = set(tool_names)
+    mocked = [
+        call
+        for call in calls
+        if span_attribute(call, "egma.tool.name") in covered
+    ]
+    assert mocked, (
+        "the agent called only tools no mock covered; the ones this run mocked "
+        f"were {sorted(covered)} and it called "
+        f"{[span_attribute(call, 'egma.tool.name') for call in calls]}"
+    )
+    for call in mocked:
+        assert span_attribute(call, "egma.tool.result"), (
+            "a covered tool call recorded no answer: an authored answer did "
+            "not reach the agent"
+        )
 
     # Nothing the simulator sent was refused on its way in. A throttled account
     # would have failed the run loudly rather than degrading into a shorter

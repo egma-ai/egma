@@ -260,7 +260,7 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
   it("says which platform produced it without inventing a connection type", async () => {
     const [trace] = (await listed()).traces;
     expect(trace?.source).toBe("production");
-    expect(trace?.emitter).toBe("agent");
+    expect(trace?.pov).toBe("agent");
     expect(trace?.environment).toBe("default");
     expect(trace?.connectionType).toBe("");
     expect(trace?.providerCallId).toBe(FIXTURE_PROVIDER_CALL_ID);
@@ -995,12 +995,11 @@ describe.skipIf(!storage.available)("what a tool call brings back", () => {
     // mark from, so it makes no claim about who answered.
     for (const tool of tools) {
       expect("toolProvenance" in tool, tool.toolName).toBe(false);
-      expect("mockTool" in tool, tool.toolName).toBe(false);
     }
 
-    // What the read does say is whose account each row is — the storage
-    // column, passed through as the product word. These rows were filed by
-    // egma's own simulator, so they read as the persona's.
+    // What the read does say is whose POV each row is — the storage column,
+    // read as the product word. These rows were filed by egma's own simulator,
+    // so they read as the persona's.
     for (const tool of tools) expect(tool.pov, tool.toolName).toBe("persona");
   });
 });

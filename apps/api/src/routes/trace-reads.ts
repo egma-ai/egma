@@ -259,7 +259,7 @@ function describedFacts(facts: TraceFacts): Record<string, unknown> {
     toolSpanCount: facts.toolSpanCount,
     erroredSpanCount: facts.erroredSpanCount,
     source: facts.source,
-    emitter: facts.emitter,
+    pov: facts.pov,
     environment: facts.environment,
     connectionType: facts.connectionType,
     providerCallId: facts.providerCallId,
@@ -303,10 +303,9 @@ function describedSpan(span: TraceSpan): Record<string, unknown> {
     toolName: span.toolName,
     toolArguments: span.toolArguments,
     toolResult: span.toolResult,
-    // The storage column read as the product word. Every production span is
-    // the agent's own account of the conversation; the persona's POV exists
-    // only inside a simulation.
-    pov: span.emitter === "agent" ? "agent" : "persona",
+    // Whose POV this row is. Every production span is the agent's own;
+    // the persona's POV exists only inside a simulation.
+    pov: span.pov,
     // No mocked mark here. Whether a mock tool answered a call is read by
     // name from a simulation's pinned test version, and this read has no
     // simulation to ask: every call on a production conversation ran for

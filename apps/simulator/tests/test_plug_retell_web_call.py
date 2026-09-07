@@ -391,6 +391,7 @@ async def test_egma_never_stands_in_this_agents_tool_path(
         ],
     )
 
+    assert assembled.tool_calls() == []
     # Nothing was offered in the room, so there is nothing there to call.
     assert not room.standing_ready.is_set()
 

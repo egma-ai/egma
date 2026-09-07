@@ -346,7 +346,7 @@ export type ListedTrace = {
   readonly toolSpanCount: number;
   readonly erroredSpanCount: number;
   readonly source: string;
-  readonly emitter: string;
+  readonly pov: "persona" | "agent";
   readonly environment: string;
   readonly connectionType: string;
   readonly providerCallId: string;
@@ -382,7 +382,7 @@ export type DetailSpan = {
   readonly toolName: string;
   readonly toolArguments: string;
   readonly toolResult: string;
-  /** Whose account of the conversation this row is. */
+  /** Whose POV of the conversation this row is. */
   readonly pov: "persona" | "agent";
   /**
    * `"mocked"` when a mock tool of the simulation's pinned test version
@@ -390,8 +390,6 @@ export type DetailSpan = {
    * production conversation, which has no test version to read.
    */
   readonly toolProvenance?: "mocked";
-  /** The mock tool that answered, by name. Only beside `toolProvenance`. */
-  readonly mockTool?: string;
   readonly spans: DetailSpan[];
 };
 

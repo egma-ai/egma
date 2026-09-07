@@ -1193,7 +1193,7 @@ def measures_for(records: list[dict], simulation_id: str) -> list[str]:
     the measurements — and the conversation's own spans are named for what
     they are, which is what tells the two apart.
     """
-    conversation = {*TURN_SPANS, "simulation"}
+    conversation = {*TURN_SPANS, "simulation", "tool_call"}
     return [
         record["span"]["name"]
         for record in spans_for(records, simulation_id)

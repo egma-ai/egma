@@ -8,13 +8,16 @@ document is what any exporter would send, which is the whole point of
 speaking OTLP: a simulation arrives at the same ingest door a customer's
 agent posts to, and is the same shape at rest.
 
-**No tool call is authored here.** The record of what the agent's tools
-did is the agent's own POV of the simulation, which arrives by simulation
-ingestion. egma's mock-tool seam still serves the answers a test asked
-for and still refuses a name it has no answer for; it simply writes no
-row, so one call is one row and the two sides can never disagree about
-it. Whether a call was answered by a mock tool is read at display time,
-by name, from the pinned test version's mock tools. See ADR-0015 §3.
+**A call egma's seam conducts is not authored here.** Where the agent's
+own process runs the egma SDK, that process reports every call it made
+and that report is the tool record; the seam serves the answer and writes
+no row, so one call is one row and two records of it cannot disagree.
+Only a call a **platform reports afterwards** — the lane where the
+platform serves egma's answers itself, and nothing of egma's runs inside
+the agent — becomes a `tool_call` span, through
+:meth:`SpanEmitter.tool_call`. Whether a call was answered by a mock tool
+is read at display time, by name, from the pinned test version's mock
+tools, whichever way the call arrived. See ADR-0015 §3.
 
 What the platform and this emitter agree on is written down once, in
 ``packages/simulation-contract/span-vocabulary.md``, and pinned as golden
@@ -91,6 +94,7 @@ happens to call something ``agent_turn`` is never read as this one."""
 
 ROOT_SPAN = "simulation"
 RECORDING_SPAN = "recording"
+TOOL_CALL_SPAN = "tool_call"
 TURN_SPAN_OF = {"human": "human_turn", "agent": "agent_turn"}
 """The transcript's two labels, exactly. The speaker rides the span name,
 so there is no second field free to disagree with it."""
@@ -108,6 +112,10 @@ neither carries something nobody spoke.
 Carried as a JSON array of strings, in the order the platform said them.
 Absent for every turn that has none, which is nearly all of them.
 """
+TOOL_NAME_ATTRIBUTE = "egma.tool.name"
+TOOL_ARGUMENTS_ATTRIBUTE = "egma.tool.arguments"
+TOOL_RESULT_ATTRIBUTE = "egma.tool.result"
+
 _NANOSECONDS_PER_MILLISECOND = 1_000_000
 
 Flush = Callable[[bytes], None]
@@ -286,6 +294,45 @@ class SpanEmitter:
             measure,
             started_unix_nano=began_unix_nano,
             ended_unix_nano=ended_unix_nano,
+        )
+
+    def tool_call(
+        self,
+        name: str,
+        *,
+        arguments: str | None = None,
+        answer: str | None = None,
+        at_unix_nano: int,
+    ) -> None:
+        """One tool call a platform reported making, after it made it.
+
+        **One instant, because that is all anybody measured.** Egma did
+        not conduct this exchange — the platform matched egma's answers and
+        served them itself — so there is no round trip to bracket, and
+        stretching the span over a guess would invent a fact nobody took.
+
+        The answer rides only where egma authored one. A call for a name
+        this simulation covers was answered from egma's own rendering, so
+        recording it invents nothing; a call for any other name ran the
+        customer's real implementation and its return value is neither
+        egma's to vouch for nor this record's to claim.
+
+        There is no stamp saying who answered. Whether a mock tool did is
+        read at display time, by name, from the pinned test version's mock
+        tools — the authored world itself, which cannot change under a
+        result — so a second copy of that fact here could only come to
+        disagree with it.
+        """
+        attributes: dict[str, str | bool] = {TOOL_NAME_ATTRIBUTE: name}
+        if arguments is not None:
+            attributes[TOOL_ARGUMENTS_ATTRIBUTE] = arguments
+        if answer is not None:
+            attributes[TOOL_RESULT_ATTRIBUTE] = answer
+        self._author(
+            TOOL_CALL_SPAN,
+            started_unix_nano=at_unix_nano,
+            ended_unix_nano=at_unix_nano,
+            attributes=attributes,
         )
 
     def measure(self, measure: str, milliseconds: float) -> None:

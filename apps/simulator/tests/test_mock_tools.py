@@ -12,11 +12,13 @@ goes in at the top, every call the agent makes is answered from that spec
 on the wire, and the record comes out with no tool row of egma's on it.
 Everything after it takes one part of that story apart.
 
-**egma writes no tool row.** The record of what the agent's tools did is
-the agent's own POV of the simulation, filed under it by simulation
-ingestion — one call, one row. So what this suite proves about a tool
-call is what came back **on the wire**, which is the whole of what this
-side does.
+**A call this exchange conducts is written down nowhere.** The agent's
+own process reports every call it made, and that report is the tool
+record — one call, one row. So what this suite proves about a call that
+came through the room is what came back **on the wire**, which is the
+whole of what this side does with one. The other lane, where a platform
+serves egma's answers itself and reports the calls afterwards, is proved
+in `test_plug_retell_text_mode.py`.
 """
 
 from __future__ import annotations

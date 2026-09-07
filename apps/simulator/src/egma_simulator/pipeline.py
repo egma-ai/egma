@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from .blob import BlobStore
 from .conductor import DEFAULT_CONDUCT, ConductParameters, VoiceConductor
 from .config import MediaSettings
-from .mock_tools import MockToolSeam
+from .mock_tools import MockToolSeam, ReportedToolCall
 from .plugs import ConnectionPlug, PlugError, VoiceConnection, plug_for
 from .recording import RECORDING_NAME, AudioFacts
 from .spec import SimulationSpec
@@ -62,6 +62,10 @@ class Assembled:
     def recording(self) -> AudioFacts | None:
         """The stored recording and its trace-clock origin, once available."""
         return None if self.conductor is None else self.conductor.audio
+
+    def tool_calls(self) -> list[ReportedToolCall]:
+        """Every call a platform has reported since this was last asked."""
+        return self.mock_tools.exchanged()
 
     @property
     def audio(self) -> dict | None:

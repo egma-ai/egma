@@ -699,15 +699,16 @@ describe("the transcript time rail", () => {
   });
 
   /**
-   * **Who answered a tool call, said once, quietly, and by name.**
+   * **Who answered a tool call, said once and quietly.**
    *
-   * A call a mock tool answered is named for that mock tool, read by name off
-   * the test version this simulation pinned. So a reader knows the answer in
-   * front of them came from the test rather than from their own backend, and
-   * knows which authored answer it was. A real call is the ordinary case and
-   * says nothing extra — there is no second word for "not mocked" to learn.
+   * A mock tool answered this call, read by name off the test version this
+   * simulation pinned, so a reader knows the answer in front of them came from
+   * the test rather than from their own backend. The mock tool's own name is
+   * the tool's name, already on the row, so the mark does not repeat it. A real
+   * call is the ordinary case and says nothing extra — there is no second word
+   * for "not mocked" to learn.
    */
-  it("names the mock tool that answered, and leaves a real call unmarked", () => {
+  it("marks a call a mock tool answered, and leaves a real one unmarked", () => {
     const read = evidence();
     const transcript = read.transcript as NonNullable<
       ReturnType<typeof evidence>["transcript"]
@@ -730,23 +731,13 @@ describe("the transcript time rail", () => {
     const rendered = render(
       <ChatTranscript
         transcript={transcript as never}
-        toolCalls={[
-          {
-            ...tool,
-            toolProvenance: "mocked",
-            mockTool: "lookup_appointment",
-          } as never,
-        ]}
+        toolCalls={[{ ...tool, toolProvenance: "mocked" } as never]}
         onSeek={vi.fn()}
       />,
     );
 
-    const mocked = screen.getByLabelText(
-      "Tool call, lookup_appointment, mocked by lookup_appointment",
-    );
-    expect(mocked.textContent).toContain(
-      "mocked by lookup_appointment · Succeeded",
-    );
+    const mocked = screen.getByLabelText("Tool call, lookup_appointment");
+    expect(mocked.textContent).toContain("mocked · Succeeded");
 
     rendered.rerender(
       <ChatTranscript
@@ -1291,11 +1282,7 @@ describe("the agent's POV is what a reader is shown", () => {
     const withBoth = bothPovs([]);
     const tools = [
       toolCall({ spanId: "lk_1", toolName: "list_providers", toolArguments: "" }),
-      toolCall({
-        spanId: "lk_2",
-        toolProvenance: "mocked",
-        mockTool: "check_availability",
-      }),
+      toolCall({ spanId: "lk_2", toolProvenance: "mocked" }),
       toolCall({
         spanId: "lk_3",
         toolName: "book_appointment",
@@ -1308,12 +1295,11 @@ describe("the agent's POV is what a reader is shown", () => {
       <ChatTranscript transcript={withBoth as never} toolCalls={tools as never} />,
     );
 
-    // One mark, on the one tool the pinned test version answers for.
+    // One mark, on the one tool the pinned test version answers for. The mock
+    // tool's own name is the tool's name, already on the row.
     expect(
-      screen.getByLabelText(
-        "Tool call, check_availability, mocked by check_availability",
-      ).textContent,
-    ).toContain("mocked by check_availability");
+      screen.getByLabelText("Tool call, check_availability").textContent,
+    ).toContain("mocked ·");
     expect(
       screen.getByLabelText("Tool call, list_providers").textContent,
     ).not.toContain("mocked");

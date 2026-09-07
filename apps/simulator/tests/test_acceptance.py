@@ -833,13 +833,32 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     # rather than carrying an id egma invented for itself.
     assert terminal["facts"]["provider_reference"] is None
 
-    # The tool facts, at the grain the honesty claim is now made at: Egma
-    # writes no tool row of its own, for the call the test named or for
-    # the one it did not. The record of a tool call is the agent's own POV
-    # of the simulation — for Retell, the call record Egma pulls when the
-    # conversation ends — so one call arrives as one row that nothing can
-    # disagree with.
-    assert [span for span in spans if span["name"] == "tool_call"] == []
+    # The tool facts, at the grain the honesty claim is made at. Nothing of
+    # Egma runs inside a Retell agent and this lane offers no provider
+    # reference, so no report of the agent's own ever arrives: the seam's
+    # own record is this lane's whole tool record. The call the test named
+    # carries what Egma answered with; the other carries the name and the
+    # arguments alone, which is the record's own way of saying a real
+    # backend did the work.
+    calls = [span for span in spans if span["name"] == "tool_call"]
+    assert [span_attribute(span, "egma.tool.name") for span in calls] == [
+        "get_availability",
+        "lookup_customer",
+    ]
+    mocked, real = calls
+    assert span_attribute(mocked, "egma.tool.arguments") == '{"day":"thursday"}'
+    assert span_attribute(mocked, "egma.tool.result") == '{"slots":["thu-1430"]}'
+    assert span_attribute(real, "egma.tool.arguments") == '{"phone":"+15551234567"}'
+    assert span_attribute(real, "egma.tool.result") is None
+    # And no stamp anywhere saying who answered: that is read at display
+    # time, by name, from the pinned test version's mock tools.
+    for span in calls:
+        for entry in span.get("attributes", []):
+            assert entry["key"] in {
+                "egma.tool.name",
+                "egma.tool.arguments",
+                "egma.tool.result",
+            }
 
     # And the platform's side of the same story: every request named the
     # version the spec resolved — never Retell's own moving default — and

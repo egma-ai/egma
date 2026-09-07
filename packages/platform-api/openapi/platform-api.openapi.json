@@ -19811,8 +19811,12 @@
                               "production"
                             ]
                           },
-                          "emitter": {
-                            "type": "string"
+                          "pov": {
+                            "type": "string",
+                            "enum": [
+                              "persona",
+                              "agent"
+                            ]
                           },
                           "environment": {
                             "type": "string"
@@ -19868,7 +19872,7 @@
                           "toolSpanCount",
                           "erroredSpanCount",
                           "source",
-                          "emitter",
+                          "pov",
                           "environment",
                           "connectionType",
                           "providerCallId",
@@ -20085,8 +20089,12 @@
                             "production"
                           ]
                         },
-                        "emitter": {
-                          "type": "string"
+                        "pov": {
+                          "type": "string",
+                          "enum": [
+                            "persona",
+                            "agent"
+                          ]
                         },
                         "environment": {
                           "type": "string"
@@ -20126,7 +20134,7 @@
                         "toolSpanCount",
                         "erroredSpanCount",
                         "source",
-                        "emitter",
+                        "pov",
                         "environment",
                         "connectionType",
                         "providerCallId",
@@ -20627,9 +20635,6 @@
             "enum": [
               "mocked"
             ]
-          },
-          "mockTool": {
-            "type": "string"
           },
           "spans": {
             "type": "array",

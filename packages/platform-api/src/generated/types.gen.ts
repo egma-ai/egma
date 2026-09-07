@@ -27,7 +27,6 @@ export type TraceSpan = {
     toolResult: string;
     pov: 'persona' | 'agent';
     toolProvenance?: 'mocked';
-    mockTool?: string;
     spans: Array<TraceSpan>;
 };
 
@@ -5438,7 +5437,7 @@ export type ListTracesResponses = {
             toolSpanCount: number;
             erroredSpanCount: number;
             source: 'simulation' | 'production';
-            emitter: string;
+            pov: 'persona' | 'agent';
             environment: string;
             connectionType: string;
             providerCallId: string;
@@ -5518,7 +5517,7 @@ export type GetTraceResponses = {
             toolSpanCount: number;
             erroredSpanCount: number;
             source: 'simulation' | 'production';
-            emitter: string;
+            pov: 'persona' | 'agent';
             environment: string;
             connectionType: string;
             providerCallId: string;

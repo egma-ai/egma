@@ -584,9 +584,10 @@ async def test_egma_answers_for_the_agents_tools_in_a_typed_room(
     answered = await stub.calls("check_availability", {"day": "Tuesday"})
     assert answered == {"answer": "Nothing free on Tuesday."}
 
-    # And egma keeps no copy of what it served. The record of a tool call
-    # is the agent's own POV of the simulation; the seam only answers.
-    assert not hasattr(assembled, "tool_calls")
+    # And egma keeps no copy of what it served. On this lane the agent's
+    # own process reports the call it made, so a row of egma's would be a
+    # second record of one call, free to disagree with the first.
+    assert assembled.tool_calls() == []
     await plug.close()
 
 

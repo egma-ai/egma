@@ -472,14 +472,13 @@ class RetellTextMode:
                 if kept:
                     noted.append(kept)
                 continue
-            # A tool-call role is understood and taken no further. egma
-            # writes no tool row of its own: this lane's tool record is
-            # Retell's own call record, pulled and filed under the
-            # simulation the moment the call ends.
-            if message.get("role") == AGENT_ROLE:
+            role = message.get("role")
+            if role == AGENT_ROLE:
                 spoken = message.get("content")
                 if isinstance(spoken, str) and spoken.strip():
                     said.append(spoken.strip())
+            elif role == INVOCATION_ROLE:
+                self._observed(message)
 
         self._resume_from(answered)
         self._variables_from(answered)
@@ -487,11 +486,34 @@ class RetellTextMode:
         return AgentReply(
             text="\n".join(said) or None,
             ended=self._ended,
-            # Deliberately empty: egma writes no tool row of its own, and
-            # this lane's tool record is Retell's own call record, pulled
-            # and filed under the simulation when the call ends.
+            # Deliberately empty: every tool fact this lane sees goes to
+            # the mock-tool seam, which is the one writer of this lane's
+            # tool record. Reporting them here as well would put each call
+            # on the record twice.
             tool_calls=(),
             platform_notes=tuple(noted),
+        )
+
+    def _observed(self, message: dict) -> None:
+        """One tool call Retell reported, handed to the seam that keeps it.
+
+        **This lane's whole tool record.** Nothing of egma's runs inside a
+        Retell agent and this lane offers no provider reference, so no
+        report of the agent's own ever arrives: without this, the call
+        would land nowhere at all. What goes on the record is egma's own
+        rendering for a name the pinned version covers — the seam holds the
+        copy that says which branch the answer was — and an uncovered call
+        lands as the observation it is, because its return value is the
+        customer's backend's and nothing egma can vouch for.
+        """
+        name = message.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return
+        called = name.strip()
+        arguments = message.get("arguments")
+        self._mock_tools.reported(
+            called,
+            arguments=arguments if isinstance(arguments, str) and arguments else None,
         )
 
     def _resume_from(self, answered: dict) -> None:

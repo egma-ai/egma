@@ -1,4 +1,5 @@
 import {
+  fromOnePov,
   type Simulation,
   type TraceDetail,
   type TraceSpan,
@@ -338,34 +339,13 @@ export function conversationOfTrace(trace: TraceDetail): Conversation {
  * conversation.
  */
 function transcriptOf(trace: TraceDetail): readonly TranscriptTurn[] {
-  return theAgentsOwn(trace.turns).map((turn) => ({
+  return fromOnePov(trace.turns, "agent").map((turn) => ({
     span_id: turn.spanId,
     speaker: speakerOf(turn.kind),
     text: turn.text,
     started_at: turn.startedAt,
     ended_at: endOf(turn),
   }));
-}
-
-/**
- * One conversation, told once — the agent's own account of it where the record
- * holds one.
- *
- * A simulation stores both POVs under one trace: what egma's own simulator
- * said, heard and recorded, and what the agent's process reported. They are two
- * accounts of the same conversation, so handing a grader both would be handing
- * it every turn twice and asking it to judge the repetition. The agent's is the
- * account a developer reads and the account a grader judges.
- *
- * A record with only one account is passed through whole: a chat simulation, a
- * production transcript, a conversation whose agent never reported. There is
- * nothing to choose between.
- */
-function theAgentsOwn(
-  spans: readonly TraceSpan[],
-): readonly TraceSpan[] {
-  const reported = spans.filter((span) => span.emitter === "agent");
-  return reported.length === 0 ? spans : reported;
 }
 
 type TranscriptTurn = {
@@ -404,14 +384,13 @@ function speakerOf(kind: string): string {
  * off the list.
  */
 function toolCallsIn(trace: TraceDetail): readonly ToolCall[] {
-  // **One call, once.** On the lanes where a platform serves egma's answers,
-  // egma files a tool row of its own beside the agent's. The agent's account
-  // is the tool record, so it wins wherever it is there; egma's rows answer
-  // only for a conversation whose agent reported none. A grader asking "was
-  // the refund tool called before the confirmation" must never see one call
-  // twice.
+  // **One call, once.** A simulation holds both POVs under one trace, and on
+  // the lanes where a platform serves egma's answers egma files a tool row of
+  // its own. `fromOnePov` is the one rule every reader shares: the agent's own
+  // POV wherever the record holds one, so a grader asking "was the refund tool
+  // called before the confirmation" never sees one call twice.
   const tools = [...everySpanIn(trace)].filter((span) => span.toolName !== "");
-  const called = theAgentsOwn(tools).map(
+  const called = fromOnePov(tools, "agent").map(
     (span): ToolCall & { readonly at: string } => ({
       kind: "tool_call",
       at: span.startedAt,

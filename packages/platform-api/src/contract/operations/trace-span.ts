@@ -31,7 +31,7 @@ export const traceSpanSchema = {
     toolArguments: stringSchema,
     toolResult: stringSchema,
     /**
-     * Whose account of the conversation this span is.
+     * Whose POV of the conversation this span is.
      *
      * `agent` is what the agent's own process reported — its turns, its tool
      * calls and its timings — and `persona` is what egma's own simulator said,
@@ -56,17 +56,11 @@ export const traceSpanSchema = {
      * second copy of the fact could only come to disagree with it. So it
      * appears on a simulation's transcript and never on a production one,
      * which has no test version and no mock tools.
+     *
+     * The mock tool's own name is not written beside it. Matching is by tool
+     * name and by nothing else, so it is `toolName`, already here.
      */
     toolProvenance: { type: "string", enum: ["mocked"] },
-    /**
-     * The mock tool that answered, by the name the pinned test version holds.
-     *
-     * Present only beside `toolProvenance`. It is the same name as `toolName`
-     * today, because a mock tool is matched to a call by name and by nothing
-     * else — and writing it is what makes the day that stops being true
-     * visible on the record instead of assumed away.
-     */
-    mockTool: stringSchema,
     spans: arrayOf(traceSpanReference),
   },
   required: [

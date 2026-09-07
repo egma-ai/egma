@@ -329,20 +329,35 @@ describe.skipIf(!storage.available)("the contract's golden flushes, posted with 
       endingReason: "persona_concluded",
     });
 
-    for (const name of ["chat-flush-2-latency.json", "chat-flush-3-root.json"]) {
+    for (const name of ["chat-flush-2-tools.json", "chat-flush-3-root.json"]) {
       const landed = await post(await fixture("valid", name));
       expect(landed.statusCode, name).toBe(200);
     }
 
-    // Nothing about the agent's tools is here, and that is the shape now:
-    // egma's simulator writes no tool row of its own, so this trace holds
-    // turns, measurements and the root, and the tool record of a simulation
-    // is the agent's own POV of it.
-    expect(
-      await countOf(
-        `select count() as n from spans final where trace_id = '${CHAT_TRACE}' and kind = 'tool'`,
-      ),
-    ).toBe(0);
+    // The calls the platform reported, as the lane that serves egma's answers
+    // itself puts them on the record. There is no stamp saying who answered:
+    // whether a mock tool did is read at display time, by name, from the
+    // pinned test version's mock tools.
+    const tools = await store().rows<{
+      tool_name: string;
+      tool_arguments: string;
+      tool_result: string;
+    }>(
+      "select tool_name, tool_arguments, tool_result from spans final " +
+        `where trace_id = '${CHAT_TRACE}' and kind = 'tool' order by started_at`,
+    );
+    expect(tools).toEqual([
+      {
+        tool_name: "reschedule_appointment",
+        tool_arguments:
+          '{"appointment_id":"apt-88213","from":"2026-08-11T15:00:00Z","to":"2026-08-13T15:00:00Z"}',
+        // A tool this simulation covers, so egma authored the answer.
+        tool_result: '{"moved":true}',
+      },
+      // The platform reported the invocation and not its arguments, and a
+      // tool nothing covers has no answer of egma's to record.
+      { tool_name: "send_confirmation_sms", tool_arguments: "", tool_result: "" },
+    ]);
 
     const [root] = await store().rows<{ kind: string; parent_span_id: string }>(
       `select kind, parent_span_id from spans final where trace_id = '${CHAT_TRACE}' ` +
@@ -352,7 +367,7 @@ describe.skipIf(!storage.available)("the contract's golden flushes, posted with 
 
     expect(
       await countOf(`select count() as n from spans final where trace_id = '${CHAT_TRACE}'`),
-    ).toBe(6);
+    ).toBe(8);
   });
 
   /**
@@ -440,11 +455,11 @@ describe.skipIf(!storage.available)("the contract's golden flushes, posted with 
     const turnsBefore = await countOf(
       `select count() as n from turns final where trace_id = '${CHAT_TRACE}'`,
     );
-    expect(before).toBe(6);
+    expect(before).toBe(8);
 
     for (const name of [
       "chat-flush-1-turns.json",
-      "chat-flush-2-latency.json",
+      "chat-flush-2-tools.json",
       "chat-flush-3-root.json",
     ]) {
       const again = await post(await fixture("valid", name));
