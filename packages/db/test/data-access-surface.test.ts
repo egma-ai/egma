@@ -260,6 +260,7 @@ const CONTEXT_REQUIRING = [
   // page shows on every deployment. A read like any other: it is answered
   // inside the context's own project and returns no provider credential.
   "readSimulationUsage",
+  "readUsageThisPeriod",
   // The measured provider requests of one piece of work, priced at the write
   // against the rate card. It takes the context the work already runs under —
   // a simulation's claim or a grading claim — so the organization and the
@@ -452,6 +453,7 @@ const THE_ALLOWANCES = [
   "ALLOWANCE_UNITS",
   "SHORTEST_BILLABLE_SECONDS",
   "allowanceKindOf",
+  "allowanceKindsAmong",
   "allowancePeriodAt",
   "allowanceUsedBy",
   "billableSecondsOf",

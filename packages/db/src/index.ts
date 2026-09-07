@@ -52,6 +52,7 @@ export {
   ALLOWANCE_UNITS,
   SHORTEST_BILLABLE_SECONDS,
   allowanceKindOf,
+  allowanceKindsAmong,
   allowancePeriodAt,
   allowanceUsedBy,
   billableSecondsOf,

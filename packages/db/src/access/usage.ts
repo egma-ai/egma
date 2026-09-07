@@ -1,9 +1,15 @@
 import { createHash } from "node:crypto";
 
 import { newId } from "@egma/ids";
-import { and, asc, eq, inArray, lte } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 
 import { db } from "../client.ts";
+import {
+  SHORTEST_BILLABLE_SECONDS,
+  allowancePeriodAt,
+  minutesFromSeconds,
+  type AllowanceKind,
+} from "../billing/allowance.ts";
 import {
   billableUsageTypesOf,
   isUsageType,
@@ -15,13 +21,15 @@ import {
 } from "../models/rate-card.ts";
 import { PROVIDER_CATALOG, type ModelAdapter } from "../models/catalog.ts";
 import { rateCard, usageRecord } from "../schema/billing.ts";
+import { simulation } from "../schema/runs.ts";
+import { organization } from "../schema/tenancy.ts";
 import type {
   UsageMeasurement,
   UsagePaymentSource,
 } from "../schema/billing.ts";
 import { authorize } from "./permissions.ts";
 import type { AuthContext } from "./context.ts";
-import { inActingProject, within } from "./within.ts";
+import { inActingProject, theOrganization, within } from "./within.ts";
 
 /**
  * Usage records: one row per provider request, priced where it is stored.
@@ -413,6 +421,121 @@ export async function readSimulationUsage(
         `${right.provider}/${right.model}`,
       ),
     ),
+  };
+}
+
+/**
+ * How much of each allowance one organization has used this period, and when
+ * the period turns over.
+ */
+export type PeriodUsage = {
+  /** The first instant of the period. */
+  readonly startedAt: Date;
+  /** The next reset. Exclusive: work begun at this instant is next month's. */
+  readonly resetsAt: Date;
+  /**
+   * The quantity used of each allowance, in that allowance's own unit —
+   * conversations for chat, minutes for the two voice kinds.
+   *
+   * Every kind is present, at zero where nothing was used, so a page renders
+   * three facts rather than however many happen to be non-zero.
+   */
+  readonly used: Readonly<Record<AllowanceKind, number>>;
+};
+
+/**
+ * What this organization has used of each allowance in the period it is in.
+ *
+ * **On every deployment.** A self-hoster counts the same three numbers against
+ * no limit; a plan that turns one of them into a limit is behind the
+ * entitlement source and this read knows nothing about one. It answers the
+ * organization settings page, and it is the shape an adapter that does enforce
+ * a limit reads — one indexed aggregate over one customer's own rows, no join,
+ * no scan of a month it was not asked about.
+ *
+ * **The whole organization, not the acting project.** An allowance belongs to
+ * the customer, and a member looking at one project's page is still looking at
+ * the customer's month. The tenancy predicate is the organization's, exactly
+ * as it is for members and API keys.
+ *
+ * **The arithmetic is the arithmetic in `billing/allowance.ts`, written in
+ * SQL.** A month's usage is an aggregate over rows a customer can have
+ * thousands of, so it is summed by the database rather than folded in this
+ * process; what keeps the two from drifting is one test that seeds spans and
+ * asserts the aggregate equals the pure function's own sum over the same
+ * spans. The floor is passed in from the constant rather than typed again.
+ */
+export async function readUsageThisPeriod(
+  auth: AuthContext,
+  at: Date = new Date(),
+): Promise<PeriodUsage> {
+  authorize(auth, "read", {
+    organizationId: auth.organizationId,
+    projectId: auth.projectId,
+  });
+
+  const [customer] = await db()
+    .select({ createdAt: organization.createdAt })
+    .from(organization)
+    .where(theOrganization(auth))
+    .limit(1);
+  if (customer === undefined) {
+    throw new Error(
+      `organization ${auth.organizationId} was not found while reading its usage`,
+    );
+  }
+
+  const period = allowancePeriodAt(customer.createdAt, at);
+
+  // The counted seconds of one voice conversation, exactly as
+  // `billableSecondsOf` counts them: the floor under the elapsed seconds,
+  // rounded up, and nothing at all for a conversation that has not both begun
+  // and ended. `greatest` covers the reversed span for the same reason the
+  // pure function's `Math.max` does.
+  const countedSeconds = sql`sum(
+    case when ${simulation.endedAt} is null then 0
+    else greatest(
+      ${SHORTEST_BILLABLE_SECONDS},
+      ceil(extract(epoch from (${simulation.endedAt} - ${simulation.startedAt})))
+    ) end
+  )`;
+  const voice = sql`${simulation.modality} <> 'chat'`;
+  const onAPhone = sql`${simulation.connectionType} = 'phone_number'`;
+
+  const [totals] = await db()
+    .select({
+      chatSimulations: sql<string>`count(*) filter (
+        where ${simulation.modality} = 'chat'
+      )`,
+      phoneSeconds: sql<string>`coalesce(
+        ${countedSeconds} filter (where ${voice} and ${onAPhone}), 0
+      )`,
+      webCallSeconds: sql<string>`coalesce(
+        ${countedSeconds} filter (where ${voice} and not ${onAPhone}), 0
+      )`,
+    })
+    .from(simulation)
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          // What ran in the period, by when it began — a conversation queued
+          // in one month and begun in the next belongs to the month it ran in.
+          gte(simulation.startedAt, period.startedAt),
+          lt(simulation.startedAt, period.resetsAt),
+        ),
+      ),
+    );
+
+  return {
+    startedAt: period.startedAt,
+    resetsAt: period.resetsAt,
+    used: {
+      chat_simulations: Number(totals?.chatSimulations ?? 0),
+      phone_minutes: minutesFromSeconds(Number(totals?.phoneSeconds ?? 0)),
+      web_call_minutes: minutesFromSeconds(Number(totals?.webCallSeconds ?? 0)),
+    },
   };
 }
 

@@ -146,6 +146,27 @@ export function allowanceUsedBy(simulation: {
   return { kind, used: minutesFromSeconds(billableSecondsOf(simulation)) };
 }
 
+/**
+ * Which allowances a set of conversations would be counted against, in the
+ * order the three kinds are declared in.
+ *
+ * The claim path's own question, and it is asked of rows the caller already
+ * holds rather than of the database: a batch of claims carries each
+ * conversation's frozen modality and lane, and what the entitlement source is
+ * asked once per organization is the set of kinds among them. Ordered and
+ * de-duplicated here so that two callers asking the same question ask it with
+ * the same list.
+ */
+export function allowanceKindsAmong(
+  simulations: readonly {
+    readonly modality: Modality;
+    readonly connectionType: ConnectionType;
+  }[],
+): readonly AllowanceKind[] {
+  const kinds = new Set(simulations.map((one) => allowanceKindOf(one)));
+  return ALLOWANCE_KINDS.filter((kind) => kinds.has(kind));
+}
+
 /** One month of allowance: when it began, and the instant it resets. */
 export type AllowancePeriod = {
   readonly startedAt: Date;
