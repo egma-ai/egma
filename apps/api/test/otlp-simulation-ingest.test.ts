@@ -1242,6 +1242,69 @@ describe.skipIf(!storage.available)("a provider_usage span", () => {
     expect(Number(kinds[0]?.n)).toBe(3);
   });
 
+  it("is not read off a scope that is not Egma's own simulator", async () => {
+    const before = (await usageOf(USAGE_SIMULATION)).length;
+    const body = JSON.stringify({
+      resourceSpans: [
+        {
+          resource: {
+            attributes: [
+              {
+                key: "egma.simulation_id",
+                value: { stringValue: USAGE_SIMULATION },
+              },
+            ],
+          },
+          scopeSpans: [
+            {
+              // A framework's own scope, carrying a span that calls itself by
+              // Egma's name. It is stored like any other span and it is not a
+              // bill: a door that read one as spend would let an emitter write
+              // rows into a customer's cost by naming a span.
+              scope: { name: "pipecat", version: "1.7.0" },
+              spans: [
+                {
+                  traceId: USAGE_TRACE,
+                  spanId: "cc10000000000099",
+                  parentSpanId: "cc10000000000001",
+                  name: "provider_usage",
+                  startTimeUnixNano: "1788862447900000000",
+                  endTimeUnixNano: "1788862447900000000",
+                  attributes: [
+                    {
+                      key: "egma.usage.provider",
+                      value: { stringValue: "openai" },
+                    },
+                    {
+                      key: "egma.usage.model",
+                      value: { stringValue: "gpt-4o-mini" },
+                    },
+                    {
+                      key: "egma.usage.operation",
+                      value: { stringValue: "openai_chat_completions" },
+                    },
+                    {
+                      key: "egma.usage.measurement",
+                      value: { stringValue: "provider_reported" },
+                    },
+                    {
+                      key: "egma.usage.quantities",
+                      value: { stringValue: '{"input_tokens":9999999}' },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const posted = await post(body);
+    expect(posted.statusCode, posted.body).toBe(200);
+    expect(await usageOf(USAGE_SIMULATION)).toHaveLength(before);
+  });
+
   it("is priced at the rate that was in force when the provider answered", async () => {
     // A price change lands with its own effective date, after the flush above.
     await api.database.sql(

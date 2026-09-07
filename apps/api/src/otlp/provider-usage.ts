@@ -40,6 +40,17 @@ import type {
 
 export const PROVIDER_USAGE_SPAN = "provider_usage";
 
+/**
+ * The one scope a bill is recognised on.
+ *
+ * Gated on the scope and never on the span name alone, for the reason the
+ * ingest's own vocabulary registry is: a framework span that happens to call
+ * itself `provider_usage` is not Egma's simulator saying what it spent, and a
+ * door that read one as spend would let an emitter write rows into a
+ * customer's cost by naming a span.
+ */
+const SIMULATOR_SCOPE = "egma-simulator";
+
 const USAGE = {
   provider: "egma.usage.provider",
   model: "egma.usage.model",
@@ -196,6 +207,7 @@ export function providerUsageIn(
   for (const resourceSpans of resources) {
     let attribution: UsageAttribution | undefined;
     for (const scopeSpans of resourceSpans.scopeSpans ?? []) {
+      if (scopeSpans.scope?.name !== SIMULATOR_SCOPE) continue;
       for (const span of scopeSpans.spans ?? []) {
         if (span.name !== PROVIDER_USAGE_SPAN) continue;
         attribution ??= attributionFor(resourceSpans);
