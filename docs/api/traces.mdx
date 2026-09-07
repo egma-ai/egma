@@ -180,7 +180,14 @@ curl "https://your-egma-instance/v1/traces?from=2026-08-01T00:00:00Z&to=2026-08-
 </ResponseField>
 
 <ResponseField name="emitter" type="string">
-  The SDK or agent process that emitted this trace.
+  The storage word for who wrote these rows: `agent` or `egma-runtime`. Kept
+  for clients that already read it.
+</ResponseField>
+
+<ResponseField name="pov" type="string">
+  The same fact in the product's own word: `agent` or `persona`. `agent` is what
+  the agent's own process reported. `persona` is what Egma's own simulator said,
+  heard, measured and recorded. A production conversation has only the agent's.
 </ResponseField>
 
 <ResponseField name="environment" type="string">
@@ -277,8 +284,36 @@ Returns the full transcript, metrics, and trace-level grades.
   `true` when the trace exceeded the store's span limit and only the first spans are returned. Measures computed from a truncated trace are partial.
 </ResponseField>
 
-<ResponseField name="measures" type="array">
-  Computed metrics for this conversation, such as turn response latency. Each entry has `measure`, `unit`, `samples`, `worst`, and `partial`.
+<ResponseField name="metrics" type="array">
+  Computed metrics for this conversation, such as turn response latency. Each
+  entry has `measure`, `unit`, `derived`, `pov`, `samples`, `spanIds`, `mean`,
+  `p50`, `p90`, and `partial`, and may carry `reportedBy` and `otherPov`.
+
+  `pov` says whose account of the conversation this number describes:
+  `persona`, measured off Egma's own recording, or `agent`, off the agent's own
+  process. It is the fact that decides whether two numbers may be compared at
+  all, and Egma never averages or appends across POVs. `derived` says which
+  machinery produced the number, which is a different question.
+
+  `otherPov` is the same measure as the other POV measured it, when both did.
+  It is a simulation only, and it carries its own `pov`, `derived`, `samples`,
+  `spanIds` and `partial`. It is absent on every conversation only one POV
+  measured, which is every production trace.
+
+  **`turn_response_latency`** is the elapsed time from the last audible sample
+  of the caller's speech to the first audible sample of the agent's reply as it
+  reaches the caller. On a simulation Egma measures it off the recording, which
+  is the persona's POV. On a production trace Egma derives it from the agent's
+  own spans, from the VAD's end of the caller's speech — never the end-of-turn
+  commit, which lands about a second later and would delete a second the caller
+  waited.
+
+  On a simulation, `turn_response_latency` and `first_response_latency` lead
+  with the agent's POV. The persona's number is computed and returned beside
+  them under `otherPov`.
+
+  `time_to_first_word` and `persona_speech_duration` described Egma's own
+  caller rather than the agent, and are no longer in the catalog.
 </ResponseField>
 
 <ResponseField name="simulationId" type="string | null">
