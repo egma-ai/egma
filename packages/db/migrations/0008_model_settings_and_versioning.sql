@@ -72,11 +72,15 @@ $$;
 
 -- Keep only code settings already valid for a shared current core. A missing
 -- LLM choice is not repaired from a removed judge_model or today's defaults.
+-- The retired mean-latency key is also discarded, even when its older core
+-- still declares it. This release grades p90 and does not reinterpret that value.
 DELETE FROM project_grader AS pg
 USING grader_definition AS d, grader_definition_version AS v
 WHERE pg.grader_definition_id = d.id
   AND v.definition_id = d.id AND v.version = d.current_definition_version
   AND (d.organization_id IS NOT NULL OR v.type = 'llm_as_judge'
+       OR (d.id = 'grl_01M0TQE5HBE1X9PDN9HFJC987Q'
+           AND pg.parameter_values ? 'maximum_average_response_time_ms')
        OR NOT egma_parameter_values_valid(pg.parameter_values, v.parameter_contract));
 DELETE FROM grader_definition WHERE organization_id IS NOT NULL;
 
