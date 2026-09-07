@@ -8,9 +8,17 @@ answer, a late-attached call or a refusal is proved about the code a
 customer's server runs.
 
 The first test is the whole claim, black box: a spec naming mocked tools
-goes in at the top, and the record comes out carrying each mocked call
-with its arguments, its answer and its provenance. Everything after it
-takes one part of that story apart.
+goes in at the top, every call the agent makes is answered from that spec
+on the wire, and the record comes out with no tool row of egma's on it.
+Everything after it takes one part of that story apart.
+
+**A call this exchange conducts is written down nowhere.** The agent's
+own process reports every call it made, and that report is the tool
+record — one call, one row. So what this suite proves about a call that
+came through the room is what came back **on the wire**, which is the
+whole of what this side does with one. The other lane, where a platform
+serves egma's answers itself and reports the calls afterwards, is proved
+in `test_plug_retell_text_mode.py`.
 """
 
 from __future__ import annotations
@@ -32,10 +40,12 @@ from egma_simulator.mock_tools import (
     HELLO_METHOD,
     LARGEST_PAYLOAD_BYTES,
     MALFORMED_REQUEST,
+    NOT_REPORTED,
     PROTOCOL_VERSION,
     TOOL_METHOD,
     UNKNOWN_TOOL,
     UNSUPPORTED_PROTOCOL_VERSION,
+    MockToolRefusal,
     MockToolSeam,
 )
 from egma_simulator.model import ScriptedModel
@@ -213,30 +223,13 @@ def milliseconds_of(span: dict) -> float:
     return (int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])) / 1_000_000
 
 
-def golden_result_for(tool_name: str) -> str:
-    """What the contract's own golden flush records for one served call.
-
-    The seam and the published bytes are the two halves of one promise,
-    and a test that restated the bytes here could only prove the seam
-    agrees with this file. This reads them off the golden flush, so a
-    change to either side fails.
-    """
-    from egma_simulator.contract import contract_dir
-
-    document = json.loads(
-        (
-            contract_dir()
-            / "fixtures"
-            / "spans"
-            / "valid"
-            / "voice-mocked-tool-calls.json"
-        ).read_text(encoding="utf-8")
-    )
-    for span in document["resourceSpans"][0]["scopeSpans"][0]["spans"]:
-        held = attributes_of(span)
-        if held.get("egma.tool.name") == tool_name:
-            return held["egma.tool.result"]
-    raise AssertionError(f"the golden flush records no call to {tool_name}")
+def terminal_reason(client: RecordingControlPlane) -> str:
+    """What the report says went wrong, in the words a reader sees."""
+    for document in client.filed:
+        for event in document.get("events", []):
+            if event["status"] in ("completed", "failed", "canceled"):
+                return event.get("reason") or ""
+    raise AssertionError("the simulation never reported a terminal state")
 
 
 def terminal_facts(client: RecordingControlPlane) -> dict:
@@ -247,24 +240,27 @@ def terminal_facts(client: RecordingControlPlane) -> dict:
     raise AssertionError("the simulation never reported a terminal state")
 
 
-async def test_a_spec_naming_mocked_tools_comes_back_as_a_record_of_them(
+async def test_a_spec_naming_mocked_tools_answers_every_call_and_records_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """The whole claim, at the seam the contract draws.
 
     A spec goes in naming three answers. A session in the room reports
-    four tools and calls two of them, and what comes out is the record: a
-    span per call carrying the arguments it was made with, the answer it
-    was served, and where that answer came from.
+    four tools and calls two of them, and each call comes back with the
+    answer that spec authored — the return branch untagged for the model
+    to use, the failure branch tagged so the far side raises it. Nothing
+    of any of it reaches the record: one call is one row, and that row is
+    the agent's own.
     """
     stub = RoomStub(greeting="Front desk.", replies=["One moment.", "All set."])
+    served: list[dict] = []
 
     async def session(agent: RoomStub) -> None:
         await agent.says_hello(
             "check_calendar", "book_appointment", "lookup_customer", "transfer_to_human"
         )
-        await agent.calls("check_calendar", {"date": "2026-08-13"})
-        await agent.calls("book_appointment", {"at": "2026-08-13T09:00"})
+        served.append(await agent.calls("check_calendar", {"date": "2026-08-13"}))
+        served.append(await agent.calls("book_appointment", {"at": "2026-08-13T09:00"}))
 
     client = await conducted_record(
         tmp_path,
@@ -283,34 +279,19 @@ async def test_a_spec_naming_mocked_tools_comes_back_as_a_record_of_them(
         session,
     )
 
-    # Two calls reached egma, and neither of the agent's other two tools
-    # did: they ran their own implementations, untouched and with no span
-    # of egma's to show for them.
-    calendar, booking = tool_spans(client)
-    assert attributes_of(calendar) == {
-        "egma.tool.name": "check_calendar",
-        "egma.tool.arguments": '{"date":"2026-08-13"}',
-        # What the call was given: the tool's own return value, which is
-        # what the agent received and what a grader reads. Held to the
-        # golden file rather than restated, so the record the seam writes
-        # and the record the contract publishes cannot drift apart.
-        "egma.tool.result": golden_result_for("check_calendar"),
-        "egma.tool.provenance": "mocked",
-        "egma.tool.mock_tool": "check_calendar",
-    }
-    assert attributes_of(calendar)["egma.tool.result"] == '{"slots":[]}'
-    # The round trip is readable as the time the exchange took, and there
-    # is no attribute repeating the number for the two to disagree.
-    assert milliseconds_of(calendar) >= 0
+    # Two calls reached egma and both were answered from the spec. The
+    # failure branch keeps its tag: that is how the far side knows to raise
+    # it rather than hand the model a string that looks like a failure.
+    assert served == [
+        {"answer": {"slots": []}},
+        {"error": "the booking service is not accepting requests"},
+    ]
 
-    # A failure has no return value, so the tag stays on: what a test that
-    # wants the apology path gets is the words its author wrote, kept
-    # tellable from a tool that returned a string.
-    assert attributes_of(booking)["egma.tool.result"] == (
-        '{"error":"the booking service is not accepting requests"}'
-    )
-    assert attributes_of(booking)["egma.tool.provenance"] == "mocked"
-    assert milliseconds_of(booking) >= 0
+    # And nothing of it is on egma's record. The agent's two other tools
+    # ran their own implementations, and the two egma answered are the
+    # agent's own rows to write — which is what keeps one call from
+    # arriving as two records that can disagree.
+    assert tool_spans(client) == []
 
 
 async def test_a_simulation_that_mocks_nothing_records_exactly_what_it_used_to(
@@ -392,11 +373,17 @@ async def opened(
     mock_tools: tuple[MockTool, ...] = (),
     *,
     seam: MockToolSeam | None = None,
+    wait_for_the_agent: bool = True,
 ) -> object:
     """One room, joined, with egma standing ready to answer in it.
 
     ``seam`` is for the one test that has to ask what the seam claims
     afterwards; everything else only cares what comes back on the wire.
+
+    ``wait_for_the_agent`` is false where the room this test wants is one
+    the agent could never have reported in — waiting for a report that
+    cannot come would fail the simulation before the test got to look at
+    the exchange, which is the plug's job and is proved where the plug is.
     """
     spec = SimulationSpec.from_document(mocked_spec())
     plug = livekit_plug.LiveKitRoom(
@@ -409,7 +396,8 @@ async def opened(
         driver=stub.driver,
     )
     await plug.prepare()
-    await plug.open()
+    if wait_for_the_agent:
+        await plug.open()
     return plug
 
 
@@ -448,6 +436,54 @@ async def test_hello_answers_the_names_this_simulation_answers_for():
     await plug.close()
 
 
+async def test_the_seam_says_whether_the_agent_ever_reported():
+    """The one fact a LiveKit simulation is required to see.
+
+    A hello is how the agent's own SDK announces itself. Without one,
+    every mocked tool in the simulation called its real backend and
+    nothing on the record would say so — which is why the plug reads this
+    and fails the simulation rather than conducting it.
+    """
+    seam = MockToolSeam((a_mock("check_calendar", {"slots": []}),))
+
+    assert seam.agent_reported is False
+
+    await seam.hello(
+        json.dumps(
+            {
+                "protocol_version": PROTOCOL_VERSION,
+                "tools": [{"name": "check_calendar", "schema": {}}],
+            }
+        )
+    )
+
+    assert seam.agent_reported is True
+
+
+async def test_a_hello_egma_refused_is_told_apart_from_one_that_never_came():
+    """Two failures, two sentences, because they are in two places.
+
+    A hello that never arrived is a worker with no SDK call in it. A hello
+    Egma received and refused told the agent nothing either — so nothing
+    was isolated, and the simulation still fails — but the SDK did call
+    and the fault is on Egma's side or in the test's own mock tools.
+    Sending a developer to add a call they already made is the wrong half
+    of the system.
+    """
+    seam = MockToolSeam((a_mock("check_calendar", {"slots": []}),))
+    assert seam.why_unreported == NOT_REPORTED
+
+    with pytest.raises(MockToolRefusal):
+        await seam.hello('{"protocol_version":99,"tools":[]}')
+
+    assert seam.agent_reported is False
+    said = seam.why_unreported
+    assert said != NOT_REPORTED
+    assert "Egma refused the report" in said
+    # Egma's own words for why, which is the half this sentence cannot know.
+    assert "99" in said
+
+
 async def test_hello_answers_a_test_that_mocks_nothing_with_an_empty_list():
     """A test naming no tools is answered, not ignored.
 
@@ -471,18 +507,21 @@ async def test_a_second_hello_replaces_the_census_rather_than_adding_to_it(
     """A census is a snapshot of the agent's tools, so an agent that
     announces itself again is announcing what it has now.
 
-    What the census is *for* is the late-attached flag, so that is what
-    proves the replacement: the second census drops ``check_calendar``, so
-    the call that follows is a call for a tool the seam no longer knows the
-    agent has — and it lands flagged. A census that added up instead would
-    still name it, and the flag would be absent.
+    What both replies say is the same thing, because what egma answers for
+    is the test's business and never the census's: the second hello drops
+    ``check_calendar`` from the agent's own list and egma still names it,
+    and still answers a call to it. Answers stand ready for every name
+    this simulation covers whether or not the census mentioned it — the
+    safe way round, because the other way lets a tool the agent gained
+    afterwards reach a real backend.
     """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
+    said: list[dict] = []
 
     async def two_sessions(agent: RoomStub) -> None:
-        await agent.says_hello("check_calendar", "lookup_customer")
-        await agent.says_hello("transfer_to_human")
-        await agent.calls("check_calendar", {"date": "2026-08-13"})
+        said.append(await agent.says_hello("check_calendar", "lookup_customer"))
+        said.append(await agent.says_hello("transfer_to_human"))
+        said.append(await agent.calls("check_calendar", {"date": "2026-08-13"}))
 
     client = await conducted_record(
         tmp_path,
@@ -492,23 +531,27 @@ async def test_a_second_hello_replaces_the_census_rather_than_adding_to_it(
         two_sessions,
     )
 
-    (served,) = tool_spans(client)
-    assert attributes_of(served)["egma.tool.name"] == "check_calendar"
-    assert attributes_of(served)["egma.tool.late_attached"] is True
+    first, second, answered = said
+    assert first == second == {
+        "protocol_version": PROTOCOL_VERSION,
+        "mocked_tools": ["check_calendar"],
+    }
+    assert answered == {"answer": {"slots": []}}
+    assert tool_spans(client) == []
 
 
-async def test_a_call_the_census_never_reported_lands_late_attached(
+async def test_a_call_the_census_never_reported_is_answered_all_the_same(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """Answers stand ready for every name this simulation covers, whether
     or not the census mentioned it — the safe way round, because the other
-    way lets a tool the agent gained afterwards reach a real backend. What
-    such a call cannot promise is its arguments, and the flag owns that."""
+    way lets a tool the agent gained afterwards reach a real backend."""
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
+    said: list[dict] = []
 
     async def gains_a_tool(agent: RoomStub) -> None:
         await agent.says_hello("check_calendar")
-        await agent.calls("send_confirmation_sms")
+        said.append(await agent.calls("send_confirmation_sms"))
 
     client = await conducted_record(
         tmp_path,
@@ -523,17 +566,8 @@ async def test_a_call_the_census_never_reported_lands_late_attached(
         gains_a_tool,
     )
 
-    (served,) = tool_spans(client)
-    assert attributes_of(served) == {
-        "egma.tool.name": "send_confirmation_sms",
-        # Held to the golden flush, which records this very call: the
-        # arguments never arrived, so the attribute is absent rather than
-        # empty, and a reader never takes thin arguments for none passed.
-        "egma.tool.result": golden_result_for("send_confirmation_sms"),
-        "egma.tool.provenance": "mocked",
-        "egma.tool.mock_tool": "send_confirmation_sms",
-        "egma.tool.late_attached": True,
-    }
+    assert said == [{"answer": {"delivered": True}}]
+    assert tool_spans(client) == []
 
 
 # -- Every way the exchange refuses ------------------------------------------
@@ -579,16 +613,10 @@ async def test_a_call_outside_the_answers_is_refused_and_never_waved_through(
         asks_for_the_unmocked,
     )
 
-    # On the record too, and honestly: no result and no mock tool, because
-    # nothing answered it — but stamped `refused`, because egma was in the
-    # path and said no. A span with no stamp at all is the other fact
-    # entirely: the real tool ran, with egma nowhere near it.
-    (refused_call,) = tool_spans(client)
-    assert attributes_of(refused_call) == {
-        "egma.tool.name": "charge_card",
-        "egma.tool.arguments": '{"amount":4200}',
-        "egma.tool.provenance": "refused",
-    }
+    # And egma writes nothing down about it. The refusal reaches the model
+    # as that tool failing, and the agent's own span for the call carries
+    # the error — which is where a reader of the transcript finds it.
+    assert tool_spans(client) == []
 
 
 @pytest.mark.parametrize(
@@ -711,22 +739,26 @@ async def test_an_answer_too_large_for_the_wire_is_refused_naming_the_size():
     await plug.close()
 
 
-async def test_a_reply_too_large_to_send_records_no_census():
+async def test_a_reply_too_large_to_send_is_refused_before_it_is_sent():
     """A test naming more mocked tools than one message can carry.
 
-    Refused before anything is written down, which is the ordering that
-    matters: the reply is what tells the other side which tools to wrap,
-    so a reply that never arrives wrapped nothing — and a census recorded
-    ahead of the refusal would leave the seam treating the next call as
-    one the agent had announced.
+    Refused as an answer about the answer, naming the cap, rather than as
+    a hello that mysteriously failed — and refused before the census is
+    kept, so a reply the other side never received leaves this side
+    believing nothing about what the agent holds.
     """
-    stub = RoomStub(greeting="Front desk.")
+    # The worker's own hello is the one refused here, so this room never
+    # reports and the plug would fail the simulation over it. Correctly:
+    # a reply that never arrived told the agent to wrap nothing. What this
+    # test is about is one step earlier, so the exchange is opened without
+    # the ordinary reporting worker in front of it.
+    stub = RoomStub(greeting="Front desk.", agent_reports=False)
     seam = MockToolSeam(
         tuple(
             a_mock(f"tool_number_{number:04d}", {"ok": True}) for number in range(900)
         )
     )
-    plug = await opened(stub, seam=seam)
+    plug = await opened(stub, seam=seam, wait_for_the_agent=False)
 
     refusal = await refused(
         stub, HELLO_METHOD, '{"protocol_version":1,"tools":[{"name":"one_tool"}]}'
@@ -734,15 +766,12 @@ async def test_a_reply_too_large_to_send_records_no_census():
     assert refusal.code == ANSWER_TOO_LARGE
     assert str(LARGEST_PAYLOAD_BYTES) in refusal.message
 
-    # The census the refused hello carried was never taken: a call for the
-    # one tool it named would land late-attached, which is the seam saying
-    # it was never told the agent had it.
+    # And the seam still answers for every name this simulation covers: a
+    # hello nobody could reply to changes nothing about what egma serves.
     answered = await stub.room.perform_rpc(
         TOOL_METHOD, '{"name":"tool_number_0000"}'
     )
     assert json.loads(answered) == {"answer": {"ok": True}}
-    (served,) = seam.exchanged()
-    assert served.late_attached
     await plug.close()
 
 
@@ -814,13 +843,19 @@ async def test_a_hello_egma_refused_leaves_the_agent_wrapping_nothing(
 async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
-    """Nothing about mock tools may fail a conversation that would have run.
+    """A room with no exchange in it is a simulation that cannot report.
 
-    A room where egma answered for nothing is exactly the room every
-    simulation was before mock tools existed, so a participant that will
-    not take the methods costs the exchange and nothing else: it is said
-    loudly, the conversation goes on, and no call of the agent's reaches
-    egma — which is the truth, because egma never stood in their path.
+    This used to be the other way round: a participant that would not take
+    the methods cost the exchange and nothing else, because a room where
+    egma answered for nothing was exactly the room every simulation was
+    before mock tools existed.
+
+    It is not that room any more. The agent's own SDK reports through this
+    same exchange, so a room that cannot offer it is a room the agent
+    cannot report in — and a simulation whose mocked tools all called
+    their real backends must not be filed as a green result. The refusal
+    is still said loudly, and now it also ends the simulation with the
+    sentence that names what to check.
     """
     caplog.set_level("ERROR")
     stub = RoomStub(
@@ -840,7 +875,8 @@ async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
         nobody_can_ask,
     )
 
-    assert terminal_facts(client)["ending"] == "persona_concluded"
+    assert terminal_facts(client)["ending"] == "agent_never_joined"
+    assert "did not report to Egma" in terminal_reason(client)
     assert tool_spans(client) == []
     assert any(
         "could not offer the mock-tool exchange" in record.getMessage()

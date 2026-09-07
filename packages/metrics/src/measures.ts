@@ -83,8 +83,46 @@
  * bookkeeping overlapped the human turn. Version 7 continues to the first
  * speech before the next human turn. The agent-turn fallback remains only for
  * a trace whose framework recorded no speaking spans at all.
+ *
+ * **8** gives `turn_response_latency` one definition and a POV, and drops two
+ * measures. The definition is ADR-0015 §5's: the elapsed time from the last
+ * audible sample of the caller's speech to the first audible sample of the
+ * agent's reply as it reaches the caller. The agent-POV derivation therefore
+ * starts at the **VAD's detected end of speech** — the end of the human turn's
+ * last `speaking` child — and never at the endpointing commit the turn's own
+ * end is, which sits about a second later and would delete a second the
+ * caller waited. `origin` becomes the POV qualifier: `timed` is the persona's
+ * POV, `derived` and `reported` the agent's; a conversation both POVs measured
+ * answers with both series, the second beside the first and never averaged or
+ * appended into it. On a simulation this version leads with the agent's POV
+ * for `turn_response_latency` and `first_response_latency` while the
+ * recorder's clock is being fixed, and the persona's series is computed and
+ * returned rather than headlined; the version that ships with the recorder fix
+ * puts the persona's back in front. `time_to_first_word` and
+ * `persona_speech_duration` leave the catalog: the first is defined out of
+ * audio egma does not hold outside a simulation, and the second measures
+ * egma's own synthetic caller rather than anything the agent did.
  */
-export const MEASURE_CATALOG_VERSION = 7;
+export const MEASURE_CATALOG_VERSION = 8;
+
+/**
+ * The measures this catalog version leads with the agent's own POV for.
+ *
+ * **The version is the switch, and this list is what it switches.** A
+ * conversation both POVs measured hands back both series; which of the two a
+ * consumer meets first — the metric a page leads with, the number a grader
+ * reduces — is decided here and nowhere else. No flag, no per-project setting:
+ * a run graded under version 8 was graded against the agent's own account of
+ * its waits, and the release that flips this list back is a catalog version of
+ * its own, which is exactly what these numbers are for.
+ *
+ * Empty for every other measure, which keeps leading with what egma timed
+ * itself.
+ */
+export const AGENT_POV_HEADLINE_MEASURES: readonly string[] = [
+  "turn_response_latency",
+  "first_response_latency",
+];
 
 /**
  * How a metric series can be reduced to one observed number.
@@ -227,8 +265,8 @@ const EVERY_AGGREGATION: readonly MeasureAggregation[] = MEASURE_AGGREGATIONS;
 /**
  * The span-level definition every timing measure shares, said once.
  *
- * All five are the same rule with a different name in it, and writing the rule
- * out five times is how five copies of one sentence come to disagree.
+ * They are the same rule with a different name in it, and writing the rule out
+ * once per measure is how several copies of one sentence come to disagree.
  */
 function timedByItsOwnSpan(measure: string): MeasureFromSpans {
   return {
@@ -262,18 +300,7 @@ export const MEASURE_CATALOG: readonly CatalogedMeasure[] = [
     origin: "timing_span",
     fromSpans: timedByItsOwnSpan("turn_response_latency"),
     means:
-      "how long the agent took to answer: from the persona's turn going out to the agent beginning its answer, once for every turn the agent began answering",
-    aggregations: EVERY_AGGREGATION,
-  },
-  {
-    measure: "time_to_first_word",
-    unit: "milliseconds",
-    taken: "per_turn",
-    from: "voice simulations",
-    origin: "timing_span",
-    fromSpans: timedByItsOwnSpan("time_to_first_word"),
-    means:
-      "the quiet before the agent's first word of an answer, measured out of the audio rather than off a clock",
+      "how long the agent took to answer: from the last audible sample of the caller's speech in the turn to the first audible sample of the agent's reply as it reaches the caller, once for every turn the agent answered",
     aggregations: EVERY_AGGREGATION,
   },
   {
@@ -284,17 +311,6 @@ export const MEASURE_CATALOG: readonly CatalogedMeasure[] = [
     origin: "timing_span",
     fromSpans: timedByItsOwnSpan("agent_speech_duration"),
     means: "how long the agent spoke for, silence inside the answer excluded",
-    aggregations: EVERY_AGGREGATION,
-  },
-  {
-    measure: "persona_speech_duration",
-    unit: "milliseconds",
-    taken: "per_turn",
-    from: "voice simulations",
-    origin: "timing_span",
-    fromSpans: timedByItsOwnSpan("persona_speech_duration"),
-    means:
-      "how long Egma's own synthetic caller spoke for — what the agent was made to listen to, not anything the agent did",
     aggregations: EVERY_AGGREGATION,
   },
   {

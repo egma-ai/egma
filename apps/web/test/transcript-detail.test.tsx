@@ -93,6 +93,7 @@ const TRACE: TraceFacts = {
   erroredSpanCount: 0,
   source: "production",
   emitter: "agent",
+  pov: "agent",
   environment: "default",
   // Nothing egma dialled: production telemetry arrives by export, so a
   // monitored exchange names the platform that ran the agent and no egma
@@ -121,6 +122,7 @@ function step(over: Partial<Step> & { readonly spanId: string }): Step {
     toolName: "",
     toolArguments: "",
     toolResult: "",
+    pov: "agent",
     spans: [],
     ...over,
   };
@@ -160,6 +162,7 @@ const MEASURE: Measured = {
   measure: "agent_response_latency",
   unit: "ms",
   derived: false,
+  pov: "persona",
   samples: [420, 1100],
   spanIds: ["span_turn_agent", "span_turn_agent"],
   mean: 760,

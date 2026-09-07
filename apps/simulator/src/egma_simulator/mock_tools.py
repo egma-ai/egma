@@ -51,33 +51,40 @@ there is no exchange to conduct, so :meth:`MockToolSeam.hello` and
 
 That lane uses these other doors: :meth:`MockToolSeam.answers` for the
 answers to send, and :meth:`MockToolSeam.reported` for each call the
-platform tells egma about afterwards. The answers are rendered here, once,
-so the bytes a tool is given are the same bytes on every lane and one
-record reads across them.
+platform tells egma about afterwards. The answers are rendered here,
+once, so the bytes a tool is given are the same bytes on every lane.
 
-## What lands on the record
+## What lands on the record, and what does not
 
-Every call egma answers becomes a ``tool_call`` span: the name, the
-arguments as they arrived, what the call was given, the provenance stamp,
-and the mock tool that answered. The span brackets the exchange — the
-round trip, from the call arriving to the answer going back — so the time
-it really took is the span's own duration, with no second field to
-disagree with it.
+**A call this seam conducts is written down nowhere.** Where the agent's
+own process runs the egma SDK, that process reports every call it made —
+with the arguments its model emitted and the result it received — and
+that report is the tool record. One call is one row, so two records of it
+cannot disagree. The exchange here still serves and still refuses; it
+writes nothing. See ADR-0015 §3.
 
-A call served for a tool the census never named is flagged
-**late-attached**: answers stand ready for every name this simulation
-covers whether or not the census mentioned it, which is the safe way
-round, and the flag carries the caveat that such a call's arguments may
-be thin.
+**A call a platform reports afterwards is.** On the lane where the
+platform serves egma's answers itself, nothing of egma's runs inside the
+agent and no such report ever arrives, so :meth:`MockToolSeam.reported`
+is where that lane's calls land: one instant, because egma neither
+conducted the exchange nor timed it, carrying the name, the arguments,
+and — only for a name this simulation covers — egma's own rendering of
+the answer it authored.
 
-A call for a name **outside** this simulation's answers is refused, on
-the wire and on the record. It is a protocol error — the other side was
-told exactly which names egma answers for — and quietly letting it
-through would put a call egma never answered on the record as one it did.
-Its span carries the provenance ``refused``: no result and no mock tool,
-because nothing answered it, but a stamp all the same. A span with no
-stamp means egma watched the call go past to a real backend, and a
-refused call is the opposite of that.
+Whether a call was answered by a mock tool is read at display time, by
+name, from the pinned test version's mock tools, whichever way the call
+arrived. A call egma refused shows as the error the SDK raised, on the
+agent's own span for that call.
+
+So the seam remembers the answers, the census it was told, and the calls
+a platform has reported since somebody last took them. Answers stand
+ready for every name this simulation covers whether or not the census
+mentioned it, which is the safe way round.
+
+A call for a name **outside** this simulation's answers is refused. It is
+a protocol error — the other side was told exactly which names egma
+answers for — and quietly letting it through would run the customer's
+real tool from inside a test that asked egma to stand in front of it.
 """
 
 from __future__ import annotations
@@ -117,6 +124,49 @@ which is why the order is that way round.
 
 HELLO_METHOD = "egma.hello"
 """Where a session announces itself and learns what egma answers for."""
+
+NOT_REPORTED = (
+    "the agent did not report to Egma: no egma.hello arrived from the "
+    "worker's session, so this simulation isolated nothing and its record "
+    "would say nothing about the tools it ran. The Egma SDK is required for "
+    "a LiveKit simulation — check that the worker can reach the room and "
+    "that Egma's participant was in it, and check that `egma.simulation` is "
+    "called on the agent's session before it starts"
+)
+"""What a LiveKit simulation whose agent never said hello ends on.
+
+Written for whoever has to go and fix it, which for a customer's worker is
+the developer wiring the SDK in. The two halves are in the order they can
+be checked: the room first, because that is what Egma can see, and the
+call in the worker's own code second, because that is the one Egma cannot.
+
+One sentence, in one place, because three things use it: the voice plug,
+the chat plug, and the room driver where an agent joined and then went
+silent.
+
+It is the sentence for a hello that **never arrived**. A hello Egma
+received and refused is a different fault in a different place, and gets
+:data:`REPORTED_AND_REFUSED` instead — sending a developer to look for a
+missing SDK call when the SDK called and Egma said no is the wrong half of
+the system.
+"""
+
+REPORTED_AND_REFUSED = (
+    "the agent reported to Egma and Egma refused the report ({why}), so no "
+    "tool was isolated and this simulation ran against whatever the agent's "
+    "own tools do. The refusal is Egma's own, so the worker is wired up "
+    "correctly and what to look at is the reason above — most often a test "
+    "whose mock tools do not fit in one message, or a worker and an Egma "
+    "that speak different versions of the exchange"
+)
+"""What a simulation ends on where Egma answered the hello with a refusal.
+
+The other half of :data:`NOT_REPORTED`, and the half a bare "did not
+report" gets badly wrong: the SDK did call, the message did arrive, and
+the fault is on Egma's side of the exchange or in the test's own mock
+tools. Carries Egma's own words for why, because those are the half this
+sentence cannot know.
+"""
 
 TOOL_METHOD = "egma.tool"
 """Where one tool call is asked and answered."""
@@ -172,48 +222,27 @@ class MockToolRefusal(Exception):
 
 
 @dataclass(frozen=True)
-class ExchangedToolCall:
-    """One call that reached egma, and what egma did with it.
+class ReportedToolCall:
+    """One call a platform says the agent made, and what egma authored for it.
 
-    Both ends are instants on the wall clock: an exchange egma conducted
-    is timed by egma, unlike a turn, which is read off the audio. The span
-    it becomes brackets exactly this — the round trip.
+    One instant, not an interval: egma did not conduct this exchange and
+    did not time it, so there is no round trip to bracket and no duration
+    to claim.
     """
 
     name: str
-    """The tool's name, exactly as the call reported it."""
+    """The tool's name, exactly as the platform reported it."""
 
     arguments: str | None
-    """The arguments as JSON, or ``None`` where the call carried none."""
+    """The arguments as JSON, or ``None`` where the report carried none."""
 
     answer: str | None
-    """What the call was given, JSON-encoded: the tool's own return value,
-    or the tagged failure where the mock tool answered with one — a
-    failure has no return value, and a record that could not tell the two
-    apart would read a mocked failure as a tool that returned a string.
-    ``None`` for a call egma refused, which is a call nobody was answered
-    about at all."""
+    """What the call was given, JSON-encoded — egma's own rendering of the
+    answer it authored, and ``None`` for a name this simulation has no
+    answer for, whose return value is the customer's backend's rather
+    than egma's to vouch for."""
 
-    mock_tool: str | None
-    """The mock tool that answered, by name. ``None`` exactly where
-    :attr:`answer` is: a result is never recorded without the stamp that
-    says where it came from."""
-
-    late_attached: bool
-    """True where the census never named this tool. Absent from the record
-    otherwise: a stamp for the ordinary case would ride every span."""
-
-    refused: bool
-    """True where egma was asked and said no — a call for a name outside
-    this simulation's answers.
-
-    Its own fact on the record, because the alternative reading is the
-    opposite one. A call carrying no stamp at all means egma watched it go
-    past to a real backend; a refused call never reached a backend at all.
-    Told apart here so a reader is never left to guess which happened."""
-
-    began_unix_nano: int
-    ended_unix_nano: int
+    at_unix_nano: int
 
 
 @dataclass(frozen=True)
@@ -246,7 +275,7 @@ class AuthoredAnswer:
 
 
 Clock = Callable[[], int]
-"""Wall-clock nanoseconds, which is what a span's two ends are."""
+"""Wall-clock nanoseconds, which is what a span's timestamp is."""
 
 
 class MockToolSeam:
@@ -254,8 +283,10 @@ class MockToolSeam:
 
     Built from the claimed spec's resolved answers and handed to whatever
     puts it in front of the agent. It holds three things and no more: the
-    answers, the census it was told, and the calls it has exchanged since
-    somebody last took them.
+    answers, the census it was told, and the calls a platform has
+    reported since somebody last took them. A call it conducts itself is
+    written down nowhere — that record is the agent's own POV of the
+    simulation.
     """
 
     def __init__(
@@ -267,19 +298,60 @@ class MockToolSeam:
         self._answers = {mock.tool_name: mock for mock in mock_tools}
         self._clock = clock
         self._censuses = 0
+        self._refused_report: str | None = None
         self._discovered: tuple[str, ...] = ()
-        self._exchanged: list[ExchangedToolCall] = []
+        self._reported: list[ReportedToolCall] = []
 
     # -- What the driver does with it -----------------------------------------
 
-    def exchanged(self) -> list[ExchangedToolCall]:
-        """Every call since this was last asked, and then none.
+    @property
+    def agent_reported(self) -> bool:
+        """Whether the agent's session has said hello at least once.
+
+        The one thing a LiveKit simulation is required to see. A hello is
+        how the agent's own SDK announces itself, and everything else this
+        seam does — answering for tools, refusing names it has none for —
+        follows from one having arrived. A simulation without one ran with
+        every mocked tool calling its real backend, and nothing here would
+        say so.
+
+        Counted rather than remembered separately: a second hello replaces
+        the first, so the count is the whole of the record.
+
+        Named for the agent because :meth:`reported` next door is the
+        platform lane's word for a tool call somebody else says was made,
+        and one name for two unrelated facts is how a reader ends up
+        checking the wrong one.
+
+        A hello this seam **refused** does not count. It never told the
+        agent which tools to wrap, so nothing was isolated — but it is a
+        different fault from silence, and :attr:`why_unreported` is what
+        tells the two apart.
+        """
+        return self._censuses > 0
+
+    @property
+    def why_unreported(self) -> str:
+        """Why this simulation has no agent report, in the words to act on.
+
+        Two answers, because they send a developer to opposite halves of
+        the system: a hello that never arrived is a worker with no SDK call
+        in it, and a hello Egma refused is a fault on Egma's own side or in
+        the test's mock tools. Read where a plug has already found that
+        :attr:`agent_reported` is false.
+        """
+        if self._refused_report is None:
+            return NOT_REPORTED
+        return REPORTED_AND_REFUSED.format(why=self._refused_report)
+
+    def exchanged(self) -> list[ReportedToolCall]:
+        """Every reported call since this was last asked, and then none.
 
         Drained rather than accumulated, so whoever authors spans from
         them can ask as often as it likes and no call is ever written
         down twice.
         """
-        taken, self._exchanged = self._exchanged, []
+        taken, self._reported = self._reported, []
         return taken
 
     # -- What a platform that serves egma's answers itself uses ---------------
@@ -305,45 +377,36 @@ class MockToolSeam:
     def reported(self, name: str, *, arguments: str | None = None) -> None:
         """One tool call the platform says it made.
 
-        Written down the way a call egma served itself is, with two
-        differences that are both the truth about this lane. It is one
-        instant, because egma did not conduct the exchange and did not time
-        it. And the result rides **only** where this simulation has an
-        answer for the name: such a call was answered from egma's own
-        authored answer, so recording that answer invents nothing, while
-        a call for any other name ran the customer's real implementation
-        and its return value is neither egma's to vouch for nor the
-        record's to stamp. That one lands as the observation it is — the
-        name, the arguments, and no stamp at all, which is the record's own
-        way of saying a real backend did the work.
+        **This lane's whole tool record, and the reason it exists.** The
+        platform matched egma's answers and served them itself; nothing of
+        egma's ran inside the agent, so no process there reports what the
+        agent did. Without this the call would land nowhere at all.
 
-        The answer recorded for a covered call is **egma's own rendering**
-        and never the platform's echo of it, even where the platform
-        reports one. The two are the same value, and only egma's carries
-        the tag that tells a mocked failure from a tool that returned a
-        string — the platform says that part in its own field, which the
-        record has no room for.
+        Written down as one instant, because egma did not conduct the
+        exchange and did not time it. The result rides **only** where this
+        simulation has an answer for the name: such a call was answered
+        from egma's own authored answer, so recording that answer invents
+        nothing, while a call for any other name ran the customer's real
+        implementation and its return value is neither egma's to vouch for
+        nor the record's to claim.
 
-        Never *refused*: nothing here was asked of egma, so there was
-        nothing for egma to say no to.
+        The answer recorded is **egma's own rendering** and never the
+        platform's echo of it, even where the platform reports one. The two
+        are the same value, and only egma's carries the tag that tells a
+        mocked failure from a tool that returned a string.
         """
         called = name.strip()
         if not called:
             raise ValueError("a tool call the platform reported must name a tool")
-        now = self._clock()
         if called not in self._discovered:
             self._discovered = (*self._discovered, called)
         mock = self._answers.get(called)
-        self._write_down(
-            ExchangedToolCall(
+        self._reported.append(
+            ReportedToolCall(
                 name=called,
                 arguments=arguments,
                 answer=None if mock is None else _recorded(mock),
-                mock_tool=None if mock is None else mock.tool_name,
-                late_attached=False,
-                refused=False,
-                began_unix_nano=now,
-                ended_unix_nano=now,
+                at_unix_nano=self._clock(),
             )
         )
 
@@ -356,6 +419,19 @@ class MockToolSeam:
         census is a snapshot of the agent's tools, and an agent that
         re-announces itself is announcing what it has *now*.
         """
+        try:
+            return await self._hello(payload)
+        except MockToolRefusal as refused:
+            # Remembered, not counted: a refused hello is not a report —
+            # it told the agent nothing, so nothing was wrapped — but it
+            # is a *different* failure from silence, and a simulation that
+            # ended saying "check that egma.simulation is called" when the
+            # SDK called and Egma said no sends a developer to the wrong
+            # half of the system.
+            self._refused_report = refused.message
+            raise
+
+    async def _hello(self, payload: str) -> str:
         asked = _object(HELLO_METHOD, payload)
         _speaks_this_version(asked)
 
@@ -387,10 +463,10 @@ class MockToolSeam:
                 "mocked_tools": list(self._answers),
             }
         )
-        # Measured before anything here is written down: a reply that
-        # cannot be sent tells the other side nothing, so it wraps nothing,
-        # and a census recorded ahead of the refusal would leave the record
-        # claiming egma was asked and answered. A test naming more mocked
+        # Measured before the census is kept: a reply that cannot be sent
+        # tells the other side nothing, so it wraps nothing, and a census
+        # taken ahead of the refusal would leave this side believing it
+        # had been told what the agent holds. A test naming more mocked
         # tools than one message can carry is also a fault worth naming,
         # where the transport's own complaint would arrive as a hello that
         # mysteriously failed.
@@ -409,9 +485,9 @@ class MockToolSeam:
         if replaced:
             # A census is a snapshot of the agent's tools, so a second one
             # is the agent saying what it has *now*. Said out loud because
-            # only the last one is kept, and an operator reading a
-            # late-attached call that surprises them deserves to find the
-            # moment the census changed.
+            # only the last one is kept, and an operator surprised by which
+            # tools egma answered for deserves to find the moment the
+            # census changed.
             logger.info(
                 "a second census replaced the first: %d tool(s) became %d",
                 len(replacing),
@@ -420,8 +496,12 @@ class MockToolSeam:
         return reply
 
     async def tool(self, payload: str) -> str:
-        """One tool call: answered at once, and written down."""
-        began = self._clock()
+        """One tool call: answered at once, and written down nowhere.
+
+        What the agent asked for and what it was given is on the agent's
+        own POV of the simulation, one row per call. This side only
+        serves.
+        """
         asked = _object(TOOL_METHOD, payload)
 
         name = asked.get("name")
@@ -440,31 +520,17 @@ class MockToolSeam:
                 f"{TOOL_METHOD} carries the call's arguments as a JSON "
                 f"object or not at all, and {name} carried {_kind_of(arguments)}",
             )
-        written = None if arguments is None else _serialized(arguments)
 
         mock = self._answers.get(name)
         if mock is None:
-            # Never a pass-through — and the record says so out loud. The
-            # other side was told which names egma answers for, so a call
-            # for any other name is that side asking for something it was
-            # never offered; answering it anyway, or waving it through,
-            # would put a tool egma had no answer for on the record as one
-            # it served. Written down as *refused* rather than as a bare
-            # observation, because a bare observation is the record's way
-            # of saying the real tool ran with egma nowhere near it, and
-            # here the opposite happened.
-            self._write_down(
-                ExchangedToolCall(
-                    name=name,
-                    arguments=written,
-                    answer=None,
-                    mock_tool=None,
-                    late_attached=False,
-                    refused=True,
-                    began_unix_nano=began,
-                    ended_unix_nano=self._clock(),
-                )
-            )
+            # Never a pass-through. The other side was told which names
+            # egma answers for, so a call for any other name is that side
+            # asking for something it was never offered; answering it
+            # anyway, or waving it through, would run the customer's real
+            # tool from inside a test that asked egma to stand in front of
+            # it. The refusal reaches the model as that tool failing, and
+            # the agent's own span for the call carries the error — which
+            # is where a reader finds it.
             offered = ", ".join(self._answers) or "no tools at all"
             logger.warning(
                 "a call for %r reached Egma, which has no answer for it; the "
@@ -479,35 +545,14 @@ class MockToolSeam:
                 f"nothing to answer with. It answers for: {offered}",
             )
 
-        # Two shapes, and the difference is the whole of why the answer is
-        # tagged. The **wire** carries the tag, because the other side has
-        # to know whether to return this to the model or raise it, and an
-        # authored value that happened to look like a failure would
-        # otherwise be one. The **record** carries what the call was given
-        # — the tool's own return value, untagged, because that is what
-        # the agent received and what a grader reads. A failure has no
-        # return value to record, so there the tag stays: it is what keeps
-        # a mocked failure from reading as a tool that returned a string.
+        # The answer travels tagged — ``{"answer": …}`` or
+        # ``{"error": …}`` — because the other side has to know whether to
+        # return this to the model or raise it, and an authored value that
+        # happened to look like a failure would otherwise be one. What the
+        # agent then did with it is the agent's own span to say.
         served = _serialized(mock.answer)
         _fits_on_the_wire(f"the mock tool for {name!r}", served)
-        recorded = _recorded(mock)
-
-        self._write_down(
-            ExchangedToolCall(
-                name=name,
-                arguments=written,
-                answer=recorded,
-                mock_tool=mock.tool_name,
-                late_attached=name not in self._discovered,
-                refused=False,
-                began_unix_nano=began,
-                ended_unix_nano=self._clock(),
-            )
-        )
         return served
-
-    def _write_down(self, call: ExchangedToolCall) -> None:
-        self._exchanged.append(call)
 
 
 # -- Reading one message of the exchange -------------------------------------

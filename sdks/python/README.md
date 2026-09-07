@@ -2,14 +2,21 @@
 
 Test a LiveKit agent with mock tools and send its production spans to Egma.
 
-The two functions are separate:
+The two verbs are separate, and the room decides which one acts:
 
-- `mockable(...)` lets Egma answer tools in an Egma simulation. It does
-  nothing in production.
-- `monitor_livekit(...)` sends production LiveKit spans to the
-  Monitoring page. It does nothing in an Egma simulation.
+- `simulation(...)` is for an Egma simulation room. It reports your
+  agent's tools to Egma, lets Egma answer the tools the running test
+  mocks, and sends the agent's own spans to Egma as that simulation's
+  agent POV. It does nothing in production.
+- `monitor(...)` sends production LiveKit spans to the Monitoring page.
+  It does nothing in an Egma simulation.
 
-Calling one function never enables or changes the other.
+Calling one verb never enables or changes the other.
+
+`simulation(...)` is **required** for a LiveKit simulation, and it fails
+closed: an agent that cannot report to Egma raises `egma.NotReported` and
+the session does not start. Egma ends that simulation from its own side
+with the same finding.
 
 ## Install
 
@@ -53,17 +60,17 @@ lk agent update-secrets --secrets-file=.env.monitoring
 Use the same file with `lk agent create --secrets-file=.env.monitoring` for a
 new deployment. LiveKit Cloud restarts the agent after a secret update.
 
-Call `monitor_livekit` as the first statement of the job entrypoint, before
+Call `monitor` as the first statement of the job entrypoint, before
 `ctx.connect` and `AgentSession.start`:
 
 ```python
-from egma import monitor_livekit
+from egma import monitor
 from livekit import agents
 from livekit.agents import Agent, AgentSession
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:
-    monitor_livekit(ctx)
+    monitor(ctx)
     await ctx.connect()
 
     agent = Agent(instructions=INSTRUCTIONS, tools=[check_calendar])
@@ -75,7 +82,7 @@ You can pass the same values directly when environment variables are not the
 right configuration source:
 
 ```python
-monitor_livekit(ctx, endpoint="https://api.egma.ai", api_key=project_key)
+monitor(ctx, endpoint="https://api.egma.ai", api_key=project_key)
 ```
 
 Use the same call for an agent hosted in your cloud and an agent hosted in
@@ -85,8 +92,9 @@ processor. It sends spans in batches and flushes the final batch when the
 LiveKit job stops.
 
 If this job runs in an Egma simulation room, the helper returns without
-adding a production exporter and says so at `WARNING`. The simulation keeps
-its own trace and does not appear a second time in Monitoring.
+adding a production exporter and says so at `WARNING`. `simulation(...)`
+exports that conversation instead, filed under the simulation rather than
+as a second production call.
 
 The helper reads the room's name for that and nothing else. Every Egma
 simulation room is named `egma-sim-…`; a room named anything else gets the
@@ -149,7 +157,7 @@ registers it.
 One call, after the agent is built and before the session starts:
 
 ```python
-from egma import mockable
+from egma import simulation
 ```
 
 ```python
@@ -157,12 +165,36 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     agent = Agent(instructions=INSTRUCTIONS, tools=[check_calendar, book_appointment])
     session = AgentSession(stt=..., llm=..., tts=...)
 
-    await mockable(agent, ctx, session)
+    await simulation(agent, ctx, session)
 
     await session.start(agent=agent, room=ctx.room)
 ```
 
-That is the whole simulation integration.
+That is the whole simulation integration. It reads `EGMA_URL` and
+`EGMA_API_KEY`, the same two settings `monitor` reads, or the matching
+`endpoint=` and `api_key=` arguments.
+
+**One LiveKit job per process.** The room a process exports under is fixed
+when its exporter is built and cannot be rewritten, so a second job in the
+same process is refused rather than filed under the first job's room.
+LiveKit runs one job per process by default; keep it that way.
+
+### What it sends to Egma
+
+Your agent's own spans, over OTLP, to `EGMA_URL` with your project API
+key — the same road `monitor` uses. Each span carries the room's name, so
+Egma files them under the simulation that opened that room. They are
+batched at one second and flushed when the session closes and again when
+the LiveKit job stops, so the end of a conversation lands in Egma within a
+second or two of the caller leaving.
+
+That is the **agent's POV** of the simulation: its turns, its tool calls,
+its own timings. Egma stores it beside what its own caller heard and shows
+it on the simulation.
+
+If your worker already has an OpenTelemetry tracer provider — Langfuse, or
+your own collector — it is kept and used as it stands. Egma is added
+beside what you already export, never in place of it.
 
 ### How it knows it is in a simulation
 
@@ -177,7 +209,7 @@ into the room, and whether your own token endpoint puts the agent there.
 A signal carried by an explicit dispatch arrives on only the first of
 those.
 
-In a simulation room, `mockable` connects the job with LiveKit's own
+In a simulation room, `simulation` connects the job with LiveKit's own
 `JobContext.connect()` if your startup has not already done so, then finds
 Egma among the room's participants: Egma joins as `egma-persona` or
 `egma-persona-<simulation>`. On two of the three dispatch paths your
@@ -188,13 +220,19 @@ price of the wait being correct on every dispatch path rather than on one;
 a simulation ordinarily pays a fraction of it. It does not reconnect an
 already-connected room, and it never connects a production room.
 
-If nobody by that name arrives, nothing is wrapped, your tools all run
-their own implementations, and the reason is logged at `ERROR`. If two
-participants answer to that name, the exchange is refused for the same
-reason a room with two claimants has no knowable answer — and your tool
-inventory is not sent to either of them.
+If nobody by that name arrives, `simulation` raises `egma.NotReported`
+and your session never starts. If two participants answer to that name,
+the exchange is refused for the same reason a room with two claimants has
+no knowable answer — your tool inventory is not sent to either of them,
+and the same error is raised.
 
-Then `mockable` reports your agent's tools to Egma — names and schemas,
+That is the fail-closed rule, and it is deliberate: a simulation that ran
+without reaching Egma would have called your real backends everywhere a
+mock tool was meant to answer, and its record would say nothing about it.
+A test that isolated nothing must not be allowed to look like one that
+did.
+
+Then `simulation` reports your agent's tools to Egma — names and schemas,
 read off the agent object, so mock authoring starts from your real tool
 names instead of your memory of them — and asks which tools this
 simulation answers for. Egma replies with exactly the names the running
@@ -204,8 +242,9 @@ lands on the simulation's record with its arguments, its answer, how long
 it took, and which mock tool answered.
 
 **In every other room it does nothing at all.** A room your own system
-named — which is every production room — is a room where `mockable`
-returns having touched nothing: no wrapper, no message, no connect. Your
+named — which is every production room — is a room where `simulation`
+returns having touched nothing: no wrapper, no message, no exporter, no
+connect. Your
 tools are the same objects, called the same way, with no wrapper between
 them and the model. Zero added latency, by construction rather than by
 care. That property is a test in this package (`tests/test_inert.py`),
@@ -228,7 +267,7 @@ After the agent object exists and before `session.start`. The report of
 your tools is the first thing said, so an Egma that is not in the room is
 found before any tool call rather than half way through a test.
 
-Keep one `mockable` call for the initial agent. The SDK follows LiveKit's
+Keep one `simulation` call for the initial agent. The SDK follows LiveKit's
 public handoff events and installs the same simulation couriers for each
 selected `Agent` or `AgentTask` before that activity starts, so a tool the
 test names is answered whichever agent holds it.
@@ -236,17 +275,20 @@ test names is answered whichever agent holds it.
 ### What a call to a mocked tool does
 
 - Goes to Egma over the same LiveKit room. No new endpoint, no new
-  credential, nothing new to expose. If needed, `mockable` connects that
+  credential, nothing new to expose. If needed, `simulation` connects that
   room through the job context before sending the first RPC.
 - Comes back with the authored answer, or raises the authored error as
   the tool's own error, so your agent handles it exactly as it would
   handle a real backend failing.
-- **Falls open** if Egma turns out not to be reachable: your real tool
-  runs, and the agent behaves as it would with this package uninstalled.
-- **Never waits forever.** Every branch ends in an answer, an error the
-  model can hear, or your own tool running.
+- **Fails, if Egma turns out not to be reachable.** The call raises as the
+  tool's own error and your real tool is never run. A mocked tool exists
+  because this test answers for it, so running its real implementation
+  would book the real appointment and charge the real card — which is the
+  one thing a test may never do.
+- **Never waits forever.** Every branch ends in an answer or an error the
+  model can hear.
 
-A tool you attach to the agent *after* calling `mockable` is still
+A tool you attach to the agent *after* calling `simulation` is still
 intercepted on its first call — Egma's answers are held by name. Its
 arguments may be incomplete on the record, and Egma marks that call so
 you can see it.
@@ -258,11 +300,13 @@ having on at `INFO` the first time you wire an agent up: the line after
 the tool report names how many tools you have and how many Egma answers
 for.
 
-`ERROR` is reserved for a simulation whose tools could not be wrapped and
-can be acted on — no Egma participant arrived in a simulation room, two
-participants claimed to be Egma, or the two halves do not speak the same
-version of the exchange. None of those lines is reachable in a production
-room.
+A simulation that could not report to Egma raises `egma.NotReported`
+rather than logging: no Egma participant arrived in the room, two
+participants claimed to be Egma, the room would not open, or the two
+halves do not speak the same version of the exchange. The message names
+what happened and the two things to check — the room and Egma's own side
+of it, then the package installed here. None of that is reachable in a
+production room.
 
 ## Before you install anything: the interim recipe
 
@@ -294,11 +338,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
 A room your own system named means the guard is false and nothing is
 wrapped. Note where that safety comes from, because it is not where
-`mockable`'s comes from: this guard fires on a prefix being *present*
+`simulation`'s comes from: this guard fires on a prefix being *present*
 rather than on Egma being *absent*. So it is true in any room whose name
-begins `egma-sim-`, including one Egma is not in — `mockable` waits for
-Egma's participant and gives up out loud, while this guard has nobody to
-wait for and simply mocks. Refuse that prefix wherever your own side mints
+begins `egma-sim-`, including one Egma is not in — `simulation` waits for
+Egma's participant and then fails the simulation, while this guard has
+nobody to wait for and simply mocks. Refuse that prefix wherever your own side mints
 production tokens, or a production room named to look like a simulation
 runs your canned answers against a live caller.
 
@@ -312,7 +356,9 @@ What it cannot do is the rest of the job. One canned world for every
 test, so you cannot write "the calendar is full" as a *test* — you would
 be editing your agent's source to change a test's data. Nothing about
 those calls reaches Egma's record: no arguments, no answers, no timings,
-so graders that read tool facts have nothing to read.
+so graders that read tool facts have nothing to read. And it sends no
+spans, so the simulation has no agent POV — which a LiveKit simulation now
+requires, so a run set up this way fails.
 
 **And the honest caveat: that guard couples your agent's source to how
 Egma announces itself.** The room-name prefix is a stated contract rather
@@ -320,7 +366,7 @@ than an implementation detail, so it is the safe thing to key off — but
 the *rest* of the mechanism is not: where Egma sits in the room, what
 it is called, how long it takes to arrive, and what a room with two
 claimants means are all Egma's to evolve. That is precisely what
-`mockable` exists to own, and your side stays one line.
+`simulation` exists to own, and your side stays one line.
 
 Use the recipe as the bridge, not as the small tier.
 

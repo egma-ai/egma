@@ -278,7 +278,83 @@ export function simulationNamedBy(resourceSpans: OtlpResourceSpans): string {
  */
 export const PROVIDER_REFERENCE_ATTRIBUTE = "egma.provider_reference";
 
-/** Which conversation this resource is the agent's POV of, or `""` for none. */
+/**
+ * What one resource says its provider reference is — and, where its spans say
+ * it instead, whether they agree.
+ *
+ * **Two places, because a resource cannot always carry it.** A resource is
+ * fixed when a tracer provider is built, and the SDK does not always build one:
+ * a worker that already runs its own OpenTelemetry hands the SDK a provider
+ * that exists, and taking that away to add ours is not an option. So the SDK
+ * stamps the reference on the resource where it builds the provider, and on
+ * every span it starts thereafter, through the framework's own metadata seam,
+ * where it does not. This door reads the resource first and falls back to the
+ * spans.
+ *
+ * **An unstamped span rides along; two stamped spans that disagree do not.**
+ * The framework's metadata processor stamps a span when the span *starts*, and
+ * the SDK installs it partway through a job that has already begun — so a
+ * reused provider always exports a few spans that opened before the stamp
+ * existed, the job's own entrypoint span among them. Refusing those would
+ * refuse the whole export, and every customer who already runs their own
+ * OpenTelemetry would lose the agent's POV of every simulation, silently.
+ * They are not ambiguous: nothing else in the resource names another
+ * conversation, so the one value the stamped spans agree on is the answer for
+ * all of them.
+ *
+ * Two *stamped* spans naming different conversations are the real ambiguity,
+ * and they are refused. One export from one agent process is one conversation,
+ * so this is a sender the door cannot file for, and guessing is exactly the
+ * mistake that puts one customer's turns on another's record.
+ *
+ * A key present with nothing in it is kept apart from a key that is absent, on
+ * the resource and on a span alike: carrying the key is the sender saying *this
+ * is a simulation's*, and an empty value is that sentence with the name left
+ * out — a malformed export rather than a silent reclassification into
+ * production.
+ */
+export type ProviderReferenceClaim =
+  /** No resource attribute and no span carrying the key: production traffic. */
+  | { readonly kind: "none" }
+  /**
+   * One conversation: named on the resource, or the one value every stamped
+   * span agrees on. Spans in this resource that carry no reference are filed
+   * under it too.
+   */
+  | { readonly kind: "named"; readonly reference: string }
+  /** Stamped spans name more than one conversation, so this names none. */
+  | { readonly kind: "disagreeing"; readonly references: readonly string[] };
+
+export function providerReferenceClaimedBy(
+  resourceSpans: OtlpResourceSpans,
+): ProviderReferenceClaim {
+  if (namesAProviderReference(resourceSpans)) {
+    return { kind: "named", reference: providerReferenceNamedBy(resourceSpans) };
+  }
+
+  const spans = (resourceSpans.scopeSpans ?? []).flatMap(
+    (scopeSpans) => scopeSpans.spans ?? [],
+  );
+  const claimed = new Set<string>();
+  for (const span of spans) {
+    if (
+      (span.attributes ?? []).some(
+        (entry) => entry.key === PROVIDER_REFERENCE_ATTRIBUTE,
+      )
+    ) {
+      claimed.add(attribute(span.attributes, PROVIDER_REFERENCE_ATTRIBUTE));
+    }
+  }
+
+  if (claimed.size === 0) return { kind: "none" };
+  const [only] = [...claimed];
+  if (claimed.size === 1 && only !== undefined) {
+    return { kind: "named", reference: only };
+  }
+  return { kind: "disagreeing", references: [...claimed].sort() };
+}
+
+/** Which conversation this **resource** is the agent's POV of, or `""`. */
 export function providerReferenceNamedBy(
   resourceSpans: OtlpResourceSpans,
 ): string {
@@ -289,16 +365,14 @@ export function providerReferenceNamedBy(
 }
 
 /**
- * Whether this resource **carries** the attribute at all, whatever it holds.
+ * Whether this **resource** carries the attribute at all, whatever it holds.
  *
  * Separate from reading it, because the two questions have different answers
  * for a resource that carries the key with nothing in it — and the difference
  * decides where its spans are filed. Reading gives `""` for a key that is absent
  * *and* for one that is present and empty, so a door that branched on the value
  * alone would file a misconfigured SDK's simulation spans under Monitoring as
- * somebody's production traffic. Carrying the key is the sender saying *this is
- * a simulation's*, and an empty value is that sentence with the name left out —
- * a malformed export, refused, rather than a silent reclassification.
+ * somebody's production traffic.
  */
 export function namesAProviderReference(
   resourceSpans: OtlpResourceSpans,

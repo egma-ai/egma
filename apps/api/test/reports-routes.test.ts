@@ -495,7 +495,8 @@ describe("the lifecycle lands", () => {
       expect(row?.endedAt?.toISOString()).toBe("2026-08-05T09:02:10.551Z");
 
       // The completed landing queued its frozen whole-trace grading plan and
-      // finalized the run header.
+      // finalized the run header. A chat-API conversation has one account of
+      // itself — egma's — so nothing is waited for.
       expect(await gradingJobsFor(simulationId)).toBe(1);
       const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
       expect(header.body.status).toBe("completed");

@@ -106,10 +106,10 @@ plus what only audio can owe:
   an endpoint and a directory for one that does not, so a first voice
   simulation needs no container running — and the report carries only the
   reference, never the bytes and never a URL.
-- **Per-turn measurements**, all read from the audio itself rather than
-  from a clock: `time_to_first_word` (how long the agent was quiet before
-  speaking), `agent_speech_duration` and `persona_speech_duration`. Each
-  is a span, like every other measurement.
+- **Per-turn measurements**, read from the audio itself rather than from a
+  clock: `turn_response_latency` (how long the caller waited for an answer)
+  and `agent_speech_duration` (how long the agent spoke for). Each is a
+  span, like every other measurement.
 
 ## How it runs
 

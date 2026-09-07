@@ -1446,7 +1446,6 @@ class VoiceConductor:
                     self._record.first_answer_measured = True
             else:
                 quiet_from = self._record.quiet_since
-                await self._measure("time_to_first_word", quiet_from, began)
                 if answering:
                     if not self._record.first_answer_measured:
                         self._record.first_answer_measured = True
@@ -1570,7 +1569,6 @@ class VoiceConductor:
             raise SpeechFault(
                 "the persona's transcript turn ended without recorded audio"
             )
-        await self._measure("persona_speech_duration", began, ended)
         await self._took_a_turn(
             "human", text, began, ended, apply_turn_limit=not concludes
         )

@@ -64,6 +64,7 @@ export {
   type PersonaModels,
   type SpeechSelection,
 } from "./models/selections.ts";
+export { fromOnePov, povOf, type SpanPov } from "./models/pov.ts";
 /**
  * The put-it-back note a mocked run leaves behind, and its serialization. Pure:
  * it reads and writes no store.
@@ -93,6 +94,18 @@ export {
   validatePassThreshold,
   validateProjectGraderScope,
 } from "./grader-library/policy.ts";
+
+/**
+ * Whether a conversation over this connection kind could ever produce the
+ * agent's own account of itself (ADR-0015 §2).
+ *
+ * A pure question about a word, reaching nothing. It is exported because the
+ * read that tells a customer their record is missing the agent's POV has to ask
+ * the same list grading waits on: two lists would one day disagree about which
+ * conversations were ever owed a second account, and the record would say one
+ * thing while the queue did another.
+ */
+export { laneProducesAnAgentPov } from "./schema/agents.ts";
 
 /**
  * Pure grading decisions over policy or rows that a tenant-scoped read already

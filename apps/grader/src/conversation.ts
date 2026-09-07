@@ -1,4 +1,5 @@
 import {
+  fromOnePov,
   type Simulation,
   type TraceDetail,
   type TraceSpan,
@@ -338,7 +339,7 @@ export function conversationOfTrace(trace: TraceDetail): Conversation {
  * conversation.
  */
 function transcriptOf(trace: TraceDetail): readonly TranscriptTurn[] {
-  return trace.turns.map((turn) => ({
+  return fromOnePov(trace.turns, "agent").map((turn) => ({
     span_id: turn.spanId,
     speaker: speakerOf(turn.kind),
     text: turn.text,
@@ -383,18 +384,21 @@ function speakerOf(kind: string): string {
  * off the list.
  */
 function toolCallsIn(trace: TraceDetail): readonly ToolCall[] {
-  const called: (ToolCall & { readonly at: string })[] = [];
-
-  for (const span of everySpanIn(trace)) {
-    if (span.toolName === "") continue;
-    called.push({
+  // **One call, once.** A simulation holds both POVs under one trace, and on
+  // the lanes where a platform serves egma's answers egma files a tool row of
+  // its own. `fromOnePov` is the one rule every reader shares: the agent's own
+  // POV wherever the record holds one, so a grader asking "was the refund tool
+  // called before the confirmation" never sees one call twice.
+  const tools = [...everySpanIn(trace)].filter((span) => span.toolName !== "");
+  const called = fromOnePov(tools, "agent").map(
+    (span): ToolCall & { readonly at: string } => ({
       kind: "tool_call",
       at: span.startedAt,
       name: span.toolName,
       arguments: span.toolArguments,
       result: span.toolResult,
-    });
-  }
+    }),
+  );
 
   return called.sort(byWhenItStarted);
 }

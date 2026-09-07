@@ -25,6 +25,7 @@ export type TraceSpan = {
     toolName: string;
     toolArguments: string;
     toolResult: string;
+    pov: 'persona' | 'agent';
     toolProvenance?: 'mocked';
     spans: Array<TraceSpan>;
 };
@@ -4319,6 +4320,7 @@ export type GetSimulationResponses = {
         endedAt: string | null;
         providerReference: string | null;
         hasRecording: boolean;
+        agentPovIncomplete: boolean;
         measures: {
             durationMs?: number;
             turnCount?: number;
@@ -4331,6 +4333,7 @@ export type GetSimulationResponses = {
             measure: string;
             unit: string;
             derived: boolean;
+            pov: 'persona' | 'agent';
             reportedBy?: string;
             samples: Array<number>;
             spanIds: Array<string>;
@@ -4338,6 +4341,14 @@ export type GetSimulationResponses = {
             p50: number;
             p90: number;
             partial: boolean;
+            otherPov?: {
+                pov: 'persona' | 'agent';
+                derived: boolean;
+                reportedBy?: string;
+                samples: Array<number>;
+                spanIds: Array<string>;
+                partial: boolean;
+            };
         }>;
         test: {
             id: string;
@@ -5437,6 +5448,7 @@ export type ListTracesResponses = {
             erroredSpanCount: number;
             source: 'simulation' | 'production';
             emitter: string;
+            pov: 'persona' | 'agent';
             environment: string;
             connectionType: string;
             providerCallId: string;
@@ -5517,6 +5529,7 @@ export type GetTraceResponses = {
             erroredSpanCount: number;
             source: 'simulation' | 'production';
             emitter: string;
+            pov: 'persona' | 'agent';
             environment: string;
             connectionType: string;
             providerCallId: string;
@@ -5534,6 +5547,7 @@ export type GetTraceResponses = {
             measure: string;
             unit: string;
             derived: boolean;
+            pov: 'persona' | 'agent';
             reportedBy?: string;
             samples: Array<number>;
             spanIds: Array<string>;
@@ -5541,6 +5555,14 @@ export type GetTraceResponses = {
             p50: number;
             p90: number;
             partial: boolean;
+            otherPov?: {
+                pov: 'persona' | 'agent';
+                derived: boolean;
+                reportedBy?: string;
+                samples: Array<number>;
+                spanIds: Array<string>;
+                partial: boolean;
+            };
         }>;
         simulationId: string | null;
         gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error';

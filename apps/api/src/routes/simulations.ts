@@ -1,4 +1,5 @@
 import {
+  AGENT_POV_BOUND_SECONDS,
   getAgent,
   getConnection,
   getGradingPlan,
@@ -7,15 +8,18 @@ import {
   getRun,
   getSimulation,
   getSimulationExecutionEvidence,
+  laneProducesAnAgentPov,
   NotPermittedError,
   readTrace,
   readTraceGrading,
   regradeTrace,
   type GradingPlan,
+  type Run,
   type Simulation,
   type TraceDetail,
   type TraceSpan,
 } from "@egma/db";
+import { everySpanIn } from "@egma/metrics";
 import { simulationOperations } from "@egma/platform-api/contract";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
@@ -58,7 +62,35 @@ function windowOf(
   return { from: BigInt(from) * 1000n, to: BigInt(to) * 1000n };
 }
 
-function describedSpan(span: TraceSpan): Record<string, unknown> {
+/**
+ * The mock tools this simulation's pinned test version names, by name.
+ *
+ * **The one place a mocked mark comes from.** A mock tool is matched to a call
+ * by tool name and by nothing else, and the version a simulation pins is
+ * immutable — so reading the mark here, at display time, is reading exactly
+ * the world this simulation ran against. egma writes no second copy onto the
+ * span: a second copy is a fact that can come to disagree with the first, and
+ * the version is the half that cannot move.
+ *
+ * Empty for a simulation whose test mocked nothing, which is most of them, and
+ * then no call carries a mark at all.
+ */
+function mockedToolNames(
+  mockTools: readonly { readonly tool: string }[] | undefined,
+): ReadonlySet<string> {
+  return new Set((mockTools ?? []).map((mock) => mock.tool));
+}
+
+function describedSpan(
+  span: TraceSpan,
+  mocked: ReadonlySet<string>,
+): Record<string, unknown> {
+  // Only a tool span can carry the mark, and only for a name the pinned
+  // version answers for. Whichever POV reported the call is marked the same
+  // way: what egma stood in front of is a fact about the test, not about who
+  // wrote the row down. The mock tool's own name is not written beside it —
+  // matching is by tool name and by nothing else, so it is `toolName`.
+  const answeredByAMockTool = span.kind === "tool" && mocked.has(span.toolName);
   return {
     spanId: span.spanId,
     parentSpanId: span.parentSpanId,
@@ -72,18 +104,19 @@ function describedSpan(span: TraceSpan): Record<string, unknown> {
     toolName: span.toolName,
     toolArguments: span.toolArguments,
     toolResult: span.toolResult,
-    // Only when egma answered the call itself. A real call carries no key at
-    // all, so nothing on the wire has to tell "ran for real" from "nobody
-    // recorded who answered".
-    ...(span.toolProvenance === undefined
-      ? {}
-      : { toolProvenance: span.toolProvenance }),
-    spans: span.spans.map(describedSpan),
+    // Whose POV this row is. `emitter` is the storage word and never reaches
+    // a screen.
+    pov: span.pov,
+    // Absent on a real call, so nothing downstream has to tell "ran for real"
+    // from "nobody recorded who answered".
+    ...(answeredByAMockTool ? { toolProvenance: "mocked" as const } : {}),
+    spans: span.spans.map((nested) => describedSpan(nested, mocked)),
   };
 }
 
 function describedTranscript(
   detail: TraceDetail | undefined,
+  mocked: ReadonlySet<string>,
 ): Record<string, unknown> | null {
   if (detail === undefined) return null;
   return {
@@ -95,8 +128,8 @@ function describedTranscript(
     turnCounts: { human: detail.humanTurnCount, agent: detail.agentTurnCount },
     toolSpanCount: detail.toolSpanCount,
     erroredSpanCount: detail.erroredSpanCount,
-    turns: detail.turns.map(describedSpan),
-    spans: detail.spans.map(describedSpan),
+    turns: detail.turns.map((span) => describedSpan(span, mocked)),
+    spans: detail.spans.map((span) => describedSpan(span, mocked)),
     spansTruncated: detail.truncated,
   };
 }
@@ -148,6 +181,58 @@ function describedMeasures(
     measures.agentTurnCount = detail.agentTurnCount;
   }
   return measures;
+}
+
+/**
+ * Whether this conversation was graded without the agent's own account of it.
+ *
+ * **Read rather than stored**, because everything it needs is already in hand
+ * here and a stored answer would be a second record to keep honest. Four facts,
+ * and all four have to hold:
+ *
+ * - the conversation **completed** — nothing else was ever waited for;
+ * - a second account was **coming**: the lane can deliver one and this landing
+ *   reported the reference to deliver it under (ADR-0015 §2);
+ * - **none arrived** — no span under the trace is the agent's;
+ * - and the **bound has passed**, so grading has stopped waiting (§6). Inside
+ *   the bound nothing is missing yet; it is simply not here yet.
+ *
+ * **A reader that shows the agent's POV needs this and cannot infer it.** Such
+ * a reader takes the rows filed as the agent's and shows them as the
+ * conversation, so a partial export — or none — would quietly become the whole
+ * record with nothing saying it was a fragment. Regrade is what picks up a late
+ * arrival.
+ */
+function agentPovIncomplete(
+  simulation: Simulation,
+  run: Run,
+  transcript: TraceDetail | undefined,
+): boolean {
+  if (simulation.status !== "completed") return false;
+  const reference = simulation.providerReference;
+  if (reference === null || reference === "") return false;
+  if (!laneProducesAnAgentPov(run.connectionSnapshot.connectionType)) {
+    return false;
+  }
+  if (transcript !== undefined) {
+    for (const span of everySpanIn(transcript)) {
+      if (span.pov === "agent") return false;
+    }
+  }
+  // The wait began when the conversation ended, on the earlier of the two
+  // clocks that answer for that — the same reading grading itself takes, so a
+  // report from a machine running ahead cannot make this say "still waiting"
+  // forever.
+  const reported = simulation.endedAt;
+  const stamped = simulation.heartbeatAt;
+  const began =
+    reported === null
+      ? stamped
+      : stamped === null || reported < stamped
+        ? reported
+        : stamped;
+  if (began === null) return false;
+  return Date.now() - began.getTime() >= AGENT_POV_BOUND_SECONDS * 1_000;
 }
 
 export async function simulationRoutes(
@@ -219,6 +304,7 @@ export async function simulationRoutes(
       ]);
 
       const testVersion = executionEvidence?.testVersion;
+      const mocked = mockedToolNames(executionEvidence?.mockTools);
 
       return reply.send({
         id: simulation.id,
@@ -239,6 +325,14 @@ export async function simulationRoutes(
         // A result is read here, so it answers here — never by fetching the
         // run to find out.
         hasRecording: simulation.recordingReference !== null,
+        // **That grading stopped waiting for the agent's own account of this
+        // conversation.** The wait is bounded at thirty seconds so a broken
+        // exporter or a failed pull cannot hold a simulation open forever
+        // (ADR-0015 §6), and past the bound the record has to say so: a reader
+        // showing the agent's POV would otherwise show whatever fragment
+        // arrived as if it were the conversation. False is the ordinary answer
+        // — the account landed, or the lane files none.
+        agentPovIncomplete: agentPovIncomplete(simulation, run, transcript),
         measures: describedMeasures(simulation, transcript),
         // The observed metrics, off the one shared projection the transcript
         // answers with — so the strip on a simulation's evidence and the strip
@@ -297,7 +391,7 @@ export async function simulationRoutes(
           simulation.testId,
           simulation.testVersionId,
         ),
-        transcript: describedTranscript(transcript),
+        transcript: describedTranscript(transcript, mocked),
       });
     },
   );

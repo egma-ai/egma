@@ -5,7 +5,10 @@ import {
   createPersona,
   createTest,
   createTestSuite,
+  getGradingJobForTrace,
+  laneProducesAnAgentPov,
   listSimulations,
+  settleSimulationsPastTheAgentPovBound,
   startRun,
   startSimulation,
 } from "@egma/db";
@@ -35,10 +38,12 @@ import {
 } from "./support/object-storage.ts";
 import {
   contextFor,
+  everySpan,
   projectKeyFor,
   signUp,
   NEUTRAL_PERSON,
   type Customer,
+  type DetailSpan,
 } from "./support/traces.ts";
 
 /**
@@ -195,6 +200,48 @@ function naming(exported: OtlpExport, reference: string): string {
   });
 }
 
+/**
+ * The SDK's other copy of the same fact: on every span, not on the resource.
+ *
+ * A resource is fixed when a tracer provider is built, and the SDK does not
+ * always build one — a worker already running its own OpenTelemetry hands it a
+ * provider that exists. There the room name rides through the framework's
+ * metadata seam instead, which stamps every span the provider starts. This is
+ * what that exporter's bytes look like.
+ */
+function namingOnEverySpan(
+  exported: OtlpExport,
+  ...references: (string | undefined)[]
+): string {
+  let at = 0;
+  return JSON.stringify({
+    resourceSpans: (exported.resourceSpans ?? []).map((resourceSpans) => ({
+      ...resourceSpans,
+      scopeSpans: (resourceSpans.scopeSpans ?? []).map((scopeSpans) => ({
+        ...scopeSpans,
+        spans: (scopeSpans.spans ?? []).map((span) => {
+          const reference = references[at % references.length];
+          at += 1;
+          return {
+            ...span,
+            attributes: [
+              ...(span.attributes ?? []),
+              ...(reference === undefined
+                ? []
+                : [
+                    {
+                      key: PROVIDER_REFERENCE_ATTRIBUTE,
+                      value: { stringValue: reference },
+                    },
+                  ]),
+            ],
+          };
+        }),
+      })),
+    })),
+  });
+}
+
 async function post(body: string, key: string) {
   return api.app.inject({
     method: "POST",
@@ -205,6 +252,81 @@ async function post(body: string, key: string) {
     },
     payload: body,
   });
+}
+
+/**
+ * egma's own POV of one simulation, at the service door its simulator posts to:
+ * a root and one turn, filed under the trace the simulation's id spells.
+ *
+ * The persona's account, in other words — what egma said, heard and measured —
+ * and the only account a lane that files no agent POV ever has.
+ */
+async function postOwnPov(landed: {
+  simulationId: string;
+  traceId: string;
+}): Promise<void> {
+  const at = (seconds: number): string =>
+    String(
+      BigInt(CONVERSATION_STARTED_AT.getTime() + seconds * 1000) * 1_000_000n,
+    );
+  const root = `${landed.traceId.slice(0, 14)}91`;
+  const posted = await api.app.inject({
+    method: "POST",
+    url: OTLP_TRACES_PATH,
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${api.config.simulatorServiceToken}`,
+    },
+    payload: JSON.stringify({
+      resourceSpans: [
+        {
+          resource: {
+            attributes: [
+              { key: "service.name", value: { stringValue: "egma-simulator" } },
+              {
+                key: "egma.simulation_id",
+                value: { stringValue: landed.simulationId },
+              },
+            ],
+          },
+          scopeSpans: [
+            {
+              scope: { name: "egma-simulator", version: "1" },
+              spans: [
+                {
+                  traceId: landed.traceId,
+                  spanId: root,
+                  parentSpanId: "",
+                  name: "simulation",
+                  kind: "SPAN_KIND_INTERNAL",
+                  startTimeUnixNano: at(0),
+                  endTimeUnixNano: at(60),
+                  attributes: [],
+                },
+                {
+                  traceId: landed.traceId,
+                  spanId: `${landed.traceId.slice(0, 14)}92`,
+                  parentSpanId: root,
+                  name: "agent_turn",
+                  kind: "SPAN_KIND_INTERNAL",
+                  startTimeUnixNano: at(1),
+                  endTimeUnixNano: at(3),
+                  attributes: [
+                    {
+                      key: "egma.turn.text",
+                      value: { stringValue: "I moved it to Tuesday." },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  });
+  expect(posted.statusCode, posted.body).toBe(200);
+  await api.drainEvidence();
 }
 
 /** The whole capture, posted as the agent's POV of one simulation. */
@@ -240,6 +362,10 @@ async function aLandedSimulation(
     startedAt: CONVERSATION_STARTED_AT,
     endedAt: CONVERSATION_ENDED_AT,
   },
+  // What this scenario answers for itself. The pinned version is where a
+  // mocked mark is read from at display time, so a test about that mark says
+  // here which tool the world covers.
+  mockTools: readonly { readonly tool: string; readonly answer: unknown }[] = [],
 ): Promise<{ simulationId: string; runId: string; traceId: string }> {
   const auth = contextFor(person, "member");
   const created = await createAgent(auth, {
@@ -257,6 +383,7 @@ async function aLandedSimulation(
     scenario: "They want today's weather in two cities before they go out.",
     expectedBehaviors: ["gives the weather for every city that was asked about"],
     personaIds: [personaId],
+    ...(mockTools.length === 0 ? {} : { mockTools }),
   });
 
   const started = await startRun(auth, {
@@ -498,6 +625,111 @@ describe.skipIf(!storage.available)(
   },
 );
 
+describe.skipIf(!storage.available)(
+  "a project-key export naming its simulation on every span",
+  () => {
+    it("files it the same way, for the worker whose provider Egma did not build", () => {
+      // The SDK stamps the resource where it builds the tracer provider and
+      // every span where it does not — a worker already running its own
+      // OpenTelemetry keeps its provider, resource and all. Both copies carry
+      // the same string, so both must file the same way, or a customer with
+      // Langfuse installed would find their simulations in Monitoring.
+      return (async () => {
+        const [first] = captured;
+        if (first === undefined) throw new Error("the capture is empty");
+        const landed = await aLandedSimulation(
+          acme,
+          "livekit-span-stamped",
+          "room-stamped-on-spans",
+          {
+            ...A_LIVEKIT_AGENT,
+            config: {
+              url: "wss://acme.livekit.cloud",
+              agentName: "front-desk-span-stamped",
+            },
+          },
+        );
+
+        const answered = await post(
+          namingOnEverySpan(first, "room-stamped-on-spans"),
+          acmeKey,
+        );
+        expect(answered.statusCode, answered.body).toBe(200);
+        await api.drainEvidence();
+
+        const rows = await store().rows<{
+          emitter: string;
+          source: string;
+          n: number;
+        }>(
+          `select emitter, source, count() as n
+           from spans final
+           where trace_id = '${landed.traceId}'
+           group by emitter, source`,
+        );
+        expect(rows.map(({ emitter, source }) => ({ emitter, source }))).toEqual([
+          { emitter: "agent", source: "simulation" },
+        ]);
+        expect(Number(rows[0]?.n ?? 0)).toBeGreaterThan(0);
+      })();
+    }, 120_000);
+
+    it("files the spans that opened before the SDK's stamp existed too", () => {
+      /*
+       * The case every customer with their own OpenTelemetry produces.
+       *
+       * The framework's metadata processor stamps a span when the span
+       * *starts*, and the SDK installs it partway through a job that has
+       * already begun — so the job's own entrypoint span, and anything else
+       * open at that moment, ends unstamped and rides the same export. There
+       * is nothing ambiguous about it: nothing else in the resource names
+       * another conversation. Refusing it would refuse the whole export, and
+       * every such customer would lose the agent's POV of every simulation,
+       * silently.
+       */
+      return (async () => {
+        const [first] = captured;
+        if (first === undefined) throw new Error("the capture is empty");
+        const landed = await aLandedSimulation(
+          acme,
+          "livekit-reused-provider",
+          "room-reused-provider",
+          {
+            ...A_LIVEKIT_AGENT,
+            config: {
+              url: "wss://acme.livekit.cloud",
+              agentName: "front-desk-reused-provider",
+            },
+          },
+        );
+
+        // The first span opened before the stamp; every one after it carries
+        // the room.
+        const answered = await post(
+          namingOnEverySpan(first, undefined, "room-reused-provider"),
+          acmeKey,
+        );
+        expect(answered.statusCode, answered.body).toBe(200);
+        await api.drainEvidence();
+
+        // Every span of that resource, the unstamped one included, filed
+        // under the simulation the rest of them named.
+        const posted = (JSON.parse(
+          namingOnEverySpan(first, undefined, "room-reused-provider"),
+        ) as OtlpExport).resourceSpans?.flatMap(
+          (one) => one.scopeSpans?.flatMap((scope) => scope.spans ?? []) ?? [],
+        );
+        expect(
+          await countOf(
+            `select count() as n from spans final
+             where trace_id = '${landed.traceId}' and emitter = 'agent'`,
+          ),
+        ).toBe(posted?.length ?? -1);
+      })();
+    }, 120_000);
+  },
+);
+
 describe.skipIf(!storage.available)("a reference that names no simulation", () => {
   it("refuses the whole export and stores nothing", async () => {
     const [first] = captured;
@@ -532,6 +764,85 @@ describe.skipIf(!storage.available)("a reference that names no simulation", () =
     const refusal = answered.json() as { message: string };
     expect(refusal.message).toContain("with no value");
     expect(refusal.message).toContain("Nothing from this request was stored");
+
+    await api.drainEvidence();
+    expect(
+      await countOf(
+        `select count() as n from spans final
+         where project_id = '${globex.projectId}'`,
+      ),
+    ).toBe(0);
+  });
+
+  it("refuses a resource whose spans do not agree on the conversation", async () => {
+    const [first] = captured;
+    if (first === undefined) throw new Error("the capture is empty");
+
+    // One agent process runs one conversation, so spans under one resource
+    // that name two rooms are a sender this door cannot file for — and
+    // guessing either answer is how one customer's turns land on another's
+    // record.
+    const answered = await post(
+      namingOnEverySpan(first, "room-lisbon", "room-oslo"),
+      globexKey,
+    );
+    expect(answered.statusCode).toBe(400);
+    const refusal = answered.json() as { message: string };
+    expect(refusal.message).toContain("do not agree");
+    expect(refusal.message).toContain("room-lisbon");
+    expect(refusal.message).toContain("room-oslo");
+    expect(refusal.message).toContain("Nothing from this request was stored");
+
+    await api.drainEvidence();
+    expect(
+      await countOf(
+        `select count() as n from spans final
+         where project_id = '${globex.projectId}'`,
+      ),
+    ).toBe(0);
+  });
+
+  it("refuses a resource whose stamped spans name two conversations by turns", async () => {
+    const [first] = captured;
+    if (first === undefined) throw new Error("the capture is empty");
+
+    // Alternating, so no single span is the odd one out: whichever answer
+    // this door picked, half the spans said the other.
+    const answered = await post(
+      namingOnEverySpan(first, "room-lisbon", "room-oslo", "room-lisbon"),
+      globexKey,
+    );
+    expect(answered.statusCode).toBe(400);
+    expect((answered.json() as { message: string }).message).toContain(
+      "do not agree",
+    );
+
+    await api.drainEvidence();
+    expect(
+      await countOf(
+        `select count() as n from spans final
+         where project_id = '${globex.projectId}'`,
+      ),
+    ).toBe(0);
+  });
+
+  it("refuses a span-stamped reference another project carries, in the same words", async () => {
+    const [first] = captured;
+    if (first === undefined) throw new Error("the capture is empty");
+
+    // The tenancy rule on the span path, which the resource path already
+    // proves: Globex's key, Acme's room. A reference is never a tenancy
+    // claim, on either path — it is looked up inside the project the
+    // credential resolved to, so a copied key learns nothing about the
+    // rooms in an account it does not hold.
+    const answered = await post(
+      namingOnEverySpan(first, FIXTURE_PROVIDER_CALL_ID),
+      globexKey,
+    );
+    expect(answered.statusCode).toBe(400);
+    const refusal = answered.json() as { message: string };
+    expect(refusal.message).toContain("no simulation in this project carries");
+    expect(refusal.message).toContain(FIXTURE_PROVIDER_CALL_ID);
 
     await api.drainEvidence();
     expect(
@@ -668,6 +979,226 @@ describe.skipIf(!storage.available)("the row caps, across an export naming two",
   }, 120_000);
 });
 
+/**
+ * **When grading is asked for, and never before.**
+ *
+ * ADR-0015 §6: a simulation's evidence is ready when the row is complete *and*
+ * the agent's own POV has been filed — or when 30 seconds have passed since
+ * completion on a lane that produces one. Grading a conversation before the
+ * account it will be judged on has arrived is grading the wrong evidence, and
+ * the wait must end anyway, because a broken exporter cannot be allowed to hold
+ * a simulation open forever.
+ *
+ * The three cases below are the whole rule: the wait, its end when the POV
+ * lands, and its end when the bound expires. Each reads the queue through the
+ * data-access seam the grading service claims from, because a job row is the
+ * whole of what "grading was asked for" means.
+ */
+describe.skipIf(!storage.available)("when a simulation's grading is asked for", () => {
+  /** What the v1 read says about the agent's account of one simulation. */
+  async function agentPovIncompleteOf(simulationId: string): Promise<unknown> {
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    return (read.json() as { agentPovIncomplete: boolean }).agentPovIncomplete;
+  }
+
+  it("waits: a landing files no grading work while the agent's POV is still coming", async () => {
+    const room = "egma-grading-waits-1";
+    const landed = await aLandedSimulation(acme, "waits", room, {
+      ...A_LIVEKIT_AGENT,
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk-waits" },
+    });
+
+    const auth = contextFor(acme, "member");
+    // The row is complete and its graders are planned, and still nothing is
+    // queued: the agent has not said anything about this conversation yet.
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+    const [row] = (await listSimulations(auth, landed.runId, { limit: 1 }))
+      ?.items ?? [];
+    expect(row?.status).toBe("completed");
+  }, 120_000);
+
+  it("asks the moment the agent's POV lands, and says the record has it", async () => {
+    const room = "egma-grading-lands-1";
+    const landed = await aLandedSimulation(acme, "lands", room, {
+      ...A_LIVEKIT_AGENT,
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk-lands" },
+    });
+    const auth = contextFor(acme, "member");
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+
+    await exportTheCapture(acmeKey, room);
+
+    const job = await getGradingJobForTrace(auth, landed.traceId);
+    expect(job?.traceId).toBe(landed.traceId);
+    expect(job?.source).toBe("simulation");
+    // And the read says the record is whole, so a page showing the agent's POV
+    // knows it is showing the conversation rather than a fragment of it.
+    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(false);
+  }, 120_000);
+
+  /**
+   * The bound, and the record it leaves. Nothing is exported for this
+   * conversation at all — the agent's exporter is broken, or its platform never
+   * answered — so the wait can only end on a clock.
+   *
+   * The sweep is called directly rather than waited for: the loop that runs it
+   * on an interval is the API's, and what is proved here is the seam's own
+   * decision.
+   */
+  it("stops waiting at the bound, grades anyway, and says the POV is incomplete", async () => {
+    const room = "egma-grading-bound-1";
+    const landed = await aLandedSimulation(acme, "bound", room, {
+      ...A_LIVEKIT_AGENT,
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk-bound" },
+    });
+    const auth = contextFor(acme, "member");
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+
+    const settled = await settleSimulationsPastTheAgentPovBound();
+    expect(settled.map((one) => one.id)).toContain(landed.simulationId);
+    expect(
+      settled.find((one) => one.id === landed.simulationId)?.agentPovFiled,
+    ).toBe(false);
+
+    const job = await getGradingJobForTrace(auth, landed.traceId);
+    expect(job?.traceId).toBe(landed.traceId);
+    // **And the read says so**, which is the half a reader needs: a view that
+    // shows the agent's POV would otherwise show whatever fragment arrived as
+    // if it were the whole conversation.
+    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(true);
+
+    // **And it settles nothing a second time.** The queue row is the record of
+    // grading having been asked for, so a later tick reads it and passes the
+    // row over — which is what keeps one conversation to one handoff however
+    // many replicas are reading the clock.
+    const again = await settleSimulationsPastTheAgentPovBound();
+    expect(again.map((one) => one.id)).not.toContain(landed.simulationId);
+  }, 120_000);
+
+  /**
+   * A landing whose clock is an hour behind egma's.
+   *
+   * `ended_at` comes off the report, so a simulator with a skewed clock writes
+   * a moment egma never saw. The bound reads it — it is the conversation's own
+   * moment and the one a person reads — but the window this sweep looks in
+   * cannot, or a row would be stamped outside every window that could ever
+   * settle it and wait for grading forever with nothing saying so. The window
+   * reads egma's own landing stamp instead.
+   */
+  it("still settles a landing whose reported clock is far behind egma's", async () => {
+    const room = "egma-grading-skewed-1";
+    const longAgo = new Date(Date.now() - 6 * 60 * 60 * 1_000);
+    const landed = await aLandedSimulation(
+      acme,
+      "skewed",
+      room,
+      {
+        ...A_LIVEKIT_AGENT,
+        config: {
+          url: "wss://acme.livekit.cloud",
+          agentName: "front-desk-skewed",
+        },
+      },
+      {
+        startedAt: new Date(longAgo.getTime() - 60 * 1_000),
+        endedAt: longAgo,
+      },
+    );
+    const auth = contextFor(acme, "member");
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+
+    // The standing window, unwidened: six hours outside it by the report's own
+    // clock, and inside it by the stamp egma wrote when the landing arrived.
+    const settled = await settleSimulationsPastTheAgentPovBound();
+    expect(settled.map((one) => one.id)).toContain(landed.simulationId);
+    expect(
+      (await getGradingJobForTrace(auth, landed.traceId))?.traceId,
+    ).toBe(landed.traceId);
+  }, 120_000);
+
+  /**
+   * A lane egma dials rather than joins produces no agent POV at all: nothing
+   * of egma's runs on the far end of a phone call. There is no second account
+   * coming, so there is nothing to wait for.
+   */
+  it("does not wait at all for a lane that produces no agent POV", async () => {
+    const landed = await aLandedSimulation(acme, "phone", "", {
+      agentPlatform: "retell",
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+15551230000" },
+    });
+
+    const auth = contextFor(acme, "member");
+    const [row] = (await listSimulations(auth, landed.runId, { limit: 1 }))
+      ?.items ?? [];
+    expect(row?.status).toBe("completed");
+    // Nothing to warn a reader about: no account was ever owed.
+    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(false);
+    const bounded = await settleSimulationsPastTheAgentPovBound();
+    expect(bounded.map((one) => one.id)).not.toContain(landed.simulationId);
+  }, 120_000);
+
+  /**
+   * **The two Retell lanes that could never deliver one either.**
+   *
+   * A chat-API conversation's reference is a chat id, and egma's pull asks for
+   * a *call* record by call id — so a chat id would fetch nothing however long
+   * anything waited. Text mode is the same answer for a different reason: egma
+   * carries the whole exchange on its own requests and Retell hands back no
+   * reference to fetch anything by at all.
+   *
+   * Naming either as producing an agent POV would make every simulation over it
+   * wait out the whole bound and then be recorded as missing an account nobody
+   * was ever going to send. So the drain of egma's own POV is the whole handoff
+   * on both: grading is asked for as soon as that evidence is query-visible,
+   * with no bound in between.
+   *
+   * The chat lane is conducted here end to end. Text mode is pinned by the list
+   * itself rather than conducted, because a run over it is opened against a
+   * named agent version and cannot be started without the platform read this
+   * suite has no reason to stand up.
+   */
+  it("grades a chat-lane landing off egma's own POV, with no bound in between", async () => {
+    const landed = await aLandedSimulation(
+      acme,
+      "chatlane",
+      "chat_5d1f9a3b7c",
+      {
+        agentPlatform: "retell",
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+        modality: "chat",
+        config: { retellAgentId: "agent_chat_lane" },
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
+    );
+    const auth = contextFor(acme, "member");
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+
+    await postOwnPov(landed);
+
+    // No sweep, no bound: the one account this lane has arrived, and that is
+    // the whole of what grading was waiting on.
+    const job = await getGradingJobForTrace(auth, landed.traceId);
+    expect(job?.traceId).toBe(landed.traceId);
+    // And nothing is missing, because nothing was owed.
+    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(false);
+
+    // The same decision about the lane beside it, and about the two that can.
+    expect(laneProducesAnAgentPov("retell_text_mode")).toBe(false);
+    expect(laneProducesAnAgentPov("retell_chat_api")).toBe(false);
+    expect(laneProducesAnAgentPov("livekit_room")).toBe(true);
+    expect(laneProducesAnAgentPov("retell_web_call")).toBe(true);
+  }, 120_000);
+});
+
 describe.skipIf(!storage.available)("a project-key export naming nothing", () => {
   it("is production, exactly as it was before the branch existed", async () => {
     const [first] = captured;
@@ -782,7 +1313,12 @@ describe.skipIf(!storage.available)("both POVs under one trace", () => {
         spans: { spanId: string; parentSpanId: string }[];
       } | null;
     };
-    expect(body.transcript?.spanCount).toBe(FIXTURE_TRACE.spans + 1);
+    // **One conversation, counted once.** Both POVs are stored and both come
+    // back in the tree, but the counts beside them are the agent's POV alone —
+    // otherwise a reader would be told this conversation held one more step
+    // than the agent ever took, and on a trace with two full POVs, twice as
+    // many turns as anybody spoke.
+    expect(body.transcript?.spanCount).toBe(FIXTURE_TRACE.spans);
     const roots = (body.transcript?.spans ?? []).filter(
       (span) => span.parentSpanId === "",
     );
@@ -838,6 +1374,10 @@ describe.skipIf(!storage.available)("the booking that opened this effort", () =>
         startedAt: new Date("2026-09-04T17:52:00.000Z"),
         endedAt: new Date("2026-09-04T17:55:00.000Z"),
       },
+      // The one tool this test stood in front of. The other two ran for real
+      // inside the agent's own process, which is exactly the case that used to
+      // be invisible.
+      [{ tool: "check_availability", answer: { slots: [] } }],
     );
 
     if (booking === undefined) throw new Error("the booking capture is missing");
@@ -900,6 +1440,46 @@ describe.skipIf(!storage.available)("the booking that opened this effort", () =>
     expect(tools[2]?.tool_arguments).toContain("Doctor Alvarez");
   });
 
+  /**
+   * **The mocked mark, read by name and from nowhere else.**
+   *
+   * These spans are LiveKit's own: the agent's process wrote them and nothing
+   * of egma's ever touched them, so there is no stamp on them to read. What
+   * says `check_availability` was answered by a mock tool is the test version
+   * this simulation pinned, matched by tool name — the authored world itself,
+   * which cannot change under a result. The two calls that world does not
+   * cover ran for real and carry no mark at all, which is the whole
+   * distinction a developer opens this transcript for.
+   */
+  it("marks the one call a mock tool answered, by name, and no other", async () => {
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${landed.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    const body = read.json() as {
+      transcript: {
+        readonly turns: DetailSpan[];
+        readonly spans: DetailSpan[];
+      } | null;
+    };
+    const transcript = body.transcript;
+    if (transcript === null) throw new Error("the simulation has no transcript");
+
+    const all = everySpan([...transcript.turns, ...transcript.spans]);
+    const tools = all.filter((span) => span.kind === "tool");
+    expect(tools.map((span) => [span.toolName, span.toolProvenance])).toEqual([
+      ["list_providers", undefined],
+      ["check_availability", "mocked"],
+      ["book_appointment", undefined],
+    ]);
+
+    // Every span of this transcript is the agent's own account of the
+    // conversation, which is what the run view renders.
+    expect([...new Set(all.map((span) => span.pov))]).toEqual(["agent"]);
+  });
+
   it("files it under the simulation, as the agent's POV, and keeps LiveKit's id", async () => {
     const rows = await store().rows<{
       source: string;
@@ -924,6 +1504,73 @@ describe.skipIf(!storage.available)("the booking that opened this effort", () =>
            and JSONExtractString(payload, '${WIRE_TRACE_ID_PAYLOAD_KEY}') = '${APPOINTMENT_TRACE.wireTraceId}'`,
       ),
     ).toBe(APPOINTMENT_TRACE.spans);
+  });
+
+  /**
+   * **The number this whole effort is about**, on the conversation that opened
+   * it, read back through the contract a customer reads.
+   *
+   * Five human turns, four of them answered. Each wait starts where the caller
+   * stopped being audible — the end of that `user_turn`'s last `user_speaking`
+   * child, which is the VAD's own detected end — and stops at the first
+   * `agent_speaking` before the next human turn. Hand-computed once from the
+   * export's raw nanosecond timestamps, held as the store keeps them: starts
+   * truncated to the microsecond, durations exact.
+   *
+   *   1. caller stops being audible 1788544388880703312, agent speaks
+   *      1788544392672227000 → 3791.523688 ms
+   *   2. 1788544412831362936 → 1788544414353803000 → 1522.440064 ms
+   *   3. 1788544429283150472 → 1788544431499003000 → 2215.852528 ms
+   *   4. 1788544442631104016 → 1788544444538535000 → 1907.430984 ms
+   *
+   * From `user_turn`'s own end — the endpointing commit, which is where the
+   * derivation stopped before catalog version 8 — the same four turns read
+   * 3334.056376, 1108.662037, 1770.409112 and 1394.444331 ms. That difference,
+   * about half a second a turn, is time the caller really waited.
+   *
+   * The fifth human turn is never answered: two agent turns follow it and
+   * neither speaks, so it measures nothing rather than borrowing the next
+   * conversation's silence.
+   */
+  it("measures the four answered waits from the caller's last audible sample", async () => {
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${landed.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    const metrics = (
+      read.json() as {
+        metrics: {
+          measure: string;
+          pov: string;
+          derived: boolean;
+          samples: number[];
+          otherPov?: unknown;
+        }[];
+      }
+    ).metrics;
+
+    const latency = metrics.find(
+      (metric) => metric.measure === "turn_response_latency",
+    );
+    expect(latency?.samples).toEqual([
+      3791.523688, 1522.440064, 2215.852528, 1907.430984,
+    ]);
+    // The agent's own POV, and it is the headline: egma timed nothing here, so
+    // there is no second series beside it either.
+    expect(latency?.pov).toBe("agent");
+    expect(latency?.derived).toBe(true);
+    expect(latency?.otherPov).toBeUndefined();
+
+    // And the first answer, from the moment the conversation opened to the
+    // agent's first word: `agent_session` at 1788544385416091000, first
+    // `agent_speaking` at 1788544388880227000.
+    const first = metrics.find(
+      (metric) => metric.measure === "first_response_latency",
+    );
+    expect(first?.samples).toEqual([3464.136]);
+    expect(first?.pov).toBe("agent");
   });
 });
 

@@ -1,6 +1,10 @@
 export {
-  monitorLiveKit,
+  monitor,
   type ExistingTelemetry,
-  type MonitorLiveKitOptions,
+  type MonitorOptions,
 } from "./monitoring.ts";
-export { mockable } from "./mockable.ts";
+export {
+  NotReported,
+  simulation,
+  type SimulationOptions,
+} from "./simulation-room.ts";
