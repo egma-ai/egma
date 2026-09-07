@@ -33,6 +33,15 @@ export const cloudMeterPeriod = pgTable(
     pendingTimestamp: moment("pending_timestamp"),
     pendingHour: moment("pending_hour"),
     pendingFirstSentAt: moment("pending_first_sent_at"),
+    lateInvoicedCents: bigint("late_invoiced_cents", { mode: "number" }).notNull().default(0),
+    lateObservedSeconds: bigint("late_observed_seconds", { mode: "number" }).notNull().default(0),
+    latePendingIdentifier: text("late_pending_identifier"),
+    latePendingThroughSeconds: bigint("late_pending_through_seconds", { mode: "number" }),
+    latePendingAmountCents: bigint("late_pending_amount_cents", { mode: "number" }),
+    lateInvoiceCreateStartedAt: moment("late_invoice_create_started_at"),
+    lateInvoiceId: text("late_invoice_id"),
+    lateItemCreateStartedAt: moment("late_item_create_started_at"),
+    lateInvoiceItemId: text("late_invoice_item_id"),
     state: text("state").$type<"open" | "needs_attention" | "closed">().notNull().default("open"),
     lastOutcome: text("last_outcome").$type<
       "accepted" | "duplicate" | "uncertain" | "invoice_closed" | "timestamp_expired"
@@ -63,6 +72,22 @@ export const cloudMeterPeriod = pgTable(
       num_nonnulls(${table.pendingIdentifier}, ${table.pendingSeconds}, ${table.pendingValue},
         ${table.pendingTimestamp}, ${table.pendingHour}, ${table.pendingFirstSentAt}) in (0, 6)
     `),
+    check("cloud_meter_period_late_counted", sql`
+      ${table.lateInvoicedCents} between 0 and 9007199254740991
+      and ${table.lateObservedSeconds} between 0 and 9007199254740991
+    `),
+    check("cloud_meter_period_late_pending_complete", sql`
+      num_nonnulls(${table.latePendingIdentifier}, ${table.latePendingThroughSeconds}, ${table.latePendingAmountCents}) in (0, 3)
+      and (${table.latePendingIdentifier} is not null or num_nonnulls(${table.lateInvoiceCreateStartedAt}, ${table.lateInvoiceId}, ${table.lateItemCreateStartedAt}, ${table.lateInvoiceItemId}) = 0)
+    `),
+    check("cloud_meter_period_late_pending_valid", sql`${table.latePendingIdentifier} is null or (
+      btrim(${table.latePendingIdentifier}) <> ''
+      and ${table.latePendingThroughSeconds} between 1 and 9007199254740991
+      and ${table.latePendingAmountCents} between 1 and 9007199254740991
+      and (${table.lateInvoiceId} is null or (${table.lateInvoiceCreateStartedAt} is not null and btrim(${table.lateInvoiceId}) <> ''))
+      and (${table.lateItemCreateStartedAt} is null or ${table.lateInvoiceId} is not null)
+      and (${table.lateInvoiceItemId} is null or (${table.lateItemCreateStartedAt} is not null and btrim(${table.lateInvoiceItemId}) <> ''))
+    )`),
     check("cloud_meter_period_pending_valid", sql`${table.pendingIdentifier} is null or (
       btrim(${table.pendingIdentifier}) <> ''
       and ${table.pendingSeconds} between 1 and 9007199254740991
