@@ -73,6 +73,18 @@ export type CloudBilling = {
    */
   readonly seededPlans: readonly string[];
   /**
+   * What the boot's catch-up charged the inference balance for: the stored
+   * usage records a failed usage sink never charged.
+   *
+   * Zero on every ordinary boot. Anything else is a delivery that was lost
+   * before this process started, collected late, and worth a line in the log
+   * for exactly that reason.
+   */
+  readonly caughtUp: {
+    readonly charged: number;
+    readonly amountMicros: number;
+  };
+  /**
    * The hourly job that reports each Pro organization's minutes to Stripe.
    *
    * Started once this process is serving, because it is neither a gate on
@@ -117,6 +129,7 @@ export async function loadCloudBilling(settings: {
       ? (app) => ee.billingWebhookRoutes(app, { stripe })
       : undefined,
     seededPlans: loaded.seededPlans,
+    caughtUp: loaded.caughtUp,
     startMeterJob: (log) => ee.startOverageMeterJob({ gateway: stripe, log }),
   };
 }

@@ -12,6 +12,10 @@
  * billing ports, whose shapes are fixed in shared code and neither of which
  * carries a person. A run start, a claim batch and a stored usage record are
  * each Egma asking itself about money it is owed or has spent.
+ *
+ * A fourth is named there and takes nothing at all: the sweep that charges the
+ * stored records a failed sink never charged. It walks the deployment's own
+ * unpaid records, so there is no customer to name it and no context to carry.
  */
 
 export {
@@ -24,10 +28,13 @@ export {
 } from "./accounts.ts";
 
 export {
+  MOST_RECORDS_SWEPT_AT_ONCE,
   chargeForStoredUsage,
   readLedgerBalance,
+  sweepUnchargedUsage,
   type ChargedUsage,
   type PeriodCharge,
+  type SweptUsage,
 } from "./ledger.ts";
 
 export { seedCloudPlans, type CloudPlan, type SeededPlans } from "./plans.ts";

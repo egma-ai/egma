@@ -114,6 +114,7 @@ export {
 export {
   METER_TIMESTAMP_WINDOW_DAYS,
   MOST_HOURS_CAUGHT_UP_AT_ONCE,
+  MOST_RECORDS_SWEPT_AT_ONCE,
   accountForBillingAction,
   applyStripeEvent,
   chargeForStoredUsage,
@@ -126,6 +127,7 @@ export {
   readEntitlementFacts,
   readLedgerBalance,
   seedCloudPlans,
+  sweepUnchargedUsage,
   type BillingAccount,
   type BillingOverview,
   type ChargedUsage,
@@ -137,6 +139,7 @@ export {
   type PeriodCharge,
   type SeededPlans,
   type StripePlanObjects,
+  type SweptUsage,
 } from "./access/index.ts";
 
 export {

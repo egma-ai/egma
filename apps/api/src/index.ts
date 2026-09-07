@@ -206,6 +206,19 @@ if (cloudBilling !== undefined && cloudBilling.seededPlans.length > 0) {
     "Cloud plan rows were written from the shipped file",
   );
 }
+if (cloudBilling !== undefined && cloudBilling.caughtUp.charged > 0) {
+  // A usage sink may fail without failing the write that stored the record,
+  // and a resend cannot replace the lost delivery — so the plug-in charges
+  // what it finds uncharged when it loads. Every row here is money this
+  // deployment would otherwise never have collected.
+  app.log.warn(
+    {
+      charged: cloudBilling.caughtUp.charged,
+      amountMicros: cloudBilling.caughtUp.amountMicros,
+    },
+    "Inference charges that reached no sink were caught up at boot",
+  );
+}
 if (graderCatalog.projectGraders.length > 0) {
   // The projects, never anything a customer wrote: what is worth saying is
   // that projects which lacked their protected Expected behaviors policy now

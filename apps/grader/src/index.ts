@@ -50,6 +50,9 @@ if (billingIsConfigured(config)) {
   log.info(
     platformEvent("egma.billing.installed", {
       plans: cloud.seededPlans.join(","),
+      // What loading it charged: the stored usage records a failed usage sink
+      // never charged. Zero on every ordinary boot.
+      caughtUp: cloud.caughtUp.charged,
     }),
     "the cloud billing adapter is installed",
   );

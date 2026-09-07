@@ -7,7 +7,7 @@ import {
   type AuthContext,
   type StoredUsageRecord,
 } from "@egma/db";
-import { and, eq, gte, lt, sql, sum } from "drizzle-orm";
+import { and, asc, eq, gt, gte, isNull, lt, sql, sum } from "drizzle-orm";
 
 import { inferenceChargeKey } from "../idempotency.ts";
 import { within } from "./within.ts";
@@ -30,6 +30,11 @@ const { cloudBillingAccount, cloudLedgerEntry, usageRecord } = schema;
  * piece of spend, so a redelivered measurement or a replayed sink cannot
  * charge twice — and the sink is handed only what the store actually wrote,
  * which is the first of the two guards.
+ *
+ * **And a charge nobody managed to write is found again.** A sink may fail
+ * without failing the write that stored the record, so the sweep below reads
+ * the records that carry no charge and puts them through the same path. The
+ * key derived from the record is what lets it run beside a live delivery.
  */
 
 /** What one delivery to the sink actually charged. */
@@ -122,6 +127,110 @@ export async function chargeForStoredUsage(
   }
 
   return { charged, amountMicros };
+}
+
+/**
+ * How many uncharged records one pass of the sweep reads, and how many passes
+ * one sweep makes.
+ *
+ * A bound rather than a limit on what is owed, exactly as the meter job's
+ * catch-up is bounded: what a sweep does not reach is still uncharged when the
+ * next one runs an hour later, and the oldest debt is always collected first.
+ * Ten thousand records a sweep is more than an outage of a whole day leaves
+ * behind on a deployment of this size, and a pass that reads a short page
+ * stops the sweep there.
+ */
+export const MOST_RECORDS_SWEPT_AT_ONCE = 500;
+const MOST_PASSES_IN_ONE_SWEEP = 20;
+
+/** What one sweep found and what it charged. */
+export type SweptUsage = {
+  /** Stored records Egma's key paid for that carried no charge. */
+  readonly found: number;
+  /** How many of them became a ledger row. A race charges the rest. */
+  readonly charged: number;
+  /** What those rows came to, in millionths of a US dollar, as a positive sum. */
+  readonly amountMicros: number;
+};
+
+/**
+ * Charge the balance for every stored record that never reached the sink.
+ *
+ * **The sink is allowed to fail, so somebody has to come back for the money.**
+ * A usage record is a durable row before any adapter sees it, and a sink that
+ * throws must never fail that write — so a billing fault loses a delivery, and
+ * a resend cannot replace it: the store collapses a redelivered measurement on
+ * its deterministic identity and hands the sink nothing. Without this the
+ * organization keeps a balance it has already spent, quietly, for ever. This
+ * is the half that makes "it can be rebuilt from `usage_record`" true rather
+ * than intended.
+ *
+ * **What it looks for is a record with no charge**, found by the left join
+ * onto the ledger row that names it. Only Egma's own key is anybody's bill —
+ * a record the customer's provider key paid for costs this balance nothing —
+ * and a record that cost nothing is not a movement, so both are passed over
+ * here for the same reasons `chargeForStoredUsage` passes over them.
+ *
+ * **It charges through that one path and nowhere else**, so there is no second
+ * opinion about what a charge is. Charging twice is impossible whatever else
+ * is happening: the row's idempotency key is derived from the usage record, so
+ * a delivery still in flight and this sweep write the same key and the unique
+ * index keeps one of them. That is also why no record has to be old enough to
+ * be safe to sweep.
+ *
+ * **It takes no `AuthContext` and can be given no customer.** It walks the
+ * deployment's own unpaid records, which is what a catch-up is; the lint rule
+ * names it beside the two ports for the same reason.
+ */
+export async function sweepUnchargedUsage(): Promise<SweptUsage> {
+  let found = 0;
+  let charged = 0;
+  let amountMicros = 0;
+
+  for (let pass = 0; pass < MOST_PASSES_IN_ONE_SWEEP; pass += 1) {
+    const rows = await fencedDatabase()
+      .select({
+        id: usageRecord.id,
+        organizationId: usageRecord.organizationId,
+        projectId: usageRecord.projectId,
+        occurredAt: usageRecord.occurredAt,
+        provider: usageRecord.provider,
+        model: usageRecord.model,
+        amountMicros: usageRecord.amountMicros,
+      })
+      .from(usageRecord)
+      .leftJoin(
+        cloudLedgerEntry,
+        and(
+          eq(cloudLedgerEntry.usageRecordId, usageRecord.id),
+          eq(cloudLedgerEntry.kind, "inference_charge"),
+        ),
+      )
+      .where(
+        and(
+          eq(usageRecord.paymentSource, "platform"),
+          gt(usageRecord.amountMicros, 0),
+          isNull(cloudLedgerEntry.id),
+        ),
+      )
+      // Oldest first, so a sweep that does not reach the end of the backlog
+      // has collected the oldest debt rather than an arbitrary slice of it.
+      .orderBy(asc(usageRecord.occurredAt))
+      .limit(MOST_RECORDS_SWEPT_AT_ONCE);
+    if (rows.length === 0) break;
+
+    found += rows.length;
+    const written = await chargeForStoredUsage(
+      // The payment source is not read back off the row: the query above is
+      // what pinned it, and every record here is one Egma's own key paid for.
+      rows.map((row) => ({ ...row, paymentSource: "platform" as const })),
+    );
+    charged += written.charged;
+    amountMicros += written.amountMicros;
+    if (rows.length < MOST_RECORDS_SWEPT_AT_ONCE) break;
+  }
+
+  return { found, charged, amountMicros };
 }
 
 /**

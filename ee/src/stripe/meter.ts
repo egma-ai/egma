@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import {
   markOverageReported,
   overageOwedThrough,
+  sweepUnchargedUsage,
   type OrganizationOverage,
   type OverageMark,
 } from "../access/index.ts";
@@ -36,6 +37,11 @@ import type { StripeGateway } from "./gateway.ts";
  *
  * **A failure stops that organization's catch-up and nobody else's.** The hour
  * that failed keeps the mark where it is, so the next wake begins there again.
+ *
+ * **The tick carries one thing that is not Stripe's**: the inference balance's
+ * own catch-up, which charges the stored records a failed usage sink never
+ * charged. It runs first, it swallows its own faults, and it is here because
+ * this timer is the only hourly heartbeat a deployment that bills has.
  */
 
 /** The two meter event names, which are also how the meters are found. */
@@ -238,6 +244,41 @@ export async function reportOverageOwed(
   };
 }
 
+/**
+ * Charge the balance for the stored records a failed sink never charged.
+ *
+ * **The hourly tick is the only heartbeat this deployment has**, so the
+ * inference balance's catch-up rides it. It has nothing to do with Stripe and
+ * runs before the meter events go out for that reason: a Stripe that is
+ * unreachable must not be what decides whether Egma collects money a customer
+ * has already spent. The plug-in's own load runs it too, so a charge lost to a
+ * billing fault is written at the next boot or within the hour, whichever
+ * comes first.
+ *
+ * **It never stops the meter run.** A sweep that could not read its rows is a
+ * charge that is late, and the hour Stripe is owed is a separate fact.
+ */
+async function catchUpOnLostDeliveries(log: MeterLog): Promise<void> {
+  try {
+    const swept = await sweepUnchargedUsage();
+    if (swept.charged === 0) return;
+    // Said out loud, and as a warning rather than as news: every row it wrote
+    // is a delivery to the usage sink that was lost, and a deployment that
+    // charges this way every hour has a fault upstream of it.
+    log.warn(
+      { charged: swept.charged, amountMicros: swept.amountMicros },
+      "the inference balance was charged for stored usage records that " +
+        "reached no sink",
+    );
+  } catch (fault) {
+    log.error(
+      { err: fault },
+      "the inference balance could not be caught up for the stored usage " +
+        "records that carry no charge",
+    );
+  }
+}
+
 export type OverageMeterJob = {
   /** Stop the timer. What a shutting-down process calls. */
   stop(): void;
@@ -275,7 +316,10 @@ export function startOverageMeterJob(
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const runFor = (at: Date): void => {
-    void reportOverageOwed(options.gateway, previousHour(at), log, at)
+    // The balance's catch-up first, then the hour Stripe is owed. It swallows
+    // its own faults, so the meter run below happens either way.
+    void catchUpOnLostDeliveries(log)
+      .then(() => reportOverageOwed(options.gateway, previousHour(at), log, at))
       .then((report) => {
         if (report.organizations === 0) return;
         log.info(

@@ -21,12 +21,14 @@ import {
   cloudEntitlementSource,
   cloudUsageSink,
   inferenceChargeKey,
+  loadCloudBilling,
   openBillingAccount,
   readBillingOverview,
   readEntitlementFacts,
   readLedgerBalance,
   readPlanCatalog,
   seedCloudPlans,
+  sweepUnchargedUsage,
   welcomeCreditKey,
 } from "../src/index.ts";
 import {
@@ -1002,5 +1004,86 @@ describe("the grading claim, when Egma's key pays for the judge", () => {
       restore();
       await database.sql("delete from grading_job where id = $1", [id]);
     }
+  });
+});
+
+describe("the catch-up for a delivery the usage sink lost", () => {
+  /**
+   * **The fault this stands in for, and why a resend cannot repair it.** A
+   * sink that throws must never fail the write that stored the record, so a
+   * billing fault loses a delivery and keeps the fact; and the next delivery
+   * of the same measurement collapses on the store's own dedupe key, which
+   * means the sink never hears about it again. What is left behind is exactly
+   * what is seeded here: a stored record Egma's key paid for, with no ledger
+   * row, on an organization that has already spent the balance.
+   *
+   * The sweep takes no customer — it walks the deployment's own unpaid
+   * records — so these tests are written for the whole database this file
+   * owns, and the two records it must leave alone are seeded beside the one it
+   * must charge.
+   */
+  const lost = storedRecord(globex, newId("usg"), { amountMicros: 44_000 });
+  const theirs = storedRecord(globex, newId("usg"), {
+    paymentSource: "customer",
+    amountMicros: 77_000,
+  });
+  const free = storedRecord(globex, newId("usg"), { amountMicros: 0 });
+
+  it("charges the record nobody charged, and leaves the other two alone", async () => {
+    for (const record of [lost, theirs, free]) {
+      await seedUsageRecord(globex, record);
+    }
+    const before = Number((await accountRow(globex)).balance_micros);
+
+    expect(await sweepUnchargedUsage()).toEqual({
+      found: 1,
+      charged: 1,
+      amountMicros: 44_000,
+    });
+
+    expect(Number((await accountRow(globex)).balance_micros)).toBe(
+      before - 44_000,
+    );
+    const keys = new Set(
+      (await ledgerRows(globex)).map((row) => row.idempotency_key),
+    );
+    expect(keys.has(inferenceChargeKey(lost.id))).toBe(true);
+    // A record the customer's own provider key paid for is not Egma's to
+    // charge, and a record that cost nothing is not a movement of a balance.
+    expect(keys.has(inferenceChargeKey(theirs.id))).toBe(false);
+    expect(keys.has(inferenceChargeKey(free.id))).toBe(false);
+  });
+
+  it("writes nothing at all on the sweep after it", async () => {
+    const account = await accountRow(globex);
+    const rows = await ledgerRows(globex);
+
+    expect(await sweepUnchargedUsage()).toEqual({
+      found: 0,
+      charged: 0,
+      amountMicros: 0,
+    });
+
+    expect(await accountRow(globex)).toEqual(account);
+    expect(await ledgerRows(globex)).toEqual(rows);
+  });
+
+  it("runs when the cloud plug-in loads", async () => {
+    // The wiring, and not the sweep again: a process that installs this
+    // adapter collects what the last one lost before it accepts new work.
+    const missed = storedRecord(globex, newId("usg"), { amountMicros: 12_000 });
+    await seedUsageRecord(globex, missed);
+    const before = Number((await accountRow(globex)).balance_micros);
+
+    const loaded = await loadCloudBilling();
+
+    expect(loaded.caughtUp).toEqual({
+      found: 1,
+      charged: 1,
+      amountMicros: 12_000,
+    });
+    expect(Number((await accountRow(globex)).balance_micros)).toBe(
+      before - 12_000,
+    );
   });
 });

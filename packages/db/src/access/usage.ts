@@ -406,6 +406,15 @@ export async function recordProviderUsage(
  * a simulator that cannot record what it spent, which is the one thing this
  * table exists to make impossible.
  *
+ * **And a lost delivery is collected rather than forgotten.** "Can be rebuilt
+ * from `usage_record`" is only true while something rebuilds it: a resend
+ * cannot, because the insert above collapses it on the dedupe key and this
+ * hand-off then hears nothing. So the deployment that charges for these rows
+ * sweeps for them — `ee/` reads the stored records that carry no charge when
+ * the plug-in loads and again on every hourly tick, and charges them by the
+ * same key it would have used here. A deployment with no billing has nothing
+ * to collect.
+ *
  * It is reported rather than swallowed, on standard error, because this
  * package has no logger of its own and a delivery that silently stopped
  * happening is a bill nobody is sending.
