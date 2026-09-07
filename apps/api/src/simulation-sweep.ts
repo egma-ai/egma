@@ -139,15 +139,21 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
     try {
       // A conversation graded without the agent's own account of it is news:
       // the record says so, and an operator reading this line knows an
-      // exporter or a pull is not delivering.
+      // exporter or a pull is not delivering. The rest of what a tick settles
+      // is a handoff the drain began and did not finish, which is worth the
+      // same line and a different number.
       const bounded = await settleAgentPovBound();
       if (bounded.length > 0) {
+        const without = bounded.filter(
+          (simulation) => simulation.agentPov === "incomplete",
+        ).length;
         options.log.info(
           {
             simulationIds: bounded.map((simulation) => simulation.id),
             runIds: [...new Set(bounded.map((simulation) => simulation.runId))],
           },
-          `graded ${bounded.length} simulation(s) whose agent POV never arrived`,
+          `settled the agent-POV wait for ${bounded.length} simulation(s), ` +
+            `${without} of them graded without one`,
         );
       }
     } catch (fault) {

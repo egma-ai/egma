@@ -833,10 +833,17 @@ async function settleAgentPovWait(
   return row !== undefined;
 }
 
-/** What the bound sweep answers with: which rows it settled, and nothing more. */
+/** What the bound sweep answers with: which rows it settled, and how. */
 export type SimulationPastTheAgentPovBound = {
   readonly id: string;
   readonly runId: string;
+  /**
+   * How the wait ended. `incomplete` is the ordinary answer here and the one
+   * worth saying out loud — a conversation graded without the agent's own
+   * account of it. `filed` happens where the account landed but the drain's own
+   * handoff did not complete, and the sweep is the backstop that notices.
+   */
+  readonly agentPov: "filed" | "incomplete";
 };
 
 /**
@@ -848,7 +855,7 @@ export type SimulationPastTheAgentPovBound = {
  * loop — the same argument the orphan sweep is built on, and it runs on the
  * same tick.
  *
- * Each row is settled `incomplete` and its grading asked for in one
+ * Each row is settled and its grading asked for in one
  * transaction, so a crash between the two is impossible: a row that says the
  * agent's POV is incomplete is a row grading was asked for. The row that loses
  * the guarded write — a second replica reading the same clock — asks for
@@ -951,7 +958,7 @@ export async function settleSimulationsPastTheAgentPovBound(options?: {
       });
       return true;
     });
-    if (took) settled.push({ id: row.id, runId: row.runId });
+    if (took) settled.push({ id: row.id, runId: row.runId, agentPov: settles });
   }
   return settled;
 }
