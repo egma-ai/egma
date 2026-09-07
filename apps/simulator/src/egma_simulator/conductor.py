@@ -81,6 +81,7 @@ from .speech import (
     SpeechProviders,
     build_legs,
     build_vad,
+    carries_speech,
 )
 
 logger = logging.getLogger(__name__)
@@ -272,6 +273,18 @@ so taking the quiet back and closing the two together is what puts it
 where it was said. Real audio is never written over to obey a clock, so a
 channel with no quiet left to give back stays where it is — a sender
 genuinely producing more audio than time keeps all of it.
+"""
+
+
+VOICED_WINDOW_SECONDS = 0.02
+"""How much of the persona's own channel is read at once for speech in it.
+
+One media frame, which is the smallest piece of audio either side of a
+call is handed. The tail of an utterance is read a window at a time, and
+the last window carrying speech is where the persona stopped — so the
+stop is one frame away from the last audible sample at worst, against
+the half second of a speech leg's trailing silence it takes off, which
+is twenty-five of them.
 """
 
 
@@ -629,6 +642,43 @@ class _EvidenceRecorder(AudioBufferProcessor):
         if not self.sample_rate or self._persona.written_through is None:
             return Fraction(0)
         return Fraction(self._persona.written_through, self.sample_rate)
+
+    def persona_voiced_through(
+        self, began: MediaPosition, ended: MediaPosition
+    ) -> MediaPosition:
+        """Where the persona was last audible, between two of its positions.
+
+        A speech leg does not stop making audio where the speaking stops.
+        It closes every utterance with about half a second of silence, and
+        the transport plays that out like any other audio, so the last
+        frame the persona's channel carries is not the last thing the
+        agent heard. The wait for the agent's answer runs from the last
+        audible sample of the caller's speech (ADR-0024 §5), and a stop
+        stamped at the played-out end starts that wait half a second late
+        — which reads back as an agent half a second quicker than the
+        caller found it.
+
+        The tail is read off the recording this recorder already holds, a
+        window at a time back from ``ended``, and the first window with
+        speech in it ends the search. Speech is the level the simulator
+        calls speech everywhere else, so what is audible here and what is
+        audible to the voice detector are one decision.
+
+        ``ended`` stands where it is when nothing between the two
+        positions is audible at all: an utterance with no speech in it is
+        not one this can place better than the transport did.
+        """
+        if not self.sample_rate:
+            return ended
+        first = max(0, round(began * self.sample_rate))
+        last = min(round(ended * self.sample_rate), len(self._bot_audio_buffer) // 2)
+        window = max(1, round(VOICED_WINDOW_SECONDS * self.sample_rate))
+        while last > first:
+            opens_at = max(first, last - window)
+            if carries_speech(bytes(self._bot_audio_buffer[opens_at * 2 : last * 2])):
+                return min(ended, Fraction(last, self.sample_rate))
+            last = opens_at
+        return ended
 
     @property
     def position(self) -> MediaPosition:
@@ -1569,6 +1619,13 @@ class VoiceConductor:
             raise SpeechFault(
                 "the persona's transcript turn ended without recorded audio"
             )
+        if self._recorder is not None:
+            # The persona stopped where it stopped being heard, not where
+            # the transport ran out of audio to play. The speech leg's own
+            # trailing silence belongs to the wait that follows it, and a
+            # turn that kept it would hold the recording's seek positions
+            # over audio nobody said anything in.
+            ended = self._recorder.persona_voiced_through(began, ended)
         await self._took_a_turn(
             "human", text, began, ended, apply_turn_limit=not concludes
         )
