@@ -5,6 +5,8 @@ import { db } from "../src/client.ts";
 import {
   archiveProjectGrader,
   createCustomLlmGrader,
+  cloneGraderInProject,
+  editGraderDefinition,
   editProjectGrader,
   getExecutableGraderDefinition,
   getProjectGrader,
@@ -21,7 +23,6 @@ import { createProject } from "../src/access/projects.ts";
 import { provisionOrganization } from "../src/access/provisioning.ts";
 import {
   GRADER_DEFINITION_CATALOG,
-  MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
   MAXIMUM_RESPONSE_TIME_PARAMETER,
   PREDEFINED_GRADERS,
 } from "../src/grader-library/catalog.ts";
@@ -155,7 +156,7 @@ describe("shared definitions and project grader policy", () => {
         },
         passThreshold: 1,
       },
-    )).rejects.toThrow("already active");
+    )).resolves.toMatchObject({ id: active?.id, parameterValues: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500 } });
 
     const edited = await editProjectGrader(auth, active?.id ?? "missing", {
       scope: { simulations: [], production: null },
@@ -177,9 +178,43 @@ describe("shared definitions and project grader policy", () => {
       auth,
       PREDEFINED_GRADERS.responseLatency,
     )).resolves.toMatchObject({ activeProjectGraderId: null });
+    const restored = await useGraderInProject(auth, PREDEFINED_GRADERS.responseLatency, {
+      scope: { simulations: [{ kind: "all" }], production: null }, passThreshold: 1,
+    });
+    expect(restored?.parameterValues).toEqual({ [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_000 });
+    await archiveProjectGrader(auth, restored!.id);
   });
 
-  it("creates one organization LLM definition and lets another project use it", async () => {
+  it("enforces project ownership at the storage boundary", async () => {
+    const second = await createProject(auth, { name: "Storage peer" });
+    const created = await createCustomLlmGrader(auth, {
+      name: "Owned core", gradingInstructions: "The agent greets the user", passesWhen: "It greets", failsWhen: "It does not",
+      scope: { simulations: [{ kind: "all" }], production: null }, passThreshold: 1,
+    });
+    await expect(database.sql(
+      `insert into grader_definition (id, organization_id, name, scope_editable, current_definition_version)
+       values ($1, $2, 'No owning project', true, 1)`, [newId("grl"), auth.organizationId],
+    )).rejects.toThrow("grader_definition_ownership_pair");
+    await expect(database.sql(
+      `update grader_definition set project_id = $2 where id = $1`, [created.definition.id, second.id],
+    )).rejects.toThrow("grader definition ownership is immutable");
+    await expect(database.sql(
+      `insert into project_grader (id, organization_id, project_id, grader_definition_id, scope, parameter_values, pass_threshold)
+       values ($1, $2, $3, $4, '{"simulations":[],"production":null}', '{}', 1)`,
+      [newId("grd"), auth.organizationId, second.id, created.definition.id],
+    )).rejects.toThrow("grader definition is not available in this project");
+    await expect(database.sql(
+      `update project_grader set project_id = $2 where id = $1`, [created.projectGrader.id, second.id],
+    )).rejects.toThrow("project grader ownership is immutable");
+    const foreignOrganizationId = newId("org");
+    await database.sql(`insert into organization (id, name, slug) values ($1, 'Foreign', $1)`, [foreignOrganizationId]);
+    await expect(database.sql(
+      `insert into grader_definition (id, organization_id, project_id, name, scope_editable, current_definition_version)
+       values ($1, $2, $3, 'Mismatched project', true, 1)`, [newId("grl"), foreignOrganizationId, second.id],
+    )).rejects.toThrow("grader_definition_project_organization_fk");
+  });
+
+  it("creates a project LLM definition and refuses another project", async () => {
     const second = await createProject(auth, { name: "Second" });
     const secondAuth: AuthContext = { ...auth, projectId: second.id };
     expect(await listProjectGraders(secondAuth)).toHaveLength(1);
@@ -199,30 +234,27 @@ describe("shared definitions and project grader policy", () => {
      * record, and the fixed template is what every client compiles to.
      */
     expect(created.definition).toMatchObject({
-      owner: "organization",
+      owner: "project",
       type: "llm_as_judge",
       gradingInstructions:
         "Decide whether: the agent stated the cancellation policy. " +
         "Answer met when: the agent names the 30-day window. " +
         "Answer not_met when: the agent ends the call without naming a window.",
       modalities: ["chat", "voice"],
-      parameterContract: [],
+      parameterContract: expect.arrayContaining([expect.objectContaining({ key: "llm_model" })]),
       activeProjectGraderId: created.projectGrader.id,
     });
     expect(created.projectGrader).toMatchObject({
-      owner: "organization",
+      owner: "project",
       type: "llm_as_judge",
       modalities: ["chat", "voice"],
       passThreshold: 1,
       scope: { simulations: [{ kind: "all" }], production: null },
-      parameterValues: {},
+      parameterValues: { llm_provider: "openai", llm_model: "gpt-5.6-terra" },
     });
 
     await expect(getGraderLibraryEntry(secondAuth, created.definition.id))
-      .resolves.toMatchObject({
-        owner: "organization",
-        activeProjectGraderId: null,
-      });
+      .resolves.toBeUndefined();
     const secondUse = await useGraderInProject(
       secondAuth,
       created.definition.id,
@@ -232,11 +264,9 @@ describe("shared definitions and project grader policy", () => {
         passThreshold: 0.9,
       },
     );
-    expect(secondUse).toMatchObject({
-      projectId: second.id,
-      graderDefinitionId: created.definition.id,
-      passThreshold: 0.9,
-    });
+    expect(secondUse).toBeUndefined();
+    await expect(cloneGraderInProject(secondAuth, created.definition.id, { name: "Stolen" })).resolves.toBeUndefined();
+    await expect(editGraderDefinition(secondAuth, created.definition.id, { baseDefinitionVersion: 1, gradingInstructions: "Stolen" })).resolves.toBeUndefined();
 
     const otherOwnerId = newId("usr");
     await database.sql(
@@ -303,48 +333,24 @@ describe("shared definitions and project grader policy", () => {
     )).rejects.toThrow("may not author_definitions");
   });
 
-  it("carries a Response latency setting across the key's rename", async () => {
-    /*
-     * The grader bounded the mean and its setting was called
-     * `maximum_average_response_time_ms`. It bounds the p90 now, so the key
-     * was renamed — and a project that had already turned the grader on holds
-     * its answer under the old name. Left there, the current contract does not
-     * name that project's only setting: the grader errors instead of grading
-     * and the project cannot be edited. The boot door moves the answer, and
-     * never changes it.
-     */
-    const used = await useGraderInProject(
-      auth,
-      PREDEFINED_GRADERS.responseLatency,
-      {
-        scope: { simulations: [{ kind: "all" }], production: null },
-        parameterValues: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500 },
-        passThreshold: 1,
-      },
-    );
+  it("preserves a saved Response latency setting when the catalog is reapplied", async () => {
+    const used = await useGraderInProject(auth, PREDEFINED_GRADERS.responseLatency, {
+      scope: { simulations: [{ kind: "all" }], production: null },
+      parameterValues: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500 },
+      passThreshold: 1,
+    });
     if (used === undefined) throw new Error("the grader was not turned on");
-
-    // Put the row back the way the old contract wrote it.
-    await database.sql(
-      `update project_grader set parameter_values = $2 where id = $1`,
-      [used.id, JSON.stringify({
-        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_500,
-      })],
-    );
-
-    await reconcileGraderCatalog();
-
-    const after = await getProjectGrader(auth, used.id);
-    expect(after?.parameterValues).toEqual({
-      [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500,
+    await editProjectGrader(auth, used.id, {
+      parameterValues: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500 },
+      passThreshold: 0.75,
     });
 
-    // Idempotent: a second boot finds nothing to move and changes nothing.
+    await reconcileGraderCatalog();
     await reconcileGraderCatalog();
     await expect(getProjectGrader(auth, used.id)).resolves.toMatchObject({
       parameterValues: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500 },
+      passThreshold: 0.75,
     });
-
     await archiveProjectGrader(auth, used.id);
   });
 
@@ -410,17 +416,16 @@ describe("shared definitions and project grader policy", () => {
     try {
       await connection.sql(
         `insert into grader_definition
-           (id, organization_id, name, scope_editable, current_definition_version)
-         values ($1, $2, 'Fixture', true, 1)`,
-        [definitionId, auth.organizationId],
+           (id, organization_id, project_id, name, scope_editable, current_definition_version)
+         values ($1, $2, $3, 'Fixture', true, 1)`,
+        [definitionId, auth.organizationId, auth.projectId],
       );
       await connection.sql(
         `insert into grader_definition_version
            (definition_id, version, type, prompt, parameter_contract,
-            modalities, judge_model)
-         values ($1, 1, 'llm_as_judge', 'Grade it', '[]'::jsonb,
-                 '["chat"]'::jsonb,
-                 '{"provider":"openai","model":"gpt-5"}'::jsonb)`,
+            modalities)
+         values ($1, 1, 'code', null, '[]'::jsonb,
+                 '["chat"]'::jsonb)`,
         [definitionId],
       );
       await connection.sql(

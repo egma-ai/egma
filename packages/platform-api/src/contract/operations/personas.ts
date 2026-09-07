@@ -1,3 +1,4 @@
+import { graderSettingDefinitionSchema } from "./grader-shapes.ts";
 import { defineOperation } from "../definition.ts";
 import {
   arrayOf,
@@ -71,6 +72,13 @@ const personaModels = {
   additionalProperties: false,
 } as const;
 
+const parameterContract = arrayOf(graderSettingDefinitionSchema);
+
+const projectPersonaSettings = {
+  type: "object", properties: { id: stringIdSchema, models: personaModels, createdAt: dateTimeSchema, updatedAt: dateTimeSchema },
+  required: ["id", "models", "createdAt", "updatedAt"], additionalProperties: false,
+} as const;
+
 const persona = {
   type: "object",
   properties: {
@@ -81,7 +89,8 @@ const persona = {
     version: { type: "integer", minimum: 1 },
     versionId: stringIdSchema,
     ...behavior,
-    models: personaModels,
+    parameterContract,
+    settings: nullable(projectPersonaSettings),
     owner: { type: "string", enum: ["egma", "organization"] },
     archivedAt: nullable(dateTimeSchema),
     createdAt: dateTimeSchema,
@@ -95,7 +104,8 @@ const persona = {
     "version",
     "versionId",
     ...behaviorRequired,
-    "models",
+    "parameterContract",
+    "settings",
     "owner",
     "archivedAt",
     "createdAt",
@@ -111,7 +121,7 @@ const personaVersion = {
     personaId: stringIdSchema,
     version: { type: "integer", minimum: 1 },
     ...behavior,
-    models: personaModels,
+    parameterContract,
     createdAt: dateTimeSchema,
   },
   required: [
@@ -119,7 +129,7 @@ const personaVersion = {
     "personaId",
     "version",
     ...behaviorRequired,
-    "models",
+    "parameterContract",
     "createdAt",
   ],
   additionalProperties: false,
@@ -204,7 +214,7 @@ const createPersonaBody = {
     ...behavior,
     models: personaModels,
   },
-  required: ["name", ...behaviorRequired, "models"],
+  required: ["name", ...behaviorRequired],
   additionalProperties: false,
 } as const;
 
@@ -222,6 +232,7 @@ const updatePersonaBody = {
   properties: {
     ...createPersonaBody.properties,
     description: nullable({ type: "string" }),
+    expectedVersionId: stringIdSchema,
   },
   additionalProperties: false,
 } as const;
@@ -247,6 +258,11 @@ const writeRefusals = {
 } as const;
 
 export const personaOperations = {
+  usePersona: defineOperation({
+    operationId: "usePersona", method: "POST", path: "/v1/personas/{personaId}/use", summary: "Use a persona with project model settings", tag: "Personas", security: "credentialed",
+    request: { params: personaParams, body: { type: "object", properties: { projectId: stringIdSchema, models: personaModels }, additionalProperties: false }, bodyRequired: false },
+    responses: { 200: { description: "The persona with its saved project settings.", schema: persona }, ...writeRefusals },
+  }),
   listPersonas: defineOperation({
     operationId: "listPersonas",
     method: "GET",

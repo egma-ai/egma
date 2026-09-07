@@ -142,6 +142,9 @@ const WORK_DISPATCHING = [
  * score. Regrading reopens the whole frozen trace plan; it never edits history.
  */
 const CONTEXT_REQUIRING = [
+  "cloneGraderInProject",
+  "editGraderDefinition",
+  "usePersona",
   "addConnection",
   // Taking a persona out of every list and picker. It removes no row: the
   // stamp is all it writes, so a run that pinned one of their versions stays
@@ -388,9 +391,6 @@ const CONTEXT_REQUIRING = [
   // it, so it is a different decision with a different blast radius.
   "updateOrganization",
   "updateOrganizationSettings",
-  // The run-start write that freezes the matching project graders and their
-  // definition versions. Future policy edits cannot change that recorded plan.
-  "writeGradingPlan",
   "yieldMonitoringLease",
 ];
 
@@ -415,6 +415,12 @@ const PERMISSION = [
  * keep the schema, resolver, and public contract on the same vocabulary.
  */
 const THE_GRADER_LIBRARY = [
+  "LLM_GRADER_PARAMETER_CONTRACT",
+  "defaultGraderParameterValues",
+  "graderModelOfParameters",
+  "validateExecutableGraderParameters",
+  "validateGraderParameterContract",
+  "validateGraderParameterValues",
   "GRADER_DEFINITION_CATALOG",
   "GRADER_DEFINITION_TYPES",
   "GRADER_MODALITIES",
@@ -428,6 +434,13 @@ const THE_GRADER_LIBRARY = [
 ];
 
 const THE_PERSONA_LIBRARY = [
+  "PERSONA_PARAMETER_CONTRACT",
+  "defaultPersonaParameterValues",
+  "personaModelsOfParameters",
+  "personaParameterContract",
+  "personaParametersOfModels",
+  "validatePersonaParameterContract",
+  "validatePersonaParameterValues",
   "PERSONA_LIBRARY_CATALOG",
   "EGMA_PROVIDED_PERSONAS",
 ];
@@ -455,6 +468,7 @@ const THE_MODELS = [
 
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
+  "PersonaVersionConflictError",
   // A guarded key creation found a living key under its reserved name prefix.
   // It carries no row metadata because the conflicting key can belong to a
   // colleague whose keys the caller cannot list.

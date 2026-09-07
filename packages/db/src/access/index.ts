@@ -361,6 +361,8 @@ export {
 export {
   archiveProjectGrader,
   createCustomLlmGrader,
+  cloneGraderInProject,
+  editGraderDefinition,
   editProjectGrader,
   getExecutableGraderDefinition,
   getProjectGrader,
@@ -464,10 +466,8 @@ export {
   pinnedSimulationGraders,
   resolvePersonaVersions,
   resolveProductionGraders,
-  writeGradingPlan,
   type GradingPlan,
 } from "./run-plans.ts";
-export type { GradingPlanState } from "../schema/plans.ts";
 
 export {
   AGENT_POV_BOUND_SECONDS,

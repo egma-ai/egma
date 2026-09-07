@@ -28,6 +28,7 @@ function describedGrade(
     projectGraderId: grade.projectGraderId,
     graderDefinitionId: grade.graderDefinitionId,
     graderDefinitionVersion: grade.graderDefinitionVersion,
+    parameterValues: grade.parameterValues,
     graderName: grade.graderName,
     score: grade.score,
     details: grade.details,

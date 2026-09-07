@@ -34,11 +34,11 @@ chmod 600 .env
 
 The normal `.env` file contains only values that Egma cannot create:
 
-- model-provider keys selected by your persona or grader versions
+- model-provider keys selected in your project persona and grader settings
 - an optional phone carrier route
 
 The shipped Predefined persona uses OpenAI and Cartesia. Add Deepgram only when
-a persona version selects Deepgram speech-to-text.
+your project persona settings select Deepgram speech-to-text.
 
 ```bash
 EGMA_OPENAI_API_KEY=...
@@ -288,7 +288,7 @@ current.
 ## Troubleshooting
 
 <Accordion title="A model-backed run does not start">
-  Check the pinned persona and grader versions. Add the key for each selected
+  Check the model settings frozen for the work. Add the key for each selected
   provider to `.env`, then run `egma self-host up` again.
 </Accordion>
 

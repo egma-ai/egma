@@ -122,6 +122,7 @@ function grade(overrides: Record<string, unknown> = {}) {
     graderDefinitionId: "grl_1",
     graderDefinitionVersion: 3,
     graderName: "expected_behaviors",
+    parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
     score: 0.5,
     details: {
       rationale: "One of two expected behaviors was present.",
@@ -215,7 +216,6 @@ function evidence(overrides: Record<string, unknown> = {}) {
       config: { phoneNumber: "+15551234567" },
     },
     gradingPlan: {
-      state: "run_start",
       capturedAt: "2026-08-15T09:59:00.000Z",
       items: [
         {

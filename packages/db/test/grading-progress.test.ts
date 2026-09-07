@@ -143,6 +143,7 @@ async function appendSuccess(claim: GradingClaim): Promise<void> {
     projectGraderId: entry.projectGraderId,
     graderDefinitionId: entry.graderDefinitionId,
     graderDefinitionVersion: entry.graderDefinitionVersion,
+    parameterValues: entry.parameterValues,
     score: 1,
     details: { rationale: "met" },
     graderPassThreshold: entry.graderPassThreshold,

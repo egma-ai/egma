@@ -73,11 +73,12 @@ async function seed(name: string) {
   return createPersona(acting(), input);
 }
 
-describe("a persona write that names no expectation", () => {
+describe("persona metadata and current-core edits", () => {
   it("lands, because the last write wins", async () => {
     const made = await seed("Renamed Rowan");
 
     const renamed = await editPersona(acting(), made.id, {
+      expectedVersionId: (await getPersona(acting(), made.id))!.versionId,
       name: "Rowan, renamed",
     });
     expect(renamed?.name).toBe("Rowan, renamed");
@@ -85,6 +86,7 @@ describe("a persona write that names no expectation", () => {
     // The second tab, still holding what it read before the rename. It is not
     // refused, and it does not have to read anything again first.
     const again = await editPersona(acting(), made.id, {
+      expectedVersionId: (await getPersona(acting(), made.id))!.versionId,
       name: "Rowan, renamed again",
     });
     expect(again?.name).toBe("Rowan, renamed again");
@@ -93,30 +95,21 @@ describe("a persona write that names no expectation", () => {
     );
   });
 
-  it("mints the next version from whatever is stored when it arrives", async () => {
+  it("refuses a stale core base after another edit wins", async () => {
     const made = await seed("Versioned Vera");
-
-    const second = await editPersona(acting(), made.id, {
-      personality: "Vera, after a long wait.",
-    });
+    const second = await editPersona(acting(), made.id, { expectedVersionId: made.versionId, personality: "Vera, after a long wait." });
     expect(second?.version).toBe(2);
-
-    // Written against version 1 by a page opened before the edit above. It
-    // lands on top of version 2 and becomes version 3.
-    const third = await editPersona(acting(), made.id, {
-      personality: "Vera, in a hurry.",
-    });
-    expect(third?.version).toBe(3);
-
+    await expect(editPersona(acting(), made.id, { expectedVersionId: made.versionId, personality: "Vera, in a hurry." })).rejects.toThrow(/current version/);
     const now = await getPersona(acting(), made.id);
-    expect(now?.version).toBe(3);
-    expect(now?.personality).toBe("Vera, in a hurry.");
+    expect(now?.version).toBe(2);
+    expect(now?.personality).toBe("Vera, after a long wait.");
   });
 
   it("mints nothing for an identical save", async () => {
     const made = await seed("Steady Sam");
 
     const saved = await editPersona(acting(), made.id, {
+      expectedVersionId: (await getPersona(acting(), made.id))!.versionId,
       personality: PERSONALITY,
     });
 
@@ -131,9 +124,11 @@ describe("what a detail sheet reads", () => {
   it("lists every version newest first, and each one stays readable on its own", async () => {
     const made = await seed("Historic Hana");
     const second = await editPersona(acting(), made.id, {
+      expectedVersionId: (await getPersona(acting(), made.id))!.versionId,
       personality: "Hana after the first edit.",
     });
     const third = await editPersona(acting(), made.id, {
+      expectedVersionId: (await getPersona(acting(), made.id))!.versionId,
       personality: "Hana after the second edit.",
     });
 
@@ -154,6 +149,7 @@ describe("what a detail sheet reads", () => {
   it("keeps the history readable after the persona is deleted", async () => {
     const made = await seed("Filed-Away Fay");
     await editPersona(acting(), made.id, {
+      expectedVersionId: (await getPersona(acting(), made.id))!.versionId,
       personality: "Fay before being filed away.",
     });
     await deletePersona(acting(), made.id);

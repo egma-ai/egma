@@ -89,7 +89,7 @@ const PROVED_IN_THE_FAST_LANE: readonly {
   {
     concern: "the CLI and API suite contract for repository push and run",
     file: "apps/api/test/cli-platform-contract.test.ts",
-    says: /atomic repository change/iu,
+    says: /starts a suite through the CLI/iu,
   },
 ];
 

@@ -2469,7 +2469,7 @@ const BROWSER_CUSTOM_GRADER = "Polite resolution";
 /**
  * The Graders surface, through the same browser, API, and stores a customer
  * uses. A definition on the library shelf is not active until this project
- * chooses it; customer authoring creates an organization definition and its
+ * chooses it; customer authoring creates a project definition and its
  * first project policy together.
  */
 describe("the project grader library", () => {
@@ -2769,6 +2769,7 @@ describe("the complete product, walked in order in a second project", () => {
         projectGraderId: entry.projectGraderId,
         graderDefinitionId: entry.graderDefinitionId,
         graderDefinitionVersion: entry.graderDefinitionVersion,
+        parameterValues: entry.parameterValues,
         score,
         details: {
           rationale: "Six of seven expected behaviors were present.",
@@ -3404,7 +3405,7 @@ describe("the complete product, walked in order in a second project", () => {
         .getByRole("button", { name: "Open the menu for Impatient Rita" })
         .first()
         .click();
-      await walk.getByRole("menuitem", { name: "Fork" }).click();
+      await walk.getByRole("menuitem", { name: "Clone" }).click();
       await reactHasTakenOver(walk, "form");
       await walk.fill("#persona-name", "Rita, a copy");
       await walk.getByRole("button", { name: "Save changes" }).click();
@@ -3445,7 +3446,7 @@ describe("the complete product, walked in order in a second project", () => {
   );
 
   it(
-    "sees the organization's custom grader inactive and edits only this project's Expected behaviors threshold",
+    "keeps another project's custom grader private and edits this project's Expected behaviors threshold",
     async () => {
       await walk.goto(at("graders"));
       await walk.waitForSelector("text=Expected behaviors");
@@ -3464,8 +3465,7 @@ describe("the complete product, walked in order in a second project", () => {
         .locator("table")
         .getByRole("row")
         .filter({ hasText: BROWSER_CUSTOM_GRADER });
-      await customDefinition.waitFor();
-      expect(await customDefinition.innerText()).toContain("Available");
+      expect(await customDefinition.count()).toBe(0);
 
       await walk.getByRole("tab", { name: "Active graders" }).click();
 
@@ -5494,3 +5494,343 @@ describe("the complete product, walked in order in a second project", () => {
     SETTLE,
   );
 });
+
+describe("project grader model settings", () => {
+  it("uses project models, clones and edits only current cores, and renders fractional and error results", async () => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const proof = await context.newPage();
+    proof.setDefaultTimeout(30_000);
+    try {
+      await proof.goto(`${origin}/signup`);
+      await proof.fill("#email", "grader-models@browser.example");
+      await proof.fill("#password", "a-long-enough-password");
+      await proof.fill("#organizationName", "Grader models");
+      await proof.fill("#projectName", "Model proof");
+      await proof.click('button[type="submit"]');
+      await proof.waitForURL(/\/projects\/prj_[^/]+\/agents/);
+      const projectId = /\/projects\/(prj_[^/]+)\//u.exec(proof.url())![1];
+      await proof.goto(`${origin}/projects/${projectId}/graders`);
+      await proof.getByRole("button", { name: "Create custom grader" }).click();
+      const create = proof.getByRole("dialog", { name: "Create custom grader" });
+      await create.getByLabel("Name", { exact: false }).fill("Model proof grader");
+      await create.getByLabel("Grading instructions").fill("The agent is polite.");
+      await create.getByLabel("Passes when").fill("The agent thanks the caller.");
+      await create.getByLabel("Fails when").fill("The agent is rude.");
+      await create.getByLabel("Language model").selectOption("openai/gpt-4o-mini");
+      await create.getByLabel("Pass threshold").fill("2");
+      expect(await create.getByRole("button", { name: "Create grader" }).isDisabled()).toBe(true);
+      await create.getByLabel("Pass threshold").fill("1");
+      await create.getByRole("button", { name: "Create grader" }).click();
+      await create.waitFor({ state: "hidden" });
+      const customRow = proof.locator("table").getByRole("row").filter({ hasText: "Model proof grader" });
+      await customRow.getByRole("button", { name: "Open the menu for Model proof grader" }).click();
+      await proof.getByRole("menuitem", { name: "Remove grader" }).click();
+      const remove = proof.getByRole("dialog", { name: "Remove Model proof grader?" });
+      await remove.getByRole("button", { name: "Remove grader" }).click();
+      await remove.waitFor({ state: "hidden" });
+      await proof.getByRole("tab", { name: "Grader library" }).click();
+      await proof.getByRole("button", { name: "Model proof grader", exact: true }).click();
+      const use = proof.getByRole("dialog", { name: "Model proof grader" });
+      await use.getByRole("button", { name: "Use in project" }).click();
+      await use.getByLabel("Language model").selectOption("openai/gpt-4o-mini");
+      await use.getByLabel("Grades simulations").click();
+      await use.getByLabel("All simulations").click();
+      await use.getByRole("button", { name: "Use in project" }).click();
+      await use.waitFor({ state: "hidden" });
+      async function openApplied() {
+        await proof.getByRole("tab", { name: "Active graders" }).click();
+        const row = proof.locator("table").getByRole("row").filter({ hasText: "Model proof grader" });
+        await row.getByRole("button", { name: "Open the menu for Model proof grader" }).click();
+        await proof.getByRole("menuitem", { name: "Edit", exact: true }).click();
+        return proof.getByRole("dialog", { name: "Model proof grader" });
+      }
+      let applied = await openApplied();
+      expect(await applied.getByLabel("Language model").inputValue()).toBe("openai/gpt-4o-mini");
+      await applied.getByLabel("Language model").selectOption("openai/gpt-5.6-terra");
+      await applied.getByRole("button", { name: "Save changes" }).click();
+      await applied.waitFor({ state: "hidden" });
+      applied = await openApplied();
+      expect(await applied.getByLabel("Language model").inputValue()).toBe("openai/gpt-5.6-terra");
+      await applied.screenshot({ path: "/tmp/egma-grader-model-settings-desktop.png" });
+      await applied.getByRole("button", { name: "Cancel", exact: true }).click();
+      await proof.getByRole("tab", { name: "Grader library" }).click();
+      await proof.getByRole("button", { name: "Expected behaviors", exact: true }).click();
+      let library = proof.getByRole("dialog", { name: "Expected behaviors" });
+      expect(await library.getByRole("button", { name: "Edit core", exact: true }).count()).toBe(0);
+      await library.getByRole("button", { name: "Clone grader", exact: true }).click();
+      await library.getByLabel("Name", { exact: false }).fill("Cloned behavior core");
+      await library.getByRole("button", { name: "Clone grader", exact: true }).click();
+      await library.waitFor({ state: "hidden" });
+      await proof.getByRole("tab", { name: "Grader library" }).click();
+      await proof.getByRole("button", { name: "Cloned behavior core", exact: true }).click();
+      library = proof.getByRole("dialog", { name: "Cloned behavior core" });
+      await library.getByRole("button", { name: "Edit core", exact: true }).click();
+      await library.getByLabel("Grading instructions").fill("The agent must speak clearly.");
+      await library.getByRole("button", { name: "Back", exact: true }).click();
+      let draftQuestion = proof.getByRole("dialog", { name: "Leave without saving?" });
+      await draftQuestion.getByRole("button", { name: "Keep editing", exact: true }).click();
+      await draftQuestion.waitFor({ state: "hidden" });
+      expect(await library.getByLabel("Grading instructions").inputValue()).toBe("The agent must speak clearly.");
+      await library.getByRole("button", { name: "Close", exact: true }).click();
+      draftQuestion = proof.getByRole("dialog", { name: "Leave without saving?" });
+      await draftQuestion.getByRole("button", { name: "Keep editing", exact: true }).click();
+      await draftQuestion.waitFor({ state: "hidden" });
+      await library.getByRole("button", { name: "Save core", exact: true }).click();
+      await library.waitFor({ state: "hidden" });
+      await proof.getByRole("tab", { name: "Grader library" }).click();
+      await proof.getByRole("button", { name: "Cloned behavior core", exact: true }).click();
+      library = proof.getByRole("dialog", { name: "Cloned behavior core" });
+      await library.getByLabel("Core version").selectOption("1");
+      await library.getByText("Decide only the expected behaviors you are given.", { exact: false }).waitFor();
+      expect(await library.getByRole("button", { name: "Edit core", exact: true }).count()).toBe(0);
+      expect(await library.getByRole("button", { name: "Clone grader", exact: true }).count()).toBe(0);
+      await library.screenshot({ path: "/tmp/egma-grader-core-history-desktop.png" });
+      await proof.setViewportSize({ width: 390, height: 844 });
+      await proof.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+      await proof.evaluate(() => {
+        const document = Reflect.get(globalThis, "document") as { documentElement: { setAttribute(name: string, value: string): void } };
+        document.documentElement.setAttribute("data-theme", "dark");
+      });
+      await library.screenshot({ path: "/tmp/egma-grader-core-history-mobile-dark.png" });
+      expect(await library.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await proof.keyboard.press("Escape");
+      await library.waitFor({ state: "hidden" });
+
+      // Real queue and ClickHouse results, with the provider answer supplied at
+      // the worker seam. The browser proves the fractional and error display.
+      const cookie = (await context.cookies()).map((one) => `${one.name}=${one.value}`).join("; ");
+      const standing = await standingOf(instance.api, cookie, "Grader result browser proof");
+      const run = await aConductedRun(instance.api, standing, { reference: "unused-recording", modality: "chat" });
+      const filed = await fileTranscriptOf(instance, run.heard, { human: "Please cancel.", agent: "I cancelled it. Thank you." }, new Date());
+      await expect.poll(async () => (await getGradingJobForTrace(standing.auth, filed.traceId))?.status).toBe("pending");
+      const claimant = "grader-model-results-browser";
+      const claim = (await claimGradingJobs({ claimant, capacity: 50 })).find((one) => one.traceId === filed.traceId)!;
+      expect(claim.entries).toHaveLength(3);
+      await appendGrades(claim.auth, claim.entries.map((entry, at) => ({
+        source: "simulation" as const, traceId: filed.traceId,
+        traceStartedAtMicroseconds: BigInt(claim.traceStartedAt.getTime()) * 1_000n,
+        runId: run.runId, projectGraderId: entry.projectGraderId,
+        graderDefinitionId: entry.graderDefinitionId, graderDefinitionVersion: entry.graderDefinitionVersion,
+        parameterValues: entry.parameterValues,
+        score: at === 1 ? null : 2 / 3,
+        details: at === 1 ? { error: "The grader could not determine whether the criterion was met." } : {
+          rationale: "Two of three criteria passed.", assertions: [0, 1, 2].map((at) => ({
+            key: `behavior_${at + 1}`, decision: at === 2 ? "not_met" : "met", score: at === 2 ? 0 : 1,
+            rationale: "The transcript supplies this evidence.", citedTurns: [2],
+          })),
+        },
+        graderPassThreshold: entry.graderPassThreshold, gradingSequence: claim.sequenceBase + claim.attempts,
+        gradedAtMicroseconds: BigInt(Date.now()) * 1_000n,
+      })));
+      await finishGradingJob(claim.auth, claim.id, claimant);
+      await proof.setViewportSize({ width: 1280, height: 900 });
+      await proof.goto(`${origin}/projects/${projectId}/runs/${run.runId}`);
+      await proof.getByRole("tab", { name: "Results summary" }).click();
+      const results = proof.getByRole("region", { name: "Grader results" });
+      await expect.poll(() => results.innerText()).toContain("Total Score 0.667");
+      expect(await results.innerText()).toContain("The grader could not determine whether the criterion was met.");
+      await results.screenshot({ path: "/tmp/egma-grader-fractional-error-results.png" });
+    } finally {
+      await context.close();
+    }
+  }, SETTLE * 2);
+});
+
+it(
+  "uses shared persona project settings and keeps core history read-only",
+  async () => {
+    const key = await anotherCustomer(
+      "settings@personas.example",
+      "Persona settings",
+    );
+    const walk = await signedInBrowser("settings@personas.example");
+    try {
+      const projectId = projectIn(walk);
+      const address = `${origin}/projects/${projectId}/personas`;
+      await walk.goto(address);
+      await reactHasTakenOver(walk, "table");
+      await walk.getByRole("button", { name: "New persona" }).first().click();
+      await walk.fill("#new-persona-name", "Directly authored Rita");
+      await walk.fill("#new-persona-identity-name", "Rita");
+      await walk.fill(
+        "#new-persona-personality",
+        "Speaks clearly and asks one question.",
+      );
+      await walk.getByRole("button", { name: "Create persona" }).click();
+      await walk.getByText("Custom · v1", { exact: true }).waitFor();
+      await walk.keyboard.press("Escape");
+      await walk
+        .getByRole("button", { name: "Everyday caller", exact: true })
+        .click();
+      await walk
+        .getByRole("button", { name: "Actions for Everyday caller" })
+        .click();
+      await walk.getByRole("menuitem", { name: "Use", exact: true }).click();
+      await reactHasTakenOver(walk, "form");
+      expect(await walk.locator("#persona-personality").count()).toBe(0);
+      await walk.selectOption("#persona-llm", "openai::gpt-4o");
+      await walk.selectOption("#persona-stt", "deepgram::nova-3-general");
+      await walk.selectOption("#persona-tts", "openai::tts-1-hd");
+      await walk.fill("#persona-tts-speed", "0.85");
+      await walk.fill("#persona-tts-voice", "my-custom-voice");
+      await walk.getByRole("button", { name: "Use persona" }).click();
+      await walk.getByRole("region", { name: "Project settings" }).waitFor();
+      expect(
+        await walk
+          .getByRole("region", { name: "Project settings" })
+          .innerText(),
+      ).toContain("my-custom-voice");
+      await walk.keyboard.press("Escape");
+      await walk
+        .getByRole("button", { name: "Everyday caller", exact: true })
+        .click();
+      await walk
+        .getByRole("button", { name: "Actions for Everyday caller" })
+        .click();
+      await walk.getByRole("menuitem", { name: "Edit settings" }).click();
+      expect(await walk.inputValue("#persona-llm")).toBe("openai::gpt-4o");
+      expect(await walk.inputValue("#persona-stt")).toBe(
+        "deepgram::nova-3-general",
+      );
+      expect(await walk.inputValue("#persona-tts")).toBe("openai::tts-1-hd");
+      expect(await walk.inputValue("#persona-tts-speed")).toBe("0.85");
+      expect(await walk.inputValue("#persona-tts-voice")).toBe(
+        "my-custom-voice",
+      );
+      await walk.fill("#persona-tts-voice", " ");
+      const invalid = walk.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          new URL(response.url()).pathname.startsWith("/v1/personas/"),
+      );
+      await walk.getByRole("button", { name: "Save changes" }).click();
+      expect((await invalid).status()).toBe(422);
+      await walk.getByRole("alert").waitFor();
+      await walk.fill("#persona-tts-voice", "my-saved-voice");
+      await walk.getByRole("button", { name: "Save changes" }).click();
+      await walk.getByRole("region", { name: "Project settings" }).waitFor();
+      await walk
+        .getByRole("button", { name: "Actions for Everyday caller" })
+        .click();
+      await walk.getByRole("menuitem", { name: "Clone" }).click();
+      await walk.locator("#persona-name").waitFor();
+      expect(await walk.inputValue("#persona-tts-voice")).toBe(
+        "my-saved-voice",
+      );
+      await walk.fill("#persona-name", "Patient Nora");
+      await walk.getByRole("button", { name: "Save changes" }).click();
+      await walk.getByText("Custom · v1", { exact: true }).waitFor();
+      await walk
+        .getByRole("button", { name: "Actions for Patient Nora" })
+        .click();
+      await walk.getByRole("menuitem", { name: "Edit", exact: true }).click();
+      await walk.fill(
+        "#persona-personality",
+        "Asks one question and waits for the answer.",
+      );
+      await walk.getByRole("button", { name: "Save changes" }).click();
+      await walk.getByText("Custom · v2", { exact: true }).waitFor();
+      await walk.getByRole("button", { name: "Read", exact: true }).click();
+      await walk.getByText("Older version", { exact: true }).waitFor();
+      expect(
+        await walk.getByRole("region", { name: "Project settings" }).count(),
+      ).toBe(0);
+      expect(
+        await walk.getByRole("button", { name: "Use as new version" }).count(),
+      ).toBe(0);
+      expect(
+        await walk
+          .getByRole("button", { name: "Actions for Patient Nora" })
+          .count(),
+      ).toBe(0);
+      await walk.screenshot({
+        path: "/tmp/egma-persona-history-light.png",
+        fullPage: true,
+      });
+      await walk.getByRole("button", { name: "Back to v2" }).click();
+      await walk
+        .getByRole("button", { name: "Actions for Patient Nora" })
+        .click();
+      await walk.getByRole("menuitem", { name: "Edit", exact: true }).click();
+      await walk.setViewportSize({ width: 390, height: 844 });
+      await walk.evaluate('document.documentElement.dataset.theme = "dark"');
+      await walk.locator("#persona-tts-voice").focus();
+      await walk.keyboard.press("Tab");
+      expect(
+        await walk
+          .getByRole("button", { name: "Cancel", exact: true })
+          .evaluate(element => element === element.ownerDocument.activeElement),
+      ).toBe(true);
+      expect(
+        await walk.evaluate(
+          "document.documentElement.scrollWidth <= window.innerWidth",
+        ),
+      ).toBe(true);
+      await expect
+        .poll(() =>
+          walk
+            .getByRole("button", { name: "Cancel", exact: true })
+            .evaluate(element => element.ownerDocument.defaultView?.getComputedStyle(element).color),
+        )
+        .toBe("rgb(242, 242, 237)");
+      await walk.screenshot({
+        path: "/tmp/egma-persona-settings-dark-mobile.png",
+        fullPage: true,
+      });
+      await walk.getByRole("button", { name: "Cancel", exact: true }).click();
+      await walk.keyboard.press("Escape");
+      await walk.setViewportSize({ width: 1280, height: 900 });
+      await walk.goto(`${origin}/projects/${projectId}/tests`);
+      await walk.getByRole("button", { name: "Create suite" }).click();
+      const dialog = walk.getByRole("dialog", { name: "Create a suite" });
+      await dialog.getByLabel("Suite name").fill("Persona selection");
+      await dialog.getByRole("button", { name: "Create suite" }).click();
+      await walk.waitForURL(/\/tests\/suites\/ste_[^/]+$/);
+      await walk.getByRole("button", { name: "+ Write a test" }).click();
+      await walk
+        .getByRole("textbox", { name: "Name", exact: true })
+        .fill("A patient caller");
+      await walk
+        .getByRole("textbox", { name: "Scenario", exact: true })
+        .fill("Asks when the office opens.");
+      await walk
+        .getByRole("textbox", { name: "Expected behavior 1" })
+        .fill("Answers the opening time.");
+      await walk.getByRole("button", { name: "+ Add a persona" }).click();
+      await walk.getByRole("option", { name: "Patient Nora" }).click();
+      await walk.getByRole("button", { name: "Done", exact: true }).click();
+      const testWrite = walk.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/v1/tests",
+      );
+      await walk.getByRole("button", { name: "Save test" }).click();
+      const testResponse = await testWrite;
+      expect(testResponse.status(), await testResponse.text()).toBe(201);
+      const saved = (await testResponse.json()) as {
+        personas: { id: string }[];
+      };
+      const read = await fetch(`${origin}/v1/personas`, {
+        headers: { authorization: `Bearer ${key}` },
+      });
+      expect(read.status).toBe(200);
+      const { personas } = (await read.json()) as {
+        personas: {
+          id: string;
+          name: string;
+          version: number;
+          settings: { models: { tts: { voiceId: string } } } | null;
+        }[];
+      };
+      const cloned = personas.find(
+        (persona) => persona.name === "Patient Nora",
+      );
+      expect(saved.personas.map((persona) => persona.id)).toEqual([cloned?.id]);
+      expect(cloned?.version).toBe(2);
+      expect(cloned?.settings?.models.tts.voiceId).toBe("my-saved-voice");
+    } finally {
+      await walk.context().close();
+    }
+  },
+  SETTLE * 2,
+);

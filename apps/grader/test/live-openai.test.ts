@@ -1,4 +1,4 @@
-import { GRADER_DEFINITION_CATALOG, PREDEFINED_GRADERS } from "@egma/db";
+import { GRADER_DEFINITION_CATALOG, PREDEFINED_GRADERS, RECOMMENDED_GRADER_MODEL } from "@egma/db";
 import { describe, expect, it } from "vitest";
 
 import { judgeFor, type JudgeInput } from "../src/judge/index.ts";
@@ -35,7 +35,7 @@ const EXPECTED_BEHAVIORS =
   GRADER_DEFINITION_CATALOG.find(
     (entry) => entry.id === PREDEFINED_GRADERS.expectedBehaviors,
   );
-const JUDGE_MODEL = EXPECTED_BEHAVIORS?.judgeModel;
+const JUDGE_MODEL = RECOMMENDED_GRADER_MODEL;
 if (
   EXPECTED_BEHAVIORS?.prompt === null ||
   EXPECTED_BEHAVIORS?.prompt === undefined ||
@@ -46,7 +46,7 @@ if (
 }
 
 const API_KEY = process.env["TEST_OPENAI_API_KEY"]?.trim() ?? "";
-const THE_PROMPT = EXPECTED_BEHAVIORS.prompt;
+const THE_PROMPT = "Judge instruction_1. Return one result with id instruction_1, decision met/not_met/cannot_determine, rationale, and cited_turns.";
 
 /** One short conversation, plainly settling one thing and plainly not another. */
 const EVIDENCE: JudgeInput = {
@@ -71,15 +71,17 @@ describe.skipIf(API_KEY === "")(
     ).ask;
 
     it("answers met, with a reason and a turn it rests on", async () => {
-      const answer = await judge({
+      const response = await judge({
         prompt: THE_PROMPT,
         criterion: "the agent confirms the new time back before finishing",
         evidence: EVIDENCE,
+        expectedBehaviors: [],
       });
 
+      const answer = response.results[0]!;
       expect(answer.decision).toBe("met");
       expect(answer.rationale.trim()).not.toBe("");
-      for (const cited of answer.citedTurns) {
+      for (const cited of answer.cited_turns) {
         expect(cited).toBeGreaterThanOrEqual(1);
         expect(cited).toBeLessThanOrEqual(EVIDENCE.transcript.length);
       }
@@ -93,12 +95,14 @@ describe.skipIf(API_KEY === "")(
      * is that it never calls it met.
      */
     it("does not call a criterion met when the conversation never touched it", async () => {
-      const answer = await judge({
+      const response = await judge({
         prompt: THE_PROMPT,
         criterion: "the agent quotes the price of the cleaning in dollars",
         evidence: EVIDENCE,
+        expectedBehaviors: [],
       });
 
+      const answer = response.results[0]!;
       expect(answer.decision).not.toBe("met");
       expect(["not_met", "cannot_determine"]).toContain(answer.decision);
     });

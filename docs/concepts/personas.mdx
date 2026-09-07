@@ -1,0 +1,74 @@
+---
+title: "Personas"
+description: "Choose a synthetic person, save project model settings, and keep each run's selected behavior."
+---
+
+A **persona** is the synthetic person who talks to your agent. A test says what
+that person wants. You can use one persona in many tests.
+
+## Core behavior and project settings
+
+The persona's identity name, personality, and language form its core behavior.
+Each core version is immutable. The display name and description are live
+labels; changing them does not create a version.
+
+Your project saves one set of model settings for each persona it uses:
+
+- The language model provider and model.
+- The speech recognition provider and model.
+- The speech generation provider and model.
+- The voice ID and speaking speed, from 0.6 to 1.5.
+
+Every test in your project that selects the same persona uses these settings.
+Another project's choices cannot change yours. Saving model settings creates no
+core version. Egma saves complete defaults on first use, so later changes to
+recommended defaults do not replace your saved choices.
+
+## Use, create, or clone
+
+Open a predefined persona and choose **Use** to review its model settings. You
+can also select it in a test; Egma then saves its defaults for your project.
+Choose **Edit settings** to change the saved values later. Supported model
+choices come from the catalog. A custom provider voice ID is allowed; it does
+not have to appear in the recommended voices.
+
+Choose **New persona** to create a custom persona with behavior and settings.
+The complete persona is saved together. A failed save leaves no partial persona.
+
+Choose **Clone** to copy the source's current core and your project's effective
+settings into a new custom persona. A clone has its own settings and history.
+It receives no later source updates. Existing tests keep the source; edit a
+test to select the clone explicitly.
+
+## Edit the current core
+
+You can edit a custom persona's current behavior. A changed save creates the
+next core version. If another edit wins first, read the current core before
+editing again.
+
+Older versions are read-only. They contain no record of past model choices and
+cannot be restored as the current core. Predefined core behavior is maintained
+by Egma; clone it to write your own instructions.
+
+Compatible Egma core updates become current for future runs automatically.
+Your project's saved model and voice settings and test selections stay in
+place. Egma checks that the new core accepts saved settings before it becomes
+current. An incompatible update is refused and leaves the earlier core usable.
+Catalog defaults do not replace existing choices; custom clones receive no
+source updates.
+
+## Runs keep their selection
+
+A test selects a persona definition. When a run is created, each simulation
+keeps the selected current core version and complete project settings. A later
+edit cannot change queued work or its retries. A future run uses the newer
+core and settings without requiring a test edit.
+
+Common Egma runtime instructions remain separate from the authored core. A
+saved core is not a historical copy of every instruction in a deployed runtime.
+
+Deleting a custom persona removes it from authoring lists. Its core history and
+saved simulation evidence remain readable. A test that selects a deleted
+persona must select an active persona before it can run again.
+
+See the [persona API](/api/personas) and [test files](/cli/test-files).

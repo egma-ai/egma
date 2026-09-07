@@ -9,6 +9,7 @@ import {
 } from "../schemas.ts";
 import {
   graderLibraryEntrySchema,
+  graderSettingDefinitionSchema,
   projectGraderPolicyInputProperties,
   projectGraderSchema,
 } from "./grader-shapes.ts";
@@ -39,6 +40,22 @@ const commonWriteRefusals = {
 } as const;
 
 export const graderLibraryOperations = {
+  getGraderForm: defineOperation({
+    operationId: "getGraderForm", method: "GET", path: "/v1/grader-form",
+    summary: "Get supported grader models and first-use defaults", tag: "Graders", security: "credentialed",
+    request: { query: projectQuery },
+    responses: {
+      200: { description: "Supported grader model pairs and the default LLM contract.", schema: {
+        type: "object", properties: {
+          modelCatalog: arrayOf({ type: "object", properties: {
+            provider: stringSchema, model: stringSchema, label: stringSchema,
+          }, required: ["provider", "model", "label"], additionalProperties: false }),
+          settingDefinitions: arrayOf(graderSettingDefinitionSchema),
+        }, required: ["modelCatalog", "settingDefinitions"], additionalProperties: false,
+      } }, ...commonReadRefusals,
+    },
+  }),
+
   listGraderLibrary: defineOperation({
     operationId: "listGraderLibrary",
     method: "GET",
@@ -55,7 +72,7 @@ export const graderLibraryOperations = {
     responses: {
       200: {
         description:
-          "Grader definitions visible to the organization, with current-project use state.",
+          "Grader definitions visible to the project, with current-project use state.",
         schema: {
           type: "object",
           properties: {
@@ -100,7 +117,7 @@ export const graderLibraryOperations = {
       body: {
         type: "object",
         properties: projectGraderPolicyInputProperties,
-        required: ["scope", "settings", "passThreshold"],
+        required: ["scope", "passThreshold"],
         additionalProperties: false,
       },
       bodyRequired: true,
@@ -120,11 +137,9 @@ export const graderLibraryOperations = {
     path: "/v1/grader-library/custom",
     summary: "Create and use a custom LLM grader",
     description:
-      "Creates one organization-owned LLM judge and its current-project policy. " +
-      "The judge is binary, so the body draws its boundary in three parts: what " +
-      "to decide, what answers met, and what answers not_met. The server " +
-      "compiles them into the definition version's one immutable prompt and " +
-      "fixes its type, model, compatible modalities, and empty settings contract.",
+      "Creates a project-owned LLM core and complete project model settings in one write. " +
+      "The server compiles the three instruction fields into one immutable prompt. " +
+      "Omitted settings use the current contract defaults once, at creation.",
     tag: "Graders",
     security: "credentialed",
     request: {
@@ -137,6 +152,7 @@ export const graderLibraryOperations = {
           gradingInstructions: stringSchema,
           passesWhen: stringSchema,
           failsWhen: stringSchema,
+          settings: projectGraderPolicyInputProperties.settings,
           scope: projectGraderPolicyInputProperties.scope,
           passThreshold: projectGraderPolicyInputProperties.passThreshold,
         },
@@ -167,5 +183,34 @@ export const graderLibraryOperations = {
       },
       ...commonWriteRefusals,
     },
+  }),
+
+  cloneGrader: defineOperation({
+    operationId: "cloneGrader", method: "POST", path: "/v1/grader-library/{graderDefinitionId}/clone",
+    summary: "Clone the current LLM core into this project", tag: "Graders", security: "credentialed",
+    request: {
+      params: definitionParams, query: projectQuery, bodyRequired: true,
+      body: { type: "object", properties: { name: stringSchema, description: nullable(stringSchema) }, required: ["name"], additionalProperties: false },
+    },
+    responses: {
+      201: { description: "The independent custom definition and its copied project settings.", schema: {
+        type: "object", properties: { definition: graderLibraryEntrySchema, grader: projectGraderSchema },
+        required: ["definition", "grader"], additionalProperties: false,
+      } }, ...commonWriteRefusals,
+    },
+  }),
+  updateGraderDefinition: defineOperation({
+    operationId: "updateGraderDefinition", method: "PATCH", path: "/v1/grader-library/{graderDefinitionId}",
+    summary: "Edit the current custom grader core or live display metadata", tag: "Graders", security: "credentialed",
+    request: {
+      params: definitionParams, query: projectQuery, bodyRequired: true,
+      body: {
+        type: "object", properties: {
+          baseDefinitionVersion: { type: "integer", minimum: 1 }, gradingInstructions: stringSchema,
+          name: stringSchema, description: nullable(stringSchema),
+        }, required: ["baseDefinitionVersion"], minProperties: 2, additionalProperties: false,
+      },
+    },
+    responses: { 200: { description: "The current core. A prompt change creates the next immutable version.", schema: graderLibraryEntrySchema }, ...commonWriteRefusals },
   }),
 } as const;

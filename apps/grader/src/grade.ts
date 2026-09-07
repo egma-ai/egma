@@ -1,5 +1,6 @@
 import {
   appendGrades,
+  graderModelOfParameters,
   getSimulation,
   getSimulationTestVersion,
   MAXIMUM_WINDOW_MILLISECONDS,
@@ -157,14 +158,9 @@ function judgesFor(
   const judges = new Map<string, AskableJudge>();
   for (const entry of entries) {
     if (entry.definition.type === "code") continue;
-    if (entry.definition.judgeModel === null) {
-      throw new Error(
-        `model-judged definition ${entry.graderDefinitionId} version ${entry.graderDefinitionVersion} has no judge model`,
-      );
-    }
     judges.set(
       entry.projectGraderId,
-      judgeFor(entry.definition.judgeModel, credentials, makers),
+      judgeFor(graderModelOfParameters(entry.parameterValues), credentials, makers),
     );
   }
   return judges;
@@ -183,6 +179,7 @@ function gradeRow(
     projectGraderId: entry.projectGraderId,
     graderDefinitionId: entry.graderDefinitionId,
     graderDefinitionVersion: entry.graderDefinitionVersion,
+    parameterValues: entry.parameterValues,
     score: result.score,
     details: result.details,
     graderPassThreshold: entry.graderPassThreshold,

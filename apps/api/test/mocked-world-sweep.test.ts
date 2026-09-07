@@ -1,3 +1,4 @@
+import { defaultPersonaParameterValues, PERSONA_PARAMETER_CONTRACT } from "@egma/db";
 import { newId } from "@egma/ids";
 import { createPersona, getRun, getSimulation } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
@@ -153,7 +154,7 @@ async function anAgentReadyToRun(label: string): Promise<Ready> {
     [String(suite.body.id)],
   );
   const personaRow = await api.database.sql<{ id: string; current_version_id: string }>(
-    `select id, current_version_id from persona limit 1`,
+    `select id, current_version_id from persona_definition limit 1`,
   );
 
   return {
@@ -190,7 +191,7 @@ async function seedRun(
         status, triggered_via, connection_snapshot,
         temp_mock_agent_version, temp_mock_agent_version_cleanup,
         mock_metadata, expected_simulation_count, created_at, started_at,
-        finished_at, completed_count, failed_count, canceled_count)
+        finished_at, completed_count, failed_count, canceled_count, grading_plan)
      values ($1,$2,$3,$4,$5,$6,$10,'manual',$7::jsonb,$8::integer,
         case when $11 = 'no' then null else false end,
         case when $11 = 'no' then null else $12::jsonb end,1,
@@ -199,7 +200,7 @@ async function seedRun(
         case when $10 = 'completed' then now() - interval '1 minute' end,
         case when $10 = 'completed' then 1 end,
         case when $10 = 'completed' then 0 end,
-        case when $10 = 'completed' then 0 end)`,
+        case when $10 = 'completed' then 0 end,$13::jsonb)`,
     [
       runId,
       organizationId,
@@ -228,14 +229,18 @@ async function seedRun(
           ...(toolPrint === undefined ? {} : { tool_print: toolPrint }),
         },
       }),
+      JSON.stringify({
+        capturedAt: new Date(Date.now() - minutesOld * 60_000).toISOString(),
+        groups: [{ tag: "test", testId: ready.testId, testVersionId: ready.testVersionId, items: [] }],
+      }),
     ],
   );
   await api.database.sql(
     `insert into simulation
        (id, run_id, organization_id, project_id, agent_id, connection_id,
         persona_id, persona_version_id, test_id, test_version_id,
-        position, modality, status)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,'voice','queued')`,
+        position, modality, status, persona_parameter_values)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,'voice','queued',$11::jsonb)`,
     [
       simulationId,
       runId,
@@ -247,6 +252,7 @@ async function seedRun(
       ready.personaVersionId,
       ready.testId,
       ready.testVersionId,
+      JSON.stringify(defaultPersonaParameterValues(PERSONA_PARAMETER_CONTRACT)),
     ],
   );
   return { runId, simulationId };

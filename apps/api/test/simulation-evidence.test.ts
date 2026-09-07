@@ -100,6 +100,7 @@ async function writeGrade(
       projectGraderId: entry.projectGraderId,
       graderDefinitionId: entry.graderDefinitionId,
       graderDefinitionVersion: entry.graderDefinitionVersion,
+      parameterValues: entry.parameterValues,
       score,
       details: {
         rationale: "The agent met one expected behavior.",
@@ -296,6 +297,7 @@ describe("one simulation's grades", () => {
         projectGraderId: entry.projectGraderId,
         graderDefinitionId: entry.graderDefinitionId,
         graderDefinitionVersion: entry.graderDefinitionVersion,
+        parameterValues: entry.parameterValues,
         score: 0.75,
         details: { rationale: "The same frozen grader scored it again." },
         graderPassThreshold: entry.graderPassThreshold,

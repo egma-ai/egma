@@ -1220,9 +1220,9 @@ describe.skipIf(!storage.available)("a production conversation selected by a fix
     await setup.sql(
       `insert into grader_definition_version
          (definition_id, version, type, prompt, parameter_contract,
-          modalities, judge_model)
+          modalities)
        values ($1, 1, 'code', null, '[]'::jsonb,
-               '["voice"]'::jsonb, null)`,
+               '["voice"]'::jsonb)`,
       [definitionId],
     );
     await setup.sql("commit");
@@ -1286,14 +1286,17 @@ describe.skipIf(!storage.available)("a production conversation selected by a fix
       projectGraderId: entry.projectGraderId,
       graderDefinitionId: entry.graderDefinitionId,
       graderDefinitionVersion: entry.graderDefinitionVersion,
+      parameterValues: entry.parameterValues,
       score: 0.25,
       details: {
         rationale: "The production response missed the policy.",
         assertions: [{
           key: "policy-followed",
+          decision: "not_met",
           score: 0,
           rationale: "The promised action did not happen.",
           citedSpanIds: [`${TRACE_ID.slice(0, 14)}02`],
+          citedTurns: [1],
         }],
       },
       graderPassThreshold: entry.graderPassThreshold,
@@ -1328,8 +1331,11 @@ describe.skipIf(!storage.available)("a production conversation selected by a fix
           rationale: "The production response missed the policy.",
           assertions: [{
             key: "policy-followed",
+            decision: "not_met",
             score: 0,
             rationale: "The promised action did not happen.",
+            citedTurns: [1],
+            citedSpanIds: [`${TRACE_ID.slice(0, 14)}02`],
           }],
         },
       }],

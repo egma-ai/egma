@@ -35,6 +35,7 @@
             "pages": [
               "concepts/agents-and-connections",
               "concepts/tests-and-runs",
+              "concepts/personas",
               "concepts/graders",
               "concepts/telemetry"
             ]
@@ -81,6 +82,7 @@
               "api/agents",
               "api/test-suites",
               "api/tests",
+              "api/personas",
               "api/runs"
             ]
           },

@@ -57,9 +57,9 @@ function pointerIn(document: unknown, pointer: string): unknown {
 }
 
 describe("the platform API operation registry", () => {
-  it("contains one unique definition for each of the 72 current operations", () => {
+  it("contains one unique definition for each of the 76 current operations", () => {
     const operations = Object.values(platformOperations);
-    expect(operations).toHaveLength(72);
+    expect(operations).toHaveLength(76);
     expect(new Set(operations.map((operation) => operation.operationId)).size).toBe(
       operations.length,
     );
@@ -322,7 +322,7 @@ describe("the platform API operation registry", () => {
     expect(definition.properties).not.toHaveProperty("prompt");
     expect(definition.properties.type.enum).toEqual(["llm_as_judge", "code"]);
     expect(definition.properties.settingDefinitions.items.properties.valueType)
-      .toEqual({ type: "string", enum: ["integer"] });
+      .toEqual({ type: "string", enum: ["integer", "number", "string"] });
     expect(
       platformOperations.getGraderLibraryEntry.request.query.properties,
     ).toEqual({
@@ -441,6 +441,7 @@ describe("the platform API operation registry", () => {
         "graderDefinitionId",
         "graderDefinitionVersion",
         "graderName",
+        "parameterValues",
         "passThreshold",
         "projectGraderId",
         "result",
@@ -451,6 +452,7 @@ describe("the platform API operation registry", () => {
       "projectGraderId",
       "graderDefinitionId",
       "graderDefinitionVersion",
+      "parameterValues",
       "graderName",
       "score",
       "details",
@@ -478,9 +480,11 @@ describe("the platform API operation registry", () => {
             type: "object",
             properties: {
               key: { type: "string" },
+              decision: { type: "string", enum: ["met", "not_met", "cannot_determine"] },
               score: { type: "number", minimum: 0, maximum: 1 },
               rationale: { type: "string" },
               citedSpanIds: { type: "array", items: { type: "string" } },
+              citedTurns: { type: "array", items: { type: "integer", minimum: 1 } },
               error: { type: "string" },
             },
             required: ["key"],
@@ -498,6 +502,8 @@ describe("the platform API operation registry", () => {
     const gradingPlan = simulation.properties.gradingPlan.anyOf[0];
     const item = gradingPlan.properties.items.items;
 
+    expect(Object.keys(gradingPlan.properties)).toEqual(["capturedAt", "items"]);
+    expect(gradingPlan.required).toEqual(["capturedAt", "items"]);
     expect(Object.keys(item.properties)).toEqual([
       "projectGraderId",
       "graderDefinitionId",

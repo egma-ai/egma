@@ -5127,6 +5127,217 @@
         }
       }
     },
+    "/v1/grader-form": {
+      "get": {
+        "operationId": "getGraderForm",
+        "summary": "Get supported grader models and first-use defaults",
+        "tags": [
+          "Graders"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Supported grader model pairs and the default LLM contract.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "modelCatalog": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model",
+                          "label"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settingDefinitions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "modelCatalog",
+                    "settingDefinitions"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/grader-library": {
       "get": {
         "operationId": "listGraderLibrary",
@@ -5164,7 +5375,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Grader definitions visible to the organization, with current-project use state.",
+            "description": "Grader definitions visible to the project, with current-project use state.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5196,7 +5407,7 @@
                             "type": "string",
                             "enum": [
                               "egma",
-                              "organization"
+                              "project"
                             ]
                           },
                           "type": {
@@ -5267,11 +5478,20 @@
                                 "valueType": {
                                   "type": "string",
                                   "enum": [
-                                    "integer"
+                                    "integer",
+                                    "number",
+                                    "string"
                                   ]
                                 },
                                 "defaultValue": {
-                                  "type": "integer"
+                                  "oneOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ]
                                 },
                                 "unit": {
                                   "anyOf": [
@@ -5286,7 +5506,7 @@
                                 "minimum": {
                                   "anyOf": [
                                     {
-                                      "type": "integer"
+                                      "type": "number"
                                     },
                                     {
                                       "type": "null"
@@ -5296,7 +5516,7 @@
                                 "maximum": {
                                   "anyOf": [
                                     {
-                                      "type": "integer"
+                                      "type": "number"
                                     },
                                     {
                                       "type": "null"
@@ -5522,7 +5742,7 @@
                       "type": "string",
                       "enum": [
                         "egma",
-                        "organization"
+                        "project"
                       ]
                     },
                     "type": {
@@ -5593,11 +5813,20 @@
                           "valueType": {
                             "type": "string",
                             "enum": [
-                              "integer"
+                              "integer",
+                              "number",
+                              "string"
                             ]
                           },
                           "defaultValue": {
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "unit": {
                             "anyOf": [
@@ -5612,7 +5841,7 @@
                           "minimum": {
                             "anyOf": [
                               {
-                                "type": "integer"
+                                "type": "number"
                               },
                               {
                                 "type": "null"
@@ -5622,7 +5851,7 @@
                           "maximum": {
                             "anyOf": [
                               {
-                                "type": "integer"
+                                "type": "number"
                               },
                               {
                                 "type": "null"
@@ -5715,6 +5944,358 @@
             }
           },
           "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateGraderDefinition",
+        "summary": "Edit the current custom grader core or live display metadata",
+        "tags": [
+          "Graders"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "graderDefinitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "baseDefinitionVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "gradingInstructions": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "baseDefinitionVersion"
+                ],
+                "minProperties": 2,
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The current core. A prompt change creates the next immutable version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "owner": {
+                      "type": "string",
+                      "enum": [
+                        "egma",
+                        "project"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "llm_as_judge",
+                        "code"
+                      ]
+                    },
+                    "scopeEditable": {
+                      "type": "boolean"
+                    },
+                    "currentDefinitionVersion": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "definitionVersion": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "modalities": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "chat",
+                          "voice"
+                        ]
+                      },
+                      "minItems": 1,
+                      "uniqueItems": true
+                    },
+                    "gradingInstructions": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "requiredEvidence": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "transcript",
+                          "ending_outcome",
+                          "tool_calls",
+                          "observed_metrics",
+                          "test_expected_behaviors",
+                          "turn_response_latency"
+                        ]
+                      }
+                    },
+                    "settingDefinitions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "activeProjectGraderId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "owner",
+                    "type",
+                    "scopeEditable",
+                    "currentDefinitionVersion",
+                    "definitionVersion",
+                    "modalities",
+                    "gradingInstructions",
+                    "requiredEvidence",
+                    "settingDefinitions",
+                    "activeProjectGraderId",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "The request was refused.",
             "content": {
               "application/json": {
@@ -5903,7 +6484,6 @@
                 },
                 "required": [
                   "scope",
-                  "settings",
                   "passThreshold"
                 ],
                 "additionalProperties": false
@@ -5948,7 +6528,7 @@
                       "type": "string",
                       "enum": [
                         "egma",
-                        "organization"
+                        "project"
                       ]
                     },
                     "type": {
@@ -6195,7 +6775,7 @@
       "post": {
         "operationId": "createCustomGrader",
         "summary": "Create and use a custom LLM grader",
-        "description": "Creates one organization-owned LLM judge and its current-project policy. The judge is binary, so the body draws its boundary in three parts: what to decide, what answers met, and what answers not_met. The server compiles them into the definition version's one immutable prompt and fixes its type, model, compatible modalities, and empty settings contract.",
+        "description": "Creates a project-owned LLM core and complete project model settings in one write. The server compiles the three instruction fields into one immutable prompt. Omitted settings use the current contract defaults once, at creation.",
         "tags": [
           "Graders"
         ],
@@ -6246,6 +6826,10 @@
                   },
                   "failsWhen": {
                     "type": "string"
+                  },
+                  "settings": {
+                    "type": "object",
+                    "additionalProperties": true
                   },
                   "scope": {
                     "type": "object",
@@ -6391,7 +6975,7 @@
                           "type": "string",
                           "enum": [
                             "egma",
-                            "organization"
+                            "project"
                           ]
                         },
                         "type": {
@@ -6462,11 +7046,20 @@
                               "valueType": {
                                 "type": "string",
                                 "enum": [
-                                  "integer"
+                                  "integer",
+                                  "number",
+                                  "string"
                                 ]
                               },
                               "defaultValue": {
-                                "type": "integer"
+                                "oneOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
                               },
                               "unit": {
                                 "anyOf": [
@@ -6481,7 +7074,7 @@
                               "minimum": {
                                 "anyOf": [
                                   {
-                                    "type": "integer"
+                                    "type": "number"
                                   },
                                   {
                                     "type": "null"
@@ -6491,7 +7084,7 @@
                               "maximum": {
                                 "anyOf": [
                                   {
-                                    "type": "integer"
+                                    "type": "number"
                                   },
                                   {
                                     "type": "null"
@@ -6582,7 +7175,553 @@
                           "type": "string",
                           "enum": [
                             "egma",
-                            "organization"
+                            "project"
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "llm_as_judge",
+                            "code"
+                          ]
+                        },
+                        "modalities": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "chat",
+                              "voice"
+                            ]
+                          },
+                          "minItems": 1,
+                          "uniqueItems": true
+                        },
+                        "scopeEditable": {
+                          "type": "boolean"
+                        },
+                        "removable": {
+                          "type": "boolean"
+                        },
+                        "scope": {
+                          "type": "object",
+                          "properties": {
+                            "simulations": {
+                              "type": "array",
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "all"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "test_suite"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "id"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "test"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "id"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              }
+                            },
+                            "production": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "samplePercent": {
+                                      "type": "number",
+                                      "minimum": 1,
+                                      "maximum": 100
+                                    }
+                                  },
+                                  "required": [
+                                    "samplePercent"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "simulations",
+                            "production"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "settings": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "passThreshold": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "graderDefinitionId",
+                        "name",
+                        "description",
+                        "owner",
+                        "type",
+                        "modalities",
+                        "scopeEditable",
+                        "removable",
+                        "scope",
+                        "settings",
+                        "passThreshold",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "definition",
+                    "grader"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/grader-library/{graderDefinitionId}/clone": {
+      "post": {
+        "operationId": "cloneGrader",
+        "summary": "Clone the current LLM core into this project",
+        "tags": [
+          "Graders"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "graderDefinitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The independent custom definition and its copied project settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "definition": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "owner": {
+                          "type": "string",
+                          "enum": [
+                            "egma",
+                            "project"
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "llm_as_judge",
+                            "code"
+                          ]
+                        },
+                        "scopeEditable": {
+                          "type": "boolean"
+                        },
+                        "currentDefinitionVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "definitionVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "modalities": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "chat",
+                              "voice"
+                            ]
+                          },
+                          "minItems": 1,
+                          "uniqueItems": true
+                        },
+                        "gradingInstructions": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "requiredEvidence": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "transcript",
+                              "ending_outcome",
+                              "tool_calls",
+                              "observed_metrics",
+                              "test_expected_behaviors",
+                              "turn_response_latency"
+                            ]
+                          }
+                        },
+                        "settingDefinitions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "valueType": {
+                                "type": "string",
+                                "enum": [
+                                  "integer",
+                                  "number",
+                                  "string"
+                                ]
+                              },
+                              "defaultValue": {
+                                "oneOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "unit": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "minimum": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "maximum": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "key",
+                              "label",
+                              "valueType",
+                              "defaultValue",
+                              "unit",
+                              "minimum",
+                              "maximum"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "activeProjectGraderId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "description",
+                        "owner",
+                        "type",
+                        "scopeEditable",
+                        "currentDefinitionVersion",
+                        "definitionVersion",
+                        "modalities",
+                        "gradingInstructions",
+                        "requiredEvidence",
+                        "settingDefinitions",
+                        "activeProjectGraderId",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "grader": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "projectId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "graderDefinitionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "owner": {
+                          "type": "string",
+                          "enum": [
+                            "egma",
+                            "project"
                           ]
                         },
                         "type": {
@@ -6909,7 +8048,7 @@
                             "type": "string",
                             "enum": [
                               "egma",
-                              "organization"
+                              "project"
                             ]
                           },
                           "type": {
@@ -7339,7 +8478,7 @@
                       "type": "string",
                       "enum": [
                         "egma",
-                        "organization"
+                        "project"
                       ]
                     },
                     "type": {
@@ -9372,6 +10511,470 @@
         }
       }
     },
+    "/v1/personas/{personaId}/use": {
+      "post": {
+        "operationId": "usePersona",
+        "summary": "Use a persona with project model settings",
+        "tags": [
+          "Personas"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "personaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "models": {
+                    "type": "object",
+                    "properties": {
+                      "llm": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "stt": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "tts": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "voiceId": {
+                            "type": "string"
+                          },
+                          "speed": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model",
+                          "voiceId",
+                          "speed"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "llm",
+                      "stt",
+                      "tts"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The persona with its saved project settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "projectId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "versionId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "identityName": {
+                      "type": "string"
+                    },
+                    "personality": {
+                      "type": "string"
+                    },
+                    "language": {
+                      "type": "string"
+                    },
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "models": {
+                              "type": "object",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string"
+                                    },
+                                    "speed": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "owner": {
+                      "type": "string",
+                      "enum": [
+                        "egma",
+                        "organization"
+                      ]
+                    },
+                    "archivedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "projectId",
+                    "name",
+                    "description",
+                    "version",
+                    "versionId",
+                    "identityName",
+                    "personality",
+                    "language",
+                    "parameterContract",
+                    "settings",
+                    "owner",
+                    "archivedAt",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/personas": {
       "get": {
         "operationId": "listPersonas",
@@ -9473,72 +11076,175 @@
                           "language": {
                             "type": "string"
                           },
-                          "models": {
-                            "type": "object",
-                            "properties": {
-                              "llm": {
+                          "parameterContract": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "key": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "valueType": {
+                                  "type": "string",
+                                  "enum": [
+                                    "integer",
+                                    "number",
+                                    "string"
+                                  ]
+                                },
+                                "defaultValue": {
+                                  "oneOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "unit": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "minimum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "maximum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "key",
+                                "label",
+                                "valueType",
+                                "defaultValue",
+                                "unit",
+                                "minimum",
+                                "maximum"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "settings": {
+                            "anyOf": [
+                              {
                                 "type": "object",
                                 "properties": {
-                                  "provider": {
-                                    "type": "string"
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1
                                   },
-                                  "model": {
-                                    "type": "string"
+                                  "models": {
+                                    "type": "object",
+                                    "properties": {
+                                      "llm": {
+                                        "type": "object",
+                                        "properties": {
+                                          "provider": {
+                                            "type": "string"
+                                          },
+                                          "model": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "provider",
+                                          "model"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "stt": {
+                                        "type": "object",
+                                        "properties": {
+                                          "provider": {
+                                            "type": "string"
+                                          },
+                                          "model": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "provider",
+                                          "model"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "tts": {
+                                        "type": "object",
+                                        "properties": {
+                                          "provider": {
+                                            "type": "string"
+                                          },
+                                          "model": {
+                                            "type": "string"
+                                          },
+                                          "voiceId": {
+                                            "type": "string"
+                                          },
+                                          "speed": {
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": [
+                                          "provider",
+                                          "model",
+                                          "voiceId",
+                                          "speed"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "required": [
+                                      "llm",
+                                      "stt",
+                                      "tts"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "createdAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "updatedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
                                   }
                                 },
                                 "required": [
-                                  "provider",
-                                  "model"
+                                  "id",
+                                  "models",
+                                  "createdAt",
+                                  "updatedAt"
                                 ],
                                 "additionalProperties": false
                               },
-                              "stt": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "provider",
-                                  "model"
-                                ],
-                                "additionalProperties": false
-                              },
-                              "tts": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  },
-                                  "voiceId": {
-                                    "type": "string"
-                                  },
-                                  "speed": {
-                                    "type": "number"
-                                  }
-                                },
-                                "required": [
-                                  "provider",
-                                  "model",
-                                  "voiceId",
-                                  "speed"
-                                ],
-                                "additionalProperties": false
+                              {
+                                "type": "null"
                               }
-                            },
-                            "required": [
-                              "llm",
-                              "stt",
-                              "tts"
-                            ],
-                            "additionalProperties": false
+                            ]
                           },
                           "owner": {
                             "type": "string",
@@ -9577,7 +11283,8 @@
                           "identityName",
                           "personality",
                           "language",
-                          "models",
+                          "parameterContract",
+                          "settings",
                           "owner",
                           "archivedAt",
                           "createdAt",
@@ -9790,8 +11497,7 @@
                   "name",
                   "identityName",
                   "personality",
-                  "language",
-                  "models"
+                  "language"
                 ],
                 "additionalProperties": false
               }
@@ -9851,72 +11557,175 @@
                     "language": {
                       "type": "string"
                     },
-                    "models": {
-                      "type": "object",
-                      "properties": {
-                        "llm": {
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "provider": {
-                              "type": "string"
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            "model": {
-                              "type": "string"
+                            "models": {
+                              "type": "object",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string"
+                                    },
+                                    "speed": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
                             }
                           },
                           "required": [
-                            "provider",
-                            "model"
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
                           ],
                           "additionalProperties": false
                         },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string"
-                            },
-                            "speed": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "owner": {
                       "type": "string",
@@ -9955,7 +11764,8 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
+                    "settings",
                     "owner",
                     "archivedAt",
                     "createdAt",
@@ -10374,72 +12184,175 @@
                     "language": {
                       "type": "string"
                     },
-                    "models": {
-                      "type": "object",
-                      "properties": {
-                        "llm": {
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "provider": {
-                              "type": "string"
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            "model": {
-                              "type": "string"
+                            "models": {
+                              "type": "object",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string"
+                                    },
+                                    "speed": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
                             }
                           },
                           "required": [
-                            "provider",
-                            "model"
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
                           ],
                           "additionalProperties": false
                         },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string"
-                            },
-                            "speed": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "owner": {
                       "type": "string",
@@ -10478,7 +12391,8 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
+                    "settings",
                     "owner",
                     "archivedAt",
                     "createdAt",
@@ -10684,6 +12598,10 @@
                       "tts"
                     ],
                     "additionalProperties": false
+                  },
+                  "expectedVersionId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "additionalProperties": false
@@ -10744,72 +12662,175 @@
                     "language": {
                       "type": "string"
                     },
-                    "models": {
-                      "type": "object",
-                      "properties": {
-                        "llm": {
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "provider": {
-                              "type": "string"
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            "model": {
-                              "type": "string"
+                            "models": {
+                              "type": "object",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string"
+                                    },
+                                    "speed": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
                             }
                           },
                           "required": [
-                            "provider",
-                            "model"
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
                           ],
                           "additionalProperties": false
                         },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string"
-                            },
-                            "speed": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "owner": {
                       "type": "string",
@@ -10848,7 +12869,8 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
+                    "settings",
                     "owner",
                     "archivedAt",
                     "createdAt",
@@ -11139,72 +13161,77 @@
                           "language": {
                             "type": "string"
                           },
-                          "models": {
-                            "type": "object",
-                            "properties": {
-                              "llm": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  }
+                          "parameterContract": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "key": {
+                                  "type": "string"
                                 },
-                                "required": [
-                                  "provider",
-                                  "model"
-                                ],
-                                "additionalProperties": false
+                                "label": {
+                                  "type": "string"
+                                },
+                                "valueType": {
+                                  "type": "string",
+                                  "enum": [
+                                    "integer",
+                                    "number",
+                                    "string"
+                                  ]
+                                },
+                                "defaultValue": {
+                                  "oneOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "unit": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "minimum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "maximum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
                               },
-                              "stt": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "provider",
-                                  "model"
-                                ],
-                                "additionalProperties": false
-                              },
-                              "tts": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  },
-                                  "voiceId": {
-                                    "type": "string"
-                                  },
-                                  "speed": {
-                                    "type": "number"
-                                  }
-                                },
-                                "required": [
-                                  "provider",
-                                  "model",
-                                  "voiceId",
-                                  "speed"
-                                ],
-                                "additionalProperties": false
-                              }
-                            },
-                            "required": [
-                              "llm",
-                              "stt",
-                              "tts"
-                            ],
-                            "additionalProperties": false
+                              "required": [
+                                "key",
+                                "label",
+                                "valueType",
+                                "defaultValue",
+                                "unit",
+                                "minimum",
+                                "maximum"
+                              ],
+                              "additionalProperties": false
+                            }
                           },
                           "createdAt": {
                             "type": "string",
@@ -11218,7 +13245,7 @@
                           "identityName",
                           "personality",
                           "language",
-                          "models",
+                          "parameterContract",
                           "createdAt"
                         ],
                         "additionalProperties": false
@@ -11525,72 +13552,77 @@
                     "language": {
                       "type": "string"
                     },
-                    "models": {
-                      "type": "object",
-                      "properties": {
-                        "llm": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
                           },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
                         },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string"
-                            },
-                            "speed": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
                     },
                     "createdAt": {
                       "type": "string",
@@ -11604,7 +13636,7 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
                     "createdAt"
                   ],
                   "additionalProperties": false
@@ -11780,72 +13812,175 @@
                     "language": {
                       "type": "string"
                     },
-                    "models": {
-                      "type": "object",
-                      "properties": {
-                        "llm": {
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "provider": {
-                              "type": "string"
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            "model": {
-                              "type": "string"
+                            "models": {
+                              "type": "object",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string"
+                                    },
+                                    "speed": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
                             }
                           },
                           "required": [
-                            "provider",
-                            "model"
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
                           ],
                           "additionalProperties": false
                         },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string"
-                            },
-                            "speed": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "owner": {
                       "type": "string",
@@ -11884,7 +14019,8 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
+                    "settings",
                     "owner",
                     "archivedAt",
                     "createdAt",
@@ -15655,6 +17791,10 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "parameterValues": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
                           "graderName": {
                             "type": "string"
                           },
@@ -15684,6 +17824,14 @@
                                     "key": {
                                       "type": "string"
                                     },
+                                    "decision": {
+                                      "type": "string",
+                                      "enum": [
+                                        "met",
+                                        "not_met",
+                                        "cannot_determine"
+                                      ]
+                                    },
                                     "score": {
                                       "type": "number",
                                       "minimum": 0,
@@ -15696,6 +17844,13 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string"
+                                      }
+                                    },
+                                    "citedTurns": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer",
+                                        "minimum": 1
                                       }
                                     },
                                     "error": {
@@ -15736,6 +17891,7 @@
                           "projectGraderId",
                           "graderDefinitionId",
                           "graderDefinitionVersion",
+                          "parameterValues",
                           "graderName",
                           "score",
                           "details",
@@ -15763,6 +17919,10 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "parameterValues": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
                           "graderName": {
                             "type": "string"
                           },
@@ -15792,6 +17952,14 @@
                                     "key": {
                                       "type": "string"
                                     },
+                                    "decision": {
+                                      "type": "string",
+                                      "enum": [
+                                        "met",
+                                        "not_met",
+                                        "cannot_determine"
+                                      ]
+                                    },
                                     "score": {
                                       "type": "number",
                                       "minimum": 0,
@@ -15804,6 +17972,13 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string"
+                                      }
+                                    },
+                                    "citedTurns": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer",
+                                        "minimum": 1
                                       }
                                     },
                                     "error": {
@@ -15844,6 +18019,7 @@
                           "projectGraderId",
                           "graderDefinitionId",
                           "graderDefinitionVersion",
+                          "parameterValues",
                           "graderName",
                           "score",
                           "details",
@@ -16307,12 +18483,6 @@
                         {
                           "type": "object",
                           "properties": {
-                            "state": {
-                              "type": "string",
-                              "enum": [
-                                "run_start"
-                              ]
-                            },
                             "capturedAt": {
                               "type": "string",
                               "format": "date-time"
@@ -16355,7 +18525,6 @@
                             }
                           },
                           "required": [
-                            "state",
                             "capturedAt",
                             "items"
                           ],
@@ -20358,6 +22527,10 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "parameterValues": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
                           "graderName": {
                             "type": "string"
                           },
@@ -20387,6 +22560,14 @@
                                     "key": {
                                       "type": "string"
                                     },
+                                    "decision": {
+                                      "type": "string",
+                                      "enum": [
+                                        "met",
+                                        "not_met",
+                                        "cannot_determine"
+                                      ]
+                                    },
                                     "score": {
                                       "type": "number",
                                       "minimum": 0,
@@ -20399,6 +22580,13 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string"
+                                      }
+                                    },
+                                    "citedTurns": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer",
+                                        "minimum": 1
                                       }
                                     },
                                     "error": {
@@ -20439,6 +22627,7 @@
                           "projectGraderId",
                           "graderDefinitionId",
                           "graderDefinitionVersion",
+                          "parameterValues",
                           "graderName",
                           "score",
                           "details",
@@ -20466,6 +22655,10 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "parameterValues": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
                           "graderName": {
                             "type": "string"
                           },
@@ -20495,6 +22688,14 @@
                                     "key": {
                                       "type": "string"
                                     },
+                                    "decision": {
+                                      "type": "string",
+                                      "enum": [
+                                        "met",
+                                        "not_met",
+                                        "cannot_determine"
+                                      ]
+                                    },
                                     "score": {
                                       "type": "number",
                                       "minimum": 0,
@@ -20507,6 +22708,13 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string"
+                                      }
+                                    },
+                                    "citedTurns": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer",
+                                        "minimum": 1
                                       }
                                     },
                                     "error": {
@@ -20547,6 +22755,7 @@
                           "projectGraderId",
                           "graderDefinitionId",
                           "graderDefinitionVersion",
+                          "parameterValues",
                           "graderName",
                           "score",
                           "details",

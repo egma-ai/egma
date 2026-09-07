@@ -25,7 +25,7 @@ import {
   listSimulations,
   listTests,
   NotPermittedError,
-  RECOMMENDED_PERSONA_MODELS,
+  PERSONA_PARAMETER_CONTRACT,
   renameTestSuite,
   RunWriteRefusedError,
   startRun,
@@ -540,7 +540,7 @@ async function seedManyPersonas(count: number): Promise<readonly string[]> {
   try {
     await connection.sql("begin");
     await connection.sql(
-      `insert into persona
+      `insert into persona_definition
          (id, organization_id, project_id, name, current_version_id)
        select seeded.persona_id, $1, $2,
          'Paged caller ' || seeded.ordinality,
@@ -555,24 +555,14 @@ async function seedManyPersonas(count: number): Promise<readonly string[]> {
       ],
     );
     await connection.sql(
-      `insert into persona_version
-         (id, persona_id, version, identity_name, personality, language,
-          llm_provider, llm_model, stt_provider, stt_model,
-          tts_provider, tts_model, tts_voice_id, tts_speed)
+      `insert into persona_definition_version
+         (id, persona_id, version, identity_name, personality, language, parameter_contract)
        select seeded.version_id, seeded.persona_id, 1,
-         'Paged Caller', 'Patient', 'en-US',
-         $1, $2, $3, $4, $5, $6, $7, $8
-       from unnest($9::text[], $10::text[])
+         'Paged Caller', 'Patient', 'en-US', $1::jsonb
+       from unnest($2::text[], $3::text[])
          as seeded(version_id, persona_id)`,
       [
-        RECOMMENDED_PERSONA_MODELS.llm.provider,
-        RECOMMENDED_PERSONA_MODELS.llm.model,
-        RECOMMENDED_PERSONA_MODELS.stt.provider,
-        RECOMMENDED_PERSONA_MODELS.stt.model,
-        RECOMMENDED_PERSONA_MODELS.tts.provider,
-        RECOMMENDED_PERSONA_MODELS.tts.model,
-        RECOMMENDED_PERSONA_MODELS.tts.voiceId,
-        RECOMMENDED_PERSONA_MODELS.tts.speed,
+        JSON.stringify(PERSONA_PARAMETER_CONTRACT),
         ids.map((row) => row.version),
         ids.map((row) => row.persona),
       ],
