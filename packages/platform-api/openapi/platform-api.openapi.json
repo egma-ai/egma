@@ -15932,6 +15932,9 @@
                     "hasRecording": {
                       "type": "boolean"
                     },
+                    "agentPovIncomplete": {
+                      "type": "boolean"
+                    },
                     "measures": {
                       "type": "object",
                       "properties": {
@@ -16463,6 +16466,7 @@
                     "endedAt",
                     "providerReference",
                     "hasRecording",
+                    "agentPovIncomplete",
                     "measures",
                     "metrics",
                     "test",

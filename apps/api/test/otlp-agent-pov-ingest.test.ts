@@ -686,6 +686,17 @@ describe.skipIf(!storage.available)("the row caps, across an export naming two",
  * whole of what "grading was asked for" means.
  */
 describe.skipIf(!storage.available)("when a simulation's grading is asked for", () => {
+  /** What the v1 read says about the agent's account of one simulation. */
+  async function agentPovIncompleteOf(simulationId: string): Promise<unknown> {
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    return (read.json() as { agentPovIncomplete: boolean }).agentPovIncomplete;
+  }
+
   it("waits: a landing files no grading work while the agent's POV is still coming", async () => {
     const room = "egma-grading-waits-1";
     const landed = await aLandedSimulation(acme, "waits", room, {
@@ -720,6 +731,9 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     const [row] = (await listSimulations(auth, landed.runId, { limit: 1 }))
       ?.items ?? [];
     expect(row?.agentPov).toBe("filed");
+    // And the read says the record is whole, so a page showing the agent's POV
+    // knows it is showing the conversation rather than a fragment of it.
+    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(false);
   }, 120_000);
 
   /**
@@ -753,6 +767,10 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     const [row] = (await listSimulations(auth, landed.runId, { limit: 1 }))
       ?.items ?? [];
     expect(row?.agentPov).toBe("incomplete");
+    // **And the read says so**, which is the half a reader needs: a view that
+    // shows the agent's POV would otherwise show whatever fragment arrived as
+    // if it were the whole conversation.
+    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(true);
 
     // **And never twice.** A second sweep finds the wait already settled and
     // asks for nothing, which is what keeps one conversation to one handoff
@@ -781,8 +799,10 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     const [row] = (await listSimulations(auth, landed.runId, { limit: 1 }))
       ?.items ?? [];
     expect(row?.status).toBe("completed");
-    // Nothing to record, because nothing was waited for.
+    // Nothing to record, because nothing was waited for — and nothing to warn
+    // a reader about either.
     expect(row?.agentPov).toBeNull();
+    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(false);
     // And the completion probe found no evidence at all — no simulator ran —
     // so the drain handoff is what will start grading, exactly as before this
     // effort. What matters here is that the *wait* was never entered.

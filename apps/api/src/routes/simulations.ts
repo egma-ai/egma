@@ -239,6 +239,14 @@ export async function simulationRoutes(
         // A result is read here, so it answers here — never by fetching the
         // run to find out.
         hasRecording: simulation.recordingReference !== null,
+        // **That grading stopped waiting for the agent's own account of this
+        // conversation.** The wait is bounded at thirty seconds so a broken
+        // exporter or a failed pull cannot hold a simulation open forever
+        // (ADR-0015 §6), and past the bound the record has to say so: a reader
+        // showing the agent's POV would otherwise show whatever fragment
+        // arrived as if it were the conversation. False is the ordinary answer
+        // — the account landed, or the lane files none.
+        agentPovIncomplete: simulation.agentPov === "incomplete",
         measures: describedMeasures(simulation, transcript),
         // The observed metrics, off the one shared projection the transcript
         // answers with — so the strip on a simulation's evidence and the strip

@@ -4319,6 +4319,7 @@ export type GetSimulationResponses = {
         endedAt: string | null;
         providerReference: string | null;
         hasRecording: boolean;
+        agentPovIncomplete: boolean;
         measures: {
             durationMs?: number;
             turnCount?: number;
