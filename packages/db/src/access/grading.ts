@@ -758,21 +758,29 @@ export async function recordSimulationTraces(
         `completed simulation trace ${trace.traceId} is not query-visible`,
       );
     }
-    // The wait is settled before the request, in its own guarded write, so a
-    // second drain of the same segment finds it settled and asks once.
-    if (readiness.settles !== undefined) {
-      const settled = await settleAgentPovWait(row.id, readiness.settles);
-      if (!settled) continue;
-    }
-    await requestGrading(auth, {
-      source: "simulation",
-      traceId: trace.traceId,
-      traceStartedAt: readiness.traceStartedAt,
-      runId: row.runId,
-      // Ignored for simulations: the completed row above is the authority.
-      endsTrace: false,
-      evidenceReady: true,
-      modality: row.modality as Modality,
+    const settles = readiness.settles;
+    const traceStartedAt = readiness.traceStartedAt;
+    // **The settle and the handoff commit together.** The guarded write is what
+    // makes one conversation one handoff — a second drain of the same segment
+    // finds the wait already settled and asks for nothing — so a crash between
+    // the two would leave a row saying its wait ended and no work to end it.
+    await db().transaction(async (tx) => {
+      if (
+        settles !== undefined &&
+        !(await settleAgentPovWait(tx, row.id, settles))
+      ) {
+        return;
+      }
+      await requestGradingIn(tx, auth, {
+        source: "simulation",
+        traceId: trace.traceId,
+        traceStartedAt,
+        runId: row.runId,
+        // Ignored for simulations: the completed row above is the authority.
+        endsTrace: false,
+        evidenceReady: true,
+        modality: row.modality as Modality,
+      });
     });
   }
 }
@@ -807,10 +815,11 @@ function connectionTypeOf(snapshot: unknown): string {
  * whole of what it may move.
  */
 async function settleAgentPovWait(
+  on: Queryable,
   simulationId: string,
   settles: "filed" | "incomplete",
 ): Promise<boolean> {
-  const [row] = await db()
+  const [row] = await on
     .update(simulation)
     .set({ agentPov: settles })
     .where(
@@ -841,7 +850,9 @@ export type SimulationPastTheAgentPovBound = {
  *
  * Each row is settled `incomplete` and its grading asked for in one
  * transaction, so a crash between the two is impossible: a row that says the
- * agent's POV is incomplete is a row grading was asked for.
+ * agent's POV is incomplete is a row grading was asked for. The row that loses
+ * the guarded write — a second replica reading the same clock — asks for
+ * nothing and reports nothing.
  *
  * **It takes no `AuthContext` and cannot be given one**, on the orphan sweep's
  * exact terms: a bound is read by egma standing behind every organization at
@@ -924,17 +935,23 @@ export async function settleSimulationsPastTheAgentPovBound(options?: {
     // Not ready is a row whose bound has not really expired — a clock that
     // moved under this sweep — and it waits for the next tick.
     if (!readiness.ready || readiness.settles === undefined) continue;
-    if (!(await settleAgentPovWait(row.id, readiness.settles))) continue;
-    await requestGrading(auth, {
-      source: "simulation",
-      traceId,
-      traceStartedAt: readiness.traceStartedAt ?? row.startedAt ?? row.endedAt,
-      runId: row.runId,
-      endsTrace: false,
-      evidenceReady: true,
-      modality: row.modality as Modality,
+    const settles = readiness.settles;
+    const traceStartedAt =
+      readiness.traceStartedAt ?? row.startedAt ?? row.endedAt;
+    const took = await db().transaction(async (tx) => {
+      if (!(await settleAgentPovWait(tx, row.id, settles))) return false;
+      await requestGradingIn(tx, auth, {
+        source: "simulation",
+        traceId,
+        traceStartedAt,
+        runId: row.runId,
+        endsTrace: false,
+        evidenceReady: true,
+        modality: row.modality as Modality,
+      });
+      return true;
     });
-    settled.push({ id: row.id, runId: row.runId });
+    if (took) settled.push({ id: row.id, runId: row.runId });
   }
   return settled;
 }
