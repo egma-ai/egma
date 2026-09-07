@@ -29,11 +29,15 @@ the agent platform.
   and then polls about every 30 seconds. The switch lives on the agent, so each
   agent is started and stopped on its own. See [Retell](/integrations/retell).
 - **LiveKit is pushed.** Install the Egma SDK for the worker's language. Call
-  `monitor_livekit(ctx)` in Python or `monitorLiveKit(ctx)` in JavaScript as the
-  first statement of the job entrypoint, before `ctx.connect` and
-  `AgentSession.start`. The worker sends OTLP to `POST /v1/traces`. There is
-  nothing to switch on: the conversations appear as soon as the worker sends
-  them.
+  `monitor(ctx)` as the first statement of the job entrypoint, before
+  `ctx.connect` and `AgentSession.start`. The worker sends OTLP to
+  `POST /v1/traces`. There is nothing to switch on: the conversations appear as
+  soon as the worker sends them.
+
+  `monitor` is the production verb. The SDK's other verb, `simulation`, sends
+  an Egma simulation's spans to that simulation instead. Each is inert in the
+  other's room, so one installed SDK serves both and a simulation never appears
+  as a production conversation.
 
 See [Monitoring API](/api/monitoring) for the start and stop doors.
 
@@ -92,12 +96,12 @@ export EGMA_API_KEY=egma_sk_...
 Then call the public helper before `AgentSession.start`:
 
 ```python
-from egma import monitor_livekit
+from egma import monitor
 from livekit import agents
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:
-    monitor_livekit(ctx)
+    monitor(ctx)
     await ctx.connect()
     # Build the agent and session here.
     await session.start(agent=agent, room=ctx.room)
@@ -117,11 +121,11 @@ Use the same `EGMA_URL` and `EGMA_API_KEY` values, then call the JavaScript
 helper first in the job entrypoint:
 
 ```typescript
-import { monitorLiveKit } from "@egma/livekit";
+import { monitor } from "@egma/livekit";
 import { type JobContext } from "@livekit/agents";
 
 export async function entrypoint(ctx: JobContext) {
-  monitorLiveKit(ctx);
+  monitor(ctx);
   // Build the agent and session here.
   await session.start({ agent, room: ctx.room });
 }

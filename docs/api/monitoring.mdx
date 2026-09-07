@@ -13,11 +13,14 @@ the platform Egma pulls from today.
 
 **Push** is your own agent process sending its spans to Egma. It needs no
 switch and no configuration on this page: set `EGMA_URL` and a project-scoped
-`EGMA_API_KEY` in the agent, call `monitor_livekit(ctx)` in Python or
-`monitorLiveKit(ctx)` in JavaScript before `AgentSession.start`, and the
-conversations appear on the Monitoring page. See the
+`EGMA_API_KEY` in the agent, call `monitor(ctx)` before `AgentSession.start`,
+and the conversations appear on the Monitoring page. See the
 [Python SDK](/integrations/python-sdk) or
 [JavaScript SDK](/integrations/javascript-sdk).
+
+`monitor` is the production verb. The SDK's other verb,
+`simulation(agent, ctx, session)`, pushes an Egma simulation's spans to that
+simulation, and never to this page. Each verb is inert in the other's room.
 
 There is no monitoring configuration object. The switch on the agent is the
 only stored monitoring choice, and an agent's fields are documented with

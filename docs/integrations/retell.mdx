@@ -20,6 +20,13 @@ your own backend, on every lane. A test that names no mock tool runs against
 your serving agent exactly as a caller does. See
 [Test files](/cli/test-files) for how a test writes them.
 
+Unmocked tools run real, and are recorded from the agent's point of view. Egma
+reads the call record from Retell the moment a simulation's call ends and files
+it under that simulation, so the transcript holds every tool call the agent
+made — the ones a mock tool answered and the ones that reached your backend. A
+call a mock tool answered is marked with that mock tool's name. Text mode keeps
+nothing between requests, so it has no call record for Egma to read.
+
 ## Before setup
 
 The public `integrate-egma` skill is still being authored. Follow this page
@@ -198,9 +205,10 @@ Egma reads the version back and refuses the run if a default came back trimmed.
 variable explicitly: the address of Egma's own endpoint for the tools this
 simulation's test names, and the empty string for every other tool. An empty
 value renders to nothing and leaves your own URL exactly as you wrote it, so
-**an unmocked tool goes straight to your backend and never reaches Egma**. The
-mocked address ends in `#`, so your original URL trails behind it as a fragment
-that no HTTP client sends.
+**an unmocked tool goes straight to your backend and no request for it reaches
+Egma**. The mocked address ends in `#`, so your original URL trails behind it as
+a fragment that no HTTP client sends. The call is still on the transcript: Egma
+reads it from Retell's own call record when the call ends.
 
 **Your serving version is never changed.** The temporary version is a branch.
 Simulations of tests that mock are placed against it; a test that names no mock

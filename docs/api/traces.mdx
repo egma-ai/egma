@@ -6,11 +6,13 @@ description: "Send OpenTelemetry spans from your voice agent to Egma and query t
 
 Traces are the storage record of a conversation. Egma accepts standard
 OTLP/HTTP from an agent process that already emits OpenTelemetry spans. LiveKit
-Agents should use `monitor_livekit(ctx)` from the Egma Python SDK or
-`monitorLiveKit(ctx)` from the Egma JavaScript SDK to create the required
-telemetry setup. Retell Monitoring polls Retell and writes normalized
-production traces without using this ingest endpoint. Use the read endpoints
-below for either source.
+Agents should use `monitor(ctx)` from the Egma Python SDK or the Egma
+JavaScript SDK to create the required telemetry setup for production. The same
+door takes a simulation's spans: the SDK's `simulation(agent, ctx, session)`
+verb stamps each span with the room's name, and Egma files those spans under
+the simulation that opened that room instead of on the Monitoring list. Retell
+Monitoring polls Retell and writes normalized production traces without using
+this ingest endpoint. Use the read endpoints below for either source.
 
 ---
 
@@ -254,7 +256,19 @@ Returns the full transcript, metrics, and trace-level grades.
 </ResponseField>
 
 <ResponseField name="spans" type="array">
-  All spans in the trace, nested under their parents. Each span includes `spanId`, `parentSpanId`, `name`, `kind`, `status`, `startedAt`, `durationNs`, `text`, `audioUrl`, `toolName`, `toolArguments`, `toolResult`, and child `spans`.
+  All spans in the trace, nested under their parents. Each span includes `spanId`, `parentSpanId`, `name`, `kind`, `status`, `startedAt`, `durationNs`, `text`, `audioUrl`, `toolName`, `toolArguments`, `toolResult`, `pov`, and child `spans`.
+
+  `pov` says whose account of the conversation the span is. `agent` is what the
+  agent's own process reported — its turns, its tool calls and its timings.
+  `persona` is what Egma's own simulator said, heard, measured and recorded. A
+  production conversation has only the agent's. A simulation holds both under
+  one trace and this read returns both; read the agent's for one conversation.
+
+  A simulation's tool span can also carry `toolProvenance` and `mockTool`.
+  `toolProvenance` has one value, `mocked`, and is absent on every other span.
+  `mockTool` is the mock tool that answered, by name, and is present only beside
+  `toolProvenance`. Both are read by name from the simulation's pinned test
+  version, so they never appear on a production trace.
 </ResponseField>
 
 <ResponseField name="spansTruncated" type="boolean">

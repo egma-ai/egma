@@ -164,8 +164,10 @@ forwarding. If yours does not, use a public server or LiveKit Cloud.
 A mock tool lets a simulation run against an answer the test authors instead of
 against your real backend, so a test never books a real appointment. On a Retell
 web-call agent this works by routing the tools a test names to Egma, per call,
-for the length of a run. Every tool a test does not name goes to your own
-backend and never reaches Egma.
+for the length of a run. Every tool a test does not name goes straight to your
+own backend, and no request for it reaches this address. It is still on the
+simulation's transcript: Egma reads the call record from Retell when the call
+ends, so the record holds every tool call the agent made.
 
 Retell calls a tool's URL from its own infrastructure, and **Retell refuses
 `localhost` and private network addresses for a tool URL**. So this is the one
@@ -208,9 +210,11 @@ address for `EGMA_URL` and a project API key for `EGMA_API_KEY`.
 For a manual LiveKit setup, install the [Python SDK](/integrations/python-sdk)
 or [JavaScript SDK](/integrations/javascript-sdk) in the agent process. Set
 `EGMA_URL` to the API address and `EGMA_API_KEY` to a project key. Call
-`monitor_livekit(ctx)` in Python or `monitorLiveKit(ctx)` in JavaScript as the
-first statement of the job entrypoint, before `ctx.connect` and
-`AgentSession.start`.
+`monitor(ctx)` as the first statement of the job entrypoint, before
+`ctx.connect` and `AgentSession.start`. For simulations on the same worker,
+call `await simulation(agent, ctx, session)` before the session starts; both
+verbs read `EGMA_URL` and `EGMA_API_KEY`, and each is inert in the other's
+room.
 
 ```bash
 export EGMA_URL=http://localhost:3100
@@ -258,10 +262,11 @@ The `egma-sim-` room-name prefix and the `egma-persona` participant identity
 are frozen contracts, so updating the worker first does not break an older
 simulator.
 
-An out-of-date worker does not fail loudly. A simulation whose mocked tools all
-ran real shows it on the transcript, which carries no answered call, so refresh
-the source dependency on your own schedule rather than waiting for a run to
-complain.
+An out-of-date worker fails loudly now. The Egma SDK is required for a LiveKit
+simulation: a worker that cannot report to Egma fails the simulation with a
+message that names the room and the installed package, rather than running your
+real tools where a mock tool was meant to answer. Keep the source dependency
+current.
 
 <Warning>
   There is no in-place self-host upgrade from a build before the current

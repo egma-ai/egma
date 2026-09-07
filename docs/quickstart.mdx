@@ -213,6 +213,15 @@ EGMA_LIVEKIT_TOKEN_ENDPOINT_HEADERS='{"Authorization":"Bearer ..."}' \
 The CLI never writes provider secrets to an environment file. The coding agent
 owns any runtime configuration needed by the LiveKit worker.
 
+<Note>
+  A LiveKit simulation needs the Egma SDK inside the agent's own process. Call
+  `await simulation(agent, ctx, session)` in the job entrypoint, before the
+  session starts. Without it the agent never reports to Egma, and every
+  simulation on this Connection fails. See the
+  [Python SDK](/integrations/python-sdk) or the
+  [JavaScript SDK](/integrations/javascript-sdk).
+</Note>
+
 ## 6. Author and push the first Suite
 
 List the Project's valid personas:
@@ -232,7 +241,8 @@ The coding agent writes the smallest grounded Test set under
 Markdown format, personas, scenarios, expected behaviors, and test-level Mock
 Tool answers. Each Test also carries its own `env`, including
 `retell_dynamic_variables` for Retell or `job_dispatch_metadata` for LiveKit.
-Every tool that a Test does not name runs for real.
+Every tool that a Test does not name runs for real, and every call the agent
+makes is on the simulation's transcript, from the agent's point of view.
 
 Push the complete repository:
 

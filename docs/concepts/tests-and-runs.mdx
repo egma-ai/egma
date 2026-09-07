@@ -61,9 +61,12 @@ weaker subset inside the run. An empty suite cannot run.
 Each simulation stores the exact test and persona versions that it executed.
 This keeps old evidence exact even after you edit a test. A simulation reads its
 world from that pinned version: Egma mocks exactly the tools the test names, and
-every other tool the agent calls runs for real. Two tests in one suite can carry
-different worlds, so one run can hold a simulation with mock tools beside one
-without any.
+every other tool the agent calls runs for real. Unmocked tools run real, and are
+recorded from the agent's point of view: the transcript is the agent's own
+account of the conversation, so every tool call it made is there, and a call a
+mock tool answered is marked with that mock tool's name. Two tests in one suite
+can carry different worlds, so one run can hold a simulation with mock tools
+beside one without any.
 
 A connection cannot always carry everything a test says. The run proceeds and
 says so on the run itself. See
