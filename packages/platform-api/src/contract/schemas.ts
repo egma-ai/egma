@@ -70,14 +70,9 @@ export function parameters<
 }
 
 /**
- * One observed metric as either conversation read answers it: the catalog
- * measure it names, the samples with the spans they happened in, and the
- * reductions the platform computed — the mean, the median and the p90, each
- * worked out once in the shared measure module so no client ever reduces for
- * itself. Which one a page leads with is the page's decision; today it is the
- * p90, the number the tail of the call is felt in. Shared here because two
- * operations answer it — a trace's transcript and one simulation's evidence —
- * and a projection written out at each door is two chances to disagree.
+ * Shared metric response: measure name, evidence samples, and reductions
+ * computed by @egma/metrics. Clients format these values without repeating
+ * the metric calculation.
  */
 const povSeriesSchema = {
   type: "object",

@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import { createPersona } from "@egma/db";
 import { mockToolVariable } from "@egma/retell";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
@@ -18,19 +17,9 @@ import {
 } from "./support/traces.ts";
 
 /**
- * One mocked run, end to end, against a Retell that exists only in this file.
- *
- * The whole promise in one walk: a developer writes a test that names the tools
- * it mocks, starts a run, and every step of the mocked world happens — a
- * temporary version branched from the exact version the agent serves, its tools
- * pointed at Egma, the live version untouched, each simulation conducted
- * against the temporary version, a tool call answered from the pinned test
- * version and landed on the record with the answer egma authored, and the
- * temporary version deleted when the run ends.
- *
- * And the other half of the promise beside it: a run whose world cannot be
- * built is refused with the reason, before a single simulation is conducted,
- * with nothing written to the version the customer's callers are served from.
+ * Exercise mocked-run creation, spec routing, tool responses, and temporary
+ * version deletion with a fake Retell service. Check serving configuration
+ * and rejection before execution when mock setup fails; this is not a live-provider test.
  */
 
 let api: TestApi;
@@ -176,8 +165,7 @@ function anAccount(
       });
     }
     if (method === "GET" && path.startsWith("/get-phone-number/")) {
-      // The restore reads the number before it writes, so this account has to
-      // answer for one number as well as for the listing.
+      // Serve the individual number read as well as the account listing.
       const number = decodeURIComponent(path.slice("/get-phone-number/".length));
       const inbound = state.bindings.get(number);
       if (inbound === undefined) return json({ error: "gone" }, 404);
@@ -463,7 +451,6 @@ describe("one mocked run, from the test to the teardown", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
@@ -642,7 +629,6 @@ describe("two tests of one run, mocking different tools", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
@@ -761,7 +747,6 @@ describe("a web-call run whose tests mock nothing", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -803,7 +788,6 @@ describe("a run over a Retell lane against an agent that publishes nothing", () 
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
 
     // A settled fact about the agent, not a bad moment: 422, not 503.
@@ -839,7 +823,6 @@ describe("a run over a Retell lane against an agent that publishes nothing", () 
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     expect(started.body.agentVersion).toBe(105);
@@ -858,7 +841,6 @@ describe("a run whose world cannot be built", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
     expect(refused.body.error).toBe("mock_tools_unbuildable");
@@ -895,7 +877,6 @@ describe("a second mocked run on an agent already holding its world", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
     const firstRunId = String(first.body.id);
@@ -914,7 +895,6 @@ describe("a second mocked run on an agent already holding its world", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
 
     // Refused as a conflict, naming the run to wait for.
@@ -947,7 +927,6 @@ describe("a second mocked run on an agent already holding its world", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
 
@@ -966,7 +945,6 @@ describe("a second mocked run on an agent already holding its world", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(second.statusCode, JSON.stringify(second.body)).toBe(201);
     const header = await ask(
@@ -984,16 +962,8 @@ describe("a second mocked run on an agent already holding its world", () => {
 });
 
 /**
- * The teardown and the next run's claim, meeting.
- *
- * A finished run never blocks a claim — its litter is the next run's sweep to
- * clear — so the two really do arrive at once every time a suite is started
- * again as soon as the last one ends. Without one fence over both, the first
- * run's delete is still in flight while the second branches its copy, and
- * Retell hands the next branch the lowest free number: the number the first
- * run is in the middle of deleting is the number the second is given. One
- * teardown would then delete the other run's live copy, and nothing downstream
- * could tell whose version it had been.
+ * Serialize teardown and the next build because Retell may reuse deleted
+ * version numbers. A delayed delete must not remove the next run's draft.
  */
 describe("a teardown that is in flight when the next run starts", () => {
   it("makes the next run wait for it, and touches no binding either way", async () => {
@@ -1003,7 +973,6 @@ describe("a teardown that is in flight when the next run starts", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
     const specs = await claim();
@@ -1038,13 +1007,9 @@ describe("a teardown that is in flight when the next run starts", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
-    // The teardown is let go the moment the second run has branched — which is
-    // the moment its copy could be hijacked — or after long enough that it
-    // plainly never will. A build that is waiting its turn never gets there,
-    // so this waits out the timer; a build that is not waiting gets there in
-    // milliseconds and the restore below lands on top of its copy.
+    // Release teardown after the second build reaches branching, or after a
+    // short timeout if it is correctly waiting for the first run to finish cleanup.
     await Promise.race([
       branched,
       new Promise((resume) => setTimeout(resume, 300)),
@@ -1075,14 +1040,8 @@ describe("a teardown that is in flight when the next run starts", () => {
 });
 
 /**
- * The claim refuses two *live* worlds; this is the other half. A world whose
- * teardown failed belongs to a finished run — nothing blocks the claim — but
- * its restore is still owed, and it retries on a later terminal report. If the
- * next run branched first, that retry would put the number's `latest` binding
- * back while the new draft is the latest version, and real callers would reach
- * a mocked agent. So the build refuses while anything on the agent is owed,
- * which is what lets the retried restore always land on an account with no
- * temporary version standing.
+ * Refuse a new build while a predecessor still owes cleanup. A later terminal
+ * report retries deletion; no phone-number binding restoration is involved.
  */
 describe("a mocked run after a predecessor's teardown failed", () => {
   it("is refused until the debt settles, and the retried restore finds no draft", async () => {
@@ -1092,14 +1051,12 @@ describe("a mocked run after a predecessor's teardown failed", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
     const firstRunId = String(first.body.id);
 
-    // The account stops honouring deletes, then the run is conducted to its
-    // end: its teardown cannot delete the draft, and delete-before-restore
-    // then keeps the pin in place — the draft stands, the world stays owed.
+    // Refuse draft deletion during teardown. The temporary version remains
+    // and cleanup stays pending; phone-number bindings are unchanged.
     ready.state.refuseDeletes = true;
     const specs = await claim();
     const simulationId = String(specs[0]?.["simulation_id"]);
@@ -1116,7 +1073,6 @@ describe("a mocked run after a predecessor's teardown failed", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(second.statusCode, JSON.stringify(second.body)).toBe(422);
     expect(second.body.error).toBe("mock_tools_unbuildable");
@@ -1127,10 +1083,8 @@ describe("a mocked run after a predecessor's teardown failed", () => {
       { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
     ]);
 
-    // The account honours deletes again, and the cleanup retries on the
-    // predecessor's next terminal report. The retried restore finds **no
-    // draft standing** — the refusal above is what guaranteed that — so
-    // `latest` resolves to the real serving version and nothing else.
+    // Allow deletion and retry cleanup on the next terminal report. The second
+    // build created no draft, so only the predecessor's version needs removal.
     ready.state.refuseDeletes = false;
     await report(simulationId, "completed");
     expect(ready.state.versions.has(106)).toBe(false);
@@ -1143,7 +1097,6 @@ describe("a mocked run after a predecessor's teardown failed", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(third.statusCode, JSON.stringify(third.body)).toBe(201);
   });

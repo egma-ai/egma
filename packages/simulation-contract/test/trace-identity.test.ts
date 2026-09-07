@@ -10,20 +10,9 @@ import {
 } from "../src/trace-identity.ts";
 
 /**
- * The derivation, held to the document that promises it.
- *
- * `span-vocabulary.md` states one worked example — a simulation id and the
- * trace id it is, "always" — and this is that sentence executed. The fixtures
- * are the same promise as bytes, so every one of them is checked through this
- * export too: a fixture the emitter wrote and a trace id the platform derives
- * have to be the same 32 characters, or a grade and its evidence would file
- * under two different traces and neither side would notice.
- *
- * `span-fixtures.test.ts` beside this file checks the fixtures against its own
- * independent implementation of the same derivation, and deliberately does not
- * import this one — two implementations that must agree is what catches a
- * change to either. This file is the other half: the export, held to the
- * document and to the fixtures.
+ * Check the exported trace-ID conversion against the documented example and
+ * every span fixture. span-fixtures.test.ts uses an independent conversion
+ * so an implementation change cannot update its own expected values.
  */
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));

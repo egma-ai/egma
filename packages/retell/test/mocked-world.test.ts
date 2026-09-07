@@ -13,17 +13,9 @@ import {
 } from "../src/index.ts";
 
 /**
- * The whole lifecycle, against a Retell that exists only in this file — and
- * every guard in it made to fire.
- *
- * The fake below is **an account, not a router**: it holds numbers, agent
- * versions and engine documents, and it answers requests by changing them. So
- * what these checks assert is what a developer would see afterwards — which
- * version their number routes to, what their live agent's tools point at, what
- * is left behind — rather than which requests Egma happened to send. The
- * request log is read only where the *order* is the safety property, which is
- * exactly twice: the write that must not happen before the fork guard, and the
- * delete that must happen before the restore.
+ * Exercise lifecycle guards against a stateful account fake.
+ * Assert resulting bindings, serving tools, and cleanup residue; inspect request
+ * order where it protects against writes before fork validation or unsafe cleanup.
  */
 
 const KEY = "retell-secret-key-9f2b1c";
@@ -196,8 +188,7 @@ function account(options: AccountOptions = {}): Account {
     }
 
     if (method === "GET" && path.startsWith("/get-phone-number/")) {
-      // The restore reads the number before it writes, so the account has to
-      // be able to answer for one number as well as for the listing.
+      // Serve the individual number read as well as the account listing.
       const held = decodeURIComponent(path.slice("/get-phone-number/".length));
       const number = numbers.get(held);
       return number === undefined ? json({ error: "gone" }, 404) : json(number);

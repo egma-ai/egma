@@ -143,6 +143,7 @@ async function appendSuccess(claim: GradingClaim): Promise<void> {
     projectGraderId: entry.projectGraderId,
     graderDefinitionId: entry.graderDefinitionId,
     graderDefinitionVersion: entry.graderDefinitionVersion,
+    parameterValues: entry.parameterValues,
     score: 1,
     details: { rationale: "met" },
     graderPassThreshold: entry.graderPassThreshold,
@@ -207,7 +208,6 @@ describe("run grading progress", () => {
       suiteId: suite.id,
       agentId: created.id,
       connectionId: created.connection?.id ?? "",
-      idempotencyKey: newId("run"),
     });
     const claims = await ownClaims(run.id);
     expect(claims).toHaveLength(2);
@@ -320,7 +320,6 @@ describe("run grading progress", () => {
       suiteId: suite.id,
       agentId: created.id,
       connectionId: created.connection?.id ?? "",
-      idempotencyKey: newId("run"),
     });
     const [claim] = await ownClaims(run.id);
     if (claim === undefined) throw new Error(`${run.id} has no simulation`);

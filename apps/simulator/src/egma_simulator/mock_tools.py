@@ -1,90 +1,15 @@
-"""Mock tools: egma answering for the agent's own tools, at the seam.
+"""Serve test-owned mock-tool answers resolved in the claimed simulation spec.
 
-A **mock tool** answers for one of the agent's tools while a simulation
-runs, so the agent's real backend is never touched and a test can order up
-the branch it needs — an empty calendar, a booking that errors, a lookup
-that finds nobody. Which tools this simulation answers for, and what each
-answers with, arrives on the claimed spec already resolved from the test
-that named them: nothing here to merge and nothing to disagree about.
+egma.hello validates the wire version and replaces the cumulative tool census
+at startup or handoff. Its reply names the fixed tools to wrap. egma.tool
+returns the authored answer or error tag and refuses unknown names.
+Handlers use JSON strings and MockToolRefusal without depending on LiveKit.
 
-## The exchange
-
-egma is already a participant in the room. So the agent's side asks egma,
-in the room, before anything real runs — two methods and no more:
-
-- **``egma.hello``** — sent when the agent's session starts and again when a
-  LiveKit handoff discovers more tools. It carries the protocol version and
-  the cumulative census: every tool found in the session so far, by name,
-  with its schema. egma replaces the stored census and answers with the fixed
-  names it will answer for, so the other side wraps exactly those and leaves
-  every other tool alone.
-- **``egma.tool``** — one per call the agent makes to a wrapped tool. It
-  carries the tool's name and the arguments. egma answers at once with the
-  pinned answer and writes the whole exchange down: what was asked, what
-  was served, and how long it took.
-
-Both directions are JSON objects in a string, because that is what the
-transport carries, and the answer travels on the wire in **the shape it
-was authored in** — ``{"answer": …}`` or ``{"error": …}`` — from the
-test that wrote it, through its pinned test version, through the claimed
-spec, onto the wire. One shape all that way means nothing in between re-tags it, and
-the tag is what lets the other side tell "return this" from "raise this"
-even when the authored value itself looks like a failure.
-
-## Nothing here knows about LiveKit
-
-The two handlers take a payload string and answer with one; a refusal is
-:class:`MockToolRefusal`, which whoever registered them turns into their
-transport's own error. That is what keeps the exchange — report the call,
-receive an answer — a contract rather than a room feature, and it is why
-the room driver can register these against a real LiveKit and against the
-room-shaped stand-in CI runs, with nothing here changing.
-
-## The other way egma stands in the tool path
-
-Some platforms serve egma's answers themselves: the answers ride the
-request, the platform matches them by name, and it reports afterwards
-which tools were called and what each was given. Egma is just as much in
-the tool path there — the agent's real backend was never reached — but
-there is no exchange to conduct, so :meth:`MockToolSeam.hello` and
-:meth:`MockToolSeam.tool` have nothing to do.
-
-That lane uses these other doors: :meth:`MockToolSeam.answers` for the
-answers to send, and :meth:`MockToolSeam.reported` for each call the
-platform tells egma about afterwards. The answers are rendered here,
-once, so the bytes a tool is given are the same bytes on every lane.
-
-## What lands on the record, and what does not
-
-**A call this seam conducts is written down nowhere.** Where the agent's
-own process runs the egma SDK, that process reports every call it made —
-with the arguments its model emitted and the result it received — and
-that report is the tool record. One call is one row, so two records of it
-cannot disagree. The exchange here still serves and still refuses; it
-writes nothing. See ADR-0024 §3.
-
-**A call a platform reports afterwards is.** On the lane where the
-platform serves egma's answers itself, nothing of egma's runs inside the
-agent and no such report ever arrives, so :meth:`MockToolSeam.reported`
-is where that lane's calls land: one instant, because egma neither
-conducted the exchange nor timed it, carrying the name, the arguments,
-and — only for a name this simulation covers — egma's own rendering of
-the answer it authored.
-
-Whether a call was answered by a mock tool is read at display time, by
-name, from the pinned test version's mock tools, whichever way the call
-arrived. A call egma refused shows as the error the SDK raised, on the
-agent's own span for that call.
-
-So the seam remembers the answers, the census it was told, and the calls
-a platform has reported since somebody last took them. Answers stand
-ready for every name this simulation covers whether or not the census
-mentioned it, which is the safe way round.
-
-A call for a name **outside** this simulation's answers is refused. It is
-a protocol error — the other side was told exactly which names egma
-answers for — and quietly letting it through would run the customer's
-real tool from inside a test that asked egma to stand in front of it.
+The agent SDK records LiveKit tool-call spans; these handlers do not duplicate
+that evidence. For platforms that serve mocks themselves, answers() supplies
+the values and reported() records observed calls without measured duration.
+Only covered names include Egma's authored answer in that record.
+Display derives mock coverage from the pinned test version by tool name.
 """
 
 from __future__ import annotations
@@ -100,26 +25,10 @@ from .spec import MockTool
 logger = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = 1
-"""Which version of this exchange egma's participant speaks.
-
-It rides every hello in both directions, so a mismatch is refused at the
-first message rather than discovered halfway through a simulation. That
-is the whole of where it travels: this number is a property of the
-exchange, and nothing about how either side found the other. An SDK
-speaking 1 and a simulator speaking 1 therefore understand each other
-whichever way round they were upgraded.
-
-Two facts constrain a future bump, and both are load-bearing. This file
-and the SDK's own copy are deliberately duplicated and must stay equal,
-and
-``packages/simulation-contract/fixtures/seam/mock-tool-exchange.v1.json``
-pins the number into the canonical bytes both suites read. So a real
-shape change ships in this order: the simulator first accepts both
-versions in :func:`_speaks_this_version`, a second fixture is added
-beside the first rather than edited into it, and only once that release
-has drained may the SDK start sending the new number. Self-hosting makes
-"old simulator, new SDK" a lasting pairing rather than a rollout window,
-which is why the order is that way round.
+"""Wire version checked in both hello directions. SDK and simulator tests share
+packages/simulation-contract/fixtures/seam/mock-tool-exchange.v1.json.
+For a shape change, add a new fixture and deploy simulator support for both
+versions before releasing an SDK that sends the new version.
 """
 
 HELLO_METHOD = "egma.hello"
@@ -133,22 +42,8 @@ NOT_REPORTED = (
     "that Egma's participant was in it, and check that `egma.simulation` is "
     "called on the agent's session before it starts"
 )
-"""What a LiveKit simulation whose agent never said hello ends on.
-
-Written for whoever has to go and fix it, which for a customer's worker is
-the developer wiring the SDK in. The two halves are in the order they can
-be checked: the room first, because that is what Egma can see, and the
-call in the worker's own code second, because that is the one Egma cannot.
-
-One sentence, in one place, because three things use it: the voice plug,
-the chat plug, and the room driver where an agent joined and then went
-silent.
-
-It is the sentence for a hello that **never arrived**. A hello Egma
-received and refused is a different fault in a different place, and gets
-:data:`REPORTED_AND_REFUSED` instead — sending a developer to look for a
-missing SDK call when the SDK called and Egma said no is the wrong half of
-the system.
+"""Shared error for a hello that never arrived. Use REPORTED_AND_REFUSED when
+Egma received and rejected hello so the developer investigates the correct fault.
 """
 
 REPORTED_AND_REFUSED = (
@@ -172,20 +67,8 @@ TOOL_METHOD = "egma.tool"
 """Where one tool call is asked and answered."""
 
 LARGEST_PAYLOAD_BYTES = 15 * 1024
-"""How much one message of this exchange may carry, in bytes of UTF-8.
-
-The transport's own limit, written down here because egma has to refuse
-an answer it cannot send *as an answer about that answer* — a refusal
-naming the size and the cap is something an author can act on, where the
-transport's own complaint arrives at the far end as a call that mysteriously
-failed.
-
-Authoring refuses an answer this large, counting the same bytes this does:
-the tagged message, ``{"answer": …}`` or ``{"error": …}``, serialized the
-way :func:`_serialized` serializes it. So a mock tool that was accepted can
-always be served, and reaching the refusal below means a cap moved
-somewhere. It is checked anyway, because the alternative is finding out
-during somebody's simulation.
+"""RPC payload limit in UTF-8 bytes, including the serialized answer/error tag.
+Recheck at serving time so an oversized answer gets a clear application refusal.
 """
 
 MALFORMED_REQUEST = 901
@@ -306,27 +189,10 @@ class MockToolSeam:
 
     @property
     def agent_reported(self) -> bool:
-        """Whether the agent's session has said hello at least once.
-
-        The one thing a LiveKit simulation is required to see. A hello is
-        how the agent's own SDK announces itself, and everything else this
-        seam does — answering for tools, refusing names it has none for —
-        follows from one having arrived. A simulation without one ran with
-        every mocked tool calling its real backend, and nothing here would
-        say so.
-
-        Counted rather than remembered separately: a second hello replaces
-        the first, so the count is the whole of the record.
-
-        Named for the agent because :meth:`reported` next door is the
-        platform lane's word for a tool call somebody else says was made,
-        and one name for two unrelated facts is how a reader ends up
-        checking the wrong one.
-
-        A hello this seam **refused** does not count. It never told the
-        agent which tools to wrap, so nothing was isolated — but it is a
-        different fault from silence, and :attr:`why_unreported` is what
-        tells the two apart.
+        """Whether at least one hello was accepted. Required for LiveKit simulation
+        startup.
+        A refused hello does not count; why_unreported distinguishes refusal from
+        absence.
         """
         return self._censuses > 0
 
@@ -375,25 +241,10 @@ class MockToolSeam:
         )
 
     def reported(self, name: str, *, arguments: str | None = None) -> None:
-        """One tool call the platform says it made.
-
-        **This lane's whole tool record, and the reason it exists.** The
-        platform matched egma's answers and served them itself; nothing of
-        egma's ran inside the agent, so no process there reports what the
-        agent did. Without this the call would land nowhere at all.
-
-        Written down as one instant, because egma did not conduct the
-        exchange and did not time it. The result rides **only** where this
-        simulation has an answer for the name: such a call was answered
-        from egma's own authored answer, so recording that answer invents
-        nothing, while a call for any other name ran the customer's real
-        implementation and its return value is neither egma's to vouch for
-        nor the record's to claim.
-
-        The answer recorded is **egma's own rendering** and never the
-        platform's echo of it, even where the platform reports one. The two
-        are the same value, and only egma's carries the tag that tells a
-        mocked failure from a tool that returned a string.
+        """Record a platform-reported tool call at one instant; no duration was
+        observed.
+        For covered names, include Egma's rendered answer instead of the platform echo.
+        For uncovered names, record the name and arguments without a result.
         """
         called = name.strip()
         if not called:
@@ -601,21 +452,9 @@ def _speaks_this_version(asked: dict) -> None:
 
 
 def _recorded(mock: MockTool) -> str:
-    """What the record carries for a call one mock tool answered.
-
-    The **wire** carries the tag — ``{"answer": …}`` or ``{"error": …}`` —
-    because whoever serves the answer has to know whether to return it to
-    the model or raise it, and an authored value that happened to look
-    like a failure would otherwise be one. The **record** carries what the
-    call was given: the tool's own return value, untagged, because that is
-    what the agent received and what a grader reads. A failure has no
-    return value to record, so there the tag stays — it is what keeps a
-    mocked failure from reading as a tool that returned a string.
-
-    Known and accepted: a tool whose own return value is an object with an
-    ``error`` key records the same bytes a mocked failure does. The
-    record's vocabulary gives the branch no slot of its own, and inventing
-    one here would be this file deciding what the contract says.
+    """Record successful return values without the wire tag; keep the tag for failures.
+    An answer object with an error key remains indistinguishable from a mocked
+    failure in this representation.
     """
     return _serialized(mock.answer if mock.fails else mock.answer["answer"])
 

@@ -22,9 +22,11 @@ const assertionDetailsSchema = {
   type: "object",
   properties: {
     key: stringSchema,
+    decision: { type: "string", enum: ["met", "not_met", "cannot_determine"] },
     score: normalizedScoreSchema,
     rationale: stringSchema,
     citedSpanIds: arrayOf(stringSchema),
+    citedTurns: arrayOf({ type: "integer", minimum: 1 }),
     error: stringSchema,
   },
   required: ["key"],
@@ -38,7 +40,7 @@ const gradeDetailsSchema = {
     assertions: arrayOf(assertionDetailsSchema),
     error: stringSchema,
   },
-  // Definition versions may add details under their declared output contract.
+  // Executors may retain additional details in the stable result envelope.
   additionalProperties: true,
 } as const;
 
@@ -48,6 +50,7 @@ export const gradeSchema = {
     projectGraderId: stringIdSchema,
     graderDefinitionId: stringIdSchema,
     graderDefinitionVersion: { type: "integer", minimum: 1 },
+    parameterValues: { type: "object", additionalProperties: true },
     graderName: stringSchema,
     score: nullable(normalizedScoreSchema),
     details: gradeDetailsSchema,
@@ -62,6 +65,7 @@ export const gradeSchema = {
     "projectGraderId",
     "graderDefinitionId",
     "graderDefinitionVersion",
+    "parameterValues",
     "graderName",
     "score",
     "details",

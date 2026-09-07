@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import { PUBLISH_OR_BIND_A_VERSION } from "@egma/retell";
 import {
   createPersona,
@@ -697,7 +696,6 @@ describe("a run over a Retell text mode connection", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
     // Retell would not answer, and asking again may well work — so it is not a
     // 422 about the request, and it says nothing was started.
@@ -726,7 +724,6 @@ describe("a run over a Retell text mode connection", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
 
     // A settled fact about the agent, so 422 and not the 503 an unanswered
@@ -755,7 +752,6 @@ describe("a run over a Retell text mode connection", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
     expect(String(refused.body.message)).toContain("custom LLM");
@@ -777,7 +773,6 @@ describe("a run over a Retell text mode connection", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     expect(started.body.agentVersion).toBe(SERVING_VERSION);
@@ -795,19 +790,9 @@ describe("a run over a Retell text mode connection", () => {
 });
 
 /**
- * The stamp, driven through `startRun`'s own seam.
- *
- * The lane's own proof above goes the whole way over HTTP and is the one that
- * says the product works. These sit beside it to say two things that door
- * cannot: what the write does when handed a world **directly**, so the record
- * shape is pinned independently of whatever the run-start read happened to
- * resolve; and what it does when handed **none**, which is the case no caller
- * should ever produce and every caller would produce silently if the write did
- * not refuse it.
- *
- * A connection that reads no platform at run start carries the first of those,
- * because a lane that pins nothing is exactly where a stray stamp would be
- * hardest to notice.
+ * Exercise startRun directly with supplied and missing version metadata.
+ * Check that required pins are enforced and connections that need no pin
+ * do not receive one accidentally.
  */
 
 describe("the sentinel Retell key", () => {
@@ -827,7 +812,6 @@ describe("the sentinel Retell key", () => {
         suiteId,
         agentId,
         connectionId,
-        idempotencyKey: newId("run"),
       });
       expect(started.body, JSON.stringify(started.body)).toBeDefined();
 
@@ -863,7 +847,6 @@ describe("the version a run resolved, on the record", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
       agentVersion: SERVING_VERSION,
     });
 
@@ -902,7 +885,6 @@ describe("the version a run resolved, on the record", () => {
         suiteId,
         agentId,
         connectionId,
-        idempotencyKey: newId("run"),
       }),
     ).rejects.toThrow(/without the run-start read of the agent's platform/u);
 
@@ -920,7 +902,6 @@ describe("the version a run resolved, on the record", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
 
     const header = await ask(api.app, "GET", `/v1/runs/${started.id}`, key);
@@ -955,7 +936,6 @@ describe("the version a run resolved, on the record", () => {
         suiteId,
         agentId,
         connectionId,
-        idempotencyKey: newId("run"),
         agentVersion: SERVING_VERSION,
         conductedConnectionIdentity: reach.connectionIdentity,
       }),
@@ -1008,7 +988,6 @@ describe("the version a run resolved, on the record", () => {
         suiteId,
         agentId,
         connectionId,
-        idempotencyKey: newId("run"),
         agentVersion: SERVING_VERSION,
         conductedConnectionIdentity: reach.connectionIdentity,
       }),
@@ -1036,7 +1015,6 @@ describe("the version a run resolved, on the record", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
       agentVersion: SERVING_VERSION,
       conductedConnectionIdentity: reach.connectionIdentity,
     });
@@ -1059,7 +1037,6 @@ describe("what a version-pinned run's landing records", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
       agentVersion: SERVING_VERSION,
     });
 
@@ -1157,7 +1134,6 @@ describe("the work order a version-pinned run hands over", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -1232,7 +1208,6 @@ describe("the work order a version-pinned run hands over", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 

@@ -1,6 +1,6 @@
 {
   "name": "@egma/livekit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Test and monitor LiveKit Agents JS workers with Egma.",
   "type": "module",
   "license": "Apache-2.0",

@@ -1,6 +1,5 @@
 import {
   DECISIONS,
-  type Decision,
   type Judge,
   type JudgeAnswer,
   type JudgeQuestion,
@@ -8,20 +7,9 @@ import {
   type ResolvedJudge,
 } from "./contract.ts";
 import { asJudgeReads } from "./input.ts";
+import { validateJudgeAnswer } from "./response.ts";
 
-/**
- * The OpenAI judge: one criterion, one chat completion, one answer.
- *
- * The only provider v1 ships, and it is deliberately the smallest surface that
- * can ask a model a question — one POST, one JSON body, one JSON answer. There
- * is no SDK behind it: the whole request is four fields, an SDK would be a
- * dependency that moves under the product, and the day a second provider
- * arrives it is a second file of this size rather than a second dependency.
- *
- * **Version-pinned in the URL.** `/v1/chat/completions` is the endpoint every
- * OpenAI-compatible provider implements, which is what makes the next provider
- * a base URL rather than a rewrite.
- */
+/** Call OpenAI Chat Completions and validate the structured LLM-judge response. */
 
 const OPENAI_CHAT_COMPLETIONS = "https://api.openai.com/v1/chat/completions";
 
@@ -34,24 +22,28 @@ const JUDGE_RESPONSE_FORMAT = {
     schema: {
       type: "object",
       properties: {
-        decision: { type: "string", enum: DECISIONS },
-        rationale: { type: "string" },
-        cited_turns: { type: "array", items: { type: "integer" } },
+        results: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              decision: { type: "string", enum: DECISIONS },
+              rationale: { type: "string" },
+              cited_turns: { type: "array", items: { type: "integer" } },
+            },
+            required: ["id", "decision", "rationale", "cited_turns"],
+            additionalProperties: false,
+          },
+        },
       },
-      required: ["decision", "rationale", "cited_turns"],
+      required: ["results"],
       additionalProperties: false,
     },
   },
 } as const;
 
-/**
- * How many times a call is made before the assertion is `errored`.
- *
- * Three, for the reason the grading job's own attempt count is three: the
- * failures worth retrying are the transient ones — a rate limit, a gateway that
- * dropped the connection — and a fourth attempt at a request the provider keeps
- * refusing is spending the customer's money to learn the same thing again.
- */
+/** Maximum model requests, including retries for transient failures. */
 const MOST_ATTEMPTS = 3;
 
 /** How long a judge is given to answer before the attempt is abandoned. */
@@ -67,17 +59,11 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       ...(judge.reasoningEffort === undefined
         ? {}
         : { reasoning_effort: judge.reasoningEffort }),
-      // The lowest the API allows, because the same conversation and the same
-      // criterion should get the same answer twice. It is not a guarantee —
-      // no model offers one — and it is the difference between a judgment that
-      // usually reproduces and one that never does.
+      // Reduce output variation across repeated judgments.
       temperature: 0,
       response_format: JUDGE_RESPONSE_FORMAT,
       messages: [
-        // The library entry's own words, handed down with the question. This
-        // file holds no prompt of its own: what a judge is told it is is
-        // product behaviour a release ships and a developer can read on the
-        // Library screen, not something the provider adapter decides.
+        // Use the grading instructions from the resolved grader definition version.
         { role: "system", content: question.prompt },
         { role: "user", content: asked(question) },
       ],
@@ -87,8 +73,7 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       const response = await fetch(OPENAI_CHAT_COMPLETIONS, {
         method: "POST",
         headers: {
-          // The one place the key is ever written down, and it is written into
-          // a header on the way out. Nothing logs this object.
+          // Send the provider key only in the authorization header; do not log it.
           authorization: `Bearer ${judge.key}`,
           "content-type": "application/json",
         },
@@ -97,8 +82,7 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       });
 
       if (!response.ok) {
-        // The provider's own words, trimmed to a line — never the request, so
-        // there is no path by which the header above reaches a log.
+        // Include up to 200 characters of the provider's error response.
         throw new JudgeRefused(
           `the judge model answered ${response.status}: ${(await response.text()).slice(0, 200)}`,
           retryable(response.status),
@@ -111,11 +95,11 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       // was still generated and still cost money, and a spend record that
       // depended on Egma liking the answer would under-count exactly the calls
       // worth looking at.
-      report(judge.usage, question, httpAttempt, answered);
+      report(judge.usage, httpAttempt, answered);
       return answered;
     });
 
-    return answerOf(said);
+    return answerOf(said, question);
   };
 }
 
@@ -129,12 +113,7 @@ export class JudgeRefused extends Error {
   }
 }
 
-/**
- * Which refusals are worth a second ask. A rate limit and a gateway error pass;
- * a rejected key and a model name that does not exist do not — asking again
- * would spend the same seconds to be told the same thing, and the assertion is
- * `errored` either way with the provider's own words on it.
- */
+/** Retry transient rate-limit and server failures, not authentication or model errors. */
 function retryable(status: number): boolean {
   return status === 408 || status === 409 || status === 429 || status >= 500;
 }
@@ -175,7 +154,6 @@ async function withRetries<T>(
  */
 function report(
   sink: JudgeUsageSink | undefined,
-  question: JudgeQuestion,
   httpAttempt: number,
   said: unknown,
 ): void {
@@ -206,7 +184,6 @@ function report(
   const id = body["id"];
   sink({
     occurredAt: new Date(),
-    assertion: question.assertion,
     httpAttempt,
     providerRef: typeof id === "string" && id !== "" ? id : undefined,
     quantities,
@@ -224,24 +201,22 @@ function numberIn(held: Record<string, unknown>, key: string): number {
 /** The question, as the words after the system prompt. */
 function asked(question: JudgeQuestion): string {
   return [
-    "## Criterion",
+    "## Instruction (instruction_1)",
     question.criterion,
+    "",
+    "## Expected behaviors",
+    ...question.expectedBehaviors.map((behavior) => `${behavior.id}: ${behavior.text}`),
+    ...(question.expectedBehaviors.length === 0 ? ["(no test expected behaviors were supplied)"] : []),
     "",
     asJudgeReads(question.evidence),
   ].join("\n");
 }
 
 /**
- * The model's answer, read strictly.
- *
- * A judge that answered something this cannot read is a judge that did not
- * answer, and it is `errored` rather than quietly `cannot_determine`: the two
- * are different facts — one is a model saying the evidence does not settle the
- * question, the other is egma not knowing what the model said — and collapsing
- * them would hide a broken integration behind a word that means "fine, not
- * applicable".
+ * Reject malformed model responses as grading errors. Do not treat a parse
+ * failure as the model deciding that evidence is insufficient.
  */
-function answerOf(said: unknown): JudgeAnswer {
+function answerOf(said: unknown, question: JudgeQuestion): JudgeAnswer {
   const content = contentOf(said);
 
   let parsed: unknown;
@@ -254,30 +229,11 @@ function answerOf(said: unknown): JudgeAnswer {
     );
   }
 
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new JudgeRefused(
-      "the judge model answered JSON that is not an object",
-      false,
-    );
+  try {
+    return validateJudgeAnswer(parsed, question);
+  } catch (error) {
+    throw new JudgeRefused(error instanceof Error ? error.message : "invalid judge response", false);
   }
-
-  const fields = parsed as Record<string, unknown>;
-  const decision = DECISIONS.find((known) => known === fields["decision"]);
-  if (decision === undefined) {
-    throw new JudgeRefused(
-      `the judge model answered a decision Egma does not know; expected one of ${DECISIONS.join(", ")}`,
-      false,
-    );
-  }
-
-  return {
-    decision: decision as Decision,
-    rationale:
-      typeof fields["rationale"] === "string" && fields["rationale"].trim() !== ""
-        ? fields["rationale"].trim()
-        : "the judge gave no reason.",
-    citedTurns: citedTurnsOf(fields["cited_turns"]),
-  };
 }
 
 function contentOf(said: unknown): string {
@@ -302,12 +258,4 @@ function contentOf(said: unknown): string {
     );
   }
   return content;
-}
-
-/** Whole positive numbers only; anything else was not a turn. */
-function citedTurnsOf(value: unknown): readonly number[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter(
-    (at): at is number => Number.isInteger(at) && typeof at === "number" && at > 0,
-  );
 }

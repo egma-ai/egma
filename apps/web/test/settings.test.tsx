@@ -21,19 +21,9 @@ import { REPLAY_PRIVATE_ATTRIBUTE } from "../lib/replay-privacy.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
- * The Settings area, rendered and driven the way somebody with a keyboard
- * drives it.
- *
- * **Nothing here asserts that a component exists or that a source file contains
- * a string.** Every test puts the API's real answers in front of a real page
- * and reads what the DOM then says.
- *
- * The claims worth having in the fast lane are the ones these pages decide for
- * themselves: that a save carries the revision it was opened at and a stale one
- * keeps the typing, that a viewer's own-key controls stay live while every
- * other mutation control is present and genuinely inert, that a secret is shown
- * once and never again, and that an organization-wide page says out loud that
- * it is not about the project the selector is showing.
+ * Drive settings pages with stubbed API responses. Check project revision
+ * saves, retained drafts, viewer key controls, one-time secret display, and
+ * organization-wide scope labels.
  */
 
 const routed = vi.hoisted(() => {
@@ -619,16 +609,8 @@ describe("project settings", () => {
   );
 
   /**
-   * The half of "disable, do not hide" that a pointer never needed.
-   *
-   * A disabled control cannot take focus, so a reason reachable only through a
-   * `title` is a reason only a mouse gets. The CSS Modules button drew the
-   * sentence itself and pointed the control at it; the base button is a bare
-   * `<button>` and draws nothing beside itself, so the page now does both.
-   *
-   * **This asserts the link and not the sentence.** The sentence is already
-   * asserted above, and it went on passing while the link did not exist — which
-   * is exactly the failure worth a test of its own.
+   * Check the disabled control's accessible description link, not just the
+   * visible explanation. A title alone is insufficient for keyboard access.
    */
   it("points a disabled Save at the sentence that says why", async () => {
     open("viewer", { ...PROJECT, mayManageProjects: false });
@@ -643,18 +625,8 @@ describe("project settings", () => {
   });
 
   /**
-   * The server says who may edit, and this page believes it.
-   *
-   * The two tests above cannot tell the difference, and that is the point: for
-   * a viewer, *not an admin* and *not permitted* are true at the same time, so
-   * a page reading either one passes. They part company only here — somebody
-   * the server permits who is not an admin.
-   *
-   * `mayManageProjects` is computed by the API from the same permission check
-   * that decides whether the write lands. A page deriving it from the role
-   * instead is a second opinion about what `manage_projects` means, and the
-   * moment that permission moves the two disagree: controls withheld from
-   * somebody who may act, or controls offered whose writes come back refused.
+   * Use a permitted non-admin to distinguish the API's mayManageProjects
+   * answer from a local role guess.
    */
   it("lets a non-admin edit when the server says the permission is theirs", async () => {
     open("member", { ...PROJECT, mayManageProjects: true });

@@ -1,20 +1,7 @@
 /**
- * The account's telephone numbers, read for what they are bound to rather than
- * for who answers them.
- *
- * **Everything here reads, and nothing writes.** Egma never edits a customer's
- * number bindings — not for a moment, not to put one back afterwards (developer
- * ruling, 2026-08-31). Retell's own picker offers Latest Created and Latest
- * Published beside real tags, tags are movable, and an unassigned tag resolves
- * to latest without saying so: too many edges for egma to touch somebody's
- * inbound routing safely. What a mocked run once pinned and restored is now
- * something a developer is told about instead, on the screens where they turn
- * mocking on.
- *
- * `listNumbers` beside this one answers the setup wizard's question — which
- * numbers reach this agent — and throws the rest of each binding away. This
- * read keeps every number's `inbound_agents` entries **verbatim**, because what
- * a binding names is what decides the version a run is conducted against.
+ * Read full inbound_agents bindings for version selection and routing warnings.
+ * Preserve binding fields. This module does not change number assignments or tags;
+ * listNumbers() provides the smaller agent-to-number view for setup.
  */
 
 import {
@@ -67,26 +54,10 @@ export type ListedRoutedNumbers =
   | RetellFailure;
 
 /**
- * What one binding names, in the four shapes Retell lets it take.
- *
- * **Read to decide which version a run is conducted against**, and for nothing
- * else — egma acts on none of them. `numeric` and `environment-tag` each name a
- * version, so a run follows them; the other two name only a moving pointer, so
- * a run falls through to the newest published version. That selection is
- * `versionReferenceIn`, and it is the one caller these verdicts have.
- *
- * - `numeric` — bound to a version that exists.
- * - `environment-tag` — bound through a tag. The assignment is the customer's,
- *   and an unassigned tag resolves to latest without saying so — which is one
- *   of the reasons egma writes to none of this.
- * - `latest-published` — follows the published pointer. A draft is never
- *   published, and nothing in this package publishes anything.
- * - `hijackable` — `latest`, or nothing at all. Retell's picker calls it Latest
- *   Created, and a temporary draft **is** the latest created — so a real caller
- *   on such a number reaches egma's copy while a mocked run is in flight. Egma
- *   used to pin the number and put it back; it no longer touches it, and says
- *   so on the screens where mocking is turned on. The name is kept because that
- *   is still exactly what the binding is.
+ * Classify bindings without changing them. Numeric and environment-tag entries
+ * select explicit references; moving pointers fall back to latest_published in
+ * versionReferenceIn(). hijackable means Latest Created or no version: such
+ * bindings can reach a temporary draft used for simulations with mock tools.
  */
 export const BINDING_VERDICTS = [
   "numeric",

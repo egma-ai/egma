@@ -37,19 +37,9 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The spine, end to end: a real LiveKit agent's telemetry goes in at the door,
- * and the trace comes back out of the two v1 endpoints as a transcript.
- *
- * One test path exercises the credential, the protobuf decoding, the
- * normalisation, the tenancy stamp, the append, the turn-grain view and both
- * read contracts — because every one of those is a place the path can be right
- * on its own and wrong end to end. Nothing here is a fixture of what egma
- * believes telemetry looks like: the fourteen bodies are the ones an exporter
- * really sent, replayed byte for byte.
- *
- * What is asserted is the exchange that was actually had — five things the
- * human said, eight the agent said, two weather lookups, one model timing out
- * and recovering — rather than the shape of the code that returns it.
+ * Replay captured LiveKit exports through ingestion and read both public trace
+ * endpoints. Check the captured turns, tool calls, and model errors across
+ * authentication, decoding, attribution, storage, and transcript assembly.
  */
 
 const storage: ObjectStorage = await startObjectStorage("trace-reads");
@@ -119,14 +109,9 @@ async function transcript(): Promise<TraceDetailBody> {
 }
 
 /**
- * **A ClickHouse outage costs query visibility and nothing else.**
- *
- * This is the release's whole point, read from the far end: evidence is
- * accepted while the trace store is down, the request is answered as accepted
- * because the object store took it, and when the store comes back the same
- * evidence appears in every read a person makes — the list, the detail, the
- * transcript, the measures — with the durable handoff written before the object
- * is deleted. Nothing was retried by the sender and nothing was lost.
+ * Accept evidence during a ClickHouse outage, then drain after recovery.
+ * Check list, transcript, and measures without requiring a sender retry;
+ * complete durable handoffs before deleting the pending object.
  */
 describe.skipIf(!storage.available)(
   "a conversation accepted while the trace store was down",
@@ -248,41 +233,13 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
     );
 
     /*
-     * This production capture has no Egma timing span, so both endpoints derive
-     * the series from the same recognised framework spans and then use the
-     * shared nearest-rank percentile.
-     *
-     * Three spoken answers, each measured from the caller's last audible
-     * sample — the end of that `user_turn`'s last `user_speaking` child, which
-     * is the VAD's own detected end (catalog version 8) — and hand-computed
-     * from the capture's raw timestamps, held as the store keeps them: starts
-     * truncated to the microsecond, durations exact.
-     *
-     * 1. human `baac22a26a96fa9b` carries no `user_speaking` child, so its own
-     *    end stands in: it starts 1785693902082961920 → 1785693902082961 µs and
-     *    runs 297806362 ns, ending 1785693902380767362. Agent speech
-     *    `1b8cc4d1064a766d` begins 1785693904727004928 → 1785693904727004 µs.
-     *    1785693904727004000 − 1785693902380767362 = 2346236638 ns.
-     * 2. human `c35b92a87f8121a1`'s last `user_speaking` `b30dd00e322f2443`
-     *    starts 1785693920313752320 → 1785693920313752 µs and runs
-     *    1710489600 ns, so the caller stops being audible at
-     *    1785693922024241600. Agent speech `42b9d5797f17aa9d` begins
-     *    1785693924924691968 → 1785693924924691 µs.
-     *    1785693924924691000 − 1785693922024241600 = 2900449400 ns.
-     * 3. human `9839f5ef664bc919`'s `user_speaking` `45e924b089cd919f` starts
-     *    1785693942114222080 → 1785693942114222 µs and runs 908797440 ns, so
-     *    the caller stops being audible at 1785693943023019440. Agent speech
-     *    `11a1eaca219437a9` begins 1785693946089613312 →
-     *    1785693946089613 µs.
-     *    1785693946089613000 − 1785693943023019440 = 3066593560 ns.
-     *
-     * So the series is 2346.236638, 2900.4494 and 3066.59356 ms, and the
-     * nearest-rank p90 of three samples is the third of them sorted — a
-     * measurement that actually happened, and the slowest answer the caller
-     * waited through.
+     * Both endpoints derive response latency from framework speech spans.
+     * The fixture arithmetic and span IDs are documented in otlp-derived-measures.test.ts.
+     * Samples are 3454.607472, 2900.4494, and 3066.59356 ms; nearest-rank p90
+     * with three samples selects the largest, 3454.607472 ms.
      */
     expect(turnLatency?.derived).toBe(true);
-    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(3066.59356);
+    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(3454.607472);
     expect(trace?.turnResponseLatencyP90Milliseconds).toBe(turnLatency?.p90);
     expect(trace?.turnResponseLatencyP90Partial).toBe(false);
   });
@@ -320,15 +277,9 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
   });
 
   /**
-   * The window is read to the microsecond it named, and the exclusive end is
-   * exclusive to the microsecond too.
-   *
-   * This capture is where that can be asked sharply: its first span opens at
-   * `…40.281989Z`, so a `to` one microsecond later holds exactly that span and a
-   * `to` at the instant itself holds none of it. A bound rounded down to the
-   * millisecond a `Date` carries would land at `…40.281000Z` on both, before
-   * anything of the trace, and the customer would be told a trace they were
-   * looking straight at was not there.
+   * Check the exclusive end bound at microsecond precision: a bound at the
+   * first span start excludes it, while one microsecond later includes it.
+   * Millisecond truncation would incorrectly exclude both.
    */
   it("reads a window to the microsecond, at an exclusive end", async () => {
     const opened = "2026-08-02T18:04:40.281989Z";
@@ -570,15 +521,8 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
   });
 
   /**
-   * This capture came off a customer's own agent, so egma conducted nothing
-   * here — and the answer says so by naming no simulation.
-   *
-   * The two identifiers are the same 128 bits written two ways, so *any* trace
-   * id converts to a well-formed simulation id, including this one. Sending it
-   * would be claiming a simulation exists, and the surface that reads this
-   * field would then go asking for a recording of a conversation egma never
-   * had. Which trace is a simulation is a fact the row carries — `source` — and
-   * it is read here rather than guessed by the reader.
+   * Production traces must return no simulation ID even though their trace IDs
+   * can convert to UUIDs. Use stored source attribution, not ID shape.
    */
   it("names no simulation, because a customer's own agent had this exchange", async () => {
     const detail = await transcript();
@@ -634,23 +578,8 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
   });
 
   /**
-   * **What this exchange measured — the metrics display's read path.**
-   *
-   * The numbers are not on any row and are not stored: they are computed from
-   * the spans this answer already carries, by the shared measure module. So
-   * every page and every future grader that uses the metric receives the same
-   * value from one arithmetic.
-   *
-   * The captured exchange emits no timing span of egma's own, and it is
-   * measured anyway: the three latencies are **derived** from the shapes the
-   * framework itself timed, and each says so. That is the answer to what this
-   * read used to return — an empty list on every production conversation a
-   * stock agent ever had.
-   *
-   * The numbers themselves are asserted in
-   * `apps/api/test/otlp-derived-measures.test.ts`, against figures hand-computed
-   * from the capture's raw timestamps. What is asked here is the read's shape:
-   * which measures come back, and that the answer is a present list either way.
+   * Check which derived measures reach the API and that metrics is always a
+   * list. Hand-computed numeric expectations live in otlp-derived-measures.test.ts.
    */
   it("answers what the exchange measured, derived from the framework's own timings", async () => {
     const detail = await transcript();
@@ -669,18 +598,9 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
 });
 
 /**
- * **What one measure looks like on the wire, field by field.**
- *
- * The acceptance criterion this pins is "simulation traffic is byte-for-byte
- * unchanged", and it is a claim about the serialized object rather than about
- * the arithmetic behind it — so it is asked here, over HTTP, by pinning the
- * keys themselves. A field that appeared on every measure would be a wire
- * change on traffic nothing new happened to, and no assertion about numbers
- * would have noticed.
- *
- * **Its own day, deliberately.** These two traces are written straight into the
- * store, and putting them in the capture's own window would make every other
- * case in this file depend on the order the describes happen to run in.
+ * Assert serialized measure keys to detect unintended contract changes.
+ * Use a separate date for these synthetic traces so they do not alter capture
+ * queries in other cases.
  */
 describe.skipIf(!storage.available)("what one measure looks like on the wire", () => {
   const SIMULATED = "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a";
@@ -922,17 +842,8 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
 });
 
 /**
- * **Who answered a tool call is not this read's question.**
- *
- * Whether a mock tool answered a call is read by name from the pinned test
- * version of the simulation that made it — the authored world itself, which
- * cannot change under a result. This read is production's: it is given a trace
- * id and has no simulation to ask, so it says nothing about who answered and
- * never guesses from a stamp somebody left on a payload. The simulation read
- * is where the mark belongs, and where it is proved.
- *
- * What this holds is that the tool facts themselves still come back whole, and
- * that no mark comes back with them.
+ * Generic trace reads return tool facts without mock marks. Mock coverage is
+ * derived by the simulation read from its pinned test and connection type.
  */
 describe.skipIf(!storage.available)("what a tool call brings back", () => {
   const MIXED = "1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d";

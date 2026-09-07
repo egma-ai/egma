@@ -20,18 +20,9 @@ import {
 } from "./support/object-storage.ts";
 
 /**
- * What the door accepts, what it refuses, and what it says either way.
- *
- * The captured LiveKit trace answers "does real telemetry land"; this file
- * answers the questions a capture cannot, because a capture is one exporter
- * behaving well: the other encoding, a body that is not what it claims, a
- * client that tries to name its own customer, and the shape of a refusal an
- * OpenTelemetry SDK is going to parse rather than read.
- *
- * The door answers on object-store durability and writes no row, so a post here
- * is followed by a drain wherever the claim is about what a reader sees. What
- * the door itself decided is read out of the pending object instead, which is
- * the only place it has put anything by the time it answers.
+ * Check OTLP encodings, malformed bodies, attribution, and exporter response
+ * shapes. Inspect pending objects for acceptance decisions; drain them before
+ * asserting query-visible evidence.
  */
 
 const storage: ObjectStorage = await startObjectStorage("otlp-door");
@@ -275,17 +266,9 @@ describe.skipIf(!storage.available)("the JSON encoding", () => {
   });
 
   /**
-   * The rule this replaced a scrubber with: **egma does not read evidence to
-   * decide what evidence is.**
-   *
-   * Each sentinel below is a thing a real caller says or a real customer names:
-   * a transcript containing the word `Bearer`, a tool argument called
-   * `password`, an attribute named `api_key`, a metadata field called
-   * `access_token`. A scanner that rewrote any of them would have edited the
-   * one thing the product exists to show a team. Operational credentials are
-   * excluded by *position* instead — the `Authorization` header and the service
-   * token live outside the payload and never reach normalization at all — so
-   * nothing here has to guess.
+   * Preserve evidence fields even when their names or contents resemble secrets.
+   * Transport credentials are excluded by position, outside the normalized payload;
+   * these sentinels catch accidental content-based redaction.
    */
   it("keeps every value a sender wrote, credential-looking ones included", async () => {
     const traceId = "19191919191919191919191919191919";
@@ -659,16 +642,8 @@ describe.skipIf(!storage.available)("a span that named itself nothing", () => {
 });
 
 /**
- * A duration that cannot be added to anything.
- *
- * `duration_ns` is a `UInt64`, but every read that works out when a trace ended
- * adds it to a start time in signed 64-bit arithmetic — so a count past Int64's
- * ceiling comes back negative and the trace ends before it begins. Nearly three
- * centuries of nanoseconds is a broken clock rather than a long call, and an
- * exporter sending `0` for a start and a real timestamp for an end reaches it,
- * so it is clamped at the door where the number is still explainable. Nothing is
- * lost: the two timestamps it was measured from are in the payload as they
- * arrived.
+ * Clamp oversized durations to the signed 64-bit maximum used by read-side
+ * arithmetic. Preserve the decoded source timestamps in the payload.
  */
 describe.skipIf(!storage.available)("a span that says it ran for longer than Int64 holds", () => {
   it("is stored with its duration clamped rather than wrapped", async () => {
@@ -825,14 +800,8 @@ describe.skipIf(!storage.available)("an export carrying nothing", () => {
 });
 
 /**
- * What a client sends and what egma has to hold are not the same size.
- *
- * Every row carries its resource and its scope verbatim, which is what makes a
- * span readable on its own — and it means one enormous resource shared by two
- * thousand spans is one small request and gigabytes of rows. Both caps are
- * reported the way OTLP says to report data that must not be retried, so an
- * exporter is told how much was refused rather than left to believe all of it
- * landed.
+ * Resource and scope data repeat in each normalized row, so a small wire body
+ * can expand substantially. Check row-count and byte caps plus OTLP partial rejection.
  */
 describe.skipIf(!storage.available)("an export asking for more than egma turns into rows", () => {
   it("stores what fits and reports the rest, when one fat resource rides every span", async () => {

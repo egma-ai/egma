@@ -7,6 +7,8 @@ import {
   connectionTypeUsesPlatformCarrier,
   failSimulationDispatch,
   getPersonaVersion,
+  personaModelsOfParameters,
+  validatePersonaParameterValues,
   getRun,
   getSimulationExecutionEvidence,
   LANES_SERVING_MOCK_TOOLS,
@@ -45,48 +47,14 @@ import {
 } from "../providers/retell.ts";
 
 /**
- * The claim door: `POST /v1/claims`, where the simulator asks for work.
+ * Internal simulation claims require the deployment service token and bypass
+ * per-organization rate limits. Stored work supplies each claim's scope.
+ * Long-poll within client/server bounds, rechecking the queue for work.
  *
- * This group is deliberately unlike every other on the API, in three ways
- * that are each contract rather than convenience.
- *
- * **The service token is the whole gate, and it resolves to nothing.** These
- * routes never accept a customer key or a session — the deployment's own
- * `EGMA_SIMULATOR_SERVICE_TOKEN`, compared in constant time, opens the door
- * and becomes no context at all. Every claimed simulation instead arrives
- * from the module with a context narrowed to that row's own organization and
- * project, so the credential a simulator holds cannot widen into anybody's
- * data even in principle: there is no context to widen.
- *
- * **The group sits outside the per-organization rate limit.** The budget
- * exists so one customer's runaway loop is not everybody's problem, and it
- * is keyed on the organization a credential resolves to; the simulator is
- * egma's own service standing behind every organization at once, so a busy
- * run must never eat any customer's budget from the inside — and there is no
- * organization to key its own on. The token is the gate here, not a budget.
- *
- * **The claim is held open rather than answered empty.** Dispatch is pull,
- * and the promise a developer actually feels is "a queued simulation is
- * claimed within about a second". So an empty queue holds the request and
- * re-asks every second until work arrives or the hold runs out — the long
- * poll every pull-dispatch product ships. The client says how long it is
- * willing to hang (`wait_seconds`), the server holds at most `min` of that
- * and its own cap, and a client that said nothing gets a middling default —
- * so a short-waiting client can never see its own request time out. A
- * notification may one day replace the re-ask behind this same route;
- * nothing the simulator sees would change.
- *
- * What goes back is the whole work order: for each claimed simulation, a
- * fully assembled spec — the pinned persona whole and their model choices,
- * current keys for only those model providers, the pinned test scenario, connection
- * config and credentials, mock answers, the current carrier route, and limits
- * — validated against the contract before a byte is sent. This is the only
- * place runtime credential material travels; reports have no field for it.
- *
- * Model choices have one source: the pinned persona version. Provider keys
- * have one source: this deployment's credential source. The carrier route comes
- * straight from this process's deployment environment. These boundaries prevent
- * a model from one provider being combined with another adapter or credential.
+ * Assemble and validate each spec from pinned test/persona content and run
+ * settings, current connection and model-provider credentials, mock tools,
+ * carrier configuration when needed, and execution limits. Return only specs
+ * that satisfy the simulation contract.
  */
 
 export type ClaimRoutesOptions = {
@@ -141,29 +109,9 @@ const CLAIM_RESPONSE_MILLISECONDS = 28_000;
 const LARGEST_CLAIM_CAPACITY = 50;
 
 /**
- * The walls around one simulation, by modality — named constants matching
- * the contract's golden fixtures, so what the platform hands out and what
- * the fixtures teach cannot drift apart. A limit tripping ends a simulation
- * deliberately (`limit_reached`), which is never the agent failing; the
- * numbers bound egma's spend on a conversation going nowhere. Per-test
- * limits are a future column on the test; these are the platform's own.
- *
- * **Ten minutes on both, as of 2026-08-28.** Voice used to stop at five,
- * on the reasoning that a voice minute costs real speech synthesis and
- * transcription while a chat minute does not. The reasoning is sound and
- * the number was wrong for what people actually test: a screening
- * interview, a support call that escalates, an onboarding walk-through —
- * conversations that are fifteen minutes in production and had every
- * simulation of them cut at five, which grades an agent on an exchange
- * that never finished. Ten is the developer's call and is a ceiling
- * rather than a target; almost every simulation ends on the persona
- * concluding, long before it.
- *
- * **The turn count is where voice still costs more, and it binds first.**
- * Forty turns at a typical voice pace is roughly six to eight minutes, so
- * a talkative agent meets `max_turns` before it meets the ten minutes.
- * Raising that number is a separate decision with a separate bill, and it
- * was not taken here.
+ * Platform execution limits by modality, pinned by contract fixtures.
+ * Reaching a limit ends the simulation with limit_reached; it is not itself
+ * a failing grade.
  */
 const SIMULATION_LIMITS = {
   chat: { max_duration_seconds: 600, max_turns: 60 },
@@ -261,42 +209,11 @@ async function modelsBlock(
 }
 
 /**
- * The version this simulation is placed against and the variables it carries —
- * one code path for both lanes that name a version, or nothing at all.
- *
- * **The version** is named explicitly, because the platform's own default is
- * "the newest version" — which a concurrent edit or a branch can move between
- * one simulation and the next. Where it comes from is decided per simulation
- * rather than per run:
- *
- * - a **web-call simulation whose own test mocks at least one tool** is placed
- *   against the run's temporary version, which is where the routing variables
- *   live;
- * - **every other simulation** is placed against the serving version the run
- *   resolved once at start — the version a real caller reaches. That includes
- *   a test that mocks nothing inside a run that did branch a copy: it has
- *   nothing to route, so it is conducted against the customer's own version.
- *
- * **The variables** are what the platform renders per call, and there are two
- * sources. The test's own `retell_dynamic_variables` are the caller context it
- * carries with it. Egma's own are the routing variables the mocked web-call
- * lane needs: one per custom tool the run's temporary version declares, filled
- * with Egma's address for the tools this simulation's test names and with the
- * empty string for every other, which renders to nothing and leaves the
- * customer's own URL exactly as they wrote it.
- *
- * The two travel differently, because they are for different things. The
- * test's own variables go wherever the platform renders variables at all,
- * named version or not: the test asked for them. Egma's routing variables go
- * only on the call that is placed against the temporary version, because that
- * is the only version their names exist on. A simulation conducted against the
- * serving version carries the test's own variables and nothing else — passing
- * the routing names there would put a row of empty egma variables on the
- * customer's own call record, naming variables that version never declared.
- *
- * **Egma's are written last**, so no authored name can take a routing
- * variable's place; the save door refuses an `egma_` name anyway, and the two
- * guards are one rule said at both ends.
+ * Select the run's temporary version when this test mocks tools and routing
+ * variables exist; otherwise use its serving-version pin. Pass authored
+ * Retell variables for either version. Add routing variables only for the
+ * temporary version, after authored values so they cannot be overridden.
+ * Covered tools receive Egma URLs; uncovered tools receive empty prefixes.
  */
 function runVersionSpecOf(
   run: Run,
@@ -337,19 +254,9 @@ function runVersionSpecOf(
 }
 
 /**
- * Every routing variable this run's temporary version declares, with the value
- * this simulation is conducted with.
- *
- * **Every one of them, on every call.** The platform distinguishes a variable
- * it was never given — whose placeholder stays literal, braces and all — from
- * one passed explicitly as the empty string, which renders to nothing. So a
- * value is passed for each of them and rendering never depends on the
- * single-space default the version carries; that default is the proven
- * fallback for a variable Egma somehow failed to pass.
- *
- * Empty for every lane but a mocked web call, and empty on a run that branched
- * no copy — there is nothing on those versions for a routing variable to
- * render into.
+ * Provide every declared routing variable on mocked web calls: Egma URL for
+ * covered tools, empty prefix for others. Do not rely on the draft's single-space
+ * fallback. Return no routing variables without a supported temporary version.
  */
 function urlVariablesFor(
   run: Run,
@@ -478,40 +385,22 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
 }
 
 /**
- * One claimed simulation as the wire carries it — the flattened work order
- * the contract's spec schema describes — or the reason it could not become
- * one.
- *
- * Everything is read through the claim's own narrowed context, so the
- * assembly of one customer's spec happens inside that customer exactly as a
- * person's read would. The reads can each come back empty — a connection
- * deleted mid-flight, a row from before tests were pinned — and the schema
- * check at the end holds whatever was assembled to the same standard the
- * simulator's own check will apply on receipt.
+ * Assemble a claimed simulation using its stored organization/project context.
+ * Missing execution inputs produce a dispatch refusal. Validate the completed
+ * spec against the same contract used by the simulator.
  */
 async function assembledSpec(
   claim: SimulationClaim,
   /**
-   * The pinned persona version, read once for the batch before the
-   * deployment was asked whether this work may go on. Handed in rather than
-   * read again: the two questions are about the same frozen row, and a second
-   * read of it inside one response could only return the same thing.
+   * The pinned persona version, already read once for this claim batch when
+   * the deployment was asked whether the work may go on. Handed in rather than
+   * read again: the row is frozen, so a second read returns the same thing.
    */
   personaVersion: PersonaVersion | undefined,
   /**
-   * The runs already read while answering this one claim request, by id.
-   *
-   * A claim takes up to fifty conversations at once and they are usually a
-   * run's — that is what a run *is* — so the run header would otherwise be
-   * read fifty times for fifty specs that all want the same frozen world. The
-   * cache lives for one request and no longer: the header is frozen from the
-   * moment the run was created, so re-reading it inside one response could
-   * only ever return the same rows, and a cache that outlived the request
-   * would be a second copy of a record somebody may since have deleted.
-   *
-   * Keyed by run id alone, which is safe because every claim in one batch was
-   * read through its own row's tenancy and a run id is unique across the
-   * deployment — two claims naming one run are two conversations of it.
+   * Cache run reads within this claim request to avoid rereading a shared run
+   * for each simulation. Run IDs are deployment-unique; each initial read uses
+   * the claim's stored scope. Do not retain the cache across requests.
    */
   runs: Map<string, Run | undefined>,
   retellTargets: Map<string, Promise<RetellDirectTargetCheck>>,
@@ -607,7 +496,7 @@ async function assembledSpec(
     // restarting either service.
     models = await modelsBlock(
       claim.modality,
-      personaVersion.models,
+      personaModelsOfParameters(validatePersonaParameterValues(personaVersion.parameterContract, claim.personaParameterValues)),
       providerCredentials,
     );
   } catch (fault) {
@@ -813,7 +702,7 @@ export async function claimRoutes(
           // question about the ones that can be read.
           return version === undefined
             ? []
-            : providersNeededBy(version.models, claim.modality);
+            : providersNeededBy(personaModelsOfParameters(claim.personaParameterValues), claim.modality);
         },
       );
 
@@ -967,16 +856,9 @@ export async function claimRoutes(
           continue;
         }
         if ("unbuildable" in spec) {
-          // Fail loudly on this side and keep dispatching the rest: one
-          // corrupt row must not hold up the batch, and the simulator is
-          // never handed a document it would have to refuse. The row lands
-          // its honest terminal state here and now — `failed`, with the
-          // platform's own `dispatch_failed` — because a spec that was never
-          // handed over is never the simulator's error, must not wait to be
-          // misnamed orphaned, and must never loop back through the queue to
-          // fail the same way again. The landing is terminal like any other,
-          // and a run waiting only on this row settles with truthful counts.
-          // No grading job is created because no completed trace exists.
+          // Mark an unbuildable claim failed with dispatch_failed and continue the
+          // batch. Do not send an invalid spec or wait for orphan cleanup. No grading
+          // is requested for this execution failure.
           request.log.error(
             platformEvent(
               "egma.simulation.dispatch.failed",

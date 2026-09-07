@@ -537,7 +537,7 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "Creates one Project-scoped API key for the Project in egma/config.yaml.",
     "The secret is printed once and is not stored by the CLI.",
   ],
-  "persona list": ["Usage:", "  egma persona list [--cwd <path>]"],
+  "persona list": ["Usage:", "  egma persona list [--cwd <path>]", "", "List persona definitions available in the bound Project.", "Model and voice settings are shared by that Project's tests and edited in Personas."],
   "suite create": [
     "Usage:",
     "  egma suite create <directory> --name <name> [--cwd <path>]",

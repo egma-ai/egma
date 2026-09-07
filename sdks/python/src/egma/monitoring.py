@@ -1,16 +1,7 @@
-"""Send LiveKit Agents production spans to an Egma project.
+"""Export production spans from a LiveKit worker.
 
-``monitor`` is one of this SDK's two verbs. It is the production one:
-called in a production worker, it exports that conversation's spans to
-Monitoring. Its sibling :func:`egma.simulation` does the simulation room,
-and the two never both act — each is inert where the other applies.
-
-Both read the same one fact to tell those apart, and only that fact: the
-name of the room this job was given. For ``monitor`` that name is also
-all there is to read — it is synchronous and runs before the room is
-connected, so there is nobody in the room to ask — and it is all there is
-to need, because a room Egma named is a simulation whether or not
-anybody has joined it yet.
+Select production by room name before connecting. Simulation rooms are
+handled by ``egma.simulation`` and are ignored here.
 """
 
 from __future__ import annotations
@@ -36,41 +27,18 @@ def monitor(
 ) -> None:
     """Export this LiveKit worker's production spans to Egma.
 
-    Call this once in the job entrypoint, before ``AgentSession.start``.
-    ``endpoint`` defaults to ``EGMA_URL`` and ``api_key`` defaults to
-    ``EGMA_API_KEY``. The API key is the existing Egma project API key.
+    Call once before ``AgentSession.start``. ``endpoint`` and ``api_key``
+    default to ``EGMA_URL`` and ``EGMA_API_KEY``. Repeated calls with the
+    same settings reuse the exporter; job shutdown flushes buffered spans.
 
-    Repeated calls with the same settings reuse the exporter. Each job gets
-    one shutdown callback so its last buffered spans are sent before exit.
-
-    It raises ``ValueError``, and only for a worker that is misconfigured:
-    ``EGMA_URL`` or ``EGMA_API_KEY`` missing or malformed, a LiveKit Agents
-    too old to expose the telemetry provider, a tracer provider this SDK
-    cannot safely extend, or a second LiveKit job in this process asking
-    for different settings. There is no per-conversation failure here — a
-    production conversation is never stopped over telemetry.
-
-    In a simulation room this returns having done nothing:
-    :func:`egma.simulation` exports that conversation instead, and under
-    the simulation it belongs to.
+    Raise ``ValueError`` for invalid settings, unsupported LiveKit/provider
+    configuration, or another job requesting different settings in this
+    process. Returns without changes in simulation rooms.
     """
 
-    # A simulation already has its own trace path, and its own verb.
-    # Exporting the agent side of the same room through the production
-    # door would make one simulation look like a second production
-    # conversation in Monitoring.
-    #
-    # The room's name is the whole of the question, here and in
-    # `simulation`, read straight off the job with no network and nothing
-    # connected.
-    #
-    # Suppression is said out loud. A room name is chosen by whoever mints
-    # the join token, so this guard can in principle be tripped by a
-    # production room named to look like a simulation — and the cost of
-    # that would be a conversation with no record in Monitoring at all. A
-    # dropped trace is evidence the customer cannot get back, so the one
-    # thing this side can do for it is make it visible in the worker's own
-    # log.
+    # Simulation rooms export through simulation(), not production monitoring.
+    # Log suppression because a production room using the reserved prefix
+    # would otherwise lose its monitoring evidence without notice.
     simulation = simulation_in(ctx)
     if simulation is not None:
         logger.warning(

@@ -15,21 +15,8 @@ import {
 } from "./support/database.ts";
 
 /**
- * The Retell lanes migration, run the way a real deployment meets it: over a
- * database that already holds connections, runs and finished simulations.
- *
- * Two things are proved here that a fresh database cannot say anything about.
- *
- * **The cut is clean.** The migration replaces the connection row's own
- * connection-type check and the access-variant check beside it, and nothing
- * else in the schema gates a connection-type value — asserted below against the
- * live catalog rather than assumed, because a gate nobody remembered would
- * refuse the new kinds at the first write on a customer's database and nowhere
- * earlier.
- *
- * **Nothing already written moves.** Every connection type an older build could
- * have written is still admitted, and every existing row reads exactly as it
- * did.
+ * Apply the Retell connection migration over existing rows. Verify the live
+ * connection-type and access-variant constraints and preserve existing data.
  */
 
 const UNDER_TEST = "0002_retell_lanes.sql";
@@ -203,9 +190,8 @@ async function seedExistingWork(): Promise<void> {
 beforeAll(async () => {
   database = await createEmptyDatabase("retell_lanes_migration");
 
-  // Everything up to the migration under test, from a directory holding
-  // nothing else. Applying the real directory afterwards finds those already
-  // recorded under the same hashes and applies only what follows.
+  // Keep this historical proof at its target schema. Later clean cutovers can
+  // remove the rows and columns whose preservation this migration promises.
   before = await mkdtemp(path.join(tmpdir(), "egma-before-retell-lanes-"));
   const earlier = (await readdir(MIGRATIONS_DIRECTORY))
     .filter((name) => name.endsWith(".sql") && name < UNDER_TEST)
@@ -228,8 +214,10 @@ afterAll(async () => {
 
 describe("the Retell lanes migration over a populated database", () => {
   it("applies over rows an older build already wrote", async () => {
-    const { applied } = await runMigrations(database.url);
-    expect(applied).toContain(UNDER_TEST);
+    if (before === undefined) throw new Error("the migration directory is not ready");
+    await cp(path.join(MIGRATIONS_DIRECTORY, UNDER_TEST), path.join(before, UNDER_TEST));
+    const { applied } = await runMigrations(database.url, before);
+    expect(applied).toEqual([UNDER_TEST]);
   });
 
   it("admits the two new doors and their access variants", async () => {

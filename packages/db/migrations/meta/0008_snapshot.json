@@ -1,5 +1,5 @@
 {
-  "id": "265341b5-cfb1-4f0f-ada4-1198329c6321",
+  "id": "d322c7b8-ed6a-47d4-8d9b-fb3685edfe22",
   "prevId": "8b45517a-ab07-45fb-a045-4f185936440b",
   "version": "7",
   "dialect": "postgresql",
@@ -1317,8 +1317,8 @@
       },
       "isRLSEnabled": false
     },
-    "public.persona": {
-      "name": "persona",
+    "public.persona_definition": {
+      "name": "persona_definition",
       "schema": "",
       "columns": {
         "id": {
@@ -1396,7 +1396,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"persona\".\"organization_id\" is null",
+          "where": "\"persona_definition\".\"organization_id\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1418,16 +1418,16 @@
             }
           ],
           "isUnique": false,
-          "where": "\"persona\".\"archived_at\" is null",
+          "where": "\"persona_definition\".\"archived_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
         }
       },
       "foreignKeys": {
-        "persona_organization_id_organization_id_fk": {
-          "name": "persona_organization_id_organization_id_fk",
-          "tableFrom": "persona",
+        "persona_definition_organization_id_organization_id_fk": {
+          "name": "persona_definition_organization_id_organization_id_fk",
+          "tableFrom": "persona_definition",
           "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
@@ -1438,10 +1438,10 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "persona_current_version_id_persona_version_id_fk": {
-          "name": "persona_current_version_id_persona_version_id_fk",
-          "tableFrom": "persona",
-          "tableTo": "persona_version",
+        "persona_definition_current_version_id_persona_definition_version_id_fk": {
+          "name": "persona_definition_current_version_id_persona_definition_version_id_fk",
+          "tableFrom": "persona_definition",
+          "tableTo": "persona_definition_version",
           "columnsFrom": [
             "current_version_id"
           ],
@@ -1451,9 +1451,9 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "persona_created_by_user_id_fk": {
-          "name": "persona_created_by_user_id_fk",
-          "tableFrom": "persona",
+        "persona_definition_created_by_user_id_fk": {
+          "name": "persona_definition_created_by_user_id_fk",
+          "tableFrom": "persona_definition",
           "tableTo": "user",
           "columnsFrom": [
             "created_by"
@@ -1466,7 +1466,7 @@
         },
         "persona_project_organization_fk": {
           "name": "persona_project_organization_fk",
-          "tableFrom": "persona",
+          "tableFrom": "persona_definition",
           "tableTo": "project",
           "columnsFrom": [
             "project_id",
@@ -1486,21 +1486,21 @@
       "checkConstraints": {
         "persona_id_prefix": {
           "name": "persona_id_prefix",
-          "value": "\"persona\".\"id\" ~ '^prs_[0-9A-HJKMNP-TV-Z]{26}$'"
+          "value": "\"persona_definition\".\"id\" ~ '^prs_[0-9A-HJKMNP-TV-Z]{26}$'"
         },
         "persona_tenancy_is_whole_or_egmas": {
           "name": "persona_tenancy_is_whole_or_egmas",
-          "value": "(\"persona\".\"organization_id\" is null) = (\"persona\".\"project_id\" is null)"
+          "value": "(\"persona_definition\".\"organization_id\" is null) = (\"persona_definition\".\"project_id\" is null)"
         },
         "persona_egma_provided_is_active": {
           "name": "persona_egma_provided_is_active",
-          "value": "\"persona\".\"organization_id\" is not null or \"persona\".\"archived_at\" is null"
+          "value": "\"persona_definition\".\"organization_id\" is not null or \"persona_definition\".\"archived_at\" is null"
         }
       },
       "isRLSEnabled": false
     },
-    "public.persona_version": {
-      "name": "persona_version",
+    "public.persona_definition_version": {
+      "name": "persona_definition_version",
       "schema": "",
       "columns": {
         "id": {
@@ -1539,51 +1539,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "llm_provider": {
-          "name": "llm_provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "llm_model": {
-          "name": "llm_model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "stt_provider": {
-          "name": "stt_provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "stt_model": {
-          "name": "stt_model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tts_provider": {
-          "name": "tts_provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tts_model": {
-          "name": "tts_model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tts_voice_id": {
-          "name": "tts_voice_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tts_speed": {
-          "name": "tts_speed",
-          "type": "numeric(3, 2)",
+        "parameter_contract": {
+          "name": "parameter_contract",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true
         },
@@ -1603,10 +1561,10 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "persona_version_persona_id_persona_id_fk": {
-          "name": "persona_version_persona_id_persona_id_fk",
-          "tableFrom": "persona_version",
-          "tableTo": "persona",
+        "persona_definition_version_persona_id_persona_definition_id_fk": {
+          "name": "persona_definition_version_persona_id_persona_definition_id_fk",
+          "tableFrom": "persona_definition_version",
+          "tableTo": "persona_definition",
           "columnsFrom": [
             "persona_id"
           ],
@@ -1616,9 +1574,9 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "persona_version_created_by_user_id_fk": {
-          "name": "persona_version_created_by_user_id_fk",
-          "tableFrom": "persona_version",
+        "persona_definition_version_created_by_user_id_fk": {
+          "name": "persona_definition_version_created_by_user_id_fk",
+          "tableFrom": "persona_definition_version",
           "tableTo": "user",
           "columnsFrom": [
             "created_by"
@@ -1653,51 +1611,140 @@
       "checkConstraints": {
         "persona_version_id_prefix": {
           "name": "persona_version_id_prefix",
-          "value": "\"persona_version\".\"id\" ~ '^prsv_[0-9A-HJKMNP-TV-Z]{26}$'"
+          "value": "\"persona_definition_version\".\"id\" ~ '^prsv_[0-9A-HJKMNP-TV-Z]{26}$'"
         },
         "persona_version_identity_name_stated": {
           "name": "persona_version_identity_name_stated",
-          "value": "btrim(\"persona_version\".\"identity_name\") <> ''"
+          "value": "btrim(\"persona_definition_version\".\"identity_name\") <> ''"
         },
         "persona_version_personality_stated": {
           "name": "persona_version_personality_stated",
-          "value": "btrim(\"persona_version\".\"personality\") <> ''"
+          "value": "btrim(\"persona_definition_version\".\"personality\") <> ''"
         },
         "persona_version_language_stated": {
           "name": "persona_version_language_stated",
-          "value": "btrim(\"persona_version\".\"language\") <> ''"
+          "value": "btrim(\"persona_definition_version\".\"language\") <> ''"
         },
-        "persona_version_llm_provider_stated": {
-          "name": "persona_version_llm_provider_stated",
-          "value": "btrim(\"persona_version\".\"llm_provider\") <> ''"
+        "persona_definition_version_parameter_contract_is_array": {
+          "name": "persona_definition_version_parameter_contract_is_array",
+          "value": "jsonb_typeof(\"persona_definition_version\".\"parameter_contract\") = 'array'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.project_persona": {
+      "name": "project_persona",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": true,
+          "notNull": true
         },
-        "persona_version_llm_model_stated": {
-          "name": "persona_version_llm_model_stated",
-          "value": "btrim(\"persona_version\".\"llm_model\") <> ''"
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
         },
-        "persona_version_stt_provider_stated": {
-          "name": "persona_version_stt_provider_stated",
-          "value": "btrim(\"persona_version\".\"stt_provider\") <> ''"
+        "project_id": {
+          "name": "project_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
         },
-        "persona_version_stt_model_stated": {
-          "name": "persona_version_stt_model_stated",
-          "value": "btrim(\"persona_version\".\"stt_model\") <> ''"
+        "persona_definition_id": {
+          "name": "persona_definition_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
         },
-        "persona_version_tts_provider_stated": {
-          "name": "persona_version_tts_provider_stated",
-          "value": "btrim(\"persona_version\".\"tts_provider\") <> ''"
+        "parameter_values": {
+          "name": "parameter_values",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
         },
-        "persona_version_tts_model_stated": {
-          "name": "persona_version_tts_model_stated",
-          "value": "btrim(\"persona_version\".\"tts_model\") <> ''"
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         },
-        "persona_version_tts_voice_id_stated": {
-          "name": "persona_version_tts_voice_id_stated",
-          "value": "btrim(\"persona_version\".\"tts_voice_id\") <> ''"
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "project_persona_organization_id_organization_id_fk": {
+          "name": "project_persona_organization_id_organization_id_fk",
+          "tableFrom": "project_persona",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
-        "persona_version_tts_speed_in_range": {
-          "name": "persona_version_tts_speed_in_range",
-          "value": "\"persona_version\".\"tts_speed\" >= 0.6 and \"persona_version\".\"tts_speed\" <= 1.5"
+        "project_persona_persona_definition_id_persona_definition_id_fk": {
+          "name": "project_persona_persona_definition_id_persona_definition_id_fk",
+          "tableFrom": "project_persona",
+          "tableTo": "persona_definition",
+          "columnsFrom": [
+            "persona_definition_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "project_persona_project_organization_fk": {
+          "name": "project_persona_project_organization_fk",
+          "tableFrom": "project_persona",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id",
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "project_persona_project_definition_unique": {
+          "name": "project_persona_project_definition_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "project_id",
+            "persona_definition_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "project_persona_id_prefix": {
+          "name": "project_persona_id_prefix",
+          "value": "\"project_persona\".\"id\" ~ '^ppr_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "project_persona_parameters_are_object": {
+          "name": "project_persona_parameters_are_object",
+          "value": "jsonb_typeof(\"project_persona\".\"parameter_values\") = 'object'"
         }
       },
       "isRLSEnabled": false
@@ -2660,6 +2707,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "project_id": {
+          "name": "project_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": false
+        },
         "name": {
           "name": "name",
           "type": "text",
@@ -2747,6 +2800,21 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+        "grader_definition_project_organization_fk": {
+          "name": "grader_definition_project_organization_fk",
+          "tableFrom": "grader_definition",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id",
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "grader_definition_current_version_fk": {
           "name": "grader_definition_current_version_fk",
           "tableFrom": "grader_definition",
@@ -2770,6 +2838,10 @@
         "grader_definition_id_prefix": {
           "name": "grader_definition_id_prefix",
           "value": "\"grader_definition\".\"id\" ~ '^grl_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "grader_definition_ownership_pair": {
+          "name": "grader_definition_ownership_pair",
+          "value": "(\"grader_definition\".\"organization_id\" is null) = (\"grader_definition\".\"project_id\" is null)"
         }
       },
       "isRLSEnabled": false
@@ -2813,12 +2885,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
-        },
-        "judge_model": {
-          "name": "judge_model",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -3339,10 +3405,10 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "test_persona_persona_id_persona_id_fk": {
-          "name": "test_persona_persona_id_persona_id_fk",
+        "test_persona_persona_id_persona_definition_id_fk": {
+          "name": "test_persona_persona_id_persona_definition_id_fk",
           "tableFrom": "test_persona",
-          "tableTo": "persona",
+          "tableTo": "persona_definition",
           "columnsFrom": [
             "persona_id"
           ],
@@ -3731,6 +3797,12 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
+        },
+        "grading_plan": {
+          "name": "grading_plan",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
         },
         "expected_simulation_count": {
           "name": "expected_simulation_count",
@@ -4242,6 +4314,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "persona_parameter_values": {
+          "name": "persona_parameter_values",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
         "test_id": {
           "name": "test_id",
           "type": "text COLLATE \"C\"",
@@ -4262,12 +4340,6 @@
         },
         "modality": {
           "name": "modality",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "connection_type": {
-          "name": "connection_type",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -4471,27 +4543,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "simulation_organization_id_started_at_idx": {
-          "name": "simulation_organization_id_started_at_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "started_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -4571,7 +4622,7 @@
         "simulation_persona_version_persona_fk": {
           "name": "simulation_persona_version_persona_fk",
           "tableFrom": "simulation",
-          "tableTo": "persona_version",
+          "tableTo": "persona_definition_version",
           "columnsFrom": [
             "persona_version_id",
             "persona_id"
@@ -4655,10 +4706,6 @@
           "name": "simulation_modality_allowed",
           "value": "\"simulation\".\"modality\" in ('voice', 'chat')"
         },
-        "simulation_connection_type_allowed": {
-          "name": "simulation_connection_type_allowed",
-          "value": "\"simulation\".\"connection_type\" in ('retell_chat_api', 'retell_text_mode', 'retell_web_call', 'phone_number', 'livekit_room')"
-        },
         "simulation_position_counts_from_one": {
           "name": "simulation_position_counts_from_one",
           "value": "\"simulation\".\"position\" >= 1"
@@ -4722,155 +4769,6 @@
         "simulation_audio_facts_are_voice_facts": {
           "name": "simulation_audio_facts_are_voice_facts",
           "value": "\"simulation\".\"modality\" = 'voice'\n        or \"simulation\".\"recording_reference\" is null"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.grading_plan": {
-      "name": "grading_plan",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "run_id": {
-          "name": "run_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "captured_at": {
-          "name": "captured_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "groups": {
-          "name": "groups",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "grading_plan_organization_id_project_id_idx": {
-          "name": "grading_plan_organization_id_project_id_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "grading_plan_organization_id_organization_id_fk": {
-          "name": "grading_plan_organization_id_organization_id_fk",
-          "tableFrom": "grading_plan",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "grading_plan_project_organization_fk": {
-          "name": "grading_plan_project_organization_fk",
-          "tableFrom": "grading_plan",
-          "tableTo": "project",
-          "columnsFrom": [
-            "project_id",
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id",
-            "organization_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "grading_plan_run_project_fk": {
-          "name": "grading_plan_run_project_fk",
-          "tableFrom": "grading_plan",
-          "tableTo": "run",
-          "columnsFrom": [
-            "run_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "grading_plan_run_id_unique": {
-          "name": "grading_plan_run_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "run_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "grading_plan_id_prefix": {
-          "name": "grading_plan_id_prefix",
-          "value": "\"grading_plan\".\"id\" ~ '^gpl_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "grading_plan_state_allowed": {
-          "name": "grading_plan_state_allowed",
-          "value": "\"grading_plan\".\"state\" in ('run_start')"
-        },
-        "grading_plan_groups_are_a_list": {
-          "name": "grading_plan_groups_are_a_list",
-          "value": "jsonb_typeof(\"grading_plan\".\"groups\") = 'array'"
         }
       },
       "isRLSEnabled": false
@@ -5266,981 +5164,6 @@
         "grading_job_attempts_are_counted": {
           "name": "grading_job_attempts_are_counted",
           "value": "\"grading_job\".\"attempts\" >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.rate_card": {
-      "name": "rate_card",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "usage_type": {
-          "name": "usage_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "unit": {
-          "name": "unit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "usd_per_million": {
-          "name": "usd_per_million",
-          "type": "numeric(24, 12)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "effective_from": {
-          "name": "effective_from",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "read_at": {
-          "name": "read_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "rate_card_effective_idx": {
-          "name": "rate_card_effective_idx",
-          "columns": [
-            {
-              "expression": "provider",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "model",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "effective_from",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "rate_card_price_identity_unique": {
-          "name": "rate_card_price_identity_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "provider",
-            "model",
-            "usage_type",
-            "effective_from"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "rate_card_id_prefix": {
-          "name": "rate_card_id_prefix",
-          "value": "\"rate_card\".\"id\" ~ '^rat_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "rate_card_usage_type_allowed": {
-          "name": "rate_card_usage_type_allowed",
-          "value": "\"rate_card\".\"usage_type\" in ('input_tokens', 'cached_input_tokens', 'output_tokens', 'audio_input_tokens', 'text_input_tokens', 'audio_seconds', 'characters')"
-        },
-        "rate_card_unit_allowed": {
-          "name": "rate_card_unit_allowed",
-          "value": "\"rate_card\".\"unit\" in ('tokens', 'seconds', 'characters')"
-        },
-        "rate_card_price_is_not_negative": {
-          "name": "rate_card_price_is_not_negative",
-          "value": "\"rate_card\".\"usd_per_million\" >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.usage_record": {
-      "name": "usage_record",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "occurred_at": {
-          "name": "occurred_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "run_id": {
-          "name": "run_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "work_kind": {
-          "name": "work_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "simulation_id": {
-          "name": "simulation_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "grading_job_id": {
-          "name": "grading_job_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "attempt": {
-          "name": "attempt",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "trace_id": {
-          "name": "trace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "span_id": {
-          "name": "span_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "operation": {
-          "name": "operation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "unit": {
-          "name": "unit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "quantities": {
-          "name": "quantities",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "measurement": {
-          "name": "measurement",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "provider_ref": {
-          "name": "provider_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "payment_source": {
-          "name": "payment_source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credential_ref": {
-          "name": "credential_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "raw_usage": {
-          "name": "raw_usage",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "amount_micros": {
-          "name": "amount_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "priced_by": {
-          "name": "priced_by",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dedupe_key": {
-          "name": "dedupe_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "usage_record_organization_id_project_id_idx": {
-          "name": "usage_record_organization_id_project_id_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "usage_record_simulation_id_idx": {
-          "name": "usage_record_simulation_id_idx",
-          "columns": [
-            {
-              "expression": "simulation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "usage_record_organization_id_organization_id_fk": {
-          "name": "usage_record_organization_id_organization_id_fk",
-          "tableFrom": "usage_record",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "usage_record_project_organization_fk": {
-          "name": "usage_record_project_organization_fk",
-          "tableFrom": "usage_record",
-          "tableTo": "project",
-          "columnsFrom": [
-            "project_id",
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id",
-            "organization_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "usage_record_simulation_project_fk": {
-          "name": "usage_record_simulation_project_fk",
-          "tableFrom": "usage_record",
-          "tableTo": "simulation",
-          "columnsFrom": [
-            "simulation_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "usage_record_run_project_fk": {
-          "name": "usage_record_run_project_fk",
-          "tableFrom": "usage_record",
-          "tableTo": "run",
-          "columnsFrom": [
-            "run_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "usage_record_dedupe_key_unique": {
-          "name": "usage_record_dedupe_key_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "dedupe_key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "usage_record_id_prefix": {
-          "name": "usage_record_id_prefix",
-          "value": "\"usage_record\".\"id\" ~ '^usg_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "usage_record_work_kind_allowed": {
-          "name": "usage_record_work_kind_allowed",
-          "value": "\"usage_record\".\"work_kind\" in ('simulation', 'grading')"
-        },
-        "usage_record_provider_allowed": {
-          "name": "usage_record_provider_allowed",
-          "value": "\"usage_record\".\"provider\" in ('openai', 'deepgram', 'cartesia')"
-        },
-        "usage_record_operation_allowed": {
-          "name": "usage_record_operation_allowed",
-          "value": "\"usage_record\".\"operation\" in ('openai_chat_completions', 'openai_realtime', 'deepgram', 'cartesia_manual', 'cartesia', 'openai')"
-        },
-        "usage_record_unit_allowed": {
-          "name": "usage_record_unit_allowed",
-          "value": "\"usage_record\".\"unit\" in ('tokens', 'seconds', 'characters')"
-        },
-        "usage_record_measurement_allowed": {
-          "name": "usage_record_measurement_allowed",
-          "value": "\"usage_record\".\"measurement\" in ('provider_reported', 'client_measured')"
-        },
-        "usage_record_payment_source_allowed": {
-          "name": "usage_record_payment_source_allowed",
-          "value": "\"usage_record\".\"payment_source\" in ('platform', 'customer')"
-        },
-        "usage_record_work_kind_names_its_control_record": {
-          "name": "usage_record_work_kind_names_its_control_record",
-          "value": "case \"usage_record\".\"work_kind\"\n        when 'simulation' then \"usage_record\".\"simulation_id\" is not null and \"usage_record\".\"grading_job_id\" is null\n        when 'grading' then \"usage_record\".\"grading_job_id\" is not null\n        else false\n      end"
-        },
-        "usage_record_attempt_is_counted": {
-          "name": "usage_record_attempt_is_counted",
-          "value": "\"usage_record\".\"attempt\" >= 0"
-        },
-        "usage_record_amount_is_not_negative": {
-          "name": "usage_record_amount_is_not_negative",
-          "value": "\"usage_record\".\"amount_micros\" >= 0"
-        },
-        "usage_record_quantities_are_an_object": {
-          "name": "usage_record_quantities_are_an_object",
-          "value": "jsonb_typeof(\"usage_record\".\"quantities\") = 'object'\n        and \"usage_record\".\"quantities\" <> '{}'::jsonb"
-        },
-        "usage_record_raw_usage_is_an_object": {
-          "name": "usage_record_raw_usage_is_an_object",
-          "value": "jsonb_typeof(\"usage_record\".\"raw_usage\") = 'object'"
-        },
-        "usage_record_priced_by_is_an_object": {
-          "name": "usage_record_priced_by_is_an_object",
-          "value": "jsonb_typeof(\"usage_record\".\"priced_by\") = 'object'"
-        },
-        "usage_record_dedupe_key_is_not_blank": {
-          "name": "usage_record_dedupe_key_is_not_blank",
-          "value": "btrim(\"usage_record\".\"dedupe_key\") <> ''"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.cloud_billing_account": {
-      "name": "cloud_billing_account",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "plan_code": {
-          "name": "plan_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "period_anchor": {
-          "name": "period_anchor",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "stripe_customer_id": {
-          "name": "stripe_customer_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stripe_subscription_id": {
-          "name": "stripe_subscription_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stripe_subscription_status": {
-          "name": "stripe_subscription_status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stripe_subscription_event_at": {
-          "name": "stripe_subscription_event_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "balance_micros": {
-          "name": "balance_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "overage_reported_through": {
-          "name": "overage_reported_through",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "cloud_billing_account_organization_id_organization_id_fk": {
-          "name": "cloud_billing_account_organization_id_organization_id_fk",
-          "tableFrom": "cloud_billing_account",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "cloud_billing_account_plan_fk": {
-          "name": "cloud_billing_account_plan_fk",
-          "tableFrom": "cloud_billing_account",
-          "tableTo": "cloud_plan",
-          "columnsFrom": [
-            "plan_code"
-          ],
-          "columnsTo": [
-            "code"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "cloud_billing_account_organization_unique": {
-          "name": "cloud_billing_account_organization_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "organization_id"
-          ]
-        },
-        "cloud_billing_account_stripe_customer_unique": {
-          "name": "cloud_billing_account_stripe_customer_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "stripe_customer_id"
-          ]
-        },
-        "cloud_billing_account_stripe_subscription_unique": {
-          "name": "cloud_billing_account_stripe_subscription_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "stripe_subscription_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "cloud_billing_account_id_prefix": {
-          "name": "cloud_billing_account_id_prefix",
-          "value": "\"cloud_billing_account\".\"id\" ~ '^cba_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "cloud_billing_account_plan_code_allowed": {
-          "name": "cloud_billing_account_plan_code_allowed",
-          "value": "\"cloud_billing_account\".\"plan_code\" in ('hobby', 'pro')"
-        },
-        "cloud_billing_account_subscription_status_allowed": {
-          "name": "cloud_billing_account_subscription_status_allowed",
-          "value": "\"cloud_billing_account\".\"stripe_subscription_status\" is null\n        or \"cloud_billing_account\".\"stripe_subscription_status\" in ('trialing', 'active', 'past_due', 'canceled', 'unpaid', 'incomplete', 'incomplete_expired', 'paused')"
-        },
-        "cloud_billing_account_subscription_needs_a_customer": {
-          "name": "cloud_billing_account_subscription_needs_a_customer",
-          "value": "\"cloud_billing_account\".\"stripe_subscription_id\" is null\n        or \"cloud_billing_account\".\"stripe_customer_id\" is not null"
-        },
-        "cloud_billing_account_subscription_status_needs_a_subscription": {
-          "name": "cloud_billing_account_subscription_status_needs_a_subscription",
-          "value": "\"cloud_billing_account\".\"stripe_subscription_status\" is null\n        or \"cloud_billing_account\".\"stripe_subscription_id\" is not null"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.cloud_ledger_entry": {
-      "name": "cloud_ledger_entry",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "amount_micros": {
-          "name": "amount_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reference_kind": {
-          "name": "reference_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reference_id": {
-          "name": "reference_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "usage_record_id": {
-          "name": "usage_record_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "idempotency_key": {
-          "name": "idempotency_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "occurred_at": {
-          "name": "occurred_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "cloud_ledger_entry_organization_idx": {
-          "name": "cloud_ledger_entry_organization_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "cloud_ledger_entry_usage_record_id_usage_record_id_fk": {
-          "name": "cloud_ledger_entry_usage_record_id_usage_record_id_fk",
-          "tableFrom": "cloud_ledger_entry",
-          "tableTo": "usage_record",
-          "columnsFrom": [
-            "usage_record_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "cloud_ledger_entry_account_fk": {
-          "name": "cloud_ledger_entry_account_fk",
-          "tableFrom": "cloud_ledger_entry",
-          "tableTo": "cloud_billing_account",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "organization_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "cloud_ledger_entry_idempotency_key_unique": {
-          "name": "cloud_ledger_entry_idempotency_key_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "idempotency_key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "cloud_ledger_entry_id_prefix": {
-          "name": "cloud_ledger_entry_id_prefix",
-          "value": "\"cloud_ledger_entry\".\"id\" ~ '^cle_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "cloud_ledger_entry_kind_allowed": {
-          "name": "cloud_ledger_entry_kind_allowed",
-          "value": "\"cloud_ledger_entry\".\"kind\" in ('welcome_credit', 'purchased_credit', 'inference_charge', 'correction')"
-        },
-        "cloud_ledger_entry_reference_kind_allowed": {
-          "name": "cloud_ledger_entry_reference_kind_allowed",
-          "value": "\"cloud_ledger_entry\".\"reference_kind\" in ('organization', 'usage_record', 'checkout_session', 'operator')"
-        },
-        "cloud_ledger_entry_reference_id_is_not_blank": {
-          "name": "cloud_ledger_entry_reference_id_is_not_blank",
-          "value": "btrim(\"cloud_ledger_entry\".\"reference_id\") <> ''"
-        },
-        "cloud_ledger_entry_idempotency_key_is_not_blank": {
-          "name": "cloud_ledger_entry_idempotency_key_is_not_blank",
-          "value": "btrim(\"cloud_ledger_entry\".\"idempotency_key\") <> ''"
-        },
-        "cloud_ledger_entry_kind_names_its_cause": {
-          "name": "cloud_ledger_entry_kind_names_its_cause",
-          "value": "case \"cloud_ledger_entry\".\"kind\"\n        when 'welcome_credit' then \"cloud_ledger_entry\".\"reference_kind\" = 'organization'\n        when 'purchased_credit' then \"cloud_ledger_entry\".\"reference_kind\" = 'checkout_session'\n        when 'inference_charge' then \"cloud_ledger_entry\".\"reference_kind\" = 'usage_record'\n        else true\n      end"
-        },
-        "cloud_ledger_entry_charge_names_its_usage_record": {
-          "name": "cloud_ledger_entry_charge_names_its_usage_record",
-          "value": "case when \"cloud_ledger_entry\".\"reference_kind\" = 'usage_record'\n        then \"cloud_ledger_entry\".\"usage_record_id\" = \"cloud_ledger_entry\".\"reference_id\"\n        else \"cloud_ledger_entry\".\"usage_record_id\" is null\n      end"
-        },
-        "cloud_ledger_entry_sign_follows_its_kind": {
-          "name": "cloud_ledger_entry_sign_follows_its_kind",
-          "value": "case \"cloud_ledger_entry\".\"kind\"\n        when 'welcome_credit' then \"cloud_ledger_entry\".\"amount_micros\" > 0\n        when 'purchased_credit' then \"cloud_ledger_entry\".\"amount_micros\" > 0\n        when 'inference_charge' then \"cloud_ledger_entry\".\"amount_micros\" <= 0\n        else \"cloud_ledger_entry\".\"amount_micros\" <> 0\n      end"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.cloud_plan": {
-      "name": "cloud_plan",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "code": {
-          "name": "code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "fee_micros": {
-          "name": "fee_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "chat_simulations_allowance": {
-          "name": "chat_simulations_allowance",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "web_call_minutes_allowance": {
-          "name": "web_call_minutes_allowance",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "phone_minutes_allowance": {
-          "name": "phone_minutes_allowance",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "web_call_overage_micros_per_minute": {
-          "name": "web_call_overage_micros_per_minute",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "phone_overage_micros_per_minute": {
-          "name": "phone_overage_micros_per_minute",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "stripe_product_id": {
-          "name": "stripe_product_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stripe_fee_price_id": {
-          "name": "stripe_fee_price_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stripe_web_call_meter_price_id": {
-          "name": "stripe_web_call_meter_price_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stripe_phone_meter_price_id": {
-          "name": "stripe_phone_meter_price_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stripe_web_call_meter_id": {
-          "name": "stripe_web_call_meter_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stripe_phone_meter_id": {
-          "name": "stripe_phone_meter_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "cloud_plan_code_unique": {
-          "name": "cloud_plan_code_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "code"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "cloud_plan_id_prefix": {
-          "name": "cloud_plan_id_prefix",
-          "value": "\"cloud_plan\".\"id\" ~ '^cpl_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "cloud_plan_code_allowed": {
-          "name": "cloud_plan_code_allowed",
-          "value": "\"cloud_plan\".\"code\" in ('hobby', 'pro')"
-        },
-        "cloud_plan_name_is_not_blank": {
-          "name": "cloud_plan_name_is_not_blank",
-          "value": "btrim(\"cloud_plan\".\"name\") <> ''"
-        },
-        "cloud_plan_fee_is_not_negative": {
-          "name": "cloud_plan_fee_is_not_negative",
-          "value": "\"cloud_plan\".\"fee_micros\" >= 0"
-        },
-        "cloud_plan_allowances_are_not_negative": {
-          "name": "cloud_plan_allowances_are_not_negative",
-          "value": "coalesce(\"cloud_plan\".\"chat_simulations_allowance\", 0) >= 0\n        and coalesce(\"cloud_plan\".\"web_call_minutes_allowance\", 0) >= 0\n        and coalesce(\"cloud_plan\".\"phone_minutes_allowance\", 0) >= 0"
-        },
-        "cloud_plan_overage_prices_are_not_negative": {
-          "name": "cloud_plan_overage_prices_are_not_negative",
-          "value": "\"cloud_plan\".\"web_call_overage_micros_per_minute\" >= 0\n        and \"cloud_plan\".\"phone_overage_micros_per_minute\" >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.cloud_stripe_event": {
-      "name": "cloud_stripe_event",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "received_at": {
-          "name": "received_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "cloud_stripe_event_id_is_not_blank": {
-          "name": "cloud_stripe_event_id_is_not_blank",
-          "value": "btrim(\"cloud_stripe_event\".\"id\") <> ''"
-        },
-        "cloud_stripe_event_type_is_not_blank": {
-          "name": "cloud_stripe_event_type_is_not_blank",
-          "value": "btrim(\"cloud_stripe_event\".\"type\") <> ''"
         }
       },
       "isRLSEnabled": false

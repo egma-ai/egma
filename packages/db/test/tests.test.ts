@@ -29,14 +29,8 @@ import {
 } from "./support/test-factory.ts";
 
 /**
- * The factory functions are the seam: every assertion goes through create and
- * get, never through table internals. Raw SQL appears only in fixtures, in row
- * counts proving what a failed create left behind, and in the inserts that
- * bypass the module on purpose to show the database refuses what the module
- * never attempts.
- *
- * The customers, their projects and their starter personas are the shared
- * fixture in `support/test-factory.ts`, which the editing tests seed from too.
+ * Test the factory through create/get. Raw SQL supplies fixtures, checks
+ * failed-write cleanup, and tests constraints by bypassing validation.
  */
 
 let database: MigratedDatabase;
@@ -285,15 +279,7 @@ describe("a test naming a persona it may not have", () => {
   });
 });
 
-/**
- * **A test naming no persona is refused, and it used to be answered for.**
- *
- * Until 2026-08-24 an empty list quietly took the project's default persona, on
- * a create and on an edit alike, so a test could exist that nobody had ever
- * said who calls about — and read back as though its author had. The
- * substitution is a refusal now. These are the same cases the substitution was
- * proven with, asserting the other answer.
- */
+/** Reject missing or empty persona lists on create and update. */
 describe("a test naming no persona", () => {
   it("is refused rather than given the project's default", async () => {
     await expect(createTest(actingAsAcme(), rescheduling)).rejects.toThrow(

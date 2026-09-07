@@ -26,16 +26,8 @@ import {
 } from "./support/clickhouse.ts";
 
 /**
- * The two read functions, asked the questions a route cannot ask them.
- *
- * The endpoints are tested over HTTP, where they belong, and three things are
- * only reachable here: what a `viewer` may read, since every account the product
- * makes is an admin; what a context can be talked into by an argument, since a
- * route only ever hands it what a URL said; and what the tree does with a span
- * whose parent never arrived, which the captured trace has no example of because
- * a real exporter does not produce one.
- *
- * Real ClickHouse throughout, on the pattern the rest of the module's tests use.
+ * Use real ClickHouse to test role and scope restrictions, plus malformed
+ * span graphs that the captured HTTP fixtures do not cover.
  */
 
 let store: MigratedTraceStore;
@@ -709,14 +701,8 @@ describe("the window a read is bounded by", () => {
 });
 
 /**
- * A span whose parent is not in the trace.
- *
- * The door normalises a malformed parent id to `''` and keeps the original in
- * the payload, and a parent that simply never arrived is the same case from the
- * reader's side. Ticket 03 settled what to do with both: treat the span as
- * top-level rather than letting it vanish down a chain that goes nowhere. The
- * captured trace has no example — a real exporter does not produce one — so it
- * is written here.
+ * A span with a missing or cleared parent must appear at the top level
+ * instead of disappearing from the transcript.
  */
 describe("a span whose parent never arrived", () => {
   const ORPHANED = "dddd1111111111111111111111111111";
@@ -763,19 +749,7 @@ describe("a span whose parent never arrived", () => {
   });
 });
 
-/**
- * A span replayed, which is the only way one identity ever arrives twice on a
- * path that is working.
- *
- * This suite used to assert the opposite: that a second, different account of a
- * span id was stored beside the first and that a reader handed back both. That
- * was a reader faithfully reporting an integrity defect as if it were a
- * transcript — a person reading it would see the human speak twice and have no
- * way to learn that only one of those things was ever said. Two accounts of one
- * immutable span are refused before the second is written now, so what a read
- * has to prove is the case that remains: a replay is one span, however many
- * physical copies of it the store is holding at this instant.
- */
+/** Replayed spans must appear once even before physical copies are merged. */
 describe("a replayed span in a trace somebody opens", () => {
   const REPLAYED = "abab1111111111111111111111111111";
   const root = "dadadadadadadada";
@@ -853,16 +827,7 @@ describe("a replayed span in a trace somebody opens", () => {
   });
 });
 
-/**
- * Spans that point at each other, which is what a truncated exporter buffer and
- * a hand-written client both eventually produce.
- *
- * Nobody sends this on purpose, and that is exactly why it is written down: the
- * walk down from the top never arrives at a span whose parent is present, is not
- * a turn, and is not under the root — so a cycle of two would leave the store
- * counting spans the transcript did not show. A response that disagrees with the
- * number printed beside it reads as egma having lost something.
- */
+/** Cyclic parent links must not hide spans or prevent the graph walk ending. */
 describe("a parent cycle longer than one span", () => {
   const CYCLED = "eeee1111111111111111111111111111";
   const DESCENDED = "ffff1111111111111111111111111111";
@@ -985,17 +950,9 @@ describe("a parent cycle longer than one span", () => {
   });
 
   /**
-   * Four rows in, three spans out, and the third is one span rather than two.
-   *
-   * The two rows sharing an id are two accounts of one immutable span, and the
-   * store collapses them onto the identity they both claim — which is why this
-   * asserts that the surviving account appears once and deliberately does not
-   * assert *which* one survived. Choosing between them is not a read's job and
-   * never becomes one: a second, different account is refused before it is
-   * written, so a working path never produces this at all.
-   *
-   * What the walk still owes is the property this case was built for: the
-   * second child, reachable both directly and through the knot, appears once.
+   * Conflicting raw rows collapse to one identity; the survivor is unspecified.
+   * Verify the child reachable through two paths appears once. Normal ingestion
+   * rejects conflicting evidence before storage.
    */
   it("returns each span once when a cycle also reuses an id", async () => {
     const detail = await readTrace(at(acme, SUPPORT), REUSED_IN_CYCLE, {
@@ -1017,14 +974,8 @@ describe("a parent cycle longer than one span", () => {
 });
 
 /**
- * A trace larger than one read returns, which is where the counts and the tree
- * stop being the same thing.
- *
- * The door caps one export at 10,000 spans, so this cannot be reached through
- * it — but a trace is however many exports an agent sent, and nothing stops
- * fifteen of them sharing a trace id. The promise is that the transcript says so
- * and that its numbers stay the trace's own: `spans_truncated` means the tree is
- * a prefix, and `span_count` is still every span the window holds.
+ * A trace can grow beyond the read limit across multiple exports.
+ * The response must mark truncation while retaining the full windowed count.
  */
 describe("a trace with more spans than one read returns", () => {
   const ENORMOUS = "9999111111111111111111111111aaaa";
@@ -1139,14 +1090,8 @@ describe("a trace with more spans than one read returns", () => {
 });
 
 /**
- * A stored duration larger than the signed arithmetic that reads it.
- *
- * `duration_ns` is a `UInt64` and the aggregate that works out when a trace
- * ended is signed, so a count near 2^64 comes back through `toInt64` negative
- * and the trace ends before it began. The door clamps what it writes at Int64's
- * ceiling; this is the floor under the rows that were written before it did,
- * which is why the row goes in past the door — the door will not produce one any
- * more, and the rows that already exist do not go back through it.
+ * Insert a legacy UInt64 duration directly to test signed-overflow handling.
+ * Current ingestion clamps durations, but reads must also handle old rows.
  */
 describe("a duration that the reading arithmetic cannot hold", () => {
   const WRAPPED = "7777111111111111111111111111bbbb";
@@ -1189,15 +1134,8 @@ describe("a duration that the reading arithmetic cannot hold", () => {
 });
 
 /**
- * The reported-measurements block, which is the one thing a read takes off a
- * payload.
- *
- * Everything else about the payload is deliberately not returned — it is the
- * largest column on the row and nothing renders it — so what is asked here is
- * that the exception stays the size it was argued to be: one root row, one
- * egma-owned key, and an answer of `undefined` for every shape that is not a
- * block. Never a throw, because a vendor's bad write must not cost a customer
- * their transcript.
+ * Extract the normalized reported-measurements block without returning the
+ * full payload. Missing or invalid blocks must not fail the trace read.
  */
 describe("the block a platform reported on the root span", () => {
   const REPORTED = "0a0a1111111111111111111111111111";
@@ -1246,6 +1184,21 @@ describe("the block a platform reported on the root span", () => {
         reported_measurements: { version: 99, reported_by: "", measurements: 7 },
       }),
     ]);
+  });
+
+  it.each([
+    { label: "degraded provider document", emitter: "agent", degraded: true, status: "error", expected: true },
+    { label: "complete provider error", emitter: "agent", degraded: false, status: "error", expected: undefined },
+    { label: "complete provider document", emitter: "agent", degraded: false, status: "ok", expected: undefined },
+    { label: "persona diagnostic", emitter: "egma-runtime", degraded: true, status: "error", expected: undefined },
+  ] as const)("reports evidence completeness for $label", async ({ label, emitter, degraded, status, expected }) => {
+    const traceId = createHash("sha256").update(label).digest("hex").slice(0, 32);
+    await appendSpans(at(acme, SUPPORT), [{
+      ...aReportedRoot(traceId, { degraded }), emitter, status,
+    }]);
+    const detail = await readTrace(at(acme, SUPPORT), traceId, { window: WINDOW });
+    expect(detail?.agentEvidenceIncomplete).toBe(expected);
+    expect(detail?.spans[0]?.status).toBe(status);
   });
 
   it("is read back with the root span it rode in on", async () => {

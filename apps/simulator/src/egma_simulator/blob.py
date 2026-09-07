@@ -1,33 +1,9 @@
-"""Blob storage: where bytes land that a report can only point at.
+"""Async recording storage; reports carry opaque references instead of audio bytes.
+Use shared object storage when configured, otherwise a local directory.
 
-A recording is too big to travel in a report and too useful to throw away,
-so the simulator writes it directly and reports only an opaque reference.
-The seam here is what that write goes through: one interface, with two
-implementations behind it. A deployment names an object-storage endpoint
-and its recordings land somewhere every part of that deployment can
-reach; it names none and a directory stands in, which is what lets the
-whole test suite run with no container anywhere and what a bare
-``egma-simulator`` process on somebody's laptop writes to.
-
-``write`` is async because every implementation after the first one is a
-network call, and a synchronous seam would make an upload stall every
-other simulation the process is conducting.
-
-Keys are the simulator's to compose and the store's to confine. A
-``simulation_id`` is opaque — never parsed, never rewritten — but a *key*
-is a different thing: an id carrying a path separator would otherwise put
-a recording somewhere nobody configured. Segments that are already plain
-names are kept as they are, so a reference stays readable; anything else
-is flattened and given a digest of the original.
-
-Two keys that flatten alike must never land on one blob, and a key can be
-odd in two different ways. Its *segments* can be — a space, a null byte,
-a ``..`` — and a digest of each segment tells those apart. Its
-*separators* can be too: ``a//b``, ``/a/b``, ``a/b/`` and ``a/b`` all
-carry the same segments, so per-segment digests see nothing to tell apart
-and all four would name one blob, the last write quietly replacing the
-rest. So a key whose separators are not already the plain ones carries a
-digest of the whole original as well.
+Confine keys without changing simulation IDs. Digest altered segments to avoid
+collisions. Also digest the full key when separators are noncanonical:
+a//b, /a/b, a/b/, and a/b must not resolve to the same object.
 """
 
 from __future__ import annotations
@@ -43,16 +19,7 @@ _UNSAFE_IN_A_SEGMENT = re.compile(r"[^A-Za-z0-9._-]")
 _READABLE_PREFIX_CHARS = 64
 
 S3_CONNECT_SECONDS = 5.0
-"""How long opening a connection to the store may take before that attempt
-is over.
-
-The store is a container on the deployment's own network and answers in
-milliseconds; this is the allowance for one that is up and busy, not for
-one that is not there. An endpoint that is *black-holed* — a firewall that
-drops rather than refuses, which is the ordinary way a store goes missing
-— never answers at all, and this number is the whole of what stops that
-from becoming a wait.
-"""
+"""Per-attempt connection timeout, including endpoints that silently drop requests."""
 
 S3_READ_SECONDS = 30.0
 """How long one socket operation may stall before that attempt is over.
@@ -65,26 +32,9 @@ sixty megabytes — over a link that is genuinely slow rather than stuck.
 """
 
 S3_ATTEMPTS = 3
-"""How many times one recording is offered to the store, in total.
-
-The arithmetic, because a recording is written from inside
-``Conductor.close()`` and holds a capacity slot until it returns. Three
-attempts at five seconds to connect is fifteen seconds against an endpoint
-that answers nothing, plus botocore's standard mode waiting a growing
-random moment between attempts — under a minute in all, and a slot back.
-
-The defaults this replaces are sixty seconds each way and five attempts,
-which is several minutes of one simulation's slot spent on a store that
-was never going to answer. The filesystem store this seam grew out of
-could not stall at all, so bounding the network one is what keeps the
-seam's promise the same in both.
-
-It is spent through botocore's ``total_max_attempts`` and deliberately not
-through ``max_attempts``, which is the same number meaning something else:
-``max_attempts`` counts the retries *after* the first request, so the
-obvious spelling buys four attempts where this docstring promises three.
-A budget whose code and prose disagree by one is the kind that is believed
-rather than checked, and this one is a wait a self-hoster pays for.
+"""Total upload attempts, including the first request.
+Use botocore total_max_attempts: max_attempts counts retries instead.
+Bound retries because recording upload holds a simulation capacity slot.
 """
 
 
@@ -155,33 +105,10 @@ class FilesystemBlobStore:
 
 
 class S3BlobStore:
-    """The store a whole deployment can reach: one bucket, one object per key.
-
-    The implementation this seam was written for. Nothing above it moves
-    — a recording is still built once when the conversation ends, still
-    written through ``write``, still reported as one opaque reference —
-    and what changes is only where those bytes come to rest. Out of one
-    container's own disk, which nothing but that container can read, and
-    into storage the control plane and every other simulator share. A
-    self-hoster who starts a second simulator, which the deployment
-    invites them to do, then gets recordings from both, readable from
-    either; with a directory inside a container they get references that
-    point at nothing and no warning that half their audio is gone.
-
-    The reference is the confined key and nothing else — no bucket, no
-    endpoint, no signature, and nothing that would go stale the day the
-    deployment moved its store. Which store resolves a reference, and how
-    a browser is let at it, is the reader's business.
-
-    ``put_object`` is one request that both creates and replaces, so
-    writing a key twice leaves one object exactly as writing a path twice
-    leaves one file. There is no read here, and no delete: this seam is
-    what a simulator does, and a simulator only ever adds.
-
-    Every wait it can do is bounded and named — see the three constants
-    at the top of this file. A store that cannot be reached must cost one
-    recording and a bounded moment, never the several minutes botocore's
-    own defaults would spend holding a simulation's capacity slot open.
+    """Shared recording bucket with one object per confined key.
+    References contain only keys, without endpoints or credentials.
+    Writing the same key replaces its object. Connection, read, and retry
+    limits bound how long upload holds a simulation capacity slot.
     """
 
     def __init__(
@@ -230,16 +157,8 @@ class S3BlobStore:
         )
 
     async def write(self, key: str, content: bytes) -> str:
-        """One recording into the bucket, off the event loop.
-
-        boto3 is synchronous and this seam is not, for the reason the
-        module docstring gives: an upload that blocked would stall every
-        other simulation this process is conducting, and a simulator
-        conducts several at once. So the call goes through a thread
-        exactly as the filesystem store's write does. One client serves
-        all of them — botocore's low-level clients are safe to call from
-        several threads, and a client per simulation would build a fresh
-        connection pool for one upload.
+        """Run synchronous boto3 upload in a thread so other simulations can proceed.
+        Reuse the low-level client and its connection pool across uploads.
         """
         reference = confined_key(key)
         await asyncio.to_thread(self._write_now, reference, content)

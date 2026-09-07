@@ -1,3 +1,4 @@
+import type { PersonaParameterValues } from "../persona-library/parameters.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 
@@ -24,11 +25,13 @@ import {
 import {
   db,
   dedicatedConnection,
-  type Queryable,
   type Transaction,
+  type Queryable,
 } from "../client.ts";
 import { allowanceKindOf } from "../billing/allowance.ts";
 import { billing } from "../billing/ports.ts";
+import { personaModelsOfParameters } from "../persona-library/parameters.ts";
+import { providersNeededBy } from "../models/selections.ts";
 import { planGroupsFor } from "../grading/plan.ts";
 import {
   agent,
@@ -40,8 +43,7 @@ import {
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
-import { persona, personaVersion } from "../schema/personas.ts";
-import { idempotentOperation } from "../schema/plans.ts";
+import { persona } from "../schema/personas.ts";
 import {
   COMPLETED_ENDING_REASONS,
   FAILED_ENDING_REASONS,
@@ -63,7 +65,6 @@ import {
   type MockMetadata,
 } from "../mock-tools/record.ts";
 import { runIsReadyToConduct } from "../mock-tools/lanes.ts";
-import { providersNeededBy } from "../models/selections.ts";
 import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import {
@@ -73,7 +74,7 @@ import {
   platformOfConnectionType,
 } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
-import { IdempotencyConflictError, RunWriteRefusedError } from "./errors.ts";
+import { RunWriteRefusedError } from "./errors.ts";
 import {
   requestGradingIn,
   simulationEvidenceReadiness,
@@ -85,7 +86,6 @@ import {
   refuseRun,
   resolvePersonaVersions,
   simulationHasPlannedGradersOn,
-  writeGradingPlan,
 } from "./run-plans.ts";
 import {
   getTestVersionExecutionContent,
@@ -106,33 +106,17 @@ export type NewRun = {
   readonly suiteId: string;
   readonly agentId: string;
   readonly connectionId: string;
-  readonly idempotencyKey: string;
   readonly name?: string | undefined;
   readonly expectedTestVersions?: readonly ExpectedTestVersion[] | undefined;
   /**
-   * The serving version this run will conduct against, already resolved from
-   * the agent's platform, for the lanes that name a version.
-   *
-   * **Read outside this call and handed in, deliberately.** Resolving a version
-   * is a request to somebody else's API, and this function's whole body is one
-   * database transaction holding a lock on a test suite. A provider that
-   * answers slowly would hold that lock for as long as it took. So the caller
-   * reads first and fails the run out loud when the read fails — never a silent
-   * conduct against an unread version — and what arrives here is a settled fact
-   * to write down.
-   *
-   * Absent on every other lane, where nothing names a version.
+   * Agent platform version resolved before the run transaction. Required for
+   * connection types that conduct against a named version; omit for other types.
+   * Keep the network read outside the transaction to avoid holding locks during it.
    */
   readonly agentVersion?: number | undefined;
   /**
-   * A fingerprint of the connection the version above was read from.
-   *
-   * Travels with `agentVersion` and only with it: the version was read from a
-   * target before this transaction opened, and this is how the transaction
-   * proves the target has not moved since. Under the lock `startRun` already
-   * holds on the connection, the fingerprint taken now must equal this one, or
-   * the connection was edited mid-creation and the run is refused rather than
-   * written against a target its record would misname.
+   * Fingerprint of the connection used for the platform version read. startRun
+   * compares it under the connection lock and rejects changes made during that read.
    */
   readonly conductedConnectionIdentity?: string | undefined;
 };
@@ -499,53 +483,6 @@ function validateExpectedVersions(
   return entries;
 }
 
-function digestOfStart(input: NewRun): string {
-  const expected = [...(input.expectedTestVersions ?? [])]
-    .map((one) => [one.testId, one.versionId] as const)
-    .sort(([a], [b]) => a.localeCompare(b));
-  return createHash("sha256")
-    .update(JSON.stringify({
-      suite: input.suiteId,
-      agent: input.agentId,
-      connection: input.connectionId,
-      name: input.name?.trim() || null,
-      expected,
-    }))
-    .digest("hex");
-}
-
-function lostToIdempotencyKey(cause: unknown): boolean {
-  const held = cause as { constraint?: unknown; cause?: unknown };
-  if (held.constraint === "idempotent_operation_pk") return true;
-  return (held.cause as { constraint?: unknown } | undefined)?.constraint === "idempotent_operation_pk";
-}
-
-async function originalRunFor(
-  on: Queryable,
-  auth: AuthContext,
-  projectId: string,
-  input: NewRun,
-): Promise<StartedRun | undefined> {
-  const [remembered] = await on
-    .select({ resultId: idempotentOperation.resultId, requestDigest: idempotentOperation.requestDigest })
-    .from(idempotentOperation)
-    .where(and(
-      eq(idempotentOperation.organizationId, auth.organizationId),
-      eq(idempotentOperation.projectId, projectId),
-      eq(idempotentOperation.actorId, auth.userId),
-      eq(idempotentOperation.operation, "start_run"),
-      eq(idempotentOperation.idempotencyKey, input.idempotencyKey.trim()),
-    ))
-    .limit(1);
-  if (remembered === undefined) return undefined;
-  if (remembered.requestDigest !== digestOfStart(input)) {
-    throw new IdempotencyConflictError(input.idempotencyKey, remembered.resultId);
-  }
-  const found = await getRun(auth, remembered.resultId);
-  if (found === undefined) throw new IdempotencyConflictError(input.idempotencyKey, remembered.resultId);
-  return found;
-}
-
 /** Start one complete suite under one exact database lock. */
 export async function startRun(auth: AuthContext, input: NewRun): Promise<StartedRun> {
   authorize(auth, "start_and_cancel_runs", here(auth));
@@ -554,412 +491,292 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
   if (!isId("ste", input.suiteId)) refuseRun("not_admitted", `"${input.suiteId}" is not a test suite id`);
   if (!isId("agt", input.agentId)) refuseRun("connection_not_on_agent", `"${input.agentId}" is not an agent id`);
   if (!isId("con", input.connectionId)) refuseRun("no_such_connection", `"${input.connectionId}" is not a connection id`);
-  const idempotencyKey = input.idempotencyKey.trim();
-  if (idempotencyKey === "") refuseRun("not_admitted", "a run needs an idempotency key");
   const expected = validateExpectedVersions(input.expectedTestVersions);
   const expectedInOrder = expected === undefined
     ? undefined
     : [...expected].sort((a, b) => a.testId.localeCompare(b.testId));
-  const remembered = await originalRunFor(db(), auth, projectId, input);
-  if (remembered !== undefined) return remembered;
 
   const runId = newId("run");
   const at = new Date();
-  let created: Run | undefined;
-  try {
-    created = await db().transaction(async (tx) => {
-      const [suite] = await tx
-        .select({ id: testSuite.id, name: testSuite.name })
-        .from(testSuite)
-        .where(within(auth, testSuite, and(
-          eq(testSuite.id, input.suiteId),
-          eq(testSuite.projectId, projectId),
-          isNull(testSuite.deletedAt),
-        )))
-        .limit(1)
-        .for("update");
-      if (suite === undefined) refuseRun("not_admitted", `there is no active test suite ${input.suiteId} in this project`);
+  return db().transaction(async (tx) => {
+    const [suite] = await tx
+      .select({ id: testSuite.id, name: testSuite.name })
+      .from(testSuite)
+      .where(within(auth, testSuite, and(
+        eq(testSuite.id, input.suiteId),
+        eq(testSuite.projectId, projectId),
+        isNull(testSuite.deletedAt),
+      )))
+      .limit(1)
+      .for("update");
+    if (suite === undefined) refuseRun("not_admitted", `there is no active test suite ${input.suiteId} in this project`);
 
-      const readTestPage = (afterId?: string) => tx
-        .select({ id: test.id, versionId: test.currentVersionId })
-        .from(test)
-        .where(and(
-          eq(test.suiteId, suite.id),
-          eq(test.projectId, projectId),
-          isNull(test.deletedAt),
-          afterId === undefined ? undefined : gt(test.id, afterId),
-        ))
-        .orderBy(asc(test.id))
-        .limit(SIMULATION_INSERT_BATCH)
-        .for("share", { of: test });
-      let currentTests = await readTestPage();
-      if (currentTests.length === 0) refuseRun("not_admitted", `test suite ${suite.id} is empty`);
+    const readTestPage = (afterId?: string) => tx
+      .select({ id: test.id, versionId: test.currentVersionId })
+      .from(test)
+      .where(and(
+        eq(test.suiteId, suite.id),
+        eq(test.projectId, projectId),
+        isNull(test.deletedAt),
+        afterId === undefined ? undefined : gt(test.id, afterId),
+      ))
+      .orderBy(asc(test.id))
+      .limit(SIMULATION_INSERT_BATCH)
+      .for("share", { of: test });
+    let currentTests = await readTestPage();
+    if (currentTests.length === 0) refuseRun("not_admitted", `test suite ${suite.id} is empty`);
 
-      const [reached] = await tx
-        .select({
-          agentId: connection.agentId,
-          // The connection holds no platform of its own: the type answers
-          // where it pins one, else the agent's own binding does.
-          agentPlatform: agent.agentPlatform,
-          connectionType: connection.connectionType,
-          accessVariant: connection.accessVariant,
-          modality: connection.modality,
-          topology: connection.topology,
-          environment: connection.environment,
-          config: connection.config,
-          credentials: connection.credentials,
-        })
-        .from(connection)
-        .innerJoin(agent, eq(connection.agentId, agent.id))
-        .where(within(auth, connection, and(
-          eq(connection.id, input.connectionId),
-          eq(connection.agentId, input.agentId),
-          eq(connection.projectId, projectId),
-          isNull(connection.archivedAt),
-          isNull(agent.archivedAt),
-        )))
-        .limit(1)
-        .for("share");
-      if (reached === undefined) refuseRun("no_such_connection", `there is no active connection ${input.connectionId} on agent ${input.agentId}`);
-      if (!connectionIsConductable(reached.connectionType, reached.accessVariant, reached.modality)) {
-        refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionType, reached.modality));
-      }
-      // **The deployment is asked once whether this may begin, and this is the
-      // moment.** The connection is now known, so the kind of work the whole
-      // suite is about to do is known — every conversation in a run goes over
-      // one connection — and nothing has been written yet, so a refusal leaves
-      // no run behind to explain. It sits beside `no_adapter` because it is
-      // the same shape of answer one step further on: that one is *this build
-      // cannot*, this one is *not now*.
-      //
-      // A deployment with no billing answers yes without reaching anything, so
-      // this costs a promise and nothing else. The claim path asks again, per
-      // organization per batch, because a run admitted an hour ago can outlive
-      // the allowance that admitted it.
-      //
-      // It is asked inside this transaction, which holds the suite. That is
-      // deliberate and it is cheap: an adapter that answers this is reading
-      // one of its own indexed rows, next to a transaction that already reads
-      // every test in the suite and writes a row per conversation. What it
-      // buys is that a refusal rolls back rather than racing a suite edit.
-      const decision = await billing().entitlements.mayStart({
-        organizationId: auth.organizationId,
-        allowances: [
-          allowanceKindOf({
-            modality: reached.modality as Modality,
-            connectionType: reached.connectionType as ConnectionType,
-          }),
-        ],
-      });
-      if (!decision.allowed) {
-        // The refusal's own sentence, whole and relayed word for word: it was
-        // written to be shown and it names the next move, which is a thing
-        // this module has no way to word. An adapter that refused and said
-        // nothing still gets a sentence, because a person meets this one and
-        // an empty refusal is the worst answer of all.
-        const said = decision.refusals
-          .map((refusal) => refusal.message.trim())
-          .filter((message) => message !== "")
-          .join(" ");
-        refuseRun(
-          "allowance_spent",
-          said === ""
-            ? "This organization cannot start this kind of work right now. " +
-                "Check its plan and usage under Settings."
-            : said,
-        );
-      }
-      // A kind whose run start reads the agent's platform carries two demands
-      // that a kind reading nothing does not, and both live here so they are
-      // properties of the write rather than habits of one caller.
-      if (connectionTypeReadsPlatformAtRunStart(reached.connectionType)) {
-        // **Never a silent conduct against an unnamed version.** The run cannot
-        // begin without what the read produced: the one serving version every
-        // request will name and this row will record. The caller does the
-        // reading — it is somebody else's API and this is one transaction
-        // holding a lock — but arriving here without it is a bug in the caller,
-        // not a run to write, and a run written without it would leave a result
-        // no reader could tie back to an agent.
-        if (input.agentVersion === undefined) {
-          throw new Error(
-            `a run over a ${reached.connectionType} connection is conducted ` +
-              `against a named version, so it cannot be started without the ` +
-              `run-start read of the agent's platform`,
-          );
-        }
-        // **The world was read from this exact connection, and it still is.**
-        // The read happened before this transaction, so the connection could
-        // have been edited in between — its agent moved, its address changed,
-        // its key rotated — and the version and tools frozen from the old
-        // target would then be stamped onto a run whose snapshot names the new
-        // one. The `for("share")` above holds the row still for the rest of
-        // this transaction, so the fingerprint taken now is the connection as
-        // it will be written; if it does not match the fingerprint the world
-        // was read at, the connection moved during creation. The fingerprint
-        // is over the identity the world depends on — the config and the
-        // sealed key — never a clock, so an edit inside the same millisecond
-        // is caught like any other. Refuse loudly and write nothing; the
-        // caller reads the connection again and retries.
-        const identityNow = connectionIdentityToken(
-          stringRecordFromRow(
-            reached.config,
-            () =>
-              new Error(
-                `connection ${input.connectionId} holds config in a shape ` +
-                  `Egma never writes`,
-              ),
-          ),
-          reached.credentials,
-        );
-        if (input.conductedConnectionIdentity !== identityNow) {
-          refuseRun(
-            "not_admitted",
-            `connection ${input.connectionId} was edited while Egma was ` +
-              `reading the agent's platform for this run, so the version it ` +
-              `read may not be the one this connection now reaches. Nothing ` +
-              `was started; read the connection again and retry.`,
-          );
-        }
-      }
-
-      const graderCandidates = await applicableGraders(auth, tx, projectId);
-      const plannedTests: {
-        suiteId: string;
-        testId: string;
-        testVersionId: string;
-        modality: Modality;
-      }[] = [];
-      const [measured] = await tx
-        .select({ total: count() })
-        .from(test)
-        .innerJoin(testPersona, eq(test.currentVersionId, testPersona.testVersionId))
-        .where(and(
-          eq(test.suiteId, suite.id),
-          eq(test.projectId, projectId),
-          isNull(test.deletedAt),
-        ));
-      const expectedSimulationCount = measured?.total ?? 0;
-      if (expectedSimulationCount <= 0) {
-        refuseRun("not_admitted", `test suite ${suite.id} is empty`);
-      }
-
-      const [header] = await tx.insert(run).values({
-        id: runId,
-        organizationId: auth.organizationId,
-        projectId,
-        suiteId: suite.id,
-        agentId: reached.agentId,
-        connectionId: input.connectionId,
-        name: input.name?.trim() || null,
-        status: "pending",
-        triggeredVia: "manual",
-        triggeredBy: auth.userId,
-        connectionSnapshot: {
-          // Derived exactly as a read derives it: the type answers where it
-          // pins one platform, else the agent's own binding does.
-          agentPlatform:
-            platformOfConnectionType(reached.connectionType) ??
-            reached.agentPlatform,
-          connectionType: reached.connectionType,
-          accessVariant: reached.accessVariant,
-          modality: reached.modality,
-          topology: reached.topology,
-          environment: reached.environment,
-          config: reached.config,
-        },
-        // Read before this transaction opened; written down here so that every
-        // request this run makes names the same version, and a concurrent edit
-        // on the account cannot move what the suite is testing halfway through.
-        ...(input.agentVersion === undefined
-          ? {}
-          : { agentVersion: input.agentVersion }),
-        expectedSimulationCount,
-        createdAt: at,
-      }).returning(RUN_COLUMNS);
-      if (header === undefined) throw new Error("the run was not written");
-
-      let simulationCount = 0;
-      let expectedIndex = 0;
-      while (currentTests.length > 0) {
-        for (const current of currentTests) {
-          const expectedCurrent = expectedInOrder?.[expectedIndex];
-          if (
-            expectedInOrder !== undefined &&
-            (expectedCurrent?.testId !== current.id || expectedCurrent.versionId !== current.versionId)
-          ) {
-            refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
-          }
-          expectedIndex += 1;
-          plannedTests.push({
-            suiteId: suite.id,
-            testId: current.id,
-            testVersionId: current.versionId,
-            modality: reached.modality as Modality,
-          });
-
-          let personaPosition = 0;
-          let namedPersona = false;
-          while (true) {
-            const personaRows = await tx
-              .select({
-                personaId: testPersona.personaId,
-                position: testPersona.position,
-              })
-              .from(testPersona)
-              .where(and(
-                eq(testPersona.testVersionId, current.versionId),
-                gt(testPersona.position, personaPosition),
-              ))
-              .orderBy(asc(testPersona.position))
-              .limit(SIMULATION_INSERT_BATCH);
-            if (personaRows.length === 0) break;
-            namedPersona = true;
-            const pins = await resolvePersonaVersions(
-              auth,
-              tx,
-              projectId,
-              personaRows.map((one) => one.personaId),
-            );
-            await tx.insert(simulation).values(pins.map((pin, index) => ({
-              id: newId("sim"),
-              runId,
-              organizationId: auth.organizationId,
-              projectId,
-              agentId: reached.agentId,
-              connectionId: input.connectionId,
-              personaId: pin.personaId,
-              personaVersionId: pin.personaVersionId,
-              testId: current.id,
-              testVersionId: current.versionId,
-              position: simulationCount + index + 1,
-              modality: reached.modality,
-              connectionType: reached.connectionType,
-              status: "queued" as const,
-              createdAt: at,
-            })));
-            simulationCount += pins.length;
-            personaPosition = personaRows.at(-1)?.position ?? personaPosition;
-            if (personaRows.length < SIMULATION_INSERT_BATCH) break;
-          }
-          if (!namedPersona) throw new Error(`test version ${current.versionId} names no persona`);
-        }
-        if (currentTests.length < SIMULATION_INSERT_BATCH) break;
-        const afterTestId = currentTests.at(-1)?.id;
-        if (afterTestId === undefined) break;
-        currentTests = await readTestPage(afterTestId);
-      }
-      if (expectedInOrder !== undefined && expectedIndex !== expectedInOrder.length) {
-        refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
-      }
-      if (simulationCount !== expectedSimulationCount) {
-        throw new Error(`test suite ${suite.id} changed while its run was being planned`);
-      }
-      // **And whether Egma's own key may pay for the providers this run
-      // needs.** The allowance question above is about a plan; this one is
-      // about a balance, and a customer can be stopped by either. It is asked
-      // here rather than beside it because only now are the persona versions
-      // pinned, so only now is it known which providers the conversations
-      // written above will need a key for — the persona's LLM on a chat, and
-      // the speech legs too on a voice conversation.
-      //
-      // **Once for the whole run**, over the distinct providers its pinned
-      // versions name, which is one indexed read of rows this transaction has
-      // just written. A deployment with no billing answers yes without
-      // reaching anything. The claim path asks again per organization per
-      // batch, because a run admitted an hour ago can outlive the balance that
-      // admitted it.
-      const needed = await queuedWorkProvidersOn(tx, auth, runId);
-      if (needed.length > 0) {
-        const funding = await billing().entitlements.mayPlatformKeyFund({
-          organizationId: auth.organizationId,
-          providers: needed,
-        });
-        if (!funding.funded) {
-          // The refusal's own sentence, whole and relayed word for word, for
-          // the reason the allowance refusal's is: it was written to be shown
-          // and it names the next move.
-          const said = funding.message.trim();
-          refuseRun(
-            "providers_unfunded",
-            said === ""
-              ? `Egma's provider keys cannot fund ${funding.providers.join(
-                  ", ",
-                )} for this organization. Add inference credit under ` +
-                  "Settings → Organization, or use your own provider keys."
-              : said,
-          );
-        }
-      }
-      const groups = planGroupsFor(graderCandidates, plannedTests);
-      await writeGradingPlan(auth, tx, {
-        runId,
-        groups,
-        capturedAt: at,
-      });
-      await tx.insert(idempotentOperation).values({
-        organizationId: auth.organizationId,
-        projectId,
-        actorId: auth.userId,
-        operation: "start_run",
-        idempotencyKey,
-        requestDigest: digestOfStart(input),
-        resultId: runId,
-      });
-      return runFromRow(header, suite.name, false);
+    const [reached] = await tx
+      .select({
+        agentId: connection.agentId,
+        // The connection holds no platform of its own: the type answers
+        // where it pins one, else the agent's own binding does.
+        agentPlatform: agent.agentPlatform,
+        connectionType: connection.connectionType,
+        accessVariant: connection.accessVariant,
+        modality: connection.modality,
+        topology: connection.topology,
+        environment: connection.environment,
+        config: connection.config,
+        credentials: connection.credentials,
+      })
+      .from(connection)
+      .innerJoin(agent, eq(connection.agentId, agent.id))
+      .where(within(auth, connection, and(
+        eq(connection.id, input.connectionId),
+        eq(connection.agentId, input.agentId),
+        eq(connection.projectId, projectId),
+        isNull(connection.archivedAt),
+        isNull(agent.archivedAt),
+      )))
+      .limit(1)
+      .for("share");
+    if (reached === undefined) refuseRun("no_such_connection", `there is no active connection ${input.connectionId} on agent ${input.agentId}`);
+    if (!connectionIsConductable(reached.connectionType, reached.accessVariant, reached.modality)) {
+      refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionType, reached.modality));
+    }
+    const decision = await billing().entitlements.mayStart({
+      organizationId: auth.organizationId,
+      allowances: [allowanceKindOf({
+        modality: reached.modality as Modality,
+        connectionType: reached.connectionType as ConnectionType,
+      })],
     });
-  } catch (cause) {
-    if (!lostToIdempotencyKey(cause)) throw cause;
-    const winner = await originalRunFor(db(), auth, projectId, input);
-    if (winner === undefined) throw cause;
-    return winner;
-  }
-  return created;
+    if (!decision.allowed) {
+      const said = decision.refusals.map((refusal) => refusal.message.trim())
+        .filter((message) => message !== "").join(" ");
+      refuseRun("allowance_spent", said ||
+        "This organization cannot start this kind of work right now. Check its plan and usage under Settings.");
+    }
+    // A kind whose run start reads the agent's platform carries two demands
+    // that a kind reading nothing does not, and both live here so they are
+    // properties of the write rather than habits of one caller.
+    if (connectionTypeReadsPlatformAtRunStart(reached.connectionType)) {
+      // **Never a silent conduct against an unnamed version.** The run cannot
+      // begin without what the read produced: the one serving version every
+      // request will name and this row will record. The caller does the
+      // reading — it is somebody else's API and this is one transaction
+      // holding a lock — but arriving here without it is a bug in the caller,
+      // not a run to write, and a run written without it would leave a result
+      // no reader could tie back to an agent.
+      if (input.agentVersion === undefined) {
+        throw new Error(
+          `a run over a ${reached.connectionType} connection is conducted ` +
+            `against a named version, so it cannot be started without the ` +
+            `run-start read of the agent's platform`,
+        );
+      }
+      // Check config and encrypted credentials under the share lock against the earlier
+        // platform read. Reject changed targets, including edits within the same millisecond,
+        // so the run records the connection whose agent version was resolved.
+      const identityNow = connectionIdentityToken(
+        stringRecordFromRow(
+          reached.config,
+          () =>
+            new Error(
+              `connection ${input.connectionId} holds config in a shape ` +
+                `Egma never writes`,
+            ),
+        ),
+        reached.credentials,
+      );
+      if (input.conductedConnectionIdentity !== identityNow) {
+        refuseRun(
+          "not_admitted",
+          `connection ${input.connectionId} was edited while Egma was ` +
+            `reading the agent's platform for this run, so the version it ` +
+            `read may not be the one this connection now reaches. Nothing ` +
+            `was started; read the connection again and retry.`,
+        );
+      }
+    }
+
+    const graderCandidates = await applicableGraders(auth, tx, projectId);
+    const plannedTests: {
+      suiteId: string;
+      testId: string;
+      testVersionId: string;
+      modality: Modality;
+    }[] = [];
+    while (currentTests.length > 0) {
+      for (const current of currentTests) {
+        const expectedCurrent = expectedInOrder?.[plannedTests.length];
+        if (expectedInOrder !== undefined &&
+          (expectedCurrent?.testId !== current.id || expectedCurrent.versionId !== current.versionId)) {
+          refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
+        }
+        plannedTests.push({
+          suiteId: suite.id,
+          testId: current.id,
+          testVersionId: current.versionId,
+          modality: reached.modality as Modality,
+        });
+      }
+      if (currentTests.length < SIMULATION_INSERT_BATCH) break;
+      const afterTestId = currentTests.at(-1)?.id;
+      if (afterTestId === undefined) break;
+      currentTests = await readTestPage(afterTestId);
+    }
+    if (expectedInOrder !== undefined && plannedTests.length !== expectedInOrder.length) {
+      refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
+    }
+    const selectedPersonas = await tx.selectDistinct({ id: testPersona.personaId })
+      .from(testPersona)
+      .innerJoin(test, eq(test.currentVersionId, testPersona.testVersionId))
+      .where(and(eq(test.suiteId, suite.id), eq(test.projectId, projectId), isNull(test.deletedAt)))
+      .orderBy(asc(testPersona.personaId));
+    const personaPins = new Map((await resolvePersonaVersions(
+      auth, tx, projectId, selectedPersonas.map((one) => one.id),
+    )).map((pin) => [pin.personaId, pin] as const));
+    const gradingPlan = {
+      capturedAt: at.toISOString(),
+      groups: planGroupsFor(graderCandidates, plannedTests),
+    };
+    const [measured] = await tx
+      .select({ total: count() })
+      .from(test)
+      .innerJoin(testPersona, eq(test.currentVersionId, testPersona.testVersionId))
+      .where(and(
+        eq(test.suiteId, suite.id),
+        eq(test.projectId, projectId),
+        isNull(test.deletedAt),
+      ));
+    const expectedSimulationCount = measured?.total ?? 0;
+    if (expectedSimulationCount <= 0) {
+      refuseRun("not_admitted", `test suite ${suite.id} is empty`);
+    }
+
+    const [header] = await tx.insert(run).values({
+      id: runId,
+      organizationId: auth.organizationId,
+      projectId,
+      suiteId: suite.id,
+      agentId: reached.agentId,
+      connectionId: input.connectionId,
+      name: input.name?.trim() || null,
+      status: "pending",
+      triggeredVia: "manual",
+      triggeredBy: auth.userId,
+      connectionSnapshot: {
+        // Derived exactly as a read derives it: the type answers where it
+        // pins one platform, else the agent's own binding does.
+        agentPlatform:
+          platformOfConnectionType(reached.connectionType) ??
+          reached.agentPlatform,
+        connectionType: reached.connectionType,
+        accessVariant: reached.accessVariant,
+        modality: reached.modality,
+        topology: reached.topology,
+        environment: reached.environment,
+        config: reached.config,
+      },
+      // Read before this transaction opened; written down here so that every
+      // request this run makes names the same version, and a concurrent edit
+      // on the account cannot move what the suite is testing halfway through.
+      ...(input.agentVersion === undefined
+        ? {}
+        : { agentVersion: input.agentVersion }),
+      expectedSimulationCount,
+      gradingPlan,
+      createdAt: at,
+    }).returning(RUN_COLUMNS);
+    if (header === undefined) throw new Error("the run was not written");
+
+    let simulationCount = 0;
+    for (const current of plannedTests) {
+      let personaPosition = 0;
+      let namedPersona = false;
+      while (true) {
+        const personaRows = await tx
+          .select({
+            personaId: testPersona.personaId,
+            position: testPersona.position,
+          })
+          .from(testPersona)
+          .where(and(
+            eq(testPersona.testVersionId, current.testVersionId),
+            gt(testPersona.position, personaPosition),
+          ))
+          .orderBy(asc(testPersona.position))
+          .limit(SIMULATION_INSERT_BATCH);
+        if (personaRows.length === 0) break;
+        namedPersona = true;
+        const pins = personaRows.map((one) => {
+          const pin = personaPins.get(one.personaId);
+          if (pin === undefined) throw new Error(`persona ${one.personaId} was not captured`);
+          return pin;
+        });
+        await tx.insert(simulation).values(pins.map((pin, index) => ({
+          id: newId("sim"),
+          runId,
+          organizationId: auth.organizationId,
+          projectId,
+          agentId: reached.agentId,
+          connectionId: input.connectionId,
+          personaId: pin.personaId,
+          personaVersionId: pin.personaVersionId,
+          personaParameterValues: pin.personaParameterValues,
+          testId: current.testId,
+          testVersionId: current.testVersionId,
+          position: simulationCount + index + 1,
+          modality: reached.modality,
+          connectionType: reached.connectionType,
+          status: "queued" as const,
+          createdAt: at,
+        })));
+        simulationCount += pins.length;
+        personaPosition = personaRows.at(-1)?.position ?? personaPosition;
+        if (personaRows.length < SIMULATION_INSERT_BATCH) break;
+      }
+      if (!namedPersona) throw new Error(`test version ${current.testVersionId} names no persona`);
+    }
+    if (simulationCount !== expectedSimulationCount) {
+      throw new Error(`test suite ${suite.id} changed while its run was being planned`);
+    }
+    const needed = await queuedWorkProvidersOn(tx, auth, runId);
+    if (needed.length > 0) {
+      const funding = await billing().entitlements.mayPlatformKeyFund({
+        organizationId: auth.organizationId,
+        providers: needed,
+      });
+      if (!funding.funded) {
+        refuseRun("providers_unfunded", funding.message.trim() ||
+          `Egma's provider keys cannot fund ${funding.providers.join(", ")} for this organization. Add inference credit under Settings, or use your own provider keys.`);
+      }
+    }
+    return runFromRow(header, suite.name, false);
+  });
 }
 
 /**
- * How a run-start read reaches the agent's platform: the connection's own
- * config, and the key sealed on it.
- *
- * **The second door onto a connection's plaintext, and it is deliberately not
- * the first one widened.** `resolveSimulationConnection` unseals for the
- * simulator and for nothing else, because conducting is the only thing done
- * there. This one exists because a run over some kinds cannot honestly begin
- * until Egma has read the agent's own configuration — which version is serving,
- * and what tools that version has — and reading it means reaching the platform
- * with the key that will conduct over it.
- *
- * It is held narrow in four ways at once, and each one is load-bearing:
- *
- * - **Only for the kinds that declare a run-start read.** Every other kind
- *   answers `undefined` however well-formed the request is, so this can never
- *   become "unseal any connection".
- * - **Gated on `start_and_cancel_runs`**, the permission for the act it serves,
- *   rather than on read.
- * - **Asked with an agent and a connection the caller already named**, in their
- *   own tenancy, so there is no argument by which it could be pointed at
- *   somebody else's row.
- * - **The key goes to the provider client and nowhere else.** It is never part
- *   of a run header, never in a refusal, and never logged — the run route hands
- *   it straight to the read and lets it go.
+ * Run-start platform reads use the connection's config and decrypted key.
+ * resolveRunStartReach limits this access to declared connection types, the caller's
+ * agent and project, and start_and_cancel_runs permission. Keep the key server-side.
  */
 /**
- * A deterministic fingerprint of the target a run-start read reached: the
- * connection's non-secret config and the sealed shape of its credential.
- *
- * **Every field the world depends on, and nothing a timestamp does.** Which
- * version a run reads and which tools it stamps are decided by the agent the
- * config names, the address it names, and the key sealed beside it. A clock
- * says only *when* the row was last written and lands on the millisecond, so
- * two edits inside one millisecond share a stamp and one slips through. This
- * hashes the identity itself, so a change to any of it changes the token and no
- * granularity can hide it.
- *
- * **The sealed envelope, never the key inside it.** The credential is folded in
- * as the ciphertext exactly as the row stores it — a re-seal with the very same
- * key mints a fresh envelope and so reads as a change, which is the safe way to
- * be wrong: a needless refusal a retry clears, never a key swap slipping past.
- * The plaintext never enters the token and the token is a one-way hash, so it
- * carries nothing a log or a run header must not hold.
+ * Hash sorted config and the encrypted credential envelope to detect changes
+ * between a platform read and run creation. Re-encryption counts as a change,
+ * even for the same key. No plaintext credential enters the fingerprint.
  */
 function connectionIdentityToken(
   config: Readonly<Record<string, string>>,
@@ -968,11 +785,11 @@ function connectionIdentityToken(
   const canonicalConfig = Object.keys(config)
     .sort()
     .map((key) => `${key}=${config[key]}`)
-    .join(" ");
+    .join("\0");
   return createHash("sha256")
     .update(canonicalConfig)
-    .update("  ")
-    .update(credentialsEnvelope ?? " none")
+    .update("\0\0")
+    .update(credentialsEnvelope ?? "\0none")
     .digest("hex");
 }
 
@@ -982,16 +799,8 @@ export type RunStartReach = {
   readonly config: Readonly<Record<string, string>>;
   readonly apiKey: string;
   /**
-   * A fingerprint of the exact target this reach read, carried into the write.
-   *
-   * The world is read from this target *before* the run's transaction opens,
-   * because reading it is a network call and the transaction holds a lock. So
-   * the connection could be edited — its agent, its address, its key — between
-   * this read and the write that snapshots it, and the run would then store a
-   * world read from one target while its record named another. `startRun` reads
-   * the connection again under its lock, fingerprints it the same way, and
-   * refuses if the two differ — so the world it froze and the target it names
-   * are always the same one.
+   * Connection fingerprint captured for the platform read and checked by startRun
+   * under its lock before saving the run snapshot.
    */
   readonly connectionIdentity: string;
 };
@@ -1051,19 +860,6 @@ export async function resolveRunStartReach(
   };
 }
 
-export async function runAlreadyStartedFor(
-  auth: AuthContext,
-  input: NewRun,
-): Promise<StartedRun | undefined> {
-  // The API asks this before phone readiness so a lost successful response can
-  // be replayed without consulting external state again. It is still a start
-  // operation: a user whose role was reduced to viewer may neither start a new
-  // run nor replay one they started while they had write access.
-  authorize(auth, "start_and_cancel_runs", here(auth));
-  if (auth.projectId === undefined || input.idempotencyKey.trim() === "") return undefined;
-  return originalRunFor(db(), auth, auth.projectId, input);
-}
-
 const RUN_READ_COLUMNS = {
   ...RUN_COLUMNS,
   suiteName: testSuite.name,
@@ -1084,21 +880,9 @@ export async function getRun(auth: AuthContext, id: string): Promise<Run | undef
 }
 
 /**
- * Write down what this run has put onto the agent's platform, and what it owes
- * the account.
- *
- * Called several times across one run, and deliberately: once when the numbers
- * have been read and before anything is changed, again when the copy lands, and
- * once more as each part of the teardown lands. Each call replaces the record
- * whole, because a half-written note is worse than a stale one — the teardown
- * reads what is here and acts on it.
- *
- * **It is the one thing a finished run may still be told.** A run's header
- * freezes when its counts land, and two of these columns are carved out of that
- * freeze: the cleanup flag and the note are bookkeeping about somebody's Retell
- * account, not about this run's numbers, and a crashed run's litter is cleared
- * after the run is over by definition. The migration's guard permits a change
- * to those two columns and to nothing else.
+ * Persist complete temporary-version cleanup state after each platform step so
+ * interrupted builds can recover. After run completion, the database guard permits
+ * only cleanup-flag and mock-metadata changes.
  */
 export type MockRunState = {
   /** The temporary copy that exists right now, or null when none does. */
@@ -1107,14 +891,8 @@ export type MockRunState = {
   readonly tempMockAgentVersionCleanup: boolean | null;
   readonly mockMetadata: MockMetadata | null;
   /**
-   * The serving version this run conducts against, where the build is what
-   * resolved it.
-   *
-   * Absent leaves it as it is. Every Retell run has it written by `startRun`
-   * from the run-start read; a mocked web-call run resolves the same `latest`
-   * again while branching its copy, and writes that number down here — the same
-   * number, from the agent it is about to branch, landing before the run's
-   * counts do and so inside the header's freeze.
+   * Optional serving version resolved by the temporary-agent build. Omit to keep
+   * the recorded version. Write it before the run header freezes at completion.
    */
   readonly agentVersion?: number | undefined;
 };
@@ -1157,15 +935,8 @@ function mockDraftFenceKey(auth: AuthContext, agentId: string): string {
 }
 
 /**
- * The fences **this piece of work** is holding, carried down its own calls.
- *
- * Per async context and not per process, because the guard below is about one
- * caller's own discipline. A process-wide set says "somebody here holds agent
- * A's fence", which is true and useless: an unrelated request that forgot to
- * open the fence would sail past the check precisely while a concurrent build
- * held it — defeated exactly when the exclusion matters. What the guard has to
- * ask is whether *this* call chain opened it, and that is what an async context
- * knows.
+ * Track locks held by this async call chain. A process-wide set could wrongly
+ * authorize an unrelated request while another request holds the same agent lock.
  */
 const heldMockDraftFences = new AsyncLocalStorage<ReadonlySet<string>>();
 
@@ -1213,14 +984,8 @@ export class MockDraftFenceBusyError extends Error {
 }
 
 /**
- * How long a waiter sits on the fence before it is told to come back.
- *
- * Several multiples of a build, which is a handful of Retell requests, so a
- * genuine queue behind a working run always wins the lock rather than being
- * refused. What it bounds is the case a queue cannot survive: a holder killed
- * with its socket still open, whose session Postgres reaps on its own TCP
- * keepalive clock — two hours by default. Every mocked run start on that agent
- * would hang its HTTP request until then, one server backend per waiter.
+ * Bound lock waits so a dead holder's lingering database session cannot block
+ * run-start requests until its network timeout.
  */
 const FENCE_WAIT_MILLISECONDS = 120_000;
 
@@ -1228,33 +993,10 @@ const FENCE_WAIT_MILLISECONDS = 120_000;
 const LOCK_NOT_AVAILABLE = "55P03";
 
 /**
- * Hold one agent's mocked-world fence for as long as `held` runs.
- *
- * **A session-scoped Postgres advisory lock on a connection of this process's
- * own**, not a transaction-scoped one, because what it fences is not a query:
- * it is a claim, a teardown and a build, each of them several requests to
- * Retell. A transaction held open across those would pin a pooled connection
- * for a minute at a time — and every statement the fenced work runs is on a
- * *different* pooled connection, so a transaction-scoped lock would deadlock
- * against the fenced work's own claim rather than protect it.
- *
- * Postgres drops a session's advisory locks when the session ends, so closing
- * the connection is the release, and a process that dies *cleanly* mid-hold
- * releases it too.
- *
- * **The wait is bounded, because one death is not clean.** A holder killed
- * without its socket closing leaves its session — and its lock — standing until
- * Postgres reaps the connection on its TCP keepalive clock, hours later. An
- * unbounded waiter would hang its whole HTTP request for that long, and every
- * later start would queue another one behind it. So the wait gives up after
- * `FENCE_WAIT_MILLISECONDS` and says the agent is in use, which is the true
- * sentence either way and the one whose next move — wait, then start again — is
- * already right.
- *
- * **A nested hold of the same key is a bug and is refused as one.** The lock is
- * session-scoped and each hold opens its own session, so the inner one would
- * wait on the outer one's lock forever: not re-entrant, and quietly so. A
- * caller inside the fence already has it and must simply do the work.
+ * Hold the agent advisory lock on a dedicated session across platform requests.
+ * A transaction lock would conflict with the work's separate database transactions.
+ * Close the session to release it. Bound acquisition with FENCE_WAIT_MILLISECONDS
+ * and reject nested holds of the same key, which use different sessions and deadlock.
  */
 async function withMockDraftFence<T>(
   key: string,
@@ -1311,57 +1053,11 @@ async function withMockDraftFence<T>(
 }
 
 /**
- * Claim this agent's **one** temporary copy for this run, or say who holds it.
- *
- * ## Why one at a time
- *
- * Two mocked runs of one agent overlapping is not a slow path — it is a hijack.
- * Run one pins a number riding `latest` to numeric version V and records the
- * binding it must put back. Run two then starts, reads that number as *numeric*
- * — a safe verdict, no pin needed — and branches its own copy. Run one finishes
- * and restores `latest`, exactly as it promised. But run two's copy still
- * exists and, being the most recently minted version, is what `latest` now
- * resolves to: every real caller reaches a mocked agent.
- *
- * Delete-before-restore protects a run from **its own** copy and cannot see
- * another run's. So the overlap itself is what is refused, and this is the one
- * place that decides it.
- *
- * ## What blocks, and what does not
- *
- * A run of this agent blocks while its cleanup flag stands `false` **and it has
- * not finished and is not stale**: still claiming, branched, or torn down but
- * for a pin still outstanding.
- *
- * A **finished** run never blocks, whatever it left behind — its litter is the
- * sweep's job, and the caller sweeps before it branches, so a finished run's
- * pin is restored before this run mints anything. When the sweep cannot restore
- * it, the caller refuses to branch at all rather than mint the copy a later
- * retry of that restore would route real callers to. A **stale** run — pending,
- * still holding no copy, and older than the build window — never blocks either:
- * its process died mid-build and it is swept, not waited for. The caller owns
- * that window and passes it, so the sweep and this check cannot disagree about
- * which runs are alive.
- *
- * ## The fence this runs behind
- *
- * A check without a lock is a time-of-check-to-time-of-use race: two runs
- * starting together would both read "nobody holds it" and both build. And a
- * lock held for only this check is barely better — the branch, the pins and the
- * teardown all happen after it is let go, so a settle of a *finished* run could
- * still be halfway through its restore while a new run mints the version that
- * restore would route real callers onto.
- *
- * So the lock is not taken here. It is `owedMockCleanups` above, held from
- * before this check until after the caller has finished building — and held by
- * the settle path over the whole teardown too, so the two can never overlap.
- * This function is the check-and-claim inside it, and refuses to run outside
- * it: the fence key is derived in one place, and a caller that forgot the fence
- * is a bug rather than a silent race.
- *
- * The claim itself is the cleanup flag written onto the run, so the winner is
- * visible to a later sweep by the same one indexed query from the instant it
- * wins — including if the process building it dies immediately after.
+ * Claim one temporary agent version per agent under the lock held by owedMockCleanups.
+ * Unfinished, non-stale runs with cleanup owed block the claim. Finished runs and
+ * stale pending builds do not block here; the caller must settle their cleanup
+ * before branching and refuse to branch if cleanup remains.
+ * Persist the claim as cleanup=false so recovery can find an interrupted build.
  */
 export async function claimMockDraftFor(
   auth: AuthContext,
@@ -1429,50 +1125,11 @@ export type OwedMockCleanup = {
 };
 
 /**
- * Every cleanup this agent's runs still owe the account — one indexed query,
- * over the partial index on `temp_mock_agent_version_cleanup = false` — read
- * **under this agent's mocked-world fence** and handed to the caller for as
- * long as it holds it.
- *
- * The sweep's whole input, and the claim's. A run answers here from the moment
- * it claims the agent until the moment its teardown lands, which covers both
- * questions at once: a copy that must be deleted or a pin that must be put
- * back, and a run that might have lost the process that was building its world.
- * The caller decides whether it is truly stuck (its clock is past the build
- * window and it still holds no copy) or just waiting for a free simulator.
- *
- * A run that finished and settled its account — the ordinary end — carries
- * `true` and matches nothing here, so the common case is not re-read on every
- * landing.
- *
- * Ordered oldest first, because the oldest litter is the litter most likely to
- * be a crash rather than a run still in flight.
- *
- * ## Why the read and the acting on it are one call
- *
- * **Reading what is owed is worth nothing unless nobody else may act between
- * the read and the acting.** A settle that read "run one owes a restore",
- * then waited on a Retell request while a new run claimed the agent, swept the
- * same run, and branched its own copy, would land its restore onto that copy —
- * a `latest` binding pointing at a mocked version, which is the exact hijack
- * the whole design exists to prevent, and one that no per-write guard can see
- * (the new run pinned the number to the same numeric version the old one did).
- *
- * So the fence is opened here, the rows are read inside it, and `whileHeld`
- * runs before it is let go. A cleanup flag that somebody else flipped to `true`
- * in the meantime is simply not in the list, which is what makes a duplicated
- * settle a no-op rather than a second restore.
- *
- * `fence`:
- * - `"only-when-owed"` — the ordinary landing. The list is read first without
- *   the fence, and an agent that owes nothing answers with an empty list and no
- *   lock at all: there is nothing to act on, so there is nothing to serialize
- *   against, and a report landing should not open a connection to learn it.
- *   Where something *is* owed, the fence is opened and the list re-read under
- *   it, because the first read is only a hint.
- * - `"take"` — for the caller that is about to *make* something. The fence is
- *   held whether or not anything is owed, because what needs the exclusion is
- *   the claim and the branch that follow, not the litter.
+ * Read owed cleanup oldest first and run whileHeld under the agent advisory lock.
+ * Keep reads, cleanup, claims, and builds inside the callback so another run cannot
+ * change the temporary-version state between reading it and acting on it.
+ * With take, always lock. With only-when-owed, skip the lock for an empty initial
+ * probe; otherwise acquire it and reread. The first probe is only a hint.
  */
 export async function owedMockCleanups<T>(
   auth: AuthContext,
@@ -1546,18 +1203,9 @@ export type SimulationExecutionEvidence = {
 };
 
 /**
- * The bounded frozen test evidence for one Simulation, and the world that
- * version asks for.
- *
- * The Simulation already pins one persona. This read therefore never loads the
- * full persona list on its test version, even when hundreds of Simulations
- * share that version.
- *
- * **Read off the pinned version, never off the run.** The run used to carry a
- * frozen copy of the project's mocked world, because a project mock tool could
- * be edited underneath it. There is no project half now: the version a
- * simulation pins is immutable, so reading it is reading exactly what this
- * simulation executes, and a copy on the run could only disagree with it.
+ * Read test execution content, mock tools, and environment from the simulation's
+ * pinned immutable test version. The simulation already pins its persona, so
+ * this read does not load the test's full persona list.
  */
 export async function getSimulationExecutionEvidence(
   auth: AuthContext,
@@ -1793,22 +1441,10 @@ async function finalizeRunIfDone(
 }
 
 /**
- * The cancel intent, honored where each simulation stands. Queued ones end
- * here and now — canceled before claim, never dispatched, never claimable.
- * Claimed and running ones get the intent stamped, and the simulator honors it
- * at its next heartbeat; the run's own status flips at once, and its counts
- * land when the last straggler does.
- *
- * Canceling a canceled run is nothing to do and answers with the run as it
- * stands; canceling a completed one is refused out loud, because a run that
- * finished has nothing left to cancel and the caller should know they missed.
- *
- * **The three counts settle honestly.** A cancel that catches every
- * conversation before it was claimed finishes the run here and now, with the
- * canceled count equal to what was queued and nothing pretending to have
- * passed. A cancel that catches conversations in flight leaves the counts
- * unwritten until the stragglers land, and the run says `canceled` in the
- * meantime — so stopping early never reads as a suite that went green.
+ * Cancel queued simulations immediately and request cancellation for claimed or
+ * running simulations at heartbeat. Mark the run canceled now; finalize counts
+ * when all simulations finish. Repeated cancellation is a no-op; a completed run
+ * returns already_finished.
  */
 export async function cancelRun(
   auth: AuthContext,
@@ -1978,14 +1614,9 @@ export async function cancelRun(
 }
 
 /**
- * What a claim answers with, and no more — identifiers, tenancy, the two
- * stamps the claim itself wrote, and the pins a spec is assembled from.
- *
- * Deliberately not the `Simulation` shape: a claim crosses every customer on
- * the deployment, so what it carries out is held to what the assembly needs
- * to *ask for* — never the asked-for things themselves. No transcript, no
- * configuration, no credentials, nothing a customer wrote. Each of those is
- * read afterwards through the ordinary scoped surface, under `auth`.
+ * Claim metadata for spec assembly: scoped context, IDs, version pins, persona
+ * parameter values, and claim timestamps. Read prompts and credentials afterward
+ * through the scoped access functions.
  */
 export type SimulationClaim = {
   readonly id: string;
@@ -1997,17 +1628,11 @@ export type SimulationClaim = {
   /** Who calls, by identity, and the pin the traits are read from. */
   readonly personaId: string;
   readonly personaVersionId: string;
+  readonly personaParameterValues: PersonaParameterValues;
   /** What is being checked, by stable identity and exact immutable version. */
   readonly testId: string;
   readonly testVersionId: string;
   readonly modality: Modality;
-  /**
-   * The lane this conversation was written against, frozen at run start. It
-   * rides the claim because the claim path is where the deployment's
-   * entitlement source is asked what kind of work is about to begin, and the
-   * answer is a question about the lane rather than about the connection row,
-   * which may have been edited since.
-   */
   readonly connectionType: ConnectionType;
   readonly claimedBy: string;
   readonly claimedAt: Date;
@@ -2029,6 +1654,7 @@ const SIMULATION_CLAIM_COLUMNS = {
   connectionId: simulation.connectionId,
   personaId: simulation.personaId,
   personaVersionId: simulation.personaVersionId,
+  personaParameterValues: simulation.personaParameterValues,
   testId: simulation.testId,
   testVersionId: simulation.testVersionId,
   modality: simulation.modality,
@@ -2038,29 +1664,15 @@ const SIMULATION_CLAIM_COLUMNS = {
 } as const;
 
 /**
- * The name the simulator's context wears where a person's id would be.
- *
- * The same shape as the grading queue's `engine`, for the same reason: the
- * simulator is a process, and the conversations it conducts were asked for by
- * whoever started the run rather than by it. Deliberately not shaped like an
- * identifier, so anything that ever tried to write it as one is refused out
- * loud by the foreign key to `user` rather than quietly attributing a
- * machine's act to a person.
+ * Service identity for simulator contexts. It is not a user ID and must not
+ * be stored in user attribution columns.
  */
 const THE_SIMULATOR = "simulator";
 
 /**
- * The context one claimed simulation is conducted under.
- *
- * `member`, where the grading engine's is `viewer`, and the difference is the
- * work: the engine only reads and writes egma's own records, while conducting
- * moves the simulation row itself through the machinery this file gates with
- * `start_and_cancel_runs` — because claiming and reporting a simulation *is*
- * conducting the run somebody started. What keeps the context narrower than a
- * person holding the same role is not the role at all: every write requires
- * the claimant's own name on the row, and the one secret it can ask for sits
- * behind a door that checks how the context came to exist, not what its role
- * permits.
+ * Build a project-scoped simulator context from a claimed row. The member role
+ * permits lifecycle writes; claimant checks and via=simulator separately restrict
+ * which rows can change and which credentials can be opened.
  */
 function conductingContext(
   organizationId: string,
@@ -2083,30 +1695,10 @@ export type SimulationClaimRequest = {
 };
 
 /**
- * The atomic claim, across every organization on this deployment.
- *
- * Up to `capacity` of the oldest queued simulations move to `claimed` in one
- * transaction, stamped with the claimant and their first heartbeat; whatever
- * another claimant holds locked is skipped rather than waited on, so two
- * simulators drain one queue without ever taking the same conversation.
- * `SKIP LOCKED`, exactly as `claimGradingJobs` does it, because it is exactly
- * the same problem. The capacity is the simulator's own declaration of what
- * it can hold — a big run degrades to a queue, never to overload.
- *
- * Every claimed simulation's run leaves `pending` here, because a run has
- * started when its first conversation is someone's to conduct.
- *
- * **It takes no `AuthContext` and cannot be given one.** See the note at the
- * top of this file, and the grading queue's, whose reasoning this claim
- * inherits whole: it is the one call in this file that reaches across
- * customers; the only rows it moves are egma's own queue of simulations; it
- * takes a claimant's name and a capacity, and there is no argument by which a
- * caller could name whose work they want — a build rule holds it to that; it
- * carries out identifiers and no content; and every claim arrives with the
- * narrowed context the conducting is actually done under. There is no
- * tenancy-scoped claim beside it, deliberately — a claim a customer's
- * credential could make would be a claim that has to answer which customers
- * it serves, and the honest answer is all of them.
+ * Claim up to capacity eligible queued simulations across organizations with
+ * FOR UPDATE SKIP LOCKED. Stamp ownership and heartbeat, start pending runs, and
+ * append events in one transaction. Return each claim with a row-derived context.
+ * The service chooses capacity and claimant, never an organization to claim from.
  */
 export async function claimSimulations(
   request: SimulationClaimRequest,
@@ -2205,6 +1797,7 @@ export async function claimSimulations(
       connectionId: row.connectionId,
       personaId: row.personaId,
       personaVersionId: row.personaVersionId,
+      personaParameterValues: row.personaParameterValues,
       testId: row.testId,
       testVersionId: row.testVersionId,
       modality: row.modality as Modality,
@@ -2217,34 +1810,10 @@ export async function claimSimulations(
 }
 
 /**
- * Where one simulation stands, and the context its conducting continues
- * under — what the report, heartbeat and telemetry doors read before applying
- * anything a simulator says about a row.
- *
- * Lifecycle stamps and identifiers, and no content: enough to tell an
- * unknown simulation from a moved one, a duplicate from a conflict, and the
- * claimant whose word the row takes — and nothing a customer wrote. The pins
- * ride along for the row's arriving evidence: a span filed under the
- * simulation carries the run and the versions its conversation executed, and
- * they come off this same row rather than off anything the wire claimed.
- * What the work itself needs is read afterwards, through the scoped surface,
- * under the context answered here.
- *
- * **It takes no `AuthContext` and cannot be given one**, on the claim's own
- * discipline, one step later in the same lifecycle: the simulator holds no
- * credential, so its calls about a claimed row arrive with the service
- * token — which resolves to nobody — and the row itself is what names whose
- * conducting this is. The context comes back built from the row's own
- * tenancy and from nothing the caller said, exactly as the claim built it,
- * and it is the context every write about the row then goes through. The
- * one argument is the simulation's id — an identifier the claim itself
- * handed out — and there is no argument by which a caller could name a
- * customer.
- *
- * The row is answered in whatever state it stands, terminal and swept
- * included, and each door decides what that standing permits: the lifecycle
- * doors refuse a claim about a row beyond help, while the telemetry door
- * keeps a late-returning orphan's spans after its terminal lifecycle state.
+ * Resolve simulation state, version pins, failure details, and a row-derived
+ * context for internal report, heartbeat, and evidence ingestion paths.
+ * Return terminal rows too: lifecycle handlers enforce state transitions while
+ * evidence ingestion can retain late spans. Service authentication happens at the API.
  */
 export async function resolveSimulationStanding(
   simulationId: string,
@@ -2287,36 +1856,45 @@ export async function resolveSimulationStanding(
   };
 }
 
+/** Register a LiveKit room before its agent can export evidence.
+ * Only the service's current claim can write the first reference. The row and
+ * frozen run supply tenancy and lane; a request cannot choose either.
+ */
+export async function registerSimulationProviderReference(auth: AuthContext, input: {
+  readonly simulationId: string;
+  readonly claimant: string;
+  readonly providerReference: string;
+}): Promise<boolean> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  if (auth.via !== "simulator") return false;
+  const reference = input.providerReference;
+  if (!/^egma-sim-(?:chat-)?[A-Za-z0-9_-]+$/.test(reference) || reference.length > 512) {
+    return false;
+  }
+  const [written] = await db()
+    .update(simulation)
+    .set({ providerReference: reference })
+    .where(within(auth, simulation, and(
+      eq(simulation.id, input.simulationId),
+      eq(simulation.claimedBy, validClaimant(input.claimant)),
+      inArray(simulation.status, ["claimed", "running"]),
+      isNull(simulation.cancelRequestedAt),
+      or(isNull(simulation.providerReference), eq(simulation.providerReference, reference)),
+      sql`exists (select 1 from ${run} where ${run.id} = ${simulation.runId}
+        and ${run.organizationId} = ${simulation.organizationId}
+        and ${run.projectId} = ${simulation.projectId}
+        and ${run.connectionSnapshot}->>'connectionType' = 'livekit_room')`,
+      inActingProject(auth, simulation),
+    )))
+    .returning({ id: simulation.id });
+  return written !== undefined;
+}
+
 /**
- * Which simulation **in this project** carries one provider reference, and
- * where it stands — the lookup simulation ingestion is matched on.
- *
- * The agent's own process knows the room it is running in, never a simulation
- * id, so the agent's POV names its conversation by the platform's identifier
- * and egma turns that into the simulation it belongs to (ADR-0024 §2). This is
- * the whole of that turning.
- *
- * **The project is a parameter, and it comes from the credential.** The
- * caller's own organization and project narrow the read, so a reference another
- * customer's simulation carries resolves to `undefined` here exactly as a
- * reference nobody carries does — and the door tells both the same thing.
- * That is deliberate: a sender holding a copied key learns nothing about whose
- * rooms exist, and there is no argument on this function by which one could
- * name a project it does not hold. Contrast `resolveSimulationStanding`, whose
- * caller is the deployment's own simulator and holds no customer credential at
- * all; there the row is the authority, and here the credential is.
- *
- * **The row is looked up and never inspected.** Evidence for a simulation this
- * project owns is filed whatever the row's standing — a POV that arrives after
- * the sweep called the conversation orphaned is still that conversation's, and
- * the service path has kept late evidence on the same reasoning since it was
- * written.
- *
- * A provider reference is one conversation's identifier, so at most one row in
- * a project should hold any given value. Nothing enforces that, and a reference
- * a platform reissued would otherwise make the answer depend on row order — so
- * the newest simulation carrying it wins, by the created moment and then by id,
- * and two readings of one export agree.
+ * Resolve a provider reference within the credential's explicit project. Accept
+ * any lifecycle state so late agent POV evidence still reaches its simulation.
+ * References are not unique; choose the newest simulation by createdAt, then ID.
+ * Return undefined for an absent reference or project scope.
  */
 export async function resolveSimulationByProviderReference(
   auth: AuthContext,
@@ -2377,41 +1955,11 @@ export async function resolveSimulationByProviderReference(
 }
 
 /**
- * What a Retell simulation's own call record is pulled with, once the
- * conversation has ended: the simulation, the call to ask for, and the key to
- * ask with.
- *
- * **Simulation ingestion by pull.** Retell exports nothing and no SDK runs
- * inside its agents, so the agent's POV of a Retell simulation is fetched by
- * egma the moment the conversation ends — with the connection's own stored
- * credential, which ADR-0024 §2 names as what a pull authenticates with. This
- * is the whole of that read.
- *
- * **The narrow door beside `resolveSimulationConnection`, on that door's exact
- * terms and one moment later.** That one opens a connection's plaintext to
- * assemble a spec and answers only while the row stands `claimed`; this one
- * opens the same plaintext to fetch the record of the conversation that just
- * ran, and answers only for a row standing `completed` — a simulation that has
- * finished conducting. The two together are the whole of what egma ever does
- * with a connection's credentials: conduct a simulation over it, and collect
- * the record of what it conducted. Nothing else may knock at either.
- *
- * **The gate is how the context came to exist, not what its role permits**, for
- * the reason the sibling gives: the only thing egma does with these credentials
- * is conduct and collect, and the only thing that conducts is the simulator. So
- * a context built by a claim — `via: "simulator"` — is the one this answers
- * for, and a person's session and an API key alike are refused out loud. The
- * report door holds exactly such a context already: the standing it resolved
- * before anything else carries the conducting context the row's own tenancy
- * built, and there is no argument here by which a caller could name a customer,
- * a connection, or a call.
- *
- * `undefined` answers every absence alike, and none of them is an error: a
- * simulation outside this context's tenancy, one not standing completed, one
- * that ran over a connection which is not Retell or has since been archived,
- * one whose conversation never reported a call id, and one whose connection
- * holds no usable key. A lane with no pull is the ordinary case — LiveKit
- * pushes instead.
+ * Resolve the current connection key for pulling an ended Retell simulation's
+ * agent POV. Require via=simulator, project scope, a frozen Retell web-call
+ * connection, an unarchived connection, a provider reference, and a usable key.
+ * Return undefined when any required record is absent. Run-start platform reads
+ * use the separate resolveRunStartReach function.
  */
 export type RetellSimulationPull = {
   readonly standing: SimulationStanding;
@@ -2438,12 +1986,13 @@ export async function resolveRetellSimulationPull(
   const [row] = await db()
     .select({
       providerReference: simulation.providerReference,
-      accessVariant: connection.accessVariant,
-      config: connection.config,
+      runId: run.id,
+      connectionSnapshot: run.connectionSnapshot,
       credentials: connection.credentials,
     })
     .from(simulation)
     .innerJoin(connection, eq(connection.id, simulation.connectionId))
+    .innerJoin(run, eq(run.id, simulation.runId))
     .where(
       within(
         auth,
@@ -2453,7 +2002,7 @@ export async function resolveRetellSimulationPull(
           // Finished conducting, which is the one moment there is a record to
           // fetch: before it the conversation is still happening, and Retell
           // has nothing complete to answer with.
-          eq(simulation.status, "completed"),
+          inArray(simulation.status, ["completed", "failed", "canceled"]),
           isNull(connection.archivedAt),
           inActingProject(auth, simulation),
         ),
@@ -2464,9 +2013,13 @@ export async function resolveRetellSimulationPull(
   if (row === undefined) return undefined;
   const providerReference = row.providerReference?.trim() ?? "";
   if (providerReference === "") return undefined;
-  // Every Retell access variant is one key against Retell's API. A connection
-  // of any other kind has no call record to pull and is not asked for one.
-  if (!row.accessVariant.startsWith("retell_")) return undefined;
+  const executed = connectionSnapshotFromRow(row.connectionSnapshot, row.runId);
+  // Retell chat IDs do not name Get Call records. The frozen connection says
+  // which API conducted this conversation, even after connection edits.
+  if (
+    executed.connectionType !== "retell_web_call" ||
+    executed.accessVariant !== "retell_web_call.api_key"
+  ) return undefined;
   if (row.credentials === null) return undefined;
 
   const apiKey = openedApiKey(row.credentials);
@@ -2475,14 +2028,14 @@ export async function resolveRetellSimulationPull(
   const standing = await resolveSimulationStanding(simulationId);
   if (standing === undefined) return undefined;
 
-  // The chat lane lets a customer point at their own Retell-compatible host,
-  // and the pull must ask wherever the conversation was held. A config nobody
-  // can read is not worth failing a landing over: Retell's own host is where
+  // The pull uses the host frozen when this conversation was started. A
+  // connection edited afterwards cannot send its historical call elsewhere.
+  // An unreadable config must not fail a landing: Retell's own host is where
   // every connection that named none is answered from anyway.
   let baseUrl = "";
   try {
     baseUrl =
-      stringRecordFromRow(row.config, () => new Error("unreadable"))[
+      stringRecordFromRow(executed.config, () => new Error("unreadable"))[
         "baseUrl"
       ]?.trim() ?? "";
   } catch {
@@ -2498,20 +2051,9 @@ export async function resolveRetellSimulationPull(
 }
 
 /**
- * Which of these provider references a simulation in this project already
- * carries — the one batched question production ingestion asks before it files
- * a page of provider calls.
- *
- * A call egma's own simulator conducted is a simulation, and its record belongs
- * under that simulation rather than a second time under Monitoring: one
- * conversation is one trace, and production is the traffic nobody asked egma to
- * create. The poller asks this once per page, beside the committed-identity and
- * transient-state lookups it already makes, and skips what comes back.
- *
- * Scoped by the project the polling target belongs to, because a provider
- * reference means nothing outside one — the target's own narrowed context is
- * what the poller asks with, and a context naming no project can carry no
- * answer, so it is given none.
+ * Find which provider references already belong to simulations in this project.
+ * Production polling uses this batched lookup to avoid filing simulation evidence
+ * again as production traffic. No project scope returns an empty set.
  */
 export async function simulationProviderReferencesIn(
   auth: AuthContext,
@@ -2543,24 +2085,9 @@ export async function simulationProviderReferencesIn(
 }
 
 /**
- * Everything the mock endpoint needs to answer one tool call, in one read.
- *
- * The request arrives from the agent's platform with no credential of egma's,
- * so this read carries the whole of what the gates ask: whether the simulation
- * named exists, whether its run is still live, and what that simulation is
- * answered. It takes no `AuthContext` for the same reason
- * `resolveSimulationStanding` beside it takes none — there is no caller to
- * resolve, and the row is the authority.
- *
- * **The simulation is the whole address.** The endpoint used to name a run and
- * a simulation and check that the two belonged together; a simulation names its
- * own run, so the pair could only ever agree or be a mistake. One identifier is
- * one gate, and the run it names comes back beside it.
- *
- * No credential rides along: the endpoint verifies nothing about the caller
- * beyond the two gates, so the agent's sealed key is never opened on this path.
- *
- * `undefined` means no such simulation, which is the first gate's answer.
+ * Resolve the simulation, its run liveness, pinned mock answers, and row-derived
+ * context for the public mock endpoint. The endpoint checks run liveness and tool
+ * coverage; this read does not authenticate the requester or open credentials.
  */
 export type MockToolCallTarget = {
   readonly runId: string;
@@ -2691,32 +2218,10 @@ export type SimulationConnection = {
 };
 
 /**
- * The one door to a connection's plaintext on the dispatch path, and **egma's
- * own simulator is the only thing that may knock.**
- *
- * The gate is narrower than a role: the only thing egma ever does with a
- * connection's credentials at this seam is conduct a simulation over them,
- * and the only thing that conducts is the simulator. So the check is on how
- * the caller came to exist rather than on what their role permits — a context
- * built from a claim says `simulator` on its face, and every other context in
- * the product, a person's session and an API key and the grading engine
- * alike, is refused out loud.
- *
- * It is asked with a simulation, never with a connection, and that is the
- * second half of the door: the row names the connection it was pinned to when
- * the run started, so there is no argument by which a caller could point the
- * unsealing at a connection the claimed row does not name. And it answers
- * only while the row stands `claimed` — the one moment a spec is assembled.
- * Before the claim there is nobody to hand a secret to, and after the
- * conversation starts nothing asks again.
- *
- * `undefined` answers three absences alike — a simulation out of the
- * context's tenancy, one not standing claimed, and a connection since deleted
- * — because telling them apart at this seam would confirm rows the context
- * cannot see. A caller who needs the difference is holding the claim, which
- * already says what was claimed; a connection gone mid-flight is the one case
- * left, and it is exactly the "could not be handed over" the dispatch path
- * answers for out loud.
+ * Open connection credentials only for a simulator context assembling a claimed
+ * simulation in its project. Use the connection named by that simulation.
+ * Return undefined for unseen or non-claimed simulations and archived connections;
+ * reject connection tuples the current simulator cannot conduct.
  */
 export async function resolveSimulationConnection(
   auth: AuthContext,
@@ -2803,20 +2308,9 @@ export type SimulationHeartbeat = {
 };
 
 /**
- * Still alive, still holding this conversation — and the answer carries the
- * one directive that travels back on a heartbeat: whether cancellation has
- * been requested. `undefined` is a heartbeat with nothing under it: an id
- * this egma never issued, another claimant's row, or one no longer moving —
- * the signal to stop, not to retry.
- *
- * **It takes no `AuthContext` and cannot be given one**, on the claim's exact
- * terms (see the note at the top of this file): the beat comes from egma's
- * own simulator, which stands behind every organization at once and holds no
- * credential to build a context from. What keeps it narrow is the guarded
- * update itself — the only row it can touch is one the caller's own name is
- * already stamped on, in a state only egma's claim machinery writes — and the
- * answer is a single boolean egma itself stamped. Nothing a customer authored
- * goes in or comes out.
+ * Update heartbeat only for this claimant's claimed or running simulation and
+ * return cancel intent. Undefined means the simulator must stop. This internal
+ * service operation takes no customer scope and returns no authored content.
  */
 export async function recordSimulationHeartbeat(
   beat: SimulationHeartbeat,
@@ -2882,15 +2376,9 @@ export async function startSimulation(
 }
 
 /**
- * How every simulation lands: one guarded update — this claimant's row, in a
- * state the landing may leave, within the caller's reach — writing the
- * terminal facts, and the run finalized in the same transaction when the
- * landing was its last. The three landings below differ only in what they
- * write and what they require, so that is all they say; `undefined` still
- * means there was nothing here to move.
- *
- * The events go in beside them: the conversation landing, and then the run
- * itself when this landing was the one that finished it.
+ * Write terminal facts only for the claimant's eligible simulation in scope.
+ * Check grading readiness for completed simulations, finalize the run if done,
+ * and append lifecycle events in one transaction. Return undefined if no row moved.
  */
 async function landSimulation(
   auth: AuthContext,
@@ -2944,16 +2432,9 @@ async function landSimulation(
         throw new Error(`completed simulation ${row.id} has no grading plan`);
       }
       if (hasPlannedGraders) {
-        // **Whether a second account of this conversation is still coming.**
-        // ADR-0024 §6: grading waits for the agent's own POV where one is
-        // coming, because a conversation graded without the account it will be
-        // judged on is graded on the wrong evidence. Two halves, both facts
-        // about this row: the lane says whether egma has any way to receive one
-        // — read off the run's own frozen snapshot rather than the connection,
-        // which can be edited or archived after the run — and the reference
-        // this landing reported says whether *this* conversation gave egma the
-        // handle to file or fetch it under. Neither needs any evidence to have
-        // arrived, which is what makes the question answerable here.
+        // Expect an agent POV only when the run's frozen connection type supports it
+        // and the simulation reported a provider reference. Evidence need not have arrived
+        // yet; the readiness check applies the wait bound (ADR-0024 §6).
         const [executed] = await tx
           .select({ connectionSnapshot: run.connectionSnapshot })
           .from(run)
@@ -3077,27 +2558,9 @@ export async function failSimulation(
 }
 
 /**
- * The claim path's own landing, for a claimed simulation the platform could
- * not hand over: `claimed → failed` with the one reason no simulator can
- * report, `dispatch_failed`. Written at claim time, the moment spec assembly
- * fails — never left for the sweep to misname `orphaned` (the simulator did
- * not stop answering; it was never handed anything to answer for), and never
- * re-queued to fail the same way again — and through the same terminal
- * machinery as every landing, so a run waiting only on a broken row settles
- * with truthful counts. No grading job is created because no completed trace
- * exists.
- *
- * Only a context minted by a claim may write it, on the terms
- * `resolveSimulationConnection` drew: the check is on how the caller came to
- * exist, not on what its role permits. Dispatch failure is a fact about the
- * moment between claiming and handing over, and the claim path is the only
- * thing that stands there — a person's session or key, and the grading
- * engine, would be recording the platform's confession to an act that was
- * never theirs.
- *
- * From `claimed` alone, by the claimant alone: once the conversation is
- * underway, dispatch already succeeded, and whatever fails afterwards is the
- * simulator's to report.
+ * Mark a claimed simulation dispatch_failed when spec assembly cannot hand it over.
+ * Require the claimant and via=simulator. Use normal terminal handling to settle
+ * the run and append events, without creating grading work or requeueing.
  */
 export async function failSimulationDispatch(
   auth: AuthContext,
@@ -3121,83 +2584,6 @@ export async function failSimulationDispatch(
       executionFailure: executionFailureWrite(message),
     },
   });
-}
-
-/**
- * What a run's still-queued work needs Egma's key to fund.
- *
- * **The run page's question, and it is asked of the deployment rather than
- * answered here.** A conversation the claim door refused stays queued with a
- * named reason, and nothing writes that reason down: no shared table gains a
- * column for the cloud, and a stored reason would go stale the moment the
- * month reset or credit arrived. So the page asks the same two questions the
- * claim door asks — is the allowance spent, can the providers be funded — and
- * this read answers the second half's input: the distinct providers the
- * conversations still waiting would need a key for.
- *
- * Distinct and small: a run's conversations share two or three persona
- * versions, and the modality is the run's own frozen lane, so this is one
- * indexed read of one customer's rows.
- */
-export async function readQueuedWorkProviders(
-  auth: AuthContext,
-  runId: string,
-): Promise<readonly string[]> {
-  authorize(auth, "read", here(auth));
-  return queuedWorkProvidersOn(db(), auth, runId);
-}
-
-/**
- * The derivation itself, on whichever connection is asking.
- *
- * Two callers: the run page's read above, and run start — which asks inside
- * the transaction that has just written the conversations, so it must run on
- * that transaction rather than on the pool, and must not authorize again for a
- * caller the write has already authorized.
- */
-async function queuedWorkProvidersOn(
-  on: Queryable,
-  auth: AuthContext,
-  runId: string,
-): Promise<readonly string[]> {
-  const rows = await on
-    .selectDistinct({
-      modality: simulation.modality,
-      llmProvider: personaVersion.llmProvider,
-      sttProvider: personaVersion.sttProvider,
-      ttsProvider: personaVersion.ttsProvider,
-    })
-    .from(simulation)
-    .innerJoin(
-      personaVersion,
-      eq(simulation.personaVersionId, personaVersion.id),
-    )
-    .where(
-      within(
-        auth,
-        simulation,
-        and(
-          eq(simulation.runId, runId),
-          eq(simulation.status, "queued"),
-          inActingProject(auth, simulation),
-        ),
-      ),
-    );
-
-  const needed = new Set<string>();
-  for (const row of rows) {
-    for (const provider of providersNeededBy(
-      {
-        llm: { provider: row.llmProvider },
-        stt: { provider: row.sttProvider },
-        tts: { provider: row.ttsProvider },
-      },
-      row.modality === "chat" ? "chat" : "voice",
-    )) {
-      needed.add(provider);
-    }
-  }
-  return [...needed];
 }
 
 /**
@@ -3254,16 +2640,8 @@ export async function releaseSimulationClaim(
 }
 
 /**
- * The simulator honors the cancel it was told about: `claimed` or `running`
- * to `canceled`, by the claimant, and only where the intent was actually
- * recorded — a simulator abandoning a conversation nobody canceled is a
- * failure, not a cancellation, and is refused by the same guarded update
- * that checks everything else.
- *
- * A canceled conversation still landed somewhere, so the landing takes the
- * summary facts the report carried — what had been reached by the time the
- * directive was honored. Never an ending reason: the cancel intent is its
- * own record, and the row's shape holds it to that.
+ * Acknowledge recorded cancellation for this claimant's claimed or running
+ * simulation. Preserve available summary facts; reject cancellation without intent.
  */
 export async function markSimulationCanceled(
   auth: AuthContext,
@@ -3292,32 +2670,10 @@ export type SweptSimulation = {
 };
 
 /**
- * The orphan sweep: every claimed or running simulation whose simulator has
- * been silent past the staleness window is marked `failed` with reason
- * `orphaned` — an honest "started, never finished" instead of a row stuck
- * running forever — and any run that was waiting only on orphans is
- * finalized. Returns what it swept, so the caller can say what it did.
- *
- * **It takes no `AuthContext` and cannot be given one**, on the claim's exact
- * terms (see the note at the top of this file): silence is noticed by egma
- * standing behind every organization at once, because the simulator whose
- * silence this is stood there too. The only rows it moves are ones egma's own
- * claim machinery stamped, and the answer is identifiers and no content.
- * Orphaned simulations have no completed trace and create no grading work.
- *
- * **Racing sweeps collide harmlessly**, which is what makes it safe to run on
- * an interval in every replica with nothing elected to go first. The guarded
- * update is the whole arbiter: of two sweeps reaching one row, whichever
- * arrives second re-reads it after the first commits, finds it no longer
- * `claimed` or `running`, and leaves it alone — so a row is ended once and its
- * run is finalized once. And the after-work
- * walks rows and runs in id order, so two sweeps over one set cannot
- * deadlock over the order they took things in.
- *
- * The staleness window is measured in whole seconds against the last
- * heartbeat. The default is `DEFAULT_STALE_AFTER_SECONDS`, set where it is so
- * a partition cannot out-wait a report that is still coming; the sweep's one
- * sin would be calling a simulator dead that isn't.
+ * Fail claimed or running simulations whose heartbeat exceeds the stale window,
+ * with reason orphaned. Finalize affected runs and append events in one transaction.
+ * The guarded update excludes already terminal rows; process affected runs in ID
+ * order. This deployment sweep returns IDs and creates no grading work.
  */
 export async function sweepOrphanedSimulations(
   options?: { readonly staleAfterSeconds?: number | undefined },
@@ -3443,26 +2799,10 @@ export async function latestRunEventSequence(
 }
 
 /**
- * Everything that has changed about a run since a point, in the order it
- * happened.
- *
- * **The split that makes crash-resume real.** This side is stateless: it
- * remembers nothing about who has read what, and asking twice for the same
- * `after` answers the same page twice. The client's half is to apply each
- * sequence number at most once. Between them, a follower that dies mid-page
- * and restarts from the last number it applied misses nothing and repeats
- * nothing — and neither end has to trust the other to have been alive.
- *
- * **The header is read before the events, and the order is load-bearing.** If
- * `done` were read second, a run that finished between the two reads would be
- * reported finished by a page that did not yet hold its last events, and a
- * follower that stopped there would never learn how the run ended. Read this
- * way round, the worst case is a `done` that is one poll stale, which costs a
- * poll and loses nothing.
- *
- * One fixed-size page is answered. A run has no simulation limit, so an event
- * reader must never materialize the whole remaining tail. The extra row read
- * below proves whether this page has a later event without exposing it early.
+ * Page events after a sequence number; clients resume from the last applied number
+ * and deduplicate by sequence. Read the header before events so done cannot hide
+ * a final event committed between the reads. Fetch one extra row to detect a tail
+ * and report done only when the run finished and this page reaches the end.
  */
 export async function listRunEvents(
   auth: AuthContext,
@@ -3536,33 +2876,10 @@ export async function listRunEvents(
 }
 
 /**
- * Stop every piece of work that would have gone over these connections.
- *
- * **Archiving how egma reaches an agent is not an edit to a list; it is a
- * decision about work in flight.** A queued simulation over an archived
- * connection would sit in the claim queue for a target the simulator can no
- * longer resolve a credential for, and would eventually fail — putting an
- * operational failure on the record dressed as something the agent did. So the
- * queue is settled in the same transaction as the Archive.
- *
- * Where each simulation stands decides what happens to it, and the two answers
- * are the ones `cancelRun` already gives for the same three states:
- *
- * - **queued** ends here and now. Nothing dispatched it, so nothing has to
- *   agree to stop.
- * - **claimed or running** gets the intent stamped and honors it at its next
- *   heartbeat. Egma does not reach into a conversation already happening, and
- *   whatever it produced before it stops stays on the record — evidence is
- *   never erased to make a state tidy.
- *
- * Every run left holding one of those and not already terminal is set
- * `canceled` in the same operation, with its run event written, so a run
- * cannot later report itself `completed` over a target that was taken away
- * mid-flight. Counts settle exactly as a cancel's do: at once where everything
- * was queued, and when the stragglers land where they were not.
- *
- * It takes a transaction rather than opening one, because the whole point is
- * that it happens with the Archive and not beside it.
+ * Cancel work in the same transaction that archives its connections. End queued
+ * simulations immediately and stamp cancel intent on claimed or running ones.
+ * Mark affected active runs canceled and append events. Finalize counts when all
+ * simulations end; retain the evidence already produced.
  */
 export async function stopWorkOverConnections(
   tx: Transaction,
@@ -3636,4 +2953,35 @@ export async function stopWorkOverConnections(
     }
   }
   return canceledRunCount;
+}
+
+/** Providers required by the frozen project settings of a run's queued work. */
+export async function readQueuedWorkProviders(
+  auth: AuthContext,
+  runId: string,
+): Promise<readonly string[]> {
+  authorize(auth, "read", here(auth));
+  return queuedWorkProvidersOn(db(), auth, runId);
+}
+
+async function queuedWorkProvidersOn(
+  on: Queryable,
+  auth: AuthContext,
+  runId: string,
+): Promise<readonly string[]> {
+  const rows = await on.selectDistinct({
+    modality: simulation.modality,
+    parameterValues: simulation.personaParameterValues,
+  }).from(simulation).where(within(auth, simulation, and(
+    eq(simulation.runId, runId), eq(simulation.status, "queued"),
+    inActingProject(auth, simulation),
+  )));
+  const needed = new Set<string>();
+  for (const row of rows) {
+    for (const provider of providersNeededBy(
+      personaModelsOfParameters(row.parameterValues),
+      row.modality === "chat" ? "chat" : "voice",
+    )) needed.add(provider);
+  }
+  return [...needed];
 }

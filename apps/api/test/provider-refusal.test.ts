@@ -8,22 +8,9 @@ import { signupRoutes } from "../src/routes/signup.ts";
 import { testConfig } from "./support/api.ts";
 
 /**
- * What the auth provider refuses, as the two doors that relay to it say it.
- *
- * Signup and the completing half of a password reset both post at the
- * provider's own endpoints and both have to turn its answer into egma's. **The
- * claim here is that they say the same thing**: one refusal, one code, whichever
- * door met it. A code is what a client branches on and the only thing it may
- * branch on, so two doors spelling one refusal two ways would be two contracts
- * to keep — and the second one is always the one nobody remembers.
- *
- * The provider is a stub rather than the real one, and that is the point: the
- * refusals worth pinning down are the ones a real provider gives rarely and
- * only under settings a test suite does not run with. Its rate limit is on when
- * `NODE_ENV=production`, which is what the API's own container sets and what no
- * test does — so the answer a person clicking "Send the link" a fourth time
- * gets is unreachable here any other way. Everything in front of the stub is
- * egma's own code, driven over HTTP exactly as a browser drives it.
+ * Use a stub identity provider to drive rare refusal responses through signup
+ * and password reset. Both routes must map the same provider refusal to the
+ * same public code and message.
  */
 
 /** Exactly what the provider's rate limiter writes, headers and all. */
@@ -236,17 +223,8 @@ describe("a provider that is refusing what was typed", () => {
   });
 
   /**
-   * **The one sentence the provider writes about itself rather than about the
-   * caller**, and it reaches nobody.
-   *
-   * `[body.email] Invalid email address` names a field in the provider's own
-   * body schema. ADR-0007 forbids a refusal generated from validation
-   * internals, and is right to: a coding agent reading that learns the name of
-   * somebody else's parser and nothing it can act on. So neither half of it
-   * ships — not the code, which is the provider's word for its own schema, and
-   * not the sentence. It is held here rather than at either door, because the
-   * door that forgot would be the one nobody was looking at, which is exactly
-   * how signup came to be relaying it while the reset door was not.
+   * Replace provider parser codes and internal field paths with the shared
+   * actionable refusal in both signup and password reset.
    */
   it("never relays what the provider generated from its own body schema", async () => {
     const door = await bothDoors(() =>

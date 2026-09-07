@@ -35,16 +35,9 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * The simulator's claim, instance-wide, and the door its credentials come
- * through.
- *
- * The simulator stands behind every organization on the deployment at once
- * and holds no credential, so its claim takes no context and reaches every
- * customer's queue — and what makes that safe is what these tests pin down:
- * a claim carries out identifiers and no content, every claimed simulation
- * arrives with a context narrowed to its own tenancy, and the one door to a
- * connection's plaintext refuses every caller whose context did not come
- * from a claim.
+ * Claims select work across organizations and return its stored scope.
+ * Connection credential resolution requires a simulator context and a
+ * claimed simulation; ordinary reads must not expose plaintext credentials.
  */
 
 let database: MigratedDatabase;
@@ -150,7 +143,6 @@ async function oneQueuedSimulation(
     suiteId: seed.suiteId,
     agentId: seed.agentId,
     connectionId: seed.connectionId,
-    idempotencyKey: newId("run"),
   });
   const simulation = (await listSimulations(auth, started.id))?.items[0];
   if (simulation === undefined) throw new Error("the run has no simulation");
@@ -535,7 +527,6 @@ describe("the dispatch-failure landing", () => {
       suiteId: suite.id,
       agentId: acmeSeed.agentId,
       connectionId: acmeSeed.connectionId,
-      idempotencyKey: newId("run"),
     });
     const simulations =
       (await listSimulations(actingAsAcme(), started.id))?.items ?? [];
@@ -631,14 +622,8 @@ describe("the dispatch-failure landing", () => {
 });
 
 /**
- * A livekit connection's credentials come in two shapes, and the claim door is
- * the only place either is ever plaintext again.
- *
- * They live here rather than beside the connection factory's own tests because
- * the resolver those tests once used is gone on purpose — one door, one true
- * story. What the factory proves is that the secret goes in and never comes
- * back out of a read; what this proves is that the simulator, and only the
- * simulator holding a claim, gets it whole.
+ * Both LiveKit access variants must return complete credentials to the
+ * simulator resolver while keeping them out of ordinary connection reads.
  */
 describe("a livekit connection's two credential shapes, through the claim", () => {
   /** The livekit connection, and one queued simulation dialling through it. */
@@ -699,24 +684,9 @@ describe("a livekit connection's two credential shapes, through the claim", () =
 });
 
 /**
- * What Archive does to work that is already moving.
- *
- * **Archiving a target is a decision about work in flight, not an edit to a
- * list**, and the two halves of that decision are settled in different places:
- * a queued conversation ends here, because nothing dispatched it, and a
- * conversation somebody is already having is *asked* to stop and honors it at
- * its next heartbeat. Egma does not reach into a call in progress, and it never
- * writes down that a conversation ended when it has not.
- *
- * Nothing proved the second half. The one cancellation test built a queued
- * simulation, so the branch that stamps a claimed or running row was never
- * entered and no test read the run's own record back — `appendRunEvents` could
- * have been deleted and the suite would have stayed green, leaving a run that
- * was canceled underneath a follower with no event to say so.
- *
- * The claim, the start and the heartbeat here are the product's own, taken
- * through the same door the simulator uses, because a second way of claiming a
- * row would prove something no simulator does.
+ * Archiving cancels queued simulations immediately and requests cancellation
+ * of claimed or running simulations through heartbeat. Verify the run event
+ * records the change without marking active simulations finished early.
  */
 describe("archiving a target out from under work", () => {
   /**

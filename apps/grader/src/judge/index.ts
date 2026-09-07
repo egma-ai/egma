@@ -34,7 +34,7 @@ export type AskableJudge = {
 };
 
 /**
- * Resolve one grader version's exact model against the bundle loaded for this
+ * Resolve one frozen project model choice against the bundle loaded for this
  * claimed job. There is no fallback: a missing selected provider throws before
  * any grade is written, so the service releases the job for a later attempt.
  */
@@ -71,6 +71,7 @@ export {
   type Decision,
   type Judge,
   type JudgeAnswer,
+  type JudgeResult,
   type JudgeMaker,
   type JudgeQuestion,
   type JudgeUsage,

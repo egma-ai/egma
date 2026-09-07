@@ -9,59 +9,12 @@ import {
 } from "./accept.ts";
 
 /**
- * **Simulation ingestion: the one filing step.**
- *
- * Three sources produce a simulation's evidence and there is one step that
- * files all three, because ADR-0024 §2 says so in one sentence: *a
- * project-authenticated export that names a simulation by its provider
- * reference is filed under that simulation's trace id, `source = simulation`,
- * `emitter = agent`, with the run and version pins.* The sources are
- *
- * - **egma's own simulator**, posting the persona's POV with the deployment's
- *   service token and naming its simulation by id (`emitter = egma-runtime`);
- * - **the customer's agent**, pushing its own POV with a project API key and
- *   naming its simulation by provider reference (`emitter = agent`);
- * - **the Retell pull**, where no agent exports anything and egma fetches the
- *   call record itself the moment the simulation ends (`emitter = agent`).
- *
- * They differ in who authenticates, how the simulation is found, and what
- * normalises the bytes. They agree on everything after that, and everything
- * after that is here. Pipecat and Vapi arrive as one more resolver and one more
- * normaliser each, and touch nothing in this file.
- *
- * ## What the step does, and why each part of it is not the caller's business
- *
- * **It stamps the attribution from egma's own row.** `source`, `emitter`, the
- * run, the agent and the two version pins are facts about the conversation that
- * only the control plane holds, and a payload that stated any of them would be
- * stating them about somebody else's run. The caller hands over the standing it
- * resolved; nothing here reads the evidence to decide whose it is.
- *
- * **It files under the simulation's own trace id.** One conversation is one
- * trace: the persona's POV and the agent's POV sit in it together, and a reader
- * opening a simulation converts its id into that trace and finds both. The
- * exporter's own trace id is kept on each span's payload, so LiveKit's tooling
- * is still reachable from what egma stored. Span ids are never touched — a
- * span's identity is `(organization, project, trace, span)` and the span half
- * of it is the emitter's to mint.
- *
- * **It accepts through the same acceptance module every other write uses**
- * (ADR-0014). There is no second path to durability, so a simulation's evidence
- * gets the same write-ahead log, the same segment, the same object store and
- * the same *not yet* refusal as a customer's production traffic.
- *
- * **It never inspects the simulation's state.** Evidence for a known simulation
- * is filed whatever its standing — a POV arriving after the sweep called the
- * conversation orphaned is still that conversation's evidence, and the service
- * path has kept late evidence on that reasoning since it was written.
- *
- * ## What the step does not do
- *
- * It does not resolve the simulation and it does not normalise. Both differ per
- * source and both are refusals a caller has to answer in its own vocabulary: an
- * OTLP door answers `google.rpc.Status`, the poller answers its own log. A step
- * that swallowed either would be deciding how a refusal reads for a caller it
- * cannot see.
+ * File simulator, agent-export, and Retell-pull evidence under the simulation
+ * trace ID. Callers authenticate, resolve the simulation, and normalize spans.
+ * This module applies stored run/agent/version attribution and the supplied
+ * agent or persona POV, retaining span IDs and original wire trace IDs.
+ * Accept through the shared durable-ingestion path, including late evidence
+ * for terminal simulations. Completion comes from the simulation lifecycle.
  */
 
 /** One simulation's evidence, resolved and normalised, ready to be filed. */
@@ -82,16 +35,9 @@ export type SimulationFiling = {
 };
 
 /**
- * The stamp one simulation's spans carry, off egma's own row and off nothing
- * the wire said.
- *
- * Exported because the OTLP paths hand it to the normaliser rather than
- * applying it afterwards: `connectionType` is only read off a resource when the
- * source is already known to be a simulation, so the normaliser has to be told
- * before it builds the row. `filedUnderSimulation` applies the same stamp again
- * on the way past, which makes the two orders agree by construction and lets a
- * source with no OTLP normaliser — the Retell pull — hand over rows that say
- * `production` and still be filed correctly.
+ * Build simulation attribution from resolved storage state and the supplied
+ * POV. OTLP normalization uses it before building spans; final filing applies
+ * it again for all sources, including Retell pulls.
  */
 export function attributionOf(
   standing: SimulationStanding,
@@ -108,14 +54,9 @@ export function attributionOf(
 }
 
 /**
- * The framework's trace id, kept at the top of a span's payload before egma
- * files the span under the simulation's trace instead.
- *
- * Written by prepending rather than by parsing: a payload is the provider's own
- * document, sometimes megabytes of it, and a round trip through `JSON.parse`
- * would re-key and re-space every object inside it — which is precisely the
- * "kept byte for byte" promise the store makes. The key is egma's own and
- * egma's alone, so prepending cannot shadow a field the sender meant.
+ * Prepend the original trace ID to a normalized object payload without
+ * parsing and reserializing its existing fields. Callers provide the payload
+ * shape and must reserve WIRE_TRACE_ID_PAYLOAD_KEY.
  */
 function withWireTraceId(payload: string, wireTraceId: string): string {
   const opened = payload.indexOf("{");
@@ -153,20 +94,8 @@ export function filedUnderSimulation(
     ...attribution,
     traceId,
     /*
-     * **A simulation's completion is its lifecycle's fact, never its
-     * evidence's.**
-     *
-     * Both normalisers set this where a platform they recognise states an
-     * ending: LiveKit's `agent_session` root and Retell's `retell_call` root
-     * each say the conversation is over, and for production that statement is
-     * the completion authority automatic grading runs on (ADR-0014). Filed
-     * under a simulation it would be a *second* producer of a fact the run
-     * lifecycle already produces when the report lands — and one conversation
-     * with two producers of "it ended" is one conversation graded twice.
-     *
-     * So it is cleared here, for every source, rather than left to each
-     * adapter to remember. The original statement is still in the payload,
-     * where every other thing the columns do not carry stays.
+     * Simulation completion comes from its lifecycle report, not a platform
+     * root span. Clear the production completion marker for every simulation POV.
      */
     endsTrace: false,
     // Only where the two genuinely differ. egma's own simulator already files
@@ -180,14 +109,8 @@ export function filedUnderSimulation(
 }
 
 /**
- * File one or more simulations' evidence, and answer when it is durable.
- *
- * `alongside` is whatever else the same request carried that is already
- * attributed — the production resources of an export that also held a
- * simulation's. It rides the same call so the answer is one answer: a request
- * is a success only when everything it carried is durable, and a per-group
- * reply would tell a sender its whole flush landed while part of it sat in a
- * local log.
+ * Accept simulation filings and already-attributed alongside groups in one
+ * call. Successful acceptance requires all non-rejected records to be durable.
  */
 export function fileSimulationEvidence(
   filings: readonly SimulationFiling[],

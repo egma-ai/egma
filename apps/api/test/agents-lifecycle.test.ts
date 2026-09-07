@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import { enablePullProductionCalls, getSimulation } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -11,19 +10,9 @@ import {
 } from "./support/traces.ts";
 
 /**
- * What a browser can do with an agent and with the ways egma reaches it, over
- * real HTTP.
- *
- * These are the promises the Agents pages are built on, and they are proved
- * here rather than in a browser because none of them is about a browser: a
- * refusal code, a stale-write conflict, a credential that never comes back, and
- * an Archive that settles work already queued. Every one of those is the same
- * whoever asked, and a real Chrome would prove nothing extra while costing a
- * minute.
- *
- * Refusal codes are asserted exactly. The code is the contract a client
- * branches on; the sentences are asserted where the product's own refusal table
- * names them word for word, because a client shows those unchanged.
+ * HTTP coverage for agent and connection lifecycle, permission refusals,
+ * credential redaction, and archive effects on queued work. Assert stable
+ * refusal codes and the message text that clients display.
  */
 
 let api: TestApi;
@@ -403,16 +392,7 @@ function movedOn(resource: "agent" | "connection", id: string): string {
   );
 }
 
-/**
- * Archive and Restore are identity writes, and nothing guards them any more.
- *
- * The revision column was dropped from `agent` and `connection` pre-launch
- * (ADR-0015), so the race this block used to prove — one tab archiving while
- * another, holding a page from before a rename, restores — now resolves
- * silently in favour of whoever wrote last. That is the accepted consequence,
- * written down here so that a reader meets it rather than assuming a guard
- * that is gone.
- */
+/** Archive and restore use last-write-wins behavior without identity revision tokens. */
 describe("what an Archive or a Restore is written against", () => {
   it("is nothing: a stale tab's Archive simply lands", async () => {
     api = await createApi("agents_browser_archive_last_writer_wins");
@@ -1191,9 +1171,8 @@ describe("archiving a connection that work is queued over", () => {
 });
 
 /**
- * A run with one conversation waiting to be claimed, built the way the product
- * builds one: Egma's Predefined persona, a test that names it, and a run over
- * one connection.
+ * Create a run with one queued simulation, a test naming an Egma-provided
+ * persona, and one connection.
  */
 async function aQueuedRunFor(who: Customer): Promise<{
   readonly agentId: string;
@@ -1224,7 +1203,6 @@ async function aQueuedRunFor(who: Customer): Promise<{
     suiteId,
     agentId: agent.id,
     connectionId: wiring.id,
-    idempotencyKey: newId("run"),
   });
   expect(started.status, JSON.stringify(started.body)).toBe(201);
   const page = await browser(

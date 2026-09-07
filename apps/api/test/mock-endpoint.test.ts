@@ -17,17 +17,8 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The mock endpoint, over real HTTP: the one new public surface, answering the
- * calls a mocked run's temporary agent version sends it.
- *
- * What is asserted is what a developer would see — the answer the agent
- * received and what the simulation's record says afterwards. Nothing here
- * asserts how egma arranged any of it, and nothing here reaches a network: the
- * calls arrive the way Retell's would, at the address the transform writes.
- *
- * **The answers come off the test, and only off the test.** There is no project
- * list to merge, no run-level switch to consult and no snapshot to freeze, so
- * two simulations of one run answer for exactly what their own tests named.
+ * Exercise HTTP mock requests in-process and inspect their responses and stored
+ * evidence. Each simulation answers from its pinned test's mock tools.
  */
 
 let api: TestApi;
@@ -140,7 +131,6 @@ async function aRunningSimulation(
     suiteId: String(suite.body.id),
     agentId,
     connectionId,
-    idempotencyKey: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
   const runId = String(started.body.id);
@@ -452,18 +442,9 @@ describe("a tool the customer wrote as a GET", () => {
 
 describe("what the customer's own tool configuration sends along", () => {
   /**
-   * The credentials arrive, and egma reads none of them.
-   *
-   * The temporary version keeps each tool's own headers and query params byte
-   * for byte, because that same version serves the tools a test does **not**
-   * mock and those calls have to authenticate exactly as production does. So a
-   * mocked call carries the customer's backend credentials into egma's
-   * ingress, and what this endpoint promises is that nothing of them is read,
-   * logged, stored, or put on the record (ADR-0022).
-   *
-   * The sentinel is one string, looked for in every log line this deployment
-   * wrote and in every column of the span that landed — so the proof does not
-   * depend on knowing which field a leak would come out of.
+   * Mock requests retain backend headers and query parameters. Search logs and
+   * stored span fields for a credential sentinel to check that ingress does not
+   * persist or echo those transport credentials.
    */
   it("drops every header and query value at the door, and writes none of them anywhere", async () => {
     const lines: string[] = [];
@@ -659,7 +640,6 @@ describe("two tests of one run", () => {
       suiteId: String(suite.body.id),
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 

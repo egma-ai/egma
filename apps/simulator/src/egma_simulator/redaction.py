@@ -1,12 +1,5 @@
-"""Credential redaction for everything this process logs.
-
-A claimed spec can hold connection credentials, the selected model-provider
-keys, and a phone route's SIP password. The discipline is to never log a spec
-at all — but a discipline is not a guarantee, so every secret value that enters
-the process is also registered here. A logging filter rewrites any record that
-carries one before a handler can emit it. The acceptance suite closes the loop
-from outside: it plants sentinel secrets and scans every byte the process
-writes.
+"""Register credential values and redact them before log output.
+Do not log claimed specs. Acceptance tests inject sentinel secrets and scan output.
 """
 
 from __future__ import annotations
@@ -54,15 +47,10 @@ class SecretRegistry:
 
 
 class RedactingFilter(logging.Filter):
-    """Rewrites any log record that carries a registered credential value.
-
-    Installed on handlers, not loggers, so records from every library that
-    logs through the stdlib pass through it. The record's message is
-    rendered early and its args dropped: a lazy ``%s`` argument holding a
-    secret would otherwise be formatted after filtering. Structured string
-    attributes take the same path. The structlog processor applies this same
-    registry after it extracts the safe exception class and frame locations,
-    so those fields are also scrubbed before output.
+    """Filter handlers so standard-library logs also receive credential redaction.
+    Render messages before clearing args; otherwise lazy formatting could expose
+    secrets.
+    Scrub structured strings and safe exception fields through the same registry.
     """
 
     def __init__(self, registry: SecretRegistry) -> None:

@@ -1,15 +1,6 @@
-"""How the simulator says who it is on the way out — and nowhere else.
-
-The simulator dials out and is never dialled into, so the only place it
-can prove it is allowed to claim work is on its own requests. A configured
-service token rides every one of them as a bearer — the same header an
-egma key uses everywhere else — and no token means no header at all, which
-is what the workbench and every local run want.
-
-A real server on loopback reads the headers back, because what is under
-test is what actually goes on the wire. The last test runs a real
-simulator process against a control plane that quotes the request it
-refused, which is the one way a configured token could reach a log line.
+"""Verify service-token bearer headers on real local HTTP requests.
+Without a token, omit Authorization. Also check redaction when a server
+echoes the request in a refusal to a real simulator process.
 """
 
 from __future__ import annotations

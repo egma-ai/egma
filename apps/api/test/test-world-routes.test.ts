@@ -10,19 +10,8 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The world one test carries, over the door a customer integrates against.
- *
- * A test used to borrow its mocked world from the project and its variables
- * from nowhere at all. It carries both itself now: `mockTools` says what the
- * agent's tools answer during this scenario, and `env` says what the platform
- * is told before the conversation starts. Both are versioned content, so a
- * change to either mints a new test version exactly as an edited expected
- * behavior does — which is what lets an old result still say what world it was
- * conducted in.
- *
- * Everything here goes over HTTP for the reason the rest of this suite does:
- * the contract is what a customer meets, and a test that called the access
- * layer directly would prove the storage and none of the door.
+ * Check versioned test mockTools and env through HTTP. Changes must create
+ * new test versions so simulations retain the configuration they pinned.
  */
 
 let api: TestApi;

@@ -1,7 +1,8 @@
 import {
   RECOMMENDED_PERSONA_MODELS,
-  type PersonaModels,
 } from "../models/selections.ts";
+import { personaParameterContract } from "./parameters.ts";
+import type { GraderParameter } from "../grader-library/parameters.ts";
 import { EGMA_PROVIDED_PERSONAS } from "./ids.ts";
 
 export { EGMA_PROVIDED_PERSONAS } from "./ids.ts";
@@ -22,7 +23,7 @@ export type EgmaProvidedPersonaVersion = {
   readonly identityName: string;
   readonly personality: string;
   readonly language: string;
-  readonly models: PersonaModels;
+  readonly parameterContract: readonly GraderParameter[];
   readonly createdAt: Date;
 };
 
@@ -35,13 +36,13 @@ export type EgmaProvidedPersona = {
   readonly versions: readonly EgmaProvidedPersonaVersion[];
 };
 
-const SHELF_PERSONA_MODELS: PersonaModels = {
+const SHELF_PERSONA_CONTRACT = personaParameterContract({
   ...RECOMMENDED_PERSONA_MODELS,
   llm: {
     provider: "openai",
     model: "gpt-5.6-terra",
   },
-};
+});
 
 /**
  * Every persona Egma provides.
@@ -55,15 +56,7 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
   {
     id: EGMA_PROVIDED_PERSONAS.defaultPersona,
     /**
-     * The team's word for the persona every project starts with.
-     *
-     * It was "Default Persona" until the default-persona pointer was deleted,
-     * and the name then claimed a role the product no longer has: nothing is a
-     * default any more, so a row saying so would be the last surface still
-     * advertising it. "Everyday caller" is what this persona is — the ordinary
-     * one, for the scenario that needs a person rather than a particular
-     * person. Catalog content, so a later change is a change of copy and not a
-     * change of behavior.
+     * Display label for this Egma-provided persona. Tests must select personas explicitly.
      */
     name: "Everyday caller",
     description: "Regular conversationalist persona",
@@ -75,7 +68,7 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
         personality:
           "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
         language: "en-US",
-        models: SHELF_PERSONA_MODELS,
+        parameterContract: SHELF_PERSONA_CONTRACT,
         createdAt: new Date("2026-08-19T23:09:01.674Z"),
       },
     ],

@@ -3,24 +3,8 @@
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 /**
- * Which of two lists a page is showing.
- *
- * **Two lists, chosen deliberately, never one list with a column saying which
- * rows are archived.** A mixed list is a list somebody picks the wrong row out
- * of.
- *
- * It is announced as a radio group because that is what it is — exactly one of
- * a small closed set is chosen. The group is one Tab stop, the arrow keys move
- * inside it and come back round, Home and End reach the ends, and selection
- * follows focus so the keyboard and the announcement never disagree. None of
- * that is written here any more: it is the kit's radio group, which is Radix's,
- * and every part of it used to be hand-written in this file where a refactor
- * could lose it without one visible pixel changing.
- *
- * It is not a shadcn Tabs or ToggleGroup. Both would draw this, and both would
- * say something else about it: tabs name panels that a page is switching
- * between, and this switches which rows a table is asked for. The radio group
- * is what a person's assistive technology is told.
+ * Choose one list filter with a radio group. The shared primitive owns arrow
+ * keys and focus; this changes queried rows rather than switching tab panels.
  */
 export function Choice<Value extends string>({
   label,

@@ -1,53 +1,13 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 /**
- * The string in a reset link, and the deadline that travels inside it.
- *
- * **The provider mints the token and egma names the deadline.** The provider's
- * single-use token is the only thing that can actually change a password, and
- * that stays true — this seals it into one opaque string with the moment the
- * link stops being worth following, and signs the pair.
- *
- * It is here for one reason, and it is the whole reason: **a link that has been
- * spent and a link that has run out of time mean opposite things to the person
- * holding one**, and the provider cannot tell them apart. It consumes the token
- * on the way past, so a spent token and an expired one are both simply a token
- * it no longer knows — one refusal, `Invalid token`, for "you already did this"
- * and "nothing happened at all". The deadline in the link is what lets egma say
- * which: **inside it**, a token the provider will not take is a token somebody
- * already used, and egma says so.
- *
- * Past it, the two are one thing again. The provider is configured with the
- * very same deadline, so its own record of the token goes at the same moment
- * and there is nothing left to ask. Egma says that rather than guessing, and
- * one number for both systems is what buys there being one door and one hour to
- * state.
- *
- * **The signature is what makes the deadline worth reading.** Without it the
- * time in the link is a number the holder could edit, and a page would name its
- * refusal from whatever they typed. Nothing about it opens anything: a valid
- * signature over a spent token still resets no password. It only decides which
- * true sentence a person is told.
- *
- * A single HMAC-SHA256 under the same secret that signs session cookies, and no
- * slow hash — the same reasoning an invitation token uses. There is nothing
- * low-entropy here to brute-force, and the secret never leaves the process.
+ * Sign the provider reset token and an expiration time with HMAC-SHA256.
+ * The signed deadline lets the UI distinguish expiration from rejection
+ * before expiration. The provider still enforces token validity and single
+ * use. Signing protects integrity; it does not encrypt the token.
  */
 
-/**
- * How long a link is worth following — **one number, and both systems get it.**
- *
- * It is what the seal is stamped with, what the provider is configured with,
- * and what the message, the page and the README all say. There is no second
- * deadline for the stated one to be untrue against, and so nothing to spell
- * around: the hour named is the hour a link lasts, whichever door its token
- * reaches.
- *
- * Short, because unlike an invitation this one is a way into an account that
- * already exists, and the person asked for it seconds ago and is waiting for
- * it. An hour survives a message that sat in a queue and a person who went to
- * make coffee, and does not leave a way in sitting in an inbox for a week.
- */
+/** Shared lifetime for provider reset tokens, signed links, and email copy. */
 export const PASSWORD_RESET_LIFETIME_MINUTES = 60;
 
 export type ResetLink = {
@@ -124,27 +84,9 @@ export const RETURN_TO_HEADER = "x-egma-return-to";
 const HERE = "https://egma.invalid";
 
 /**
- * A path on this instance, or nothing.
- *
- * Somebody who was approving a terminal's login when they discovered they had
- * forgotten their password has somewhere to be sent back to, and that place has
- * to survive the message: the link opens a fresh tab, often minutes later, so
- * nothing the first page was holding is still around to remember it.
- *
- * So the return path travels in the link — which makes it a redirect decided by
- * a query parameter, the shape of every open-redirect bug there has ever been,
- * and this is the rule that stops it being one. **The candidate is resolved,
- * and it has to land back where it started.**
- *
- * Listing the shapes that leave is what this used to do, and a list is a thing
- * somebody finds the next entry in: `/<TAB>/elsewhere.example` was one, because
- * a URL parser strips tab, carriage return and newline *before* it parses, so a
- * browser reads that as `//elsewhere.example` and goes there. Asking the parser
- * instead of guessing at it costs nothing and cannot be enumerated around.
- *
- * What comes back is the parser's own path, so nothing that survives can carry
- * a stray control character on into a header either. The web application
- * applies the same rule again before it follows one.
+ * Return a normalized absolute path only if URL parsing keeps the same
+ * origin. Parsing is required because browsers remove some control characters
+ * before resolving a URL; prefix checks alone can miss external redirects.
  */
 export function safeReturnPath(raw: unknown): string | null {
   if (typeof raw !== "string") return null;

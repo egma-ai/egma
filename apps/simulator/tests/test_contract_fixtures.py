@@ -234,15 +234,8 @@ def test_a_persona_value_of_only_whitespace_is_refused_by_this_engine_too():
 
 
 def test_a_spec_carries_a_named_version_and_this_simulations_variables():
-    """The two optional fields, absent and present, read the way a plug
-    will be handed them.
-
-    Absent is the ordinary case and is what every spec looked like before
-    this: no version means the platform's own default, and no variables
-    mean an agent conducted with whatever its own configuration says. What
-    is present is passed on untouched — a number stays a number, and an
-    empty value stays an empty value, because a variable set to nothing is
-    not the same as one nobody set.
+    """Preserve optional version types and dynamic-variable values.
+    An absent value differs from an explicitly empty string.
     """
     plain = read_json(
         contract_dir() / "fixtures" / "spec" / "valid" / "chat-retell.json"
@@ -278,19 +271,9 @@ def test_a_spec_carries_a_named_version_and_this_simulations_variables():
 
 
 def test_the_text_mode_lane_reads_back_with_and_without_the_optional_fields():
-    """The chat lane for a Retell *voice* agent, both ways round.
-
-    A real text-mode run always names the version it conducts — the run
-    resolves it once so a concurrent edit cannot move the agent under test
-    mid-suite — and it is the lane whose mock tools ride the request, so
-    the fixture that carries everything carries all three. The plain one is
-    the same connection with none of it: no version means the platform's
-    own default, and a project that mocks nothing sends no answers, and
-    neither is a shape the contract may refuse.
-
-    The connection type is new here and the schema is untouched, which is
-    the point: this vocabulary is open, so a lane arrives as a fixture and
-    a plug rather than as a contract change.
+    """Validate Retell text-mode specs with and without version, variables, and mock
+    tools.
+    The open connection-type vocabulary must accept the adapter without a schema change.
     """
     carried = read_json(
         contract_dir() / "fixtures" / "spec" / "valid" / "chat-retell-text-mode.json"

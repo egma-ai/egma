@@ -1,63 +1,24 @@
-"""Retell web call: the agent under test, reached by voice over WebRTC.
+"""Retell voice connection through create-web-call and the shared LiveKit driver.
+Config requires retellAgentId; baseUrl and roomHost are optional overrides.
+Forward the supplied agent version and dynamic variables when creating the call.
+Check the final call status if the room closes before participant departure.
 
-The third plug that reaches an agent where it lives, and the first that
-reaches a *voice* agent on somebody else's platform. Egma creates the call
-itself — ``create-web-call``, against the agent and, where the spec named
-one, against a **named version** of it, with this simulation's variables
-attached — and Retell answers with a way into a room. That room is a
-LiveKit one: the way in is a server URL and an access token, which is
-exactly what :mod:`egma_simulator.media.livekit_room` already joins, so
-this module is thin. Creating the call is the only place it touches
-Retell's API; everything after it is the room media the simulator already
-has.
+Credentials contain apiKey. The returned room access token is also a secret;
+register both for redaction before reporting platform errors.
+The token permits one join: do not retry or create a second transport.
 
-Its config keys, like every plug's, are its own:
-
-- ``retellAgentId`` (string, required) — the agent the call is placed
-  against, exactly as the control plane stores it.
-- ``baseUrl`` (string, optional) — where Retell's API answers, defaulting
-  to Retell itself. What lets a test create a call against a
-  Retell-shaped server on loopback, and a proxy stand in front of the
-  platform for a deployment that needs one.
-- ``roomHost`` (string, optional) — where the room a web call opens is,
-  defaulting to :data:`RETELL_ROOM_HOST` below. See that constant for why
-  it is a value and not a line of code.
-
-Credentials are shaped ``{"apiKey": ...}`` — the shape the control plane
-seals — and are read for the ``Authorization`` header and nothing else.
-Retell's answer carries a second secret, the room's access token, and it
-is treated as one from the moment it arrives: registered for scrubbing
-before anything can quote it, and named in no message, log or report.
-
-**What "the agent answered" means here.** Retell's own participant is in
-the room and its audio is flowing. A call that was created and whose room
-nobody joined never tested anything, so it fails as ``AGENT_NEVER_JOINED``
-and is never graded as the agent failing. ``NOT_ANSWERED`` belongs to a
-line that rang out, and nothing rings here: egma creates the call and
-joins the room it opens, so this lane never claims it.
-
-**One call, one join.** A web call's access token is spent on the join —
-Retell mints it for that one entry — so there is no rejoining and no
-second attempt. Asking this plug for a second transport is refused rather
-than tried, because trying would be a request Retell has already answered.
-
-**Egma leaves; Retell closes.** The room is Retell's own, opened for its
-own call, and a token that opens one room carries no power to delete it.
-So teardown is a departure, which is also what ends the call from egma's
-side.
-
-**Egma is not in this agent's tool path.** A mocked world on Retell is
-built out of the agent's own configuration, and the tool calls in it
-travel from Retell to egma's endpoint rather than through the room. So the
-mock-tool seam is taken and dropped here, deliberately: this plug never
-offers the exchange in the room, and the record therefore claims nothing
-about tools, which is the truth.
+Wait for the agent and its audio; absence is AGENT_NEVER_JOINED, not NOT_ANSWERED.
+Teardown leaves the room; Egma has no authority to delete Retell's room.
+Mock-tool calls use the configured HTTP endpoint, not RPC on this participant.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
@@ -65,31 +26,17 @@ from ..client import UNREACHABLE
 from ..contract import AGENT_NEVER_JOINED
 from ..media import MediaBackendError, VoiceMedia
 from ..media.livekit_room import URL_SCHEMES, LiveKitRoomBackend, RoomSettings
+from ..platform_logging import log_event
 from . import PlugError, named_version, quotable, rendered_variables
 from .retell import CREDENTIAL_KEYS, DEFAULT_BASE_URL
 
+logger = logging.getLogger(__name__)
+
 RETELL_ROOM_HOST = "wss://retell-ai-4ihahnq7.livekit.cloud"
-"""Where every Retell web call's room is.
-
-Retell's own infrastructure, and the same host for every account: the API
-hands back an access token and nothing about where to spend it, because
-its browser SDK has the host built in.
-
-**Where this value comes from, so the next person can check it.** Read on
-2026-08-27 out of ``retell-client-js-sdk`` version 2.0.8, ``src/index.ts``,
-which calls ``room.connect("wss://retell-ai-4ihahnq7.livekit.cloud",
-accessToken)`` with the host as a literal. That package is **not a
-dependency of this repository** — nothing here runs Retell's browser SDK —
-so there is no lockfile entry to diff against and no build that would
-notice it moving. To re-verify, read that file at the newest published
-version of the package and compare the literal. The same reading confirmed
-the token is a LiveKit room JWT, which is why the room media below can join
-it at all.
-
-Because nothing automatic can catch a change, the connection's ``roomHost``
-is the escape hatch: a deployment can follow Retell moving its
-infrastructure without waiting for a release of egma, and this constant is
-the one place to change when the next SDK reading says it moved.
+"""Default room host copied from retell-client-js-sdk 2.0.8, src/index.ts,
+on 2026-08-27. That external SDK is not a dependency, so builds cannot detect
+a host change. Verify its room.connect literal when updating this value.
+The roomHost config override lets deployments use a changed host.
 """
 
 CREATE_PATH = "/v2/create-web-call"
@@ -98,6 +45,9 @@ CREATE_PATH = "/v2/create-web-call"
 TIMEOUT_SECONDS = 30.0
 """The most creating one call may take. Retell registers a call and
 answers; anything past this is a platform that has stopped answering."""
+
+FINAL_STATUS_SECONDS = 3.0
+"""A room can disappear just before Retell publishes its final call status."""
 
 AGENT_JOIN_SECONDS = 30.0
 """How long the room may stand empty before nobody coming is the answer.
@@ -269,6 +219,7 @@ class RetellWebCall:
             # path, so nothing is offered in the room and the record makes
             # no claim about tools it never saw.
             mock_tools=None,
+            confirm_remote_end=self._confirm_remote_end,
         )
         try:
             self._media = await self._room.create_transport()
@@ -307,7 +258,67 @@ class RetellWebCall:
         if room is not None:
             await room.teardown()
 
-    # -- The one place this plug reaches Retell ------------------------------
+    async def _confirm_remote_end(self) -> bool:
+        """Only this call's final status can confirm a Retell room ending.
+
+        The disconnect reason explains the ending; it does not replace the
+        provider's status. A network failure or an unfinished call remains
+        unconfirmed, and no media failure is cleared by this check.
+        """
+        call_id = self._call_id
+        if call_id is None:
+            return False
+        url = f"{self._base_url}/v2/get-call/{quote(call_id, safe='')}"
+        try:
+            async with (
+                asyncio.timeout(FINAL_STATUS_SECONDS),
+                aiohttp.ClientSession(
+                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    timeout=aiohttp.ClientTimeout(total=1.0),
+                ) as session,
+            ):
+                while True:
+                    try:
+                        async with session.get(url) as response:
+                            if response.status == 200:
+                                document = await response.json()
+                                if not isinstance(document, dict):
+                                    return False
+                                if document.get("call_id") != call_id:
+                                    return False
+                                status = document.get("call_status")
+                                if status in {"ended", "error"}:
+                                    reason = document.get("disconnection_reason")
+                                    log_event(
+                                        logger,
+                                        logging.INFO,
+                                        "egma.retell.call_final_status",
+                                        "retell reported its final call status",
+                                        attributes={
+                                            "retell.call_id": call_id,
+                                            "retell.call_status": status,
+                                            "retell.disconnection_reason": (
+                                                quotable(reason, self._api_key)[:80]
+                                                if isinstance(reason, str)
+                                                else "unknown"
+                                            ),
+                                        },
+                                    )
+                                    return status == "ended"
+                            elif (
+                                response.status not in {404, 408, 429}
+                                and response.status < 500
+                            ):
+                                return False
+                    except UNREACHABLE:
+                        pass
+                    except ValueError:
+                        return False
+                    await asyncio.sleep(0.25)
+        except TimeoutError:
+            return False
+
+    # -- Creating the Retell call -------------------------------------------
 
     async def _create_call(self) -> str:
         """Create the call and come back with the way into its room.
@@ -413,4 +424,3 @@ class RetellWebCall:
             f"so a token already used, or created and left, is refused and a "
             f"new call has to be created"
         )
-

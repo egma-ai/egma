@@ -1,63 +1,17 @@
-"""The conversation, authored as OpenTelemetry spans.
+"""Emit simulation observations as OTLP spans using the shared span vocabulary.
+One SpanEmitter serves one simulation; the reporter owns durable ordered delivery.
 
-One ``SpanEmitter`` serves one simulation. Everything a conductor
-observes — each turn with who said it and what was said, each measurement
-— becomes a span, stamped when it happened and handed to a flush as an
-ordinary OTLP export document. On the wire that
-document is what any exporter would send, which is the whole point of
-speaking OTLP: a simulation arrives at the same ingest door a customer's
-agent posts to, and is the same shape at rest.
+The OpenTelemetry SDK creates span IDs and parents. A parentless simulation
+root receives the trace ID derived from its simulation ID. Retries replay serialized
+bytes; conducting again creates new span IDs.
 
-**A call egma's seam conducts is not authored here.** Where the agent's
-own process runs the egma SDK, that process reports every call it made
-and that report is the tool record; the seam serves the answer and writes
-no row, so one call is one row and two records of it cannot disagree.
-Only a call a **platform reports afterwards** — the lane where the
-platform serves egma's answers itself, and nothing of egma's runs inside
-the agent — becomes a `tool_call` span, through
-:meth:`SpanEmitter.tool_call`. Whether a call was answered by a mock tool
-is read at display time, by name, from the pinned test version's mock
-tools, whichever way the call arrived. See ADR-0024 §3.
+Timestamps describe observations, not export time. Chat turns occupy one instant;
+voice turns use audio-derived start and end times and can overlap. A measurement
+span's duration is its value.
 
-What the platform and this emitter agree on is written down once, in
-``packages/simulation-contract/span-vocabulary.md``, and pinned as golden
-fixtures beside it: the scope, the span names, the attribute keys, and how
-a batch names the simulation it is evidence of. Nothing here may drift
-from that document without the fixtures failing on both sides.
-
-**Delivery is not this module's business.** A flush hands the document to
-whoever built the emitter, and the reporter puts it through the same
-write-ahead log and the same single ordered sender the lifecycle documents
-ride — which is what makes a resend byte-identical and puts every span on
-the wire before the terminal document leaves. That ordering is the whole
-design: when the control plane records a terminal transition, the evidence
-is already stored.
-
-Two things follow from that and shape everything below.
-
-**OpenTelemetry authors the record.** The process-wide SDK mints every span id,
-tracks parents, and serializes the export. Its one identity adapter gives a
-parentless simulation root the trace id already derived from the simulation id,
-so the simulation, conversation, and grades can find each other without a
-mapping. A retry replays the already-serialized bytes; conducting the same
-conversation again creates new span ids and therefore new evidence.
-
-**Timestamps say when the thing happened**, never when it was sent. A
-timing span is named for the measure it takes and its own duration *is*
-the number, so it is opened one measurement before the moment it was
-taken. A turn is opened for as long as it was spoken — one instant on
-chat, where a message has no duration, and ear to ear on voice. Two turns
-may cross in time: that is how barge-in is represented now that the
-persona is full-duplex, and the shape always permitted it rather
-than being widened later.
-
-**Where a turn's two ends come from depends on who conducted it.** Chat's
-conversation loop observes a turn at one moment and this stamps it there, which is the
-whole truth about a message that was never spoken. A voice conductor knows
-both ends before it says anything, because it read them off the audio
-itself, and hands both over — see :meth:`SpanEmitter.spoken_turn`. Only
-the second is exact enough for turns that cross, and every voice
-simulation goes through it.
+The agent SDK reports LiveKit tool calls. Only platform-reported calls are emitted
+here, without invented duration. Display derives mock coverage from the pinned
+test version. See packages/simulation-contract/span-vocabulary.md and its fixtures.
 """
 
 from __future__ import annotations
@@ -102,16 +56,8 @@ so there is no second field free to disagree with it."""
 
 TURN_TEXT_ATTRIBUTE = "egma.turn.text"
 TURN_PLATFORM_NOTES_ATTRIBUTE = "egma.turn.platform_notes"
-"""What the platform said about one turn that nobody said in it.
-
-A node transition announced mid-answer, a message in a role egma has never
-seen. It is agent-side content and it is not speech, so it rides beside
-the words instead of inside them: the persona is handed the words back,
-and one scenario's chat and voice transcripts are only comparable while
-neither carries something nobody spoke.
-
-Carried as a JSON array of strings, in the order the platform said them.
-Absent for every turn that has none, which is nearly all of them.
+"""Non-speech platform notes, stored as an ordered JSON array beside turn text.
+Omit when empty; do not add them to the transcript the persona reads.
 """
 PROVIDER_USAGE_SPAN = "provider_usage"
 """One provider request Egma made, and what it consumed.
@@ -223,16 +169,9 @@ class SpanEmitter:
     def turn(
         self, speaker: str, text: str, platform_notes: tuple[str, ...] = ()
     ) -> None:
-        """One transcript turn, by whichever of the two speakers took it.
-
-        One instant, which is the whole truth about a message: chat is
-        where this is used and a message has no duration. A turn that was
-        *spoken* has two ends read off the audio, and it comes through
-        :meth:`spoken_turn` instead.
-
-        ``platform_notes`` is what the platform said about the turn that
-        nobody said in it, and it rides its own attribute rather than the
-        words for the reason :data:`TURN_PLATFORM_NOTES_ATTRIBUTE` gives.
+        """Record a chat turn at one instant, with platform notes in a separate
+        attribute.
+        Use spoken_turn() when audio provides both endpoints.
         """
         name = TURN_SPAN_OF.get(speaker)
         if name is None:
@@ -262,18 +201,8 @@ class SpanEmitter:
         began_unix_nano: int,
         ended_unix_nano: int,
     ) -> None:
-        """One transcript turn whose both ends are already known.
-
-        The turn above is one instant on the wall clock, which is exact
-        enough only for a message nobody spoke. Giving a spoken turn its
-        length by subtracting the audio's duration from the moment the
-        turn was observed would make "did these two turns overlap" a
-        question about when Python happened to run.
-
-        So a conductor that knows both ends says both, and says them from
-        the audio itself. What arrives here is already the answer — two
-        instants on the conversation's own clock, converted once from
-        sample positions — and this authors the span and nothing else.
+        """Record a voice turn using its audio-derived start and end times.
+        Do not infer either endpoint from when Python received the observation.
         """
         name = TURN_SPAN_OF.get(speaker)
         if name is None:
@@ -324,24 +253,10 @@ class SpanEmitter:
         answer: str | None = None,
         at_unix_nano: int,
     ) -> None:
-        """One tool call a platform reported making, after it made it.
-
-        **One instant, because that is all anybody measured.** Egma did
-        not conduct this exchange — the platform matched egma's answers and
-        served them itself — so there is no round trip to bracket, and
-        stretching the span over a guess would invent a fact nobody took.
-
-        The answer rides only where egma authored one. A call for a name
-        this simulation covers was answered from egma's own rendering, so
-        recording it invents nothing; a call for any other name ran the
-        customer's real implementation and its return value is neither
-        egma's to vouch for nor this record's to claim.
-
-        There is no stamp saying who answered. Whether a mock tool did is
-        read at display time, by name, from the pinned test version's mock
-        tools — the authored world itself, which cannot change under a
-        result — so a second copy of that fact here could only come to
-        disagree with it.
+        """Record a platform-reported tool call at one instant without invented
+        duration.
+        Include an answer only when Egma authored one for that name. Display derives
+        mock coverage from the pinned test version; no duplicate flag is stored here.
         """
         attributes: dict[str, str | bool] = {TOOL_NAME_ATTRIBUTE: name}
         if arguments is not None:

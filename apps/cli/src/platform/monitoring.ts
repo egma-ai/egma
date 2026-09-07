@@ -1,28 +1,8 @@
 /**
- * Watching an agent's production traffic, from the terminal.
- *
- * Four operations and no fifth: discover the Retell account a key opens, start
- * watching, stop watching, and read what an agent says about itself. They are
- * the shipped public contract and this module is a wrapper over the generated
- * client — the CLI adds workflow, never protocol.
- *
- * **Discovery is server-side, and that is the point.** Egma asks Retell; the
- * terminal never does. So the list that comes back is the only one that knows
- * which of the account's agents this project already registers and which of
- * those already pull — which is what makes it a picker rather than a catalogue,
- * and why the CLI has no Retell client on this path at all.
- *
- * **Starting is one commit.** The same request seals the key onto the agent's
- * row, turns the switch on, and — for a platform agent this project does not
- * register yet — writes the agent row, because watching an unregistered
- * platform agent *means* registering it (ADR-0015). There is no per-agent
- * start, no 404 and no 409: a request naming at least one platform agent is
- * answered entry by entry, and an entry that could not start is a refusal
- * beside the ones that did.
- *
- * **The key passes through and is never held.** It arrives as something that
- * has to be asked for its value, goes into one request body, and this module
- * writes it nowhere — no field, no log line, no error message.
+ * Monitoring workflows through the generated public API client. Discovery happens
+ * on the server so results include project registration and monitoring state.
+ * Start requests register selected agents and enable monitoring, with per-agent
+ * results. Provider credentials go only into the request body and are not stored locally.
  */
 
 import {

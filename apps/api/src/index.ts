@@ -34,30 +34,9 @@ connect({
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
 
 /**
- * The trace store's own schema, applied in the background and never fatal.
- *
- * **This is the failure the durable boundary exists to remove.** A slow
- * ClickHouse Cloud wake used to throw out of this module, so the process never
- * reached `listen()` — and an egma that could have accepted evidence into
- * object storage and drained it later instead accepted nothing, and took the
- * hosted address down with it. Evidence is safe when it is durable in the
- * bucket; ClickHouse is what happens next, and "next" is allowed to be late.
- *
- * So it runs beside the server rather than in front of it, its state is a
- * reported component, and the drainer refuses to drain until it finishes —
- * writing a segment into a schema still being built is how a good object
- * becomes a retained defect for a reason that had nothing to do with it.
- *
- * It never settles into a terminal failure. A slow or unreachable store is
- * retried with a doubling, capped backoff: the migrations are idempotent and one
- * instance holds their lock, so a later attempt finishes what an earlier one
- * could not — and until one does, the acceptance path keeps taking evidence and
- * the drainer stands by. A process stuck in a `failed` state would hold the
- * deployment's one drain claim behind a green health check for good, while a
- * healthy sibling stood by forever.
- *
- * The `ingest` role skips it: that process never writes ClickHouse, and a role
- * that only accepts evidence has no business applying somebody else's schema.
+ * Apply ClickHouse migrations in the background with capped exponential retry.
+ * Acceptance can serve while ClickHouse is unavailable; draining waits for
+ * schema readiness. The ingest-only role skips these migrations.
  */
 type TraceStoreSchema =
   | { readonly state: "skipped" }

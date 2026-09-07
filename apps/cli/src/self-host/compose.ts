@@ -1,16 +1,6 @@
 /**
- * Docker Compose, driven from the CLI.
- *
- * The deployment is a compose file and always has been; this is not a second
- * way to run egma, it is the same `docker compose` a self-hoster would type,
- * with the arguments got right and the platform's own configuration already in
- * the environment. `egma self-host up` performs the same source-checkout
- * sequence as `docker compose build` followed by
- * `docker compose up -d --wait`.
- *
- * **Secrets go through the environment of the child process, never through its
- * arguments.** A command line is readable by every process on the machine and
- * is kept in shell history; an environment is neither.
+ * Run Docker Compose for the platform workspace: build, then up -d --wait.
+ * Pass secrets through the child environment, never command arguments.
  */
 
 import { spawn } from "node:child_process";
@@ -149,19 +139,10 @@ export function parseComposeEnvironment(output: string): Record<string, string> 
 }
 
 /**
- * Resolve the workspace environment with Docker Compose's own parser.
- *
- * This deliberately does not parse `.env` in TypeScript. Compose accepts
- * interpolation and `NAME: value` syntax that Node's dotenv parser does not,
- * and an older deployment may hold the encryption key that opens its database
- * in either form. Asking a different parser could generate a replacement key
- * and make every sealed row unreadable.
- *
- * A minimal Compose document arrives on stdin, so this reads only the
- * interpolation environment and never evaluates the real deployment's
- * required variables. The resolved values are captured in memory and are
- * never printed. The same values are later placed in the real Compose child
- * environment, which also keeps `$` inside a SIP password literal.
+ * Use Compose's own parser for .env interpolation and NAME: value syntax.
+ * A minimal document on stdin avoids evaluating deployment-required variables.
+ * Capture values without printing them and pass them to the real Compose process,
+ * preserving encryption keys and literal $ characters in passwords.
  */
 export async function composeEnvironment(options: {
   readonly workspace: string;
@@ -220,16 +201,8 @@ export async function composeEnvironment(options: {
 }
 
 /**
- * What Compose says when a variable the deployment description requires was
- * not supplied.
- *
- * This deployment's own secrets and its own address have no defaults — a
- * default for one of them is a value every reader of a public repository holds
- * — so Compose refuses while it is still reading the file, before a container
- * is created, and names the variable. That refusal is the whole point of the
- * required form, and it must not be mistaken for a service that failed to
- * start: nothing is half-done, no second attempt can help, and what the
- * operator needs is the name.
+ * Recognize required-variable interpolation failures before container creation.
+ * Report the missing setting instead of treating this as a service startup failure.
  */
 const REQUIRED_VARIABLE = /required variable ([A-Z0-9_]+) is missing a value/u;
 

@@ -1,23 +1,6 @@
-"""The property this package is safe by: in a production room it does nothing.
-
-Not "adds negligible latency", not "wraps harmlessly" — **nothing**. The
-same tool objects, no side table written, not one message put on the
-wire, no exporter built, and no connect the agent was not already
-making. The exporter matters as much as the rest: ``egma.simulation``
-sends a room's spans to Egma, and a production room that built one would
-export a real customer conversation as a simulation. Everything else
-this SDK does is worth having only if a customer can install it and have
-their production behavior be literally unchanged, so this file comes first
-and is read as the whole safety argument.
-
-The question the SDK asks is the room's name, and only the room's name, so
-this file is mostly a list of names that are not egma's. Every one of them
-is crossed with a list of dispatch metadata — including metadata carrying
-egma's own key names — because that channel is the customer's to fill with
-whatever they like and nothing in it may turn their production room into a
-simulation. A room wrapped by mistake is also a room whose spans are held
-out of Monitoring, and a dropped trace is evidence a customer cannot get
-back.
+"""Production rooms must not trigger simulation setup.
+Test room names with empty, arbitrary, and legacy-shaped customer metadata;
+none may install mocks, export spans, connect, or send RPC messages.
 """
 
 from __future__ import annotations
@@ -104,18 +87,8 @@ async def test_a_room_egma_did_not_name_is_left_alone(room_name, metadata, sessi
 async def test_the_customers_dispatch_metadata_is_never_read_as_an_instruction(
     metadata, session
 ):
-    """The channel that is the customer's, down to egma's own key names.
-
-    Dispatch metadata is where LiveKit teaches customers to put a caller's
-    own identifiers, so whatever is in it belongs to them — including the
-    four names egma writes there for older SDK versions. A customer whose
-    own JSON happens to use ``egmaIdentity`` gets exactly the production
-    room they had: their tools untouched, and their conversation still on
-    the record in Monitoring.
-
-    The last parameter is the one this test exists for. The rest are here
-    so the reading is proved to be no reading at all, rather than a
-    reading that this particular JSON happened to fail.
+    """Customer metadata, including legacy Egma keys, cannot turn a production
+    room into a simulation or change its tools.
     """
     agent = ReceptionAgent()
     room = StubRoom(connected=False, mocked_tools=("check_calendar",))

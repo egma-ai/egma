@@ -1,13 +1,6 @@
-"""The recorder puts each channel where the transport says it belongs.
-
-One simulation leaves one recording, and every number egma reads off it —
-how long the caller waited, where a transcript turn seeks to — is read as
-a distance on that one timeline. So the timeline has to be time.
-
-These tests feed the recorder by hand: frames whose audio says one thing
-and whose transport clock says another. A recorder that counts samples
-puts the agent's reply where the persona's buffer happened to end. A
-recorder that reads the clock puts it where it arrived.
+"""Feed audio frames with controlled transport timestamps.
+Verify channel placement follows transport time rather than the other channel's
+buffer length, preserving recording latency and transcript seek positions.
 """
 
 from __future__ import annotations
@@ -169,18 +162,9 @@ async def agent_held_the_line(
 
 
 async def test_each_channel_lands_where_its_transport_clock_says() -> None:
-    """The persona at its playout, the agent at its arrival, one timeline.
-
-    The shape of a real turn. The agent greets and then holds the line
-    quiet. The speech leg makes the persona's whole answer in one burst,
-    a second before the transport will play any of it. The agent replies
-    half a second after the persona stops.
-
-    Placed by buffer length the persona lands where its speech leg made
-    it and the agent's reply is padded up to that, which puts the two of
-    them a second closer together than the caller ever heard them.
-    Placed by time each one sits where the conversation put it, and the
-    half second between them is the half second that was waited.
+    """Place persona audio at playout and agent audio at arrival.
+    Audio synthesized a second early must not shorten the recorded half-second
+    wait between the persona ending and the agent replying.
     """
     recorder = await recorder_started()
 
@@ -320,20 +304,8 @@ async def test_audio_the_transport_threw_away_is_not_in_the_recording(
 
 
 async def test_a_delivery_that_stalls_and_catches_up_stays_on_time() -> None:
-    """A burst is a stall catching up, and the recording holds it whole.
-
-    Pipecat queues inbound audio, so a machine that stops running the
-    loop for a second wakes to a second of frames and stamps them all at
-    once. Nothing was quiet: the agent spoke through the stall and the
-    audio is only now being handed over.
-
-    A recorder that opened a second of quiet for the stall and then wrote
-    the burst after it would put a second of nothing where the agent was
-    talking, *and* leave the channel a second late for the rest of the
-    call — the very defect this recorder exists to fix, walked back in
-    through delivery. So the quiet it opened is given back to the burst
-    as the burst catches up, and the channel comes out where its clock
-    says it is.
+    """A delivery burst after a scheduling stall must reclaim inserted silence.
+    Preserve the audio and restore channel timing instead of retaining a false gap.
     """
     recorder = await recorder_started()
 
@@ -458,17 +430,8 @@ async def test_a_media_clock_has_no_wall_clock_instant_to_give(
 
 
 async def test_an_interruption_settles_the_quiet_the_recorder_owes() -> None:
-    """A cut tail takes some of the owed quiet with it.
-
-    The persona speaks, the line is quiet for a while, and the transport
-    takes a second utterance it has not started playing. The agent talks
-    over it, so that whole second utterance is thrown away — and the cut
-    lands inside the quiet the recorder opened for the pause, so most of
-    that quiet is gone too.
-
-    A ledger still claiming the quiet would hand it to the next burst,
-    and the channel would be pulled back over the first utterance, which
-    the caller certainly did hear. The account is settled at the cut.
+    """When interruption cuts through inserted silence, update the owed-silence ledger.
+    Later catch-up must not reclaim removed silence and overwrite the first utterance.
     """
     recorder = await recorder_started()
 

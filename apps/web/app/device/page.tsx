@@ -9,17 +9,8 @@ import { Field } from "../../ui/form.tsx";
 import { AuthForm, AuthShell } from "../ui.tsx";
 
 /**
- * The code from your terminal.
- *
- * The terminal opens a browser on this page with the code already in the
- * address, so the ordinary path is: read the field, see it already says what
- * the terminal says, click continue. Nobody retypes eight characters between
- * two windows.
- *
- * The field is still a field, because somebody whose browser did not open — a
- * headless machine, a remote box, a copy-pasted line — needs somewhere to type
- * it. What they type is tidied up on the way through: a hyphen, a space or
- * lower case is a thing people do, not a thing to refuse.
+ * Prefill the terminal code from the URL, but allow manual entry when the
+ * browser was not opened automatically. Normalize case, spaces, and hyphens.
  */
 export default function DeviceCodePage() {
   const [code, setCode] = useState("");

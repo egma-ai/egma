@@ -1,36 +1,6 @@
 #!/bin/sh
-# Make `pnpm install --frozen-lockfile` able to build the one dependency that
-# has to be compiled, and prove it can before the install starts.
-#
-# ## Why this exists
-#
-# `node-pty` is a real dependency of `apps/cli` — `apps/cli/test/support/pty.ts`
-# drives the wizard through a real terminal, which is the only honest way to
-# test a terminal experience — and it is named in `onlyBuiltDependencies`, so
-# pnpm runs its install script.
-#
-# That script looks for a prebuilt binary and falls back to `node-gyp rebuild`.
-# **There is nothing to fall back from on Linux.** node-pty 1.1.0 publishes
-# prebuilds for `darwin-arm64`, `darwin-x64`, `win32-arm64` and `win32-x64`, and
-# for no Linux at all, so every Linux install of this repository compiles it —
-# a laptop, GitHub's runner image, and this one alike. There is no cheaper path
-# to take: the artefact does not exist to be fetched.
-#
-# What changed with the move to Blacksmith is only whether the compiler is
-# there. GitHub's runner image ships `node-gyp` on the PATH, so the compile
-# happened quietly and the install succeeded. Blacksmith's image, despite
-# advertising parity, does not — and the failure arrives as `sh: 1: node-gyp:
-# not found` from inside pnpm's install script, which names neither the package
-# nor the missing toolchain.
-#
-# **So this is a runner-image gap, not a repository requirement.** A future
-# reader on an image that already carries these will find every check below
-# pass and nothing installed, and should leave it where it is rather than
-# rediscover the failure.
-#
-# Nothing here makes the job non-deterministic: node-pty is compiled on every
-# Linux run either way, because it always was. What is conditional is only
-# whether a tool has to be fetched before that compile can happen.
+# Ensure the native build tools needed by node-pty are available before
+# pnpm install. Install missing tools, then verify the commands can run.
 
 set -eu
 

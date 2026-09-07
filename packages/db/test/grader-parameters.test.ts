@@ -16,6 +16,18 @@ const contract = [{
 }] as const;
 
 describe("grader settings", () => {
+  it("accepts complete text and decimal settings without converting their types", () => {
+    const models = [
+      { key: "llm_model", label: "Model", valueType: "string", defaultValue: "gpt-5.2", unit: null, minimum: null, maximum: null },
+      { key: "tts_speed", label: "Speed", valueType: "number", defaultValue: 1, unit: null, minimum: 0.6, maximum: 1.5 },
+    ];
+    expect(validateGraderParameterValues(models, { llm_model: "gpt-5.2", tts_speed: 0.8 }))
+      .toEqual({ llm_model: "gpt-5.2", tts_speed: 0.8 });
+    expect(() => validateGraderParameterValues(models, { llm_model: 5, tts_speed: 1 }))
+      .toThrow("must be nonempty text");
+    expect(() => validateGraderParameterValues(models, { llm_model: "gpt-5.2", tts_speed: "1" }))
+      .toThrow("must be a number");
+  });
   it("accepts the small typed contract with its default", () => {
     expect(validateGraderParameterContract(contract)).toEqual(contract);
   });

@@ -199,7 +199,6 @@ describe("run start asks the entitlement source", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
 
     expect(listener.asked).toEqual([
@@ -221,7 +220,6 @@ describe("run start asks the entitlement source", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     }).catch((fault: unknown) => fault);
 
     expect(refused).toBeInstanceOf(RunWriteRefusedError);
@@ -257,7 +255,6 @@ describe("run start asks the entitlement source", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
 
     // Once for the whole run, naming the providers its pinned personas need —
@@ -276,7 +273,6 @@ describe("run start asks the entitlement source", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     }).catch((fault: unknown) => fault);
 
     expect(refused).toBeInstanceOf(RunWriteRefusedError);
@@ -314,7 +310,6 @@ describe("run start asks the entitlement source", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     }).catch((fault: unknown) => fault)) as RunWriteRefusedError;
 
     expect(refused.reason).toBe("providers_unfunded");
@@ -339,7 +334,6 @@ describe("run start asks the entitlement source", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     }).catch((fault: unknown) => fault);
 
     expect(refused).toBeInstanceOf(RunWriteRefusedError);
@@ -354,7 +348,6 @@ describe("run start asks the entitlement source", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.status).toBe("pending");
     expect((await listSimulations(sessionOf(globex), started.id))?.items).toHaveLength(
@@ -373,7 +366,6 @@ describe("stored usage records reach the usage sink", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     const one = (await listSimulations(sessionOf(who), started.id))?.items[0];
     if (one === undefined) throw new Error("the run has no simulation");

@@ -1,14 +1,6 @@
 /**
- * Current suite-owned test and atomic repository fixture contract.
- *
- * **A test carries its own world.** Its mock tools and its env are versioned
- * content of the test, so this one group is where both are written, judged, and
- * answered — there is no project-wide mock tool and no route that holds one.
- *
- * The content gates are the platform's, and the two ceilings are read from the
- * platform's own constants rather than copied: a fixture holding its own number
- * would go on refusing at yesterday's budget for a year after the real one
- * moved, and the CLI would ship a check against a number nothing enforces.
+ * Suite-owned test and atomic repository fixture routes. Mock tools and env version
+ * with the test. Use platform size constants so fixture validation stays aligned.
  */
 
 import {

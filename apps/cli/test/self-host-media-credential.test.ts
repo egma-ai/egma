@@ -1,27 +1,7 @@
 /**
- * The media server's credential, which a deployment now makes for itself.
- *
- * **This closes a hole that was open in a running deployment**, not a
- * hypothetical one. The media server, the simulator and the SIP gateway all
- * fell back to a key and a secret written into the compose file in the public
- * repository, and nothing in the CLI, the skills or the documentation ever
- * replaced them. Bound to loopback the exposure is small; the compose file
- * invites a wider bind for testing from another machine, and at that moment the
- * media server accepts anyone who read the repository.
- *
- * So preparing a workspace mints a random pair. What is worth proving, in the
- * order it would cost to get wrong:
- *
- * 1. **A second preparation does not replace it.** A regenerated pair is a
- *    running deployment whose three media containers stop agreeing, and the
- *    symptom is every phone simulation failing to authenticate.
- * 2. **The pair reaches compose**, because a credential written to a file no
- *    container reads is the same as no credential at all.
- * 3. **The secret is never printed, and the file it lands in is private.** It
- *    is a password between egma's own parts, and the operator never sees it,
- *    chooses it or types it.
- * 4. **A newly generated pair is reported**, because its containers are
- *    recreated with that pair.
+ * Verify one generated media credential pair per workspace.
+ * Repeated preparation preserves it; Compose receives it; storage is private;
+ * output hides secrets; newly generated credentials trigger the required recreation.
  */
 
 import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
@@ -267,20 +247,8 @@ describe("the media server's credential", () => {
 });
 
 /**
- * Who owns the lock that decides the pair.
- *
- * A lock old enough to look abandoned is taken from whoever left it, which is
- * right — a process that died holding it must not stop every later start. But
- * it makes a second failure possible, and it is the one this describes: a
- * holder that merely *stalled* past the window, on a closed lid or a machine
- * deep in swap, wakes up and finishes. If releasing means "delete the lock
- * file", it deletes its successor's lock, and the next command then walks into
- * the step beside that successor. Two commands inside the section is the exact
- * state the lock exists to prevent.
- *
- * These run against the lock rather than against two stalled processes,
- * because reproducing the stall honestly means waiting out the takeover window
- * to assert one comparison.
+ * Test lock ownership directly. A holder displaced after a stall must not
+ * release its successor's lock and admit a concurrent writer.
  */
 describe("the minting lock", () => {
   function lockPath(workspace: PlatformWorkspace): string {

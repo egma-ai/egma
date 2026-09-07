@@ -41,19 +41,9 @@ import {
 } from "./support/traces.ts";
 
 /**
- * What the v1 read contract refuses, and what it promises while refusing it.
- *
- * These are the one-way-door tests. A required window, a capped one, a page
- * token that is a position rather than an offset, and an organization that comes
- * off the credential are all things that can be added on the first day and never
- * afterwards — every one of them breaks an integration written against their
- * absence. So each is asserted here, through the routes, at the point where
- * changing the answer is still free.
- *
- * The traces are synthetic and go in at the real door. The captured LiveKit
- * trace is one exchange at the instants it really happened, which is exactly
- * right for the spine test and useless for asking whether page two follows page
- * one.
+ * Check required and capped windows, page tokens, and credential-derived
+ * organization scope through the API. Use synthetic traces at chosen times
+ * to exercise pagination and boundary cases.
  */
 
 const storage: ObjectStorage = await startObjectStorage("trace-reads-contract");
@@ -234,14 +224,8 @@ describe.skipIf(!storage.available)("a list request that does not say when", () 
 });
 
 /**
- * A window wider than the cap is **refused, not clamped**, and the refusal says
- * what the cap is.
- *
- * Clamping would answer a different question than the one asked while saying
- * nothing about having done so: a caller walking ninety days would reach the end
- * of a month and conclude that was everything there was. What to do about a
- * window too wide to serve is the caller's decision to make, and only a refusal
- * lets them make it.
+ * Reject an oversized time window instead of silently narrowing the requested
+ * period. The response must state the supported bound.
  */
 describe.skipIf(!storage.available)("a window wider than one request may ask for", () => {
   it("is refused rather than quietly narrowed", async () => {
@@ -402,14 +386,8 @@ describe.skipIf(!storage.available)("walking every page of a list", () => {
 });
 
 /**
- * A query parameter that arrived carrying nothing.
- *
- * `?projectId=&pageSize=` is what a form submits for fields left blank, and it is
- * a request a client sends without meaning anything by it. Both used to be read
- * as though somebody had said something: `projectId` became a predicate on a
- * project no row is filed under and answered with an empty list, and `pageSize`
- * became `Number("")`, which is zero, which is refused. Neither is what the
- * caller asked, and neither said so.
+ * Treat empty projectId and pageSize parameters as absent, not as an empty
+ * project predicate or a zero page size.
  */
 describe.skipIf(!storage.available)("a parameter that arrived empty", () => {
   it("is the whole organization, when it is the project", async () => {
@@ -438,14 +416,8 @@ describe.skipIf(!storage.available)("a parameter that arrived empty", () => {
 });
 
 /**
- * Two customers, and the enforcement the ingest door deferred to the reads.
- *
- * The strongest form of the question is a trace id that is *right* — Globex asks
- * for Acme's trace by its actual id, inside the window it actually happened in,
- * and is told there is no such trace. Nothing about the answer differs from the
- * one they would get for an id nobody ever minted, which is the point: the
- * organization leads the filing order, so the query never reached the rows and
- * there is nothing to leak the difference.
+ * Use the correct trace ID and time window with another organization's key.
+ * The response must match a missing trace without exposing its existence.
  */
 describe.skipIf(!storage.available)("another organization asking for a trace that is not theirs", () => {
   it("finds nothing in a list of the same window", async () => {
@@ -634,23 +606,8 @@ describe.skipIf(!storage.available)("filtering a list to one project", () => {
   });
 
   /**
-   * **A session's project is a default; a key's is a scope**, and until this was
-   * written these reads could not tell the two apart.
-   *
-   * A browser session resolves to the first project its membership holds —
-   * `auth/session.ts` fills one in and throws rather than leaving it out, and
-   * every route depends on that. This surface then read it as though it were a
-   * key's scope: naming any other project was refused with the key's own
-   * sentence, so in an organization with two projects the Monitoring page
-   * answered 400 on every project except the first. The project is in the
-   * address on every page, and it is the *selector's* answer rather than the
-   * credential's.
-   *
-   * The rule is `acting.ts`'s `browserProject` and is not restated here: every
-   * member of an organization holds their organization role on every project in
-   * it, so the only project a session can come to name is one its own membership
-   * read already returned. The organization still comes off the credential, so
-   * nothing about this widens tenancy — which is what the last two cases hold.
+   * A session may select an accessible sibling project; a project API key may
+   * not. Check organization isolation and project-selection refusals separately.
    */
   describe("a browser naming one of them", () => {
     it("reads the project the address named, not the one the session defaulted to", async () => {
@@ -748,17 +705,8 @@ describe.skipIf(!storage.available)("filtering a list to one project", () => {
 });
 
 /**
- * The other credential these endpoints take.
- *
- * The README says both of them read traces, and the plumbing is shared — the
- * same hook resolves a key or a cookie into the same context before either
- * route runs — but "shared" is a claim about code that only a request can
- * settle. A signed-in browser is how egma's own dashboard will read this, so it
- * is the path a regression would be found in last.
- *
- * A session acts in the project signup made, which is why this ingests through
- * a key scoped to that project rather than reusing the organization-wide one:
- * the question is whether the cookie reads, not which project it reads.
+ * Read traces with a real session cookie after ingesting into that session's
+ * project. This checks cookie authentication independently of API-key reads.
  */
 describe.skipIf(!storage.available)("a browser session rather than a key", () => {
   const SESSION_WINDOW = {
@@ -827,27 +775,9 @@ describe.skipIf(!storage.available)("a browser session rather than a key", () =>
 });
 
 /**
- * The one filter this list has, and the only one it is getting: which kind of
- * traffic.
- *
- * **Additive, and that is the whole claim.** A caller naming nothing reads both
- * kinds and gets byte for byte the answer they got before the parameter
- * existed — asserted below against the response body itself rather than against
- * a shape. Present, it narrows; misspelled, it is refused naming both accepted
- * words rather than quietly reading everything, because a page of simulations
- * under a heading that promised production is exactly the failure a silent
- * filter produces.
- *
- * The two kinds arrive at the two doors that actually make them: production
- * through a customer's key, simulations through the service token with each
- * resource naming a real simulation row this deployment conducted. Nothing is
- * written into the store by hand, so what is filtered here is what ingest files.
- *
- * They are **interleaved in time on purpose**. Newest-first over a mixed window
- * puts a simulation between every pair of production exchanges, so a walk of
- * `source=production` at page size one crosses a simulation at every boundary —
- * which is what separates a predicate inside the scan from a filter over a page
- * that has already been counted.
+ * Absent source selects both types; invalid source is refused. Interleave
+ * production and simulation traces in time, then paginate production one row
+ * at a time to catch filtering after page selection.
  */
 describe.skipIf(!storage.available)("narrowing a list to one kind of traffic", () => {
   const MIXED = {
@@ -929,7 +859,6 @@ describe.skipIf(!storage.available)("narrowing a list to one kind of traffic", (
       suiteId: suite.id,
       agentId: agent.id,
       connectionId: agent.connection?.id ?? "",
-      idempotencyKey: newId("run"),
     });
     const simulationPage = await listSimulations(auth, started.id, { limit: 200 });
     const simulations = simulationPage?.items ?? [];
@@ -1220,9 +1149,9 @@ describe.skipIf(!storage.available)("a production conversation selected by a fix
     await setup.sql(
       `insert into grader_definition_version
          (definition_id, version, type, prompt, parameter_contract,
-          modalities, judge_model)
+          modalities)
        values ($1, 1, 'code', null, '[]'::jsonb,
-               '["voice"]'::jsonb, null)`,
+               '["voice"]'::jsonb)`,
       [definitionId],
     );
     await setup.sql("commit");
@@ -1286,14 +1215,17 @@ describe.skipIf(!storage.available)("a production conversation selected by a fix
       projectGraderId: entry.projectGraderId,
       graderDefinitionId: entry.graderDefinitionId,
       graderDefinitionVersion: entry.graderDefinitionVersion,
+      parameterValues: entry.parameterValues,
       score: 0.25,
       details: {
         rationale: "The production response missed the policy.",
         assertions: [{
           key: "policy-followed",
+          decision: "not_met",
           score: 0,
           rationale: "The promised action did not happen.",
           citedSpanIds: [`${TRACE_ID.slice(0, 14)}02`],
+          citedTurns: [1],
         }],
       },
       graderPassThreshold: entry.graderPassThreshold,
@@ -1328,8 +1260,11 @@ describe.skipIf(!storage.available)("a production conversation selected by a fix
           rationale: "The production response missed the policy.",
           assertions: [{
             key: "policy-followed",
+            decision: "not_met",
             score: 0,
             rationale: "The promised action did not happen.",
+            citedTurns: [1],
+            citedSpanIds: [`${TRACE_ID.slice(0, 14)}02`],
           }],
         },
       }],

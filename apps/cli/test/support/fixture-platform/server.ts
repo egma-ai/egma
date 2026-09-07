@@ -1,19 +1,6 @@
 /**
- * The fixture platform: egma's public HTTP API, faked, for tests to run against.
- *
- * The CLI speaks the public API and nothing else. That is the seam this stands
- * in at — so the whole of a flow runs in CI with no database, no browser and no
- * platform, and the same CLI binary runs unchanged against a real instance.
- *
- * It is built as a list of route groups because it is going to grow: login is
- * the first group, and agents, connections and tests are groups beside it. Each
- * group owns its own state and its own controls, and the server here owns only
- * the plumbing — matching a request, reading a body, and recording what was
- * asked.
- *
- * Every request is recorded in order. The records are what a test asserts on
- * when it wants to know what the CLI actually said, rather than inferring it
- * from what came back.
+ * Local public-API fixture for full CLI processes without a database or browser.
+ * Route groups own state; this server handles dispatch, bodies, and ordered request logs.
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";

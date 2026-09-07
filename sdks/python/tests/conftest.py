@@ -1,25 +1,7 @@
-"""What every test here builds from, and the one place LiveKit's own
-internals are read.
+"""SDK fixtures use real Agent subclasses and function_tool schemas.
 
-The agents below are real :class:`~livekit.agents.Agent` subclasses with
-real ``@function_tool`` methods, because the SDK reads its census off a
-real agent object and a hand-rolled shape would prove the shape rather
-than the reading.
-
-## Reading the side table on purpose
-
-``mock_tools`` writes into a table LiveKit keeps privately, and the same
-table is what the framework's tool dispatch consults per call. So the
-only way to say "a courier is standing in front of exactly these names,
-and it answers a call the way the framework would deliver one" without a
-LiveKit server is to read that table and call through the framework's own
-argument trimming.
-
-Both are private names, and reaching for them is deliberate. This package
-pins ``livekit-agents`` to one minor precisely because the substitution
-mechanism carries no stability promise — and a failing import here is
-that pin's tripwire firing, at test time, on the developer's machine,
-which is exactly where it should fire.
+Tests inspect LiveKit's private mock_tools table and argument trimming
+to verify dispatch compatibility. These checks guard the pinned dependency.
 """
 
 from __future__ import annotations
@@ -201,21 +183,8 @@ async def called(courier: Any, *args: Any, **kwargs: Any) -> Any:
     return await _run_mock(courier, *args, **kwargs)
 
 
-# -- A real LiveKit, for the suites that will not take a stub ----------------
-#
-# Everything above proves the SDK against a room-shaped fake, which is the
-# right default: it needs no server, no account and no network, so it runs
-# on every machine and in CI. What it cannot say is whether egma is really
-# found in a real room's participant table, or whether the wait that makes
-# two of the three dispatch paths work really ends when a real participant
-# really arrives. Those are the two claims the room-name contract rests on,
-# and a fake that answers them is answering for itself.
-#
-# So there is a second lane, and its point is that it costs no account: the
-# server is the one this repository already deploys, started in its own dev
-# mode, and the conversation is never held — no speech, no model, no keys.
-# What it exercises is detection, addressing and the exchange, which is all
-# of the SDK that a real LiveKit can contradict.
+# Real-server fixtures verify participant discovery and arrival events.
+# The local Docker option needs no model or external LiveKit account.
 
 
 LIVEKIT_START_SECONDS = 300.0
@@ -363,15 +332,8 @@ def _docker(*argv: str) -> subprocess.CompletedProcess[str] | None:
 
 @pytest.fixture(scope="session")
 def live_livekit() -> Iterator[LiveKit]:
-    """A real LiveKit for one test session: the one named, or one started.
-
-    Two ways in, and a test cannot tell them apart. A machine that already
-    has a project says so through the environment and this reaches it. A
-    machine that says nothing gets the server this repository deploys,
-    started in dev mode on loopback and stopped again at the end.
-
-    It skips rather than fails where neither is possible, because a
-    developer without Docker is not a developer with a broken SDK.
+    """Use the configured LiveKit server or start a local Docker dev server on loopback.
+    Skip if neither is available. Stop only the server this fixture started.
     """
     named = _first_set("TEST_LIVEKIT_URL", "LIVEKIT_URL")
     if named:
@@ -404,18 +366,9 @@ def live_livekit() -> Iterator[LiveKit]:
     name = f"egma-livekit-tests-{os.getpid()}"
     try:
         started = subprocess.run(
-            # Host networking because a room's media negotiates addresses of
-            # its own, and a published port would advertise one the container
-            # cannot reach from inside its own view of this machine.
-            #
-            # Bound to loopback, and that is the security boundary rather than
-            # a preference. Host networking puts this server in this machine's
-            # own network namespace, so a bind of 0.0.0.0 would offer it on
-            # every interface the machine has — under the key pair `--dev`
-            # prints, which everybody knows. Anybody who could reach the host
-            # could then mint a token, join a room whose name is predictable,
-            # and answer to egma's name in it. Loopback is the whole of what
-            # these tests need.
+            # Use host networking for media addresses. Bind to loopback because the
+            # dev server uses public test credentials and must not accept remote
+            # clients.
             [
                 "docker",
                 "run",
@@ -466,17 +419,8 @@ def live_livekit() -> Iterator[LiveKit]:
             time.sleep(0.2)
         yield LiveKit(url, LIVEKIT_DEV_KEY, LIVEKIT_DEV_SECRET)
     finally:
-        # Never raises, whatever docker does: a teardown exception here
-        # would replace every result this session earned with an error
-        # about the cleanup of a container that is thrown away regardless.
-        #
-        # A stop that did not succeed is followed by `rm -f`, and the test
-        # is on the exit status rather than on whether the call returned.
-        # A `docker stop` that answers non-zero has left the container
-        # running just as surely as one that never answered at all — and
-        # this container holds the host's own port 7880, so surviving this
-        # teardown means every later session finds the port taken and
-        # skips. Two ways to fail, one cleanup.
+        # Cleanup must not mask test results. If docker stop raises or returns nonzero,
+        # force removal so the container does not retain port 7880.
         stopped = _docker("stop", "-t", f"{LIVEKIT_STOP_SECONDS:.0f}", name)
         if stopped is None or stopped.returncode != 0:
             _docker("rm", "-f", name)

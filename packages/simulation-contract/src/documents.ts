@@ -9,27 +9,9 @@ import ajvFormats from "ajv-formats";
 const addFormats = ajvFormats.default;
 
 /**
- * The contract's documents, as TypeScript can check them.
- *
- * The schemas under `schemas/` are the authority, read from disk because the
- * other reader of those bytes is not TypeScript — the simulator compiles the
- * same files (`contract.py`) and holds every claimed spec to the spec schema.
- * This is the control plane's half of the same guarantee, both ways round: a
- * spec is checked *before it is sent*, so a document that does not speak the
- * contract is a fault caught on the sending side rather than a refusal the
- * simulator has to explain back — and a report is checked *as it arrives*,
- * so nothing off the wire reaches a lifecycle write without having proven it
- * speaks the contract the simulator's own check already applied on the way
- * out.
- *
- * The answer is a list of complaints rather than a thrown violation, because
- * the caller's next move is not an exception's: one unbuildable spec is
- * skipped and said out loud, and the rest of the batch still goes; one
- * refused report is answered with its complaints, and the simulator's log
- * shows the same sentences its own check would have raised. Each complaint
- * names the place and the problem — `/modality: must be equal to one of the
- * allowed values` — in the same shape the simulator's check logs, so the two
- * sides of the wire read alike in two languages.
+ * Validate outgoing specs and incoming reports against the JSON schemas also
+ * used by the Python simulator. Return path-qualified complaints instead of
+ * throwing so an invalid spec does not stop the rest of a claim batch.
  */
 
 /**
@@ -80,14 +62,8 @@ export function specComplaints(document: unknown): readonly string[] {
 }
 
 /**
- * Everything wrong with one arrived report document, or nothing.
- *
- * An empty answer means the document speaks the report direction of the
- * contract, and only then does the control plane read anything out of it —
- * which is also where the vocabulary line is held: the endings a caller may
- * report are the ones the schema enumerates, so the platform's own words
- * (`orphaned` is the sweep's, `dispatch_failed` the claim path's) are refused
- * here as documents rather than reasoned about as states.
+ * Return schema complaints, or an empty list for a valid report. Only simulator
+ * endings are accepted; orphaned and dispatch_failed belong to the platform.
  */
 export function reportComplaints(document: unknown): readonly string[] {
   compiledReport ??= compileFromDisk("simulation-report.v1.schema.json");

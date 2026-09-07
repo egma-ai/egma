@@ -78,15 +78,8 @@ export type ServerOptions = {
    */
   readonly rateLimit?: RateLimit;
   /**
-   * Where log lines are written. Defaults to the process's own output, which
-   * is what a container reads.
-   *
-   * A test hands in a destination of its own, because one of the promises this
-   * door makes is about what is *not* written: a customer's provider secret
-   * arrives here and must appear in no line egma keeps. That promise is only
-   * worth making while something can read the log back and check it, so the
-   * log is a seam rather than a side effect. A destination handed in is asked
-   * for lines, whatever `LOG_LEVEL` a test run was started with.
+   * Optional log destination for tests that inspect emitted lines, including
+   * secret-redaction checks. Supplying it enables logging regardless of LOG_LEVEL.
    */
   readonly logTo?: { write(line: string): void } | undefined;
   /**
@@ -115,15 +108,8 @@ export type ServerOptions = {
   /** Test seam for Retell account reads. Production uses the global fetch. */
   readonly retellFetch?: RetellFetch | undefined;
   /**
-   * Whether this process runs the standing drainer, over and above what its
-   * role already says. Defaults to whatever the role says.
-   *
-   * The role is the deployment's answer — `all` and `drain` drain, `ingest`
-   * does not — and this is the seam a proof uses to hold a sealed segment
-   * still and look inside it: in a running deployment that state lasts about
-   * as long as one upload, and a proof that raced it would be a proof about
-   * timing. It can only take draining away, never give it to a role that does
-   * not have it.
+   * Tests can disable the standing drainer to inspect pending segments.
+   * This option cannot enable draining for a role that does not support it.
    */
   readonly drainsPendingEvidence?: boolean;
   /**
@@ -266,24 +252,9 @@ export function buildApi(options: ServerOptions): Api {
   // The container health check polls this every few seconds; logging each poll
   // would bury everything else in `docker compose logs`.
   /**
-   * `/health` answers one question: **can this process still accept evidence
-   * and keep the promise it makes when it does?**
-   *
-   * That promise is object-store durability, so the status code follows the
-   * three things acceptance actually needs — Postgres for authentication and
-   * control state, a writable local log below its refusal bound, and a
-   * reachable ingestion bucket. Nothing else may flip it.
-   *
-   * **ClickHouse deliberately cannot.** It used to: a slow trace store made
-   * this endpoint answer `503`, which took the container out of its own health
-   * check and, on the hosted platform, took the shared address down with it —
-   * while the write path was perfectly able to accept evidence and drain it
-   * later. Read health and drain health are real facts and they are reported
-   * here, but they are components rather than verdicts. A query outage is a
-   * query outage; it is not egma being unable to receive a conversation.
-   *
-   * The path and the existing body keys stay exactly as they were, because
-   * five `depends_on` edges and one hosted tunnel already read them.
+   * Acceptance health depends on Postgres, local-log capacity, and ingestion
+   * bucket reachability. Report ClickHouse and drainer health separately so a
+   * query outage does not disable evidence acceptance.
    */
   const reachability = async (
     store: string,
@@ -561,32 +532,15 @@ export function buildApi(options: ServerOptions): Api {
       : { simulationPullOptions: options.simulationPullOptions }),
   });
 
-  // The mock endpoint: the seam's one new public surface. Registered without
-  // `fastify-plugin` for the same reason the OTLP door below is — it keeps the
-  // bytes that were sent, because a signature is over the raw body, and
-  // encapsulation is what stops that reaching the JSON routes.
-  //
-  // Outside the credentialed scope and outside the per-organization rate limit
-  // on purpose. The caller is the customer's own agent platform, which holds no
-  // credential of egma's: the whole gate is one unguessable identifier, a live
-  // run, and a tool the simulation's own test named. A budget keyed on the
-  // organization would let a busy mocked run eat that customer's own request
-  // budget from the inside, and a run whose tool calls started failing would be
-  // a green suite that quietly tested nothing.
+  // Keep mock endpoint body parsers isolated from ordinary JSON routes.
+  // The endpoint uses a simulation-specific URL, a live run, and pinned test
+  // coverage; it does not verify a body signature. Platform tool requests use
+  // this gate outside the credentialed organization rate limit.
   void app.register(mockEndpointRoutes);
 
-  // The OTLP door, registered without `fastify-plugin` for the same reason the
-  // provider's adapter is: it replaces every body parser inside its own scope
-  // so that telemetry arrives as the bytes that were sent, and encapsulation is
-  // what stops that reaching the JSON routes above. It takes the service token
-  // beside the customer credentials because it is the one door with two: a
-  // customer key files an agent's traces, and the simulator's own spans arrive
-  // through this same door naming the simulation they are evidence of.
-  //
-  // Registered for the roles that accept evidence. A `drain` process has no
-  // local log open and no promise it could keep, so the honest answer there is
-  // that this door is not here — rather than a door that takes a request and
-  // refuses every one of them.
+  // Isolate OTLP body parsers from JSON routes. Customer credentials and the
+  // service token share this ingestion endpoint. Register it only for roles
+  // that accept evidence and have a local log.
   if (acceptsEvidence) {
     void app.register(traceRoutes, {
       provider: identity.provider,

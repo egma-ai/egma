@@ -1,5 +1,5 @@
 import { newId } from "@egma/ids";
-import { RECOMMENDED_PERSONA_MODELS } from "@egma/db";
+import { PERSONA_PARAMETER_CONTRACT, defaultPersonaParameterValues } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -112,29 +112,15 @@ async function seedPersona(
   // transaction exactly as the application writes it.
   await db.sql("begin");
   await db.sql(
-    `insert into persona (id, organization_id, project_id, name, current_version_id)
+    `insert into persona_definition (id, organization_id, project_id, name, current_version_id)
      values ($1, $2, $3, 'Impatient Rita', $4)`,
     [persona, organization, project, version],
   );
   await db.sql(
-    `insert into persona_version
-       (id, persona_id, version, identity_name, personality, language,
-        llm_provider, llm_model, stt_provider, stt_model,
-        tts_provider, tts_model, tts_voice_id, tts_speed)
-     values ($1, $2, 1, 'Rita Alvarez', 'Speaks plainly and stays patient.',
-       'en-US', $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [
-      version,
-      persona,
-      RECOMMENDED_PERSONA_MODELS.llm.provider,
-      RECOMMENDED_PERSONA_MODELS.llm.model,
-      RECOMMENDED_PERSONA_MODELS.stt.provider,
-      RECOMMENDED_PERSONA_MODELS.stt.model,
-      RECOMMENDED_PERSONA_MODELS.tts.provider,
-      RECOMMENDED_PERSONA_MODELS.tts.model,
-      RECOMMENDED_PERSONA_MODELS.tts.voiceId,
-      RECOMMENDED_PERSONA_MODELS.tts.speed,
-    ],
+    `insert into persona_definition_version
+       (id, persona_id, version, identity_name, personality, language, parameter_contract)
+     values ($1, $2, 1, 'Rita Alvarez', 'Speaks plainly and stays patient.', 'en-US', $3::jsonb)`,
+    [version, persona, JSON.stringify(PERSONA_PARAMETER_CONTRACT)],
   );
   await db.sql("commit");
 }
@@ -183,6 +169,10 @@ async function insertRun(overrides: RunOverrides = {}): Promise<string> {
       topology: "hosted-broker",
       environment: null,
       config: {},
+    }),
+    grading_plan: JSON.stringify({
+      capturedAt: new Date().toISOString(),
+      groups: [{ tag: "test", testId, testVersionId, items: [] }],
     }),
     expected_simulation_count: 1,
     ...overrides,
@@ -243,6 +233,7 @@ async function insertSimulation(
     connection_id: connectionId,
     persona_id: personaId,
     persona_version_id: personaVersionId,
+    persona_parameter_values: JSON.stringify(defaultPersonaParameterValues(PERSONA_PARAMETER_CONTRACT)),
     test_id: testId,
     test_version_id: testVersionId,
     position: 1,
@@ -504,20 +495,26 @@ describe("a simulation's shape", () => {
     );
   });
 
-  it("holds the summary facts to ended rows, exactly as the report's", async () => {
+  it("allows room registration after claim while keeping turn counts terminal", async () => {
+    for (const status of ["queued", "claimed", "running"] as const) {
+      await expect(
+        insertSimulation(status, { turn_count: 6 }),
+      ).rejects.toSatisfy(
+        (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+      );
+    }
     await expect(
-      insertSimulation("running", { turn_count: 6 }),
+      insertSimulation("queued", { provider_reference: "egma-sim-not-claimed" }),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
     );
-    await expect(
-      insertSimulation("claimed", { provider_reference: "chat_5d1f9a3b7c" }),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
+    for (const status of ["claimed", "running"] as const) {
+      await expect(
+        insertSimulation(status, { provider_reference: `egma-sim-${status}` }),
+      ).resolves.toBeDefined();
+    }
 
-    // On a landed row they are exactly what the columns are for — canceled
-    // included, where the reason stays empty but the facts still landed.
+    // Terminal reports still retain their counts and provider reference.
     await expect(
       insertSimulation("completed", {
         turn_count: 14,
@@ -842,4 +839,29 @@ describe("a run event", () => {
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
     );
   });
+});
+
+
+it("freezes complete persona settings on every simulation", async () => {
+  const id = await insertSimulation("queued");
+  await expect(
+    db.sql(
+      "update simulation set persona_parameter_values = jsonb_set(persona_parameter_values, '{tts_speed}', '1.2') where id = $1",
+      [id],
+    ),
+  ).rejects.toSatisfy(
+    (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+  );
+  await expect(
+    insertSimulation("queued", {
+      persona_parameter_values: JSON.stringify({ tts_speed: 1 }),
+    }),
+  ).rejects.toSatisfy(
+    (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+  );
+  await expect(
+    insertSimulation("queued", { persona_parameter_values: null }),
+  ).rejects.toSatisfy((error) =>
+    [POSTGRES_ERROR.checkViolation, "23502"].includes(errorCodeOf(error) ?? ""),
+  );
 });

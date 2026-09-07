@@ -1,21 +1,7 @@
 /**
- * Agent versions, and the engine document each one points at.
- *
- * Retell keeps an agent's words and tools in a second object — a conversation
- * flow, or a Retell LLM — and the agent version holds only a pointer to it.
- * Everything here is about that pointer: what a name resolves to, what the
- * thing it points at holds, how a new version is branched from an old one, and
- * how a write names the exact version it is for.
- *
- * **Nothing here ever lets Retell choose the version.** Every write takes a
- * number and puts it in the query string. Retell's own default is "the latest
- * version", and the latest version is exactly the one a concurrent branch has
- * just minted — so a write that trusted the default is a write that can land
- * on somebody else's draft.
- *
- * **Nothing here publishes anything**, and nothing here is a draft-lane
- * detail: the reads are what any surface needs to look at a Retell agent at a
- * named version.
+ * Read agent versions and their flow or Retell LLM engine references.
+ * Require explicit versions for writes so concurrent drafts cannot change the target.
+ * Use Retell branching to preserve unknown engine fields. Nothing here publishes.
  */
 
 import {
@@ -238,34 +224,12 @@ export async function resolveAgentVersion(
   return { kind: "version", agentVersion };
 }
 
-/**
- * Retell's own word for the newest version an agent has **published**.
- *
- * Beside it Retell has `latest`, which means the newest version *created* —
- * drafts included. The two words are one character apart in a query string and
- * a world apart in what they select: `latest` reaches whichever draft was
- * minted last, anywhere on the account, and a run that resolved it tested that
- * draft instead of the agent real callers reach. Every serving read in egma
- * names this one.
- */
+/** Newest published agent version. Unlike latest, this excludes unpublished drafts. */
 export const LATEST_PUBLISHED = "latest_published";
 
 /**
- * The way out of "this agent has published nothing", in one clause.
- *
- * Two kinds of surface say this one fact, and each leads into it in its own
- * voice: a run start refuses with it, and the enable-time read explains with it
- * what a mocked run would find. The lead-ins are local to those surfaces; this
- * — the half a developer actually acts on — is one string, so the two can never
- * come to describe different ways out of the same dead end.
- *
- * **It names only ways that exist today.** Egma takes no version on a run and
- * none on a connection, so telling somebody to "name a version for the run"
- * would be sending them at a door with no handle. The one place a version can
- * be named is where the customer already names one: a Retell phone number's own
- * binding to this agent, which Egma reads and follows — the same read the
- * enable-time screen and the mocked builder make. The day Egma grows a version
- * of its own to pass, this clause grows the door with it.
+ * Shared recovery instructions when no published version is available:
+ * publish a version in Retell or pin this agent's phone binding to a version or tag.
  */
 export const PUBLISH_OR_BIND_A_VERSION =
   "Two ways open it. Publish in Retell the version you want tested — that is " +
@@ -298,26 +262,10 @@ export type ResolvedServingVersion =
   | RetellFailure;
 
 /**
- * The version a run conducts against, resolved once and answered as a number.
- *
- * A thin layer over `resolveAgentVersion` that exists for one reference —
- * `latest_published` — and passes every other one straight through. A number,
- * an environment tag and a bound version are the developer's own explicit
- * choice and keep working exactly as they do: resolved once here, and it is the
- * **number that comes back** every later request names, so a tag reassigned or
- * a draft minted mid-run cannot move what a run is testing.
- *
- * What this adds is the two things `latest_published` needs and a bare resolve
- * cannot give:
- *
- * 1. **A published answer, or none.** Retell resolving `latest_published` to an
- *    unpublished version would be Retell contradicting its own schema, and the
- *    safe reading of a contradiction is the refusal — never a run conducted
- *    against a draft by accident.
- * 2. **A 404 read rather than guessed.** One status carries two facts here: the
- *    agent is not there, or the agent is there and has published nothing. They
- *    have different next moves, so the difference is settled with one extra
- *    request — on the failure path only, and never on the path a run takes.
+ * Resolve a run's reference once to a numeric version.
+ * For latest_published, require a published result. On 404, make one additional
+ * read to distinguish an existing unpublished agent from a missing agent.
+ * Other explicit references pass through unchanged.
  */
 export async function resolveServingAgentVersion(
   key: RetellCredential,
@@ -403,15 +351,8 @@ export async function readEngineConfiguration(
 }
 
 /**
- * A new agent version, branched by Retell from a named base.
- *
- * Retell forks the engine document itself, which is the whole reason this is a
- * branch rather than a copy: a hand-made twin is missing every field egma has
- * never heard of, and the fields egma has never heard of are exactly the ones
- * that make the agent under test the agent the customer ships.
- *
- * Only `base_version` is sent. A title and a description are refused by this
- * endpoint — they belong to publishing — and sending them creates nothing.
+ * Branch from base_version through Retell so unknown engine fields are preserved.
+ * Send only base_version; title and description belong to publishing.
  */
 export async function branchAgentVersion(
   key: RetellCredential,
@@ -444,18 +385,8 @@ export async function branchAgentVersion(
 }
 
 /**
- * Write onto one engine version, naming that version and no other.
- *
- * The version is a required argument rather than a field of the reference, so
- * a caller cannot leave it out and get Retell's default. That default is
- * "latest", and after a branch the latest version is the branch — so a write
- * that leaned on it would land on whichever version was minted most recently
- * anywhere on the account.
- *
- * **The tools and the defaults go in one PATCH**, because they are one change:
- * a tool whose URL names a routing variable and a version with no default for
- * that variable is a call with nowhere to go, and two writes would leave the
- * version in exactly that state in between.
+ * Patch tools and routing defaults together on the explicitly named engine version.
+ * Separate writes could leave tool URLs referring to unset variables.
  */
 export async function writeEngineTools(
   key: RetellCredential,
@@ -524,26 +455,10 @@ export async function writeEngineTools(
 }
 
 /**
- * Delete one agent version.
- *
- * **The version is a query parameter and never a path segment.** Retell's
- * router has no `/delete-agent-version/{agent}/{version}` route at all: it
- * answers that shape 404 "Cannot DELETE", the query shape 204 (verified live,
- * 2026-08-31). Egma sent the path shape for a week, read every 404 back as
- * "already gone", and reported a teardown that had deleted nothing — which is
- * why no caller of this may treat 404 as proof on its own. See
- * `finishMockedWorld`, which deletes and then reads the versions back.
- *
- * **Deleting an agent version leaves its conversation-flow version behind**
- * (verified live, 2026-08-31, against the developer's own dashboard). Retell
- * has no endpoint that removes one — `delete-conversation-flow` takes the whole
- * flow, and a `?version` on it answers 400 "Unknown query parameter" — so there
- * is no second cleanup here because there is none to make. The orphan is
- * invisible in Retell's own screens and unroutable, since a binding can only
- * name a live agent version; the teardown writes its number down instead.
- *
- * `gone` is still answered rather than swallowed, because a version that is not
- * there is a version serving nobody. What it is worth is the caller's to judge.
+ * Delete an agent version using the version query parameter, not a path segment.
+ * A 404 is not proof of absence; finishMockedWorld verifies the version listing.
+ * Deletion leaves its flow version behind, with no single-version cleanup here;
+ * the teardown records that residue.
  */
 export async function deleteAgentVersion(
   key: RetellCredential,
@@ -602,20 +517,9 @@ function versionSummaryFrom(row: unknown): AgentVersionSummary | null {
 }
 
 /**
- * Every version an agent has right now, read from the **current** listing.
- *
- * `/list-agent-versions/` and never `/get-agent-versions/`: the second is
- * removed on 2026-09-15 and egma has never used it. Nothing here may move back
- * to it.
- *
- * This is what a teardown proves a deletion with. A delete's own answer cannot
- * do that job — a malformed request answers 404 exactly as a version that was
- * never there does, and that is the confusion that let a broken teardown
- * report an account put back for a week. So absence is read, not inferred, and
- * every ambiguity below is answered as a refusal rather than as absence: a
- * malformed page, a cursor that does not advance, and a bare full page with no
- * cursor at all are all "Egma cannot say", which is the honest answer for a
- * proof.
+ * Read the complete /list-agent-versions/ listing to verify version absence.
+ * Reject malformed pages, nonadvancing cursors, and full pages without a cursor.
+ * An ambiguous listing must not be treated as a successful deletion.
  */
 export async function listAgentVersions(
   key: RetellCredential,

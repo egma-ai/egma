@@ -1,21 +1,6 @@
 /**
- * The API's deployment story, checked against the code that reads it.
- *
- * **This file exists because the gap it closes really happened.** Phone
- * readiness was written, documented, and covered by tests —
- * and then a real carrier setup against a real Twilio account
- * finished every carrier step correctly and reported phone setup required anyway,
- * because the compose entry for the API never passed the carrier variables
- * through. A variable absent from a service's `environment:` is not merely
- * undocumented: it does not reach the container at all, whatever the operator
- * sets in their shell or their `.env`. Nothing fails, nothing warns, and the
- * feature is quietly off.
- *
- * The simulator has had this check for its own variables since before the
- * phone work; the API had none. So this is that check, one app over, and it is
- * deliberately about *names and shapes* rather than about Docker: it parses no
- * YAML and starts no container. What it asserts is true of the text, which is
- * what somebody reads.
+ * Check that deployment text passes the API's configuration variables into
+ * the container. These source checks do not parse YAML or start Docker.
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -246,23 +231,8 @@ describe("the API's deployment story", () => {
   });
 
   it("publishes the recording store to this machine and no further, by default", () => {
-    // The one port in this file whose default bind is a security decision.
-    // What answers on it is the store's admin surface and its *root*
-    // credential — which can list, replace and delete every recording a
-    // deployment holds. Bound to 0.0.0.0, `docker compose up` on a shared
-    // network offers every customer's recording to the room, to read and to
-    // overwrite. This product calls a recording evidence.
-    //
-    // That credential no longer has a default written in this repository, so
-    // the wide bind is no longer a hole anybody can walk through from reading
-    // the source. The loopback default stays, because the two are one pair: a
-    // password is one mistake away from a wide port, and closing the port by
-    // default is the half that costs nothing.
-    //
-    // Held as a test rather than as the comment beside it, because a comment
-    // does not close a port. The publishing itself is required — a browser has
-    // to fetch a recording — so what is asserted is the host it is published
-    // to, and that opening it is a variable somebody sets on purpose.
+    // Keep the published recording-store port on loopback by default. Publishing
+    // is needed for browser audio; wider network access must be an explicit setting.
     const block = serviceBlock("minio");
     const published = /^\s*-\s*"(.+:9000)"\s*$/mu.exec(block)?.[1] ?? "";
     expect(published, "the minio service publishes its API port").not.toBe("");
@@ -278,19 +248,9 @@ describe("the API's deployment story", () => {
     const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
     const api = serviceBlock("api");
 
-    // The whole reason there are two credentials. A leaked read credential must
-    // not be usable to overwrite a customer's call recording, and the one line
-    // that would undo that is the API being handed the write pair — which is
-    // exactly what an interpolation default would do if somebody "simplified"
-    // it. Neither write variable may appear on this service at all.
-    //
-    // **The API does now hold a credential that can write**, and this test says
-    // so on purpose rather than quietly stopping being true: ingestion writes
-    // segments, so its pair is on this service by design. What keeps that from
-    // reaching a recording is the next test — a different bucket, and a policy
-    // confined to one prefix of it. The rule this one holds is unchanged and
-    // narrower than it used to read: *the recordings write pair* never appears
-    // here.
+    // The API must receive recording-read credentials, never recording-write
+    // credentials. Its separate ingestion credential may write only to the
+    // ingestion bucket prefix checked below.
     for (const write of [
       "EGMA_S3_ACCESS_KEY_ID",
       "EGMA_S3_SECRET_ACCESS_KEY",
@@ -332,21 +292,9 @@ describe("the API's deployment story", () => {
   });
 
   it("confines the ingestion credential to the pending prefix of its own bucket", () => {
-    // The credential the API holds that *can* write, and the two facts that
-    // keep it away from everything it must not touch.
-    //
-    // The first is that it is a different bucket. The second is this policy:
-    // one prefix of that bucket for the object operations a spool needs, and a
-    // listing statement carrying a prefix condition, so the credential cannot
-    // even enumerate the ingestion bucket outside `pending/`. Neither fact is
-    // enough alone — a policy is one document in a compose file that a
-    // deployment could widen, and a second bucket without a confining policy
-    // would still be a credential that could delete a whole bucket's worth of
-    // accepted evidence.
-    //
-    // Held against the copy `ingestion-object-store.test.ts` proves against a
-    // real MinIO, the way the recordings policy is, so the suite cannot end up
-    // proving a policy nobody deploys.
+    // Keep ingestion in a separate bucket with object operations and listing
+    // restricted to pending/. Compare the deployed policy with the policy tested
+    // against MinIO in ingestion-object-store.test.ts.
     const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
     const written =
       /printf '([^']+)'\s*\n?\s*"\$\$EGMA_INGEST_BUCKET"/u.exec(compose)?.[1] ?? "";
@@ -396,14 +344,8 @@ describe("the API's deployment story", () => {
   });
 
   /**
-   * One image, three roles, and today exactly one of them is running.
-   *
-   * The point of the setting is that splitting acceptance from draining later
-   * is a value in an environment file rather than a second image and a second
-   * protocol. The point of the default is that this release does not split
-   * anything: the shipped stack runs `all`, adds no container, and adds no
-   * broker — which is the promise a reader of the compose file should be able
-   * to check without reading any code.
+   * The image supports all, ingest, and drain roles. The Compose default uses
+   * all, so separating acceptance and draining does not require another image.
    */
   it("ships one image running the whole path, with no container or broker added", () => {
     const api = serviceBlock("api");

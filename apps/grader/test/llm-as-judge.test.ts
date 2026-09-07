@@ -19,7 +19,6 @@ function definition(): GraderDefinitionSnapshot {
     prompt: INSTRUCTIONS,
     parameterContract: [],
     modalities: ["chat", "voice"],
-    judgeModel: { provider: "openai", model: "gpt-4o-mini" },
   };
 }
 
@@ -81,9 +80,11 @@ describe("a customer LLM grader", () => {
         rationale: "The agent explained what happens next.",
         assertions: [{
           key: "instruction_1",
+          decision: "met",
           score: 1,
           rationale: "The agent explained what happens next.",
           citedSpanIds: ["aaaaaaaaaaaaaaaa"],
+          citedTurns: [1],
         }],
       },
     });
@@ -103,7 +104,7 @@ describe("a customer LLM grader", () => {
       score: null,
       details: {
         error:
-          "the grader could not determine whether the grading instructions were met",
+          "1 of 1 criteria could not be graded",
         assertions: [{ key: "instruction_1" }],
       },
     });

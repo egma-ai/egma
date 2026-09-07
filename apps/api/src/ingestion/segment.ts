@@ -12,64 +12,17 @@ import {
 } from "./record.ts";
 
 /**
- * The unit that crosses the acceptance boundary: one project's staged records,
- * sealed into one immutable object.
+ * Immutable object containing one project's staged records. Its key is
+ * pending/<segment id>.ndjson.gz; organization and project scope live in
+ * the header and come from trusted acceptance context.
  *
- * A segment is what makes group commit possible and what makes the object store
- * a spool rather than a second trace archive. It is sealed once — identity,
- * bytes and checksum all fixed at the same instant — and after that it is only
- * uploaded, read and deleted. Nothing appends to a sealed segment and nothing
- * rewrites one, which is what lets an ambiguous upload be retried against the
- * same key with the same bytes and be *success* rather than a second object
- * holding the same evidence.
+ * Gzip contains a header followed by canonical NDJSON records. SHA-256 covers
+ * the canonical header without content_sha256 plus the record lines, including
+ * scope. This detects corruption; it is not authentication against a writer
+ * that can replace the object and recompute the digest.
  *
- * ## One project, and the reason tenancy is not in the key
- *
- * Records are grouped by the `(organization, project)` the **authenticated
- * request** resolved to, never by anything an evidence attribute claimed. Two
- * projects never share an object, so a segment cannot leak one tenant's
- * evidence into another's read.
- *
- * That scope is written **inside** the sealed object and the key carries only
- * the segment's identity — `pending/<segment id>.ndjson.gz`, one flat prefix.
- * A key that named the tenant would be a second statement of the same fact, and
- * two statements can disagree: a renamed, copied or hand-restored object would
- * then carry one tenancy in its name and another in its body, and whichever the
- * drainer believed would be a coin toss. There is one statement, it is sealed
- * with the evidence, and the checksum covers it.
- *
- * The flat prefix is also what makes recovery one paginated listing rather than
- * a walk of a tree whose shape nobody can enumerate. Segment ids sort by mint
- * time, so that listing is oldest-first for free.
- *
- * ## The bytes
- *
- * Gzip-compressed NDJSON. The first line is the header — format version,
- * segment identity, trusted scope, record count and one checksum binding all of
- * it together. Then one canonical record per line.
- *
- * **The checksum covers the header as well as the records**, which is what
- * makes the sealed scope a fact rather than a label. A digest over the records
- * alone would leave `organization_id` and `project_id` bound to nothing, and
- * the drainer builds the context it writes under out of exactly those two
- * fields — so an object whose header had been edited would file one customer's
- * evidence under another's, and every checksum in the path would still agree.
- * A field cannot cover itself, so what is hashed is the header **without**
- * `content_sha256`, in one fixed field order, followed by the record lines
- * exactly as they are written. A reader rebuilds that form from the fields it
- * validated and compares.
- *
- * It is a check on the evidence and its binding rather than on the compression,
- * so it still holds if a store or a proxy ever re-encodes the transfer.
- *
- * **The compressed object is deterministic for one sealed segment**, which is
- * what makes "same identity, same bytes" a fact a retry can be judged against
- * rather than a hope. Two things buy that: the record order is fixed at seal
- * time, and gzip is asked for one fixed level with the modification-time field
- * of its header left at zero. Node writes that field as zero and has no option
- * to write anything else — so `ingestion-segment.test.ts` asserts the header
- * bytes directly, because determinism here is a contract and not a detail of
- * whichever zlib is linked in.
+ * Sealing fixes identity, record order, and compressed bytes for upload retries.
+ * Tests pin gzip header behavior as part of deterministic serialization.
  */
 
 /**
@@ -124,14 +77,8 @@ export type SegmentHeader = SegmentBinding & {
 };
 
 /**
- * The one digest a sealed segment is judged against, over the one canonical
- * form of what it binds.
- *
- * The field order is written out here rather than taken from an object literal,
- * for the reason `canonicalRecordJson` writes its own out: insertion order is a
- * property of whichever construction site built the object, and a reader
- * rebuilding the header from fields it parsed would otherwise hash a different
- * string from the one the writer hashed.
+ * Hash the header in fixed field order followed by canonical record lines.
+ * Exclude the checksum field itself.
  */
 export function segmentChecksum(
   binding: SegmentBinding,
@@ -165,15 +112,9 @@ export type StagedRecord = {
 };
 
 /**
- * What the local log holds, as one line of JSON per frame.
- *
- * Two kinds, told apart by `e`. A `record` frame is one accepted record and the
- * scope it was accepted in — the scope travels with each record rather than in
- * a side table, so a log recovered after a crash can be regrouped by project
- * without anything else having survived. A `seal` frame is written **before**
- * the upload it belongs to and says which records became which segment, so a
- * retry after an ambiguous upload reaches for the identity that was already
- * chosen instead of minting a second one for the same evidence.
+ * Local log frames use e to distinguish records with scope from seals.
+ * Write the seal identity and record count before uploading so crash recovery
+ * can retry the same segment.
  */
 export type StagedFrame =
   | {
@@ -289,20 +230,8 @@ export type PendingGroup = {
 };
 
 /**
- * Whether this group should be sealed now.
- *
- * A pure function of the group and the clock, so the rule is testable without a
- * timer and the standing loop that calls it holds no rule of its own. Either
- * bound reached is enough, and the time bound is what a low-volume deployment
- * lives on: one conversation's spans must not wait for a batch that will never
- * fill.
- *
- * Reaching a size bound seals a segment that has **already crossed** it by at
- * most one record. That is deliberate — the alternative is to hold the record
- * that crossed the bound back into the next segment, which makes the bytes of a
- * segment depend on what arrived after it, and a retry that re-groups the same
- * records would then seal different bytes. The bound is set far enough under
- * the store's own insert bound to absorb one record.
+ * Seal a nonempty group when its record, byte, or age bound is reached.
+ * The timer ensures low-volume groups do not wait indefinitely for more records.
  */
 export function shouldSeal(
   group: PendingGroup,
@@ -342,14 +271,8 @@ export function recordBytes(record: IngestionRecord): number {
 }
 
 /**
- * Seal one project's records into one immutable object.
- *
- * The identity is minted here and returned, so the caller writes it into the
- * local log before the upload starts and hands the same value to every retry.
- * A caller replaying a seal it already recorded passes that identity back in,
- * and the same records in the same order then produce the same bytes. An
- * identity chosen after an upload could not do that: the one moment it is
- * needed is the moment nobody knows whether the upload happened.
+ * Seal ordered records using a new or recovered segment ID. Persist the ID
+ * before upload; retries must retain the same records, order, and identity.
  */
 export function sealSegment(options: {
   readonly scope: SegmentScope;

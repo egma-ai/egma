@@ -5,19 +5,8 @@ import type { Email } from "../src/auth/email.ts";
 import { cookiesFrom, createApi, type TestApi } from "./support/api.ts";
 
 /**
- * Getting back in after forgetting a password, followed the whole way.
- *
- * The claim is not that a sender was called. It is that a developer who cannot
- * remember their password ends up signed in: the link is taken out of the
- * message the transport was handed, followed, a password set behind it, and
- * that password used at the front door. Anything less proves nothing a
- * developer cares about, because every step between the message and the sign-in
- * is a step that can be broken without the sender ever noticing.
- *
- * It is driven on both transports on purpose. **Whether the link is posted or
- * written to the log is the only difference between them**, and reset works on
- * both — the same rule verification already follows, read off the one sender
- * rather than off a second setting that could disagree with it.
+ * Follow the reset link captured by the test mail transport, set a new password,
+ * and sign in with it. This tests the flow after delivery, not real SMTP delivery.
  */
 
 let api: TestApi;
@@ -230,15 +219,8 @@ describe("a link that is no longer worth following", () => {
   });
 
   /**
-   * And past the hour, egma says what it knows, which is that the link is dead.
-   *
-   * There is one deadline and both systems have it, so the moment egma stops
-   * honouring a link is the moment the provider forgets the token. Nothing is
-   * left to ask, a link that ran out unused and one somebody spent look
-   * identical from out here, and either of the other two sentences would be a
-   * guess. **That is the price of one number**, and it is written down as two
-   * tests rather than one, because the two situations it flattens together are
-   * opposite and a reader has to see both of them being flattened.
+   * After the signed deadline, used and unused links both report expiry.
+   * The response must not infer whether the provider token was previously consumed.
    */
   it("says only what it can still check, once the hour is up and nobody used the link", async () => {
     api = await createApi("reset_expired", { emailDelivers: true });
@@ -302,21 +284,9 @@ describe("a link that is no longer worth following", () => {
 });
 
 /**
- * The hour the message promises is the hour that applies — everywhere.
- *
- * The seal is signed rather than encrypted, so the provider's own token reads
- * straight out of any link, and the provider's whole surface is served under
- * this instance's origin. **So the provider's own deadline is the one that has
- * to be true**, and it is: egma states an hour and configures the provider with
- * that same hour, which is why there is now nothing to shut and nothing to
- * spell around.
- *
- * A route of egma's own in front of that endpoint would only ever have been a
- * spelling of it. `POST /api/auth/x/../reset-password` reaches the same handler
- * — Fastify matches the target as it arrived, so an exact route never sees it,
- * while the URL the provider is handed is parsed with its dot segments removed
- * — and that is exactly the shape a shorter deadline behind a longer one gets
- * found through. So both spellings are driven here, and neither is a way in.
+ * The signed link exposes the provider token, so the provider must enforce the
+ * same lifetime. Test both the direct provider endpoint and a dot-segment path
+ * to ensure neither bypasses expiry.
  */
 describe("the provider's own reset endpoint", () => {
   async function setPasswordAtTheProvider(
@@ -426,17 +396,9 @@ describe("asking for a link", () => {
   });
 
   /**
-   * **Saying the same words is only half of saying the same thing.** A platform
-   * that posts mail spends a quarter of a second reaching an SMTP server before
-   * it answers an address it knows, and nothing at all before it answers one it
-   * does not — so the two identical sentences arrive twenty times apart, and one
-   * unauthenticated request tells a stranger who holds an account here.
-   *
-   * The transport here is held open on purpose, because a fake one that returns
-   * the instant it is called cannot tell a flow that waits for delivery from one
-   * that does not. The claim is that the answer is back **while the message is
-   * still going**, which is a fact rather than a measurement: no threshold, no
-   * clock, nothing to be flaky about on a busy machine.
+   * Hold mail delivery open and verify that the request returns before delivery
+   * settles. This checks that SMTP latency does not delay the known-address path;
+   * it is not a general proof of constant response time.
    */
   it("answers before the message has gone anywhere, so the wait says nothing", async () => {
     let posting: Promise<void> | undefined;

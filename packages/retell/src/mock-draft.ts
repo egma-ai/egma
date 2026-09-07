@@ -1,46 +1,12 @@
 /**
- * The one transform: an engine's tools, made routable per call — to Egma for
- * the tools a test names, and to the customer's own backend for every other.
+ * Pure transform that adds per-tool routing variables to captured engine config.
+ * Prefix each custom-tool URL while preserving its original bytes, tool schema,
+ * headers, query parameters, and node references. Unmocked simulations still need
+ * the original backend credentials.
  *
- * It is a pure function of a captured configuration. It reaches nothing,
- * writes nothing, and holds nothing — which is what lets the whole promise be
- * checked against a captured configuration rather than against an account.
- *
- * **Exactly one field changes per intercepted tool, and it only grows a
- * prefix.** The URL becomes `{{egma_url_<tool>}}` followed by the original URL
- * byte for byte — the customer's own variables inside it included — and
- * nothing else about the tool moves. Name, description and parameters are the
- * tool's contract, the part the model reads, so the agent under test reasons
- * and asks exactly as it does in production. Node references by tool id are
- * untouched for the same reason: they name tools, and no tool is renamed.
- *
- * **Headers and query params are carried verbatim** (ADR-0022). One temporary
- * version now serves every test of a run, and a test that does not name a tool
- * must reach the customer's real backend from that same version — which it
- * cannot do with its credentials emptied. Egma's own endpoint drops every
- * header and query param that arrives on a mocked call and reads only the
- * platform's signature; that, and not an emptied configuration, is what keeps
- * a customer's backend credentials out of Egma.
- *
- * ## Why a prefix and not a whole-URL variable
- *
- * Retell renders a dynamic variable inside a tool URL per call, and drops
- * everything after a `#` when it makes the request (both proven live,
- * 2026-09-03). So one variable in front of the untouched original URL is
- * enough to decide, per call, where that tool goes:
- *
- * - Egma passes `https://<egma origin>/mock-tools/<simulation>/<tool>#` and
- *   the original URL trails behind the `#` as a fragment nothing sends;
- * - Egma passes `""` and the placeholder renders to nothing, leaving the
- *   original URL exactly as the customer wrote it.
- *
- * **Each variable is defaulted to a single space, never to the empty string.**
- * Retell stores an empty default as *absent*, and an absent variable renders
- * as the literal `{{egma_url_book}}`, which is not a URL and fails the call.
- * A single space is kept as set, and a leading space is stripped when the URL
- * is parsed, as the WHATWG URL Standard prescribes. The default is the proven
- * fallback for a variable Egma failed to pass; Egma passes every one of them
- * on every call it creates, so rendering never depends on it.
+ * Per call, a mock URL ending in # hides the original URL in the fragment;
+ * an empty prefix leaves it unchanged. See EGMA_URL_VARIABLE_DEFAULT for the
+ * required stored fallback. The mock endpoint must ignore customer headers and query data.
  */
 
 import { createHash } from "node:crypto";
@@ -62,13 +28,9 @@ import { isIntercepted, toolsOf, type EngineTool } from "./tools.ts";
 export const EGMA_URL_VARIABLE_PREFIX = "egma_url_";
 
 /**
- * The default every routing variable is written with: one space.
- *
- * Not the empty string. Retell treats an empty default as absent and leaves
- * the braces literal, so a tool whose variable Egma failed to pass would carry
- * a URL of `{{egma_url_book}}https://…` and the call would fail. A single
- * space is stored as set and stripped by the URL parser, so the same tool
- * falls back to the customer's own backend instead. Proven live, 2026-09-03.
+ * Stored routing-variable default: one space. Retell treats an empty default as
+ * absent, leaving literal {{…}} in the URL. A space remains set and is removed
+ * by URL parsing, preserving the original backend URL. Verified live on 2026-09-03.
  */
 export const EGMA_URL_VARIABLE_DEFAULT = " ";
 
@@ -81,18 +43,8 @@ export type MockToolVariable = {
 };
 
 /**
- * The variable that routes one tool, from the tool's own name.
- *
- * A Retell dynamic variable is named in `{{…}}` inside a URL, so the name has
- * to be plain: letters, digits and underscores. A tool name may be anything —
- * `price list/lookup?v=2` is a real one — so anything else is replaced by an
- * underscore, and **the exact name's digest is appended** so that two names
- * that sanitize alike still get two variables. Without it `a-b` and `a.b`
- * would both become `egma_url_a_b`, and one tool's calls would route by the
- * other's value.
- *
- * A name that is already plain is used as it is, so the ordinary case reads as
- * itself in the customer's dashboard: `egma_url_book_appointment`.
+ * Build a variable name from the tool name. Preserve plain alphanumeric/underscore
+ * names; sanitize others and append the original name's digest to avoid collisions.
  */
 export function mockToolVariable(toolName: string): string {
   if (/^[A-Za-z0-9_]+$/u.test(toolName)) {
@@ -119,18 +71,8 @@ export type MockEndpointTarget = {
 };
 
 /**
- * The URL Egma passes for one tool it is answering on this call.
- *
- * Two segments after the base — the simulation and the tool — and a trailing
- * `#`. The simulation is how the endpoint finds the run, its liveness and the
- * pinned test version whose answer to serve; the tool's name is
- * percent-encoded here and decoded at the endpoint, so any name Retell accepts
- * routes correctly, reserved characters and slashes included.
- *
- * **The `#` is the whole of how the original URL is hidden.** The configured
- * URL is this value followed by the customer's own, so everything after the
- * `#` is a fragment, and an HTTP client never sends a fragment. Egma therefore
- * receives its own path and nothing of the customer's.
+ * Build the encoded simulation/tool endpoint followed by #.
+ * The original tool URL follows as a fragment and is not sent in the HTTP request.
  */
 export function mockToolUrl(
   target: MockEndpointTarget,
@@ -146,24 +88,9 @@ export function mockToolUrl(
 /** What a mocked draft is written from. */
 export type MockedTools = {
   /**
-   * The tool arrays to write onto the draft's engine version. They carry the
-   * smallest set of top-level keys the engine's own update endpoint can
-   * express, and **that set is not the same for both engines**:
-   *
-   * - **A conversation flow** keeps its tools in one top-level `tools` array,
-   *   so this is that array and nothing else. Prompts, nodes, the MCP list
-   *   and every other key are never resent, and therefore cannot be resent
-   *   wrong.
-   * - **A Retell LLM** keeps per-state tools inside its `states` array, and
-   *   Retell offers no way to patch one state. So this carries `states`
-   *   **whole** — every state's prompt, edges and remaining fields travel back
-   *   exactly as they were read, alongside its rewritten tool array. Nothing
-   *   is altered, but more than the tools is resent, and that is a real
-   *   difference worth knowing when a write is being reviewed.
-   *
-   * Under both, every value that goes back came from the version that was read
-   * moments earlier and is byte-identical to it except for the one field each
-   * intercepted tool is allowed to grow a prefix on.
+   * Minimal engine update containing rewritten tool URLs. Conversation flows need
+   * only tools. Retell LLM per-state tools require resending the full states array;
+   * preserve every other state field from the captured version.
    */
   readonly tools: Readonly<Record<string, unknown>>;
   /**

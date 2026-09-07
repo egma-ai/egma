@@ -11,42 +11,13 @@ import {
 import { connectionsOnRow, type ListedConnection } from "@/lib/agents.ts";
 
 /**
- * How egma reaches an agent, said on the row rather than one click away.
- *
- * **The cell names the ways in and lets a person open one.** That is what the
- * board draws (`6ZJ-0`): each connection is its own underlined link, and
- * following it opens that connection over the list a person is already reading
- * rather than sending them two pages away and back. An agent egma cannot reach
- * at all says so here, in words, rather than at the moment a run refuses to
- * start.
- *
- * **It used to be a line of facts per connection** — environment, product
- * label, modality — stacked one under another, which made a row with three
- * connections three times as tall as its neighbour and gave a person nothing to
- * press. The resolved comment threads on the decision page ruled the other way:
- * consistent row heights, two names then an overflow chip, and link text in the
- * text colour. Those four facts have not gone anywhere; they are what the
- * connection sheet opens onto.
- *
- * Everything is drawn from what the list read already carried. There is no
- * second request behind any of it.
+ * Open connection sheets from the agent row using the list response; no
+ * additional request is needed to build these links.
  */
 
 /**
- * Every way into one agent, or the fact that there is none.
- *
- * **"No connections yet" is a state of the agent, not an empty cell.** An agent
- * nobody has wired is an agent egma cannot test, and a row that simply left the
- * space blank would leave that to be found out at the start of a run. It is
- * quiet rather than a warning, because being unwired is a fact about setup and
- * not a failure anybody has had yet.
- *
- * **The overflow chip counts rather than lists, and opens what it counts.**
- * Two links, then "+3" — and pressing the chip drops a popover holding every
- * connection this agent has, each one a link to its own sheet (`IZJ-0`). It is
- * links and nothing else: no rename, no delete, no facts. There is no agent
- * page behind it any more, so a chip that only navigated would now have
- * nowhere honest to go.
+ * Show two connection links and an overflow popover containing all connections.
+ * Use an explicit empty label when the agent has none.
  */
 export function ConnectionsOnRow({
   connections,

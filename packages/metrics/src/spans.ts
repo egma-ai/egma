@@ -1,12 +1,6 @@
 /**
- * The slice of a stored conversation this package reads.
- *
- * **Structural on purpose, and narrower than the store's own span row.** The
- * measure module computes over exactly these fields; everything else a trace
- * read carries — text, audio references, tool payloads — is a display's
- * business, not arithmetic's. Declaring only what is read keeps the store's
- * fuller span shape assignable here without this package depending on the
- * data-access module, which depends on this one.
+ * Minimal stored-span fields needed for metric computation. Kept structural
+ * so the data-access module can supply richer rows without a reverse dependency.
  */
 
 import type { ReportedMeasurement } from "./reported.ts";
@@ -25,17 +19,8 @@ export type TraceSpan = {
    * spells its own way. */
   readonly parentSpanId: string;
   /**
-   * Whose account of the conversation this span is.
-   *
-   * **A simulation stores both, under one trace id**, so a derivation that did
-   * not ask this would read egma's own transcript turns and the agent's as one
-   * conversation — every wait measured twice over, each one wrongly. The
-   * persona's account is what egma said, heard and measured; the agent's is
-   * what the agent's own process reported. A production trace has one.
-   *
-   * Optional so a caller holding an older shape still assigns, and absent reads
-   * as the agent's: a span whose account nobody named is the conversation's
-   * own, which is what every production row is.
+   * Span POV, used to keep the agent and persona evidence separate.
+   * Absent emitter is treated as agent POV for older span shapes.
    */
   readonly pov?: "persona" | "agent" | undefined;
   readonly name: string;

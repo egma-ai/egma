@@ -1,32 +1,11 @@
 /**
- * Retell's own call document, with the two transport fields that are
- * credentials taken out of it — and nothing else touched.
+ * Omit only known transport credentials from Retell call documents:
+ * - top-level access_token;
+ * - authorization, proxy-authorization, cookie, set-cookie, api-key, and x-api-key
+ *   entries in custom_sip_headers, matched case-insensitively.
  *
- * **This is omission, not replacement, and it is exact-field rather than
- * heuristic.** Two rules, both of them a rule about *where* a value sits rather
- * than about what it looks like:
- *
- * 1. The top-level `access_token` field, which is how Retell hands back the
- *    short-lived credential a web call was joined with.
- * 2. Inside Retell's own `custom_sip_headers` map, the values of six exact
- *    header names — `authorization`, `proxy-authorization`, `cookie`,
- *    `set-cookie`, `api-key`, `x-api-key` — compared case-insensitively,
- *    because HTTP header names are.
- *
- * Nothing else is looked at. Not a field whose name contains `token`, not a
- * string that starts with `Bearer`, not a nested object anywhere at any depth.
- * A transcript is evidence: a customer saying *my password is hunter2* on a
- * recorded call is what a team is later going to argue about, and a scanner
- * that rewrote it would have edited the one thing the product exists to show
- * them. The same is true of a tool argument called `credential`, of a metadata
- * field a customer named `secret`, and of a provider field Retell adds next
- * month. **Preserved by default** is the rule; another omission is a versioned
- * change to this contract with a round-trip test proving nothing else moved.
- *
- * And an omitted field is *gone*, with no marker written where it was. A marker
- * is a value, values are evidence, and `"[REDACTED]"` is a string a customer
- * can legitimately say — so a reader meeting one could never tell whether Egma
- * put it there or the caller did.
+ * Preserve all other fields and evidence. Do not scan values heuristically or insert
+ * redaction markers. Additional omissions require a contract change and round-trip tests.
  */
 
 /** The six exact names, lower-cased. HTTP header names are case-insensitive. */

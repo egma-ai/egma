@@ -1,26 +1,6 @@
-"""CI's Retell: a local HTTP server shaped like Retell's own API.
-
-The endpoints the two Retell plugs speak — ``create-chat``,
-``create-chat-completion``, ``end-chat`` for the chat lane and
-``create-web-call`` for the web-call one — answering with Retell's own field
-names, status codes and bearer-key auth, from a script. Real HTTP on a
-loopback port, because a plug's whole job is speaking a platform's wire
-protocol and a mock of that protocol would prove the mock instead.
-
-The stub is deliberately strict where the real platform is: a request
-without the exact bearer key is refused 401, a completion for a chat that
-was never opened is refused 422, and a chat that has ended refuses further
-completions. Those refusals are what the plug's failure paths are tested
-against.
-
-It also records every call it served — the whole request body included — so
-a test can assert the plug drove the exchange and asked for exactly what the
-spec said: opened once against the named version with this simulation's
-variables attached, delivered in order, ended at the platform.
-
-What it deliberately is **not** is a room. A web call is created here and
-conducted in a LiveKit room somewhere else, so this server hands out the
-access token and stops; the room that token opens is :mod:`room_stub`.
+"""Local HTTP stub for Retell chat and web-call creation.
+Validate bearer auth and chat lifecycle, script replies, and record requests.
+Web-call creation returns a token; room_stub handles the resulting room.
 """
 
 from __future__ import annotations

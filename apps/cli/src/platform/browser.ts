@@ -1,21 +1,7 @@
 /**
- * Opening the developer's browser on the address they have to approve at.
- *
- * The address is handed to the opener as one argument and never through a
- * shell — but on Windows the opener *is* a shell, because `start` is a builtin
- * of one, and it reads what it is given a second time. So the address is
- * checked before it is passed to anything: it has to be an http address, on the
- * egma this login is against, made of characters no command interpreter reads
- * as syntax. Anything else is not opened at all.
- *
- * `BROWSER` is honoured first. It is the variable a developer already sets when
- * the machine's idea of a browser is wrong — a devbox, a container, a desktop
- * with two of them — and honouring it costs nothing and is the difference
- * between a working login and a shrug.
- *
- * Failing to open a browser is not a failure of login. The address stays on
- * the screen, can be opened on another machine, and the CLI keeps polling for
- * approval.
+ * Open the validated verification URL, honoring BROWSER first.
+ * The Windows opener uses a shell builtin, so URL checks remain required.
+ * If opening fails, retain the printed URL and continue polling for approval.
  */
 
 import { spawn } from "node:child_process";

@@ -10,23 +10,9 @@ import { Field } from "../../ui/form.tsx";
 import { AuthForm, AuthShell, LinkLine, Notice, StatePage } from "../ui.tsx";
 
 /**
- * The page behind the link, and it asks for one thing.
- *
- * A new password, and nothing else. The link already names the account, so
- * there is no address to type and nothing to get wrong — the same reason the
- * invitation page shows the address rather than asking for it.
- *
- * **A link somebody already used says so**, because "you already did this, so
- * sign in" and "nothing happened at all, so ask for another" are opposite
- * instructions. The API decides which, and this page never guesses between them.
- *
- * **Once the hour is up the API can no longer tell which**, and that has a page
- * of its own for the same reason: a page that picked the likelier one would
- * tell half the people holding such a link to go on using a password that no
- * longer works. So it says both, and what to do either way.
- *
- * Setting the password does not sign anybody in. Two steps a person can see is
- * better than one they cannot, and using the password is what proves it works.
+ * Ask only for a new password; the link identifies the account. Display the
+ * API's used, expired, or invalid-link state without inferring it locally.
+ * Successful reset still requires sign-in.
  */
 
 type Refused = {

@@ -31,23 +31,11 @@ import { authorize, here } from "./permissions.ts";
 import { within } from "./within.ts";
 
 /**
- * Production monitoring, agent-shaped, on the durable ingestion boundary.
- *
- * There is no setup object and no account-wide health machine. An agent binds
- * to its platform, holds that platform's sealed monitoring key, and its
- * `pull_production_calls` switch is the only stored monitoring choice in the
- * product. The switch opens one machine notebook — `monitoring_state` — and
- * the poller works from that notebook joined to the agent's own key (ADR-0015).
- *
- * Once a call arrives, nothing here owns it. Its evidence goes to the
- * write-ahead log, the object store and then the trace store, where committed
- * span identity is the exactly-once rule; there is no receipt book and no
- * failure list. What is left in Postgres is a retry clock and, for a call that
- * could not be turned into evidence, a bounded budget followed by an expiring
- * marker (ADR-0014).
- *
- * Push is not here at all, by design: the OTLP door authenticates with the
- * project key, stores and grades, and writes nothing down about having done it.
+ * Production polling uses each agent's platform binding, encrypted monitoring key,
+ * and monitoring_state. The pull_production_calls flag enables polling.
+ * Evidence enters durable ingestion and the trace store. Postgres holds polling
+ * progress, bounded retries, and expiring failure markers. OTLP push ingestion
+ * uses the project key separately from this polling state.
  */
 
 const HISTORY_MILLISECONDS = 30 * 24 * 60 * 60 * 1_000;
@@ -156,22 +144,9 @@ export type AgentPullState = {
 };
 
 /**
- * Bind one agent to its platform, seal its key, flip the switch, and open the
- * notebook — inside whatever transaction the caller is already in.
- *
- * **It takes the transaction rather than opening one**, because the two callers
- * need different amounts of work to be one atomic act. Enabling an agent that
- * already exists is this and nothing else. Registering an unregistered platform
- * agent is *this plus the insert that made the row*, and splitting those two
- * across separate commits is what leaves an unbound agent behind when the
- * uniqueness index refuses the switch.
- *
- * **The deep import happens once, on an agent's first ever switch-on, and only
- * for Retell.** Turning the switch on again is a new observation of the
- * provider from that moment: a fresh `import_generation`, a `regular_floor_at`
- * at the switch, and no backfill of what happened while it was off. Pause and
- * resume do no backfill, deliberately — a customer who wants Egma to look
- * further back has to say so, and in v1 there is no way to say it twice.
+ * Bind the agent, encrypt its key, and enable polling in the caller's transaction.
+ * First-time Retell setup schedules historical import. Re-enabling resets the scan
+ * and generation from now, without importing the disabled interval. Clear older retries.
  */
 async function bindAndOpen(
   tx: Queryable,
@@ -288,16 +263,9 @@ function refuseDifferentPlatformAgent(
 }
 
 /**
- * Turn pull on for one agent: bind it to its platform, seal its monitoring
- * key, and open its notebook.
- *
- * **The key reaches this from wherever the person last gave it.** Connecting
- * an agent seals it here first (`sealAgentMonitoringKey`), so a switch-on that
- * follows a connect spends the copy the agent already holds rather than asking
- * again — one paste per agent, ever (founder ruling, 2026-08-24). A Retell
- * chat connection still keeps its own copy on the connection, because
- * simulation custody and monitoring custody are two jobs; what changed is that
- * a person is no longer asked twice to supply them.
+ * Enable polling for an active agent using the supplied monitoring key.
+ * Reject a different platform agent identity and update the binding and polling
+ * state together. Callers may resolve an existing agent key before this call.
  */
 export async function enablePullProductionCalls(
   auth: AuthContext,
@@ -351,18 +319,8 @@ export async function enablePullProductionCalls(
 }
 
 /**
- * Register one platform agent Egma does not know yet, and start pulling it —
- * as one act.
- *
- * **Why this exists rather than a create followed by an enable.** Two requests
- * that both tick the same unregistered platform agent can both write an agent
- * row before either reaches the uniqueness-enforced switch. Split across two
- * commits, the loser's row survives: an agent in the roster bound to nothing,
- * belonging to a request that was told it had failed. One transaction makes
- * the refusal undo the row it was about to be attached to.
- *
- * The insert is `agents.ts`'s own, so the identity, the tenancy stamp and the
- * held-name refusal are decided in one place for every agent Egma writes.
+ * Create the agent and enable production polling in one transaction so a failed
+ * platform binding cannot leave an unbound agent row.
  */
 export async function registerAgentPullingProductionCalls(
   auth: AuthContext,
@@ -431,35 +389,9 @@ export async function disablePullProductionCalls(
 }
 
 /**
- * Bind an agent to its platform agent and seal its key, without turning the
- * pull switch on.
- *
- * **This exists because the key is pasted once per agent, ever** (the
- * founder's ruling of 2026-08-24), and connecting an agent is where a person
- * pastes it — whether or not they also tick "Pull production calls". Sealing
- * it there is what lets every later connect flow for the same agent list the
- * account without asking for the secret a second time.
- *
- * It is deliberately *not* `enablePullProductionCalls` with a flag. That
- * function flips the switch and opens the machine notebook, which is the act
- * of starting an observation; this one only records custody. A save that asks
- * for both calls both, in that order, and the switch alone decides what the
- * poller does.
- *
- * **One egma agent binds to one platform agent, and a second one is refused
- * here.** Retell gives a voice agent and a chat agent different ids, so
- * somebody who adds a phone connection for `agent_voice_1` and then a chat
- * connection for `agent_chat_9` under one egma agent is asking for two
- * bindings. Overwriting quietly is the dangerous half: monitoring would go on
- * running under the same name while reading a different Retell agent, and the
- * transcripts of one agent would accumulate against the results history of
- * another. So the binding is read and compared **inside the transaction that
- * would replace it**, with the row held — a check before the write would be a
- * race with the very next request. An unset binding binds as before.
- *
- * Fronting two platform agents from one egma agent is a schema change (two
- * binding columns, or a binding table) and a separate ticket. This refusal is
- * what says so out loud instead of pretending it already works.
+ * Store an active agent's monitoring key without enabling polling. Lock the agent
+ * and reject a different platform agent identity before replacing credentials.
+ * Enabling polling also requires enablePullProductionCalls.
  */
 export async function sealAgentMonitoringKey(
   auth: AuthContext,
@@ -592,18 +524,8 @@ export type MonitoringPullTarget = {
   readonly seenPaginationKeys: readonly string[];
   readonly importGeneration: number;
   /**
-   * This agent has at least one transient call row of either shape.
-   *
-   * Answered inside the claim's own statement, so a poller can skip the retry
-   * pass entirely without asking a second question. That matters because the
-   * common case by far is an agent that owes nothing and a page that is empty,
-   * and it has to cost one claim and one provider read — not a query per turn
-   * looking for work that is almost never there.
-   *
-   * It asks about the agent rather than about its current import generation,
-   * and it can: turning the switch on again deletes the rows belonging to the
-   * observation it replaces, so a row from a generation nothing reads cannot
-   * exist.
+   * Whether this agent has retry or failure-marker rows, read in the claim statement.
+   * Re-enabling polling deletes prior generations, so this probe can check by agent alone.
    */
   readonly hasTransientCallState: boolean;
   readonly consecutiveFailures: number;
@@ -613,20 +535,9 @@ export type MonitoringPullTarget = {
 };
 
 /**
- * Claim one due pulled agent before any provider request.
- *
- * Due-ness is the switch joined to the notebook: an agent whose switch is off
- * keeps its notebook and is never claimed. Backoff is per agent, so a shared
- * key that starts refusing is discovered independently by each agent's poll —
- * there is no account-wide gate to consult, because there is no account-wide
- * anything.
- *
- * The fixed window is decided here and then held: a scan already in flight is
- * resumed exactly as it was, and a new regular scan reaches five minutes back
- * from the last completed upper bound so that a call the provider exposed a
- * little late is still found. That subtraction has one limit — a floor, while
- * one is set, which a switch-on uses to stop the first window after it reaching
- * behind the moment the customer turned it on.
+ * Lease one due Retell agent with polling enabled before making provider requests.
+ * Resume an existing fixed scan; otherwise scan from the last completed bound
+ * with the regular overlap, limited by any switch-on floor. Backoff is per agent.
  */
 export async function claimDueMonitoringPull(
   options: {
@@ -878,17 +789,8 @@ export async function yieldMonitoringLease(
 }
 
 /**
- * Finish the fixed scan and release its lease.
- *
- * The completed upper bound moves here and only here, which is what makes the
- * next regular window start where this one stopped. The floor is cleared at the
- * same moment: a window has now completed above it, so later polls regain the
- * ordinary five-minute overlap.
- *
- * A success ends this agent's cool-down: the retry clock returns to zero and
- * the last refusal is forgotten, which is what lets a parked key start pulling
- * again the moment the provider answers. Nothing about it is a health word — no
- * screen reads these columns.
+ * Finish the owned scan, advance completedThrough, and clear the switch-on floor.
+ * Release the lease, reset failure state, and schedule the next regular poll.
  */
 export async function finishMonitoringScan(
   auth: AuthContext,
@@ -953,20 +855,9 @@ export type MonitoringFailureKind =
   | "provider_unavailable";
 
 /**
- * Record one provider refusal against this agent and release its lease.
- *
- * **The cool-down is per agent, and it is a clock rather than a condition.**
- * `consecutive_failures` is the exponent of the backoff ladder and nothing
- * else; `next_poll_at` is where the ladder puts this agent. No screen reads
- * either, and there is no account-wide gate to raise — a sealed key on one
- * agent is unrecognizable as the same key sealed on another, so a shared key
- * that starts refusing is discovered independently by each agent's poll.
- *
- * **A refused key parks until the customer acts.** A lesser failure may not
- * shorten a longer park: once Retell has said the key is wrong, a rate limit
- * arriving afterwards cannot bring the next poll forward. Rotating the key or
- * turning the switch on again is what ends it, because that is the customer
- * doing the one thing that could make the answer different.
+ * Record a provider failure and release the owned lease. Keep an existing invalid-key
+ * park or later retry time for lesser failures. If the key changed during the request,
+ * schedule a fresh poll without charging the old failure to the new key.
  */
 export async function failMonitoringPull(
   auth: AuthContext,
@@ -1064,14 +955,9 @@ export async function failMonitoringPull(
 }
 
 /**
- * Release a lease after a call-only failure without moving its fixed scan.
- *
- * **The retry clock does not climb here.** `consecutive_failures` means "the
- * provider refused this agent", and what reaches this function is neither
- * refusal nor rate limit — a broken page contract, an unreadable call id, an
- * internal fault. Counting it would push the ladder out for something the
- * provider never said no to. The plain retry the caller passes is the whole
- * answer.
+ * Release the owned lease for a call-specific or internal error without increasing
+ * provider failure counts or moving the scan. Retry at the supplied time, or now
+ * if the monitoring key changed.
  */
 export async function releaseMonitoringLease(
   auth: AuthContext,
@@ -1129,25 +1015,9 @@ export async function releaseMonitoringLease(
 }
 
 /**
- * Move "last heard from" forward for one pulled agent, and never backward.
- *
- * **The merge is monotone, and it has to be.** Evidence becomes durable in one
- * order and is drained in another, and the instant a caller passes is the one
- * the evidence was *received* rather than the one it is being written at — so a
- * replayed segment or a historical import carries an older instant than the row
- * already holds. A plain assignment would answer a customer's "last production
- * conversation" by winding it back to a call from an hour ago. `greatest` keeps
- * whichever instant is later, and the `coalesce` is what makes the first write
- * work at all: a column that has never been written is null, and
- * `greatest(null, x)` is null in Postgres.
- *
- * **Only pull has a row to stamp.** A pushing agent writes nothing down — the
- * OTLP door stores and grades and keeps no bookkeeping — so a drained segment
- * that names no pulled platform agent moves nothing here, deliberately.
- *
- * Batched by construction: the caller names a platform agent, never a call. One
- * drained segment carrying two hundred conversations of one agent is one
- * statement here.
+ * Advance lastReceivedAt to the latest evidence receipt time for the bound agent.
+ * Historical imports and replays must not move it backward. Update once per agent
+ * in a drained segment; agents without monitoring state have no row to update.
  */
 export async function recordPulledCallReceived(
   auth: AuthContext,
@@ -1257,20 +1127,9 @@ function transientOf(row: TransientRow): TransientRetellCall {
 }
 
 /**
- * What this page already knows about the calls it listed, in **one** statement.
- *
- * The poller asks this once per non-empty page and never once per call. What
- * comes back decides two different things: a call with a scheduled retry is
- * accounted for and must not be hydrated again this turn, and a call with an
- * active marker must not be hydrated at all — the five-minute overlap lists a
- * dropped call again on purpose, and treating that repeat as new work is how a
- * three-attempt budget quietly becomes an endless one.
- *
- * **Scoped to one import generation.** Selecting the agent again is a new,
- * deliberate observation of the provider's history, so state written under an
- * earlier generation is invisible here and the new import may take its own
- * bounded look. An ordinary repeated poll carries the same generation and sees
- * everything, which is the difference the whole rule turns on.
+ * Fetch retry and unexpired failure-marker state for a page of calls in one query.
+ * Scope to the agent and import generation so repeated polls share the budget
+ * and a new observation does not inherit an old generation's failures.
  */
 export async function transientRetellCallState(
   auth: AuthContext,
@@ -1352,18 +1211,9 @@ export type RetellCallAttemptOutcome =
     };
 
 /**
- * Count one failed attempt at a listed call, and either schedule the next
- * automatic retry or end the budget.
- *
- * **The count lives here rather than in a process**, which is the whole point:
- * a restart in the middle of a budget resumes it, and a provider listing the
- * same call again does not restart it. The ceiling is a stored check as well as
- * an arithmetic one, so no timing inside any implementation can produce a
- * fourth automatic retry.
- *
- * A row that no longer applies — an expired marker, or state from an earlier
- * import generation — is replaced rather than incremented. That is the same
- * rule the batched lookup uses, said once more where it decides a budget.
+ * Persist a failed call attempt under the owned monitoring lease. Continue an
+ * applicable generation's budget; replace expired or older state. Schedule another
+ * attempt below the limit, otherwise write an expiring failure marker.
  */
 export async function recordRetellCallAttempt(
   auth: AuthContext,
@@ -1488,17 +1338,8 @@ export async function recordRetellCallAttempt(
 }
 
 /**
- * Forget one call's transient state, because its evidence is durable.
- *
- * Called after object-store acceptance and never before it. A row deleted on
- * hydration success would be a row deleted while the evidence was still only in
- * this process's memory, and a crash in that gap would leave a call nobody is
- * still trying and nobody has stored.
- *
- * Scoped to the project-and-call pair the row is unique on, which is the scope
- * `recordRetellCallAttempt` finds and reassigns it by: two pulled agents that
- * both meet one provider call keep one row and one budget, so whichever agent
- * makes that call durable is the one that clears it.
+ * Remove transient call state only after object-store acceptance makes evidence
+ * durable. Scope by project and provider call ID, matching the row's unique key.
  */
 export async function deleteRetellCallRetry(
   auth: AuthContext,

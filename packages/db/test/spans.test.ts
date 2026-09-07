@@ -19,19 +19,8 @@ import {
 } from "./support/clickhouse.ts";
 
 /**
- * The one way anything writes a span.
- *
- * What the ingest door's own tests cannot show is what this function does when
- * the batch is enormous or a single field is: those are storage decisions, they
- * belong to the module that owns the table, and they are the two Langfuse named
- * as real requirements rather than refinements. A transcript will reach them.
- *
- * Every storage assertion here runs against a real ClickHouse. What a repeated
- * span does to the visible row count, what a named insert does to a retry that
- * regrouped its bytes, and whether an insert of ten thousand rows arrives whole
- * are engine behaviours, and a substitute would confirm only the strings egma
- * sends. The two pure assertions — the 130-month plan and the fingerprint —
- * reach nothing and are proved as the arithmetic they are.
+ * Use real ClickHouse for large inserts, replay, and visible-row behavior.
+ * Block planning and fingerprint checks are pure.
  */
 
 let store: MigratedTraceStore;
@@ -395,15 +384,9 @@ describe("what a span says, as one comparable value", () => {
   });
 
   /**
-   * **The fingerprint of one fixed span, written down.**
-   *
-   * The stored `content_hash` is taken over key names, so renaming one — the
-   * frozen `connection_kind`, say, which no longer matches its TypeScript
-   * field — moves the fingerprint of every span already stored, and the
-   * drainer then reads each replay as a second account of one immutable
-   * identity and refuses the segment. Adding a field to `NewSpan` does the
-   * same. Neither is forbidden; both need somebody to decide it, and this is
-   * the line that makes them ask.
+   * Pin the persisted fingerprint format, including the connection_kind key.
+   * Changing its fields or key names requires a compatibility decision or
+   * existing spans will appear to conflict when replayed.
    */
   it("is the same fingerprint yesterday's Egma wrote", () => {
     expect(spanContentHash(span())).toBe(
@@ -483,17 +466,9 @@ describe("sending the same batch twice", () => {
   });
 
   /**
-   * **One identity is one visible span, whatever arrives claiming it.** This
-   * used to assert the opposite — that changed evidence under a reused span id
-   * was stored beside the original as the different thing it was — and that is
-   * exactly the state the identity exists to make impossible: two accounts of
-   * one immutable span, both visible, with nothing to say which one happened.
-   *
-   * Which of the two ends up visible is deliberately not asserted, because the
-   * engine's answer is not the product's. A second, different account of one
-   * identity is an integrity defect, and it is refused before it is written —
-   * by the caller, against `committedSpans`, which is where that guarantee is
-   * proved. What this function owes is that no reader is ever handed both.
+   * The engine exposes one row per span identity but does not decide which
+   * evidence is valid. Callers must reject conflicting fingerprints before
+   * writing; this case tests only the visible row count.
    */
   it("never leaves two accounts of one span visible", async () => {
     const traceId = "aaaa2222aaaa2222aaaa2222aaaa2222";

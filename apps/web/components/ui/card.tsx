@@ -3,16 +3,8 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * A Pure Paper group at the 12px card radius.
- *
- * No shadow: "Tables, sidebars, inputs, and ordinary cards do not float." The
- * structure comes from the border and the change of surface, which is what
- * keeps a page of cards readable when there are twenty of them.
- *
- * The `m-0` on the title and the description is not decoration. Tailwind's
- * reset removes every default margin and `globals.css` gives those defaults
- * back for the CSS Modules pages that still expect them, so a heading or a
- * paragraph inside a new component has to say it wants none.
+ * Bordered card using the shared shape and surface tokens.
+ * Reset title and description margins so base typography adds no spacing.
  */
 function Card({ className, ...props }: ComponentProps<"div">) {
   return (

@@ -1,28 +1,12 @@
-import { GRADER_DEFINITION_CATALOG, PREDEFINED_GRADERS } from "@egma/db";
+import { GRADER_DEFINITION_CATALOG, PREDEFINED_GRADERS, RECOMMENDED_GRADER_MODEL } from "@egma/db";
 import { describe, expect, it } from "vitest";
 
 import { judgeFor, type JudgeInput } from "../src/judge/index.ts";
 
 /**
- * One real question put to a real OpenAI judge — opt-in.
- *
- * Everything else in this suite runs on the scripted judge, which proves egma's
- * side of the seam: the fan-out, the isolation, the skipped denominator, the
- * errored sibling. It proves nothing at all about the wire. This file is the
- * other half — the provider, the request shape, the answer shape — against the
- * real endpoint, so that a change at OpenAI is something a test can find rather
- * than something a customer finds.
- *
- * It is opt-in because CI holds no OpenAI account. With no key in the
- * environment it skips — visibly, never failing, never waiting on anybody:
- *
- *     TEST_OPENAI_API_KEY=sk-... npx vitest run apps/grader/test/live-openai
- *
- * The model is the model in the shipped Expected behaviors definition. The
- * test does not accept a second model setting: it proves the exact release
- * default and its provider settings rather than a test-only substitute.
- * Nothing here touches a database or service: one function, one request, one
- * answer, so a failure names the provider rather than the harness.
+ * Opt-in live test of the shipped Expected behaviors model and provider settings.
+ * Skips without TEST_OPENAI_API_KEY; makes one model request and uses no stores.
+ * Run: TEST_OPENAI_API_KEY=... npx vitest run apps/grader/test/live-openai
  */
 
 /**
@@ -35,7 +19,7 @@ const EXPECTED_BEHAVIORS =
   GRADER_DEFINITION_CATALOG.find(
     (entry) => entry.id === PREDEFINED_GRADERS.expectedBehaviors,
   );
-const JUDGE_MODEL = EXPECTED_BEHAVIORS?.judgeModel;
+const JUDGE_MODEL = RECOMMENDED_GRADER_MODEL;
 if (
   EXPECTED_BEHAVIORS?.prompt === null ||
   EXPECTED_BEHAVIORS?.prompt === undefined ||
@@ -46,7 +30,7 @@ if (
 }
 
 const API_KEY = process.env["TEST_OPENAI_API_KEY"]?.trim() ?? "";
-const THE_PROMPT = EXPECTED_BEHAVIORS.prompt;
+const THE_PROMPT = "Judge instruction_1. Return one result with id instruction_1, decision met/not_met/cannot_determine, rationale, and cited_turns.";
 
 /** One short conversation, plainly settling one thing and plainly not another. */
 const EVIDENCE: JudgeInput = {
@@ -71,16 +55,17 @@ describe.skipIf(API_KEY === "")(
     ).ask;
 
     it("answers met, with a reason and a turn it rests on", async () => {
-      const answer = await judge({
+      const response = await judge({
         prompt: THE_PROMPT,
         criterion: "the agent confirms the new time back before finishing",
-        assertion: "behavior_1",
         evidence: EVIDENCE,
+        expectedBehaviors: [],
       });
 
+      const answer = response.results[0]!;
       expect(answer.decision).toBe("met");
       expect(answer.rationale.trim()).not.toBe("");
-      for (const cited of answer.citedTurns) {
+      for (const cited of answer.cited_turns) {
         expect(cited).toBeGreaterThanOrEqual(1);
         expect(cited).toBeLessThanOrEqual(EVIDENCE.transcript.length);
       }
@@ -94,13 +79,14 @@ describe.skipIf(API_KEY === "")(
      * is that it never calls it met.
      */
     it("does not call a criterion met when the conversation never touched it", async () => {
-      const answer = await judge({
+      const response = await judge({
         prompt: THE_PROMPT,
         criterion: "the agent quotes the price of the cleaning in dollars",
-        assertion: "behavior_1",
         evidence: EVIDENCE,
+        expectedBehaviors: [],
       });
 
+      const answer = response.results[0]!;
       expect(answer.decision).not.toBe("met");
       expect(["not_met", "cannot_determine"]).toContain(answer.decision);
     });

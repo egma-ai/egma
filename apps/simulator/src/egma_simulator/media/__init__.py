@@ -1,13 +1,7 @@
-"""Media backends give Pipecat one transport for an outbound phone call.
-
-A backend creates the transport processors, dials, waits for an answer,
-and tears the call down. The transport owns frames, conversion, buffering,
-and pacing. It never exposes a PCM exchange or a processing rate to Egma.
-
-Backends receive checked deployment settings. They must keep credentials
-out of logs, exceptions, and returned values. A refusal is ``not_answered``
-only when the far end declined or did not pick up; path and carrier faults
-are ``error``.
+"""Phone backends create a Pipecat transport, dial, wait for an answer, and clean up.
+The transport owns audio frames, conversion, buffering, and pacing.
+Keep credentials out of output. Only declined or unanswered calls are
+not_answered; connection and carrier faults are error.
 """
 
 from __future__ import annotations
@@ -61,15 +55,8 @@ class MediaBackendError(Exception):
 
 
 NOT_ANSWERED_STATUSES = frozenset({408, 410, 480, 486, 487, 600, 603, 604})
-"""The SIP statuses that mean the far end, not the path to it.
-
-Request Timeout, Gone, Temporarily Unavailable, Busy Here, Request
-Terminated, Busy Everywhere, Decline, Does Not Exist Anywhere — a phone
-that rang out, was engaged, or was refused by whoever holds it. Every
-other status is something between here and there going wrong, and that is
-a fault somebody has to fix rather than a call nobody picked up. The
-vocabulary is the PSTN's own, so any bridge riding a SIP trunk maps
-through this same table.
+"""SIP statuses classified as an unanswered or declined call.
+Other statuses are connection or carrier faults.
 """
 
 
@@ -160,16 +147,8 @@ def transport_time(frame: object, named: str) -> float | None:
 
 
 class PlayoutClock:
-    """When the transport will play the audio it is handed next.
-
-    Audio handed to a transport does not start playing when it arrives:
-    it starts when everything already queued has finished. So the first
-    frame of an utterance plays now and the rest follow it end to end,
-    which is what makes a recording of the persona the caller's own
-    experience rather than the speech leg's output rate.
-
-    ``cleared`` is a queue thrown away — an interruption — after which
-    the next frame plays immediately again.
+    """Track playout time after already-queued audio.
+    cleared resets the queue after interruption so the next frame starts immediately.
     """
 
     def __init__(self) -> None:
@@ -188,18 +167,9 @@ class PlayoutClock:
 
 
 class PlayoutStamp(FrameProcessor):
-    """Say when a real-time transport plays out what it has been handed.
-
-    Goes after the transport's own output processor, where a frame has
-    been written out and is on its way to the far end. A transport takes
-    audio faster than it plays it — a whole utterance can go over in a
-    moment and then play for seconds — so a frame that has just been
-    written is not audio anybody has heard yet. It is audio that starts
-    once everything written before it has finished.
-
-    An interruption throws away whatever was written and not yet played,
-    so this says when that happened too, and the recording lets that
-    audio go instead of claiming the persona spoke it.
+    """Observe audio after the transport output processor and calculate queued playout
+    time.
+    Report interruptions so the recording discards audio removed before playback.
     """
 
     def __init__(self) -> None:

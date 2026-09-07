@@ -1,14 +1,6 @@
 /**
- * Logging in for the promptless `egma login` command.
- *
- * There is one flow here. `egma login` is a terminal-text adapter over it, so
- * tests exercise the same path a coding agent uses.
- *
- * Nothing in here draws, and nothing in here reads a keystroke. What the
- * developer has to see arrives through `onPrompt`; browser approval is polled
- * at the pace set by the platform. A flow that
- * asked a question directly could not be both browser approval and a
- * promptless command.
+ * Promptless login flow. Send display content through onPrompt and poll browser
+ * approval at the platform interval; do not read terminal input here.
  */
 
 import {

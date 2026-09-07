@@ -20,25 +20,9 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The persona routes, over real HTTP against real Postgres.
- *
- * What is asserted here is what a caller observes: the shapes, the envelope,
- * who may do what, and every refusal sentence word for word. **Refusal wording
- * is contract** — it is what a page shows somebody and what tells them their
- * next move — so a sentence that changed without anybody deciding to change it
- * fails here.
- *
- * The factory beneath has its own tests and none of them are repeated. What is
- * new at this seam is everything the wire adds: a project named on every
- * browser request, the codes a client branches on, and the fact that a
- * viewer's write is refused by the server whether or not a browser was
- * involved.
- *
- * **The authored person is flat, and there is no old shape.** A body still
- * carrying a `traits` wrapper or either expectation token is refused rather
- * than half-applied, and that refusal is asserted here field by field: a
- * client written against the shape this replaced must be told, never quietly
- * answered `200` with nothing of its edit landed.
+ * Persona HTTP coverage for payloads, permissions, project selection, and
+ * refusal codes and messages. Reject traits wrappers and obsolete identity
+ * revision fields; behavior edits use expectedVersionId.
  */
 
 let api: TestApi;
@@ -94,7 +78,7 @@ type WirePersona = {
   identityName: string;
   personality: string;
   language: string;
-  models: PersonaModels;
+  settings: { id: string; models: PersonaModels } | null;
 };
 
 function personaIn(answer: Answer): WirePersona {
@@ -117,22 +101,16 @@ async function createPersonaThrough(
   return personaIn(made);
 }
 
-/**
- * Egma's own persona, readable from every project.
- *
- * It used to be found through the project's `default_persona_id` pointer. That
- * column is gone with everything that guarded it, so the catalog's fixed
- * identifier is what names them now — which is what it always was underneath.
- */
+/** Use the shared persona catalog ID; projects store no default-persona pointer. */
 const PREDEFINED_PERSONA = EGMA_PROVIDED_PERSONAS.defaultPersona;
 
-/** The one sentence every write to a Predefined persona is refused with. */
+/** Refusal message for protected Egma-provided persona edits. */
 function predefinedRefusal(personaId: string): Record<string, unknown> {
   return {
     error: "egma_provided_persona",
     message:
-      `Persona ${personaId} is Predefined and cannot be changed or deleted. ` +
-      "Fork it to make a Custom persona you can edit.",
+      `Persona ${personaId} is Predefined. Its core and metadata cannot be changed, and it cannot be deleted. ` +
+      "Clone it to make a Custom persona you can edit.",
   };
 }
 
@@ -200,7 +178,7 @@ describe("creating and reading a persona", () => {
     expect(made.archivedAt).toBeNull();
     expect(made.owner).toBe("organization");
     expect(made.versionId).toEqual(expect.any(String));
-    expect(made.models).toEqual(RECOMMENDED_PERSONA_MODELS);
+    expect(made.settings?.models).toEqual(RECOMMENDED_PERSONA_MODELS);
 
     // The retired machinery is off the wire entirely, not merely unused.
     for (const gone of ["traits", "revision", "isDefault"]) {
@@ -275,15 +253,11 @@ describe("creating and reading a persona", () => {
 
     const missingModels = await browse("POST", "/v1/personas", ada, {
       projectId: ada.projectId,
-      name: "No implicit execution",
+      name: "Recommended project settings",
       ...BEHAVIOR,
     });
-    expect(missingModels.statusCode).toBe(422);
-    expect(missingModels.body).toEqual({
-      error: "unprocessable",
-      message:
-        "a persona needs one complete models value with llm, stt and tts",
-    });
+    expect(missingModels.statusCode).toBe(201);
+    expect(personaIn(missingModels).settings?.models).toEqual(RECOMMENDED_PERSONA_MODELS);
 
     const mismatchedStt = await browse("POST", "/v1/personas", ada, {
       projectId: ada.projectId,
@@ -301,13 +275,8 @@ describe("creating and reading a persona", () => {
   });
 
   /**
-   * **The shape this replaced is refused, never half-applied.**
-   *
-   * A client written against the old persona API sent a `traits` wrapper with
-   * an accent and a background noise inside it, and named two expectations on
-   * every edit. None of those exist. Dropping them silently would answer `201`
-   * to a create whose personality nobody read, and `200` to an edit that
-   * believed in a guard that is not there — so each is refused by name.
+   * Reject obsolete traits, accent, background-noise, and revision fields.
+   * Behavior edits use expectedVersionId; unknown fields must not be silently ignored.
    */
   it("refuses every key the old persona shape carried", async () => {
     api = await createApi("personas_no_old_shape");
@@ -327,7 +296,6 @@ describe("creating and reading a persona", () => {
       // client would send, and text is all this door has to refuse.
       revision: "rev_01M0E4EVJ6ECGVJEA4NSBTC0CC",
       expectedRevision: "rev_01M0E4EVJ6ECGVJEA4NSBTC0CC",
-      expectedVersionId: made.versionId,
       isDefault: true,
       scenario: "Their Thursday cleaning has to move to next week.",
       goal: "Reschedule the appointment.",
@@ -355,7 +323,7 @@ describe("creating and reading a persona", () => {
       expect(edited.statusCode, field).toBe(422);
       expect(edited.body, field).toEqual({
         error: "unprocessable",
-        message: `a persona has no key "${field}"; ${carries}`,
+        message: `a persona has no key "${field}"; ${carries.slice(0, -1)}, expectedVersionId.`,
       });
     }
 
@@ -383,7 +351,7 @@ describe("creating and reading a persona", () => {
         },
       });
       expect(made.statusCode, JSON.stringify(made.body)).toBe(201);
-      expect(personaIn(made).models.tts.speed).toBe(speed);
+      expect(personaIn(made).settings?.models.tts.speed).toBe(speed);
     }
 
     for (const speed of [
@@ -424,7 +392,7 @@ describe("creating and reading a persona", () => {
       models: terra,
     });
     expect(made.statusCode, JSON.stringify(made.body)).toBe(201);
-    expect(personaIn(made).models.llm).toEqual({
+    expect(personaIn(made).settings?.models.llm).toEqual({
       provider: "openai",
       model: "gpt-5.6-terra",
     });
@@ -467,13 +435,7 @@ describe("creating and reading a persona", () => {
       personality:
         "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
       language: "en-US",
-      models: {
-        ...RECOMMENDED_PERSONA_MODELS,
-        llm: {
-          provider: "openai",
-          model: "gpt-5.6-terra",
-        },
-      },
+      settings: null,
     });
 
     const refused = await browse(
@@ -522,7 +484,7 @@ describe("the list", () => {
       `/v1/personas?projectId=${ada.projectId}&search=O`,
       ada,
     );
-    // "Two" was deleted, and the Predefined persona carries no `o` in its
+    // "Two" was deleted, and the Egma-provided persona carries no `o` in its
     // name, so what one letter leaves is the two rows that do hold it.
     expect(
       (searched.body.personas as WirePersona[]).map((one) => one.name),
@@ -716,6 +678,7 @@ describe("editing a persona", () => {
     const changed = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
       projectId: ada.projectId,
       personality: "Vera, after a long wait.",
+      expectedVersionId: made.versionId,
     });
     expect(changed.statusCode).toBe(200);
     expect(personaIn(changed).version).toBe(2);
@@ -726,7 +689,7 @@ describe("editing a persona", () => {
       "PATCH",
       `/v1/personas/${made.id}`,
       ada,
-      { projectId: ada.projectId, identityName: "Vera Lindqvist" },
+      { projectId: ada.projectId, identityName: "Vera Lindqvist", expectedVersionId: personaIn(changed).versionId },
     );
     expect(renamedIdentity.statusCode).toBe(200);
     expect(personaIn(renamedIdentity).version).toBe(3);
@@ -737,6 +700,7 @@ describe("editing a persona", () => {
       identityName: "Vera Lindqvist",
       personality: "Vera, after a long wait.",
       language: made.language,
+      expectedVersionId: personaIn(renamedIdentity).versionId,
     });
     expect(identical.statusCode).toBe(200);
     expect(personaIn(identical).version).toBe(3);
@@ -760,12 +724,12 @@ describe("editing a persona", () => {
     ]);
   });
 
-  it("mints one version for one complete models change", async () => {
+  it("saves complete project models without changing core history", async () => {
     api = await createApi("personas_models_version");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const made = await createPersonaThrough(ada, "Modelled Maya");
     const models: PersonaModels = {
-      ...made.models,
+      ...RECOMMENDED_PERSONA_MODELS,
       tts: {
         provider: "openai",
         model: "gpt-4o-mini-tts",
@@ -780,28 +744,21 @@ describe("editing a persona", () => {
     });
 
     expect(changed.statusCode).toBe(200);
-    expect(personaIn(changed)).toMatchObject({ version: 2, models });
+    expect(personaIn(changed)).toMatchObject({ version: 1, settings: { models } });
+    expect(personaIn(changed).versionId).toBe(made.versionId);
 
     const history = await browse(
       "GET",
       `/v1/personas/${made.id}/versions?projectId=${ada.projectId}`,
       ada,
     );
-    expect(history.body.versions).toMatchObject([
-      { version: 2, ...BEHAVIOR, models },
-      { version: 1, ...BEHAVIOR, models: RECOMMENDED_PERSONA_MODELS },
-    ]);
+    expect(history.body.versions).toMatchObject([{ version: 1, ...BEHAVIOR }]);
+    expect((history.body.versions as Record<string, unknown>[])[0]).not.toHaveProperty("models");
+    expect((history.body.versions as Record<string, unknown>[])[0]).not.toHaveProperty("settings");
   });
 
-  /**
-   * **Last write wins, and nothing is asked for to prove it.**
-   *
-   * The revision token and the expected version id are gone from this door.
-   * Two edits sent one after the other both land, and the second one is what
-   * the persona says afterwards — the clobber risk this effort accepted
-   * knowingly, asserted so that nobody re-adds a guard by accident.
-   */
-  it("takes a second edit written against what the first one replaced", async () => {
+  /** Metadata writes remain independent of immutable core version changes. */
+  it("takes a second metadata edit without requiring a core version", async () => {
     api = await createApi("personas_last_write_wins");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const made = await createPersonaThrough(ada, "Contested Cora");
@@ -851,7 +808,9 @@ describe("forking a persona", () => {
     expect(fork.identityName).toBe(made.identityName);
     expect(fork.personality).toBe(made.personality);
     expect(fork.language).toBe(made.language);
-    expect(fork.models).toEqual(made.models);
+    expect(made.settings).toBeNull();
+    expect(fork.settings?.models).toEqual({ ...RECOMMENDED_PERSONA_MODELS,
+      llm: { provider: "openai", model: "gpt-5.6-terra" } });
     expect(fork.owner).toBe("organization");
     // Its own history, starting over: the source's versions are the source's.
     expect(fork.version).toBe(1);
@@ -1092,6 +1051,7 @@ describe("history and usage", () => {
     const moved = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
       projectId: ada.projectId,
       personality: "Hana has waited too long and is now blunt.",
+      expectedVersionId: made.versionId,
     });
     // The persona really moved on, so reading version 1 below is reading
     // something the persona has left behind rather than where they still are.

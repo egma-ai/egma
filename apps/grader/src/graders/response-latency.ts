@@ -6,17 +6,9 @@ import type { Execution, GraderResult } from "./contract.ts";
 const RESPONSE_LATENCY_MEASURE = "turn_response_latency";
 
 /**
- * Grade the p90 of every measured turn response time.
- *
- * **The p90 rather than the mean, since 2026-08-29.** A mean hides the one
- * turn that took nine seconds, and the tail is what a caller feels. It is also
- * the reduction the simulation page leads with, so a developer reading a
- * conversation's latency and this grader judging it are now reading one
- * number — which the mean-against-p90 split they had before made impossible.
- *
- * Below ten samples the nearest-rank p90 is the slowest turn. That is the
- * honest answer for a short conversation rather than an accident: nearest-rank
- * never interpolates a number nothing measured.
+ * Grade p90 turn response latency, the same reduction shown by the UI.
+ * Nearest-rank p90 uses the slowest turn below ten samples and never
+ * interpolates an unobserved value.
  */
 export function executeResponseLatency(execution: Execution): GraderResult {
   const nothingToGrade = execution.conversation.nothingToJudgeBecause;

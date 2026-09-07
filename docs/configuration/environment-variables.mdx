@@ -413,9 +413,9 @@ These values are for contributors. They are not self-host deployment inputs.
 
 ## Model provider credentials
 
-Persona versions choose the LLM, speech-to-text, text-to-speech, and voice.
-LLM grader versions choose the model they use. The variables below supply only
-the credentials needed to call those providers.
+Project persona settings choose the LLM, speech-to-text, text-to-speech, and voice.
+Project grader settings choose the LLM used for grading. The variables below
+supply only the credentials needed to call those providers.
 
 Put one current key per selected provider in `.env`, then run
 `egma self-host up` so the containers receive the changed environment.
@@ -426,11 +426,11 @@ Put one current key per selected provider in `.env`, then run
 </ParamField>
 
 <ParamField path="EGMA_DEEPGRAM_API_KEY" type="string">
-  The deployment's Deepgram key for persona versions that select Deepgram STT.
+  The deployment's Deepgram key for persona settings that select Deepgram STT.
 </ParamField>
 
 <ParamField path="EGMA_CARTESIA_API_KEY" type="string">
-  The deployment's Cartesia key for persona versions that select Cartesia TTS.
+  The deployment's Cartesia key for persona settings that select Cartesia TTS.
 </ParamField>
 
 ### Egma Cloud provider source
