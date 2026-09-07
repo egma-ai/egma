@@ -268,17 +268,15 @@ export async function recordProviderUsage(
   records: readonly NewUsageRecord[],
 ): Promise<RecordedProviderUsage> {
   if (records.length === 0) return { stored: 0, amountMicros: 0 };
-  // **Only Egma's own two services may write spend, and the check is the
-  // context's provenance rather than a role.** A usage record is not an action
-  // a person takes: it is Egma writing down what it has just spent on somebody
-  // else's behalf, and the only honest authority for one is the claim that
-  // authorised the work — a simulation's, or a grading job's. There is no HTTP
-  // door a person reaches this through, and a session-built context arriving
-  // here would mean somebody had built one.
-  authorize(auth, "read", {
-    organizationId: auth.organizationId,
-    projectId: auth.projectId,
-  });
+  /*
+   * **The guard is the context's provenance, and there is no permission for
+   * this.** A usage record is not an action a person takes: it is Egma writing
+   * down what it has just spent on somebody else's behalf, and the only honest
+   * authority for one is the claim that authorised the work — a simulation's,
+   * or a grading job's. No role should be able to do this and none can, so
+   * adding a permission row for it would be a row nothing could ever refuse,
+   * which is the kind of permission this codebase already refuses to write.
+   */
   if (auth.via !== "simulator" && auth.via !== "engine") {
     throw new Error(
       "a usage record is written by Egma's own simulator or its grading " +
@@ -287,6 +285,18 @@ export async function recordProviderUsage(
         "except by starting work Egma then claims",
     );
   }
+  /*
+   * The floor underneath it, and it is a floor rather than this call's own
+   * permission: every function on this surface asks, and `read` is what both
+   * claim contexts hold. It cannot refuse one the module itself built — which
+   * is the point of asking, and the same reason the ingest door asks: a change
+   * that made a claim context refusable would surface here rather than as a
+   * customer's missing rows.
+   */
+  authorize(auth, "read", {
+    organizationId: auth.organizationId,
+    projectId: auth.projectId,
+  });
   const projectId = projectOf(auth);
   const rates = await ratesFor(records);
 

@@ -14,7 +14,7 @@ import {
 import { MODEL_ADAPTERS, MODEL_PROVIDERS } from "../models/catalog.ts";
 import { USAGE_TYPES, USAGE_UNITS } from "../models/rate-card.ts";
 import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
-import { simulation } from "./runs.ts";
+import { run, simulation } from "./runs.ts";
 import { organization, project } from "./tenancy.ts";
 
 /**
@@ -269,6 +269,16 @@ export const usageRecord = pgTable(
       name: "usage_record_simulation_project_fk",
       columns: [table.simulationId, table.projectId],
       foreignColumns: [simulation.id, simulation.projectId],
+    }).onDelete("cascade"),
+    // The run edge, closed the same way. A composite key with a nullable
+    // column matches nothing when the column is null, which is exactly the
+    // behaviour a grading job on a production trace needs: it names no run,
+    // and the key lets it, while a record that *does* name one can only name
+    // its own project's.
+    foreignKey({
+      name: "usage_record_run_project_fk",
+      columns: [table.runId, table.projectId],
+      foreignColumns: [run.id, run.projectId],
     }).onDelete("cascade"),
     index("usage_record_organization_id_project_id_idx").on(
       table.organizationId,

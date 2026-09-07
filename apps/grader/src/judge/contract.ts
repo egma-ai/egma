@@ -65,9 +65,16 @@ export type JudgeUsage = {
   readonly assertion: string;
   /** Which HTTP attempt of that call this was, counted from one. */
   readonly httpAttempt: number;
-  /** The model the provider says it served, or the one that was asked for. */
-  readonly model: string;
-  /** The provider's own id for the response, where it gave one. */
+  /**
+   * The provider's own id for the response, where it gave one.
+   *
+   * There is no model here, and that is the decision rather than an omission.
+   * OpenAI answers `gpt-5.6-terra-2026-08-01` to a request that asked for
+   * `gpt-5.6-terra`, and the rate card is keyed by the catalog Egma itself
+   * closed — so the record is written against the pinned selection, and a
+   * served string on this shape would be a second candidate for the one field
+   * that decides a price.
+   */
   readonly providerRef: string | undefined;
   /**
    * The billable counts, normalised: `input_tokens` is the **uncached** part

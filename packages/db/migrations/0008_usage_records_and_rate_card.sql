@@ -11,8 +11,12 @@
 --
 -- `usage_record` keeps its deterministic identity in `dedupe_key`, unique,
 -- rather than in the primary key: Egma's identifiers are prefixed and
--- time-sortable and a hash is neither. There is no foreign key to
--- `grading_job`, on purpose — that row is deleted once its grades are durable,
+-- time-sortable and a hash is neither. Its tenancy edges are closed the way
+-- every other table's are — the project is of the organization, the simulation
+-- and the run are of the project — and each of the last two is nullable,
+-- because a composite key with a null column matches nothing, which is exactly
+-- what a grading job on a production trace needs. There is no foreign key to
+-- `grading_job`, on purpose: that row is deleted once its grades are durable,
 -- and a key would either take the spend with it or refuse the delete.
 
 CREATE TABLE "rate_card" (
@@ -85,6 +89,7 @@ CREATE TABLE "usage_record" (
 ALTER TABLE "usage_record" ADD CONSTRAINT "usage_record_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "usage_record" ADD CONSTRAINT "usage_record_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "usage_record" ADD CONSTRAINT "usage_record_simulation_project_fk" FOREIGN KEY ("simulation_id","project_id") REFERENCES "public"."simulation"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "usage_record" ADD CONSTRAINT "usage_record_run_project_fk" FOREIGN KEY ("run_id","project_id") REFERENCES "public"."run"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "rate_card_effective_idx" ON "rate_card" USING btree ("provider","model","effective_from");--> statement-breakpoint
 CREATE INDEX "usage_record_organization_id_project_id_idx" ON "usage_record" USING btree ("organization_id","project_id");--> statement-breakpoint
 CREATE INDEX "usage_record_simulation_id_idx" ON "usage_record" USING btree ("simulation_id");

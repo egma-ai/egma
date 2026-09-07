@@ -1305,6 +1305,100 @@ describe.skipIf(!storage.available)("a provider_usage span", () => {
     expect(await usageOf(USAGE_SIMULATION)).toHaveLength(before);
   });
 
+  it("costs the flush nothing when Egma cannot read it: the spans still land whole", async () => {
+    const before = (await usageOf(USAGE_SIMULATION)).length;
+    const body = JSON.stringify({
+      resourceSpans: [
+        {
+          resource: {
+            attributes: [
+              {
+                key: "egma.simulation_id",
+                value: { stringValue: USAGE_SIMULATION },
+              },
+            ],
+          },
+          scopeSpans: [
+            {
+              scope: { name: "egma-simulator", version: "1" },
+              spans: [
+                {
+                  traceId: USAGE_TRACE,
+                  spanId: "cc10000000000021",
+                  parentSpanId: "cc10000000000001",
+                  name: "provider_usage",
+                  startTimeUnixNano: "1788862455000000000",
+                  endTimeUnixNano: "1788862455000000000",
+                  attributes: [
+                    {
+                      key: "egma.usage.provider",
+                      value: { stringValue: "openai" },
+                    },
+                    {
+                      key: "egma.usage.model",
+                      value: { stringValue: "gpt-4o-mini" },
+                    },
+                    {
+                      key: "egma.usage.operation",
+                      value: { stringValue: "openai_batch" },
+                    },
+                    {
+                      key: "egma.usage.measurement",
+                      value: { stringValue: "provider_reported" },
+                    },
+                    {
+                      key: "egma.usage.quantities",
+                      value: { stringValue: '{"gpu_hours":3}' },
+                    },
+                  ],
+                },
+                {
+                  traceId: USAGE_TRACE,
+                  spanId: "cc10000000000022",
+                  parentSpanId: "cc10000000000001",
+                  name: "human_turn",
+                  startTimeUnixNano: "1788862455100000000",
+                  endTimeUnixNano: "1788862455100000000",
+                  attributes: [
+                    {
+                      key: "egma.turn.text",
+                      value: { stringValue: "Can we move it to Friday?" },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const posted = await post(body);
+    expect(posted.statusCode, posted.body).toBe(200);
+
+    /*
+     * **Nothing in the partial-success field, and that is the whole claim.**
+     * OTLP's rejected count means "this data was not stored, do not send it
+     * again", and this simulator's own sender raises on a non-zero one — after
+     * which the reporter abandons the simulation and its terminal report never
+     * leaves. A cost Egma could not read is an emitter defect for this
+     * deployment's log; losing the conversation over it would be a far worse
+     * answer than not knowing what one request cost.
+     */
+    expect(posted.json()).toEqual({});
+
+    // The turn beside it landed, and so did the unreadable bill's own span:
+    // the evidence is kept whole either way.
+    const landed = await store().rows<{ span_id: string; kind: string }>(
+      `select span_id, kind from spans final where trace_id = '${USAGE_TRACE}' ` +
+        "and span_id in ('cc10000000000021', 'cc10000000000022') order by span_id",
+    );
+    expect(landed.map((row) => row.kind)).toEqual(["usage", "turn:human"]);
+
+    // And no record was priced from it, because nothing about it could be.
+    expect(await usageOf(USAGE_SIMULATION)).toHaveLength(before);
+  });
+
   it("is priced at the rate that was in force when the provider answered", async () => {
     // A price change lands with its own effective date, after the flush above.
     await api.database.sql(

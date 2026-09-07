@@ -35,6 +35,7 @@ import { deviceRoutes } from "./routes/device.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
+import { usageRoutes } from "./routes/usage.ts";
 import { mockEndpointRoutes } from "./routes/mock-endpoint.ts";
 import { passwordResetRoutes } from "./routes/password-reset.ts";
 import { platformApiRoutes } from "./routes/platform-api.ts";
@@ -410,6 +411,12 @@ export function buildApi(options: ServerOptions): Api {
       limit: config.rateLimitPerMinute,
       windowMilliseconds: 60_000,
     });
+
+  // What a simulation cost, for the pages that show it. Registered here beside
+  // the other account routes rather than inside the platform boundary below,
+  // because it is not in the published contract and must not be able to enter
+  // the OpenAPI document by sharing a prefix with something that is.
+  void app.register(usageRoutes, { provider: identity.provider, rateLimit });
 
   // Every customer-managed resource is registered through this one boundary.
   // It is the same explicit operation set that produces OpenAPI and the

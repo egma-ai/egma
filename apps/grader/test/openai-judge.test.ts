@@ -338,9 +338,6 @@ describe("what one judge call consumed", () => {
     expect(spent[0]?.assertion).toBe("behavior_1");
     expect(spent[0]?.httpAttempt).toBe(1);
     expect(spent[0]?.providerRef).toBe("chatcmpl-1");
-    // The model the provider says it served, which is more exact than the one
-    // that was asked for and is what the bill will name.
-    expect(spent[0]?.model).toBe("gpt-5.6-terra-2026-08-01");
     // The provider's own object, whole, so a wrong reading can be re-rated
     // later rather than re-measured.
     expect(spent[0]?.rawUsage).toMatchObject({ total_tokens: 1_448 });

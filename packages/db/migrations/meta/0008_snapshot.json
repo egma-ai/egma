@@ -1,5 +1,5 @@
 {
-  "id": "e5e9ebba-1e3c-4b83-b534-4c17bd1592f1",
+  "id": "a5500a9f-52d1-4f7b-bf31-a072acc8a96c",
   "prevId": "8b45517a-ab07-45fb-a045-4f185936440b",
   "version": "7",
   "dialect": "postgresql",
@@ -5605,6 +5605,21 @@
           "tableTo": "simulation",
           "columnsFrom": [
             "simulation_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "id",
+            "project_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "usage_record_run_project_fk": {
+          "name": "usage_record_run_project_fk",
+          "tableFrom": "usage_record",
+          "tableTo": "run",
+          "columnsFrom": [
+            "run_id",
             "project_id"
           ],
           "columnsTo": [

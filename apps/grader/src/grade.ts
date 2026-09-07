@@ -212,12 +212,8 @@ function usageRow(
   if (model === null) {
     throw new Error("a judge reported usage for a grader with no judge model");
   }
-  // **The pinned catalog model, never the provider's own served string.**
-  // OpenAI answers `gpt-5.6-terra-2026-08-01` for a request that asked for
-  // `gpt-5.6-terra`, and the rate card is keyed by the catalog — Egma's
-  // catalog is closed and Egma names the models itself, which is exactly why
-  // it needs no match patterns. Pricing by the dated variant would find no row
-  // and store the call at nothing.
+  // The pinned catalog model. The provider's own served string never reaches
+  // this shape — see `JudgeUsage` for why.
   const named = model.model;
   const adapter = catalogEntry("llm", model.provider, named)?.adapter;
   return {
