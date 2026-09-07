@@ -83,7 +83,6 @@ import {
   refuseRun,
   resolvePersonaVersions,
   simulationHasPlannedGradersOn,
-  writeGradingPlan,
 } from "./run-plans.ts";
 import {
   getTestVersionExecutionContent,
@@ -682,6 +681,40 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
         testVersionId: string;
         modality: Modality;
       }[] = [];
+      while (currentTests.length > 0) {
+        for (const current of currentTests) {
+          const expectedCurrent = expectedInOrder?.[plannedTests.length];
+          if (expectedInOrder !== undefined &&
+            (expectedCurrent?.testId !== current.id || expectedCurrent.versionId !== current.versionId)) {
+            refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
+          }
+          plannedTests.push({
+            suiteId: suite.id,
+            testId: current.id,
+            testVersionId: current.versionId,
+            modality: reached.modality as Modality,
+          });
+        }
+        if (currentTests.length < SIMULATION_INSERT_BATCH) break;
+        const afterTestId = currentTests.at(-1)?.id;
+        if (afterTestId === undefined) break;
+        currentTests = await readTestPage(afterTestId);
+      }
+      if (expectedInOrder !== undefined && plannedTests.length !== expectedInOrder.length) {
+        refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
+      }
+      const selectedPersonas = await tx.selectDistinct({ id: testPersona.personaId })
+        .from(testPersona)
+        .innerJoin(test, eq(test.currentVersionId, testPersona.testVersionId))
+        .where(and(eq(test.suiteId, suite.id), eq(test.projectId, projectId), isNull(test.deletedAt)))
+        .orderBy(asc(testPersona.personaId));
+      const personaPins = new Map((await resolvePersonaVersions(
+        auth, tx, projectId, selectedPersonas.map((one) => one.id),
+      )).map((pin) => [pin.personaId, pin] as const));
+      const gradingPlan = {
+        capturedAt: at.toISOString(),
+        groups: planGroupsFor(graderCandidates, plannedTests),
+      };
       const [measured] = await tx
         .select({ total: count() })
         .from(test)
@@ -727,92 +760,61 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           ? {}
           : { agentVersion: input.agentVersion }),
         expectedSimulationCount,
+        gradingPlan,
         createdAt: at,
       }).returning(RUN_COLUMNS);
       if (header === undefined) throw new Error("the run was not written");
 
       let simulationCount = 0;
-      let expectedIndex = 0;
-      while (currentTests.length > 0) {
-        for (const current of currentTests) {
-          const expectedCurrent = expectedInOrder?.[expectedIndex];
-          if (
-            expectedInOrder !== undefined &&
-            (expectedCurrent?.testId !== current.id || expectedCurrent.versionId !== current.versionId)
-          ) {
-            refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
-          }
-          expectedIndex += 1;
-          plannedTests.push({
-            suiteId: suite.id,
-            testId: current.id,
-            testVersionId: current.versionId,
-            modality: reached.modality as Modality,
+      for (const current of plannedTests) {
+        let personaPosition = 0;
+        let namedPersona = false;
+        while (true) {
+          const personaRows = await tx
+            .select({
+              personaId: testPersona.personaId,
+              position: testPersona.position,
+            })
+            .from(testPersona)
+            .where(and(
+              eq(testPersona.testVersionId, current.testVersionId),
+              gt(testPersona.position, personaPosition),
+            ))
+            .orderBy(asc(testPersona.position))
+            .limit(SIMULATION_INSERT_BATCH);
+          if (personaRows.length === 0) break;
+          namedPersona = true;
+          const pins = personaRows.map((one) => {
+            const pin = personaPins.get(one.personaId);
+            if (pin === undefined) throw new Error(`persona ${one.personaId} was not captured`);
+            return pin;
           });
-
-          let personaPosition = 0;
-          let namedPersona = false;
-          while (true) {
-            const personaRows = await tx
-              .select({
-                personaId: testPersona.personaId,
-                position: testPersona.position,
-              })
-              .from(testPersona)
-              .where(and(
-                eq(testPersona.testVersionId, current.versionId),
-                gt(testPersona.position, personaPosition),
-              ))
-              .orderBy(asc(testPersona.position))
-              .limit(SIMULATION_INSERT_BATCH);
-            if (personaRows.length === 0) break;
-            namedPersona = true;
-            const pins = await resolvePersonaVersions(
-              auth,
-              tx,
-              projectId,
-              personaRows.map((one) => one.personaId),
-            );
-            await tx.insert(simulation).values(pins.map((pin, index) => ({
-              id: newId("sim"),
-              runId,
-              organizationId: auth.organizationId,
-              projectId,
-              agentId: reached.agentId,
-              connectionId: input.connectionId,
-              personaId: pin.personaId,
-              personaVersionId: pin.personaVersionId,
-              personaParameterValues: pin.personaParameterValues,
-              testId: current.id,
-              testVersionId: current.versionId,
-              position: simulationCount + index + 1,
-              modality: reached.modality,
-              status: "queued" as const,
-              createdAt: at,
-            })));
-            simulationCount += pins.length;
-            personaPosition = personaRows.at(-1)?.position ?? personaPosition;
-            if (personaRows.length < SIMULATION_INSERT_BATCH) break;
-          }
-          if (!namedPersona) throw new Error(`test version ${current.versionId} names no persona`);
+          await tx.insert(simulation).values(pins.map((pin, index) => ({
+            id: newId("sim"),
+            runId,
+            organizationId: auth.organizationId,
+            projectId,
+            agentId: reached.agentId,
+            connectionId: input.connectionId,
+            personaId: pin.personaId,
+            personaVersionId: pin.personaVersionId,
+            personaParameterValues: pin.personaParameterValues,
+            testId: current.testId,
+            testVersionId: current.testVersionId,
+            position: simulationCount + index + 1,
+            modality: reached.modality,
+            status: "queued" as const,
+            createdAt: at,
+          })));
+          simulationCount += pins.length;
+          personaPosition = personaRows.at(-1)?.position ?? personaPosition;
+          if (personaRows.length < SIMULATION_INSERT_BATCH) break;
         }
-        if (currentTests.length < SIMULATION_INSERT_BATCH) break;
-        const afterTestId = currentTests.at(-1)?.id;
-        if (afterTestId === undefined) break;
-        currentTests = await readTestPage(afterTestId);
-      }
-      if (expectedInOrder !== undefined && expectedIndex !== expectedInOrder.length) {
-        refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
+        if (!namedPersona) throw new Error(`test version ${current.testVersionId} names no persona`);
       }
       if (simulationCount !== expectedSimulationCount) {
         throw new Error(`test suite ${suite.id} changed while its run was being planned`);
       }
-      const groups = planGroupsFor(graderCandidates, plannedTests);
-      await writeGradingPlan(auth, tx, {
-        runId,
-        groups,
-        capturedAt: at,
-      });
       await tx.insert(idempotentOperation).values({
         organizationId: auth.organizationId,
         projectId,

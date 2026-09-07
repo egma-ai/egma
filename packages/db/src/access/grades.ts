@@ -12,6 +12,8 @@ export type GradeSource = "simulation" | "production";
 
 export type GradeAssertion = {
   readonly key: string;
+  readonly decision?: "met" | "not_met" | "cannot_determine" | undefined;
+  readonly citedTurns?: readonly number[] | undefined;
   readonly score?: number | undefined;
   readonly rationale?: string | undefined;
   readonly citedSpanIds?: readonly string[] | undefined;
@@ -32,6 +34,8 @@ export type NewGrade = {
   readonly projectGraderId: string;
   readonly graderDefinitionId: string;
   readonly graderDefinitionVersion: number;
+  /** The actual frozen settings used for this grade, retained after job cleanup. */
+  readonly parameterValues: Readonly<Record<string, unknown>>;
   readonly score: number | null;
   readonly details: GradeDetails;
   readonly graderPassThreshold: number;
@@ -155,6 +159,8 @@ function validate(grade: NewGrade): void {
 
 type StoredAssertion = {
   readonly key: string;
+  readonly decision?: "met" | "not_met" | "cannot_determine" | undefined;
+  readonly cited_turns?: readonly number[] | undefined;
   readonly score?: number | undefined;
   readonly rationale?: string | undefined;
   readonly cited_span_ids?: readonly string[] | undefined;
@@ -174,9 +180,10 @@ function storedDetails(details: GradeDetails): StoredDetails {
     ...(details.assertions === undefined
       ? {}
       : {
-          assertions: details.assertions.map(({ citedSpanIds, ...assertion }) => ({
+          assertions: details.assertions.map(({ citedSpanIds, citedTurns, ...assertion }) => ({
             ...assertion,
             ...(citedSpanIds === undefined ? {} : { cited_span_ids: [...citedSpanIds] }),
+            ...(citedTurns === undefined ? {} : { cited_turns: [...citedTurns] }),
           })),
         }),
   };
@@ -188,9 +195,10 @@ function detailsOf(details: StoredDetails): GradeDetails {
     ...(details.assertions === undefined
       ? {}
       : {
-          assertions: details.assertions.map(({ cited_span_ids, ...assertion }) => ({
+          assertions: details.assertions.map(({ cited_span_ids, cited_turns, ...assertion }) => ({
             ...assertion,
             ...(cited_span_ids === undefined ? {} : { citedSpanIds: cited_span_ids }),
+            ...(cited_turns === undefined ? {} : { citedTurns: cited_turns }),
           })),
         }),
   };
@@ -252,18 +260,18 @@ function canonicalParameterValues(
   value: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError("production grading-plan settings must be an object");
+    throw new TypeError("grading settings must be an object");
   }
   const answer = Object.fromEntries(
     Object.keys(value).sort().map((key) => [key, value[key]]),
   );
   const encoded = JSON.stringify(answer);
   if (encoded === undefined) {
-    throw new TypeError("production grading-plan settings must be JSON values");
+    throw new TypeError("grading settings must be JSON values");
   }
   const decoded: unknown = JSON.parse(encoded);
   if (typeof decoded !== "object" || decoded === null || Array.isArray(decoded)) {
-    throw new TypeError("production grading-plan settings must be a JSON object");
+    throw new TypeError("grading settings must be a JSON object");
   }
   return decoded as Readonly<Record<string, unknown>>;
 }
@@ -292,6 +300,7 @@ function rowFor(auth: AuthContext, grade: NewGrade): Record<string, unknown> {
     project_grader_id: grade.projectGraderId,
     grader_definition_id: grade.graderDefinitionId,
     grader_definition_version: grade.graderDefinitionVersion,
+    parameter_values: JSON.stringify(canonicalParameterValues(grade.parameterValues)),
     score: grade.score,
     details: storedDetails(grade.details),
     grader_pass_threshold: grade.graderPassThreshold,
@@ -326,6 +335,7 @@ type GradeRow = {
   readonly project_grader_id: string;
   readonly grader_definition_id: string;
   readonly grader_definition_version: number;
+  readonly parameter_values: string;
   readonly score: number | null;
   readonly details: StoredDetails;
   readonly grader_pass_threshold: number;
@@ -345,6 +355,7 @@ function gradeOf(row: GradeRow): RecordedGrade {
     projectGraderId: row.project_grader_id,
     graderDefinitionId: row.grader_definition_id,
     graderDefinitionVersion: Number(row.grader_definition_version),
+    parameterValues: parameterValuesOf(row.parameter_values),
     score: row.score === null ? null : Number(row.score),
     details: detailsOf(row.details),
     graderPassThreshold: Number(row.grader_pass_threshold),
@@ -374,6 +385,7 @@ export async function readTraceGrades(
               project_grader_id,
               grader_definition_id,
               grader_definition_version,
+              parameter_values,
               score,
               details,
               grader_pass_threshold,
@@ -504,7 +516,7 @@ function parameterValuesOf(value: string): Readonly<Record<string, unknown>> {
   try {
     parsed = JSON.parse(value);
   } catch {
-    throw new Error("production grading plan has unreadable parameter values");
+    throw new Error("grade or production plan has unreadable parameter values");
   }
   return canonicalParameterValues(
     parsed as Readonly<Record<string, unknown>>,

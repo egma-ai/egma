@@ -7,7 +7,7 @@ import {
   GRADER_DEFINITION_CATALOG,
   type PredefinedGraderDefinition,
 } from "../grader-library/catalog.ts";
-import type { GraderParameter } from "../grader-library/parameters.ts";
+import { defaultGraderParameterValues, validateExecutableGraderParameters, type GraderParameter } from "../grader-library/parameters.ts";
 import {
   snapshotGraderDefinition,
   type GraderDefinitionSnapshot,
@@ -23,7 +23,6 @@ import type { AuthContext } from "./context.ts";
 import { authorize, here } from "./permissions.ts";
 import {
   backfillExpectedBehaviorsProjectGraders,
-  moveResponseLatencySettingToItsNewKey,
   type SeededProjectGrader,
 } from "./seeded-graders.ts";
 
@@ -60,6 +59,7 @@ export type ReconciledGraderCatalog = {
 const DEFINITION_COLUMNS = {
   id: graderDefinition.id,
   organizationId: graderDefinition.organizationId,
+  projectId: graderDefinition.projectId,
   name: graderDefinition.name,
   description: graderDefinition.description,
   scopeEditable: graderDefinition.scopeEditable,
@@ -216,13 +216,34 @@ function catalogVersion(entry: PredefinedGraderDefinition) {
   };
 }
 
+/** The caller holds the definition lock before reading its project settings. */
+export async function assertGraderSettingsCompatibleOn(
+  on: Queryable,
+  definitionId: string,
+  type: string,
+  parameterContract: unknown,
+): Promise<void> {
+  const saved = await on.select({ id: projectGrader.id, parameterValues: projectGrader.parameterValues })
+    .from(projectGrader)
+    .where(eq(projectGrader.graderDefinitionId, definitionId))
+    .orderBy(asc(projectGrader.id))
+    .for("share", { of: projectGrader });
+  for (const row of saved) {
+    try {
+      validateExecutableGraderParameters(type, parameterContract, row.parameterValues);
+    } catch (cause) {
+      throw new Error(`grader ${definitionId} cannot publish: saved project settings ${row.id} are incompatible: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    }
+  }
+}
+
 async function reconcileDefinitions(
   on: Queryable,
   catalog: readonly PredefinedGraderDefinition[],
 ): Promise<readonly ReconciledGraderDefinition[]> {
   const written: ReconciledGraderDefinition[] = [];
 
-  for (const entry of catalog) {
+  for (const entry of [...catalog].sort((a, b) => a.id.localeCompare(b.id))) {
     const [installed] = await on
       .select({ ...DEFINITION_COLUMNS, ...VERSION_COLUMNS })
       .from(graderDefinition)
@@ -241,6 +262,9 @@ async function reconcileDefinitions(
       .for("update", { of: graderDefinition });
 
     const wanted = catalogVersion(entry);
+    // Validate release defaults even when no project has used this definition.
+    validateExecutableGraderParameters(wanted.type, wanted.parameterContract, defaultGraderParameterValues(wanted.parameterContract));
+    snapshotGraderDefinition({ definitionId: entry.id, version: 1, ...wanted });
     if (installed === undefined) {
       await on.insert(graderDefinition).values({
         id: entry.id,
@@ -262,8 +286,8 @@ async function reconcileDefinitions(
       continue;
     }
 
-    if (installed.organizationId !== null) {
-      throw new Error(`catalog identity ${entry.id} is organization-owned`);
+    if (installed.organizationId !== null || installed.projectId !== null) {
+      throw new Error(`catalog identity ${entry.id} is customer-owned`);
     }
     if (installed.version === null) {
       throw new Error(
@@ -279,6 +303,7 @@ async function reconcileDefinitions(
     };
     let version = installed.version;
     if (!isDeepStrictEqual(held, wanted)) {
+      await assertGraderSettingsCompatibleOn(on, entry.id, wanted.type, wanted.parameterContract);
       version += 1;
       await on.insert(graderDefinitionVersion).values({
         definitionId: entry.id,
@@ -319,9 +344,6 @@ export async function reconcileGraderCatalog(
     );
     const definitions = await reconcileDefinitions(tx, catalog);
     const projectGraders = await backfillExpectedBehaviorsProjectGraders(tx);
-    // After the reconcile above, so no project is left holding a setting the
-    // definition version now live does not name.
-    await moveResponseLatencySettingToItsNewKey(tx);
     return { definitions, projectGraders };
   });
 }

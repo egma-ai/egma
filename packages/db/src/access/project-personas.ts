@@ -1,5 +1,5 @@
 import { newId } from "@egma/ids";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 
 import type { Queryable } from "../client.ts";
 import {
@@ -132,4 +132,24 @@ export async function ensureProjectPersonaOn(
     throw new Error("the project persona settings were not written");
   }
   return saved;
+}
+
+/** The definition is locked first, so settings cannot change during publication. */
+export async function assertPersonaSettingsCompatibleOn(
+  on: Queryable,
+  definitionId: string,
+  contract: unknown,
+): Promise<void> {
+  const saved = await on.select({ id: projectPersona.id, parameterValues: projectPersona.parameterValues })
+    .from(projectPersona)
+    .where(eq(projectPersona.personaDefinitionId, definitionId))
+    .orderBy(asc(projectPersona.id))
+    .for("share", { of: projectPersona });
+  for (const row of saved) {
+    try {
+      validatePersonaParameterValues(contract, row.parameterValues);
+    } catch (cause) {
+      throw new Error(`persona ${definitionId} cannot publish: saved project settings ${row.id} are incompatible: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    }
+  }
 }

@@ -211,7 +211,10 @@ describe("the worker consumes one frozen trace plan", () => {
       .resolves.toMatchObject({
         state: "complete",
         combinedScore: 1,
-        current: [{ graderName: "Response latency", result: "passed" }],
+        current: [{
+          graderName: "Response latency", result: "passed",
+          parameterValues: { maximum_response_time_ms: 3_000 },
+        }],
       });
 
     await expect(regradeTrace(auth, { source: "production", traceId }))

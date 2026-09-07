@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import { isId, newId } from "@egma/ids";
 import {
   and,
@@ -37,6 +39,7 @@ import {
 import type { GraderParameter } from "../grader-library/parameters.ts";
 import {
   ensureProjectPersonaOn,
+  assertPersonaSettingsCompatibleOn,
   readProjectPersonaSettingsOn,
   type ProjectPersonaSettings,
 } from "./project-personas.ts";
@@ -367,114 +370,57 @@ export async function seedPersonaLibraryInternal(
   if (catalog.length === 0) return [];
 
   return db().transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('egma:reconcile-persona-catalog'::text, 0))`);
     const seeded: SeededPersona[] = [];
-    for (const entry of catalog) {
+    for (const entry of [...catalog].sort((a, b) => a.id.localeCompare(b.id))) {
       const current = currentCatalogVersion(entry);
-      const now = new Date();
-      const identityInsertions = await tx
-        .insert(persona)
-        .values({
-          id: entry.id,
-          organizationId: null,
-          projectId: null,
-          name: entry.name,
-          description: entry.description,
-          currentVersionId: current.id,
-          createdBy: null,
-          createdAt: entry.versions[0]?.createdAt ?? current.createdAt,
-          updatedAt: entry.versions[0]?.createdAt ?? current.createdAt,
-        })
-        .onConflictDoNothing({ target: persona.id })
-        .returning({ id: persona.id });
-      const identityUpdates =
-        identityInsertions.length > 0
-          ? []
-          : await tx
-              .update(persona)
-              .set({
-                name: entry.name,
-                description: entry.description,
-                currentVersionId: current.id,
-                updatedAt: now,
-              })
-              .where(
-                and(
-                  eq(persona.id, entry.id),
-                  isNull(persona.organizationId),
-                  sql`(${persona.name}, ${persona.description}, ${persona.currentVersionId}) is distinct from (${entry.name}, ${entry.description}, ${current.id})`,
-                ),
-              )
-              .returning({ id: persona.id });
-      const identityChanges = [...identityInsertions, ...identityUpdates];
-      const versionInsertions = await tx
-        .insert(personaVersion)
-        .values(
-          entry.versions.map((version) => ({
-            id: version.id,
-            personaId: entry.id,
-            version: version.version,
-            ...behaviorColumns(version),
-            parameterContract: validatePersonaParameterContract(version.parameterContract),
-            createdBy: null,
-            createdAt: version.createdAt,
-          })),
-        )
-        .onConflictDoNothing()
-        .returning({ id: personaVersion.id });
-
-      const [storedIdentity] = await tx
-        .select({
-          organizationId: persona.organizationId,
-          projectId: persona.projectId,
-          name: persona.name,
-          description: persona.description,
-          currentVersionId: persona.currentVersionId,
-        })
-        .from(persona)
-        .where(eq(persona.id, entry.id))
-        .limit(1);
-      if (
-        storedIdentity === undefined ||
-        storedIdentity.organizationId !== null ||
-        storedIdentity.projectId !== null ||
-        storedIdentity.name !== entry.name ||
-        storedIdentity.description !== entry.description ||
-        storedIdentity.currentVersionId !== current.id
-      ) {
-        throw new Error(
-          `fixed Egma-provided persona id ${entry.id} already holds a different identity`,
-        );
+      const identityInsertions = await tx.insert(persona).values({
+        id: entry.id,
+        organizationId: null,
+        projectId: null,
+        name: entry.name,
+        description: entry.description,
+        currentVersionId: current.id,
+        createdBy: null,
+        createdAt: entry.versions[0]?.createdAt ?? current.createdAt,
+        updatedAt: entry.versions[0]?.createdAt ?? current.createdAt,
+      }).onConflictDoNothing({ target: persona.id }).returning({ id: persona.id });
+      const [storedIdentity] = await tx.select().from(persona)
+        .where(eq(persona.id, entry.id)).for("update", { of: persona });
+      if (storedIdentity === undefined || storedIdentity.organizationId !== null || storedIdentity.projectId !== null) {
+        throw new Error(`fixed Egma-provided persona id ${entry.id} already holds a different identity`);
       }
-
-      const storedVersions = await tx
-        .select({
-          id: personaVersion.id,
-          version: personaVersion.version,
-          ...BEHAVIOR_COLUMNS,
-        })
-        .from(personaVersion)
-        .where(eq(personaVersion.personaId, entry.id));
+      const [installed] = await tx.select({ version: personaVersion.version }).from(personaVersion)
+        .where(eq(personaVersion.id, storedIdentity.currentVersionId));
+      if (installed !== undefined && current.version < installed.version) {
+        throw new Error(`persona ${entry.id} cannot publish an earlier core version`);
+      }
+      await assertPersonaSettingsCompatibleOn(tx, entry.id, current.parameterContract);
+      const versionInsertions = await tx.insert(personaVersion).values(entry.versions.map((version) => ({
+        id: version.id,
+        personaId: entry.id,
+        version: version.version,
+        ...behaviorColumns(version),
+        parameterContract: validatePersonaParameterContract(version.parameterContract),
+        createdBy: null,
+        createdAt: version.createdAt,
+      }))).onConflictDoNothing().returning({ id: personaVersion.id });
+      const storedVersions = await tx.select({ id: personaVersion.id, version: personaVersion.version, ...BEHAVIOR_COLUMNS })
+        .from(personaVersion).where(eq(personaVersion.personaId, entry.id));
       for (const expected of entry.versions) {
         const stored = storedVersions.find((one) => one.id === expected.id);
-        if (
-          stored === undefined ||
-          stored.version !== expected.version ||
-          !sameBehavior(stored, expected) ||
-          JSON.stringify(validatePersonaParameterContract(stored.parameterContract)) !== JSON.stringify(validatePersonaParameterContract(expected.parameterContract))
-        ) {
-          throw new Error(
-            `fixed Egma-provided persona version ${expected.id} already holds different content`,
-          );
+        if (stored === undefined || stored.version !== expected.version || !sameBehavior(stored, expected) ||
+          !isDeepStrictEqual(validatePersonaParameterContract(stored.parameterContract), validatePersonaParameterContract(expected.parameterContract))) {
+          throw new Error(`fixed Egma-provided persona version ${expected.id} already holds different content`);
         }
       }
-
-      if (identityChanges.length > 0 || versionInsertions.length > 0) {
-        seeded.push({
-          id: entry.id,
-          name: entry.name,
-          version: current.version,
-          versionId: current.id,
-        });
+      const identityChanged = storedIdentity.name !== entry.name || storedIdentity.description !== entry.description || storedIdentity.currentVersionId !== current.id;
+      if (identityChanged) {
+        await tx.update(persona).set({ name: entry.name, description: entry.description, currentVersionId: current.id, updatedAt: new Date() })
+          .where(eq(persona.id, entry.id));
+      }
+      if (identityInsertions.length > 0 || identityChanged || versionInsertions.length > 0) {
+        seeded.push({ id: entry.id, name: entry.name, version: current.version, versionId: current.id });
       }
     }
     return seeded;
@@ -651,7 +597,7 @@ export async function getPersona(
 ): Promise<Persona | undefined> {
   authorize(auth, "read", here(auth));
 
-  return readPersonaOn(db(), auth, id);
+  return db().transaction((tx) => readPersonaOn(tx, auth, id), { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
 /**
@@ -767,6 +713,7 @@ export async function editPersona(
       }
       let versionId = current.id;
       if (coreChanged) {
+        await assertPersonaSettingsCompatibleOn(tx, id, current.parameterContract);
         versionId = newId("prsv");
         await tx
           .insert(personaVersion)
@@ -922,15 +869,17 @@ export async function listPersonas(
       ? undefined
       : ilike(persona.name, `%${wanted.replace(/([\\%_])/g, "\\$1")}%`);
 
-  const rows = await selectWithCurrentVersion(auth)
-    .where(
-      readablePersona(auth, and(notArchived, named, olderThanCursor)),
-    )
-    .orderBy(desc(persona.id))
-    .limit(limit + 1);
+  return db().transaction(async (tx) => {
+    const rows = await selectWithCurrentVersion(auth, tx)
+      .where(
+        readablePersona(auth, and(notArchived, named, olderThanCursor)),
+      )
+      .orderBy(desc(persona.id))
+      .limit(limit + 1);
 
-  const { items, nextCursor } = pageOf(rows, limit);
-  return { items: await Promise.all(items.map((row) => personaFrom(db(), auth, row))), nextCursor };
+    const { items, nextCursor } = pageOf(rows, limit);
+    return { items: await Promise.all(items.map((row) => personaFrom(tx, auth, row))), nextCursor };
+  }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
 /**

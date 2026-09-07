@@ -81,11 +81,10 @@ const planItemSchema = {
 const gradingPlanSchema = {
   type: "object",
   properties: {
-    state: { type: "string", enum: ["run_start"] },
     capturedAt: dateTimeSchema,
     items: arrayOf(planItemSchema),
   },
-  required: ["state", "capturedAt", "items"],
+  required: ["capturedAt", "items"],
   additionalProperties: false,
 } as const;
 

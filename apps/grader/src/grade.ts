@@ -179,6 +179,7 @@ function gradeRow(
     projectGraderId: entry.projectGraderId,
     graderDefinitionId: entry.graderDefinitionId,
     graderDefinitionVersion: entry.graderDefinitionVersion,
+    parameterValues: entry.parameterValues,
     score: result.score,
     details: result.details,
     graderPassThreshold: entry.graderPassThreshold,
