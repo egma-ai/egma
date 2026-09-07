@@ -114,7 +114,7 @@
  * speech rather than the last frame the transport played — the definition
  * above, measured rather than approached, so egma's own numbers move as well
  * as their order. Its acceptance against the agent's own account of the same
- * calls: egma's clock reads 0.52 to 0.58 s longer per turn and stays there
+ * calls: egma's clock reads 0.5 to 0.7 s longer per turn and stays in that band
  * across the call — the detection lag at the front and the playback hop at the
  * back, and nothing that grows — where the old recorder was 1.5 to 1.8 s out
  * and drifting. A number measured off the audio the caller heard, differing
