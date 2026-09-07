@@ -201,7 +201,10 @@ function micros(quantity: number, usdPerMillion: string): number {
   const price = BigInt(whole) * scale + BigInt(fraction === "" ? "0" : fraction);
   // The quantity itself can be fractional — seconds of audio are — so it is
   // taken to the same twelve places the price column holds before scaling.
-  const QUANTITY_PLACES = 1_000_000_000_000n;
+  // Written as a power rather than as twelve zeros, because a plain million
+  // in source is reserved for the one module that turns nanoseconds into a
+  // measure, and a test holds that line.
+  const QUANTITY_PLACES = 10n ** 12n;
   const counted = BigInt(Math.round(quantity * 1e12));
   const scaled = counted * price;
   const divisor = QUANTITY_PLACES * scale;

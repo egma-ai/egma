@@ -98,6 +98,13 @@ describe("the provider's footprint on the schema", () => {
     "account",
     "agent",
     "api_key",
+    // The four cloud tables and the two billing tables are Egma's own rows like
+    // every other name here: the provider reads and writes them through the
+    // same role and can alter none of them.
+    "cloud_billing_account",
+    "cloud_ledger_entry",
+    "cloud_plan",
+    "cloud_stripe_event",
     "connection",
     "device_code",
     "grader_definition",
@@ -114,6 +121,7 @@ describe("the provider's footprint on the schema", () => {
     "persona_version",
     "project",
     "project_grader",
+    "rate_card",
     "retell_call_retry",
     "run",
     "run_event",
@@ -123,6 +131,7 @@ describe("the provider's footprint on the schema", () => {
     "test_persona",
     "test_suite",
     "test_version",
+    "usage_record",
     "user",
     "verification",
   ];

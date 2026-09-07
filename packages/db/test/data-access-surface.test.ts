@@ -498,6 +498,11 @@ const THE_ALLOWANCES = [
   "organizationInThePeriod",
   "periodAt",
   "periodUsageFrom",
+  // The voice-seconds columns of a period read, narrowed by a predicate, so
+  // the hourly meter job in `ee/` counts an hour with the same expressions the
+  // settings page counts a month with. A selection, not a query: it reaches no
+  // store on its own.
+  "voiceSecondsSelection",
 ];
 
 /**
