@@ -436,8 +436,8 @@ export const simulation = pgTable(
      * The platform's own identifier for this exchange on the connection's
      * side — a Retell chat id, a telephony provider's id for the dialed leg.
      * The one join between egma's record and the agent's own telemetry, since
-     * no trace context crosses an audio channel. Verbatim from the report,
-     * never parsed; null when the plug had none to offer.
+     * no trace context crosses an audio channel. Registered before dispatch for LiveKit rooms, otherwise carried by the
+     * terminal report; null when the plug had none to offer.
      */
     providerReference: text("provider_reference"),
     /*
@@ -540,13 +540,16 @@ export const simulation = pgTable(
       sql`${table.endedAt} is not null
         or ${table.recordingReference} is null`,
     ),
-    // The two summary facts are terminal facts too; a check of their own
-    // beside the report's rather than a rewrite of it, because they arrived
-    // by a later migration and an additive column takes an additive guard.
+    // Counts are terminal facts. A LiveKit room reference is registered
+    // before dispatch so the agent can export while the simulation runs.
     check(
       "simulation_summary_facts_only_when_ended",
       sql`${table.endedAt} is not null
-        or (${table.turnCount} is null and ${table.providerReference} is null)`,
+        or ${table.turnCount} is null`,
+    ),
+    check(
+      "simulation_provider_reference_after_claim",
+      sql`${table.status} <> 'queued' or ${table.providerReference} is null`,
     ),
     check(
       "simulation_turn_count_is_a_count",

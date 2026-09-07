@@ -20,7 +20,6 @@ import {
   type TraceDetail,
   type TraceSpan,
 } from "@egma/db";
-import { everySpanIn } from "@egma/metrics";
 import { simulationOperations } from "@egma/platform-api/contract";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
@@ -200,18 +199,21 @@ function describedMeasures(
 }
 
 /**
- * Whether this conversation was graded without the agent's own account of it.
+ * Whether a finished conversation is missing the agent's own account of it.
  *
  * **Read rather than stored**, because everything it needs is already in hand
  * here and a stored answer would be a second record to keep honest. Four facts,
  * and all four have to hold:
  *
- * - the conversation **completed** — nothing else was ever waited for;
+ * - the conversation **ended**, including failed and canceled calls;
  * - a second account was **coming**: the lane can deliver one and this landing
  *   reported the reference to deliver it under (ADR-0024 §2);
- * - **none arrived** — no span under the trace is the agent's;
- * - and the **bound has passed**, so grading has stopped waiting (§6). Inside
+ * - **the final record is absent** — partial spans alone do not complete it;
+ * - and the **bound has passed**, so the import has stopped waiting (§6). Inside
  *   the bound nothing is missing yet; it is simply not here yet.
+ *
+ * A provider document explicitly marked incomplete is reported immediately;
+ * its presence is not proof that the whole conversation arrived.
  *
  * **A reader that shows the agent's POV needs this and cannot infer it.** Such
  * a reader takes the rows filed as the agent's and shows them as the
@@ -224,17 +226,18 @@ function agentPovIncomplete(
   run: Run,
   transcript: TraceDetail | undefined,
 ): boolean {
-  if (simulation.status !== "completed") return false;
+  if (
+    simulation.status !== "completed" &&
+    simulation.status !== "failed" &&
+    simulation.status !== "canceled"
+  ) return false;
   const reference = simulation.providerReference;
   if (reference === null || reference === "") return false;
   if (!laneProducesAnAgentPov(run.connectionSnapshot.connectionType)) {
     return false;
   }
-  if (transcript !== undefined) {
-    for (const span of everySpanIn(transcript)) {
-      if (span.pov === "agent") return false;
-    }
-  }
+  if (transcript?.agentEvidenceIncomplete === true) return true;
+  if (transcript?.agentEvidenceComplete === true) return false;
   // The wait began when the conversation ended, on the earlier of the two
   // clocks that answer for that — the same reading grading itself takes, so a
   // report from a machine running ahead cannot make this say "still waiting"
@@ -351,6 +354,7 @@ export async function simulationRoutes(
         // showing the agent's POV would otherwise show whatever fragment
         // arrived as if it were the conversation. False is the ordinary answer
         // — the account landed, or the lane files none.
+        agentPovComplete: transcript?.agentEvidenceComplete === true,
         agentPovIncomplete: agentPovIncomplete(simulation, run, transcript),
         measures: describedMeasures(simulation, transcript),
         // The observed metrics, off the one shared projection the transcript

@@ -14,6 +14,7 @@ from typing import Any
 
 from ..contract import ERROR
 from ..mock_tools import MockToolRefusal
+from ..platform_logging import log_event
 from . import (
     MediaBackendError,
     PlayoutStamp,
@@ -25,6 +26,22 @@ from . import (
 logger = logging.getLogger(__name__)
 
 RpcMethod = Callable[[str], Awaitable[str]]
+
+
+def disconnect_reason_name(reason: object) -> str:
+    """Keep the documented RTC reason, never arbitrary provider payloads."""
+    from livekit import rtc
+
+    try:
+        return rtc.DisconnectReason.Name(reason) if isinstance(reason, int) else "UNKNOWN"
+    except ValueError:
+        return "UNKNOWN"
+
+
+def room_was_deleted(reason: object) -> bool:
+    from livekit import rtc
+
+    return reason == rtc.DisconnectReason.ROOM_DELETED
 
 ROOM_PREFIX = "egma-sim"
 """The stem of the name every room egma conducts a simulation in.
@@ -528,7 +545,13 @@ class _Pipecat17InputDrain:
     the version guard below pins is the whole of what is reached into.
     """
 
-    def __init__(self, input_transport: object, failed: asyncio.Event) -> None:
+    def __init__(
+        self,
+        input_transport: object,
+        failed: asyncio.Event,
+        *,
+        on_disconnected: Callable[[object], None] | None = None,
+    ) -> None:
         try:
             from livekit import rtc
             from livekit.rtc._utils import RingQueue
@@ -599,6 +622,7 @@ class _Pipecat17InputDrain:
         self._joined_a_track = joined_a_track
         self._left_a_track = left_a_track
         self._canceling = False
+        self._on_disconnected = on_disconnected
         self._audio_queue = _JoinAfterPipecatConversion()
         client._audio_queue = self._audio_queue
         self._ring_queue_type = RingQueue
@@ -613,7 +637,7 @@ class _Pipecat17InputDrain:
                 asyncio.Task[None],
             ],
         ] = {}
-        self._departures: dict[str, asyncio.Task[None]] = {}
+        self._departures: dict[str | None, asyncio.Task[None]] = {}
         self._watching = False
         client._process_audio_stream = self._read_audio_stream
         client._close_audio_stream = self.finish_stream
@@ -651,6 +675,10 @@ class _Pipecat17InputDrain:
             return
         room.on("track_muted")(self._track_muted)
         room.on("track_unmuted")(self._track_unmuted)
+        if self._on_disconnected is not None:
+            # Pipecat schedules its async callback but drops this reason.
+            # RTC runs this listener before that scheduled callback executes.
+            room.on("disconnected")(self._on_disconnected)
         self._watching = True
 
     def _track_muted(self, participant: Any, publication: Any) -> None:
@@ -723,7 +751,7 @@ class _Pipecat17InputDrain:
         await self.finish_stream(track_key(participant.sid, track))
         await self._left_a_track(participant.sid)
 
-    def _stream_keys_of(self, participant_id: str) -> list[str]:
+    def _stream_keys_of(self, participant_id: str | None) -> list[str]:
         """The keys of every audio stream one participant reached here on.
 
         Both the streams still registered and the ones already being
@@ -732,11 +760,16 @@ class _Pipecat17InputDrain:
         miss a track whose unsubscribe was still in flight — and then
         announce the departure over audio still on its way in.
         """
-        keys = [key for key in self._streams if key.split(":", 1)[0] == participant_id]
+        keys = [
+            key
+            for key in self._streams
+            if participant_id is None or key.split(":", 1)[0] == participant_id
+        ]
         keys.extend(
             key
             for key in self._finishes
-            if key not in keys and key.split(":", 1)[0] == participant_id
+            if key not in keys
+            and (participant_id is None or key.split(":", 1)[0] == participant_id)
         )
         return keys
 
@@ -861,9 +894,11 @@ class _Pipecat17InputDrain:
             self._mix.gone(key)
 
     async def participant_left(
-        self, participant_id: str, completed: asyncio.Event
+        self, participant_id: str | None, completed: asyncio.Event
     ) -> None:
-        departure = self._departures.get(participant_id)
+        # None is a confirmed whole-room ending and drains every publisher.
+        # A later participant event joins it instead of emitting another marker.
+        departure = self._departures.get(None) or self._departures.get(participant_id)
         if departure is None:
             departure = asyncio.create_task(
                 self._finish_departure(participant_id, completed),
@@ -872,12 +907,20 @@ class _Pipecat17InputDrain:
             self._departures[participant_id] = departure
         await asyncio.shield(departure)
 
+    @property
+    def departure_started(self) -> bool:
+        return bool(self._departures)
+
+    async def finish_departures(self) -> None:
+        """A room closing must not cancel a departure already draining audio."""
+        await asyncio.shield(asyncio.gather(*self._departures.values()))
+
     def _require_working_media(self) -> None:
         if self._failed.is_set():
             raise RuntimeError("the livekit input failed before participant departure")
 
     async def _finish_departure(
-        self, participant_id: str, completed: asyncio.Event
+        self, participant_id: str | None, completed: asyncio.Event
     ) -> None:
         # Every track the participant was publishing, because a departure
         # is the participant's and the tracks are only the ways it reached
@@ -947,11 +990,15 @@ class JoinedRoom:
         token: str,
         room_name: str,
         quotable: Callable[[str], str] = lambda told: told,
+        confirm_remote_end: Callable[[], Awaitable[bool]] | None = None,
     ) -> None:
         self._url = url
         self._token = token
         self._room_name = room_name
         self._quotable = quotable
+        self._confirm_remote_end = confirm_remote_end
+        self._disconnect_reason: object = None
+        self._remote_close: asyncio.Task[None] | None = None
         self._transport: object | None = None
         self._input_drain: _Pipecat17InputDrain | None = None
         self._connected = asyncio.Event()
@@ -996,7 +1043,9 @@ class JoinedRoom:
         self._transport = transport
         input_transport = transport.input()
         try:
-            input_drain = _Pipecat17InputDrain(input_transport, self.failed)
+            input_drain = _Pipecat17InputDrain(
+                input_transport, self.failed, on_disconnected=self._room_disconnected
+            )
         except Exception:
             self.failed.set()
             raise
@@ -1014,13 +1063,19 @@ class JoinedRoom:
             # Pipecat fires this awaited event before its own stop/cancel path
             # closes streams. Take down an in-flight remote departure first.
             self._leaving = True
+            await self._cancel_remote_close()
             await input_drain.cancel()
 
         @transport.event_handler("on_disconnected")
         async def _disconnected(_transport: object) -> None:
             if not self._leaving:
-                self.failed.set()
-                await input_drain.cancel()
+                if self._remote_close is None:
+                    self._remote_close = asyncio.create_task(
+                        self._finish_remote_close(input_drain),
+                        name="livekit-room-completion",
+                    )
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.shield(self._remote_close)
 
         @transport.event_handler("on_participant_connected")
         async def _arrived(_transport: object, _participant: str) -> None:
@@ -1082,6 +1137,55 @@ class JoinedRoom:
             failed=self.failed,
             transport_name=f"livekit server at {self._quotable(self._url)}",
         )
+
+    def _room_disconnected(self, reason: object = None) -> None:
+        self._disconnect_reason = reason
+        log_event(
+            logger,
+            logging.INFO,
+            "egma.media.disconnected",
+            "livekit room disconnected",
+            attributes={"livekit.disconnect_reason": disconnect_reason_name(reason)},
+        )
+
+    async def _finish_remote_close(self, drain: _Pipecat17InputDrain) -> None:
+        try:
+            if self.failed.is_set():
+                return
+            if self.ended.is_set():
+                return
+            if drain.departure_started:
+                await drain.finish_departures()
+                return
+            established = self._connected.is_set() and self.carrying_audio.is_set()
+            confirmed = False
+            if established:
+                if self._confirm_remote_end is not None:
+                    confirmed = await self._confirm_remote_end()
+                else:
+                    confirmed = room_was_deleted(self._disconnect_reason)
+            if self._leaving:
+                return
+            if confirmed:
+                # This check and every drain check preserve independent media
+                # failures. A provider ending never clears a failure event.
+                drain._require_working_media()
+                await drain.participant_left(None, self.ended)
+            else:
+                self.failed.set()
+        except Exception:
+            if not self._leaving:
+                self.failed.set()
+                logger.warning("the livekit input drain failed before room completion")
+        finally:
+            if self.failed.is_set():
+                await drain.cancel()
+
+    async def _cancel_remote_close(self) -> None:
+        task = self._remote_close
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     async def wait_connected(self) -> None:
         """Wait for the running Pipecat transport to enter the room."""
@@ -1147,6 +1251,7 @@ class JoinedRoom:
         input_drain, self._input_drain = self._input_drain, None
         self._leaving = True
         self.ended.set()
+        await self._cancel_remote_close()
         if input_drain is not None:
             await input_drain.cancel()
         if transport is not None:

@@ -2199,6 +2199,37 @@ export async function resolveSimulationStanding(
   };
 }
 
+/** Register a LiveKit room before its agent can export evidence.
+ * Only the service's current claim can write the first reference. The row and
+ * frozen run supply tenancy and lane; a request cannot choose either.
+ */
+export async function registerSimulationProviderReference(input: {
+  readonly simulationId: string;
+  readonly claimant: string;
+  readonly providerReference: string;
+}): Promise<boolean> {
+  const reference = input.providerReference;
+  if (!/^egma-sim-(?:chat-)?[A-Za-z0-9_-]+$/.test(reference) || reference.length > 512) {
+    return false;
+  }
+  const [written] = await db()
+    .update(simulation)
+    .set({ providerReference: reference })
+    .where(and(
+      eq(simulation.id, input.simulationId),
+      eq(simulation.claimedBy, validClaimant(input.claimant)),
+      inArray(simulation.status, ["claimed", "running"]),
+      isNull(simulation.cancelRequestedAt),
+      or(isNull(simulation.providerReference), eq(simulation.providerReference, reference)),
+      sql`exists (select 1 from ${run} where ${run.id} = ${simulation.runId}
+        and ${run.organizationId} = ${simulation.organizationId}
+        and ${run.projectId} = ${simulation.projectId}
+        and ${run.connectionSnapshot}->>'connectionType' in ('livekit_room', 'livekit_chat'))`,
+    ))
+    .returning({ id: simulation.id });
+  return written !== undefined;
+}
+
 /**
  * Which simulation **in this project** carries one provider reference, and
  * where it stands — the lookup simulation ingestion is matched on.
@@ -2303,7 +2334,7 @@ export async function resolveSimulationByProviderReference(
  * terms and one moment later.** That one opens a connection's plaintext to
  * assemble a spec and answers only while the row stands `claimed`; this one
  * opens the same plaintext to fetch the record of the conversation that just
- * ran, and answers only for a row standing `completed` — a simulation that has
+ * ran, and answers only for a terminal row — a simulation that has
  * finished conducting. The two together are the whole of what egma ever does
  * with a connection's credentials: conduct a simulation over it, and collect
  * the record of what it conducted. Nothing else may knock at either.
@@ -2319,8 +2350,8 @@ export async function resolveSimulationByProviderReference(
  * a connection, or a call.
  *
  * `undefined` answers every absence alike, and none of them is an error: a
- * simulation outside this context's tenancy, one not standing completed, one
- * that ran over a connection which is not Retell or has since been archived,
+ * simulation outside this context's tenancy, one still conducting, one
+ * whose frozen connection is not a Retell web call or has since been archived,
  * one whose conversation never reported a call id, and one whose connection
  * holds no usable key. A lane with no pull is the ordinary case — LiveKit
  * pushes instead.
@@ -2350,12 +2381,13 @@ export async function resolveRetellSimulationPull(
   const [row] = await db()
     .select({
       providerReference: simulation.providerReference,
-      accessVariant: connection.accessVariant,
-      config: connection.config,
+      runId: run.id,
+      connectionSnapshot: run.connectionSnapshot,
       credentials: connection.credentials,
     })
     .from(simulation)
     .innerJoin(connection, eq(connection.id, simulation.connectionId))
+    .innerJoin(run, eq(run.id, simulation.runId))
     .where(
       within(
         auth,
@@ -2365,7 +2397,7 @@ export async function resolveRetellSimulationPull(
           // Finished conducting, which is the one moment there is a record to
           // fetch: before it the conversation is still happening, and Retell
           // has nothing complete to answer with.
-          eq(simulation.status, "completed"),
+          inArray(simulation.status, ["completed", "failed", "canceled"]),
           isNull(connection.archivedAt),
           inActingProject(auth, simulation),
         ),
@@ -2376,9 +2408,13 @@ export async function resolveRetellSimulationPull(
   if (row === undefined) return undefined;
   const providerReference = row.providerReference?.trim() ?? "";
   if (providerReference === "") return undefined;
-  // Every Retell access variant is one key against Retell's API. A connection
-  // of any other kind has no call record to pull and is not asked for one.
-  if (!row.accessVariant.startsWith("retell_")) return undefined;
+  const executed = connectionSnapshotFromRow(row.connectionSnapshot, row.runId);
+  // Retell chat IDs do not name Get Call records. The frozen connection says
+  // which API conducted this conversation, even after connection edits.
+  if (
+    executed.connectionType !== "retell_web_call" ||
+    executed.accessVariant !== "retell_web_call.api_key"
+  ) return undefined;
   if (row.credentials === null) return undefined;
 
   const apiKey = openedApiKey(row.credentials);
@@ -2387,14 +2423,14 @@ export async function resolveRetellSimulationPull(
   const standing = await resolveSimulationStanding(simulationId);
   if (standing === undefined) return undefined;
 
-  // The chat lane lets a customer point at their own Retell-compatible host,
-  // and the pull must ask wherever the conversation was held. A config nobody
-  // can read is not worth failing a landing over: Retell's own host is where
+  // The pull uses the host frozen when this conversation was started. A
+  // connection edited afterwards cannot send its historical call elsewhere.
+  // An unreadable config must not fail a landing: Retell's own host is where
   // every connection that named none is answered from anyway.
   let baseUrl = "";
   try {
     baseUrl =
-      stringRecordFromRow(row.config, () => new Error("unreadable"))[
+      stringRecordFromRow(executed.config, () => new Error("unreadable"))[
         "baseUrl"
       ]?.trim() ?? "";
   } catch {

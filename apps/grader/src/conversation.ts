@@ -1,5 +1,6 @@
 import {
   fromOnePov,
+  laneProducesAnAgentPov,
   type Simulation,
   type TraceDetail,
   type TraceSpan,
@@ -116,10 +117,8 @@ export function conversationOfSimulation(
   simulation: Simulation,
   trace: TraceDetail | undefined,
 ): Conversation {
-  // Whether there was a conversation at all is the row's answer and only the
-  // row's: a simulation the simulator reported failed produced none, and no
-  // amount of telemetry arriving afterwards makes one. So it is decided before
-  // anything is read, and every branch below carries it.
+  // Execution status decides whether grading is allowed. Failed simulations
+  // may still hold a transcript, but late evidence does not change their status.
   const neverHappened =
     simulation.status === "completed" ? null : neverRan(simulation);
 
@@ -141,16 +140,18 @@ export function conversationOfSimulation(
   };
 
   if (trace !== undefined && !trace.truncated) {
+    const requiresAgentPov = laneProducesAnAgentPov(trace.connectionType);
+    const agentEvidenceMissing = requiresAgentPov &&
+      trace.agentEvidenceComplete !== true;
     return {
       ...filedUnderTheSimulation,
-      transcript: transcriptOf(trace),
-      // The same walk a production trace's tool calls come off, which is what
-      // makes the two lists the same list. A simulation's results are always
-      // empty and that is the emitter's fact rather than a rule applied here:
-      // the simulator observes the call from egma's side of the connection and
-      // not the return, so its vocabulary declares no result attribute and the
-      // door has nothing to write into the column.
-      events: toolCallsIn(trace),
+      nothingToJudgeBecause: neverHappened ?? (
+        agentEvidenceMissing || (requiresAgentPov && trace.agentEvidenceIncomplete === true)
+          ? "The platform transcript is unavailable or incomplete. Egma's recording cannot replace it for grading."
+          : null
+      ),
+      transcript: transcriptOf(trace, requiresAgentPov),
+      events: toolCallsIn(trace, requiresAgentPov),
       // The one shared measure module, called exactly as the production branch
       // below calls it and exactly as the metrics display calls it. There is no
       // reading of a timing span left in this file: the same spans produce the
@@ -208,12 +209,16 @@ export function evidenceIsStillArriving(
 ): boolean {
   if (simulation.status !== "completed") return false;
   if (trace === undefined) return true;
+  if (laneProducesAnAgentPov(trace.connectionType)) {
+    return !trace.truncated && trace.agentEvidenceIncomplete !== true &&
+      trace.agentEvidenceComplete !== true;
+  }
   return !trace.truncated && !rootArrivedIn(trace);
 }
 
 /** A simulation that produced no conversation, in the simulator's own words. */
 function neverRan(simulation: Simulation): string {
-  return `this simulation ended ${simulation.endingReason ?? "without running"}, so there was no conversation to grade.`;
+  return `this simulation ended ${simulation.endingReason ?? "without completing"}, so its execution cannot be graded.`;
 }
 
 /**
@@ -338,8 +343,11 @@ export function conversationOfTrace(trace: TraceDetail): Conversation {
  * has several, and a turn that produced no words is a fact about the
  * conversation.
  */
-function transcriptOf(trace: TraceDetail): readonly TranscriptTurn[] {
-  return fromOnePov(trace.turns, "agent").map((turn) => ({
+function transcriptOf(trace: TraceDetail, requiresAgentPov = false): readonly TranscriptTurn[] {
+  const turns = requiresAgentPov
+    ? trace.turns.filter((turn) => turn.pov === "agent")
+    : fromOnePov(trace.turns, "agent");
+  return turns.map((turn) => ({
     span_id: turn.spanId,
     speaker: speakerOf(turn.kind),
     text: turn.text,
@@ -383,14 +391,14 @@ function speakerOf(kind: string): string {
  * asking "was the refund tool called before the confirmation" reads the order
  * off the list.
  */
-function toolCallsIn(trace: TraceDetail): readonly ToolCall[] {
-  // **One call, once.** A simulation holds both POVs under one trace, and on
-  // the lanes where a platform serves egma's answers egma files a tool row of
-  // its own. `fromOnePov` is the one rule every reader shares: the agent's own
-  // POV wherever the record holds one, so a grader asking "was the refund tool
-  // called before the confirmation" never sees one call twice.
+function toolCallsIn(trace: TraceDetail, requiresAgentPov = false): readonly ToolCall[] {
+  // Platform simulations must not turn a mock server observation into a
+  // platform tool call, including when the platform reported no tools.
   const tools = [...everySpanIn(trace)].filter((span) => span.toolName !== "");
-  const called = fromOnePov(tools, "agent").map(
+  const selected = requiresAgentPov
+    ? tools.filter((span) => span.pov === "agent")
+    : fromOnePov(tools, "agent");
+  const called = selected.map(
     (span): ToolCall & { readonly at: string } => ({
       kind: "tool_call",
       at: span.startedAt,

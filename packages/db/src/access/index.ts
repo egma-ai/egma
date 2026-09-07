@@ -401,6 +401,7 @@ export {
   runCarriesMockTools,
   resolveRetellSimulationPull,
   resolveSimulationByProviderReference,
+  registerSimulationProviderReference,
   resolveSimulationStanding,
   runAlreadyStartedFor,
   simulationProviderReferencesIn,

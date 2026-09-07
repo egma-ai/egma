@@ -3,6 +3,7 @@ import {
   failSimulation,
   markSimulationCanceled,
   resolveSimulationStanding,
+  registerSimulationProviderReference,
   startSimulation,
   type CompletedEndingReason,
   type FailedEndingReason,
@@ -232,6 +233,30 @@ export async function reportRoutes(
     return undefined;
   });
 
+  // Acknowledged before the simulator creates or dispatches the room. The
+  // service token authenticates the sender; the active claim authorizes the
+  // row, and the stored reference remains the project-key ingest lookup key.
+  app.post("/v1/simulations/:simulationId/provider-reference", async (request, reply) => {
+    const { simulationId } = request.params as { simulationId: string };
+    const body = request.body as Record<string, unknown> | null;
+    if (body === null || typeof body !== "object" || Array.isArray(body) ||
+      Object.keys(body).some(key => key !== "claimant" && key !== "provider_reference") ||
+      typeof body.claimant !== "string" || body.claimant.trim() === "" || body.claimant.length > 200 ||
+      typeof body.provider_reference !== "string" || body.provider_reference.length > 512 ||
+      !/^egma-sim-(?:chat-)?[A-Za-z0-9_-]+$/.test(body.provider_reference)) {
+      return invalid(reply, "Room registration requires a claimant and a non-empty Egma LiveKit room name.");
+    }
+    const registered = await registerSimulationProviderReference({
+      simulationId,
+      claimant: body.claimant.trim(),
+      providerReference: body.provider_reference,
+    });
+    if (!registered) {
+      return conflict(reply, "This active LiveKit claim cannot register that room reference.");
+    }
+    return reply.send({ simulation_id: simulationId, provider_reference: body.provider_reference });
+  });
+
   /**
    * One report document about one simulation: `status` events apply as
    * lifecycle transitions, in order, and the answer names where the row
@@ -290,14 +315,18 @@ export async function reportRoutes(
     // above has already refused anything else: a conversation's turns, tool
     // calls and measurements arrive as spans at the OTLP door, and a report
     // claiming to carry one does not validate.
-    // Whether anything in this document actually moved the row to completed.
-    // A resend answers `completed` too, and the pull below must not run twice.
-    let completedNow = false;
+    // Pull once for a new terminal transition, including a call whose media
+    // failed. An absorbed resend must not fetch and file the call again.
+    let endedNow = false;
     for (const event of report.events) {
       const applied = await applyStatusEvent(reply, simulationId, event);
       if (!("status" in applied)) return applied;
       lastKnownStatus = applied.status;
-      completedNow ||= applied.moved && applied.status === "completed";
+      endedNow ||=
+        applied.moved &&
+        (applied.status === "completed" ||
+          applied.status === "failed" ||
+          applied.status === "canceled");
     }
 
     /*
@@ -305,13 +334,14 @@ export async function reportRoutes(
      * conversation ends.
      *
      * Retell exports nothing, so this is where the second POV of a Retell
-     * simulation comes from at all (ADR-0024 §2). It runs on a **completed**
-     * landing only: a conversation that never ran has no call record to fetch,
-     * and asking Retell about one would be a request per failed dispatch.
+     * simulation comes from at all (ADR-0024 §2). Every terminal landing may
+     * carry a call record, including failed and canceled calls. The resolver
+     * requires a Retell web-call snapshot and a provider reference, so a
+     * dispatch that created no call makes no request.
      *
      * **Once per conversation, on the landing that moved the row** — never on
      * a resend of it. A reporter delivers at least once and an absorbed
-     * duplicate answers `completed` exactly as the transition it repeats did,
+     * duplicate answers with the same status as the transition it repeats,
      * so a condition reading the status alone would pull again minutes later.
      * Retell fills a call document in after the call ends, so that second pull
      * can normalise *changed* content under the same deterministic span ids —
@@ -334,7 +364,7 @@ export async function reportRoutes(
      * landing's problem — a POV that never arrived is a state the record
      * already has a word for.
      */
-    if (options.simulationPullReach !== undefined && completedNow) {
+    if (options.simulationPullReach !== undefined && endedNow) {
       await pullRetellSimulationRecord(
         standing.auth,
         simulationId,

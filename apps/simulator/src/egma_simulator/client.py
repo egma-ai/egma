@@ -143,6 +143,16 @@ class ControlPlaneClient:
             raise ClaimFailure(f"claim answer has no specs list: {body!r}")
         return specs
 
+    async def register_provider_reference(
+        self, simulation_id: str, claimant: str, provider_reference: str
+    ) -> None:
+        """Acknowledge the room association before the agent can export into it."""
+        await self._post_document(
+            f"{self._base_url}/v1/simulations/{simulation_id}/provider-reference",
+            json.dumps({"claimant": claimant, "provider_reference": provider_reference}).encode(),
+            accepted_statuses=(200,),
+        )
+
     async def heartbeat(self, simulation_id: str, claimant: str) -> str | None:
         """One beat for one running simulation; the answer may carry a directive."""
         try:

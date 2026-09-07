@@ -1,3 +1,4 @@
+import { AGENT_EVIDENCE_COMPLETE_SQL, AGENT_EVIDENCE_INCOMPLETE_SQL } from "./agent-evidence.ts";
 import { traceStore } from "../clickhouse/client.ts";
 import {
   aggregateOf,
@@ -383,6 +384,10 @@ export type ReportedOnTrace = {
 };
 
 export type TraceDetail = TraceFacts & {
+  /** The final recognized agent session/call root has arrived. */
+  readonly agentEvidenceComplete?: boolean | undefined;
+  /** The agent's root says its provider document could not be read whole. */
+  readonly agentEvidenceIncomplete?: boolean | undefined;
   /**
    * The transcript in the order it happened: every `turn:` span, each carrying
    * the spans that happened inside it.
@@ -1269,10 +1274,12 @@ export async function readTrace(
   // it is refused before the second row can be written — and an order that made
   // it look settled would be the response quietly picking a winner.
   const [summaries, rows, roots] = await Promise.all([
-    rowsOf<SummaryRow>(
+    rowsOf<SummaryRow & { agent_evidence_complete: number; agent_evidence_incomplete: number }>(
       `select
        trace_id,
-       ${TRACE_FACTS}
+       ${TRACE_FACTS},
+       countIf(${AGENT_EVIDENCE_COMPLETE_SQL}) > 0 as agent_evidence_complete,
+       countIf(${AGENT_EVIDENCE_INCOMPLETE_SQL}) > 0 as agent_evidence_incomplete
      from ${SPANS_TABLE} final
      where ${where}
      group by trace_id`,
@@ -1338,6 +1345,11 @@ export async function readTrace(
       `select
        span_id,
        span_id as root_span_id,
+       if(
+         emitter = 'agent',
+         JSONExtractBool(payload, '${NORMALISED_KEY}', 'degraded'),
+         0
+       ) as agent_evidence_incomplete,
        JSONExtractRaw(payload, '${NORMALISED_KEY}') as normalised,
        toJSONString(arrayMap(
          event -> tuple(
@@ -1378,12 +1390,17 @@ export async function readTrace(
     ...transcriptOf(kept),
     truncated,
     reported: reportedOn(roots[0]),
+    agentEvidenceComplete: facts.agent_evidence_complete === 1 && facts.agent_evidence_incomplete === 0,
+    ...(facts.agent_evidence_incomplete === 1
+      ? { agentEvidenceIncomplete: true }
+      : {}),
   };
 }
 
 /** The root id, egma-owned block, and bounded Retell structural projections. */
 type RootSliceRow = RetellToolTimelineSlice & {
   readonly span_id: string;
+  readonly agent_evidence_incomplete: number;
   readonly normalised: string;
 };
 
