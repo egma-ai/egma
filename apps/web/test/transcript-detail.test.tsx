@@ -92,7 +92,6 @@ const TRACE: TraceFacts = {
   toolSpanCount: 1,
   erroredSpanCount: 0,
   source: "production",
-  emitter: "agent",
   pov: "agent",
   environment: "default",
   // Nothing egma dialled: production telemetry arrives by export, so a

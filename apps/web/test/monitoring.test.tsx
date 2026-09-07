@@ -103,7 +103,6 @@ const FACTS: Facts = {
   toolSpanCount: 2,
   erroredSpanCount: 0,
   source: "production",
-  emitter: "agent",
   pov: "agent",
   environment: "default",
   connectionType: "",

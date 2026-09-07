@@ -5447,7 +5447,6 @@ export type ListTracesResponses = {
             toolSpanCount: number;
             erroredSpanCount: number;
             source: 'simulation' | 'production';
-            emitter: string;
             pov: 'persona' | 'agent';
             environment: string;
             connectionType: string;
@@ -5528,7 +5527,6 @@ export type GetTraceResponses = {
             toolSpanCount: number;
             erroredSpanCount: number;
             source: 'simulation' | 'production';
-            emitter: string;
             pov: 'persona' | 'agent';
             environment: string;
             connectionType: string;

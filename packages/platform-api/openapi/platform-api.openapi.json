@@ -19864,9 +19864,6 @@
                               "production"
                             ]
                           },
-                          "emitter": {
-                            "type": "string"
-                          },
                           "pov": {
                             "type": "string",
                             "enum": [
@@ -19928,7 +19925,6 @@
                           "toolSpanCount",
                           "erroredSpanCount",
                           "source",
-                          "emitter",
                           "pov",
                           "environment",
                           "connectionType",
@@ -20146,9 +20142,6 @@
                             "production"
                           ]
                         },
-                        "emitter": {
-                          "type": "string"
-                        },
                         "pov": {
                           "type": "string",
                           "enum": [
@@ -20194,7 +20187,6 @@
                         "toolSpanCount",
                         "erroredSpanCount",
                         "source",
-                        "emitter",
                         "pov",
                         "environment",
                         "connectionType",

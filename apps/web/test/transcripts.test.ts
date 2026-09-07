@@ -61,7 +61,6 @@ const FACTS: Facts = {
   toolSpanCount: 2,
   erroredSpanCount: 3,
   source: "production",
-  emitter: "agent",
   pov: "agent",
   environment: "default",
   connectionType: "",
