@@ -115,6 +115,9 @@ jobs:
           pnpm docs:check
           pnpm docs:build
 
+      - name: Check compatibility job failure handling
+        run: python3 -B -m unittest discover -s .github -p 'test_*.py'
+
   fast:
     name: Fast lane
     # Four CPUs guarantee the two Vitest workers below while leaving Postgres,
@@ -282,48 +285,45 @@ jobs:
       - name: Run the simulator tests
         run: pnpm test:simulator
 
-  sdk:
-    name: SDK tests
+  livekit-python-compatibility:
+    name: LiveKit Python compatibility
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # Two isolated Python environments run their core suites concurrently.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          node-version: 24
-          cache: pnpm
+          python-version: "3.11"
 
-      - name: Make the native build toolchain available
-        # Blacksmith's image carries no node-gyp, and `node-pty` publishes no
-        # Linux prebuild — so the install below compiles it, and without a
-        # compiler it dies as a bare "node-gyp: not found" underneath a package
-        # name. A gap in this runner image, not a requirement of this
-        # repository: `.github/native-toolchain.sh` says why in full, and
-        # installs nothing on an image that already has the four tools.
-        run: ./.github/native-toolchain.sh
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          version: "0.11.33"
 
-      - run: pnpm install --frozen-lockfile
+      - name: Lint the Python SDK
+        working-directory: sdks/python
+        run: uv run --frozen ruff check --config pyproject.toml src tests ../../.github/*.py
 
-      - name: Install the Python SDK toolchain
-        run: pipx install uv
+      - name: Build the Python SDK once
+        id: pack
+        run: |
+          dir="$(mktemp -d)"
+          uv build sdks/python --wheel --out-dir "$dir"
+          wheel="$(find "$dir" -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          echo "wheel=$wheel" >> "$GITHUB_OUTPUT"
 
-      - name: Run the Python and JavaScript SDK tests
-        run: pnpm test:sdk
+      - name: Verify the minimum and locked LiveKit versions in parallel
+        run: python3 .github/livekit_compatibility.py python "${{ steps.pack.outputs.wheel }}"
 
   livekit-js-compatibility:
-    name: LiveKit JS ${{ matrix.livekit }} compatibility
+    name: LiveKit JS compatibility
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    strategy:
-      fail-fast: false
-      matrix:
-        # 1.5.0 is the mock-tool floor. 1.5.5 is the monitoring floor.
-        # 1.6.4 is the exact Rentlyx pin. The remaining lanes catch a break at
-        # each supported minor boundary and at the current upper edge.
-        livekit: ["1.5.0", "1.5.5", "1.6.0", "1.6.4", "1.7.0", "1.7.1"]
+    # Share checkout/build work; all six clean installs run concurrently.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -339,6 +339,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Run the JavaScript SDK tests
+        run: pnpm test:sdk:javascript
+
       - name: Build and pack the SDK
         id: pack
         run: |
@@ -351,11 +354,8 @@ jobs:
           test -n "$tarball"
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
 
-      - name: Verify the packed SDK with LiveKit ${{ matrix.livekit }}
-        run: >-
-          node sdks/livekit-js/test/verify-packed-compatibility.mjs
-          "${{ steps.pack.outputs.tarball }}"
-          "${{ matrix.livekit }}"
+      - name: Verify all LiveKit versions in parallel
+        run: python3 .github/livekit_compatibility.py javascript "${{ steps.pack.outputs.tarball }}"
 
   fixture:
     name: Fixture agent tests
@@ -390,7 +390,7 @@ jobs:
 
   deploy:
     name: Deploy
-    needs: [checks, fast, browser, simulator, sdk, livekit-js-compatibility, fixture]
+    needs: [checks, fast, browser, simulator, livekit-python-compatibility, livekit-js-compatibility, fixture]
     if: >-
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
