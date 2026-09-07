@@ -148,7 +148,10 @@ function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
                     <Facts
                       facts={[
                         { label: "Plan", value: account.plan.name },
-                        { label: "Plan fee", value: feeLabel(account.plan) },
+                        {
+                          label: "Plan fee",
+                          value: <span className="tabular-nums">{feeLabel(account.plan)}</span>,
+                        },
                         {
                           label: "Inference balance",
                           value: (

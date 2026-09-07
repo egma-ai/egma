@@ -88,6 +88,7 @@ export function UsageAllowances({
                   {
                     key: "overage",
                     header: "Overage",
+                    mono: true,
                     cell: (row: AllowanceUsage) => {
                       const allowance = account.plan.allowances.find(
                         (item) => item.kind === row.kind,
