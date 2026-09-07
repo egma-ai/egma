@@ -283,10 +283,17 @@ export const cloudLedgerEntry = pgTable(
      * table rather than only as text. Null for every other kind — a credit
      * names a Checkout session Egma did not write a row for, and a welcome
      * credit names the organization.
+     *
+     * **The edge refuses a delete rather than following one**, which is the
+     * opposite of every other key in this schema and is the point. A charge is
+     * money that moved: it is summed into `balance_micros`, and a cascade that
+     * quietly took the row with its usage record would leave the materialised
+     * balance disagreeing with the ledger it caches, silently, for one
+     * customer. Nothing in the product deletes a usage record today, so this
+     * costs nothing now; the day something does, this key is what makes
+     * somebody decide what happens to the charge instead of finding out later.
      */
-    usageRecordId: idText("usage_record_id").references(() => usageRecord.id, {
-      onDelete: "cascade",
-    }),
+    usageRecordId: idText("usage_record_id").references(() => usageRecord.id),
     /** What makes this movement happen at most once. */
     idempotencyKey: text("idempotency_key").notNull(),
     /** When the movement happened, off the fact rather than off the write. */

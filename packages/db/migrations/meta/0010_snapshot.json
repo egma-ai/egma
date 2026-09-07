@@ -5978,7 +5978,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "no action",
           "onUpdate": "no action"
         },
         "cloud_ledger_entry_account_fk": {

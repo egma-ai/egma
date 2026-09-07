@@ -112,7 +112,6 @@ const rateCard = await upsertRateCard();
 // loaded here, once, and its plan rows are written before the first request:
 // an allowance cannot be answered against a plan nobody wrote.
 const cloudBilling = await loadCloudBilling(config);
-const plans = await cloudBilling?.seedPlans();
 
 const running: Config = cloudBilling === undefined
   ? config
@@ -195,12 +194,12 @@ if (rateCard.written.length > 0) {
     "Rate-card prices were written from the shipped file",
   );
 }
-if (plans !== undefined && plans.written.length > 0) {
+if (cloudBilling !== undefined && cloudBilling.seededPlans.length > 0) {
   // A plan is a price somebody set. Saying which rows this boot wrote is what
   // makes a pricing change readable in a deployment log rather than only in a
   // file's history.
   app.log.info(
-    { plans: plans.written },
+    { plans: cloudBilling.seededPlans },
     "Cloud plan rows were written from the shipped file",
   );
 }

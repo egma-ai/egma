@@ -129,6 +129,13 @@ export class RunWriteRefusedError extends Error {
  *   is answered as an unprocessable refusal today, like every reason with no
  *   answer of its own; the surface that links it to a billing page arrives
  *   with the adapter that can raise it.
+ * - `providers_unfunded` — the deployment's entitlement source will not let
+ *   Egma's own provider keys pay for the providers this run's pinned personas
+ *   need. Its own reason beside `allowance_spent` for that reason's own sake:
+ *   nothing is wrong with the request and the next move is different again —
+ *   credit or a key of the customer's own, rather than a plan or a wait. A
+ *   deployment with no billing never produces one, and it is answered as an
+ *   unprocessable refusal like every reason with no answer of its own.
  */
 export type RunWriteRefusal =
   | "no_such_connection"
@@ -136,7 +143,8 @@ export type RunWriteRefusal =
   | "no_adapter"
   | "not_admitted"
   | "already_finished"
-  | "allowance_spent";
+  | "allowance_spent"
+  | "providers_unfunded";
 
 /**
  * The person being invited is already in an organization.

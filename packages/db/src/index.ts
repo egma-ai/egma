@@ -110,6 +110,7 @@ export {
   usageSinkContract,
   type AdapterFactory,
   type PortCheck,
+  type PortWorld,
 } from "./billing/contract.ts";
 /**
  * The rate card's vocabulary and its coverage rule. No store is reached: a

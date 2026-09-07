@@ -44,8 +44,13 @@ export type BillingRoutes = (
 export type CloudBilling = {
   readonly plugIn: BillingPlugIn;
   readonly routes: BillingRoutes;
-  /** The plan rows, written on boot the way the rate card is. */
-  seedPlans(): Promise<{ readonly written: readonly string[] }>;
+  /**
+   * The plan codes this boot wrote, for the log. The rows themselves come with
+   * the plug-in rather than from a line here: the grader installs the same
+   * adapter and either process can boot first, so whichever loads it writes
+   * them and the other finds them there.
+   */
+  readonly seededPlans: readonly string[];
 };
 
 export async function loadCloudBilling(settings: {
@@ -54,9 +59,10 @@ export async function loadCloudBilling(settings: {
   if (!billingIsConfigured(settings)) return undefined;
 
   const ee = await import("@egma/ee");
+  const loaded = await ee.loadCloudBilling();
   return {
-    plugIn: ee.cloudBillingPlugIn(),
-    routes: ee.billingRoutes,
-    seedPlans: () => ee.seedCloudPlans(),
+    plugIn: loaded.plugIn,
+    routes: loaded.routes,
+    seededPlans: loaded.seededPlans,
   };
 }

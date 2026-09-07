@@ -39,11 +39,18 @@ const log = makeLog(config.logLevel, config.claimant);
 connect({ databaseUrl: config.databaseUrl });
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
 
-if (billingIsConfigured({ stripeSecretKey: process.env["EGMA_STRIPE_SECRET_KEY"] })) {
+if (billingIsConfigured(config)) {
+  // The plan rows come with the plug-in, so whichever process boots first
+  // writes them and the other finds them there. A grader that reached a
+  // customer's account before anybody had written a plan row would meet the
+  // account's own foreign key.
   const ee = await import("@egma/ee");
-  installBillingPlugIn(ee.cloudBillingPlugIn());
+  const cloud = await ee.loadCloudBilling();
+  installBillingPlugIn(cloud.plugIn);
   log.info(
-    platformEvent("egma.billing.installed", {}),
+    platformEvent("egma.billing.installed", {
+      plans: cloud.seededPlans.join(","),
+    }),
     "the cloud billing adapter is installed",
   );
 }

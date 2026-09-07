@@ -14,6 +14,7 @@ import {
 
 import {
   chargeForStoredUsage,
+  openBillingAccount,
   readEntitlementFacts,
   type CloudPlan,
   type EntitlementFacts,
@@ -200,17 +201,23 @@ export function cloudEntitlementSource(
       );
       if (onEgmasKey.length === 0) return { funded: true };
 
-      const facts = await readEntitlementFacts(request.organizationId, now());
+      // **The account and nothing else.** This is asked on the claim path,
+      // once per organization per batch, and the only fact it needs is the
+      // balance — a month's allowance is the other question's business. Asking
+      // for the whole entitlement picture here would run the period aggregate
+      // over a customer's conversations to read one integer beside it.
+      const account = await openBillingAccount(request.organizationId, now());
+
       // **Above zero, and not "enough".** Egma cannot know what a simulation
       // will cost before it runs, so the rule is the one the founders set: new
       // balance-funded work is refused at zero, and work already claimed
       // finishes and is charged.
-      if (facts.account.balanceMicros > 0) return { funded: true };
+      if (account.balanceMicros > 0) return { funded: true };
 
       return {
         funded: false,
         providers: onEgmasKey,
-        message: unfundedMessage(onEgmasKey, facts.account.balanceMicros),
+        message: unfundedMessage(onEgmasKey, account.balanceMicros),
       };
     },
   };

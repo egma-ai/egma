@@ -105,24 +105,16 @@ export async function openBillingAccount(
   catalog?: PlanCatalog,
 ): Promise<BillingAccount> {
   const opened = await openAccountIfTheCustomerExists(organizationId, at, catalog);
-  if (opened === undefined) {
-    throw new Error(
-      `organization ${organizationId} was not found while opening its ` +
-        "billing account",
-    );
-  }
-  return opened;
+  // **An organization with no row has no account, and none can be opened.**
+  // The answer is the unopened one rather than a throw, because the two ports
+  // are asked about an organization rather than handed a context and must
+  // answer: nothing run, so no allowance spent; nothing held, so Egma's key
+  // funds nothing. Both are true and neither is generous. A path that goes on
+  // to *write* — the usage sink's charge — is refused by the ledger's own
+  // foreign key, which names the row it could not write.
+  return opened ?? unopened(organizationId, at);
 }
 
-/**
- * The same, answering nothing at all where the organization does not exist.
- *
- * **There is one caller and it is the entitlement source**, which is asked
- * about an organization rather than handed a context and must answer rather
- * than throw: an organization with no rows has run nothing and holds nothing,
- * which is a true answer to both of the port's questions and the safe one —
- * the balance it does not have funds nothing.
- */
 async function openAccountIfTheCustomerExists(
   organizationId: string,
   at: Date,
@@ -221,11 +213,7 @@ export async function readEntitlementFacts(
   organizationId: string,
   at: Date = new Date(),
 ): Promise<EntitlementFacts> {
-  const opened = await openAccountIfTheCustomerExists(organizationId, at);
-  // An organization with no rows at all: it has run nothing, so it has spent
-  // no allowance, and it holds no balance, so Egma's key funds nothing for it.
-  // Both are true answers and neither is generous.
-  const account = opened ?? unopened(organizationId, at);
+  const account = await openBillingAccount(organizationId, at);
   const plan = await readPlan(account.planCode);
   const period = periodAt(account.periodAnchor, at);
 

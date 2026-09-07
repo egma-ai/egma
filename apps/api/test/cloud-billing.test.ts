@@ -363,7 +363,53 @@ describe("starting a run an organization cannot pay for", () => {
     });
     expect(admitted.statusCode, JSON.stringify(admitted.body)).toBe(201);
   });
+
+  it("is refused when Egma's key cannot pay for the providers it needs", async () => {
+    await aBillingDeployment("cloud_billing_run_start_funding");
+    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+
+    // The balance spent, as a correction an operator would write.
+    await spendTheBalance(acme);
+
+    const refused = await ask(api.app, "POST", "/v1/runs", acme.key, {
+      suiteId: acme.suiteId,
+      agentId: acme.agentId,
+      connectionId: acme.connectionId,
+      idempotencyKey: newId("run"),
+    });
+    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+    const message = String(
+      (refused.body as { message?: unknown }).message ?? "",
+    );
+    // A chat conversation needs its persona's LLM and nothing else.
+    expect(message).toContain("openai");
+    expect(message).toContain("$0.00");
+    expect(message).toContain("Settings");
+
+    // Nothing was written: one run in this project, the one the fixture made.
+    const { rows } = await api.database.sql<{ started: string }>(
+      "select count(*)::text as started from run where project_id = $1",
+      [acme.customer.projectId],
+    );
+    expect(rows[0]?.started).toBe("1");
+  });
 });
+
+/** This customer's welcome credit spent, as an operator's correction. */
+async function spendTheBalance(seeded: Seeded): Promise<void> {
+  await api.database.sql(
+    `insert into cloud_ledger_entry
+       (id, organization_id, kind, amount_micros, reference_kind,
+        reference_id, idempotency_key, occurred_at)
+     values ($1, $2, 'correction', $3, 'operator', 'this-test',
+             'this-test-spends-' || $2, now())`,
+    [newId("cle"), seeded.customer.organizationId, -WELCOME_CREDIT_MICROS],
+  );
+  await api.database.sql(
+    "update cloud_billing_account set balance_micros = 0 where organization_id = $1",
+    [seeded.customer.organizationId],
+  );
+}
 
 type HoldAnswer = {
   runId: string;
@@ -401,19 +447,7 @@ describe("why a run's queued work is waiting", () => {
     await aBillingDeployment("cloud_billing_run_hold_funding");
     const acme = await aCustomerWithARun("ada@acme.example", "Acme");
 
-    // The balance spent, as a correction an operator would write.
-    await api.database.sql(
-      `insert into cloud_ledger_entry
-         (id, organization_id, kind, amount_micros, reference_kind,
-          reference_id, idempotency_key, occurred_at)
-       values ($1, $2, 'correction', $3, 'operator', 'this-test',
-               'this-test-spends-acme', now())`,
-      [newId("cle"), acme.customer.organizationId, -WELCOME_CREDIT_MICROS],
-    );
-    await api.database.sql(
-      "update cloud_billing_account set balance_micros = 0 where organization_id = $1",
-      [acme.customer.organizationId],
-    );
+    await spendTheBalance(acme);
 
     const answer = await ask(
       api.app,
@@ -553,5 +587,46 @@ describe("what the claim door does when a customer's month is spent", () => {
       [running],
     );
     expect(live[0]?.status).toBe("running");
+  });
+
+  it("leaves it queued when Egma's key cannot pay for its providers", async () => {
+    await aBillingDeployment("cloud_billing_claim_funding");
+    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+    // The allowance is untouched. What is spent is the balance, so the door
+    // refuses for the other of the two reasons.
+    await spendTheBalance(acme);
+
+    const claimed = await api.app.inject({
+      method: "POST",
+      url: CLAIMS_PATH,
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: {
+        contract_versions: [5],
+        claimant: "sim-1",
+        capacity: 10,
+        wait_seconds: 0,
+      },
+    });
+    expect(claimed.statusCode, claimed.body).toBe(200);
+    expect(
+      (claimed.json() as { simulations?: unknown[] }).simulations ?? [],
+    ).toEqual([]);
+
+    const { rows } = await api.database.sql<{ status: string }>(
+      "select status from simulation where run_id = $1",
+      [acme.runId],
+    );
+    expect(rows.map((row) => row.status)).toEqual(["queued"]);
+
+    // And the run page says which of the two reasons it was, by name.
+    const hold = await ask(
+      api.app,
+      "GET",
+      `/api/runs/${acme.runId}/billing-hold`,
+      acme.key,
+    );
+    const read = hold.body as unknown as HoldAnswer;
+    expect(read.holds.map((one) => one.held)).toEqual(["funding"]);
+    expect(read.holds[0]?.providers).toEqual(["openai"]);
   });
 });

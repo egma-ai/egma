@@ -299,6 +299,44 @@ export function RunNote({
   /* The lines are already loudest first, so the first one names the box. */
   const accent = lines[0]?.accent ?? "quiet";
   return (
+    <NoteBox
+      accent={accent}
+      slot="run-note"
+      {...(className === undefined ? {} : { className })}
+    >
+      {lines.map((line, at) => (
+        <NoteLine key={`run-note-${String(at)}`}>{line.text}</NoteLine>
+      ))}
+    </NoteBox>
+  );
+}
+
+/**
+ * The box a quiet fact about a run is drawn in, and the only one there is.
+ *
+ * The house hairline, the surface fill, no corner, no icon and no title, with
+ * the edge carrying the warning colour where a fact is one a person has to
+ * read before they act (founder, 2026-09-04). It is exported because a second
+ * surface says a second kind of fact in it — why a run's queued work is
+ * waiting — and two copies of a box is how a product ends up with two box
+ * looks: the next change to this one reaches only one of them.
+ *
+ * The words always say the news themselves, so the colour stays supporting
+ * information, as `DESIGN.md` requires.
+ */
+export function NoteBox({
+  accent,
+  slot,
+  className,
+  children,
+}: {
+  readonly accent: RunNoteAccent;
+  /** What this box is, for the stylesheet and for a test. */
+  readonly slot: string;
+  readonly className?: string;
+  readonly children: ReactNode;
+}) {
+  return (
     <div
       className={cn(
         "flex flex-col gap-1 border bg-surface p-3",
@@ -306,17 +344,17 @@ export function RunNote({
         className,
       )}
       data-accent={accent}
-      data-slot="run-note"
+      data-slot={slot}
       role="note"
     >
-      {lines.map((line, at) => (
-        <p
-          className="m-0 text-sm leading-(--line-normal) text-faint"
-          key={`run-note-${String(at)}`}
-        >
-          {line.text}
-        </p>
-      ))}
+      {children}
     </div>
+  );
+}
+
+/** One line inside a note box. Quiet ink at the product's own reading size. */
+export function NoteLine({ children }: { readonly children: ReactNode }) {
+  return (
+    <p className="m-0 text-sm leading-(--line-normal) text-faint">{children}</p>
   );
 }

@@ -107,6 +107,115 @@ describe("a file outside the data-access module that imports the Postgres driver
   });
 });
 
+describe("the one export that hands out the query interface", () => {
+  it("fails the build for a file in neither fenced home", async () => {
+    await write(
+      "apps/api/src/reads.ts",
+      'import { fencedDatabase } from "@egma/db";\nexport { fencedDatabase };\n',
+    );
+
+    const violations = await check(root);
+
+    expect(rules(violations)).toEqual([
+      "only-a-fenced-home-holds-the-query-interface",
+    ]);
+    expect(violations[0]?.file).toBe("apps/api/src/reads.ts");
+    expect(violations[0]?.line).toBe(1);
+  });
+
+  it("fails whichever way the export is named", async () => {
+    // Renaming it on the way in changes nothing: the rule reads the binding
+    // the import declares, not the name it is given here.
+    await write(
+      "apps/web/lib/a.ts",
+      'import { fencedDatabase as reach } from "@egma/db";\nexport { reach };\n',
+    );
+    await write(
+      "apps/web/lib/b.ts",
+      'export { fencedDatabase } from "@egma/db";\n',
+    );
+
+    const violations = await check(root);
+
+    expect(violations).toHaveLength(2);
+    expect(new Set(rules(violations))).toEqual(
+      new Set(["only-a-fenced-home-holds-the-query-interface"]),
+    );
+  });
+
+  it("fails inside the commercial package but outside its access module", async () => {
+    // `ee/` is a fenced home only where its access code lives. An adapter or a
+    // route reaching the pool directly is the loophole this rule exists for.
+    await write(
+      "ee/src/adapters.ts",
+      'import { fencedDatabase } from "@egma/db";\nexport { fencedDatabase };\n',
+    );
+
+    const violations = await check(root);
+
+    expect(rules(violations)).toEqual([
+      "only-a-fenced-home-holds-the-query-interface",
+    ]);
+    expect(violations[0]?.file).toBe("ee/src/adapters.ts");
+  });
+
+  it("says nothing inside either fenced home", async () => {
+    await write(
+      "packages/db/src/access/things.ts",
+      'import { fencedDatabase } from "../client.ts";\nexport { fencedDatabase };\n',
+    );
+    await write(
+      "ee/src/access/accounts.ts",
+      'import { fencedDatabase } from "@egma/db";\nexport { fencedDatabase };\n',
+    );
+
+    expect(await check(root)).toEqual([]);
+  });
+
+  it("does not fire on a mention that is not an import", async () => {
+    await write(
+      "apps/api/src/a.ts",
+      "// never import fencedDatabase here\nexport const note = 'fencedDatabase';\n",
+    );
+
+    expect(await check(root)).toEqual([]);
+  });
+});
+
+describe("the commercial package's own way in", () => {
+  it("fails a file outside its access module that goes around the surface", async () => {
+    await write(
+      "ee/src/routes.ts",
+      'import { readBillingOverview } from "./access/accounts.ts";\nexport { readBillingOverview };\n',
+    );
+
+    const violations = await check(root);
+
+    expect(rules(violations)).toEqual([
+      "no-reaching-into-the-data-access-module",
+    ]);
+    expect(violations[0]?.file).toBe("ee/src/routes.ts");
+  });
+
+  it("allows the surface itself", async () => {
+    await write(
+      "ee/src/routes.ts",
+      'import { readBillingOverview } from "./access/index.ts";\nexport { readBillingOverview };\n',
+    );
+
+    expect(await check(root)).toEqual([]);
+  });
+
+  it("lets its access module reach its own neighbours", async () => {
+    await write(
+      "ee/src/access/ledger.ts",
+      'import { openBillingAccount } from "./accounts.ts";\nexport { openBillingAccount };\n',
+    );
+
+    expect(await check(root)).toEqual([]);
+  });
+});
+
 describe("the data-access module itself", () => {
   it("may hold the driver, because that is the whole point of it", async () => {
     await write("packages/db/src/client.ts", 'import pg from "pg";\nexport default pg;\n');

@@ -108,6 +108,21 @@ function refusing(allowance: AllowanceKind): EntitlementSource {
   };
 }
 
+/** An adapter that will not let Egma's own key pay for these providers. */
+function unfunded(providers: readonly string[]): EntitlementSource {
+  return {
+    mayStart: openEntitlementSource().mayStart,
+    mayPlatformKeyFund: (request) =>
+      Promise.resolve({
+        funded: false,
+        providers: request.providers.filter((one) => providers.includes(one)),
+        message:
+          "Egma's provider keys cannot fund openai: this organization's " +
+          "inference balance is $0.00. Add inference credit under Settings.",
+      }),
+  };
+}
+
 /** Everything one run needs, made through the module. */
 async function readyToRun(who: typeof acme): Promise<{
   agentId: string;
@@ -222,6 +237,89 @@ describe("run start asks the entitlement source", () => {
       [ready.suiteId],
     );
     expect(rows[0]?.started).toBe("0");
+  });
+
+  it("asks whether Egma's key may fund the providers this run's personas need", async () => {
+    const ready = await readyToRun(acme);
+    const asked: string[][] = [];
+    restore = installBillingPlugIn({
+      ...openBillingPlugIn(),
+      entitlements: {
+        mayStart: openEntitlementSource().mayStart,
+        mayPlatformKeyFund: (request) => {
+          asked.push([...request.providers]);
+          return Promise.resolve({ funded: true });
+        },
+      },
+    });
+
+    await startRun(sessionOf(acme), {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+
+    // Once for the whole run, naming the providers its pinned personas need —
+    // a chat conversation runs the persona's LLM and nothing else.
+    expect(asked).toEqual([["openai"]]);
+  });
+
+  it("refuses the run when Egma's key cannot pay, naming the providers", async () => {
+    const ready = await readyToRun(acme);
+    restore = installBillingPlugIn({
+      ...openBillingPlugIn(),
+      entitlements: unfunded(["openai"]),
+    });
+
+    const refused = await startRun(sessionOf(acme), {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    }).catch((fault: unknown) => fault);
+
+    expect(refused).toBeInstanceOf(RunWriteRefusedError);
+    const error = refused as RunWriteRefusedError;
+    // Its own reason beside `allowance_spent`: the next move is credit or a
+    // key of the customer's own, not a plan or a wait.
+    expect(error.reason).toBe("providers_unfunded");
+    expect(error.message).toContain("openai");
+    expect(error.message).toContain("inference balance");
+
+    // Nothing was written, so there is no run and no queued conversation.
+    const { rows } = await database.sql<{ started: string }>(
+      "select count(*)::text as started from run where suite_id = $1",
+      [ready.suiteId],
+    );
+    expect(rows[0]?.started).toBe("0");
+  });
+
+  it("still says something when a funding refusal words nothing", async () => {
+    const ready = await readyToRun(acme);
+    restore = installBillingPlugIn({
+      ...openBillingPlugIn(),
+      entitlements: {
+        mayStart: openEntitlementSource().mayStart,
+        mayPlatformKeyFund: () =>
+          Promise.resolve({
+            funded: false,
+            providers: ["openai"],
+            message: "   ",
+          }),
+      },
+    });
+
+    const refused = (await startRun(sessionOf(acme), {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    }).catch((fault: unknown) => fault)) as RunWriteRefusedError;
+
+    expect(refused.reason).toBe("providers_unfunded");
+    expect(refused.message).toContain("openai");
+    expect(refused.message).not.toBe("");
   });
 
   it("still says something when an adapter refuses and words nothing", async () => {

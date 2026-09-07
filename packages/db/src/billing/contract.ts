@@ -42,7 +42,34 @@ export type PortCheck = {
 /** How a suite gets a fresh adapter for each check. */
 export type AdapterFactory<T> = () => T | Promise<T>;
 
-const AN_ORGANIZATION = newId("org");
+/**
+ * The world these checks run in, for an adapter that keeps rows.
+ *
+ * **The open adapters need none of it and the cloud one needs all of it.** An
+ * adapter that answers "yes, unlimited" and throws its records away is correct
+ * about an organization nobody has ever created; an adapter that writes a
+ * ledger row is not — its writes have foreign keys, and a check that handed it
+ * a made-up organization would prove only that the adapter had swallowed the
+ * failure. So a suite driving one supplies a customer that exists, and a way
+ * to make each record real before it is delivered.
+ *
+ * Both are optional and both default to nothing, so the open adapters are held
+ * to exactly the list they were held to before this existed.
+ */
+export type PortWorld = {
+  /** The organization every check below asks about. */
+  readonly organizationId?: string;
+  /** The project its records belong to. */
+  readonly projectId?: string;
+  /**
+   * Make one record real — store the `usage_record` row it names — before it
+   * is handed to the sink. Called once per record, before every delivery of
+   * it, so a check that delivers the same record twice prepares it once.
+   */
+  prepare?(record: StoredUsageRecord): Promise<void>;
+};
+
+const THE_MADE_UP_ORGANIZATION = newId("org");
 
 /**
  * What every entitlement source must do.
@@ -52,8 +79,10 @@ const AN_ORGANIZATION = newId("org");
  */
 export function entitlementSourceContract(
   make: AdapterFactory<EntitlementSource>,
+  world: PortWorld = {},
 ): readonly PortCheck[] {
   const source = async (): Promise<EntitlementSource> => make();
+  const AN_ORGANIZATION = world.organizationId ?? THE_MADE_UP_ORGANIZATION;
 
   return [
     {
@@ -153,8 +182,23 @@ export function entitlementSourceContract(
 /** What every usage sink must do. */
 export function usageSinkContract(
   make: AdapterFactory<UsageSink>,
+  world: PortWorld = {},
 ): readonly PortCheck[] {
   const sink = async (): Promise<UsageSink> => make();
+  /** One record, made real where the suite gave a way to make one real. */
+  const record = async (
+    overrides: Partial<StoredUsageRecord> = {},
+  ): Promise<StoredUsageRecord> => {
+    const one = storedRecord({
+      ...(world.organizationId === undefined
+        ? {}
+        : { organizationId: world.organizationId }),
+      ...(world.projectId === undefined ? {} : { projectId: world.projectId }),
+      ...overrides,
+    });
+    await world.prepare?.(one);
+    return one;
+  };
 
   return [
     {
@@ -166,7 +210,7 @@ export function usageSinkContract(
     {
       name: "takes one stored record",
       async run() {
-        await (await sink()).receive([storedRecord()]);
+        await (await sink()).receive([await record()]);
       },
     },
     {
@@ -174,7 +218,7 @@ export function usageSinkContract(
       async run() {
         await (
           await sink()
-        ).receive([storedRecord(), storedRecord(), storedRecord()]);
+        ).receive([await record(), await record(), await record()]);
       },
     },
     {
@@ -184,7 +228,7 @@ export function usageSinkContract(
         // Egma's key would charge a customer for their own provider account.
         await (
           await sink()
-        ).receive([storedRecord({ paymentSource: "customer" })]);
+        ).receive([await record({ paymentSource: "customer" })]);
       },
     },
     {
@@ -192,7 +236,7 @@ export function usageSinkContract(
       async run() {
         // A quantity with no price effective at its instant is stored at zero.
         // It is real usage and the sink still sees it.
-        await (await sink()).receive([storedRecord({ amountMicros: 0 })]);
+        await (await sink()).receive([await record({ amountMicros: 0 })]);
       },
     },
     {
@@ -201,9 +245,9 @@ export function usageSinkContract(
         // The store collapses a resend, so this should not happen — and a sink
         // that threw when it did would turn a redelivery into a lost write.
         const receiving = await sink();
-        const record = storedRecord();
-        await receiving.receive([record]);
-        await receiving.receive([record]);
+        const delivered = await record();
+        await receiving.receive([delivered]);
+        await receiving.receive([delivered]);
       },
     },
   ];
@@ -251,7 +295,7 @@ function storedRecord(
 ): StoredUsageRecord {
   return {
     id: newId("usg"),
-    organizationId: AN_ORGANIZATION,
+    organizationId: THE_MADE_UP_ORGANIZATION,
     projectId: newId("prj"),
     occurredAt: new Date("2026-09-07T10:00:00.000Z"),
     provider: "openai",

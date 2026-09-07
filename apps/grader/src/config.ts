@@ -22,6 +22,17 @@ export type Config = {
   readonly leaseSeconds: number;
   /** The backstop, for a notification nothing was listening for. */
   readonly sweepSeconds: number;
+  /**
+   * `EGMA_STRIPE_SECRET_KEY`, as the deployment named it, or `undefined`.
+   *
+   * **A setting and never a mode**, read here beside every other deployment
+   * value rather than off the process where it is used. Its presence selects
+   * the cloud billing adapter, which this service asks at its own claim: a
+   * grading job's only spend is the judge's model usage, so the claim asks
+   * whether Egma's key may fund it before it hands a job out. Empty is every
+   * deployment that charges nobody, and nothing is imported at all.
+   */
+  readonly stripeSecretKey: string | undefined;
   readonly logLevel: LogLevel;
 };
 
@@ -126,6 +137,7 @@ export function loadConfig(): Config {
       "EGMA_GRADER_SWEEP_SECONDS",
       DEFAULT_SWEEP_SECONDS,
     ),
+    stripeSecretKey: process.env["EGMA_STRIPE_SECRET_KEY"]?.trim() || undefined,
     logLevel: logLevel(),
   };
 

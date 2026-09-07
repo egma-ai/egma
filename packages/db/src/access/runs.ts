@@ -850,6 +850,42 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
       if (simulationCount !== expectedSimulationCount) {
         throw new Error(`test suite ${suite.id} changed while its run was being planned`);
       }
+      // **And whether Egma's own key may pay for the providers this run
+      // needs.** The allowance question above is about a plan; this one is
+      // about a balance, and a customer can be stopped by either. It is asked
+      // here rather than beside it because only now are the persona versions
+      // pinned, so only now is it known which providers the conversations
+      // written above will need a key for — the persona's LLM on a chat, and
+      // the speech legs too on a voice conversation.
+      //
+      // **Once for the whole run**, over the distinct providers its pinned
+      // versions name, which is one indexed read of rows this transaction has
+      // just written. A deployment with no billing answers yes without
+      // reaching anything. The claim path asks again per organization per
+      // batch, because a run admitted an hour ago can outlive the balance that
+      // admitted it.
+      const needed = await queuedWorkProvidersOn(tx, auth, runId);
+      if (needed.length > 0) {
+        const funding = await billing().entitlements.mayPlatformKeyFund({
+          organizationId: auth.organizationId,
+          providers: needed,
+        });
+        if (!funding.funded) {
+          // The refusal's own sentence, whole and relayed word for word, for
+          // the reason the allowance refusal's is: it was written to be shown
+          // and it names the next move.
+          const said = funding.message.trim();
+          refuseRun(
+            "providers_unfunded",
+            said === ""
+              ? `Egma's provider keys cannot fund ${funding.providers.join(
+                  ", ",
+                )} for this organization. Add inference credit under ` +
+                  "Settings → Organization, or use your own provider keys."
+              : said,
+          );
+        }
+      }
       const groups = planGroupsFor(graderCandidates, plannedTests);
       await writeGradingPlan(auth, tx, {
         runId,
@@ -2824,8 +2860,23 @@ export async function readQueuedWorkProviders(
   runId: string,
 ): Promise<readonly string[]> {
   authorize(auth, "read", here(auth));
+  return queuedWorkProvidersOn(db(), auth, runId);
+}
 
-  const rows = await db()
+/**
+ * The derivation itself, on whichever connection is asking.
+ *
+ * Two callers: the run page's read above, and run start — which asks inside
+ * the transaction that has just written the conversations, so it must run on
+ * that transaction rather than on the pool, and must not authorize again for a
+ * caller the write has already authorized.
+ */
+async function queuedWorkProvidersOn(
+  on: Queryable,
+  auth: AuthContext,
+  runId: string,
+): Promise<readonly string[]> {
+  const rows = await on
     .selectDistinct({
       modality: simulation.modality,
       llmProvider: personaVersion.llmProvider,

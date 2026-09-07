@@ -825,21 +825,66 @@ describe("what the Billing section reads", () => {
 });
 
 describe("the port contracts, against the cloud adapters", () => {
-  // The same list the open adapters are held to, run against these. Neither
-  // can drift from the other, because there is only one list.
-  for (const check of entitlementSourceContract(() =>
-    cloudEntitlementSource({ now: () => NOW }),
+  /**
+   * The same list the open adapters are held to, run against these — in a
+   * world where the customer exists and every record is a real row.
+   *
+   * **That world is what makes these checks mean anything here.** An adapter
+   * that writes a ledger row has foreign keys; handed a made-up organization
+   * and a record no table holds, every write would fail and the sink would
+   * swallow it, and the checks would pass by doing nothing at all. So the
+   * suite supplies Acme and stores each record before it is delivered, and
+   * asserts below that the rows it should have written are there.
+   */
+  const delivered: StoredUsageRecord[] = [];
+
+  for (const check of entitlementSourceContract(
+    () => cloudEntitlementSource({ now: () => NOW }),
+    { organizationId: acme.organizationId },
   )) {
     it(`entitlement source: ${check.name}`, async () => {
       await check.run();
     });
   }
 
-  for (const check of usageSinkContract(() => cloudUsageSink())) {
+  for (const check of usageSinkContract(() => cloudUsageSink(), {
+    organizationId: acme.organizationId,
+    projectId: acme.projectId,
+    async prepare(record) {
+      await seedUsageRecord(acme, record);
+      delivered.push(record);
+    },
+  })) {
     it(`usage sink: ${check.name}`, async () => {
       await check.run();
     });
   }
+
+  it("wrote one charge for every record Egma's key paid for, and no other", async () => {
+    // The checks above are about shape and say nothing about answers. This is
+    // the half that says the cloud sink actually did its work while passing
+    // them — without it, an adapter that quietly wrote nothing would be held
+    // to the same list and pass it.
+    expect(delivered.length).toBeGreaterThan(0);
+    const keys = new Set(
+      (await ledgerRows(acme)).map((row) => row.idempotency_key),
+    );
+
+    for (const record of delivered) {
+      const charged = record.paymentSource === "platform" && record.amountMicros > 0;
+      expect(
+        keys.has(inferenceChargeKey(record.id)),
+        `${record.id} (${record.paymentSource}, ${record.amountMicros})`,
+      ).toBe(charged);
+    }
+    // The customer-funded one and the one that cost nothing are both in there,
+    // so the assertion above is refusing something rather than agreeing with
+    // everything.
+    expect(
+      delivered.some((record) => record.paymentSource === "customer"),
+    ).toBe(true);
+    expect(delivered.some((record) => record.amountMicros === 0)).toBe(true);
+  });
 });
 
 describe("an organization the adapter has never heard of", () => {

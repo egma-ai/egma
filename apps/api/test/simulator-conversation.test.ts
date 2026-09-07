@@ -848,6 +848,9 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           // Both stores are already connected by the instance this process
           // shares.
           claimant: "walking-grader-1",
+          // This instance is the deployment everybody runs: no Stripe secret,
+          // so no billing adapter and every claim funded.
+          stripeSecretKey: undefined,
           capacity: 4,
           heartbeatSeconds: 1,
           leaseSeconds: 3_600,

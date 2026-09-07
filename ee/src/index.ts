@@ -19,6 +19,11 @@
  */
 
 export {
+  loadCloudBilling,
+  type LoadedCloudBilling,
+} from "./load.ts";
+
+export {
   cloudBillingPlugIn,
   cloudEntitlementSource,
   cloudUsageSink,

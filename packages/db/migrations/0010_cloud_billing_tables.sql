@@ -15,6 +15,13 @@
 -- The two rows in `cloud_plan` are written on boot from a file in `ee/`, the
 -- way the rate card is written from its own, so a price change is a row change
 -- and not a deploy.
+--
+-- One key here refuses a delete rather than following one: the ledger's edge
+-- into `usage_record`. A charge is money that moved and is summed into the
+-- account's materialised balance, so a cascade would leave that balance
+-- disagreeing with the ledger it caches. Nothing in the product deletes a
+-- usage record today; the day something does, this key makes somebody decide
+-- what happens to the charge.
 
 CREATE TABLE "cloud_billing_account" (
 	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
@@ -112,6 +119,6 @@ CREATE TABLE "cloud_stripe_event" (
 --> statement-breakpoint
 ALTER TABLE "cloud_billing_account" ADD CONSTRAINT "cloud_billing_account_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "cloud_billing_account" ADD CONSTRAINT "cloud_billing_account_plan_fk" FOREIGN KEY ("plan_code") REFERENCES "public"."cloud_plan"("code") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "cloud_ledger_entry" ADD CONSTRAINT "cloud_ledger_entry_usage_record_id_usage_record_id_fk" FOREIGN KEY ("usage_record_id") REFERENCES "public"."usage_record"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "cloud_ledger_entry" ADD CONSTRAINT "cloud_ledger_entry_usage_record_id_usage_record_id_fk" FOREIGN KEY ("usage_record_id") REFERENCES "public"."usage_record"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "cloud_ledger_entry" ADD CONSTRAINT "cloud_ledger_entry_account_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."cloud_billing_account"("organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "cloud_ledger_entry_organization_idx" ON "cloud_ledger_entry" USING btree ("organization_id","id");
