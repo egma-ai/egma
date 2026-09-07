@@ -226,7 +226,27 @@ export function cloudEntitlementSource(
 export function cloudUsageSink(): UsageSink {
   return {
     async receive(records: readonly StoredUsageRecord[]): Promise<void> {
-      await chargeForStoredUsage(records);
+      try {
+        await chargeForStoredUsage(records);
+      } catch (fault) {
+        // **A sink must not fail a write, and this one is no exception.** The
+        // records are already durable rows when this runs, so a charge that
+        // could not be written is a delivery lost and not a fact: every one of
+        // them can be rebuilt from `usage_record`, which is exactly why the
+        // records are the product's and the charging is not. Letting it out
+        // would turn a billing fault into a simulator that cannot record what
+        // it spent.
+        //
+        // Reported rather than swallowed, on standard error, because this
+        // package has no logger of its own and a charge that silently stopped
+        // being written is money nobody is collecting.
+        console.error(
+          `the inference balance could not be charged for ${records.length} ` +
+            "stored usage record(s); they are stored and can be replayed from " +
+            "usage_record",
+          fault,
+        );
+      }
     },
   };
 }

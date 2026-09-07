@@ -104,6 +104,30 @@ export async function openBillingAccount(
   at: Date = new Date(),
   catalog?: PlanCatalog,
 ): Promise<BillingAccount> {
+  const opened = await openAccountIfTheCustomerExists(organizationId, at, catalog);
+  if (opened === undefined) {
+    throw new Error(
+      `organization ${organizationId} was not found while opening its ` +
+        "billing account",
+    );
+  }
+  return opened;
+}
+
+/**
+ * The same, answering nothing at all where the organization does not exist.
+ *
+ * **There is one caller and it is the entitlement source**, which is asked
+ * about an organization rather than handed a context and must answer rather
+ * than throw: an organization with no rows has run nothing and holds nothing,
+ * which is a true answer to both of the port's questions and the safe one —
+ * the balance it does not have funds nothing.
+ */
+async function openAccountIfTheCustomerExists(
+  organizationId: string,
+  at: Date,
+  catalog?: PlanCatalog,
+): Promise<BillingAccount | undefined> {
   const held = await accountRow(fencedDatabase(), organizationId);
   if (held !== undefined) return held;
 
@@ -116,12 +140,7 @@ export async function openBillingAccount(
       .from(organization)
       .where(eq(organization.id, organizationId))
       .limit(1);
-    if (customer === undefined) {
-      throw new Error(
-        `organization ${organizationId} was not found while opening its ` +
-          "billing account",
-      );
-    }
+    if (customer === undefined) return undefined;
 
     const [created] = await tx
       .insert(cloudBillingAccount)
@@ -177,6 +196,20 @@ export async function openBillingAccount(
  * comes from a caller's own resolved context or from a row Egma claimed. See
  * the lint rule's note on the second fenced home.
  */
+/** What an organization with no rows looks like: nothing spent, nothing held. */
+function unopened(organizationId: string, at: Date): BillingAccount {
+  return {
+    id: "",
+    organizationId,
+    planCode: "hobby",
+    periodAnchor: at,
+    stripeCustomerId: null,
+    stripeSubscriptionId: null,
+    stripeSubscriptionStatus: null,
+    balanceMicros: 0,
+  };
+}
+
 export type EntitlementFacts = {
   readonly account: BillingAccount;
   readonly plan: CloudPlan;
@@ -188,7 +221,11 @@ export async function readEntitlementFacts(
   organizationId: string,
   at: Date = new Date(),
 ): Promise<EntitlementFacts> {
-  const account = await openBillingAccount(organizationId, at);
+  const opened = await openAccountIfTheCustomerExists(organizationId, at);
+  // An organization with no rows at all: it has run nothing, so it has spent
+  // no allowance, and it holds no balance, so Egma's key funds nothing for it.
+  // Both are true answers and neither is generous.
+  const account = opened ?? unopened(organizationId, at);
   const plan = await readPlan(account.planCode);
   const period = periodAt(account.periodAnchor, at);
 
