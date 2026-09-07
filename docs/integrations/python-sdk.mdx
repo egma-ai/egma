@@ -164,6 +164,33 @@ if __name__ == "__main__":
 
 That is the whole integration. It reads `EGMA_URL` and `EGMA_API_KEY`, the same two settings `monitor` reads, or the matching `endpoint=` and `api_key=` arguments.
 
+### Chat simulations
+
+A chat simulation's room name starts with `egma-sim-chat-`. Read that prefix and start the session on LiveKit's text path, so the worker sends no audio in a chat room and keeps its normal voice settings everywhere else:
+
+```python
+from livekit.agents import room_io
+from egma import simulation
+
+agent = ...
+session = AgentSession(...)
+await simulation(agent, ctx, session)
+
+chat = ctx.job.room.name.startswith("egma-sim-chat-")
+options = (
+    room_io.RoomOptions(
+        audio_input=False,
+        audio_output=False,
+        text_output=room_io.TextOutputOptions(sync_transcription=False),
+    )
+    if chat
+    else room_io.RoomOptions()
+)
+await session.start(agent=agent, room=ctx.room, room_options=options)
+```
+
+Keep independent audio publishers, such as background audio, off in that branch too.
+
 ## What `simulation` does
 
 `simulation` reads the room's name off `ctx.job` once, and reads nothing else. In a room Egma did not name — which is every production room — it returns immediately having touched nothing: no connect, no message, no exporter, no wrapper between your tools and the model. This is enforced by a test in the package (`tests/test_inert.py`), not just described in documentation.
