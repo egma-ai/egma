@@ -298,7 +298,7 @@ describe("the Retell lanes migration over a populated database", () => {
     //
     // **Two checks now, and the second one arrived on purpose.** A simulation
     // records the lane it ran over, frozen at execution, so a month's usage is
-    // answerable from the row alone — see migration 0009. It is a second copy
+    // answerable from the row alone — see migration 0008. It is a second copy
     // of the value list in the database and not a second source of it: both
     // checks are generated from `CONNECTION_TYPES` in `schema/agents.ts`, so
     // adding a lane still changes one declaration and one migration writes

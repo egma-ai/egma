@@ -61,43 +61,8 @@
     {
       "idx": 8,
       "version": "7",
-      "when": 1788764479615,
-      "tag": "0008_usage_records_and_rate_card",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1788764960394,
-      "tag": "0009_simulation_connection_type",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "7",
-      "when": 1788767607337,
-      "tag": "0010_cloud_billing_tables",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "7",
-      "when": 1788772536439,
-      "tag": "0011_cloud_plan_stripe_objects",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "7",
-      "when": 1788774416442,
-      "tag": "0012_cloud_overage_reported_through",
-      "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "7",
       "when": 1788777867667,
-      "tag": "0013_cloud_stripe_subscription_event_at",
+      "tag": "0008_billing",
       "breakpoints": true
     }
   ]

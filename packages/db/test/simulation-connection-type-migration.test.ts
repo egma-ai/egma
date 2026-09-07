@@ -24,7 +24,8 @@ import {
  * a number that is wrong and looks right.
  */
 
-const MIGRATION = "0009_simulation_connection_type.sql";
+/** The migration that carries the backfill, among the rest of billing. */
+const MIGRATION = "0008_billing.sql";
 
 const acme = {
   organization: newId("org"),

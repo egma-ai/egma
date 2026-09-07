@@ -1,5 +1,5 @@
 {
-  "id": "a5500a9f-52d1-4f7b-bf31-a072acc8a96c",
+  "id": "265341b5-cfb1-4f0f-ada4-1198329c6321",
   "prevId": "8b45517a-ab07-45fb-a045-4f185936440b",
   "version": "7",
   "dialect": "postgresql",
@@ -4266,6 +4266,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "connection_type": {
+          "name": "connection_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -4465,6 +4471,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "simulation_organization_id_started_at_idx": {
+          "name": "simulation_organization_id_started_at_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -4627,6 +4654,10 @@
         "simulation_modality_allowed": {
           "name": "simulation_modality_allowed",
           "value": "\"simulation\".\"modality\" in ('voice', 'chat')"
+        },
+        "simulation_connection_type_allowed": {
+          "name": "simulation_connection_type_allowed",
+          "value": "\"simulation\".\"connection_type\" in ('retell_chat_api', 'retell_text_mode', 'retell_web_call', 'phone_number', 'livekit_room')"
         },
         "simulation_position_counts_from_one": {
           "name": "simulation_position_counts_from_one",
@@ -5697,6 +5728,519 @@
         "usage_record_dedupe_key_is_not_blank": {
           "name": "usage_record_dedupe_key_is_not_blank",
           "value": "btrim(\"usage_record\".\"dedupe_key\") <> ''"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.cloud_billing_account": {
+      "name": "cloud_billing_account",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "plan_code": {
+          "name": "plan_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "period_anchor": {
+          "name": "period_anchor",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stripe_customer_id": {
+          "name": "stripe_customer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_subscription_id": {
+          "name": "stripe_subscription_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_subscription_status": {
+          "name": "stripe_subscription_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_subscription_event_at": {
+          "name": "stripe_subscription_event_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "balance_micros": {
+          "name": "balance_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "overage_reported_through": {
+          "name": "overage_reported_through",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "cloud_billing_account_organization_id_organization_id_fk": {
+          "name": "cloud_billing_account_organization_id_organization_id_fk",
+          "tableFrom": "cloud_billing_account",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "cloud_billing_account_plan_fk": {
+          "name": "cloud_billing_account_plan_fk",
+          "tableFrom": "cloud_billing_account",
+          "tableTo": "cloud_plan",
+          "columnsFrom": [
+            "plan_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "cloud_billing_account_organization_unique": {
+          "name": "cloud_billing_account_organization_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        "cloud_billing_account_stripe_customer_unique": {
+          "name": "cloud_billing_account_stripe_customer_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "stripe_customer_id"
+          ]
+        },
+        "cloud_billing_account_stripe_subscription_unique": {
+          "name": "cloud_billing_account_stripe_subscription_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "stripe_subscription_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "cloud_billing_account_id_prefix": {
+          "name": "cloud_billing_account_id_prefix",
+          "value": "\"cloud_billing_account\".\"id\" ~ '^cba_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "cloud_billing_account_plan_code_allowed": {
+          "name": "cloud_billing_account_plan_code_allowed",
+          "value": "\"cloud_billing_account\".\"plan_code\" in ('hobby', 'pro')"
+        },
+        "cloud_billing_account_subscription_status_allowed": {
+          "name": "cloud_billing_account_subscription_status_allowed",
+          "value": "\"cloud_billing_account\".\"stripe_subscription_status\" is null\n        or \"cloud_billing_account\".\"stripe_subscription_status\" in ('trialing', 'active', 'past_due', 'canceled', 'unpaid', 'incomplete', 'incomplete_expired', 'paused')"
+        },
+        "cloud_billing_account_subscription_needs_a_customer": {
+          "name": "cloud_billing_account_subscription_needs_a_customer",
+          "value": "\"cloud_billing_account\".\"stripe_subscription_id\" is null\n        or \"cloud_billing_account\".\"stripe_customer_id\" is not null"
+        },
+        "cloud_billing_account_subscription_status_needs_a_subscription": {
+          "name": "cloud_billing_account_subscription_status_needs_a_subscription",
+          "value": "\"cloud_billing_account\".\"stripe_subscription_status\" is null\n        or \"cloud_billing_account\".\"stripe_subscription_id\" is not null"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.cloud_ledger_entry": {
+      "name": "cloud_ledger_entry",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount_micros": {
+          "name": "amount_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reference_kind": {
+          "name": "reference_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reference_id": {
+          "name": "reference_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "usage_record_id": {
+          "name": "usage_record_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "cloud_ledger_entry_organization_idx": {
+          "name": "cloud_ledger_entry_organization_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "cloud_ledger_entry_usage_record_id_usage_record_id_fk": {
+          "name": "cloud_ledger_entry_usage_record_id_usage_record_id_fk",
+          "tableFrom": "cloud_ledger_entry",
+          "tableTo": "usage_record",
+          "columnsFrom": [
+            "usage_record_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "cloud_ledger_entry_account_fk": {
+          "name": "cloud_ledger_entry_account_fk",
+          "tableFrom": "cloud_ledger_entry",
+          "tableTo": "cloud_billing_account",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "organization_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "cloud_ledger_entry_idempotency_key_unique": {
+          "name": "cloud_ledger_entry_idempotency_key_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "idempotency_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "cloud_ledger_entry_id_prefix": {
+          "name": "cloud_ledger_entry_id_prefix",
+          "value": "\"cloud_ledger_entry\".\"id\" ~ '^cle_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "cloud_ledger_entry_kind_allowed": {
+          "name": "cloud_ledger_entry_kind_allowed",
+          "value": "\"cloud_ledger_entry\".\"kind\" in ('welcome_credit', 'purchased_credit', 'inference_charge', 'correction')"
+        },
+        "cloud_ledger_entry_reference_kind_allowed": {
+          "name": "cloud_ledger_entry_reference_kind_allowed",
+          "value": "\"cloud_ledger_entry\".\"reference_kind\" in ('organization', 'usage_record', 'checkout_session', 'operator')"
+        },
+        "cloud_ledger_entry_reference_id_is_not_blank": {
+          "name": "cloud_ledger_entry_reference_id_is_not_blank",
+          "value": "btrim(\"cloud_ledger_entry\".\"reference_id\") <> ''"
+        },
+        "cloud_ledger_entry_idempotency_key_is_not_blank": {
+          "name": "cloud_ledger_entry_idempotency_key_is_not_blank",
+          "value": "btrim(\"cloud_ledger_entry\".\"idempotency_key\") <> ''"
+        },
+        "cloud_ledger_entry_kind_names_its_cause": {
+          "name": "cloud_ledger_entry_kind_names_its_cause",
+          "value": "case \"cloud_ledger_entry\".\"kind\"\n        when 'welcome_credit' then \"cloud_ledger_entry\".\"reference_kind\" = 'organization'\n        when 'purchased_credit' then \"cloud_ledger_entry\".\"reference_kind\" = 'checkout_session'\n        when 'inference_charge' then \"cloud_ledger_entry\".\"reference_kind\" = 'usage_record'\n        else true\n      end"
+        },
+        "cloud_ledger_entry_charge_names_its_usage_record": {
+          "name": "cloud_ledger_entry_charge_names_its_usage_record",
+          "value": "case when \"cloud_ledger_entry\".\"reference_kind\" = 'usage_record'\n        then \"cloud_ledger_entry\".\"usage_record_id\" = \"cloud_ledger_entry\".\"reference_id\"\n        else \"cloud_ledger_entry\".\"usage_record_id\" is null\n      end"
+        },
+        "cloud_ledger_entry_sign_follows_its_kind": {
+          "name": "cloud_ledger_entry_sign_follows_its_kind",
+          "value": "case \"cloud_ledger_entry\".\"kind\"\n        when 'welcome_credit' then \"cloud_ledger_entry\".\"amount_micros\" > 0\n        when 'purchased_credit' then \"cloud_ledger_entry\".\"amount_micros\" > 0\n        when 'inference_charge' then \"cloud_ledger_entry\".\"amount_micros\" <= 0\n        else \"cloud_ledger_entry\".\"amount_micros\" <> 0\n      end"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.cloud_plan": {
+      "name": "cloud_plan",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fee_micros": {
+          "name": "fee_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chat_simulations_allowance": {
+          "name": "chat_simulations_allowance",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "web_call_minutes_allowance": {
+          "name": "web_call_minutes_allowance",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone_minutes_allowance": {
+          "name": "phone_minutes_allowance",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "web_call_overage_micros_per_minute": {
+          "name": "web_call_overage_micros_per_minute",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phone_overage_micros_per_minute": {
+          "name": "phone_overage_micros_per_minute",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stripe_product_id": {
+          "name": "stripe_product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_fee_price_id": {
+          "name": "stripe_fee_price_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_web_call_meter_price_id": {
+          "name": "stripe_web_call_meter_price_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_phone_meter_price_id": {
+          "name": "stripe_phone_meter_price_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_web_call_meter_id": {
+          "name": "stripe_web_call_meter_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_phone_meter_id": {
+          "name": "stripe_phone_meter_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "cloud_plan_code_unique": {
+          "name": "cloud_plan_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "cloud_plan_id_prefix": {
+          "name": "cloud_plan_id_prefix",
+          "value": "\"cloud_plan\".\"id\" ~ '^cpl_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "cloud_plan_code_allowed": {
+          "name": "cloud_plan_code_allowed",
+          "value": "\"cloud_plan\".\"code\" in ('hobby', 'pro')"
+        },
+        "cloud_plan_name_is_not_blank": {
+          "name": "cloud_plan_name_is_not_blank",
+          "value": "btrim(\"cloud_plan\".\"name\") <> ''"
+        },
+        "cloud_plan_fee_is_not_negative": {
+          "name": "cloud_plan_fee_is_not_negative",
+          "value": "\"cloud_plan\".\"fee_micros\" >= 0"
+        },
+        "cloud_plan_allowances_are_not_negative": {
+          "name": "cloud_plan_allowances_are_not_negative",
+          "value": "coalesce(\"cloud_plan\".\"chat_simulations_allowance\", 0) >= 0\n        and coalesce(\"cloud_plan\".\"web_call_minutes_allowance\", 0) >= 0\n        and coalesce(\"cloud_plan\".\"phone_minutes_allowance\", 0) >= 0"
+        },
+        "cloud_plan_overage_prices_are_not_negative": {
+          "name": "cloud_plan_overage_prices_are_not_negative",
+          "value": "\"cloud_plan\".\"web_call_overage_micros_per_minute\" >= 0\n        and \"cloud_plan\".\"phone_overage_micros_per_minute\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.cloud_stripe_event": {
+      "name": "cloud_stripe_event",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "cloud_stripe_event_id_is_not_blank": {
+          "name": "cloud_stripe_event_id_is_not_blank",
+          "value": "btrim(\"cloud_stripe_event\".\"id\") <> ''"
+        },
+        "cloud_stripe_event_type_is_not_blank": {
+          "name": "cloud_stripe_event_type_is_not_blank",
+          "value": "btrim(\"cloud_stripe_event\".\"type\") <> ''"
         }
       },
       "isRLSEnabled": false
