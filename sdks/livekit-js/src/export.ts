@@ -21,29 +21,14 @@ import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import { telemetry, type JobContext } from "@livekit/agents";
 
 /**
- * The one Egma exporter in this process, shared by both verbs.
+ * Shared span exporter for monitor() and simulation(), authenticated by a project API key.
+ * Simulation spans carry the room name so ingestion can associate the agent POV.
  *
- * `monitor` and `simulation` send the same thing to the same door: this
- * worker's OpenTelemetry spans, over OTLP, with the project API key on them.
- * They differ in one fact — a simulation stamps the room it runs in on every
- * span, so Egma can file the agent's POV under the simulation that room
- * belongs to.
+ * Resources cannot change after provider creation. Set the room on a new resource
+ * and on spans through LiveKit metadata so existing providers also work. Ingestion
+ * reads the resource first, then accepts a room shared by all spans in that resource.
  *
- * **Why the room name rides two ways at once.** A resource is fixed when a
- * tracer provider is built, and this SDK does not always build one: a worker
- * that already has OpenTelemetry set up hands it a provider that exists, and
- * that provider must keep working. So the room name goes on twice — as a
- * resource attribute where this SDK builds the provider, and as a span
- * attribute on every span through LiveKit's own `setTracerProvider` metadata
- * seam, which works on any provider whoever built it. Egma's door reads the
- * resource first and falls back to the spans when every span in a resource
- * agrees.
- *
- * **One job per process.** The room this process exports under is decided by
- * the first job that asks, because a resource cannot be rewritten and the
- * metadata processor goes on once. LiveKit runs one job per process, and a
- * second job asking for different settings is refused here rather than filed
- * under the first job's name.
+ * One job per process: the exporter settings and room cannot change after setup.
  */
 
 const TRACE_PATH = "/v1/traces";

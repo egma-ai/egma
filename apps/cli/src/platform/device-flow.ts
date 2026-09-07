@@ -1,14 +1,6 @@
 /**
- * The terminal's half of the device flow: ask to be let in, then collect.
- *
- * A short code goes on the screen, a browser opens on it, somebody approves it
- * where they can see who they are and what they are approving, and this end
- * exchanges the code it was given for a key. No secret is ever typed into the
- * terminal, and nothing rides on a URL.
- *
- * Everything here speaks the public HTTP API and nothing else, which is what
- * lets the whole of login run against a fixture of that API in CI and against a
- * real instance unchanged.
+ * Start device authorization, show the short code, and poll for the approved key.
+ * Use the public HTTP contract so fixtures exercise the same login path.
  */
 
 /** The one client egma issues device codes to, and the name it says. */
@@ -56,18 +48,8 @@ export type Collection =
 export type Fetch = typeof fetch;
 
 /**
- * What egma says about a refusal, in egma's own words.
- *
- * RFC 8628 carries an `error_description` beside the code, and none of it is
- * ever repeated at a terminal. Two reasons, and either alone would be enough.
- * It is written for whoever built the client rather than for whoever is sitting
- * at it. And egma's own descriptions name what a terminal never names — what
- * was set up for a new account is settled in the browser page and said nowhere
- * out here — so relaying them would break that rule from the far end of an
- * HTTP request, where no reading of this code could see it.
- *
- * So the code is switched on and the sentence is egma's. The instance's own
- * words are read and dropped.
+ * Map protocol error codes to terminal copy. Do not relay server error_description,
+ * which may contain browser-only account details or unsuitable diagnostics.
  */
 export function refusalFor(code: string): string {
   switch (code) {

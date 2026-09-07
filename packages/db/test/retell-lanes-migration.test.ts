@@ -15,21 +15,8 @@ import {
 } from "./support/database.ts";
 
 /**
- * The Retell lanes migration, run the way a real deployment meets it: over a
- * database that already holds connections, runs and finished simulations.
- *
- * Two things are proved here that a fresh database cannot say anything about.
- *
- * **The cut is clean.** The migration replaces the connection row's own
- * connection-type check and the access-variant check beside it, and nothing
- * else in the schema gates a connection-type value — asserted below against the
- * live catalog rather than assumed, because a gate nobody remembered would
- * refuse the new kinds at the first write on a customer's database and nowhere
- * earlier.
- *
- * **Nothing already written moves.** Every connection type an older build could
- * have written is still admitted, and every existing row reads exactly as it
- * did.
+ * Apply the Retell connection migration over existing rows. Verify the live
+ * connection-type and access-variant constraints and preserve existing data.
  */
 
 const UNDER_TEST = "0002_retell_lanes.sql";

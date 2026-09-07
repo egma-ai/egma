@@ -1,16 +1,7 @@
 /**
- * The person at the browser, for a check that has nobody at the keyboard.
- *
- * A terminal asking to be let in is only half of the device flow; the other
- * half is a human on the instance's own pages, signing up and pressing
- * Approve. More than one check needs that half, and it is a sequence of clicks
- * against real markup — so it lives once, here, and a page that changes breaks
- * one file rather than several in different ways.
- *
- * Nothing in here asserts anything. The check that owns those pages as its
- * subject makes its own claims about what they say; for every other check this
- * is a step on the way, and a step that quietly held opinions about somebody
- * else's screens would fail for reasons that are not its own.
+ * Shared browser steps for signup and device approval.
+ * Keep assertions in the owning smoke test so unrelated checks do not depend
+ * on extra UI expectations.
  */
 
 import type { Page } from "playwright-core";

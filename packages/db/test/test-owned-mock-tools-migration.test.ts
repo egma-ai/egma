@@ -15,21 +15,9 @@ import {
 } from "./support/database.ts";
 
 /**
- * The migration that moves the mocked world onto the test, run the way a real
- * deployment meets it: over a database that already holds a project's mock
- * tools, a ticked connection, a finished run with a frozen world, a stamped
- * simulation, and a test version that overrode a tool.
- *
- * Two things are proved here that a fresh database cannot say anything about.
- *
- * **Everything that can be carried across is carried across.** A version's
- * overrides become that version's own mock tools, in the order they were
- * authored and in the new shape. The delay does not survive, deliberately: the
- * new shape has no room for one and the header says so.
- *
- * **Everything else is really gone**, tables, columns, checks and the three
- * JSON keys — asserted against the live catalog rather than against the file,
- * so a statement that ran and did nothing would still fail here.
+ * Migrate legacy mock overrides into ordered, test-owned mock tools.
+ * Verify that delays and obsolete project, connection, run, and simulation
+ * fields are removed from existing data and the live schema.
  */
 
 const UNDER_TEST = "0007_test_owned_mock_tools.sql";

@@ -5,43 +5,10 @@ import {
 } from "@egma/db";
 
 /**
- * The one written-down form of one span of evidence, and what makes two copies
- * of it the same evidence.
- *
- * Everything downstream of acceptance reads this shape and nothing else. A
- * record is appended to the local log, sealed into a segment, uploaded, read
- * back by the drainer after a restart it did not survive, and turned into a row
- * — so it is a **durable contract with a version on it**, not an internal
- * struct. The names here are the names in the object, and changing one is a
- * format change rather than a rename.
- *
- * ## Why the keys are not the column names
- *
- * They are close and deliberately not identical. `started_at_microseconds` is
- * an integer count; the column it eventually reaches is a `DateTime64(6)`
- * literal. Naming the record's field after the column would say that the
- * record holds what the row holds, and the day the row's encoding changes the
- * record would be carrying a lie in its own key. The record is the evidence;
- * the row is one projection of it.
- *
- * ## Numbers travel as decimal strings
- *
- * A microsecond timestamp and a nanosecond duration are 64-bit counts and JSON
- * numbers are doubles, so a round trip through `JSON.parse` would quietly move
- * a span by a few microseconds — which is invisible, survives every test that
- * compares a transcript, and makes a replay hash differently from the evidence
- * it replays. They are written as decimal strings for the same reason
- * `appendSpans` sends `duration_ns` as one.
- *
- * ## Nothing about delivery is in here
- *
- * There is no receive time, no request identifier, no source address, no
- * attempt count, and no credential of any kind. Two facts depend on that. The
- * content hash is over this evidence, so a delivery-only value would make an
- * exact replay hash differently from the evidence it replays and turn every
- * retry into an integrity defect. And the sealed object is handed to an object
- * store, so anything operational written into a record would be written into
- * the spool as well.
+ * Versioned durable span format shared by the local log, segments, and drainer.
+ * Changing keys requires format compatibility work. Store 64-bit timestamps
+ * and durations as decimal strings to preserve exact values through JSON.
+ * Keep delivery metadata out of evidence so retries retain the same fingerprint.
  */
 
 /**
@@ -131,32 +98,9 @@ export type IngestionRecord = {
 };
 
 /**
- * How much room one more record needs, in bytes of the frame it is staged as.
- *
- * What a caller reserves when it asks whether the local log will take more
- * evidence. It has to be the *largest* record the acceptance path will stage
- * rather than a typical one: readiness is a promise about the next request,
- * whatever that request turns out to carry, and a reserve sized for an average
- * record is a green health check in front of a door already refusing.
- *
- * Three parts, in the order they add up:
- *
- * - the evidence itself, at every bound the record module enforces at once;
- * - the JSON it is written as — keys, quotes, separators, and the staged
- *   frame's own envelope around all of it;
- * - escaping, because a string is measured before it is written and written
- *   longer than it was measured. One byte becomes six as `\uXXXX`, so the
- *   worst case is the whole of the evidence at six times its size. That is a
- *   transcript of nothing but control characters, which is not a thing anybody
- *   sends — and a reserve that only covered what people usually send would
- *   fail exactly on the request nobody expected.
- *
- * **It does not cover `payload`, which has no bound to cover.** A provider
- * document arrives as it is, and no part of this path refuses one for its
- * size. A record whose payload is larger than this reserve can still meet
- * backpressure while readiness is green; what this rules out is the far more
- * ordinary case, where a log with room for a hundred more records reports
- * writable and refuses every one of them.
+ * Readiness reserve for bounded fields, worst-case JSON escaping (6×),
+ * and envelope overhead. Payload has no size bound and is excluded, so a
+ * large payload can encounter backpressure while readiness is still green.
  */
 export const LARGEST_STAGEABLE_RECORD_BYTES =
   LARGEST_BOUNDED_RECORD_BYTES * 6 + 4_096;
@@ -196,19 +140,9 @@ const RECORD_KEYS = [
 ] as const satisfies readonly (keyof IngestionRecord)[];
 
 /**
- * One record as the bytes it is written as: every key present, in one fixed
- * order, and `JSON.stringify`'s own escaping for the values.
- *
- * The order is written out above rather than taken from `Object.keys`, because
- * insertion order is what `Object.keys` answers and that is a property of
- * whichever construction site built the object. Two acceptance paths building
- * the same evidence in a different field order would seal two segments with
- * different bytes, and a retry that re-grouped the same records would then be
- * asked to create an object that does not match the one already there.
- *
- * The list is checked against the type at compile time, so a field added to
- * `IngestionRecord` and not added here stops the build rather than silently
- * dropping out of the written form.
+ * Serialize keys in a fixed order so equivalent records produce the same
+ * bytes regardless of construction order. Keep RECORD_KEYS complete when
+ * changing IngestionRecord; satisfies checks key validity, not exhaustiveness.
  */
 export function canonicalRecordJson(record: IngestionRecord): string {
   const ordered: Record<string, unknown> = {};
@@ -295,37 +229,17 @@ export function recordFor(span: NewSpan): IngestionRecord {
 }
 
 /**
- * What makes two copies of one span the same evidence.
- *
- * **The arithmetic is not here, and that is the point.** The stored
- * `content_hash` is what a replay is judged against, so the value computed over
- * a record on its way into a segment and the value computed over the row it
- * becomes have to be the same value — and two implementations of one
- * fingerprint is one of them quietly deciding that a conflict is a replay. The
- * canonical form lives beside the span type it describes, in `@egma/db`, and
- * this function is the record's way of asking it.
- *
- * The format version is outside the hash as a consequence: it says how the
- * evidence is written down, not what the evidence says. Two segments written
- * under two versions carrying one span's evidence are an exact replay of each
- * other, which is what a reader of either would expect.
+ * Use the database's canonical span fingerprint so staged and stored evidence
+ * compare identically. The record format version is excluded from that hash.
  */
 export function contentHashOf(record: IngestionRecord): string {
   return spanContentHash(spanFor(record));
 }
 
 /**
- * A record read back out of a segment, checked far enough to be trusted as one.
- *
- * The drainer meets bytes that were written by an older Egma, or by nothing at
- * all. This refuses a shape rather than repairing it: a record missing a field,
- * carrying an extra one, or holding the wrong type for one is an internal
- * defect, and the segment holding it is retained rather than partly written.
- *
- * Nothing here looks at what a value *says*. A transcript is not validated, a
- * tool result is not parsed, and no string is measured against a bound —
- * evidence was already accepted, and refusing it after acknowledgement would be
- * this side reclassifying its own promise as bad customer input.
+ * Validate exact keys, field types, version, and decimal integer syntax.
+ * Do not repair accepted evidence or parse its text/payload content. Invalid
+ * records cause the containing segment to be retained by the drainer.
  */
 export function recordFrom(value: unknown): IngestionRecord {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {

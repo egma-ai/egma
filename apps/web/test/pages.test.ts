@@ -46,14 +46,8 @@ const TRANSCRIPT_PAGE =
   "app/projects/[projectId]/monitoring/transcripts/[transcriptId]/page.tsx";
 
 /**
- * The one read in this application with a deadline on it.
- *
- * While it is in flight the whole document is covered and everything behind
- * the cover is inert, so this read failing to answer is not the same kind of
- * event as any other read failing to answer: it is a page nobody can touch.
- * A refused or dropped connection rejects and always ended the wait. A server
- * that accepts the connection and then says nothing does neither, and that is
- * the one these hold.
+ * Bound stalled session reads so the document cannot remain behind the
+ * loading cover indefinitely. Ordinary readJson calls set no default deadline.
  */
 describe("reading who is signed in", () => {
   /** A connection that is open and silent: no response, and no error either. */
@@ -107,14 +101,8 @@ describe("reading who is signed in", () => {
   });
 
   /**
-   * A deadline is only worth anything if every session read goes through it,
-   * and the invitation page is why this is written down: it asked `/api/me`
-   * with a plain fetch of its own, so it kept the exact stall the shell and
-   * the entrance had just been given a bound for — on the one page where the
-   * person waiting has no account yet and nowhere else to go.
-   *
-   * A page that asks this question again with a fetch of its own is that bug
-   * again, and this is what says so while it is being written.
+   * Reject direct session reads outside the shared helper so pages cannot
+   * bypass its deadline.
    */
   it("is the only way any page asks who is signed in", async () => {
     const allowed = new Set([
@@ -245,17 +233,7 @@ describe("the pages", () => {
     }
   });
 
-  /**
-   * The tenancy the pages show has exactly two levels and they are called
-   * `organization` and `project` — the same two words the API and the database
-   * use for the same two things.
-   *
-   * A container word invented above them is how `project` comes to mean the
-   * tenancy container in one place and something inside one in another, and a
-   * word that means two things is a word nobody can read a permission with.
-   * This costs nothing today and is written down now because the dashboard is
-   * what would grow on top of it.
-   */
+  /** Use organization for the isolation boundary and project for the resource scope. */
   it("name the two levels of tenancy, and invent no word above them", async () => {
     for (const [file, source] of await pageSources()) {
       expect(source.toLowerCase(), `${file} names a level above organization`)
@@ -398,15 +376,8 @@ describe("the pages", () => {
   });
 
   /**
-   * **The page never says a thing the API did not check**, and past the hour
-   * there is exactly one thing left to check: that the link is dead.
-   *
-   * "Your old password still works" is true of a link that ran out unused and
-   * false of one somebody already reset with, and there is one deadline now —
-   * the auth provider forgets the token at the moment egma stops honouring the
-   * link, so nothing can tell those two apart afterwards. The reassurance is
-   * therefore not on any refusal, anywhere on this page. It used to be, on the
-   * refusal that was checked; that refusal no longer exists to hold it.
+   * An expired reset link does not prove whether the old password still works.
+   * Do not offer reassurance that the API cannot verify.
    */
   it("never promise the old password still works", async () => {
     const reset = await readFile(
@@ -423,14 +394,8 @@ describe("the pages", () => {
   });
 
   /**
-   * Where somebody was going survives a reset, all the way through the message.
-   *
-   * A developer approving a terminal's login who turns out to have forgotten
-   * their password has to land back on the approval page. The sign-in page
-   * carries the destination to the form, the form sends it to the API, the API
-   * writes it into the link, and the page behind the link carries it on to
-   * sign-in. Any one of those dropping it leaves a terminal waiting on a person
-   * who is looking at the wrong page.
+   * Preserve the return path through reset submission and the link back to
+   * sign-in, so device approval can continue after a password reset.
    */
   it("carry where somebody was going through a reset, and not only up to it", async () => {
     const signIn = await readFile(path.join(WEB, "app/sign-in/page.tsx"), "utf8");
@@ -520,14 +485,8 @@ describe("the pages", () => {
   });
 
   /**
-   * The one rewrite whose caller is not a browser.
-   *
-   * A mocked run mints tool URLs on this origin under `/mock-tools/…` and
-   * writes them onto the agent under test, so the calls arrive from the
-   * agent's own platform. Without the rule they were answered by this
-   * process's not-found page: every mocked tool call on a live agent read
-   * Egma's own HTML 404, and the agent apologized to the caller for a broken
-   * backend on every call.
+   * Forward mock-tool requests from the agent platform to the API. Otherwise
+   * Next returns an HTML not-found page for the generated tool URL.
    */
   it("reach the API for a mocked run's tool calls at a path this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
@@ -743,15 +702,8 @@ describe("coming back after signing in", () => {
   });
 
   /**
-   * A redirect decided by a query parameter is the shape of every open-redirect
-   * bug there has ever been, and this one is handed to somebody in the middle
-   * of authorizing a terminal — which is exactly when a page that looks like
-   * egma but is not would be worth the most to somebody.
-   *
-   * The rule used to be a list of the shapes that leave, and a list is a thing
-   * somebody finds the next entry in: the tab was the entry. It is resolution
-   * now — the candidate is parsed against this origin and has to land back on
-   * it — so the entries below are examples of a rule rather than the rule.
+   * Exercise same-origin URL resolution, including control characters that
+   * change how a browser parses an apparent local path.
    */
   it("refuses anywhere that is not this instance", () => {
     for (const elsewhere of [
@@ -788,14 +740,8 @@ describe("coming back after signing in", () => {
 });
 
 /**
- * When a page that was offered a recording shows nothing at all, and when it
- * speaks.
- *
- * It is the whole substance of the player's honesty rule, and it has been got
- * wrong twice — once by hiding a failure that arrived after a player was
- * already on screen, once by hiding every fault egma could have. Both times it
- * was carried entirely by a render branch, which nothing could reach. It is a
- * function now, and this is where it is held.
+ * Hide only expected absence before a recording is known to exist. Failures
+ * after a player has worked must remain visible.
  */
 describe("a refusal of a recording", () => {
   const A_TRANSCRIPT = { knownToExist: false, afterOneWorked: false };
@@ -823,15 +769,8 @@ describe("a refusal of a recording", () => {
   });
 
   /**
-   * Everything about **egma** rather than about the conversation. A store
-   * nobody configured, a fault, an egma that answered nothing at all, and a row
-   * carrying a reference no simulator could have written — the last of which
-   * has a code of its own precisely so it is not mistaken for an absence.
-   *
-   * A deployment that is broken must never look like a product working
-   * correctly. That is the failure the recordings effort exists to end, and the
-   * surface that asks about every conversation somebody opens is where it would
-   * spread furthest.
+   * Configuration, transport, and unsignable-reference failures must not look
+   * like a simulation that recorded no audio.
    */
   it("is said out loud when it is about egma rather than about the conversation", () => {
     for (const code of [
@@ -846,15 +785,8 @@ describe("a refusal of a recording", () => {
   });
 
   /**
-   * And an answer that was not egma's at all.
-   *
-   * Fastify's own not-found reply is `{"statusCode":404,"error":"Not
-   * Found","message":"Route GET:… not found"}` — a 404 carrying a message, from
-   * a route that is not mounted, a container running a different version, or a
-   * proxy that has stopped forwarding this path. Reading the presence of a
-   * message would have gone quiet on every one of those. A code is the API's
-   * own promise and nobody else's, so a code is what is read; `Not Found` with
-   * a capital and a space is not one of them.
+   * A generic HTTP 404 is not the API's expected-absence code. Show it because
+   * it can indicate a missing route or proxy failure.
    */
   it("is said out loud when the answer did not come from egma", () => {
     expect(offersNothing({ code: undefined }, A_TRANSCRIPT)).toBe(false);

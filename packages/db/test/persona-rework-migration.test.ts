@@ -20,21 +20,9 @@ import {
 } from "./support/database.ts";
 
 /**
- * The persona rework's one destructive migration, run the way a real database
- * meets it: over rows written in the old shape.
- *
- * **This is the one storage-shaped proof that is genuinely external.** Every
- * other test in this area asserts what a caller of the module observes, and
- * should; this one exists because the migration's whole promise is about data
- * that already exists, and no read of a freshly created database can say
- * anything about it. So the baseline is applied on its own, rows are written
- * through raw SQL exactly as the old build wrote them — jsonb traits carrying
- * accent and background noise, jsonb models, a project default pointer, a
- * revision token, an archived persona — and only then does the rework land.
- *
- * What it has to show afterwards: nothing authored was lost, every persona
- * carries an identity name taken from the team name they already had, the dead
- * machinery is gone from the catalog, and the rewritten storage guards still protect it.
+ * Apply the persona migration to legacy rows, then verify preserved authored
+ * content, derived identity names, removed schema, and replacement constraints.
+ * Raw SQL is needed because current factories cannot create the old shape.
  */
 
 const BASELINE = "0000_baseline.sql";
@@ -67,14 +55,8 @@ const gone = { id: newId("prs"), v1: newId("prsv") };
 let database: EmptyDatabase;
 let baselineOnly: string;
 /**
- * The raw handle this file writes and reads through.
- *
- * **One connection rather than a pool, and the support module's rather than
- * this file's.** The fixtures below land inside an explicit transaction, which
- * a pool would scatter across sessions; and the driver itself belongs to
- * `support/database.ts`, which is one of the three files the data-access
- * boundary lets hold one. A test that reached for the driver directly would be
- * the fourth, silently.
+ * Use the support module's single connection so explicit fixture transactions
+ * stay on one session and driver access stays within the allowed boundary.
  */
 let store: SingleConnection;
 

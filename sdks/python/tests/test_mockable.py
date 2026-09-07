@@ -1,23 +1,6 @@
-"""The exchange, from the customer's seat: census, couriers, and answers.
-
-Every test here runs against a room-shaped stand-in for egma's
-participant, so the whole of the SDK's own code is exercised — the room's
-name read, egma found among the people in the room, the census built off
-a real agent, the export installed, the couriers stood in LiveKit's own
-side table, the reply read, the failures raised — with no LiveKit server
-and no network anywhere.
-
-**Every test here is in a simulation room, so every one fails closed.**
-Where the old verb logged and left the agent alone, this one raises
-``NotReported`` and the session never starts; where a courier used to run
-the real tool because Egma was not reached, it now errors. Those two are
-the same decision from two directions: a simulation that isolated nothing
-must not be allowed to look like one that did.
-
-Where a courier is called, it is called the way the framework delivers a
-call to one: through LiveKit's own argument trimming. That is the only
-way the copied signature can be proved, because trimming is the very
-thing the copy exists to survive.
+"""Test simulation startup and mock-tool RPC against an offline room stub.
+Failed startup raises NotReported; failed mock RPC never runs the real tool.
+Invoke mocks through LiveKit argument trimming to verify copied signatures.
 """
 
 from __future__ import annotations
@@ -305,15 +288,8 @@ async def test_two_participants_answering_to_egmas_name_are_refused(session, cap
 async def test_a_participant_who_is_not_egma_is_never_asked(
     session, monkeypatch, identity
 ):
-    """The room's name says simulation; who to talk to is a separate question.
-
-    The name gets this side as far as looking, and no further: what the
-    census carries is every tool this agent has, by name and schema, so
-    the only participant it may be sent to is one that answers to egma's
-    name exactly — the bare name, or the name with a ``-`` and a
-    simulation after it. A prefix test would hand that inventory to
-    ``egma-personality-quiz``. Nobody here matches, so the search waits
-    the bound out and the simulation ends unreported.
+    """Only exact Egma participant names may receive tool schemas.
+    Unrelated prefix matches must time out with NotReported.
     """
     agent = ReceptionAgent()
     room = StubRoom(present=(identity,), mocked_tools=("check_calendar",))
@@ -415,15 +391,8 @@ async def test_a_census_asked_again_until_the_deadline_ends_the_simulation(
 
 
 async def test_a_room_that_lost_egma_is_not_waited_out(session):
-    """``RECIPIENT_NOT_FOUND`` is answered at once, not asked again.
-
-    It is the same kind of race as an unregistered method in principle,
-    and it is treated differently on purpose: nothing gets as far as
-    asking without having seen egma in this room's own participant table,
-    so a destination that cannot be found now is one that left. Asking it
-    again for the rest of the bound would hold this agent silent through
-    the simulation it was waiting to serve, and end in the same place —
-    which is this simulation ending unreported.
+    """Do not retry RECIPIENT_NOT_FOUND: discovery already saw the participant,
+    so this response means it left. Startup must end with NotReported.
     """
     agent = ReceptionAgent()
     room = StubRoom(refuses_with=not_reached())
@@ -1371,15 +1340,8 @@ async def test_a_refusal_reaches_the_model_and_never_the_real_tool(session, refu
 
 
 async def test_a_census_egma_refuses_ends_the_simulation_and_says_why(session):
-    """egma is there and will not answer for anything.
-
-    Nothing is wrapped and the session never starts. Egma's own sentence
-    is carried through whole, because it is the half of the finding this
-    side did not write and the half a developer acts on.
-
-    The agent is left exactly as it was on the way out: raising is how
-    this stops the session, never how it damages the object it was
-    handed.
+    """A refused hello must preserve Egma's error, leave tools unchanged,
+    and prevent AgentSession.start.
     """
     agent = ReceptionAgent()
     room = StubRoom(

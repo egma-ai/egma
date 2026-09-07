@@ -219,13 +219,9 @@ const createPersonaBody = {
 } as const;
 
 /**
- * The same shape with every field optional, and nothing else.
- *
- * **No expectation field, on purpose.** A persona write is last-write-wins:
- * the revision token and the expected version id are gone from this body and
- * from the door underneath it. What the body leaves out, the persona keeps;
- * a behavioral field that differs from the current version answers with the
- * next one.
+ * Partial persona update. Behavior edits require expectedVersionId in the
+ * access layer; omitted fields retain their current values. Metadata and
+ * project settings do not create a behavior version.
  */
 const updatePersonaBody = {
   type: "object",

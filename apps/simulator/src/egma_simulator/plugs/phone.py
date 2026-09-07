@@ -1,47 +1,11 @@
-"""The phone plug: the simulator dials a number and holds the line.
+"""Phone connection lifecycle; the Pipecat transport owns audio processing.
 
-The first plug that reaches an agent the way its customers do. It is
-deliberately **provider-blind**: the public telephone network neither
-knows nor cares what answers, so a Retell agent behind a number, a Vapi
-agent behind a number, and a human behind a number are all one plug and
-one connection block. What a spec names is a number.
+Config requires phoneNumber in E.164. callerId optionally overrides the trunk
+source number. Backend-specific config is accepted only for the active backend.
+The deployment selects the media backend; the simulation supplies the resolved
+carrier route. Phone connections do not accept connection credentials.
 
-The call itself is a media backend's job — see
-:mod:`egma_simulator.media`, whose docstring is the whole brief for one.
-This module owns the lifecycle above that seam: dial, hear the answer,
-notice the far end hanging up, end deliberately, and offer the backend's
-own identifier for the call as the provider reference.
-
-Its config keys, like every plug's, are its own:
-
-- ``phoneNumber`` (string, required) — what to dial, in E.164. The only
-  field a spec author has to know.
-- ``callerId`` (string, optional) — the number the call appears to come
-  from, where the backend can choose one. Absent: the trunk's own.
-- one optional block per backend, named for it (``scripted``) — that
-  backend's own config, handed to it whole. A block for a backend this
-  deployment does not use is refused: a script nobody reads was written
-  by mistake.
-
-Which media backend places the call is the deployment's and is checked at
-startup. The complete carrier route arrives on each phone simulation's work
-order. The simulation contract has already checked that its address, source
-number, SIP username, and SIP password are all present before this plug receives
-it. A spec that names a number on a simulator configured to place no calls is
-refused with the variable to set.
-
-Credentials are refused outright. A phone connection carries no secret of
-its own.
-
-## Media
-
-The stock Pipecat LiveKit transport owns call input, output, conversion,
-and pacing. Egma does not select or expose a processing rate.
-
-## Where a turn begins and ends
-
-Nowhere in here. A phone line carries no end-of-turn signal. The one
-running Pipecat pipeline reads turns from the transport's frames.
+Expose the backend call ID as provider_reference and clean up on every ending.
 """
 
 from __future__ import annotations

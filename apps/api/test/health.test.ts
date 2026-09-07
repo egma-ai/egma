@@ -339,15 +339,8 @@ describe("configuration", () => {
   });
 
   /**
-   * The region, which has exactly one honest default and one deployment where
-   * that default is a wrong answer rather than a default.
-   *
-   * MinIO ignores regions entirely and every signature must still carry one, so
-   * `us-east-1` is what lets a deployment that named none work at all. Amazon's
-   * own S3 does not ignore it: a bucket in `eu-west-1` signed for `us-east-1`
-   * refuses every recording with `SignatureDoesNotMatch`, naming neither the
-   * region nor the variable — which is the same nameless failure the browser's
-   * address is a separate setting to prevent, arriving by a second route.
+   * Require an explicit region for recognized Amazon S3 endpoints. Other
+   * compatible endpoints use the configured default region.
    */
   it("signs for us-east-1 where the store ignores regions, and refuses to guess where it does not", () => {
     const withCredential = {
@@ -382,16 +375,8 @@ describe("configuration", () => {
   });
 
   /**
-   * The one pair of schemes no browser will honour, and the one this file exists
-   * to refuse by name.
-   *
-   * Both settings are addresses of the *same browser* — one to egma, one to the
-   * store. A page served over https: may not fetch audio over http:: the browser
-   * blocks it as mixed content before the request is sent, so the store is never
-   * asked and the signature is never checked. The player fails and the only
-   * sentence naming the reason is in a console the person pressing play is not
-   * looking at. Which is exactly the failure the address binding and the region
-   * were each refused at startup to prevent, arriving by a third route.
+   * Reject an HTTP recording URL when the application uses HTTPS, to avoid
+   * browser mixed-content failures during playback.
    */
   it("refuses an https egma pointed at an http store, and names both variables", () => {
     const withCredential = {
@@ -468,17 +453,8 @@ describe("configuration", () => {
   });
 
   /**
-   * The judgement call, pinned so it is a decision rather than an oversight.
-   *
-   * A plaintext store at a *remote* address means the recording and a link
-   * reusable for fifteen minutes are readable by anybody who can see the
-   * traffic. It is allowed, because it is only reachable from an egma that is
-   * itself plaintext — where the session cookie that opens every recording
-   * already crosses the same network in the clear. Refusing the audio while
-   * serving the cookie would apply a rule to one byte stream and not the other,
-   * and would lock out a self-hoster on a private network egma cannot see. The
-   * cost is written beside the example instead, in `.env.example`, the compose
-   * file and the README.
+   * Allow remote HTTP recording storage when the application also uses HTTP.
+   * This supports private-network deployments but does not protect traffic in transit.
    */
   it("allows a plaintext store on a remote address, because the page reaching it is plaintext too", () => {
     expect(
@@ -705,14 +681,8 @@ describe("write readiness", () => {
   });
 
   /**
-   * The sliver between "under the bound" and "will take another record".
-   *
-   * A bound is on frames and a frame is a record plus the log's own header, so
-   * a log can sit under its byte bound with less room left than the next
-   * record needs. Readiness that compared usage against the bound called that
-   * instance ready and left it in front of traffic every request of which the
-   * door was already refusing — invisible from outside, because the health
-   * check and the door disagreed.
+   * Readiness must reserve frame overhead and room for a bounded record,
+   * not just report that current usage is below the byte limit.
    */
   it("is unavailable while under the byte bound but out of room for a record", async () => {
     if (!storage.available) return;
@@ -846,14 +816,8 @@ describe("the three roles one image serves", () => {
 });
 
 /**
- * The drain component while the trace store is down.
- *
- * A stalled drain that read as healthy is a green health check in front of a
- * conversation that never becomes query-visible — indistinguishable from a
- * working one. So the drain component says `degraded` when it has work and keeps
- * making no progress on it, and it says so **without turning the status code**:
- * acceptance does not need ClickHouse, so the write path is still ready and the
- * container stays in its own health check while the outage lasts.
+ * A stalled drainer reports degraded while acceptance remains healthy if
+ * Postgres, local staging, and the ingestion bucket are available.
  */
 describe("the drain component under a trace store outage", () => {
   let storage: ObjectStorage;

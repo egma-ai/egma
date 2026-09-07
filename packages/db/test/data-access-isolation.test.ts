@@ -28,20 +28,9 @@ import {
 } from "./support/database.ts";
 
 /**
- * Two organizations exist in every test in this file, because a test with one
- * organization cannot fail the way that matters: a query missing its tenancy
- * predicate returns exactly the right answer when there is only one customer's
- * data to return.
- *
- * These go through the data-access module, which is the seam the isolation
- * guarantee lives at. Raw SQL appears only to check what actually landed in a
- * table, never to set anything up that the module could have set up — asking
- * the module whether the module worked would prove nothing.
- *
- * One thing deliberately not asserted here: that a caller cannot hand in an
- * `AuthContext` naming somebody else's organization. Nothing at this seam could
- * stop that. The context is resolved from the credential rather than from the
- * request, and *that* is what the authentication path has to get right.
+ * Use two organizations so a missing isolation predicate can fail.
+ * These tests assume a trusted AuthContext; credential-to-context resolution
+ * is the authentication layer's responsibility.
  */
 
 let database: MigratedDatabase;

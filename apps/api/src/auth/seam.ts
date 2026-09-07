@@ -1,25 +1,9 @@
 import type { Role } from "@egma/db";
 
 /**
- * Everything egma asks of an auth provider, and nothing wider.
- *
- * The provider answers one question — who is this person, and are they logged
- * in — and everything past the front door is egma's. Organizations, projects,
- * membership, invitations, API keys and every permission check are egma's own
- * tables with egma's own foreign keys, so swapping the provider changes what
- * fills two nullable columns and leaves every product row untouched.
- *
- * That only stays true while this file is the whole of the dependency. A build
- * rule holds it there: the provider's package may be named in the file that
- * implements this seam and in the one that binds it to the identity tables, and
- * nowhere else. Anything wider than these four calls and two hooks is porting
- * cost, paid later, by somebody who did not choose it.
- *
- * The provider is on the login path always, and on the authenticated-request
- * path for browser sessions, because turning a session cookie into an identity
- * is exactly `resolveIdentity`. It is absent from the API-key path entirely:
- * egma mints, hashes and verifies those against its own table, and that is the
- * high-volume path a swap must not be able to reach.
+ * Identity-provider interface for sessions and device authorization.
+ * Egma owns organization and project scope, membership, permissions, and
+ * API keys. The API-key request path does not invoke this provider.
  */
 
 /**
@@ -93,17 +77,8 @@ export type SessionIdentityProvider = Pick<
 >;
 
 /**
- * What a new identity should land in.
- *
- * Two shapes, because there are exactly two ways to arrive: somebody who came
- * to egma on their own gets an organization of their own, and somebody who was
- * asked to join gets the one that asked them. A union rather than an optional
- * field, so that the second case cannot be read as the first with some values
- * missing — an invited person names no organization and no project, and there is
- * nothing for a default to fill in.
- *
- * Absent altogether when the identity was created some other way, in which case
- * provisioning falls back to names derived from the email address.
+ * Signup intent selects a new organization or invitation acceptance.
+ * Without intent, provisioning derives default names from the email.
  */
 export type ProvisioningIntent =
   | {
@@ -128,17 +103,8 @@ export type Landing = {
 };
 
 /**
- * The hooks egma registers rather than calls. They are the reason signup is not
- * a provider call: the provider creates the identity through its own endpoint,
- * and egma is told about it.
- *
- * A hook is not porting cost the way a call is — the body is egma's own code
- * and only the registration changes with the provider — which is why the
- * refusal below is a hook rather than a check in egma's signup route. Put in
- * the route, it would be bypassed by posting straight at the provider's signup
- * endpoint, and on a self-hosted instance that bypass is the whole attack:
- * everyone defaults to `admin`, so joining the only organization is
- * administering it.
+ * Provider hooks enforce admission and provisioning for identity creation,
+ * including requests sent directly to the provider signup endpoint.
  */
 export type IdentityHooks = {
   /**

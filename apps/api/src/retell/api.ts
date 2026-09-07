@@ -6,16 +6,8 @@ import {
 } from "./normalise.ts";
 
 /**
- * The provider reads Egma uses for Retell Monitoring.
- *
- * Retell's own names are used for Retell's own objects — its addresses, its
- * field names, its filter shape. Renaming somebody else's API inside a client
- * for it makes the client harder to check against their documentation, which is
- * the one thing this file has to stay true to.
- *
- * Every ending is a value rather than an exception. A key the customer rotated
- * and a Retell that is briefly down are different facts about an import, and
- * neither of them is a fault in Egma.
+ * Retell monitoring reads keep provider field names for traceability.
+ * Return typed provider outcomes for authentication and availability failures.
  */
 
 /** Retell's own address. Overridden only so a test can answer as Retell. */
@@ -168,17 +160,9 @@ function refusalFrom(answer: Answer): RetellRefused {
 }
 
 /**
- * One page of this agent's terminal conversations in one fixed time window.
- *
- * **Ascending, and the lower bound is inclusive.** Both are load-bearing:
- * oldest-first is what lets the poller checkpoint each conversation before it
- * moves on, and an inclusive bound means the last conversation written is
- * offered again after a resume — which the ledger absorbs, and which is what
- * lets the cursor logic stay as simple as it is.
- *
- * Retell v3 owns the cursor. Egma never derives one from a call id. A page that
- * says there is more work but does not give a new non-empty cursor is a broken
- * provider answer, not the end of the scan.
+ * List terminal Retell calls in ascending order with an inclusive lower bound.
+ * Use the provider cursor; a page claiming more work must provide a new,
+ * nonempty cursor. Repeated identities are handled by the poller.
  */
 export async function listTerminalCalls(
   apiKey: string,

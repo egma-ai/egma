@@ -1,16 +1,9 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
 /**
- * The secret the simulator holds, and how a request carrying one is let in.
- *
- * This is the sibling of `api-key.ts`, and the whole of the difference is
- * what the secret resolves to: nothing. An egma key becomes a customer
- * `AuthContext`; the service token opens the work-claiming door and becomes
- * no context at all, which is what makes it structurally unable to widen
- * into anybody's data — the claim it guards hands back per-simulation
- * contexts built from the claimed rows, never from the caller. One
- * deployment-level value, read from the environment on both sides, on the
- * pattern every self-host-first pull worker ships.
+ * Authenticate internal simulator requests with a deployment service token.
+ * The token does not resolve to a customer AuthContext; handlers derive scope
+ * from the stored simulation or claimed work.
  */
 
 /**

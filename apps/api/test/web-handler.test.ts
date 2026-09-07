@@ -10,14 +10,8 @@ import {
 } from "../src/http/web-handler.ts";
 
 /**
- * The Fastify adapter, on its own.
- *
- * It is tested against an echo rather than against the auth provider, because
- * what is under test is the carriage and not the cargo: whether every method
- * routes, whether the bytes that were sent are the bytes that arrive, whether
- * two cookies stay two cookies, and whether a proxy's word about the origin is
- * taken when — and only when — the server was told to take it. Answering those
- * against the provider would test the provider.
+ * Use an echo handler to test HTTP method and body forwarding, separate
+ * Set-Cookie headers, and explicitly trusted proxy origin headers.
  */
 
 let app: FastifyInstance;
@@ -259,15 +253,8 @@ describe("the response", () => {
 });
 
 /**
- * Asking who is calling reads a bearer token or a session cookie, and nothing
- * else — so the request built for that question carries no body.
- *
- * It matters most where the body is largest. The identity hook runs in front of
- * every credentialed route including the ingest door, where a body is somebody's
- * telemetry: building a `Request` around it copied those bytes for a question
- * that never reads them, on every export. The route that genuinely forwards a
- * body to the auth provider is unchanged, and both are asserted here together
- * because the difference between them is the whole point.
+ * Identity resolution needs credential headers, not the body. Verify that it
+ * avoids copying OTLP payloads while ordinary provider forwarding retains bodies.
  */
 describe("the request an identity is resolved from", () => {
   it("carries the headers and the URL, and none of the body", async () => {

@@ -31,20 +31,9 @@ import {
 import { mintKey, signUp, type Customer } from "./support/traces.ts";
 
 /**
- * The acceptance boundary, entered through the door a customer really uses.
- *
- * One promise is under test here and it is the whole design: **a request is
- * answered as accepted only when its evidence is durable in the object store.**
- * Not when it normalized, not when it reached the local log, and — the change
- * this release is — not when a row was written. So every question this file
- * asks is asked in the gap the door now leaves: what is in the bucket before
- * anything drains it, what is in the bucket when the request was refused, and
- * what a sender was told either way.
- *
- * It runs against a real MinIO, a real Postgres and a real ClickHouse, because
- * every one of those answers a question no stand-in can. The door tests next
- * door still own the wire contract; what is proved here is the boundary behind
- * it.
+ * Verify through the OTLP endpoint that acceptance waits for object-store
+ * durability. Inspect pending segments before draining, using real MinIO,
+ * Postgres, and ClickHouse. Wire-format cases have separate route coverage.
  */
 
 const storage: ObjectStorage = await startObjectStorage("ingestion-accept");
@@ -96,14 +85,8 @@ async function aStoreThatNeverAnswers(): Promise<{
 }
 
 /**
- * Something wearing the store's address that refuses the Nth object it is asked
- * to create, and forwards everything else untouched.
- *
- * A proxy rather than a stand-in client, because what has to be proved is the
- * real client meeting a real refusal: the request is signed for this address
- * and passed on byte for byte, headers included, so the store validates the
- * signature it was given and the only thing that changes is which call comes
- * back as a `503`.
+ * Proxy real signed storage requests and refuse the selected object write
+ * with 503. Forward other requests unchanged to exercise the storage client.
  */
 type RefusingStore = {
   readonly store: IngestionStore;
@@ -502,14 +485,8 @@ describe.skipIf(!storage.available)("evidence at the acceptance boundary", () =>
 });
 
 /**
- * The store stops answering, and the whole promise is tested at once: the
- * refusal a sender can act on, the staged evidence nothing threw away, the
- * upload a later start finishes, and the one visible span a client's retry
- * leaves behind.
- *
- * It gets its own instance because it needs two of them over one local log —
- * which is what a restart is — and because the bound it proves is a second
- * rather than the deployment's ten.
+ * Reuse one local log across two instances to test retryable refusal, restart
+ * upload, and deduplication of a client retry after a storage outage.
  */
 describe.skipIf(!storage.available)("an object store that has gone quiet", () => {
   const running = storage as Extract<ObjectStorage, { available: true }>;
@@ -625,24 +602,9 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
 });
 
 /**
- * A batch naming two projects, one of whose segments the store refuses.
- *
- * **The answer is all or nothing, and no evidence is discarded either way.** A
- * trusted service batch may carry more than one project, each project gets a
- * segment of its own, and the request is a success only once every one of them
- * is durable — so a store that takes one and refuses the other is a retryable
- * refusal for the whole call.
- *
- * What the two halves then are is deliberately different, and both are safe.
- * The project whose segment landed is **durable**, and stays so: an object in
- * the store is not un-made by another project's failure. The project whose
- * segment was refused is **still staged**, and stays so until the store
- * confirms it. A sender's retry meets one of each, and stable identity makes
- * the meeting a replay rather than a duplicate.
- *
- * The fault sits on the wire rather than behind an injected client, so what is
- * proved is the real client meeting a real refusal from something wearing the
- * store's address.
+ * A multi-project request succeeds only after every segment is durable. If
+ * one upload fails, keep uploaded objects and retain the other staged records;
+ * the whole request is retryable without undoing successful uploads.
  */
 describe.skipIf(!storage.available)("a store that refuses one project's segment", () => {
   const running = storage as Extract<ObjectStorage, { available: true }>;
@@ -730,21 +692,9 @@ describe.skipIf(!storage.available)("a store that refuses one project's segment"
 });
 
 /**
- * A store that keeps refusing, and the pace at which Egma asks it again.
- *
- * A sealed segment whose upload failed stays sealed, which is what keeps the
- * evidence — and it also means the group is permanently *due*, so the standing
- * loop would otherwise wake, fail and wake again with nothing between the
- * attempts. Against a store that is refusing quickly, that is a loop as fast as
- * the network answers: it spends this service's capacity and lands on the
- * failing store as a flood, at exactly the moment the store is least able to
- * take one.
- *
- * So an attempt that failed puts its own group aside for a while. The wait
- * starts at the flush interval and doubles up to the request bound — two
- * settings this path already has, rather than a third nobody has tuned — and it
- * ends the moment an attempt succeeds. Nothing is discarded while it waits, and
- * a request that is waiting keeps its own bound and its own `503`.
+ * Failed uploads must back off while retaining sealed segments. The delay
+ * starts at the flush interval and doubles to max(flush interval, request
+ * timeout), then resets on success. Each waiting request keeps its own deadline.
  */
 describe.skipIf(!storage.available)("a store that keeps refusing", () => {
   const running = storage as Extract<ObjectStorage, { available: true }>;

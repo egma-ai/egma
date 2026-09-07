@@ -5,14 +5,8 @@ import type { SessionIdentityProvider } from "./seam.ts";
 import { resolveSession } from "./session.ts";
 
 /**
- * Whoever is on the other end of a request, however they proved it.
- *
- * Two credentials reach egma and they are resolved by two different resolvers,
- * in a deliberate order. **The key is tried first, and a request carrying one
- * never reaches the second branch** — which is what makes the sentence "an
- * API-key request runs no provider code at all" true of the code rather than
- * only of the intention. Falling through to the session resolver would run
- * `resolveIdentity`, and that is the provider.
+ * Try Egma API-key authentication first. A resolved key bypasses the identity
+ * provider; absent or unresolved keys fall through to session authentication.
  */
 
 export type Requester = {

@@ -1,22 +1,9 @@
 /**
- * The put-it-back note one mocked run leaves behind, and nothing else.
- *
- * It exists so that **a teardown gives back rather than guesses**, and so that
- * a run which never reached its own teardown can still be finished by somebody
- * else. Two things live in it, both written before the thing they describe is
- * changed:
- *
- * - `engine` — the serving engine capture: which document it is, and what its
- *   tools looked like, which is what the verify step reads back and compares
- *   against once the mocked tools are on the copy — and what a teardown
- *   resumed by somebody else compares against before it deletes anything.
- * - `urlVariables` — which per-call variable routes which tool on the copy,
- *   which is what the claim fills on every call the run creates.
- *
- * **Egma writes to nothing of the customer's**, so there is nothing of theirs
- * to promise back: no number binding, no tag, no version they made. The one
- * thing a mocked run makes is its own temporary copy, and the two cleanup
- * fields beside this note are what say whether it is still standing.
+ * Durable recovery state for a temporary Retell agent version: serving engine
+ * identity and tool fingerprint, per-tool routing variables, and cleanup progress.
+ * The build verifies the serving tools and may repair unexpected mutation using
+ * its in-memory capture. Resumed cleanup has only the fingerprint, so it reports
+ * a mismatch instead of attempting repair. Number bindings are not changed.
  */
 
 /** Which engine document the serving version ran on when it was captured. */
@@ -37,23 +24,9 @@ export type MockEngineNote = {
    */
   readonly draftVersion?: number;
   /**
-   * The tools that engine declared when this run captured it, in the one
-   * spelling a comparison uses.
-   *
-   * **The comparison value, written down rather than held in memory.** The
-   * run's own verify step compares what the serving version declares after the
-   * swap against what it declared before, and a run that crashes between the
-   * two takes that "before" with it — so a teardown resumed by anybody else
-   * could not say whether the serving version had moved, which is one of the
-   * four promises the consent screen makes. With it here, the resumed teardown
-   * reads the engine at the reference above and answers honestly.
-   *
-   * **A difference is reported, never repaired.** Putting the tools back would
-   * need the captured document itself, which this note deliberately does not
-   * hold — it is a note about what to put back, not a copy of the customer's
-   * configuration — so a mismatch is said out loud and the world stays
-   * unsettled. Absent on a note written before the print existed, and on one
-   * whose run never got as far as reading the engine.
+   * Canonical serving-tool fingerprint for verification and resumed cleanup.
+   * A resumed cleanup cannot repair a mismatch because this record has no full engine
+   * config. Optional for older records or builds that did not reach engine capture.
    */
   readonly toolPrint?: string;
 };
@@ -69,44 +42,21 @@ export type MockToolVariable = {
 export type MockMetadata = {
   readonly engine: MockEngineNote;
   /**
-   * Which per-call variable routes which tool on the temporary copy.
-   *
-   * **Kept because the claim reads it.** A run's copy points every one of the
-   * agent's own tools at a variable, and each call the run creates fills every
-   * one of them: Egma's address for the tools that simulation's test names,
-   * and the empty string for the rest, which renders to nothing and leaves the
-   * customer's own URL. The test says which tools; only this says which
-   * variables the agent has at all.
-   *
-   * Absent on a note whose run branched no copy.
+   * Tool-to-variable map used to fill every temporary-version URL override per
+   * simulation. Covered tools receive Egma's mock endpoint; other tools retain
+   * the original backend URL. Optional when no routing map was created.
    */
   readonly urlVariables?: readonly MockToolVariable[];
   /**
-   * Whether the temporary version was deleted **and the deletion proved**.
-   *
-   * The one fact a teardown has to hand to the next one. A teardown can delete
-   * the copy, prove it gone against the platform's own version listing, and
-   * then fail a restore — which leaves the world unsettled and the next sweep
-   * retrying it. Without this the sweep would read a version number off the
-   * row and delete it a second time, and by then the platform can have handed
-   * that number to somebody else's draft.
-   *
-   * It lives here rather than beside the version number because a finished
-   * run's header is frozen except for this note and the cleanup flag, and
-   * because the version number is a permanent answer to "what did this run
-   * branch" rather than a statement about what is standing now.
+   * Set only after the version listing proves deletion. Resumed cleanup must not
+   * delete the same version number again because Retell may reuse it. This mutable
+   * note preserves that fact after the run header freezes.
    */
   readonly temporaryVersionGone?: boolean;
   /**
-   * The conversation-flow version the platform keeps after the agent version is
-   * deleted.
-   *
-   * **Deleting an agent version does not take its flow version with it**
-   * (verified live, 2026-08-31), and no endpoint removes one: the flow can only
-   * be deleted whole. The orphan is invisible in the platform's own screens and
-   * unroutable, because a binding can only name a live agent version — but it
-   * exists over the API. So the number is written down rather than pretended
-   * away, and it is written only once the agent version's deletion is proved.
+   * Conversation-flow version left after verified agent-version deletion. Live checks
+   * on 2026-08-31 found that deleting the agent version retained this flow version;
+   * no individual flow-version delete was available. Record it for cleanup visibility.
    */
   readonly strayFlowVersion?: number;
 };
@@ -192,26 +142,9 @@ function urlVariablesFrom(
 }
 
 /**
- * The note as a **reader of the run** sees it: what Egma promised to put back,
- * and nothing of how it goes about it.
- *
- * Four fields are the teardown's own working notes and are dropped here. The
- * print is the whole of the serving version's tools in one line, kept so a
- * resumed teardown can still prove that version never moved; a canonicalized
- * copy of the customer's tool declarations is neither something a person can
- * act on nor something a page of runs should carry. `draftVersion`,
- * `temporaryVersionGone` and `strayFlowVersion` are bookkeeping between one
- * teardown and the next — what a reader wants to know about the copy is
- * whether the account is back, and the cleanup flag beside the note says that.
- * So the sweep's read keeps all four and the run's read drops all four, which
- * is also why the published shape of the note names none of them.
- *
- * **The variable map is the one working note this read keeps**, because the
- * claim is a reader of the run and cannot conduct a simulation without it: it
- * fills every one of those variables on every call it creates. It is not part
- * of the note's **published** shape — see `mockMetadataAsPublished` below,
- * which is what the API answers with — because a map of variable names is
- * machinery rather than anything a person can act on.
+ * Internal run projection: remove toolPrint, draftVersion, temporaryVersionGone,
+ * and strayFlowVersion. Keep urlVariables for simulation claim assembly.
+ * Cleanup reads use the full stored record.
  */
 export function mockMetadataAsRead(
   metadata: MockMetadata | null,
@@ -231,18 +164,8 @@ export function mockMetadataAsRead(
 }
 
 /**
- * The note as the **API publishes** it: the engine capture and nothing else.
- *
- * A second projection rather than a narrower `mockMetadataAsRead`, because the
- * two readers want two different things. The claim is a reader of the run and
- * needs the variable map to conduct a simulation at all; a person reading a
- * run header wants to know which engine this run's copy was built from, and a
- * list of generated variable names is machinery to them.
- *
- * **The published shape is a contract**, and it names `engine` alone: a field
- * outside it is not a field the wire drops quietly — the response serializer
- * refuses the whole document — so the narrowing happens here, once, rather
- * than at each route that answers with a run.
+ * Remove urlVariables from an already reduced run projection for API publication.
+ * Call after mockMetadataAsRead; this function alone does not remove cleanup fields.
  */
 export function mockMetadataAsPublished(
   metadata: MockMetadata | null,

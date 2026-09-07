@@ -40,27 +40,10 @@ COPY apps/simulator/src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
-# The sentence-tokenizer corpus, fetched once here rather than at run time.
-#
-# The speaking leg regroups a turn into sentences to line spoken words up
-# with the transcript, and that regrouping needs this data. It is the same
-# file for every deployment, it never changes between them, and nobody
-# configures it — so there is nothing to gain by fetching it later, and a
-# customer's firewall would be a poor place to discover it was missing.
-#
-# English alone, because the sentence matcher asks for no other language;
-# that is 244 KB where the whole package is 11 MB. Should a language ever
-# be asked for, the library's own missing-data error says so loudly rather
-# than guessing, which is what makes this pruning safe to do.
-#
-# Run through the interpreter directly and not through the simulator: the
-# package disarms NLTK's downloader on import, deliberately, and this is
-# the one moment that download is wanted.
-# Said twice, because the two say different things. The variable puts the
-# directory on NLTK's *search* path, without which the downloader refuses
-# to write there at all — it will not write anywhere it would not later
-# read from. The argument below is the *destination*, which otherwise
-# lands in whichever home directory the build happens to run as.
+# Fetch the sentence-tokenizer corpus at build time and retain English data,
+# which the sentence matcher uses. Run Python without importing the simulator,
+# whose initialization disables NLTK downloads. NLTK_DATA sets the search path;
+# the download argument sets the destination copied into the runtime image.
 ENV NLTK_DATA=/app/nltk_data
 
 # Loudly, and checked twice: the downloader answers False rather than

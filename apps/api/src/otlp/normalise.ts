@@ -12,35 +12,12 @@ import type {
 } from "./decode.ts";
 
 /**
- * An OpenTelemetry export, as rows of the `spans` table.
- *
- * Three rules run through everything below and each of them is a decision taken
- * elsewhere rather than a preference expressed here:
- *
- * **Nothing is invented.** One arriving span becomes one row, and a span that
- * did not arrive is never conjured from an aggregate somebody reported. A
- * provider that reports latency as a bag of samples with no turn attached gets
- * those samples kept verbatim on the row they came on, and no fabricated
- * per-turn spans — inventing structure that was never measured would corrupt
- * every comparison the numbers exist for.
- *
- * **Everything that arrives is kept, exactly.** What the columns do not have a
- * place for stays in the payload, resource and scope attributes included, byte
- * for byte. Nothing here reads an attribute's name or a value's shape and
- * decides it looks like a credential: a transcript containing the word
- * `password`, a tool argument called `secret`, an attribute whose value starts
- * with `Bearer` are all evidence, and a scanner that rewrote them would have
- * edited the one thing the product exists to show a team. Operational
- * credentials are excluded by position instead — the HTTP `Authorization`
- * header and the service token live outside the payload and never reach here.
- *
- * **Tenancy is not the payload's business.** A resource attribute naming an
- * organization or a project is read by nothing here, deliberately. The customer
- * comes from the credential, which is what makes a copied key unable to write
- * into somebody else's account by asking nicely. The one resource attribute the
- * simulator path does read — `egma.simulation_id` — names a conversation, not
- * a customer: the door resolves whose it is from egma's own row, so the
- * payload's claim still decides nothing.
+ * Normalize accepted OTLP spans into storage rows without inventing spans
+ * from aggregates. Keep decoded span, resource, and scope fields in the JSON
+ * payload; this preserves values, not original wire formatting.
+ * Do not redact evidence by matching words or credential-like values. Request
+ * credentials remain outside this payload. Organization/project scope comes
+ * from authentication and resolved simulation state, not resource attributes.
  */
 
 /**
@@ -120,18 +97,8 @@ const PROVIDER_CALL_ID_ATTRIBUTES = [
 ];
 
 /**
- * How LiveKit names the timed things inside a trace.
- *
- * Recognised by the instrumentation scope rather than guessed from the span
- * name, so another framework that happens to call something `user_turn` is not
- * silently read as LiveKit. What is not in this table is `other`, and that is a
- * complete answer — the row is stored either way, its payload intact, and a
- * later ticket that learns a new name adds a line here rather than a migration.
- *
- * There is deliberately no speech-to-text entry: this version of the framework
- * emits no such span, and recognition arrives as attributes on the human's
- * turn. A kind for a span nobody sends would be exactly the invented structure
- * this file refuses.
+ * Recognize LiveKit span kinds only under its instrumentation scope.
+ * Unknown names remain other with their payload retained.
  */
 const LIVEKIT_SCOPE = "livekit-agents";
 
@@ -176,21 +143,9 @@ const LIVEKIT_TOOL = {
 } as const;
 
 /**
- * How egma's own simulator names the timed things inside a conversation — the
- * scope-gated entry beside LiveKit's, and the ingest half of the emitter
- * contract: the scope, the span names and the attribute keys are pinned by the
- * golden fixtures in `packages/simulation-contract`, whose document says what
- * each shape means. The simulator emits exactly those shapes; this table is
- * what they land as.
- *
- * A timing span is named for the measure it takes and its duration *is* the
- * measurement, so the timing names here are **read out of the measure catalog**
- * rather than listed again: every measure the catalog says comes off a span of
- * its own lands as `timing`, and a measure joining the catalog is filed
- * correctly by the release that adds it. A hand-kept copy of that list is how a
- * measure comes to be emitted, stored as `other`, and then never computed —
- * green, silent, and wrong, which is the exact failure the catalog exists to
- * prevent.
+ * Map the simulator contract's span names to storage kinds. Derive timing
+ * names from the measure catalog so emitted measures are not filed as other.
+ * Golden fixtures in simulation-contract pin this vocabulary.
  */
 const SIMULATOR_SCOPE = "egma-simulator";
 
@@ -221,18 +176,8 @@ const SIMULATOR_TURN_NAMES: ReadonlySet<string> = new Set([
 const SIMULATOR_TURN_TEXT = "egma.turn.text";
 
 /**
- * The result key is here now, and the reason it was once absent is the reason
- * it belongs: this file refuses invented structure, and a result egma itself
- * served is not invented. The simulator answers a mocked tool call from inside
- * the exchange, so the answer is authored rather than observed — and the
- * vocabulary only lets it be written down beside the provenance stamp saying
- * where it came from. A call egma merely watched go past still carries
- * neither.
- *
- * The stamp itself, the mock tool that answered, and the late-attached flag
- * have no columns of their own and are not given one here. They are in the
- * span's payload, whole, like every other attribute the row does not lift out;
- * a column earns its place by being queried, and nothing queries these yet.
+ * Lift simulator tool name, arguments, and result into columns. Remaining
+ * attributes stay in payload; these keys alone do not establish mock provenance.
  */
 const SIMULATOR_TOOL = {
   name: ["egma.tool.name"],
@@ -254,64 +199,18 @@ export function simulationNamedBy(resourceSpans: OtlpResourceSpans): string {
 }
 
 /**
- * How a resource on the **project-key** path names the simulation its spans are
- * the agent's POV of: the **provider reference** — the identifier the agent
- * platform gave that one conversation, a LiveKit room name or a Retell call id.
- *
- * **A different attribute from `egma.simulation_id`, because a different thing
- * knows the answer.** The simulator is handed a simulation id and echoes it
- * back; the customer's own agent has never heard of one. What the agent's
- * process does hold is the room it is running in, and that is the one key on
- * which the agent's POV is matched to its simulation — for every platform and
- * framework (ADR-0024 §2). The egma SDK stamps it on the resource of every span
- * it exports from a simulation room.
- *
- * **A reference is not a tenancy claim and is never read as one.** The
- * organization and the project come from the credential, exactly as they do for
- * production traffic; the reference is looked up *inside* that project, so an
- * export naming a room another customer owns resolves to nothing and is
- * refused. Absent, the resource is production traffic and takes the path it
- * always took.
- *
- * In the `egma.` namespace, like every attribute this product owns, so it can
- * never collide with a semantic convention or a framework's own key.
+ * Agent exports identify simulations by provider reference, such as a LiveKit
+ * room name. Resolve the reference within the authenticated project.
+ * The simulator service path instead uses egma.simulation_id.
  */
 export const PROVIDER_REFERENCE_ATTRIBUTE = "egma.provider_reference";
 
 /**
- * What one resource says its provider reference is — and, where its spans say
- * it instead, whether they agree.
- *
- * **Two places, because a resource cannot always carry it.** A resource is
- * fixed when a tracer provider is built, and the SDK does not always build one:
- * a worker that already runs its own OpenTelemetry hands the SDK a provider
- * that exists, and taking that away to add ours is not an option. So the SDK
- * stamps the reference on the resource where it builds the provider, and on
- * every span it starts thereafter, through the framework's own metadata seam,
- * where it does not. This door reads the resource first and falls back to the
- * spans.
- *
- * **An unstamped span rides along; two stamped spans that disagree do not.**
- * The framework's metadata processor stamps a span when the span *starts*, and
- * the SDK installs it partway through a job that has already begun — so a
- * reused provider always exports a few spans that opened before the stamp
- * existed, the job's own entrypoint span among them. Refusing those would
- * refuse the whole export, and every customer who already runs their own
- * OpenTelemetry would lose the agent's POV of every simulation, silently.
- * They are not ambiguous: nothing else in the resource names another
- * conversation, so the one value the stamped spans agree on is the answer for
- * all of them.
- *
- * Two *stamped* spans naming different conversations are the real ambiguity,
- * and they are refused. One export from one agent process is one conversation,
- * so this is a sender the door cannot file for, and guessing is exactly the
- * mistake that puts one customer's turns on another's record.
- *
- * A key present with nothing in it is kept apart from a key that is absent, on
- * the resource and on a span alike: carrying the key is the sender saying *this
- * is a simulation's*, and an empty value is that sentence with the name left
- * out — a malformed export rather than a silent reclassification into
- * production.
+ * Prefer a resource-level provider reference. If absent, use the single
+ * reference agreed by stamped spans; unstamped spans can predate SDK setup.
+ * Multiple span references are ambiguous. An explicitly empty reference stays
+ * distinct from absence so the route can reject it instead of filing production.
+ * A resource-level value takes precedence without comparing span values.
  */
 export type ProviderReferenceClaim =
   /** No resource attribute and no span carrying the key: production traffic. */
@@ -365,14 +264,8 @@ export function providerReferenceNamedBy(
 }
 
 /**
- * Whether this **resource** carries the attribute at all, whatever it holds.
- *
- * Separate from reading it, because the two questions have different answers
- * for a resource that carries the key with nothing in it — and the difference
- * decides where its spans are filed. Reading gives `""` for a key that is absent
- * *and* for one that is present and empty, so a door that branched on the value
- * alone would file a misconfigured SDK's simulation spans under Monitoring as
- * somebody's production traffic.
+ * Distinguish an absent provider-reference key from an explicitly empty one.
+ * Empty simulation attribution must not become production traffic.
  */
 export function namesAProviderReference(
   resourceSpans: OtlpResourceSpans,
@@ -383,23 +276,9 @@ export function namesAProviderReference(
 }
 
 /**
- * Where the framework's own trace id is kept once egma files the spans under
- * the simulation's trace instead.
- *
- * **One conversation is one trace, so one of the two ids has to move.** A
- * simulation's trace id is the 128 bits its simulation id spells, and every
- * reader in the product turns one into the other; the agent's exporter knows
- * nothing of that and files under whatever id its framework minted. Filing the
- * agent's POV under the simulation is what puts both POVs in front of one
- * reader — and it would throw away LiveKit's own id if the id were simply
- * overwritten. So it is kept, byte for byte, at the top of the span's payload,
- * and a developer can still paste it into their framework's own tooling.
- *
- * Named in the `egma.` namespace and written by egma, never by an emitter — a
- * payload that arrived carrying this key had it added by the sender, and the
- * filing step overwrites nothing it did not put there itself: the key is
- * prepended, and the first occurrence is the one every JSON reader answers
- * with.
+ * Payload key preserving the exporter's trace ID when filing under a
+ * simulation trace ID. Reserve this key for Egma; duplicate JSON keys do not
+ * have portable first-value semantics.
  */
 export const WIRE_TRACE_ID_PAYLOAD_KEY = "egma.wire_trace_id";
 
@@ -420,20 +299,9 @@ const PLATFORM_AGENT_VERSION_ATTRIBUTES = [
 const CONNECTION_TYPE_ATTRIBUTES = ["egma.connection_type"];
 
 /**
- * How much of one export egma will turn into rows.
- *
- * Neither of these is a limit on how much telemetry a customer may send — an
- * exporter flushes as often as it likes — and neither drops anything silently:
- * what does not fit is reported in the partial-success field the specification
- * has for exactly this, so the client is told how much was refused and knows
- * not to retry it.
- *
- * Both caps are needed because they answer different requests. A body inside
- * the wire limit can still carry a hundred thousand tiny spans, which is what
- * the count is for; and it can carry two thousand spans sharing one enormous
- * resource, where every row repeats that resource and a 1.3 MiB
- * request becomes gigabytes of rows. The byte budget is measured on what the
- * rows actually weigh, which is the only number that predicts the memory.
+ * Per-request span-count and normalized-byte caps. Repeated resource payloads
+ * can make stored rows much larger than the wire body. Report excluded spans
+ * as partial success instead of silently discarding them.
  */
 const MAXIMUM_SPANS_PER_REQUEST = 10_000;
 const MAXIMUM_NORMALISED_BYTES = 64 * 1024 * 1024;
@@ -449,14 +317,8 @@ export type NormalisedExport = {
 };
 
 /**
- * How much of the two caps one request has already spent.
- *
- * A door that normalises an export in more than one call — the simulation
- * branches do, because each simulation is filed on its own and must never be
- * blended with another's — would otherwise get a fresh budget per call, and a
- * request naming N simulations would buy N times the bound. The caps exist to
- * bound the memory *one request* can ask this side for, so the count is carried
- * across the calls of one request and spent once.
+ * Share one budget across normalization calls for the same HTTP request,
+ * including resources resolved to different simulations.
  */
 export type NormalisationBudget = {
   spans: number;
@@ -520,14 +382,8 @@ function statusOf(span: OtlpSpan): string {
 const DECIMAL_DIGITS = /^\d+$/;
 
 /**
- * A decimal count of nanoseconds, however the encoding wrote it. The JSON
- * mapping says string and every exporter obeys, but a number is what a
- * hand-written client sends.
- *
- * A string is read exactly, digit for digit, into a `bigint`. A number cannot
- * be: JSON parsed it into a float before this saw it, so a count above
- * 2^53 has already lost its low digits and nothing here can put them back —
- * which is the whole reason the mapping says to send a string.
+ * Read decimal nanoseconds as bigint. Numeric JSON input may already have
+ * lost precision; decimal strings preserve the exact value.
  */
 function nanoseconds(value: string | number | undefined): bigint | null {
   if (value === undefined) return null;
@@ -537,15 +393,8 @@ function nanoseconds(value: string | number | undefined): bigint | null {
 }
 
 /**
- * Where a duration stops, which is Int64's ceiling and not `UInt64`'s.
- *
- * The column is a `UInt64`, but every read that adds a duration to a start time
- * does so in signed 64-bit arithmetic, so a count past this comes back negative
- * and the trace ends before it began. Nearly three centuries in nanoseconds is a
- * broken clock rather than a long call — an exporter sending `0` for a start and
- * `now` for an end reaches it — so it is clamped here, where the number is still
- * explainable, and the pair of timestamps it was measured from stays untouched
- * in the payload.
+ * Clamp duration at Int64's ceiling because reads use signed arithmetic
+ * even though storage is UInt64. Keep original timestamps in the payload.
  */
 const MAXIMUM_DURATION_NANOSECONDS = 2n ** 63n - 1n;
 
@@ -559,16 +408,7 @@ const WIRE_ID_PATTERNS: Readonly<Record<number, RegExp>> = {
   16: /^[0-9a-f]{32}$/,
 };
 
-/**
- * An id off the wire in the one form egma stores it in, or `""` for anything
- * that is not one.
- *
- * Hex of the right width is the whole of what an id must be. Uppercase is
- * accepted and lowered rather than refused — the JSON mapping says lowercase
- * and every exporter obeys, but a hand-written client that shouts its hex means
- * the same id, and storing the two spellings as two different traces would
- * split one conversation in half.
- */
+/** Normalize fixed-width hex IDs to lowercase; return empty for invalid shape. */
 function wireId(id: string | undefined, bytes: 8 | 16): string {
   const lowered = (id ?? "").toLowerCase();
   return WIRE_ID_PATTERNS[bytes]?.test(lowered) === true ? lowered : "";
@@ -687,19 +527,9 @@ const TOO_MANY_BYTES =
   "refused rather than retried; flush smaller batches.";
 
 /**
- * Turn one export into rows.
- *
- * `attributionFor` is the door's knowledge of each resource, resolved before
- * this runs: absent on the customer path, where every resource is production
- * traffic from the customer's agent; present on the service path, where the
- * door has already resolved each resource's simulation row and answers the
- * stamp its spans carry. It is asked once per resource, because attribution is
- * a fact about where the spans came from and every span of a resource came
- * from the same place.
- *
- * `budget` is the caps this request has already spent, for a door that
- * normalises one request in more than one call. Absent, the call is the whole
- * request and gets the whole budget.
+ * Normalize spans using optional per-resource attribution resolved by the
+ * route. Without it, attribution defaults to production/agent. Reuse budget
+ * when several calls process one request.
  */
 export function normaliseOtlpExport(
   request: OtlpExport,
@@ -864,23 +694,9 @@ export function normaliseOtlpExport(
           personaVersionId: attribution.personaVersionId,
           payload,
           /*
-           * The platform's own statement that the conversation is over, and
-           * only where a platform this door recognises made it.
-           *
-           * Two conditions, both required. `root` says the framework's session
-           * span arrived — the one span the whole trace happened inside, named
-           * in that framework's own vocabulary rather than guessed from the
-           * shape of the trace. `agentPlatform` says the scope is a production
-           * platform this release supports. A scope nobody recognises reaches
-           * `other` and says nothing here, which is the point: a parentless
-           * span is not an ending, and an exporter flush whose parent never
-           * arrived produces one.
-           *
-           * A simulation's root is deliberately `false`. Its scope maps to no
-           * production platform, and the completion fact for a simulation
-           * belongs to the lifecycle that ends the run — asserting it here as
-           * well would be two producers of one fact, which is how one
-           * conversation comes to be graded twice.
+           * Only recognized agent-platform root spans mark production completion.
+           * A parentless span alone is insufficient. Simulation filing clears this
+           * marker because its lifecycle report controls completion.
            */
           endsTrace: kind === "root" && agentPlatform !== "",
         });

@@ -1,19 +1,7 @@
 /*
- * The one stylesheet the application loads.
- *
- * Order is the whole file. Tailwind arrives first and brings its layers with
- * it; then `tailwind-theme.css` declares egma's values in an unlayered
- * `:root`, which beats anything Tailwind put in `@layer theme`, and hands
- * those same declarations to Tailwind by reference in the same file — so a
- * utility and the one remaining stylesheet read one value rather than two
- * copies of it.
- *
- * The element rules below sit in `@layer base`, beside Tailwind's own reset and
- * after it, so they overrule the reset where the two disagree and a utility
- * class overrules them in turn. That is the ordinary arrangement and it is what
- * lets a shadcn component say `text-base` on a `<button>` and be obeyed. The
- * one rule kept outside every layer is focus, and it is called out where it is
- * written.
+ * Load Tailwind before Egma's unlayered theme values. Put element defaults
+ * in the base layer so utilities can override them; focus rules remain
+ * unlayered to take precedence over ordinary utility declarations.
  */
 
 /*
@@ -47,19 +35,9 @@
   ::selection { background: var(--surface-active); color: var(--foreground); }
 
   /*
-   * Tailwind's reset flattens the browser's own defaults — no list markers, no
-   * link underline, no margins anywhere. The CSS Modules pages were written
-   * against those defaults and are still the product until they are migrated,
-   * so the defaults are given back here. This is deliberately in
-   * `@layer base` and deliberately says `revert`: a utility class still wins,
-   * so a shadcn surface that asks for `list-none` or `m-0` gets it, and a page
-   * that asks for nothing keeps the rendering it shipped with.
-   *
-   * Heading *sizes* are deliberately not among them. Tailwind's reset makes
-   * `h1`-`h6` inherit their size, the browser's own sizes are not on the
-   * accepted type scale, and every heading in this application already takes
-   * its size from a class. So a heading here has no size of its own, and a new
-   * one that is given no class will come out at body size rather than wrong.
+   * Restore browser defaults for these elements in the base layer so utilities
+   * can still override them. Keep heading sizes inherited; components apply
+   * the accepted type scale.
    */
   a { text-decoration: revert; }
   ul, ol, menu { list-style: revert; padding: revert; }
@@ -69,21 +47,8 @@
 }
 
 /*
- * Focus, outside every layer on purpose.
- *
- * "Focus is always visible" is not a default a component may talk its way out
- * of, and shadcn components routinely carry `outline-none` and a ring of their
- * own. An unlayered rule beats every utility whatever its specificity, so this
- * is the product's focus indicator everywhere, and a pasted component cannot
- * quietly remove it.
- *
- * **It names roles as well as elements.** The element names alone missed every
- * menu item in the product: Radix draws one as `<div role="menuitem">`, so the
- * one surface a keyboard user crosses by arrow key was the one surface with no
- * Ember ring on it. It was not invisible — the highlighted item paints the
- * quiet neutral surface — but "focus is always visible" means the product's own
- * indicator, not a different answer in one place. The element names stay: a
- * `<button>` is still reached as a button whatever role it is given.
+ * Keep focus indicators unlayered so ordinary utility rules cannot remove
+ * them. Include ARIA widget roles as well as native interactive elements.
  */
 :is(
   button, a, input, select, textarea, summary,
@@ -93,23 +58,9 @@
 ):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 
 /*
- * A text field's focus is quiet: its hairline darkens to ink, in place.
- *
- * (Developer decision, 2026-08-24, recorded in `DESIGN.md`.) A person typing
- * has already been told where they are by the caret, and the 2px Ember ring
- * around every box in a form made a sheet flash orange with each Tab. The ring
- * stays everywhere it is the only answer — buttons, links, selects,
- * checkboxes, radios, menu items, tabs — because those controls carry no caret
- * and nothing else on them moves.
- *
- * **It answers `:focus`, not `:focus-visible`.** A field clicked into and a
- * field tabbed into are the same field being typed in, and one of the two
- * showing no state at all would make the border mean "reached by keyboard"
- * rather than "this is where your typing goes".
- *
- * The specificity is deliberate rather than lucky: `:is(input, textarea)` with
- * a `:not()` and `:focus` outweighs the ring rule above, so a text field
- * cannot end up wearing both.
+ * Text fields use an ink border instead of an outer ring. Apply it on focus
+ * for pointer and keyboard input. The selector outranks the general focus
+ * rule so fields do not receive both treatments.
  */
 :is(input, textarea):not(
   [type="checkbox"], [type="radio"], [type="button"], [type="submit"],
@@ -119,64 +70,14 @@
   border-color: var(--border-strong);
 }
 
-/*
- * Inside a menu the ring turns inward.
- *
- * The panel holds its items on 4px of padding and scrolls, so a ring drawn 3px
- * *outside* a full-width item is clipped on both sides and reads as two stripes
- * rather than a rectangle. A negative offset puts the whole ring on the item.
- *
- * This is a design call rather than a fact, and it is called out in the pull
- * request for the developer to overrule: -2px, so the ring sits just inside the
- * item's own edge without touching the text.
- */
+/* Inset menu-item focus rings so the scrolling panel does not clip them. */
 :is([role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="option"]):focus-visible { outline-offset: -2px; }
 
 /*
- * The open select picker, where the browser lets the product draw it.
- *
- * **Opting into `base-select` makes the picker the product's box to size, and
- * the first version of this block did not size it.** Before the opt-in the
- * browser drew its own popup and the operating system bounded and scrolled it.
- * After the opt-in the picker is a real box in the top layer, and Chrome's
- * defaults for a box nobody sized are `max-height: stretch` with
- * `position-try-order: most-block-size` — read together, "make it as tall as
- * the space allows". A project with thirty test suites therefore opened a
- * picker 584px tall in a 700px window, its lower edge flush with the window
- * and its last row sliced in half. It did scroll. Nothing said so, and a row
- * cut by the window edge reads as a broken render rather than as an invitation
- * to keep going. A short list never showed it, which is why it reached
- * production.
- *
- * **So the picker is bounded the way every other menu in this product is
- * bounded.** `ui/menu.tsx` caps its panel to the space available less a gap
- * and scrolls the rest; that rule was written for the Radix popover and simply
- * never carried across to the one menu the browser draws. The cap here is
- * eight rows, and it is held under `min()` with half the viewport so a short
- * window cannot be handed a picker taller than the room the picker has. Below
- * 32rem of viewport there is no cap at all and Chrome's `stretch` takes it
- * back, which is the right answer when eight rows would not have fitted
- * anyway. Every placement was measured open, at six viewport heights against a
- * trigger at the top, the middle and the foot of each: all eighteen stay
- * inside the window.
- *
- * **The block margins are equal, and an unequal pair was tried first.** The
- * idea was a small gap under the trigger and a larger one at the window edge.
- * It does not survive the flip: when Chrome places the picker above a trigger
- * near the foot of the window, the two swap, so the large gap lands against
- * the trigger and the small one against the window edge — the flush edge this
- * change exists to remove, moved to the top. Measured across twenty-five
- * placements, the unequal pair left 1px at the window edge in its worst case,
- * an equal 12px left 1px, and an equal 8px left 5px with 7px still under the
- * trigger. So 8px, both sides. `stretch` subtracts margins, so the gap is real
- * rather than drawn. (Raised by Greptile on the pull request, and its reading
- * of the flip was right.)
- *
- * `overscroll-behavior` keeps a wheel that reaches the end of the list from
- * carrying on into the page behind the open picker.
- *
- * `align-items` belongs to the select and not to the picker: the picker's
- * computed `display` is `block`, so the declaration did nothing there.
+ * Style custom select pickers only where base-select is supported. Use equal
+ * block margins so spacing survives placement above or below the trigger.
+ * Cap height on taller viewports; shorter ones retain browser sizing. Contain
+ * overscroll, and put align-items on the select because its picker uses block layout.
  */
 @layer base {
   select[data-slot="select"] {

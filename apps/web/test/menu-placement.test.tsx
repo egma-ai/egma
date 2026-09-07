@@ -70,20 +70,9 @@ describe("anchored menu placement", () => {
 });
 
 /**
- * Every anchored panel is bounded, and the primitive is what bounds it.
- *
- * Radix measures the room a panel has and publishes it, then reads it back
- * nowhere — `maxHeight` does not occur in `@radix-ui/react-popper`. A panel is
- * therefore exactly as tall as whatever it was given unless the file that
- * draws it says otherwise, and a caller who forgets gets a panel that runs off
- * the window. `ui/menu.tsx` remembered from the start; `popover.tsx` and
- * `dropdown-menu.tsx` did not, and the agents list found the second one: an
- * agent with enough connections opened a `+N` panel taller than the window
- * over `overflow: visible`, so its last rows could not be reached at all.
- *
- * These read the class list rather than a measurement because jsdom lays
- * nothing out. That is the same trade `data-table-row-link.test.tsx` makes for
- * the table's own scroller.
+ * Check that each anchored panel uses Radix's available-height value and
+ * scrolling styles. Radix supplies the measurement; the component must apply
+ * the limit. jsdom cannot verify viewport fit.
  */
 describe("anchored panels are bounded by the primitive", () => {
   const CAP = "-available-height)-var(--space-2))]";

@@ -1,101 +1,23 @@
 /**
- * The temporary world one run builds on a Retell account, and unbuilds.
+ * Build and remove one temporary Retell agent version for a run.
  *
- * Everything here is the **order** — the part that cannot be got wrong twice.
- * The verbs it is written out of are the ones beside it: number reads in
- * `numbers.ts`, version reads and writes in `versions.ts`, the pure transform
- * in `mock-draft.ts`. Nothing new reaches Retell from here; what is new is the
- * sequence, the guards between its steps, and the record it leaves behind so
- * that somebody else can finish what a crashed run started.
+ * The control plane must exclude overlapping runs with mock tools for one agent.
+ * Retell can reuse deleted version numbers, so persist cleanup proof and never
+ * repeat a proved deletion. Record intent before writes so cleanup can resume.
  *
- * ## Egma writes to exactly one thing
+ * Resolve the serving version and capture its engine before branching. Reject
+ * a branch that shares the serving engine. Write tool URLs and defaults together,
+ * then verify the draft version and exact single-space defaults by reading them back.
+ * Compare the serving tools to the capture; if changed during build, attempt
+ * restoration to the captured engine version and fail the run.
  *
- * **One temporary agent version, made by this run and deleted by it.** Nothing
- * here touches the customer's phone numbers, their tags, or any version they
- * made. Egma used to pin a number riding `latest` for the length of a run and
- * put it back afterwards; that is gone (developer ruling, 2026-08-31). Retell's
- * own picker offers Latest Created and Latest Published beside real tags, tags
- * are movable, and an unassigned tag resolves to latest without saying so —
- * too many edges for egma to be editing somebody's inbound routing across them.
+ * Each simulation supplies routing variables from its own pinned test. Do not
+ * rewrite the shared draft while simulations run. Number bindings and tags are
+ * read only; bindings to Latest Created can reach the temporary version.
  *
- * So the hazard the pin covered is now **said** rather than acted on: a
- * temporary draft is the latest *created* version, and a number or tag pointing
- * at Latest Created reaches it while a mocked run is in flight. The mock-tools
- * screen says that where mocking is turned on, and the developer decides.
- *
- * ## The order, and why each step is where it is
- *
- * 1. **Sweep** — `finishMockedWorld` over what a previous run recorded. Run
- *    before anything new is made, so litter never becomes a hazard.
- * 2. **Bindings** — every number routing to the agent, read by
- *    `bindingDecisionsFor`. Re-read every run, because a customer can rebind
- *    between two of them, and read to choose the version this run tests.
- * 3. **Capture** — the serving version and the serving engine configuration,
- *    written down before anything is changed. The verify step compares against
- *    what is here rather than against what egma remembers sending.
- * 4. **Branch** — Retell forks the engine itself.
- * 5. **Fork guard** — the branch's engine reference must differ from the
- *    serving version's. A branch that still shares the serving engine version
- *    is refused **before the swap**, because writing mocked tools onto a shared
- *    engine version is writing them onto production.
- * 6. **Swap** — the transform's tools and routing defaults, onto the draft's
- *    engine version in one PATCH, naming that version explicitly, and Retell
- *    must answer that it wrote that version and no other.
- * 7. **The read-back guard** — read the draft's own engine back and refuse the
- *    run if any routing default is no longer exactly one space. Retell stores
- *    an empty default as absent, and an absent one leaves the braces literal —
- *    so a trimmed default is every unmocked tool call of the run failing on a
- *    URL that is not a URL, found here rather than mid-conversation.
- * 8. **Verify** — read the serving version's tools back and compare them to the
- *    capture. A difference means the swap landed somewhere it should not have;
- *    the capture is written back and the run fails loudly.
- * 9. **Teardown** — `finishMockedWorld` again: delete the copy, and **prove the
- *    delete**. The proof is a read of the agent's versions, because the
- *    delete's own answer cannot be one: a malformed delete and a version that
- *    was never there both answer 404.
- *
- * ## The record is an obligation, not a report
- *
- * `record` is called at every point where what egma owes the account changes,
- * and each call replaces the whole record. What is written is always the
- * **outstanding** obligation: a `tempMockAgentVersion` that is not null is a
- * version that must be deleted. The teardown flips the cleanup flag to true
- * only once the account owes nothing, and writes the note's proof of deletion
- * the moment it has one — so a sweep that comes later never deletes twice.
- *
- * That is also why the intent is written **before** the write it describes. A
- * crash between "egma says it will branch" and the branch itself leaves a
- * record of a debt that turns out not to exist, and a sweep answers that
- * harmlessly. The other order would leave a real draft nothing knows to delete.
- *
- * ## One mocked world per agent at a time
- *
- * **Two of these lifecycles may never overlap on one agent**, and the control
- * plane refuses the second run rather than queueing it (`claimMockDraftFor`,
- * under an advisory lock keyed on the agent).
- *
- * Two drafts at once on one agent is two runs each conducted against a version
- * the other could be deleting, and a sweep that cannot tell whose litter it is
- * looking at. The version numbers are the account's, not a run's: Retell hands
- * the next branch the lowest free number, so run one's number can be run two's
- * draft the moment run one deletes. Refusing the overlap is what keeps every
- * delete in this file a delete of something this run made.
- *
- * ## One draft per run, and what tells its calls apart
- *
- * A run is one suite against one agent over one connection, so its simulations
- * share one temporary version — and each of them mocks exactly the tools its
- * own test names, which are not the same tools. What tells them apart is not
- * the version and not the URL written on it: **every custom tool's URL carries
- * its own per-call variable**, and Egma decides per call, in the claim, which
- * of them point at Egma and which render to nothing and reach the customer's
- * own backend (ADR-0022).
- *
- * So this file writes one shape for everybody and never rewrites it: the
- * version is written once, before any call of the run exists, and is never
- * touched again while calls are in flight. That is what makes the undocumented
- * question — whether a running call re-reads its version — one this design
- * does not have to answer.
+ * Teardown verifies serving tools, deletes the draft, and proves absence through
+ * the version listing. Persist each result, including retained flow-version residue.
+ * Resumed cleanup cannot restore serving tools from a comparison print alone.
  */
 
 import {
@@ -129,16 +51,8 @@ import {
 } from "./versions.ts";
 
 /**
- * What one number routing to this agent is bound to.
- *
- * **A reading, never an instruction.** Egma writes to no customer's number
- * bindings (developer ruling, 2026-08-31), so nothing here says what egma will
- * do about a number — it says what the number names, which is how the version a
- * run tests is chosen and what a screen shows a developer so they can decide
- * for themselves.
- *
- * A number can carry several entries for one agent under weighted routing, so
- * every entry's verdict is kept.
+ * Read-only decisions for every binding of a number to this agent.
+ * Keep multiple weighted entries; they inform version selection and UI warnings.
  */
 export type BindingDecision = {
   /** E.164, exactly as Retell holds it. */
@@ -188,16 +102,9 @@ export type MockEngineNote = {
   readonly engineId: string;
   readonly version: number | null;
   /**
-   * The tools that engine declared when this run captured it, in the one
-   * spelling a comparison uses (`toolPrint` below).
-   *
-   * Written down rather than kept in memory so that the comparison outlives
-   * the process that made it: a teardown resumed by anybody else can still
-   * read the serving version back and say whether it moved — one of the four
-   * promises — instead of deleting the copy and hoping. A difference is
-   * reported and never repaired: putting the tools back would need the
-   * captured document, and this note holds what to put back, not a copy of the
-   * customer's configuration.
+   * Canonical tool print captured for comparison during resumed cleanup.
+   * It is not the original engine document; a mismatch can be reported but cannot
+   * be safely restored from this print.
    */
   readonly toolPrint?: string;
   /**
@@ -216,53 +123,20 @@ export type MockEngineNote = {
 export type MockMetadataRecord = {
   readonly engine: MockEngineNote;
   /**
-   * Which per-call variable routes which tool on the temporary version.
-   *
-   * **Written down because the claim cannot work it out.** The claim passes
-   * every one of these on every call it creates — the mock URL for a tool the
-   * simulation's test names, the empty string for every other — and it knows
-   * the test's tools but not the agent's. The map is the whole of what the
-   * build learned about the agent that the claim needs, so it rides on the
-   * run's own note rather than being read from Retell a second time.
-   *
-   * Absent on a note written by a run that branched nothing.
+   * Persist tool-to-variable mappings so claims can set every routing variable:
+   * a mock URL for covered tools, an empty prefix for others. Absent without a draft.
    */
   readonly urlVariables?: readonly MockToolVariable[];
   /**
-   * Whether the temporary version has been deleted **and the deletion proved**.
-   *
-   * The one fact that must outlive the teardown that learned it. A teardown can
-   * finish the delete and prove it against the version listing, and still leave
-   * the world unsettled on something else — the serving version's own read-back
-   * failing, say — which the next sweep retries. Without this, that sweep would
-   * see a version number on the record and delete it a second time.
-   *
-   * **A second delete of the same number is not harmless.** Retell hands the
-   * next branch the lowest free number, so the number this run branched can
-   * belong to somebody else's draft by then. The version number itself stays on
-   * the record, because a reader months later still deserves to know what a run
-   * branched; this is what says it is no longer standing.
-   *
-   * Absent on a note written before the delete, and on one whose run never
-   * branched anything.
+   * Deletion proved by the version listing. Persist immediately so later cleanup
+   * does not delete the same number after Retell has reused it for another draft.
+   * Keep the original version number as run history.
    */
   readonly temporaryVersionGone?: boolean;
   /**
-   * The conversation-flow version Retell keeps after the agent version is gone.
-   *
-   * **Deleting an agent version does not delete its lockstep flow version**
-   * (verified live, 2026-08-31, against the developer's own dashboard): Retell
-   * removes the agent version, keeps the flow version, and offers no API that
-   * removes one — `delete-conversation-flow` takes the whole flow, and a
-   * `?version` on it answers 400 "Unknown query parameter". The orphan is
-   * invisible in every Retell screen and unroutable, because a binding can only
-   * name a live agent version; but it exists over the API and it becomes that
-   * flow's `latest`.
-   *
-   * So it is written down rather than pretended away. This is the one thing a
-   * mocked run leaves on a customer's account, and a reader asking what Egma
-   * left deserves the number rather than silence. Recorded only once the delete
-   * of the agent version is **proved**, because until then nothing is orphaned.
+   * Flow version retained after agent-version deletion, observed live on 2026-08-31.
+   * Retell's flow deletion API deletes the whole flow, not one version. Record
+   * this residue only after the agent version is proved absent.
    */
   readonly strayFlowVersion?: number;
 };
@@ -287,41 +161,9 @@ export type MockRunRecord = {
 export type RecordMockRun = (state: MockRunRecord) => Promise<void>;
 
 /**
- * Which version a run over this agent should be testing.
- *
- * The one a real caller reaches: the first of **this agent's own** bindings on
- * a routed number that names a version — a number or a tag. A number riding
- * `latest` names none, so it is passed over here and answered by `latest`
- * below, which is the same thing it resolves to.
- *
- * **Only this agent's entries are read**, never the whole array. A number two
- * agents share carries the other agent's version too, and resolving out of it
- * would branch, capture, verify and report a version nobody's traffic to this
- * agent reaches — while the tick, which resolves the same way, would read the
- * wrong version's tools.
- *
- * **`latest_published` where no binding names a version** — an agent with no
- * number at all, which is the ordinary case for a chat agent, and an agent
- * every number of which rides `latest`.
- *
- * It used to be `latest`, and that one word is half of the defect this design
- * was rebuilt around — the teardown that deleted nothing is the other half, and
- * neither is dangerous without the other. `latest` is Retell's word for the newest
- * version *created*, drafts included; every mocked run mints a draft; and a
- * teardown that deleted nothing left each run's draft standing. So each run
- * resolved `latest` onto the previous run's leftover and conducted the suite
- * against egma's own mocks instead of against the customer's agent. The
- * teardown is fixed beside this, but the reference is the part that must never
- * have depended on the teardown being right: `latest_published` cannot select a
- * draft even when one exists, because nothing in this package publishes
- * anything.
- *
- * It is also the closer reading of the question. What a run wants is the
- * version real callers reach, and a number riding `latest` is a deploy habit
- * rather than an intent to serve a draft. An agent whose traffic really is
- * pinned to an older published version — an environment tag, a bound number —
- * is answered above, by its own binding, and a run may always name a version
- * outright.
+ * Select the first numeric or tag binding belonging to this agent.
+ * Otherwise use latest_published, including bindings that follow Latest Created.
+ * This avoids selecting temporary drafts when no binding pins a version.
  */
 export function versionReferenceIn(
   decisions: readonly BindingDecision[],
@@ -395,17 +237,8 @@ function sentenceOf(failure: RetellFailure, doing: string): string {
 }
 
 /**
- * One value, in the one spelling two of them are compared in.
- *
- * Object keys are sorted, arrays are not: the customer's configuration is the
- * values and their order in each array, and the order Retell happens to
- * serialize an object's keys in is the serializer's business. A run that failed
- * because a provider reordered two keys would be a loud failure about nothing,
- * every time.
- *
- * Exported so a proof that reads the account can compare two readings the same
- * way the builder does — a live suite that used `JSON.stringify` instead would
- * cry "changed" the first time Retell reordered a key.
+ * Canonical comparison: sort object keys while preserving array order.
+ * Use the same serialization in account checks so provider key order is irrelevant.
  */
 export function canonicalJson(value: unknown): string {
   return canonical(value);
@@ -517,21 +350,9 @@ export async function buildMockedWorld(
   const servingVersion = serving.agentVersion.version;
   const servingEngine = serving.agentVersion.engine;
 
-  // The serving engine must name a version, and this is refused **before the
-  // capture read**, because everything downstream turns on a null one going
-  // wrong. `readEngineConfiguration` sends no `?version=` for a null version,
-  // which means "Retell's newest" — so the capture would read the newest engine
-  // rather than the one this version serves, the verify re-read would land on
-  // the copy egma just mocked (a false hijack alarm), and the repair would
-  // PATCH the capture onto `servingVersion` used as an engine version, writing
-  // real tools onto a version egma never read. One guard here forecloses all
-  // three. The copy's side already refuses its own null version below; this is
-  // the serving side's matching guard.
-  //
-  // A custom LLM is exempt and falls through to the capture read below, which
-  // answers `not-held` with its own reason: it carries no engine version by
-  // nature — its brain and tools live in the customer's own service — and a
-  // "name a version" refusal would be the wrong sentence for it.
+  // Require an explicit serving-engine version before capture, verification, or repair.
+  // A null version would read latest and could target another draft. Custom LLMs
+  // reach the separate unsupported-engine check because they have no hosted version.
   if (servingEngine.type !== "custom-llm" && servingEngine.version === null) {
     return {
       kind: "refused",
@@ -676,26 +497,9 @@ export async function buildMockedWorld(
     };
   }
 
-  // 6b. **The write landed on the version it named, and minted nothing.**
-  //
-  // Retell's reference says nothing about whether a PATCH edits the named
-  // version in place or forks a new one, and only the version it answers with
-  // tells the truth per call. That is not a detail: there is no
-  // delete-conversation-flow-version anywhere in Retell's API, so an engine
-  // version minted here could never be removed — the account would keep it
-  // after the run's own version was deleted and proved gone, and no teardown
-  // could ever say the panel was as it was found.
-  //
-  // So the accident fails the run here rather than surviving it. The caller
-  // tears the world down, which deletes the agent version this branched; if a
-  // stray engine version really was minted, the run's failure is what makes a
-  // person look at it while it is still one version rather than a hundred.
-  //
-  // A **null** answer is refused with the rest. Retell's schema documents the
-  // field, so an answer without it is Retell contradicting itself, and the one
-  // reading of that contradiction egma may not take is the optimistic one:
-  // there is no endpoint that removes a stray engine version, so "probably
-  // fine" would be litter nobody can clear.
+  // Require the PATCH response to name the requested engine version.
+  // A missing or different version may mean a new flow version was created,
+  // which this lifecycle cannot remove. Fail the run and retain cleanup state.
   if (written.version !== draft.engine.version) {
     return {
       kind: "refused",
@@ -715,16 +519,9 @@ export async function buildMockedWorld(
     };
   }
 
-  // 6c. **The read-back guard.** The routing defaults are read off the copy
-  // Retell now holds, not off the request Egma sent.
-  //
-  // Everything turns on each of them being exactly one space. Retell stores an
-  // empty default as *absent*, and an absent variable renders as the literal
-  // `{{egma_url_book}}` — so a default that was trimmed on the way in makes
-  // every call this run does **not** mock fail on a URL that is not a URL,
-  // silently, one conversation at a time. The whole run is refused here
-  // instead, before a single simulation is conducted. Skipped where there is
-  // nothing to route: an agent with no custom tool wrote no defaults.
+  // Read back each routing default and require exactly one space.
+  // An absent or trimmed default leaves literal braces and breaks unmocked calls.
+  // Skip when there are no custom-tool routing variables.
   if (variables.length > 0) {
     const readBack = await readEngineConfiguration(key, draft.engine, reach);
     if (readBack.kind === "not-held") {
@@ -836,27 +633,10 @@ function toolsWriteOf(
 }
 
 /**
- * Put the account back: **delete the copy, and prove it.**
- *
- * One function, two callers. A run's own teardown calls it when every
- * simulation is terminal; the next run's claim calls it over whatever a crashed
- * run left recorded. They are the same act, and writing them twice would be two
- * chances to get the order wrong.
- *
- * There is one thing to give back, because there is one thing egma made: the
- * temporary version. Nothing here writes to a number, a tag, or a version the
- * customer made, so a failure leaves exactly one thing outstanding and the next
- * sweep retries exactly that.
- *
- * **The delete is proved and never assumed.** A 404 to egma's own delete is not
- * evidence the version is gone — a request Retell has no route for answers the
- * same way, which is exactly how a teardown that deleted nothing reported an
- * account put back for a week. So the agent's versions are read back, from the
- * current listing endpoint, and "gone" counts only when that read agrees.
- *
- * Each landing is recorded as it happens, so a crash halfway through leaves a
- * record of exactly what is still owed rather than a record of what was owed
- * when it started.
+ * Resume cleanup from the persisted run record. Verify serving tools, delete
+ * the temporary agent version, and prove absence through a complete version listing.
+ * Persist each completed step so a retry does not repeat a proved deletion.
+ * This cleanup does not alter number bindings, tags, or customer versions.
  */
 export async function finishMockedWorld(
   key: RetellCredential,
@@ -878,21 +658,9 @@ export async function finishMockedWorld(
    */
   let provedNow = false;
 
-  // **The promise, proved again before anything is undone.** A run's own build
-  // read the serving version back and compared it to the capture, but that
-  // comparison lived in the process that made it — so a teardown that somebody
-  // else resumed, days later, could delete the copy and say the account was
-  // back without ever having looked at the version real callers are served
-  // from. The note carries the comparison value for exactly this, and the read
-  // is here — **before the delete** — so what it reads is the account as this
-  // run left it.
-  //
-  // A difference is reported and never repaired. Repairing would mean writing
-  // the captured tools back, and the note holds what the tools *looked like*,
-  // not the document they came from; a repair out of a print would be a guess
-  // at the customer's own configuration. So the sentence says what stands
-  // there now, and the world stays unsettled — which is what keeps a resumed
-  // teardown's answer honest and stops the next run branching over it.
+  // Verify serving tools before deleting the draft, including on resumed cleanup.
+  // A mismatch stays unresolved: the persisted print cannot reconstruct the captured
+  // engine document needed for safe restoration.
   const captured = state.mockMetadata?.engine;
   if (captured?.toolPrint !== undefined) {
     const serving = await readEngineConfiguration(
@@ -956,21 +724,8 @@ export async function finishMockedWorld(
       return { state, unfinished };
     }
 
-    // **The proof, and the reason this whole function stopped trusting a status
-    // code.** Egma sent the delete with the version as a path segment for a
-    // week. Retell has no such route, answered 404, and 404 maps to `gone` —
-    // "the thing you named is not there" — so every teardown reported the
-    // account put back while every draft survived, and the next run resolved
-    // one of them. A malformed request and a version that was never there are
-    // the same three digits; only a second, different read tells them apart.
-    //
-    // So the versions are read back, and the account is recorded as put back
-    // only when that read agrees. Everything that is not agreement — the read
-    // failing, the read being unable to say, the version still standing — is
-    // reported as still owed. That is deliberately the expensive direction: an
-    // unsettled world blocks the next mocked run of this agent, and a world
-    // wrongly called settled is a customer's version panel filling with egma's
-    // litter and a suite quietly grading the wrong agent.
+    // Prove deletion through the version listing. A DELETE 404 can also mean a bad route.
+    // Any failed, ambiguous, or still-present listing keeps cleanup outstanding.
     const listed = await listAgentVersions(key, input.agentId, reach);
     if (listed.kind === "gone") {
       unfinished.push(
@@ -999,18 +754,8 @@ export async function finishMockedWorld(
       );
       return { state, unfinished };
     }
-    // **Proven absent, and written down before anything else can fail.** The
-    // version number stays on the record — it is what this run branched, and a
-    // reader asking months later still deserves the answer — and this flag is
-    // what says it is no longer standing. Set here rather than at the end
-    // because everything below can fail, and a delete proved is a delete that
-    // must never be attempted again whatever happens next.
-    //
-    // **And what Retell keeps.** The agent version is gone; its conversation
-    // flow version is not, and no Retell endpoint removes one. Nothing can
-    // route to it — a binding names a live agent version, and there is none —
-    // so it is residue rather than a hazard, and it is written down rather
-    // than pretended away.
+    // Persist proved deletion before later steps can fail; never delete this number again.
+    // Also record the flow version Retell retains after agent-version removal.
     const metadata = state.mockMetadata;
     if (metadata !== null) {
       const stray = metadata.engine.draftVersion;

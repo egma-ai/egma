@@ -23,105 +23,24 @@ import {
 import { afterAll, describe, expect, it } from "vitest";
 
 /**
- * The version lifecycle, end to end, against the developer's own live agent —
- * and the proof that the account is byte-identical afterwards.
- *
- * This is the whole-seam half of the live convention: `live-fork.test.ts` in
- * `packages/retell` asks the same questions of a scratch agent it creates and
- * destroys, and this asks them of an agent that is really serving, with real
- * versions on it and a version panel a person looks at.
- *
- * **Nobody but the developer runs this.** Agents test against fakes only
- * (ruling, 2026-08-28); the live account is the developer's to touch. Every
- * check is skipped — visibly, as skipped rather than passed — unless the
- * environment names a real Retell key, and nothing here reaches a network at
- * module load. CI has no key, so CI never touches an account.
- *
- * ## The one command
- *
- * ```sh
- * # EGMA_LIVE_RETELL_API_KEY is already exported in the developer's shell.
- * EGMA_LIVE_RETELL_AGENT_ID=agent_… \
+ * Developer-run live test; agents use fakes. Requires EGMA_LIVE_RETELL_API_KEY
+ * and EGMA_LIVE_RETELL_AGENT_ID for an agent with a published version. Run with:
  *   npx vitest run --project fast apps/api/test/live-version-lifecycle.test.ts
- * ```
  *
- * Both are required and neither has a default. The agent must have a published
- * version — this proof branches from it — and whoever runs the proof names it,
- * so no live target is ever spelled in the repository.
+ * Branches a draft, writes its routed tools and single-space defaults, creates
+ * two web calls without joining them, and deletes the draft in afterAll. It
+ * publishes no version and changes no number bindings. A process crash or failed
+ * cleanup can leave a draft. It does not run a simulation or verify audio.
  *
- * ## Where it stops, and why
- *
- * **At the version lifecycle.** It creates no agent, no connection and no run
- * in the product, and it starts no simulation. The full mocked web-call run
- * over the deployed fix is the developer's own hand step, because hearing the
- * agent through its ambient background is a different defect with a different
- * proof — see `live-remedy.test.ts` beside this, which does start a run.
- *
- * ## What it does to the account, and what it undoes
- *
- * It branches exactly one draft from the published version, writes the routed
- * tool bodies and their routing defaults onto **that draft's own engine
- * version**, creates two web calls against that draft which nobody joins (a
- * web call nobody joins carries no media and expires within thirty seconds),
- * and deletes the draft. It publishes nothing, binds no telephone number, and
- * **never writes to the version the agent serves** — the write names the branch's own engine version,
- * read from the branch's own response, so a serving version cannot be the
- * target even by accident. The delete runs in an `afterAll`, so it runs on
- * every failure path too, and a crash between the branch and the delete leaves
- * one unpublished draft the developer can remove from the version panel.
- *
- * **One thing is left behind, and it cannot be helped.** Deleting the agent
- * version does not delete the conversation-flow version it ran on, and Retell
- * has no endpoint that removes one — the flow can only be deleted whole. That
- * orphan is invisible in every Retell screen and unroutable, because a binding
- * can only name a live agent version; it exists over the API and it becomes
- * the flow's `latest`. This proof asserts it is there, exactly once, rather
- * than pretending the account is untouched.
- *
- * ## The six steps, which are the acceptance list
- *
- * 1. Capture the agent's version list as found.
- * 2. Resolve `latest_published`, and pin the number.
- * 3. Branch one draft from it; the list grew by exactly that draft.
- * 4. Write the routed tools **and their single-space defaults** onto the
- *    branch's flow in one PATCH, naming its own version; the list did **not**
- *    grow again — the write edited in place. Read it back: each custom tool's
- *    URL is its own `{{egma_url_…}}` in front of the URL the customer wrote,
- *    their headers and query params are untouched, and every routing default
- *    is exactly one space. Then create two web calls against that version —
- *    one with every routing variable `""`, one with a mock address on a single
- *    tool — because Retell validates a rendered tool URL as it creates a call,
- *    so a call it accepts is a call whose variables rendered.
- * 5. Delete the draft with the version as a query parameter; confirm the
- *    answer, then prove it with the read-back. Then read what Retell keeps:
- *    the branch's flow version is still there, and the flow's latest is
- *    exactly that one version — so the run added one and no more.
- * 6. Compare against step 1. Four readings, because no one of them catches
- *    everything: the same agent version numbers with the same published flags;
- *    the same numbers behind `latest` and `latest_published`, which is what
- *    catches a stray draft the list's flags would not; the serving version's
- *    own configuration unchanged; and the flow grown by exactly the one
- *    version this run branched. The agent side is as it was found, the flow
- *    side holds one known orphan, and that comparison is the whole point.
- *
- * ## What to bank when it passes
- *
- * The two version lists this file prints, and the branch's own flow version.
- * The finding goes, dated, into this effort's research file —
- * `.scratch/retell-lanes-rework/research/retell-version-apis.md` — per the
- * house convention.
+ * Compare agent version numbers, published flags, resolved latest versions, and
+ * serving configuration. A conversation-flow version remains after agent-version
+ * deletion; the test checks this residue, so the account is not unchanged.
+ * Retain the printed version lists and branch flow version as live-test evidence.
  */
 
 /**
- * Both are required, and neither has a default.
- *
- * **The agent is named by whoever runs the proof, never by this file.** A real
- * account's agent identifier baked in as a fallback is a live target sitting in
- * the repository waiting for somebody who set only a key — and the account it
- * belongs to is somebody's production. It would also make this file quietly
- * wrong the day that agent is retired. The convention is the one
- * `live-remedy.test.ts` beside it already follows: list what is needed, skip
- * visibly while any of it is missing, and say which is missing.
+ * Require both the live key and explicit target agent ID. Never supply a
+ * production target as a fallback; report missing settings as skipped tests.
  */
 const NEEDED = [
   "EGMA_LIVE_RETELL_API_KEY",
@@ -157,17 +76,8 @@ const TARGET = {
 const made: { draftVersion: number | null } = { draftVersion: null };
 
 /**
- * A version list in the one spelling two readings are compared in.
- *
- * **The stable fields, not the bytes.** What is compared is the set of version
- * numbers this agent holds and which of them are published — the two things the
- * version panel shows and the two things a run of Egma could have changed. Keys
- * are sorted and the list is ordered by version, so neither Retell's
- * serialization order nor the order it happened to page in can make an
- * unchanged account look changed. Fields Egma never touches and Retell may move
- * on its own — a modification timestamp, a version title — are deliberately
- * outside it: a proof that failed because somebody renamed a version would be a
- * loud failure about nothing.
+ * Compare sorted version numbers and published flags. Ignore provider-managed
+ * timestamps and titles, which may change independently of this lifecycle.
  */
 function print(versions: readonly AgentVersionSummary[]): string {
   return canonicalJson([...versions].sort((a, b) => a.version - b.version));
@@ -466,21 +376,9 @@ live("the corrected version lifecycle, on the live agent", () => {
         `version ${draft.version} in place, each defaulted to one space`,
     );
 
-    // ── 4c. **The first owed check: what an explicit `""` renders to.** ──
-    //
-    // Retell validates a tool's *rendered* URL when the call is created — a
-    // variable it was never given stays literal and the call is refused with
-    // `Got invalid url` (proven by hand, 2026-09-03). So a call that Retell
-    // **accepts** against this version is a call whose tool URLs all rendered,
-    // and that is the whole of the question the ADR left owed: whether an
-    // explicit empty string renders the prefix to nothing on a voice call.
-    //
-    // Both shapes are asked, because both are what a run really sends: every
-    // routing variable empty, which is a test that mocks nothing, and one of
-    // them carrying Egma's address, which is a test that mocks one tool.
-    //
-    // Nothing joins these calls. A web call nobody joins carries no media and
-    // expires on its own within thirty seconds.
+    // Create calls with empty routing prefixes and with one mock address to
+    // test provider URL validation. Nothing joins these calls, so this does not
+    // prove media playback or actual tool delivery.
     if (mocked.variables.length > 0) {
       const everythingReal = await webCall(draft.version, emptyValues(mocked.variables));
       expect(

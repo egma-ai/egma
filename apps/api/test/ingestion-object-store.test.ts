@@ -13,19 +13,9 @@ import {
 } from "./support/object-storage.ts";
 
 /**
- * The ingestion bucket, against a store that answers for itself.
- *
- * There is no fake here for the reason there is none for recordings: every
- * question this module asks is one only a store can answer. Whether
- * `If-None-Match: *` really refuses a second write, whether a listing really
- * hands back a continuation token, whether a policy confined to one prefix
- * really refuses a key outside it — a stand-in would agree with whatever this
- * code believed about all three, and the belief is the thing under test.
- *
- * It skips, visibly and with a sentence, where no store can be started, and a
- * run that sets `EGMA_REQUIRE_OBJECT_STORAGE` gets a red line instead. That is
- * the recording suite's arrangement and its promise: contributing costs no new
- * infrastructure.
+ * Use MinIO to verify conditional writes, listing pagination, and prefix
+ * policies. Skip when storage cannot start unless EGMA_REQUIRE_OBJECT_STORAGE
+ * is set, in which case setup failure must fail the suite.
  */
 
 const storage: ObjectStorage = await startObjectStorage("api-ingestion");

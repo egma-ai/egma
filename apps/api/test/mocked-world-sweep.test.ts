@@ -17,14 +17,8 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The sweep's two hard cases, both about a run that is `pending`.
- *
- * A mocked run's simulations are unclaimable until it names a temporary copy, so
- * a run whose build died leaves them queued forever — the sweep must find it
- * and cancel it (S2). But a run whose world is fully built and is merely
- * *waiting for a free simulator* is not stuck, and cancelling it for queue wait
- * would be a fate no other run in the product suffers (S3). One clock, two
- * answers, told apart by whether the draft exists.
+ * Cancel a pending run whose mock-tool setup was abandoned, but keep a fully
+ * built run waiting for a simulator. Queue wait alone is not a failed build.
  */
 
 let api: TestApi;
@@ -378,14 +372,8 @@ describe("what the sweep answers", () => {
 });
 
 /**
- * The promise a resumed teardown can still keep, because the note carries the
- * comparison value: the version this agent serves never moved.
- *
- * The run that built the world compared the engine it read back against a print
- * it held in memory. A run that crashed took that print with it — so without
- * one on the note, a teardown finished by anybody else could delete the copy
- * and call the account settled without ever looking at the version real callers
- * are served from.
+ * Persist the serving-configuration fingerprint so resumed teardown can
+ * compare the serving version after the original process has exited.
  */
 describe("a teardown resumed from the note alone", () => {
   const TOOLS = [
@@ -472,15 +460,8 @@ describe("a teardown resumed from the note alone", () => {
 });
 
 /**
- * Two settles of one agent, and the rule that makes the second one harmless.
- *
- * A terminal report lands the settle, and so does the next run's claim — so two
- * of them meeting is ordinary, not exotic. They take turns behind the agent's
- * mocked-world fence, and the one that arrives second re-reads the cleanup flag
- * inside it: a run somebody else has already put back is not in its list, so it
- * asks Retell for nothing. Without that re-read the second one would delete a
- * version number a moment after the first did — and Retell gives the next
- * branch the lowest free number, so by then it can be somebody else's draft.
+ * Re-read cleanup state under the agent lock. A second settle must skip a
+ * completed cleanup instead of deleting a version number another run may reuse.
  */
 describe("a settle that arrives after somebody else settled the run", () => {
   it("deletes nothing a second time, and still answers settled", async () => {

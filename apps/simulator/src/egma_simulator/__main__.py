@@ -1,15 +1,7 @@
-"""``python -m egma_simulator`` — the standing simulator process.
-
-Reads its whole configuration from ``EGMA_SIMULATOR_*`` environment
-variables, installs the credential-redacting log filter, and claims work
-until told to stop. The first SIGTERM or SIGINT is the drain: claiming
-ends, the exchanges in flight finish and report, and the process exits
-when the last one has — so replacing this container drops nobody's call.
-A second signal is the hard stop of old: in-flight exchanges are torn
-down and nothing terminal is invented for them — the control plane's
-orphan sweep records what a disappearing simulator means. The compose
-file's ``stop_grace_period`` is the drain's ceiling; past it, Docker
-kills the container and the sweep speaks for whatever remained.
+"""Simulator entrypoint: load environment settings, redact credentials, and claim work.
+The first SIGTERM or SIGINT stops claims and drains active simulations.
+A second signal cancels them; the control plane sweeps unreported work.
+Compose stop_grace_period bounds draining before Docker forces termination.
 """
 
 from __future__ import annotations
@@ -35,16 +27,9 @@ def _configure_logging(level: str, registry: SecretRegistry) -> None:
 
 
 def _gather_loguru(level: str) -> None:
-    """Bring the voice legs' logging under the same roof as everything else.
-
-    Pipecat logs through loguru, which writes to stderr on its own and so
-    would miss both the configured level and the credential filter — and a
-    filter with a way around it is not one. Every loguru record is handed
-    to the standard library instead; the level numbers already agree.
-
-    Exceptions stay as exception information so the JSON formatter can emit
-    the class and safe frame locations. Runtime messages and source lines do
-    not leave the process. The shared filter also scrubs the retained fields.
+    """Route Pipecat loguru records through standard logging and credential redaction.
+    Preserve exception information for safe class and frame fields; omit runtime
+    messages and source lines from emitted exception details.
     """
     from loguru import logger as loguru_logger
 
@@ -67,15 +52,8 @@ def _gather_loguru(level: str) -> None:
 
 
 def secrets_of(config: SimulatorConfig) -> SecretRegistry:
-    """Every secret this configuration holds, registered for redaction.
-
-    Provider keys arrive on each claim and are registered by the service.
-    This function covers the standing deployment credentials: media,
-    object storage, and the control-plane service token.
-
-    Written as one function so that what a running simulator registers is
-    the thing a test can ask about, rather than something that happens
-    once inside a process nobody can inspect.
+    """Register deployment secrets for redaction: media, storage, and service token.
+    The service registers provider credentials received with each claim.
     """
     registry = SecretRegistry()
     for secret in (

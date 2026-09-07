@@ -5,14 +5,8 @@ import { resolveSession } from "../auth/session.ts";
 import { toIdentityRequest } from "../http/web-handler.ts";
 
 /**
- * Where the person holding this session is: who they are, which organization,
- * which projects.
- *
- * The pages hide any level whose cardinality is one, so this returns the lists
- * rather than a chosen one. Somebody with a single organization and a single
- * project sees neither picker — not because a page was told to hide them, but
- * because there is nothing to pick between and the page renders a picker only
- * when there is.
+ * Return session identity, organization membership, and accessible projects
+ * for the web app's scope selection.
  */
 export async function meRoutes(
   app: FastifyInstance,

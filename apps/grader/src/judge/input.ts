@@ -1,26 +1,10 @@
 import type { Conversation } from "../conversation.ts";
 
 /**
- * What a judge is shown, declared.
- *
- * **It is a declared set rather than "the conversation".** A judge reads the
- * transcript, how the conversation ended, the tools the agent called and what
- * was measured — four things, named here, assembled here, and nowhere else. The
- * point of writing them down is that adding a fifth is an edit to this file and
- * a line in the text below, rather than a new argument threaded through every
- * caller: the recording is the fifth, it is designed for and not built, and the
- * day it arrives it joins the type and the rendering and nothing else moves.
- *
- * **It carries no criterion, and that is structural.** The evidence is
- * assembled once per conversation. The saved instruction and test behavior
- * context travel beside it in the judge question.
- *
- * Text-only in v1. Nothing fixes the shape of what arrives here — telemetry is
- * written by whoever emitted it, and no write door stands between an exporter
- * and the store — so everything here reads defensively and says honestly when
- * what it wanted is not there. An absent transcript is an empty list, not a
- * crash, and a judge shown an empty transcript answers that it cannot determine
- * anything, which is exactly right.
+ * Text evidence for an LLM judge: transcript, execution ending, tool calls,
+ * and metrics. Grading instructions and expected behaviors travel separately
+ * in the question. Validate untyped evidence and represent missing lists
+ * as empty arrays.
  */
 export type JudgeInput = {
   /** In the order they were spoken, numbered from one. */
@@ -32,14 +16,7 @@ export type JudgeInput = {
   readonly measures: readonly Measure[];
 };
 
-/**
- * One thing somebody said, and its number.
- *
- * The number is what a judgment cites, and it is the turn's position in the
- * transcript rather than anything the simulator minted: a position is a thing a
- * person reading the record can count to, and it is the same number in the text
- * the judge read and in the row the judgment lands in.
- */
+/** A transcript turn with a one-based position used in assertion citations. */
 export type Turn = {
   /** One-based, matching the transcript as it is shown. */
   readonly at: number;
@@ -52,9 +29,8 @@ export type Turn = {
 
 export type Outcome = {
   /**
-   * Whether there was a conversation at all. False never reaches a judge — the
-   * engine writes `errored` without asking anybody — and it is here because the
-   * outcome is one fact and splitting it would let the two halves disagree.
+   * False when evidence cannot be graded; the engine records errors without
+   * calling the model in that case.
    */
   readonly happened: boolean;
   /** The simulator's own word for why it ended, or null. */
@@ -68,50 +44,30 @@ export type ToolCall = {
   readonly arguments: string | null;
 };
 
-/**
- * One measure, as the judge is shown it.
- *
- * **Taken from the conversation rather than re-read out of it.** The shared
- * measure module computed these off the spans, and the words a judge reads are
- * that answer rendered — so the number in a prompt, the number on the metrics
- * display and the number a future metric-based grader rests on are one arithmetic, not
- * three readings that agree today.
- */
+/** Metric samples already computed by the shared measure module. */
 export type Measure = {
   readonly measure: string;
   /** One sample, or the whole series when the measure was taken per turn. */
   readonly samples: readonly number[];
 };
 
-/**
- * The conversation, as the declared set. Everything defensive, because nothing
- * stands between an exporter and the store: telemetry that arrived in a shape
- * nobody expected must make a judge say "I could not tell" rather than make the
- * service fall over.
- */
+/** Build judge evidence defensively from untyped transcript and tool entries. */
 export function judgeInputOf(conversation: Conversation): JudgeInput {
   const transcript = turnsOf(conversation.transcript);
 
   return {
     transcript,
     outcome: {
-      // Always true by the time a judge is asked anything: a conversation with
-      // nothing to judge is `errored` for every grader without a model being
-      // called, so the one place this could be false never reaches here.
+      // The engine rejects ungradable evidence before asking the model.
       happened: conversation.nothingToJudgeBecause === null,
       endingReason: conversation.endingReason,
       turns: transcript.length,
     },
     toolCalls: toolCallsOf(conversation.events),
-    // Straight across, because there is nothing to read defensively: the
-    // measures arrived as numbers from the one module that computes them, not
-    // as a shape somebody wrote. A second reading here would be a second
-    // opinion about one arithmetic.
+
     measures: conversation.measures.map(({ measure, samples }) => ({
       measure,
-      // The numbers alone: a judge reads what was measured, and the span each
-      // measurement happened in is a storage fact with nothing to say to a
-      // model that is being shown a transcript.
+      // The judge receives values; the original metrics retain their evidence span IDs.
       samples: samples.map((sample) => sample.value),
     })),
   };
@@ -125,29 +81,12 @@ function objectsOf(value: unknown): readonly Record<string, unknown>[] {
   );
 }
 
-/**
- * One field of the assembled conversation as something somebody wrote, or
- * `undefined` when there is nothing there to read.
- *
- * **Blank is absent**, deliberately: a transcript entry holding an empty string
- * is a turn with nothing said in it, and a tool call naming `""` names no tool.
- *
- * Exported because the `tool_calls` grader reads the same list and has to see
- * the same tool calls a judge is shown. Two readings of one shapeless list
- * would be two answers to one question, and the way to stop that is one reading
- * rather than two careful ones.
- */
+/** Return a nonblank string unchanged, or undefined for absent or non-string input. */
 export function textOf(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-/**
- * The turns, numbered as they are shown.
- *
- * An entry with nothing said in it is dropped rather than numbered: a judge
- * citing turn 4 must be citing something a person can read, and a blank line in
- * the middle would shift every number after it away from what the judge saw.
- */
+/** Drop empty entries before numbering turns so citations match the rendered input. */
 function turnsOf(transcript: unknown): readonly Turn[] {
   const said: Turn[] = [];
   for (const entry of objectsOf(transcript)) {
@@ -189,13 +128,8 @@ function toolCallsOf(events: unknown): readonly ToolCall[] {
 }
 
 /**
- * The declared set as the words a judge actually reads.
- *
- * One rendering, here, so that every provider is handed the same evidence and a
- * difference between two judges is a difference between two models rather than
- * between two prompt builders. Sections are labelled and a section with nothing
- * in it says so out loud — "no tool calls were recorded" is evidence, and an
- * absent heading would let a judge assume the tools were simply not shown.
+ * Render the same evidence for every judge. Keep empty-section labels so
+ * the model can distinguish missing evidence from omitted input.
  */
 export function asJudgeReads(input: JudgeInput): string {
   const lines: string[] = ["## Transcript"];

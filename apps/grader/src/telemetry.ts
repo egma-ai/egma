@@ -1,19 +1,8 @@
 /**
- * Platform telemetry for this process, behind one flag. The API's
- * `telemetry.ts` carries the full story — what the flag means, why this
- * loads before the entry module, why `on` without both required values is
- * refused at boot by name, and why a backend that fails past that check says
- * so on standard error instead of stopping the service. This is that file one
- * app over, minus what a grader does not have: no fastify. Pino writes JSON
- * lines, which the deployment's filelog collector reads from standard output
- * like everything else's. Its trace
- * spans go to the same configured OTLP destination as the API. The collector
- * exporter chooses the span backend; PostHog is the current one. Crash
- * reports use a separate, direct PostHog adapter.
- *
- * `EGMA_TELEMETRY=on` is the whole decision. Off — the default, and
- * anything that is not `on` — means nothing below is imported and nothing
- * is sent anywhere, whatever else is set.
+ * Load process telemetry only when EGMA_TELEMETRY=on. Validate required
+ * settings at startup; report later backend failures on stderr without
+ * stopping grading. Pino logs go to stdout, request spans to the configured
+ * OTLP collector, and crash reports directly to PostHog.
  */
 
 const environment = process.env;

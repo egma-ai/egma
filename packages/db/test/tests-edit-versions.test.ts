@@ -25,15 +25,9 @@ import {
 } from "./support/test-factory.ts";
 
 /**
- * Editing a test, and reading one frozen version of it — through the factory
- * functions only, like the create and fetch tests before them. Raw SQL appears
- * in the reads that prove an old version's rows were left exactly where they
- * were, which no seam shows; every id an assertion needs comes off the seam
- * itself.
- *
- * What a write refuses is walked through in full at the create seam, in
- * `tests.test.ts`. Here one representative arm per rule shows the edit is held
- * to the same rules, rather than enumerating them a second time.
+ * Test edits through the factory and use raw SQL to verify old versions
+ * remain unchanged. Representative invalid edits complement create validation
+ * in tests.test.ts.
  */
 
 let database: MigratedDatabase;

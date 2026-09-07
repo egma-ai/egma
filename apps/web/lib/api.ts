@@ -1,20 +1,6 @@
 /**
- * One raw account or bootstrap read, and the four things a page can be told.
- *
- * Every product page in this application asks the same question — *give me
- * this, in this project* — and has to answer the same four situations for
- * somebody looking at it: it is here, it is not here, egma refused, and you
- * are not signed in. Writing that fold once is what lets a page's own code be
- * about its own subject, and what stops one page quietly deciding that a 404
- * is a failure while its neighbour decides it is an empty list.
- *
- * **A missing thing and a project that is not yours are the same answer**, and
- * deliberately so: the API answers both as an absence so that following a
- * stranger's link never reveals whether the thing on the other end exists.
- *
- * The refusal's own sentence is always kept and never paraphrased. It is
- * written to be shown, it names the next move, and a second copy of it in a
- * page would be a second thing to keep in step.
+ * Map reads to ready, missing, refused, or signed-out states. Preserve the
+ * API refusal message so callers can display it without a second copy.
  */
 
 /** The shape every refusal from this API has: a stable code, and a sentence. */
@@ -86,14 +72,8 @@ export function unreachable<T>(): Answer<T> {
 }
 
 /**
- * One read, with the project named in it where the caller named one.
- *
- * **The signal is optional and nothing here decides one.** A read that has to
- * be bounded says so at the call, because how long a wait is worth depends on
- * what is waiting on it — a deadline written here would be one that every
- * request in the product silently inherited. An abort lands in the same catch
- * as a refused connection, and means the same thing to a page: egma did not
- * answer.
+ * Forward the caller's optional abort signal. This helper sets no deadline;
+ * an abort is returned as a failed read.
  */
 export async function readJson<T>(
   path: string,

@@ -20,18 +20,9 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * The two reads a persona's detail sheet is made of — its version history and
- * who uses it — and the write rule underneath them.
- *
- * **A persona write names no expectation, and that is the decision this file
- * records.** There was a revision token for the identity and a version id for
- * the content, and an edit had to name whichever it moved. Both are gone: with
- * two authors before launch, the ceremony cost more than the clobber it
- * prevented, so the last write wins. The reopen condition is written down in
- * the spec — the first real clobber incident — and this file is where a test
- * for the token would come back.
- *
- * Every assertion goes through the factory functions.
+ * Test persona history, usage, and metadata edits through the factory.
+ * Metadata edits use last-write-wins semantics; behavior edits separately
+ * require the current expectedVersionId.
  */
 
 let database: MigratedDatabase;

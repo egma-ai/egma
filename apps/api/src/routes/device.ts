@@ -21,29 +21,10 @@ import { resolveSession, type Session } from "../auth/session.ts";
 import { toIdentityRequest } from "../http/web-handler.ts";
 
 /**
- * Logging in from a terminal, without a secret ever passing through a chat
- * window.
- *
- * Both approaches to `egma login` end with a key on disk. Only one of them puts
- * that key in the coding agent's transcript on the way there, which is why the
- * terminal never asks a person to paste anything: it shows a short code, a
- * browser opens with that code already in the field, and the person approves it
- * where they can see who they are and what they are approving.
- *
- * **Where the work is split.** The provider owns RFC 8628's mechanics — issuing
- * the pair of codes, claiming one for a signed-in person, the polling interval,
- * and what state a code is in. egma owns the two things the provider has no
- * field for and no opinion about: which organization and project the terminal
- * is being let into, and what the terminal ends up holding. The provider's own
- * token endpoint would hand back a session; egma hands back an API key against
- * egma's own table, so that every request the terminal ever makes afterwards
- * runs no provider code at all.
- *
- * The provider's endpoints are reached by relaying to its HTTP surface, exactly
- * as signup does, rather than by widening the seam. The seam is four calls and
- * a fifth is a decision somebody makes on purpose; approving and denying are
- * not egma asking the provider a question, they are a browser talking to the
- * provider through egma's origin.
+ * CLI login exchanges browser approval for an Egma API key. The identity
+ * provider handles device codes and temporary sessions; Egma records approved
+ * organization/project scope and issues the final key. Approval and denial
+ * relay to the provider through Egma's HTTP surface.
  */
 
 const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
@@ -204,16 +185,8 @@ export async function deviceRoutes(
   });
 
   /**
-   * Approving. The person says yes, and says which project.
-   *
-   * Gated on `mint_own_api_key`, which every role holds — including `viewer`,
-   * deliberately. Login mints a key as its final step, so an admin-only rule
-   * here would close the product to everybody who is not an admin.
-   *
-   * The choice is recorded before the provider is told to approve, and not
-   * after: between those two moments the terminal is polling, and a code that
-   * is approved but not yet aimed is one the terminal could collect with no
-   * project on it.
+   * Require mint_own_api_key, available to all roles. Record approved scope
+   * before provider approval so polling cannot collect an unscoped grant.
    */
   app.post("/api/device/approve", async (request, reply) => {
     const body = (request.body ?? {}) as Body;
@@ -306,18 +279,9 @@ export async function deviceRoutes(
   });
 
   /**
-   * Collecting. The terminal exchanges its device code for a key.
-   *
-   * What is recorded on the authorization has to be read **before** the
-   * exchange, because exchanging consumes the row. Everything after that is
-   * egma's own: the identity the provider named becomes a membership, the
-   * membership becomes a role, and a fresh secret is minted, hashed once and
-   * handed over. It is handed over here and nowhere else, ever again.
-   *
-   * There is no `expires_in` in the answer, and that is the protocol saying
-   * what the product means: keys never expire. Rotation is mint, deploy,
-   * revoke, so there is no window in which a deployment is unauthenticated and
-   * no timer nobody remembers setting.
+   * Read approved scope before the provider exchange consumes the device row.
+   * Recheck membership and deactivation, then mint and return the API key once.
+   * Keys have no automatic expiry; rotation uses mint, deploy, then revoke.
    */
   app.post("/api/device/token", async (request, reply) => {
     const body = (request.body ?? {}) as Body;

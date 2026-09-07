@@ -1,17 +1,9 @@
 name: Release CLI
 
-# Releasing is one deliberate act: push a tag that names the version.
-#
-#   pnpm --filter egma-cli exec npm version patch   # bumps apps/cli/package.json
-#   git commit -am "cli: 0.3.2" && git push
-#   git tag cli-v0.3.2 && git push origin cli-v0.3.2
-#
-# Nothing else publishes. Merging to main does not publish.
-#
-# There is no npm token in this repository. npm is told, once, on the package
-# settings page, that this workflow in this repository may publish egma-cli.
-# GitHub proves that per run with a short-lived OIDC token, which is what
-# `id-token: write` below allows. Provenance is attached automatically.
+# Publish CLI releases from a cli-v<version> tag matching apps/cli/package.json.
+# Update and commit the package version before pushing the tag.
+# Publishing uses npm trusted OIDC authentication configured for this workflow;
+# merging to main alone does not trigger this workflow.
 
 on:
   push:

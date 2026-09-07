@@ -1,34 +1,10 @@
-"""The scripted counterpart: CI's platform, and honestly the first plug.
+"""Deterministic chat adapter for offline simulation tests.
 
-A fake platform whose agent answers from a script, so a whole simulation
-conducts with no account, no network, and no model on the other side —
-deterministically. It is not a shortcut around the seam: it implements the
-same plug surface a real platform does, which is what makes the acceptance
-suite's conversations representative.
-
-Its config keys, like every plug's, are its own:
-
-- ``greeting`` (string, optional) — spoken by the agent the moment the
-  exchange opens. Absent: the persona speaks first.
-- ``replies`` (list, default empty) — the agent's answers, in order, one
-  per persona turn. An entry may be ``null`` instead of a string, which
-  is an answer that carried no words — what a real platform hands back
-  when its agent called a tool and said nothing.
-- ``ends_after_replies`` (bool, default false) — when true, the last
-  scripted reply ends the exchange (with no replies at all, the exchange
-  ends silently on the first persona turn). When false, a spent script
-  falls back to a fixed holding line forever.
-- ``turn_seconds`` (number ≥ 0, default 0) — how long the agent takes to
-  answer, the way a real platform takes time. What makes mid-exchange
-  cancellation testable.
-- ``provider_reference`` (string, optional) — offered as the platform's
-  own identifier for the exchange, the way a real plug offers a chat id.
-- ``tool_calls`` (list of objects, default empty) — tools the scripted
-  agent calls while producing its first answer, each ``{"name": …}`` with
-  an optional ``"arguments"`` string, the way a platform that exposes its
-  agent's tool traffic reports it alongside the words. One position is
-  enough: what a script has to be able to produce is the shape, and where
-  in an exchange it lands is the real platform's business.
+Config: greeting is optional; replies supplies one string or None per persona turn.
+ends_after_replies ends on the last reply, or first turn when the list is empty;
+otherwise exhausted replies use a fixed holding line. turn_seconds delays each
+reply for cancellation tests. provider_reference is optional. tool_calls supplies
+name and optional argument text for calls reported with the first reply.
 """
 
 from __future__ import annotations

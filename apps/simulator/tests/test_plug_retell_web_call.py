@@ -1,23 +1,6 @@
-"""The Retell web-call plug: a call egma creates, in a room Retell opens.
-
-Two counterparts, one for each half of what this plug does, and neither of
-them a mock of egma's own code:
-
-- **Creating the call** goes to the Retell-shaped HTTP server on loopback
-  (:mod:`retell_stub`), the same one the chat plug is held against. What is
-  proved about the request egma sends is proved over a socket, against
-  Retell's own field names and status codes.
-- **Joining the room** goes to the room-shaped LiveKit CI already runs
-  (:mod:`room_stub`), which stands in for the places the room driver
-  reaches a LiveKit and leaves every other line of it real. A web call *is*
-  a LiveKit room joined by url and token, so the room this plug conducts in
-  is the room every other voice simulation conducts in.
-
-What is pinned here is the whole story: the call created against the
-version the spec named with this simulation's variables attached, the room
-joined with the token that creation handed back, a conversation held in it,
-every way the two halves fail said honestly and typed, and egma leaving a
-room it has no power to delete.
+"""Use a local Retell HTTP stub for call creation and a room stub for the join.
+Check version and variable forwarding, returned token use, simulation output,
+failures, and departure without attempting to delete Retell's room.
 """
 
 from __future__ import annotations

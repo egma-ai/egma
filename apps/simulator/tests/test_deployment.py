@@ -1,21 +1,6 @@
-"""The deployment story, checked against the code that reads it.
-
-The normal operator inputs stay in `.env.example`. The full environment
-reference documents advanced variables. Both can fall behind
-the module that reads them — silently, because nothing fails when a
-variable is documented and unread, or read and undocumented. The second
-one is the expensive kind: a self-hoster cannot set a variable nobody
-told them about, and the failure is a feature that quietly never turns on.
-
-So this file compares them, and it is deliberately about *names and
-shapes* rather than about Docker. It parses no YAML and starts no
-container: what it asserts is true of the text, which is what somebody
-reads.
-
-The other half is the invariant the whole deployment rests on — **the
-simulator publishes nothing** — which is a claim about every compose file
-in the repository at once, and so cannot be tested from inside any one of
-them.
+"""Check environment names and Compose text against runtime configuration.
+Also verify that shipped simulator services expose no inbound ports.
+These checks start no containers.
 """
 
 from __future__ import annotations
@@ -200,15 +185,8 @@ def test_the_simulator_publishes_nothing_in_every_configuration(compose):
 
 
 def test_a_plain_compose_up_starts_the_whole_phone_stack():
-    """The phone stack is the default stack, not an overlay to ask for.
-
-    It was opt-in until the self-hosted release, and the reversal is the
-    point rather than an accident: a platform that cannot place a phone
-    call is not the product, so `egma self-host up` — and a plain
-    `docker compose up`, which is the same containers — brings all three
-    up. Phone calls remain unavailable until `.env` contains a complete
-    carrier route and `egma self-host up` starts the API with it. That is
-    separate from the media stack being present and healthy.
+    """The default stack includes phone media services. Calls additionally require
+    a complete carrier route in the API configuration.
     """
     default = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     for service in ("livekit", "livekit-sip", "livekit-redis"):
@@ -241,29 +219,8 @@ rather than merely that some default is absent."""
 
 
 def test_no_development_media_credential_is_left_in_the_deployment_description():
-    """The media server does not run on a credential anyone can read.
-
-    This is a finding rather than a precaution. A running deployment was
-    checked and found using the pair below: all three containers fell back
-    to it, and nothing in the CLI, the skills or the documentation ever
-    replaced them. Published to loopback the exposure is small — and the
-    deployment description invites a wider bind for testing from another
-    machine, at which point the media server accepts anyone who read the
-    repository.
-
-    `egma self-host` generates a pair for the workspace instead. What is
-    asserted here is the half a behavioural test cannot reach: that no
-    default is left in the files a self-hoster copies, and that all three
-    containers read the same two variables, so no two of them can end up
-    holding different halves of one password.
-
-    **The form this pair is read in changed once the bootstrap work landed.**
-    It used to be asserted as the silent-empty `${VAR:-}` — no default, which
-    was the whole of the fix at the time — and an empty value still started
-    the media server with no password and took the simulator down with it,
-    naming neither variable. It is the required `${VAR:?…}` now, so Compose
-    refuses and says which of the two is missing. The rest of the bootstrap
-    set is held to the same form below.
+    """Require generated media credentials with no public or empty defaults.
+    All three media consumers must read the same required variables.
     """
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
@@ -329,34 +286,9 @@ REQUIRED_IN_THE_ENVIRONMENT = {
         "binds to what it says"
     ),
 }
-"""The bootstrap set: what the CLI must supply before Compose may start.
-
-Each credential is generated once per platform workspace; the address is
-selected by the normal start command. **Not one may have a public default**, because a
-default here is a value every reader of this repository already holds — the
-finding that took the media pair's default away, one file wider.
-
-They are the required `${VAR:?…}` form, so an absent one stops Compose with
-the variable's name and what to do about it, rather than starting a platform
-that looks healthy and is not.
-
-What is deliberately **not** here is anything the deployment creates for
-itself. The stores' own users and databases, every port and every bind are
-values this file chooses and then uses consistently — a self-hoster who sets
-none of them gets the deployment the README documents, and the two binds
-default to loopback because that is a security decision this file makes
-rather than one it asks for. Per-container tuning is not here either, for
-the reason the spec gives: how many simulations one simulator takes at once
-is a property of the host, not of the deployment.
-
-**A store address is missing from this list on purpose, and is not
-unguarded.** `DATABASE_URL` and `CLICKHOUSE_URL` are what the API and the
-grader actually read, and this file builds each of them out of the store it
-starts beside them — so under Compose the address of a container this file
-creates cannot go missing. Both processes refuse to start without one and
-name it, which is what covers every other way of running them: a bare
-process, an override, somebody's managed Postgres. See the API's own
-configuration tests.
+"""Bootstrap values supplied by the CLI must use required Compose interpolation
+and have no public credential defaults. Store addresses are composed from bundled
+services; API and grader startup validation covers non-Compose deployments.
 """
 
 MAY_BE_ABSENT = {
@@ -412,33 +344,17 @@ MAY_BE_ABSENT = {
     "EGMA_S3_REGION": "empty is right for the store this file runs",
     "EGMA_BLOB_REGION": "falls back to EGMA_S3_REGION, which may be empty",
     "EGMA_SIMULATOR_S3_REGION": "falls back to EGMA_S3_REGION, which may be empty",
-    # The ingestion store, evidence's durable home. The API reads the
-    # EGMA_INGEST_* pair; each falls back to the EGMA_S3_INGEST_* pair, the
-    # bundled store's own ingestion credential. Empty is not hollow here: the
-    # accepting role refuses at boot and names EGMA_INGEST_ACCESS_KEY_ID when it
-    # has no credential to write with. That refusal lives in the API rather than
-    # a ${VAR:?} here, because Compose interpolates the whole file before it
-    # picks a service, so a required form would stop `docker compose down` too —
-    # the same reason the two store addresses are built rather than demanded.
-    # Left empty, the bundled store still makes the bucket and its confined
-    # policy; no user holds it.
+    # The API accepts EGMA_INGEST_* or bundled EGMA_S3_INGEST_* credentials.
+    # Validate missing credentials at API startup so Compose-wide interpolation
+    # does not also block commands such as down.
     "EGMA_S3_INGEST_ACCESS_KEY_ID": "empty makes no confined user; the API names it",
     "EGMA_S3_INGEST_SECRET_ACCESS_KEY": "is that credential's secret half",
     "EGMA_INGEST_ACCESS_KEY_ID": "falls back to EGMA_S3_INGEST_ACCESS_KEY_ID",
     "EGMA_INGEST_SECRET_ACCESS_KEY": "is that credential's secret half",
     "EGMA_INGEST_REGION": "falls back to EGMA_S3_REGION, which may be empty",
 }
-"""Every variable the deployment description may leave empty, and why.
-
-**This is the list the guard below is really about.** A variable written
-`${VAR:-}` is absent and empty at once, and nothing says so: the container
-starts, the health check passes, and the failure arrives minutes later as a
-provider or carrier refusal naming nothing about configuration. That was the
-original failure, and every setting in the deployment was written that way.
-
-So an empty default is now a decision somebody records here rather than a
-shape somebody reaches for. Each name above is one the platform, a project or
-the host answers for instead — never one a deployment needs in order to run.
+"""Variables allowed to resolve empty, with the reason for each exception.
+The guard rejects any new empty default without an entry here.
 """
 
 
@@ -486,19 +402,8 @@ ONE_EXPRESSION = re.compile(r"\A\$\{.*\}\Z", re.DOTALL)
 
 
 def interpolations(text: str, where: str = "") -> list[Interpolation]:
-    """Every `${…}` in some compose text, nested ones included.
-
-    Written as a scanner rather than as one regular expression because the
-    question is not what the text looks like — it is **what an unset variable
-    leaves behind**, and Compose answers that differently for six operators and
-    recursively for a default that is itself an expression. A pattern that
-    matched `${VAR:-}` and stopped would call `${VAR}`, `${VAR-}`, `${VAR:- }`
-    and `${NEW:-${OTHER:-}}` safe, and every one of those puts an empty string
-    into a container exactly as the original failure did.
-
-    So braces are counted, the body is split into name, operator and tail, and
-    the tail is read again — which is what makes a chain of defaults ending in
-    nothing a hollow variable rather than a clever one.
+    """Scan nested Compose expressions and split name, operator, and fallback.
+    Recursion is needed to detect empty results inside chained defaults.
     """
     found: list[Interpolation] = []
     at = 0
@@ -536,16 +441,9 @@ def interpolations(text: str, where: str = "") -> list[Interpolation]:
 
 
 def is_hollow(operator: str, tail: str, nested: list[Interpolation]) -> bool:
-    """Whether an unset variable leaves this expression empty.
-
-    - no operator — Compose warns and substitutes empty. A warning in a build
-      log is not a refusal, and the container starts either way.
-    - `:-` and `-` — empty when what follows them is empty, whitespace, or one
-      nested expression that is itself hollow. A chain of fallbacks ending in
-      nothing ends in nothing.
-    - `:+` and `+` — the alternate is used only when the variable is *set*, so
-      an unset one is empty by construction.
-    - `:?` and `?` — the required form, which is the only one that refuses.
+    """Check whether an unset variable resolves empty.
+    Bare and alternate forms do; defaults depend on their nested value.
+    Required forms reject missing values instead.
     """
     if operator in ("", ":+", "+"):
         return True
@@ -611,25 +509,9 @@ def test_a_bootstrap_variable_refuses_to_start_the_platform_when_absent(name):
 
 
 def test_no_variable_in_a_shipped_compose_file_is_hollow_when_it_is_absent():
-    """The regression this whole seam exists for: a new bootstrap variable that
-    is empty when nobody set it.
-
-    That shape is why the original failure was silent. It makes an absent
-    setting an empty setting, and an empty setting starts every container,
-    passes every health check, and reports the platform ready — so the first
-    anybody hears of it is a carrier refusal minutes later that names nothing
-    about configuration.
-
-    The guard is deliberately in this direction. Asserting that the ten
-    required variables are still required catches somebody undoing this work,
-    which is the unlikely half; nobody would notice a *new* variable arriving
-    empty, which is exactly how this failure was built the first time. So every
-    hollow variable in every file we ship has to be one `MAY_BE_ABSENT`
-    explains, and a name that is not there fails until somebody writes down why
-    the platform can run without it.
-
-    `${VAR:-}` is only the commonest spelling of it. See `is_hollow` for the
-    others, each of which reaches a container as the same empty string.
+    """Reject Compose variables that can resolve empty unless MAY_BE_ABSENT explains
+    why.
+    Scan new variables too, rather than checking only the known bootstrap set.
     """
     unexplained = sorted(hollow_variables() - set(MAY_BE_ABSENT))
     assert not unexplained, (
@@ -704,16 +586,8 @@ def test_the_gateway_and_its_published_ports_agree_on_the_rtp_range():
 
 
 def test_the_gateway_listens_on_the_port_it_is_published_on():
-    """The SIP port is one number, inside the container and out.
-
-    The gateway *announces* the port it listens on, so a gateway listening
-    on 5060 behind a host publishing 5070 tells the carrier to send its
-    in-dialog requests — a BYE, a re-INVITE — to a port nothing answers
-    on. What that looks like is a call that connects and then will not
-    hang up cleanly, which is a long way from the variable that caused it.
-
-    Found by running a platform on a moved port and reading the gateway's
-    own startup line.
+    """Keep the published SIP port equal to the gateway listen port.
+    The gateway advertises it for later BYE and re-INVITE requests.
     """
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     variable = r"\$\{EGMA_LIVEKIT_SIP_PORT:-5060\}"
@@ -729,19 +603,8 @@ def test_the_gateway_listens_on_the_port_it_is_published_on():
 
 
 def test_the_object_store_under_test_is_the_one_the_deployment_runs():
-    """The image the suite proves against and the images a self-hoster gets
-    are one release, named in three places.
-
-    Drift here is quiet and expensive: the object-storage tests would keep
-    passing against whatever they happened to pull while the deployment ran
-    something else, which is exactly the assurance those tests exist to
-    give up front.
-
-    Three places, because the store and the one-shot job that makes its
-    bucket both name it, and they are the same image on purpose — the job
-    is `mc` out of the server's own release. Counting rather than merely
-    finding it, so the two compose entries cannot drift apart while a test
-    that only asked "is it in there anywhere" keeps passing.
+    """Pin the test store and both Compose storage entries to the same release.
+    Count both entries so one cannot drift while the other still matches.
     """
     from conftest import MINIO_IMAGE
 

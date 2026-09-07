@@ -50,16 +50,7 @@ export function runSuitePath(projectId: string, suiteId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/runs/new?suite=${encodeURIComponent(suiteId)}`;
 }
 
-/**
- * Whether a row survives what somebody typed in the search box.
- *
- * **The filter runs in the browser, and that is a gap rather than a design.**
- * Neither `listTestSuites` nor `listTests` takes a search, so this narrows the
- * page that is already on screen. It stays honest because the empty result says
- * which emptiness it is — "No test suites match …" is a different sentence from
- * "No test suites yet" — and it is why neither list pages through everything to
- * answer a search.
- */
+/** Filter names in the rows already fetched; this is not a server-wide search. */
 export function matchesSearch(name: string, search: string): boolean {
   const wanted = search.trim().toLocaleLowerCase();
   return wanted === "" || name.toLocaleLowerCase().includes(wanted);

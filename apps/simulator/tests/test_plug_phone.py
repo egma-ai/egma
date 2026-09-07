@@ -1,14 +1,6 @@
-"""The phone connection and the media backend seam it uses.
-
-A phone connection owns the call lifecycle: prepare one Pipecat transport,
-dial, wait for an answer, report the carrier's refusal when there is one,
-and tear everything down. Pipecat owns audio frames, conversion, pacing,
-and recording. No PCM exchange or processing rate crosses the connection
-seam.
-
-The scripted backend proves the whole phone path without a carrier or a
-network. One full simulation also proves that the existing recording
-reference still resolves to a playable, two-channel WAV.
+"""Exercise phone lifecycle through the scripted backend without a carrier.
+Check transport preparation, dialing, answer/refusal handling, cleanup, and
+a full simulation with a resolvable stereo WAV recording.
 """
 
 from __future__ import annotations

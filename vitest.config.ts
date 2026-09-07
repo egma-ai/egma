@@ -32,15 +32,9 @@ const THE_PLANNING_REPOSITORY = "egma-planning/**";
 const LOCAL_AGENT_WORKTREES = "**/.claude/worktrees/**";
 
 /**
- * Two lanes, so daily work does not pay for a real browser on every edit.
- *
- * **The lanes are defined by what they leave out, never by a list of what they
- * hold.** Vitest's own default already finds every test file in every
- * JavaScript and TypeScript extension, so a new test file joins the fast lane
- * by existing. A hand-kept list of what to include cannot do that: a file the
- * list does not name runs nowhere, fails nothing, and leaves the run green. It
- * is the one mistake in this area that gives no signal at all, so the shape
- * here is chosen to make it impossible rather than to guard against it.
+ * Separate browser acceptance from the default test discovery. The fast lane
+ * uses Vitest defaults with explicit exclusions; the browser lane names its
+ * ordered acceptance file.
  */
 const SHARED = {
   env: { LOG_LEVEL: "silent" },

@@ -27,32 +27,10 @@ import {
 } from "./support/clickhouse.ts";
 
 /**
- * The shared measure module: the one place a measure is worked out.
- *
- * **Through the real store, deliberately.** The claim this file exists to prove
- * is that identical spans produce identical numbers whatever conducted the
- * conversation — so the same rows are written twice, once stamped `simulation`
- * and once stamped `production`, read back through the same trace read the
- * grader and the metrics display use, and computed. A hand-built pair of trees
- * would prove the arithmetic and nothing about the two worlds converging, which
- * is the part that could actually break.
- *
- * **The not-computable path is asked per measure in the catalog**, because each
- * needs different spans to be computable and a single case would only prove the
- * one it happened to pick. A conversation that carries every measure but one
- * answers for that one and nothing else, and the loop is over the catalog rather
- * than over a list written here — so a measure added to the catalog is a measure
- * this file starts asking about.
- *
- * **Two customers, because one proves nothing about the filter.** Every measure
- * here is computed from a trace a read handed back, and a read is where tenancy
- * is enforced — so a file with one organization in it would pass identically
- * whether the predicate existed or not. The second customer's spans sit in the
- * same store, in the same window, and are asked for by the wrong credential.
- *
- * The drift alarm that keeps this module the only one is in
- * `one-measure-path.test.ts`, deliberately apart: it is a filesystem scan and
- * has no business waiting on a container.
+ * Store and read identical simulation and production spans, then compare
+ * their measures. Test missing evidence for each catalog measure and use
+ * two organizations to check isolation. The filesystem-only guard is in
+ * one-measure-path.test.ts.
  */
 
 let store: MigratedTraceStore;
@@ -519,18 +497,8 @@ describe("a conversation a measure cannot be computed for", () => {
  * ------------------------------------------------------------------- */
 
 /**
- * What egma works out for a conversation that timed nothing itself.
- *
- * **Constructed trees, and the shapes are the point.** Each case here is one
- * arrangement of turns and speech that a rule has to answer the same way twice —
- * turns out of order, a turn that answered without speaking, an interruption,
- * an emitter the door did not recognise, and a conversation carrying both
- * vocabularies. The captured LiveKit trace proves the whole path in
- * `apps/api/test/otlp-derived-measures.test.ts`, against numbers hand-computed
- * from its own timestamps; what is proved here is the arithmetic itself.
- *
- * Rows are written and read back through the real store, exactly as every case
- * above is, so the derivation is asked the same question a grader asks.
+ * Synthetic turn and speech arrangements test derived measures through the
+ * real store. otlp-derived-measures.test.ts covers a captured LiveKit export.
  */
 
 /** One turn of a constructed conversation, in whole milliseconds from the root. */
@@ -930,18 +898,8 @@ describe("measures derived from a recognised framework's own spans", () => {
   });
 
   /**
-   * **The derivation reads the agent's turns and only the agent's.**
-   *
-   * A simulation's trace holds two accounts of one conversation under one id.
-   * egma's own account carries transcript turns too — the same exchanges, from
-   * egma's side of the connection, on egma's own clock — so a derivation that
-   * walked every `turn:human` row would measure each wait twice over, and each
-   * one wrongly: egma's turns speak no `speaking` spans, so they would sit
-   * between the agent's turns as barriers that answer nothing.
-   *
-   * The conversation below is that arrangement exactly: the agent's two turns
-   * with speech, and egma's own record of the same exchange filed beside them,
-   * off by a fraction of a second as two clocks always are.
+   * The fixture contains both agent and persona POVs on separate clocks.
+   * Derivation must not combine their turns or count one exchange twice.
    */
   it("derives from the agent's own turns, never from both POVs at once", async () => {
     const trace = await aLiveKitCall(
@@ -987,19 +945,8 @@ describe("measures derived from a recognised framework's own spans", () => {
  * ------------------------------------------------------------------- */
 
 /**
- * The last source in the chain, and for a managed platform the only one there
- * is.
- *
- * A Retell production trace carries no timing spans, because Retell publishes
- * no per-turn timing and the store never writes a span nobody observed. What it
- * does carry is Retell's own raw measurements, translated at the ingest door
- * into the neutral block and written on the root span's payload. These cases
- * store that payload, read it back through the same trace read a grader reads
- * through, and ask what the shared measure module makes of it.
- *
- * **Deliberately without turn spans of any kind.** What a zero-width turn
- * derives is a separate question with its own fix, and a case here that leaned
- * on it would be proving two things at once and failing for either.
+ * Read normalized platform measurements from the root payload without turn
+ * spans. This isolates reported values from turn-based derivation.
  */
 
 /** Where the block rides, in the payload's own words rather than a constant's.
@@ -1291,14 +1238,8 @@ describe("measures an agent platform reported about its own conversation", () =>
   });
 
   /**
-   * **The block sits behind the same tenancy wall every other read does.**
-   *
-   * Two customers and one trace id, in one window — the only arrangement that
-   * can tell a real predicate from a lucky one. Without the shared id the wrong
-   * customer's read finds no rows at all and answers `undefined` for a reason
-   * that has nothing to do with the block's own query. Here their read
-   * succeeds on their own rows, and the question is whether somebody else's
-   * block came back with it.
+   * Both organizations have this trace ID, so the test detects a missing
+   * organization predicate rather than succeeding because no trace was found.
    */
   it("never hands one customer the block another customer's trace carries", async () => {
     const shared = traceId();
@@ -1425,23 +1366,8 @@ async function aRetellTrace(
 }
 
 /**
- * **A zero read off a turn that had no width is not a measurement**, and this is
- * the shape that made the rule necessary.
- *
- * Retell publishes no per-turn timing, so its normalizer writes placeholders and
- * says so plainly. Subtract one from the next and the answer is zero every time
- * — a series a bound cannot fail, so a production trace whose worst wait was
- * really 2145 ms held a two-second bound with "0 milliseconds at its worst" as
- * its rationale. A false pass is the exact false trust this product exists to
- * kill, and it is worse than the `skipped` a provider reporting no timing has
- * earned.
- *
- * **`turn_response_latency` is the whole of what is load-bearing below**, and
- * the empty answer is stated in full only so nothing arrives here unremarked.
- * The other two were never derivable on a Retell trace and are not evidence of
- * this rule: `first_response_latency` needs a root, and Retell's root is filed
- * as `conversation` while the module reads `root`. `agent_speech_duration` needs
- * `speaking` children, and Retell reports none, so no turn here has any.
+ * Placeholder timestamps must not produce zero response latency and a false
+ * passing grade. This fixture has no observed turn timing or speech spans.
  */
 describe("a production trace whose turns were never timed", () => {
   it("derives nothing at all, so every measure is absent", async () => {
@@ -1464,18 +1390,8 @@ describe("a production trace whose turns were never timed", () => {
 });
 
 /**
- * **A turn of no width is not the same thing as a turn nobody timed**, and the
- * two cases below are why the rule is a pair rather than a width.
- *
- * A chat simulation has no duration to write — a typed message is one instant —
- * so every turn it files is zero nanoseconds wide at a real, distinct moment.
- * Its geometry is honestly timed and its waits are real. `apps/grader` reads
- * exactly these numbers into the evidence a judge is shown, and the rule is
- * pinned here as well so it lives beside the arithmetic it constrains.
- *
- * The stamps say `production` on these rows, as they do on every constructed
- * tree in this file, and it changes nothing: the module cannot see which world a
- * conversation came from, which is what the pair of describes above proves.
+ * Zero-duration turns at observed timestamps still have measurable gaps.
+ * Unlike placeholders, their timestamps can support latency derivation.
  */
 describe("turns of no width at real instants", () => {
   it("measures the gaps between them, because the gaps were observed", async () => {

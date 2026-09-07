@@ -6,39 +6,15 @@ import type {
 import { agentPlatformLabel } from "./transcripts.ts";
 
 /**
- * The agents of one project, and every way egma can reach one, as the API
- * answers them.
- *
- * An **agent** is the customer's voice agent — the thing egma is trying to
- * establish trust in. It belongs to a project, which is why these reads are
- * never made without one. A **connection** is how egma reaches an agent, and an
- * agent has many: the same logical agent might be a process on a laptop today,
- * a hosted assistant in staging, and a phone number in production.
- *
- * The shapes are the API's own, field names included. Renaming its fields on
- * the way in would put a second vocabulary between the contract and the page,
- * and the two would drift the first time the API grew a field.
- *
- * **What is not here is as deliberate as what is.** No provider prompt, no
- * model, no tools: those live where the customer configures them, and a copy
- * in this application would be stale from the moment it was taken. And no
- * credential — a read answers whether one is present and a hint of which one it
- * is, and never the secret.
+ * API response types for a project's agents under test and their connections.
+ * Provider configuration stays on the agent platform; reads expose credential
+ * status and hints, not secrets.
  */
 
 export type ListedAgentWithConnections = ListAgentsResponse["agents"][number];
 export type ListedAgent = Omit<ListedAgentWithConnections, "connections">;
 
-/**
- * One page of them. Keyset, newest first: `nextCursor` is where this page
- * stopped, and asking for more means handing it back. It is `null` rather than
- * absent when there is no next page, so "there is no more" and "this answer is
- * an older shape" are different answers.
- *
- * The items are the widened shape below: the list read carries every listed
- * agent's connections, so a page of agents is a page of *reachability* rather
- * than a page of names each hiding a second request.
- */
+/** A page of agents with their active connections and the API pagination token. */
 export type AgentPage = ListAgentsResponse;
 
 export type ListedConnection = ListedAgentWithConnections["connections"][number];
@@ -55,38 +31,15 @@ export function connectionLabel(
   return `${connection.name} · ${modalityLabel(connection.modality)}`;
 }
 
-/**
- * One agent as a *list* of them answers it: the identity above, and every
- * living way egma can reach it.
- *
- * The connections are the same shape the agent's own read answers, because the
- * API describes them with one function. So a row and a page never disagree
- * about what a connection is, and code that reads one reads the other.
- *
- * Archived connections are not among them. "How egma reaches this agent" and
- * "how it used to" are two questions, and the second is asked of the agent's
- * own read.
- */
+/** Agent detail using the generated response shape, including connections. */
 export type AgentDetail = GetAgentResponse;
 
 /** Which half of the project a list is asking for. */
 export type ArchiveFilter = "active" | "archived";
 
 /**
- * Which platforms an agent is on, in the words a person reads, as this
- * application can honestly answer it.
- *
- * Every agent declares its platform when it is registered. Connections can
- * still name another platform when their connection type pins one, so the
- * list says every platform represented by a live connection and falls back to
- * the agent's declared platform when it has no live connection.
- *
- * **An agent can be reached on two platforms at once**, so every platform its
- * live connections name is said, and not the first of them. One Retell
- * connection and one LiveKit connection on one agent is an ordinary state, and
- * naming only the first made the answer depend on which connection was made
- * first: the same agent read `Retell` today and `LiveKit` the day that
- * connection was archived, with nothing about the agent having changed.
+ * List distinct platforms from active connections in display order. Fall back
+ * to the agent's declared platform when it has no active connections.
  */
 export function agentPlatformText(
   agent: ListedAgentWithConnections,

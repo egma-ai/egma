@@ -1,14 +1,5 @@
-"""What the claim loop does with an answer it did not expect.
-
-The capacity a claim declares is a request, and the answer is the control
-plane's to compose. A simulator that trusted the answer would overload on a
-bad one, and a simulator that raised on it would take its own in-flight work
-down with it. Neither is acceptable, so the loop takes what fits, refuses
-the rest out loud, and keeps going.
-
-These are the runtime's own defences, tested with the workbench's clamping
-deliberately out of the way — a well-behaved control plane can never
-exercise them.
+"""Test excess or malformed claims without the workbench's normal clamping.
+The simulator must accept only valid work within capacity and keep running.
 """
 
 from __future__ import annotations

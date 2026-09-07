@@ -1,13 +1,6 @@
 /**
- * Two real platforms, two real logins, one machine.
- *
- * A developer who self-hosts and also uses hosted egma signs in to both from the
- * same laptop. The promise is that the second login does not sign them out of
- * the first, and that the key each platform minted is only ever offered back to
- * that platform. Both halves are proved here against real API processes with
- * their own databases, driving the real `egma login` as a separate process
- * through the real device flow — a fixture could agree with the reader about
- * the file format and prove neither.
+ * Run separate API processes and CLI device logins for two platforms.
+ * Verify both keys survive and each is sent only to its issuing platform.
  */
 
 import { spawn } from "node:child_process";

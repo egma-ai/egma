@@ -15,15 +15,8 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * Registering the same vendor agent twice, including from two machines at
- * once.
- *
- * `createAgent` is tested next door and is not re-tested here. What is new is
- * the reuse rule and the transaction that carries it: a second registration of
- * one vendor agent must never mint a second identity, and two arriving
- * together must settle to one rather than one of them losing to the name
- * index. Both are Postgres guarantees — an advisory lock and a committed read
- * behind it — so both run against a real database.
+ * Real PostgreSQL transactions test registration reuse, including concurrent
+ * requests that must resolve to one agent in a project.
  */
 
 let database: MigratedDatabase;
@@ -419,14 +412,8 @@ describe("a credential rotated by a reused registration", () => {
 });
 
 /**
- * The composite reuse rule, against a real database.
- *
- * Retell's rule is one config value compared as it was stored, and Postgres
- * can decide it on its own. LiveKit's cannot be decided in SQL at all: the
- * identity is a normalized server origin and a worker name, and
- * `wss://acme.livekit.cloud`, `https://acme.livekit.cloud:443` and
- * `ws://acme.livekit.cloud` are one server that no `=` will ever match. So the query narrows on the name and the
- * rule settles the rest, and these are the cases that tell the two apart.
+ * LiveKit reuse compares the normalized server origin and worker name.
+ * These cases cover equivalent URL spellings that raw string equality misses.
  */
 describe("one LiveKit worker registered twice", () => {
   it("answers reused, and replaces the sealed pair whole", async () => {

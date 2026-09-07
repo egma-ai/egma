@@ -699,14 +699,8 @@ describe("the transcript time rail", () => {
   });
 
   /**
-   * **Who answered a tool call, said once and quietly.**
-   *
-   * A mock tool answered this call, read by name off the test version this
-   * simulation pinned, so a reader knows the answer in front of them came from
-   * the test rather than from their own backend. The mock tool's own name is
-   * the tool's name, already on the row, so the mark does not repeat it. A real
-   * call is the ordinary case and says nothing extra — there is no second word
-   * for "not mocked" to learn.
+   * Render the supplied mocked provenance mark without repeating the tool name.
+   * An unmarked tool call gets no extra label. This does not verify tool execution.
    */
   it("marks a call a mock tool answered, and leaves a real one unmarked", () => {
     const read = evidence();
@@ -1163,18 +1157,9 @@ describe("the transcript time rail", () => {
 });
 
 /**
- * **The run view shows the agent's POV, and one conversation once.**
- *
- * A simulation stores both accounts of the same call: the persona's, which is
- * what egma's own simulator said, heard and recorded, and the agent's, which is
- * what the agent's own process reported — every tool call with the arguments
- * its model emitted and the result it received. The transcript a developer
- * reads is the agent's. There is no side-by-side, no threshold and no diff:
- * the persona's POV is stored, and what it is still drawn for is the recording
- * underneath and the origin every row seeks against.
- *
- * The conversation here is the one that opened this effort — a booking, three
- * tool calls, one of them mocked and one of them refused.
+ * Use the agent POV for the readable transcript. The persona POV supplies
+ * recording evidence and the seek origin. This fixture contains a booking
+ * with three tool calls, including mocked and refused results.
  */
 describe("the agent's POV is what a reader is shown", () => {
   const AGENT_TURNS = [

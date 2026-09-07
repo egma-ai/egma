@@ -21,19 +21,8 @@ import type { RateLimit } from "../http/rate-limit.ts";
 import { sendRefusal } from "../http/refusals.ts";
 
 /**
- * Working with keys: see the ones you may see, mint one, retire one.
- *
- * These are the first routes in egma that a key can be used on, which is what
- * makes the end of `egma login` verifiable rather than asserted. They take
- * either credential — a browser session or a key — and neither is privileged
- * over the other, because a key already resolves to the same context a session
- * would.
- *
- * **The list is filtered, not gated.** An `admin` sees every key in the
- * organization; everybody else sees the keys they minted. Refusing the whole
- * call would leave a `viewer` holding a key they could never see or rotate,
- * which is a worse outcome than either reading of the permission table. The
- * filtering itself lives in the data-access module, so no route can forget it.
+ * API-key routes accept sessions and keys. The data layer filters key lists:
+ * admins see organization keys; other roles see their own.
  */
 
 export type ApiKeyRoutesOptions = {

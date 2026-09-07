@@ -7,38 +7,15 @@ import type { Membership } from "./memberships.ts";
 import { insertMembership } from "./memberships.ts";
 
 /**
- * Creating a customer is the one write that cannot take an `AuthContext`,
- * because it is what brings the boundary into existence. It is safe on the same
- * terms as the resolver: it reads nothing, it names no existing organization,
- * and the only rows it can touch are the ones it just made.
- *
- * Signup either fully succeeds or fully fails. An account with an organization
- * but no project is a developer with no way forward, and a project with no
- * grader is a first run nobody grades. The organization, its first project,
- * its expected-behaviors grader and the owner's membership are therefore one
- * transaction.
+ * Provision the organization, first project, expected-behaviors project grader,
+ * and owner membership in one transaction. This creates a new isolation boundary
+ * before an AuthContext exists.
  */
 
 /**
- * Everything a project needs to be a *usable* project, written in one
- * transaction: the row itself and its seeded expected-behaviors grader.
- *
- * **It reads nothing from the persona catalog.** A project used to be born
- * pointing at Egma's shared persona, so creating one depended on the catalog
- * having been seeded and made the tenancy schema import a product table. The
- * pointer answered one question — who calls when a test names nobody — and
- * that question stopped existing when tests began refusing an empty persona
- * list. A project with an empty catalog is now a complete project.
- *
- * **One factory, two callers, and that is the whole reason it is a function.**
- * Signup provisions the first project and an admin creates every one after it.
- * Both paths create the same complete project. There is no smaller project
- * shape without its seeded grader.
- *
- * It takes the transaction rather than opening one, because both callers have
- * other rows to write in the same breath — an organization and a membership for
- * one, nothing yet for the other — and a project that committed while its
- * organization rolled back would be a project belonging to nobody.
+ * Shared project factory for signup and admin creation. Insert the project and
+ * its expected-behaviors project grader on the caller's transaction.
+ * No default persona or persona catalog entry is required.
  */
 export type NewProjectRow = {
   readonly projectId: string;

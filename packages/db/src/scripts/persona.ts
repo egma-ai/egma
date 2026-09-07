@@ -22,21 +22,9 @@ import { runMigrations } from "../migrate.ts";
 import { organization, user } from "../schema/index.ts";
 
 /**
- * Drives the persona factory from a terminal, until the real front door
- * (the API) exists. Signup does not reach a terminal yet either, so the script
- * keeps one development organization of its own — provisioned through the same
- * front door signup will use — and acts in it as its admin.
- *
- *   node packages/db/dist/scripts/persona.js create \
- *     --name "Impatient Rita" \
- *     --identity-name "Rita Alvarez" \
- *     --personality "70, hard of hearing, gets louder when mishears." \
- *     --language en-US
- *
- *   node packages/db/dist/scripts/persona.js get prs_…
- *   node packages/db/dist/scripts/persona.js list [--limit 50] [--cursor prs_…]
- *   node packages/db/dist/scripts/persona.js fork prs_…
- *   node packages/db/dist/scripts/persona.js delete prs_…
+ * Development persona CLI. Provisions or reuses the factory-dev organization
+ * and acts as its admin. Run node packages/db/dist/scripts/persona.js for
+ * command usage. Create requires name, identity-name, personality, and language.
  */
 
 const DATABASE_URL =

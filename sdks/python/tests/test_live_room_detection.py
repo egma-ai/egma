@@ -1,26 +1,7 @@
-"""The room-name contract, held against a real LiveKit — and no account.
-
-Every other suite here proves the SDK against a room-shaped fake, which is
-the right default and says nothing about a real room. Two claims cannot be
-settled that way, and both are load-bearing:
-
-- **egma is found where it really is.** Addressing reads a room's own
-  participant table, and a fake table is a fake answer.
-- **the wait really ends.** Detection is the room's name, and the name is
-  what lets this side wait for egma rather than conclude production. On
-  two of the three dispatch paths the agent is in the room *first*, so the
-  wait is not a nicety there — it is the whole reason those paths work.
-
-So these run against a real server, and deliberately cost nothing to run:
-the server is the one this repository deploys, started in its own dev mode
-by the ``live_livekit`` fixture, and no conversation is ever held. No
-speech, no model, no key. What is exercised is detection, addressing and
-the exchange — all of the SDK a real LiveKit is in a position to
-contradict.
-
-The speaking half of a live simulation is a different proof with a
-different price, and it lives in the simulator's own
-``test_live_livekit_room.py``.
+"""Verify room-name detection, participant addressing, and arrival waits on real
+LiveKit.
+The live_livekit fixture uses a configured server or a local Docker dev server.
+These tests do not start audio or a model.
 """
 
 from __future__ import annotations

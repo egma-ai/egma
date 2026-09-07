@@ -17,38 +17,10 @@ import { cn } from "@/lib/utils";
 import { ROW_HOVER } from "./evidence.tsx";
 
 /**
- * A page of rows, described once and drawn once.
- *
- * **One semantic table produces both layouts.** A wide screen gets a dense
- * table; CSS turns that same tree into a stack of labelled rows on a narrow
- * screen. The column marked `primary` becomes the row's name and the rest
- * become its facts. Drawing a table and a mobile list side by side would put
- * every control and id in the document twice, even though only one copy is
- * visible.
- *
- * **A row is a line of reading, not a card.** The height is a token, cells do
- * not wrap, and the vertical padding is deliberately small: a list of forty
- * agents should be a list of forty agents rather than four screens of scroll.
- *
- * **The frame is the kit's `Table`, and the numbers are the boards'.** A Pure
- * Paper panel inside one hairline with no corner; a 40px header of quiet
- * labels; rows at least 52px with a hairline between them and none after the
- * last; and a fixed 48px slot at the trailing edge that every row carries, so
- * the ⋮ menus line up in one lane down the table whether or not a given row
- * has one. Read off `6ZM-0`, `71F-0` and `710-0` on 2026-08-23. The lane is a
- * floor as well as a width — see `floorOf`, which is what stopped a crowded
- * table squeezing it.
- *
- * Paging is keyset, so "more" means *carry on from where that page stopped*
- * rather than *skip a number of rows*. The control is here rather than in each
- * page so that every list in the product asks for the next page the same way.
- *
- * **What each cell is, is on the cell.** The narrow layout has to reach the
- * primary cell and the action cell from a stylesheet, and the wide layout has
- * to reach real controls inside a row whose primary link has been stretched
- * over it. Those hooks are `data-primary` and `data-action` rather than class
- * names, because a page composing this table can read them, a test can assert
- * them, and neither depends on what the styling is written in.
+ * Render one semantic table in wide and stacked layouts so controls and IDs
+ * are not duplicated. Columns define headers and cells together; primary and
+ * action attributes identify their roles for layout and tests.
+ * Use the shared trailing action slot and next-page control across lists.
  */
 
 export type Column<Row> = {
@@ -64,21 +36,9 @@ export type Column<Row> = {
   /** A row control. It stays at the trailing edge in both table layouts. */
   readonly action?: boolean;
   /**
-   * How wide this column is, when the boards say.
-   *
-   * **It is a real width, not a hint, and that was worth measuring.** The table
-   * lays out `auto`, where a declared width is only a preference — but every
-   * cell's content is clipped to one line, so a column's own minimum is its
-   * padding and nothing pushes back. A browser then gives the widths that were
-   * asked for and hands the slack to the columns that asked for none.
-   *
-   * Measured at 1440 on 2026-08-23, against `6ZM-0` and `8XV-0`: the agents
-   * list lands 260 / 160 / 360 with Created taking the 338 left over, and
-   * personas lands 260 / 140 / 110 / 90 / 130 with Description taking the
-   * slack. Both are the boards, to the pixel. So `table-fixed` is not needed,
-   * and a list that wants the boards' proportions only has to say them.
-   *
-   * A row control's slot is not a caller's to set: see `widthOf`.
+   * Requested column width in automatic table layout. Unspecified columns share
+   * remaining space; constrained content can still affect sizing. Action columns
+   * use the shared width and minimum-width rules below.
    */
   readonly width?: string;
 };
@@ -129,14 +89,9 @@ export function DataTable<Row>({
    */
   readonly stretchPrimaryLink?: boolean;
   /**
-   * Makes the whole row a pointer target for one action that opens in place —
-   * a sheet, not a URL. `stretchPrimaryLink` is for rows whose name is a real
-   * link; this is for rows whose name is a real button. The row answers the
-   * pointer and lights up under it with the evidence surface's own hover mix;
-   * the keyboard path stays the primary cell's button, so the accessibility
-   * tree still holds exactly one control for the one action. A click that
-   * lands on a control inside the row — the ⋮ menu, the name button itself —
-   * is that control's, not the row's.
+   * Activate the row on pointer clicks outside its child controls. Keep a real
+   * button in the primary cell for keyboard access. Use stretchPrimaryLink for
+   * rows whose primary action is navigation.
    */
   readonly onRowActivate?: (
     row: Row,
@@ -175,34 +130,16 @@ export function DataTable<Row>({
   const primary = columns.find((column) => column.primary) ?? columns[0];
   const pageLabel = pagination?.pageLabel(pagination.page);
   /**
-   * How wide a column is, and the one width this component decides for itself.
-   *
-   * A row control's slot is the theme's, not the caller's: it is what makes
-   * the trailing lane straight, and a page choosing its own would bend it. A
-   * caller may still say `width` on any other column.
-   *
-   * It is written on the header cell alone. A column width set there governs
-   * the whole column, and a width on the body cells as well would survive into
-   * the stacked layout — where the cells are no longer a table and a 48px
-   * "column" is a 48px box with a menu falling out of it.
+   * The theme owns action-column width; callers may size other columns. Apply
+   * width to headers only so it does not constrain body cells in stacked layout.
    */
   function widthOf(column: Column<Row>): string | undefined {
     if (column.action === true) return "var(--table-action-width)";
     return column.width;
   }
   /**
-   * The one width that is a floor rather than a preference.
-   *
-   * **A declared width on a table is a request, and an over-constrained table
-   * refuses it.** The layout is `auto`, so when the columns' own minimums add
-   * up to more than the table has — which every list with a long name in it
-   * reaches — a browser takes the shortfall out of the columns that can give
-   * it, and the trailing lane gives most: its content is one 36px glyph, or on
-   * a row with no control, nothing at all. That is how the same 48px
-   * declaration measured 48 on Agents, 40 on Personas and 0 on Runs.
-   *
-   * `min-width` is what the lane cannot be argued out of. It is written beside
-   * the width, on the header cell alone and for the same reason.
+   * Give the action column a min-width as well as width. Automatic table layout
+   * can otherwise shrink an empty action column below its intended size.
    */
   function floorOf(column: Column<Row>): string | undefined {
     return column.action === true ? "var(--table-action-width)" : undefined;
@@ -350,22 +287,9 @@ export function DataTable<Row>({
                       ],
                       "data-[action=true]:px-0 data-[action=true]:text-center",
                       /*
-                       * **A column the narrow layout omits takes the stacked
-                       * layout's `display` and nothing else.** Writing the two
-                       * as separate rules — `stacked:flex` for every cell and
-                       * `max-[900px]:hidden` for this one — put two `display`
-                       * declarations of equal weight under one query, and the
-                       * one Tailwind happened to emit last won. It was `flex`,
-                       * so `hideOnMobile` hid nothing on a phone: the personas
-                       * list still drew Description and Version, and the
-                       * agents list still drew Created.
-                       *
-                       * There is no rule to outrank now, and the second half
-                       * is the same fix: the omission follows `stacked`, so a
-                       * table that stacks because its own container is narrow
-                       * omits the same columns a phone does. `hideOnMobile`
-                       * has always meant "the narrow layout may leave this
-                       * out", and `stacked` is what "narrow layout" means.
+                       * Choose hidden or flex within the same stacked variant. Competing display
+                       * rules could make hideOnMobile ineffective; container-based stacking must
+                       * hide the same optional columns as a narrow viewport.
                        */
                       stacks && hiddenWhenStacked(column)
                         ? "stacked:hidden"

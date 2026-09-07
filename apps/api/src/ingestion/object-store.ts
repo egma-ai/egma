@@ -9,49 +9,13 @@ import {
 import { PENDING_PREFIX, type SealedSegment } from "./segment.ts";
 
 /**
- * The ingestion bucket, and the four things Egma ever asks it.
+ * Read, list, create, and delete pending ingestion segments through the S3 SDK.
+ * Use path-style addressing for stores without per-bucket hostnames.
  *
- * Create one pending object without ever replacing one, read one back, list the
- * whole pending prefix, and delete one that has been drained. Nothing else: no
- * copy, no multipart, no lifecycle, no bucket administration. The object store
- * is a **spool** in this design and not a second permanent trace archive, and
- * this surface is the whole of what that costs.
- *
- * ## Why this module buys the tree the recordings signer refused to
- *
- * `recordings/signed-link.ts` writes SigV4 out by hand and says exactly where
- * that stops (`:34-37`): *what is deliberately not here is signing anything
- * with a request body, anything with headers beyond `host`, and anything that
- * needs a temporary credential. If egma ever needs one of those, that is the
- * day to buy the tree rather than to grow this file.* This is that day, and by
- * some distance — every call below has a body or a payload hash or a
- * conditional header, and two of them have both. So the signer stays exactly as
- * it is, still hand-written, still proving itself against a real MinIO on every
- * run, and the ingestion path takes the dependency instead of growing a second
- * hand-written signer that nothing outside our own tests would ever check.
- *
- * Path-style addressing, for the reason the signer uses it: a MinIO answering
- * at `http://minio:9000` has one name on the deployment's network and no
- * per-bucket name at all, so `http://egma-ingestion.minio:9000` resolves
- * nothing. AWS serves both styles, so a deployment on real S3 pays nothing.
- *
- * ## Conditional create is the whole idempotency story
- *
- * A segment is sealed once and its identity is written into the local log
- * before the upload starts, so a retry after an ambiguous upload asks to create
- * **the same key with the same bytes**. `If-None-Match: *` turns that into a
- * question the store answers rather than a race this side has to reason about:
- * either this call created the object, or an object is already there.
- *
- * Where one is already there the bytes are read back and compared. Identical
- * bytes are a success — that is the retry finishing the work its own earlier
- * attempt already did. Different bytes under one segment identity are an
- * **internal defect** and never a customer's problem: identities are minted
- * here, and two different sealings claiming one is a fault in Egma. The
- * comparison is over the bytes rather than over the store's ETag because an
- * ETag is the store's own summary, and its rule for making one changes with
- * encryption settings and multipart thresholds. This path only runs on a retry,
- * so it costs one read on a rare turn and answers the exact question.
+ * Retries reuse the sealed segment's key and bytes. If-None-Match: * prevents
+ * replacement; an existing object succeeds only when its bytes match. Compare
+ * bytes, not ETags, whose meaning varies with storage settings. Different bytes
+ * under the same segment ID are an internal defect.
  */
 
 /** Where the ingestion bucket is, and the credential confined to it. */
@@ -103,15 +67,8 @@ export type PendingObjectStore = {
   list(): Promise<readonly PendingObject[]>;
   delete(key: string): Promise<void>;
   /**
-   * Answers whether this process can still reach the bucket, and refuses
-   * otherwise.
-   *
-   * One bounded listing rather than the full walk `list` does: it proves the
-   * address, the credential and the prefix permission, which is everything the
-   * acceptance promise rests on, and it costs the same whether the backlog is
-   * empty or enormous. A health check that walked the whole prefix every few
-   * seconds would be most expensive exactly when a deployment is least able to
-   * afford it.
+   * Probe bucket reachability with one bounded listing. This checks listing
+   * access, not upload permission or guaranteed durability of a future write.
    */
   reachable(): Promise<void>;
 };

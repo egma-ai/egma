@@ -129,17 +129,8 @@ describe("the development design proof", () => {
     render(<DesignSystemProof />);
 
     /*
-     * These are class assertions rather than colour assertions because jsdom
-     * loads no stylesheet. What they guard is the mapping: the primary action
-     * asks for the theme's `primary-wash` fill and `primary` ink, and
-     * `tailwind-theme.css` is what makes those mean Ember Wash and Deep Ember.
-     * The colours themselves are proved in a real browser, by reading the
-     * computed value back off the element.
-     *
-     * **The primary is the wash button as of 2026-08-23.** It used to be a
-     * Deep Ember block with white text; the developer retired that looking at
-     * the Paper boards, so a filled fill here would be the old rule coming
-     * back rather than a passing test.
+     * Check the primary-button theme mapping. jsdom does not load the stylesheet,
+     * so this does not verify computed colors.
      */
     const start = screen.getByRole("button", { name: "Start run" });
     expect(start.getAttribute("data-slot")).toBe("button");
@@ -263,16 +254,8 @@ describe("the development design proof", () => {
     const dialog = screen.getByRole("dialog", { name: "Archive Support agent?" });
     expect(dialog).toBeTruthy();
     /*
-     * The confirmation inside the dialog is the shared button, and it is the
-     * destructive one. Two assertions because they guard two different things:
-     * `data-slot` says the element is the base component at all, and the class
-     * says which variant was asked for. The line these replace named a CSS
-     * Modules class, `buttonDestructive`, which did both at once and is gone.
-     *
-     * The variant is worth naming rather than dropping: `DESIGN.md` says a
-     * destructive action uses the failure colour, and that brand orange never
-     * means errored. A confirmation that quietly came out Deep Ember would
-     * pass a check for "is a button".
+     * Check both the shared button slot and its destructive variant. The variant
+     * must use failure styling rather than brand styling.
      */
     const confirm = within(dialog).getByRole("button", {
       name: "Archive agent",

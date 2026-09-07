@@ -53,20 +53,8 @@ const COLUMNS = {
 } as const;
 
 /**
- * The keys in the caller's organization that the caller may see.
- *
- * **Filtered by role, never gated by it.** An `admin` sees every key in the
- * organization, so responding to a leak does not depend on the person who
- * created one; everybody else sees the keys they minted themselves. Refusing
- * the whole call to anyone but an admin would leave a `viewer` holding a key
- * they could never list and therefore never rotate — and login mints a key for
- * every role, so that is not an edge case, it is most of the instance.
- *
- * The predicate is applied per row rather than as one decision about the whole
- * call, and it is `permitsApiKeyMintedBy` rather than a comparison written out
- * here, because a rule spread across call sites is a rule nobody audits.
- * Organization-scoped keys that name no project are included: an owner has to
- * be able to see every key, not only the ones for the project they are in.
+ * List organization keys permitted by permitsApiKeyMintedBy: admins see all,
+ * other roles see their own. Include organization-scoped keys without a project.
  */
 export async function listApiKeys(
   auth: AuthContext,
@@ -197,14 +185,9 @@ export async function createApiKey(
 }
 
 /**
- * Revoking takes effect on the very next request, because verification reads
- * `revoked_at` rather than a cache. Naming a key in another customer's account
- * changes nothing and returns nothing — the predicate is the caller's own
- * organization, so the row is not there to update.
- *
- * The same per-key rule as the list applies: your own key at any role, and
- * anybody's key as an `admin`. Keys never expire, so a key is only ever retired
- * by somebody who decided to.
+ * Revoke under the same ownership rule as listing: own keys at any role, all keys
+ * for admins. Verification reads revoked_at on each request. Out-of-scope keys
+ * return no row and remain unchanged.
  */
 export async function revokeApiKey(
   auth: AuthContext,
@@ -234,15 +217,8 @@ export async function revokeApiKey(
 }
 
 /**
- * Every live key somebody minted in one organization, revoked at once.
- *
- * Internal, and it takes wherever the statement should run so that removing
- * somebody from an organization can revoke their keys and delete their
- * membership in a single transaction. The predicates are the organization and
- * the creator rather than an `AuthContext`, because the caller already resolved
- * both from one — this is the same write, inside the same transaction, and
- * splitting it across two exported calls is what would let one half happen
- * without the other.
+ * Revoke a member's live organization keys inside the membership-removal transaction.
+ * Use the organization and creator already resolved by the caller.
  */
 export async function revokeApiKeysMintedBy(
   on: Queryable,
@@ -271,33 +247,9 @@ export type ResolvedApiKey = {
 };
 
 /**
- * A key's secret hash turned into who is asking, which customer, which project
- * and what role. The sibling of resolving a browser session, and the reason the
- * auth provider is absent from the programmatic path entirely: egma minted this
- * key, egma hashed it, and egma verifies it against its own table.
- *
- * Every link in the chain is re-read on this request rather than remembered:
- *
- *     the key row → who minted it → their membership now → their role now
- *
- * **A key carries no role of its own.** Demote somebody and every key they ever
- * minted acts at the new role on their next request, with no key row edited and
- * nothing to hunt down. The membership is read through the one resolver, so the
- * same rule holds here as everywhere else.
- *
- * Three ways this answers nobody, and each is a promise the product makes. The
- * key was revoked, so revocation takes effect on the very next request with no
- * cache to wait out. The person who minted it was deactivated, so an IT
- * deprovisioning script stops their credentials working without touching a line
- * of what they authored. Or they are no longer in that organization, so a key
- * cannot outlive the membership it borrows its powers from.
- *
- * The second of those is read off the membership rather than looked up here, so
- * that the browser path and this one are answering it from the same place
- * rather than each remembering to ask.
- *
- * The organization is the key row's. Nothing the client sent is consulted, so a
- * copied key cannot reach across a boundary by asking nicely.
+ * Resolve a live key using its creator's current organization membership and role.
+ * Return undefined for revoked keys, missing memberships, or deactivated members.
+ * Take organization and optional project scope from the key row, never the request.
  */
 export async function resolveApiKey(
   hash: string,

@@ -222,19 +222,9 @@ class _RecordedInputSegment:
 
 @dataclass
 class _RecordedTrack:
-    """How far one channel of the recording has been written.
-
-    ``written_through`` is the sample the next audio follows, which is not
-    the same as the length of the buffer: a channel the conversation has
-    left quiet keeps its cursor where its own last audio ended while the
-    other channel runs on.
-
-    ``owed`` is every stretch of quiet the recorder put there itself, at
-    a re-anchor, and can still take back — each as the sample it ends at
-    and how much of it is left, oldest first. A channel can fall behind
-    twice before it catches up at all, and a burst that could only reach
-    the newer of the two would leave the older one in the recording for
-    good.
+    """Per-channel recording position. written_through is the next sample position,
+    not buffer length. owed tracks inserted silence that later audio can reclaim,
+    as end position and remaining length, ordered oldest first.
     """
 
     written_through: int | None = None
@@ -252,66 +242,24 @@ the chance to close a gap opened minutes ago.
 
 
 RESYNC_TOLERANCE_SECONDS = 0.1
-"""How far a channel may run from its own transport clock before the
-recorder puts it back where the clock says.
-
-Under the tolerance the audio is written end to end. That is what keeps a
-jittery delivery — one frame late, the next one early — from chopping a
-single utterance into pieces, and it is why the recorder does not simply
-seek on every frame. Over it, the count and the clock disagree about the
-passing of time itself, and time wins: the audio goes where the transport
-says it belongs and the recording holds quiet across the difference.
-LiveKit's own in-process recorder re-anchors at the same tenth of a
-second.
-
-A channel that has run *ahead* of its clock is pulled back only into
-quiet the recorder itself wrote. Audio arriving faster than real time is
-a delivery that stalled and caught up, and the stall is why that quiet is
-there: the audio the burst carries was spoken while the line was silent,
-so taking the quiet back and closing the two together is what puts it
-where it was said. Real audio is never written over to obey a clock, so a
-channel with no quiet left to give back stays where it is — a sender
-genuinely producing more audio than time keeps all of it.
+"""Clock drift tolerance before re-anchoring a recording channel.
+Small delivery jitter stays contiguous. Larger gaps follow transport time.
+When delayed audio catches up, remove only silence inserted by the recorder;
+never overwrite real audio to force agreement with the clock.
 """
 
 
 
 class _EvidenceRecorder(AudioBufferProcessor):
-    """One recording, on one timeline, written by the clock and not by the
-    count.
-
-    Pipecat's recorder keeps time by buffer length: whichever side writes
-    first pads the other side up to its own position. That makes a file
-    whose two channels are the same length and whose content is in the
-    wrong place — the agent's reply lands wherever the persona's buffer
-    had already reached, and the lead accumulates, so the whole recording
-    slides later than the call it came from.
-
-    This recorder places every frame where its transport says it happened.
-    The agent's audio goes at the instant it arrived at the transport; the
-    persona's goes at the instant the transport plays it out, which is
-    after the transport's own pacing and not when the speech leg made it.
-    Silence is whatever nothing was written over. Both channels read one
-    clock, so a distance measured across them on the file is the distance
-    the caller lived through — which is what every latency egma reads off
-    a recording claims to be.
+    """Place both recording channels on one transport timeline.
+    Agent frames use arrival time; persona frames use transport playout time
+    after pacing. Gaps remain silent so cross-channel timing reflects the simulation.
     """
 
     def __init__(self, *, real_time: bool = True, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        # Pipecat's recorder clears its resampler after 0.2s of *wall-clock*
-        # quiet, to keep stale history out of audio that really did pause.
-        # This recorder must not: a clear discards the samples the resampler
-        # still holds, which is audio the recording then never carries at
-        # all, and the trigger is wall-clock rather than conversation — a
-        # loaded machine deschedules this process past 0.2s between two
-        # frames of one continuous utterance. Nothing paused; only the CPU
-        # did.
-        #
-        # `None` is Pipecat's own documented answer — its docstring
-        # recommends it "for telephony providers that have irregular gaps
-        # between chunks", which is this case exactly, and the artefact it
-        # protects against needs a real silence to appear across.
+        # Disable wall-clock resampler reset. A scheduling gap can exceed 0.2 seconds
+        # within continuous audio; resetting would discard buffered samples.
         self._input_resampler = SOXRStreamAudioResampler(clear_after_secs=None)
         self._output_resampler = SOXRStreamAudioResampler(clear_after_secs=None)
         self._recording_ready = asyncio.Condition()
@@ -399,16 +347,10 @@ class _EvidenceRecorder(AudioBufferProcessor):
         audio = await self._resample_input_audio(frame)
         written = len(audio) // 2
         if written:
-            # A resampler emits its samples in order and holds part of a
-            # frame back to give out with the next one. So what it just
-            # returned is the audio that *ends* with this frame rather
-            # than the audio that starts with it, and one chunk after
-            # another covers the source with no gap and no overlap,
-            # trailing it by whatever is held. Placing each chunk by its
-            # end keeps every sample inside the frame it came from, and
-            # carrying the boundary forward keeps the map from a turn's
-            # source time to its place in the recording whole from one end
-            # of a call to the other.
+            # The resampler retains samples for the next frame. Place each returned
+            # chunk
+            # by its end and carry the boundary forward to keep source timing
+            # continuous.
             through = arrived + float(source_end - source_start)
             began, ended = self._place(
                 self._user_audio_buffer,
@@ -451,17 +393,9 @@ class _EvidenceRecorder(AudioBufferProcessor):
         )
 
     def _drop_what_was_never_played(self, frame: Frame) -> None:
-        """Forget persona audio the transport threw away unheard.
-
-        An interruption clears whatever the transport had queued and had
-        not yet played. A recording that kept it would say the persona
-        spoke for as long as the queue was deep, and would start the next
-        wait that much late.
-
-        Cutting the tail off also settles the quiet this channel was
-        owed: some of that quiet may have gone with the tail, and quiet
-        given back out of a ledger describing a recording that no longer
-        exists would pull the channel back over audio that was heard.
+        """Discard persona audio removed from the transport queue by an interruption.
+        Update the inserted-silence ledger too, so later catch-up cannot overwrite
+        audio that was played.
         """
         cleared = transport_time(frame, TRANSPORT_PLAYOUT)
         if cleared is None or self._origin_seconds is None:
@@ -514,17 +448,9 @@ class _EvidenceRecorder(AudioBufferProcessor):
     def _give_the_quiet_back(
         self, buffer: bytearray, track: _RecordedTrack, ahead: int
     ) -> None:
-        """Close up quiet the recorder wrote that the audio has caught up on.
-
-        A channel writing faster than its clock has been fed a burst, and
-        a burst is a delivery catching up on a stall. The stalls are the
-        quiet on the ledger, so the burst is given as much of it back as
-        it needs — the newest stretch first, because that is the stall it
-        is catching up on, and back through older ones while it is still
-        ahead. Only quiet this recorder put there is taken, so nothing a
-        listener could hear is written over. Closing a newer stretch does
-        not move an older one, which is why the ledger is walked from the
-        end.
+        """Reclaim recorder-inserted silence when delayed audio catches up.
+        Walk newest gaps first so closing one does not move older ledger positions.
+        Never reclaim real audio.
         """
         while ahead > 0 and track.owed:
             ends_at, owed = track.owed[-1]
@@ -552,17 +478,9 @@ class _EvidenceRecorder(AudioBufferProcessor):
                 track.owed.pop()
 
     def _wall_clock_zero(self, starts_at: float) -> int:
-        """The wall-clock instant the recording's first sample stands for.
-
-        A real-time transport stamps the clock this machine reads, so the
-        distance from the stamp to now is the distance from the first
-        sample to now, whatever the pipeline did in between. Reading the
-        wall clock at placement instead would charge the recording every
-        millisecond the frame spent getting here, and every span with it.
-
-        A media clock counts audio rather than seconds, so nothing can be
-        derived from it and the moment of placement is the only answer
-        there is.
+        """Map the first recorded sample to wall time using its real-time transport
+        stamp.
+        This excludes processing delay. For a media clock, use placement time instead.
         """
         if not self._real_time:
             return _now()

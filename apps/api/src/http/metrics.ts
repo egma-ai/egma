@@ -7,34 +7,10 @@ import {
 } from "@egma/metrics";
 
 /**
- * What a conversation measured — the one projection of the observed metrics
- * onto the wire, shared by both surfaces that answer a conversation.
- *
- * **A trace's transcript and one simulation's evidence draw the same strip**,
- * and the shape it reads is decided here rather than twice — the exact
- * arrangement `http/verdicts.ts` gives the judgment card, for the exact
- * reason: a projection written out at each door is two chances for one of
- * them to answer a field the other does not.
- *
- * **Every number comes off the shared measure module**, including the
- * reductions. The mean, the median and the p90 ride the wire because the
- * module computes each once — a browser reducing the samples for itself
- * would be a second implementation of the number a page leads with, correct
- * until the day the arithmetic or the samples change under one of them. The
- * series still rides along: a reduction should be checkable against what it
- * was reduced from, and counting the measurements is the page's honest
- * business.
- *
- * **The same call for a simulation and for a real caller's trace.** Nothing
- * here looks at `source`; a trace whose agent emits no timing spans simply
- * carries no metrics, which is a fact about the telemetry rather than a
- * branch taken here.
- *
- * **`partial` says the reading is a prefix.** A trace over the store's span
- * limit comes back as its first spans, so a mean taken over it is the mean
- * of the part egma holds and not of the call. A measure the platform
- * reported is the exception and is never partial: it is one row's account
- * of the whole conversation, so the cap cannot have cut anything off it.
+ * Shared metric response for simulation evidence and production trace reads.
+ * @egma/metrics computes samples and reductions from timed, derived, or reported
+ * measurements. Mark span-derived values partial when the read is truncated;
+ * reported measurements describe the whole trace and are not marked partial.
  */
 export function describedMetrics(
   detail: TraceDetail,

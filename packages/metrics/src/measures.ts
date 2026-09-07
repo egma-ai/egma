@@ -1,168 +1,24 @@
 /**
- * The measure catalog: every measure a conversation produces, named once, each
- * beside the definition that says how it is computed from the conversation's
- * spans.
- *
- * **A contract document, not a table.** Nothing writes a row to declare a
- * measure and nothing queries for the list — it is a fact about what egma
- * measures, so it lives beside the two schemas that are the other facts about
- * what the simulator emits, and it is read by the control plane the same way the
- * schemas are: at the write door, before anything is stored.
- *
- * The catalog exists because of one failure it rules out. A grader definition
- * can name the metric it reads as a string, and a string that names nothing
- * would make the definition impossible to execute honestly. The write door
- * therefore refuses a metric this file does not name. A typo is a refusal at
- * the moment it is written, not a grader that quietly produces no result.
- *
- * **Each measure now also carries its span-level definition**, which is the
- * second half of the same guarantee. A name pins what a grader may ask for; the
- * definition beside it pins what egma computes when asked — so the dropdown a
- * developer picks from and the arithmetic that answers them are one list read
- * twice, and a measure cannot be offered that nothing knows how to compute.
- * Added 2026-08-14 so the metrics display and any grader that later consumes a
- * metric use one module's arithmetic. This is where that module is told what to
- * compute; the catalog itself does not grade a conversation.
- *
- * `measure-catalog.md` beside this file is the same catalog in prose, for a
- * person deciding what to bound. The two are held to each other by the
- * contract suite: a measure in one and not the other fails the build's tests.
+ * Measure names, units, and span-level definitions used by @egma/metrics.
+ * The catalog is code, not a database table. measure-catalog.md documents
+ * the same definitions, and contract tests keep the two aligned.
  */
 
 /**
- * Which catalog this is.
- *
- * Bumped when a measure joins, leaves or changes what it means — the same
- * discipline the two JSON schemas carry, for the same reason. A grader stored
- * against version 1 keeps naming what version 1 named, and a version that
- * dropped a measure is a version whose old graders need reading before they are
- * re-pointed.
- *
- * **2** is where every measure gained a span-level definition and the number a
- * grader reads became one derived from the trace rather than one carried
- * separately. No measure joined or left; what each of them *means* is now said
- * precisely enough to compute, which is exactly what this number is for.
- *
- * **3** is where three of them gained a second span-level definition: computed
- * from a recognised framework's own spans, for a conversation that timed none
- * itself. No measure joined or left and no timed number changed, but a
- * conversation that answered "nothing measured" at version 2 answers with
- * three latencies at version 3 — which is a measure changing what it means to a
- * consumer, and this number is what tells them so.
- *
- * **4** removes ``measured_audio_band_hertz``. A recording's WAV header keeps
- * the rate needed to play that file; a second product field cannot describe
- * the connection's acoustic quality and is no longer a measure.
- *
- * **5** adds the three stage latencies — `asr_latency`, `llm_latency`,
- * `tts_latency` — the first measures whose numbers are only ever the agent
- * platform's own account of itself: reported by Retell per call, derived from
- * LiveKit's own stage spans, and honestly absent where the platform tells
- * egma nothing. Egma's own vocabulary never times them, so they carry the new
- * rule and origin rather than joining the timing list the simulator is held
- * to.
- *
- * **6** moves where `turn_response_latency` stops on a chat simulation. No
- * measure joined or left, and the sentence beside it did not change: it has
- * always been how long the agent took to answer. The chat lane was not
- * measuring that. It timed its own call to the platform, and on a live room
- * that call also has to establish the agent has no more to say before the
- * persona may speak — up to a whole quiet period of waiting, all of it after
- * the agent had answered. Egma's patience was being reported as the agent's
- * speed. The lane now stops where the agent began answering, which is where
- * the voice lane has always stopped and where the derivation below already
- * read a stock LiveKit call. This number is here because a chat conversation
- * measured at version 5 and the same one at version 6 give different samples,
- * and fewer of them: a turn the agent never began answering now takes none,
- * for the same reason a speechless one never did on voice.
- *
- * **7** makes a framework's silent tool turn part of the wait rather than the
- * answer when that framework also records speech. LiveKit can open one agent
- * turn to choose and run a tool, then a second agent turn to speak the answer.
- * Version 6 stopped at the first turn and could drop the measurement when that
- * bookkeeping overlapped the human turn. Version 7 continues to the first
- * speech before the next human turn. The agent-turn fallback remains only for
- * a trace whose framework recorded no speaking spans at all.
- *
- * **8** gives `turn_response_latency` one definition and a POV, and drops two
- * measures. The definition is ADR-0024 §5's: the elapsed time from the last
- * audible sample of the caller's speech to the first audible sample of the
- * agent's reply as it reaches the caller. The agent-POV derivation therefore
- * starts at the **VAD's detected end of speech** — the end of the human turn's
- * last `speaking` child — and never at the endpointing commit the turn's own
- * end is, which sits about a second later and would delete a second the
- * caller waited. `origin` becomes the POV qualifier: `timed` is the persona's
- * POV, `derived` and `reported` the agent's; a conversation both POVs measured
- * answers with both series, the second beside the first and never averaged or
- * appended into it. On a simulation this version leads with the agent's POV
- * for `turn_response_latency` and `first_response_latency` while the
- * recorder's clock is being fixed, and the persona's series is computed and
- * returned rather than headlined; the version that ships with the recorder fix
- * puts the persona's back in front. `time_to_first_word` and
- * `persona_speech_duration` leave the catalog: the first is defined out of
- * audio egma does not hold outside a simulation, and the second measures
- * egma's own synthetic caller rather than anything the agent did.
- *
- * **9** puts the persona's POV back in front of the agent's for
- * `turn_response_latency` and `first_response_latency` on a simulation, which
- * is what version 8 said the recorder's fix would buy. No measure joined or
- * left and no definition changed: a conversation both POVs measured hands back
- * the same two series version 8 handed back, in the other order, with the
- * agent's as `otherPov`. What did change is the clock the persona's series is
- * taken on: the recorder places each channel where its transport says it
- * happened. The persona's stop is the pipeline's own mark for the end of its
- * played audio, the mouth's trailing padding included — about a tenth of a
- * second past the last audible sample, a constant per voice, and by decision
- * not trimmed by any code of egma's own. Its acceptance against the agent's
- * own account of the same calls: egma's clock reads 0.5 to 0.6 s longer per
- * turn and stays in that band across the call — the detection lag at the
- * front and the playback hop at the back, and nothing that grows — where the
- * old recorder was 1.5 to 1.8 s out and drifting. A number measured off the
- * audio the caller heard, differing from the agent's own by a constant a
- * reader can name, is the one to lead with. A production trace answers exactly as it did at version 8: egma
- * conducted nothing there, so the agent's POV is the only POV and still the
- * headline. Version 9 also reads the agent's own spans one way more carefully:
- * a caller turn with no speech of its own that opened inside the agent turn
- * immediately before it, and that the agent turn did not outlive, is the rest
- * of the caller's last sentence, delivered late, and the reply it cut off is
- * no answer — so one sentence the transcriber split is one wait, not two. A
- * word-bounded trace records no speech for any turn, so nothing there is read
- * as a continuation.
+ * Bump when a measure is added, removed, or changes meaning, including POV
+ * precedence or span-level definitions. Update measure-catalog.md together.
+ * Changing this constant does not select a historical implementation.
  */
 export const MEASURE_CATALOG_VERSION = 9;
 
 /**
- * The measures this catalog version leads with the agent's own POV for.
- *
- * **The version is the switch, and this list is what it switches.** A
- * conversation both POVs measured hands back both series; which of the two a
- * consumer meets first — the metric a page leads with, the number a grader
- * reduces — is decided here and nowhere else. No flag, no per-project setting:
- * a run graded under version 8 was graded against the agent's own account of
- * its waits, and version 9 is the release that flipped this list back, which
- * is exactly what these numbers are for.
- *
- * **Empty at version 9**, so every measure leads with what egma timed itself
- * and the agent's account rides beside it: the recorder's clock is the adopted
- * definition again, and the two response latencies rejoined everything else.
- * The list stays rather than going with them, because the decision it holds
- * stays — leading with one POV or the other is this one line and a version
- * note, and what a consumer met under a stored version is read here.
+ * Measures that prefer agent POV when both POVs exist. An empty list prefers
+ * persona POV, with agent POV still available as otherPov. Change this policy
+ * with the catalog version.
  */
 export const AGENT_POV_HEADLINE_MEASURES: readonly string[] = [];
 
-/**
- * How a metric series can be reduced to one observed number.
- *
- * They live here, with the metrics, rather than beside a grader that may consume
- * them: which reductions make sense is a fact about what was measured — a
- * latency taken every turn has a p90 and a turn count taken once does not
- * usefully have one — so the catalog is where both halves of "what may a
- * consumer ask" are written down together.
- *
- * When latency is graded, a percentile often says more than a mean: a mean can
- * hide the one turn that took nine seconds.
- */
+/** Supported reductions of a metric series to one observed number. */
 export const MEASURE_AGGREGATIONS = [
   "mean",
   "max",
@@ -195,19 +51,9 @@ export type MeasureSource =
   | "the agent's platform";
 
 /**
- * Where the number comes from on the wire — which is not the same question as
- * what it is called here.
- *
- * `timing_span` measures arrive as their own spans through the trace store's
- * ingest, one per measurement, named for exactly the name in this catalog and
- * with the span's own duration as the number. `terminal_fact` measures arrive
- * on the status transition that ends the simulation, inside its facts, and the
- * control plane records them under the catalog name — so every consumer reads
- * one vocabulary whether the number was timed or counted.
- * `platform_telemetry` measures arrive only as the agent platform's own
- * account of itself — inside a recognised framework's stage spans, or in the
- * block its platform reported — because what happened inside the agent is a
- * fact only the agent's machinery holds.
+ * Wire origin: timing_span uses span durations; terminal_fact arrives with
+ * simulation completion; platform_telemetry comes from the agent platform
+ * as stage spans or reported measurements.
  */
 export type MeasureOrigin =
   | "timing_span"
@@ -215,31 +61,11 @@ export type MeasureOrigin =
   | "platform_telemetry";
 
 /**
- * How a measure is computed from a conversation's spans — the rule, as one of a
- * closed set.
- *
- * **A word rather than prose, because the shared measure module switches on it
- * and the switch is exhaustive.** A rule nothing implements stops the
- * TypeScript build, and a measure whose rule is `no_span_carries_it` is refused
- * at the write door instead of becoming an executable definition that can never
- * receive its input. So the list a form offers, the list a write accepts and the
- * list the module can answer are one list, and no two of them can drift apart.
- *
- * - `timing_spans_named_for_it` — every span the ingest door filed as `timing`
- *   whose name is this measure's own name. The span's own duration **is** the
- *   sample; nothing carries the number a second time, so nothing can disagree
- *   with the interval. A measure taken once has one such span, a per-turn
- *   measure has one per turn, and a conversation that never took it has none.
- * - `no_span_carries_it` — nothing in the trace holds this. It is still a real
- *   measure and still named here; it simply arrives somewhere else, and a
- *   grader may not name it, because a check reading a number that is never
- *   there is a check that can never fire.
- * - `platform_telemetry_carries_it` — egma's own vocabulary never times this:
- *   the samples come from a recognised framework's stage spans, or from the
- *   block the platform reported, through the same derived-then-reported
- *   precedence every measure obeys. A grader may name it — the trace can
- *   answer it — and a conversation whose platform told egma nothing simply
- *   lacks it, which is a `skipped` check and not a failed one.
+ * Closed set of span-level derivation rules. timing_spans_named_for_it uses
+ * named timing-span durations; platform_telemetry_carries_it uses framework
+ * spans or reported measurements; no_span_carries_it has no trace derivation.
+ * The shared measure module handles the rules exhaustively. Missing required
+ * metrics cause grading errors, not failed judgments.
  */
 export const SPAN_RULES = [
   "timing_spans_named_for_it",
@@ -412,15 +238,8 @@ export const CATALOGED_MEASURES: readonly string[] = MEASURE_CATALOG.map(
 );
 
 /**
- * The measures egma computes from a conversation's spans — the shorter list,
- * and the one that matters to any grader.
- *
- * **Three surfaces read exactly this, which is the point of it existing.** The
- * shared measure module implements it, the **Use** form's dropdown offers it,
- * and the write door accepts it — so a developer cannot pick, and a write
- * cannot store, a measure nothing can answer. A measure named in the catalog
- * but absent here is one that arrives somewhere other than the trace: real,
- * readable where it lands, and not something a grader may bound.
+ * Catalog measures that can be computed from trace evidence. Excludes
+ * measures whose values arrive only outside spans or reported measurements.
  */
 export const SPAN_DERIVED_MEASURE_CATALOG: readonly CatalogedMeasure[] =
   MEASURE_CATALOG.filter(

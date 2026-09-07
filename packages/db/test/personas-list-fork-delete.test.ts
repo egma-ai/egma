@@ -275,7 +275,7 @@ describe("forking a persona", () => {
     ).toBeUndefined();
 
     // Neither refused fork created anything. Both lists still contain only
-    // their earlier local rows plus the shared Predefined persona.
+    // their earlier local rows plus the shared Egma-provided persona.
     const globexPage = await listPersonas(actingAsGlobex());
     expect(globexPage.items.map((item) => item.name)).toEqual([
       "Stranger",

@@ -1,23 +1,9 @@
 import { CROCKFORD_ALPHABET, isId } from "@egma/ids";
 
 /**
- * Trace identity: which trace a simulation's spans belong to.
- *
- * A simulation's telemetry is filed in the trace store under an OpenTelemetry
- * trace id, which is 128 bits of fixed-width binary and cannot hold one of
- * egma's own identifiers. So the two are not the same string, and something
- * has to turn one into the other. That derivation is a term of the contract —
- * `span-vocabulary.md` states it, with a worked example, because the emitter
- * applies it when it authors a span and the platform applies it when it goes
- * looking for one. Their agreement lets a simulation row find both its spans
- * and its trace-level grades without storing another identity mapping.
- *
- * **This is the whole of the TypeScript side.** The simulator has its own, in
- * Python, at the far end of the wire; the golden fixtures are the two held to
- * each other. Inside this repository every production caller comes here, so a
- * conversation is looked up one way — a second derivation would be a second
- * answer, and the two disagreeing would look exactly like telemetry that never
- * arrived.
+ * Convert between simulation IDs and OpenTelemetry trace IDs without a stored
+ * mapping. The Python implementation and this module share golden fixtures;
+ * see span-vocabulary.md for the wire contract.
  */
 
 /**
@@ -32,23 +18,10 @@ const TRACE_ID_HEX_LENGTH = 32;
 const BITS_PER_CHARACTER = 5n;
 
 /**
- * The trace a simulation's spans belong to, as 32 lowercase hex — or
- * `undefined` for a string that is not one of egma's simulation ids.
- *
- * egma's ids carry 128 bits of their own: the 26 Crockford base32 characters
- * after `sim_` are a ULID, and those bits *are* the trace. So
- * `sim_01K3XQ7M4E8YB2FVN0H9TZQWER` is trace `0198fb73d08e479627eea08a75fbf1d8`,
- * always and on both sides of the wire.
- *
- * **The absent answer is not a refusal a caller has to handle carefully.** Every
- * simulation id the platform reads is one it minted itself, so there is no
- * reachable path here that is not egma-shaped. Answering `undefined` rather
- * than digesting an unrecognised string into something trace-shaped is what
- * keeps that true: a made-up trace id would send a reader looking for spans
- * that were never filed under it, and finding none looks precisely like
- * telemetry that went missing. The simulator's own copy does digest, because
- * over there a simulation id is opaque — echoed back from a claimed spec and
- * never parsed — and it has to name a trace for whatever it was handed.
+ * Decode a simulation ID's ULID bits as 32 lowercase hex characters.
+ * Return undefined for an invalid simulation ID; do not invent a trace ID
+ * for a value that the platform did not mint. The Python simulator also
+ * supports digesting opaque IDs used outside the platform.
  */
 export function traceIdOfSimulation(simulationId: string): string | undefined {
   if (!isId("sim", simulationId)) return undefined;
@@ -77,20 +50,9 @@ export function traceIdOfSimulation(simulationId: string): string | undefined {
 const SIMULATION_ID_CHARACTERS = 26;
 
 /**
- * The other direction: the simulation a trace is, or `undefined` for a trace
- * that is not one of egma's simulations.
- *
- * Needed because the two forms are read from opposite ends. A grader is handed
- * a **simulation** and goes looking for its trace, so it derives forwards. A
- * reader can open a **trace** and needs to say which simulation produced it, so
- * it derives backwards. Storing a second mapping would create another identity
- * that could disagree with this one.
- *
- * The round trip is exact because it is the same 128 bits written two ways. A
- * production trace, whose id came off somebody else's wire, is not a simulation
- * — but its bits still convert to a well-formed string, so this can only ever
- * say "here is the simulation id those bits spell", never "a simulation by that
- * id exists". The caller finds that out by reading the simulation store.
+ * Encode a nonzero, lowercase 128-bit trace ID as a simulation ID.
+ * This converts the bits; it does not prove that the simulation exists.
+ * The reader must resolve the resulting ID in the simulation store.
  */
 export function simulationIdOfTrace(traceId: string): string | undefined {
   if (!/^[0-9a-f]{32}$/u.test(traceId) || /^0{32}$/u.test(traceId)) {

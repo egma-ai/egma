@@ -30,32 +30,9 @@ import {
 import { useUnsavedChanges } from "../../ui/settings-read.ts";
 
 /**
- * Where a project comes from.
- *
- * **This address names no project, deliberately, because it is the one page an
- * organization with none can reach.** Signup provisions the first project, so
- * that state is rare — but an organization whose only project was never made,
- * or whose admin is standing in front of an empty product shell, has to have
- * somewhere to go. Every other Settings page lives under a project and could
- * not serve this.
- *
- * It is `/new-project` and deliberately not `/projects/new`, which would read
- * better and would be wrong: the shell reads the project out of the address, so
- * the second form would have the selector announcing a project called `new` and
- * the navigation linking into one. An address that lies to the shell is worse
- * than an address that reads a little flatter.
- *
- * **A name is all it asks for.** The slug is derived from the name on the
- * server and numbered past whatever is already there, so nobody has to think
- * about slugs to make a project — and the numbering is deterministic, so two
- * admins racing get `outbound` and `outbound-2` rather than a suffix neither
- * could have guessed. An admin who wants a particular word changes it
- * afterwards in project Settings.
- *
- * What is created is the whole thing: the project, the persona a first test
- * gets when it names none, and the Expected behaviors project grader. That is
- * the server's business and not this page's — but it is why this page can
- * send somebody straight into the new project rather than to a checklist.
+ * Use /new-project so organizations without a project can reach creation and
+ * the shell does not interpret new as a project ID. Submit the name; the server
+ * derives a unique slug and creates the project with its default project grader.
  */
 export default function NewProjectPage() {
   return (
@@ -117,9 +94,8 @@ function NewProject() {
       return;
     }
 
-    // Straight into the new project, at the landing every project has. It is
-    // usable from this moment: it has the Predefined persona every project can
-    // use and its fixed-scope Expected behaviors project grader.
+    // Open the new project, which has its seeded Expected behaviors grader
+    // and access to shared Egma-provided personas.
     includeProject(written.value);
     await refreshSession();
     router.push(projectLanding(written.value.id));

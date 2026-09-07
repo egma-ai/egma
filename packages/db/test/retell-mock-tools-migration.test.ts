@@ -15,23 +15,9 @@ import {
 } from "./support/database.ts";
 
 /**
- * The mock-tools migration, run the way a real deployment meets it: over a
- * database that already holds connections, runs and finished simulations.
- *
- * **What 0003 adds**, which includes the four columns a temporary copy of
- * somebody's Retell agent is tracked by. The later removal of the connection
- * switch and the project's own mocked world is proved separately in
- * `test-owned-mock-tools-migration.test.ts`, which is 0007's own file.
- *
- * **Nothing 0003 wrote is backfilled and it disables no trigger.** The four run
- * columns arrive null, which is their honest value on every run already
- * written: none of them conducted against a named version and none of them made
- * a temporary copy.
- *
- * **The freeze carve-out is exact.** A finished run may still be told the two
- * cleanup facts, because clearing a crashed run's litter is by definition
- * something that happens after the run is over; everything else on the header
- * stays frozen.
+ * Apply migration 0003 over existing runs: new mock-draft columns start null,
+ * and terminal-run updates permit only the cleanup fields. Migration 0007
+ * removals are covered in test-owned-mock-tools-migration.test.ts.
  */
 
 const UNDER_TEST = "0003_retell_mock_tools.sql";

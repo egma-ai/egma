@@ -1,122 +1,18 @@
-"""The dumb counterpart: a deliberately boring LiveKit agent to test against.
+"""LiveKit receptionist fixture for chat, voice, monitoring, and mock-tool tests.
+check_availability and opening_hours return fixed values without backend access.
+Keeping both lets tests mock one tool while the other runs its implementation.
 
-A real agent in every mechanical sense — registers as a worker, gets
-dispatched into rooms, listens with real STT, thinks with a small model,
-answers with real TTS — and dull on purpose in every other sense: it is a
-dental-office receptionist with two tools, no memory, and one-sentence
-answers. It exists so a simulation has something on the other side of the
-room while the thing under test is egma, not the agent.
+Call simulation() after creating agent and session, before session.start().
+It configures mock tools and agent POV export in simulation rooms and does nothing
+in production rooms. Failed simulation setup propagates and prevents startup.
 
-All three model steps ride one OpenAI key, the same single-provider shape used
-for local runs.
+The egma-sim-chat- prefix disables audio and transcription pacing for chat.
+Dispatch metadata supplies optional tenant context, logged without speaking it.
+monitor() runs when either export setting is present; simulations require
+EGMA_URL and EGMA_API_KEY too.
 
-## The two tools, and why there are two
-
-``check_availability`` is the booking-shaped one: the call a real practice
-would answer out of a real calendar, and the reason mock tools exist at
-all. Here it reaches nothing — it answers out of two invented slots
-written into this file — so running this agent can neither book anything
-nor fail because a backend was down. That is what makes it safe to leave
-running; it is also why an *unmocked* run of it says the same two times
-every day of the week.
-
-``opening_hours`` is the second one, and it is here so a simulation has a
-tool egma is **not** answering for. A test names a tool or it does not,
-and the interesting run is the one with both kinds in it: one call reaches
-egma and lands on the record stamped ``mocked``, and the other runs its
-own implementation with egma nowhere near it and leaves no span at all.
-With one tool there would be nothing to prove the second half of that.
-
-Both are harmless and deterministic when nobody mocks them. Neither reads
-a clock, a network or a disk.
-
-## The one line that lets egma answer
-
-``await simulation(agent, ctx, session)`` goes after the agent and the
-session exist and before the session starts. In a room egma named for a
-simulation, it reports these two tools by name, stands egma in front of
-whichever ones this simulation has answers for, and sends this agent's own
-spans to egma as that simulation's agent POV. It does that on both
-dispatch styles below, including the unnamed one where this worker is in
-the room before egma is: the SDK reads the room's name, which arrives with
-the job either way, and waits for egma's own participant. **In every other
-room it does nothing at all** — no wrapper, no message, no exporter, no
-connect, the same two callables — so this file behaves identically whether
-or not egma is anywhere near it, which is the property
-`tests/test_outside_egma.py` holds it to.
-
-It is also the one call here that may raise. A LiveKit simulation needs
-the SDK, so an agent that cannot report to egma raises ``NotReported`` and
-this session never starts. That is deliberate and this fixture does not
-catch it: a run that isolated nothing must not look like one that did.
-
-## The one line that reads the test's own world
-
-``json.loads(ctx.job.metadata)`` is the customer-side half of a test's
-env. Egma writes the test's ``job_dispatch_metadata`` onto the agent
-dispatch, which is the channel LiveKit's own documentation teaches an
-agent to read for per-session context, so a worker that already does this
-keeps working under test — and reads a different tenant, caller or
-account per scenario. This fixture reads one key out of it and **logs**
-it, so the live proof can read the value back off the worker's own output
-and know the bytes crossed.
-
-Logged and never spoken. What a test writes here is the *world* the agent
-starts in and never the *script* it is about to be asked, so speaking it
-would put a value on the transcript that the caller never said. A
-production room carries whatever the practice's own dispatch carried, or
-nothing at all, and both are read the same careful way: nothing is
-required, nothing raises, and the agent behaves identically when the
-channel is empty or is not JSON.
-
-## The six lines that make a chat simulation a chat simulation
-
-Egma says which kind of simulation a room conducts in the room's own
-name — a chat simulation's room begins ``egma-sim-chat-`` — and these
-six lines read it and answer in kind: in a chat simulation the session
-takes no audio in, sends no audio out, and stops tying its transcription
-to speech it is not producing. The name arrives with the job before the
-worker connects to anything, and no metadata key of anybody's can
-collide with it. That is the whole of the customer-side integration — no
-egma package, and the same shape in Node through its own input and
-output options.
-
-Without them the agent still answers a chat simulation, because a LiveKit
-session already listens for text. It answers it *aloud*: every reply is
-synthesised, published, and transcribed at the speed of the mouth
-producing it, so a fourteen-word answer takes nearly five seconds and the
-customer pays for speech nobody hears. Egma sees that on the wire and
-stops the simulation rather than grading it.
-
-**A production room carries the customer's own name**, never egma's
-marked one, so ``chat`` is false there and the options are the stock
-ones. The voice path is untouched by
-construction rather than by care — which is the property
-``tests/test_outside_egma.py`` already holds this file to.
-
-## The export that makes this agent visible in Egma
-
-``monitor(ctx)`` is the public SDK setup for a production room. This
-fixture calls it when ``EGMA_URL`` or ``EGMA_API_KEY`` is present, so a
-worker started without a Monitoring setup still runs. A real monitored
-worker calls it directly and treats missing configuration as an error.
-
-The two verbs read the same two settings, and a simulation needs them: in
-an ``egma-sim-`` room the call above is what exports, and ``monitor`` is
-inert there.
-
-``EGMA_DUMB_AGENT_NAME`` is the name this worker registers under, and it
-is the one prerequisite of the whole arrangement. Egma dispatches by name,
-always, so its record names the agent it graded — where LiveKit's
-automatic dispatch, which is what a worker registered without a name
-gets, would hand egma's rooms to whichever workers were listening.
-Naming a worker that was previously
-unnamed turns automatic dispatch off for it: it then joins only the rooms
-whose dispatch asks for it.
-
-Run it with the project's own values in the environment (see README):
-
-    uv run agent.py dev
+Set EGMA_DUMB_AGENT_NAME for explicit dispatch and OPENAI_API_KEY for all models.
+See README.md for environment setup, then run: uv run agent.py dev
 """
 
 import json
@@ -142,24 +38,11 @@ INSTRUCTIONS = (
 logger = logging.getLogger("dumb-agent")
 
 TENANT_KEY = "tenant"
-"""The one key this fixture reads out of its job's dispatch metadata.
-
-An ordinary customer key and deliberately not an egma one: what the live
-proof watches for is a *test's* value arriving on the channel LiveKit
-teaches agents to read, and a key of egma's own would prove the wrong
-thing.
-"""
+"""Customer-owned metadata key used to verify test context reaches the worker."""
 
 
 def dispatched_world(metadata: str) -> dict:
-    """The job's dispatch metadata, read the way a real worker reads it.
-
-    Forgiving on purpose, and this is the shape a customer's own worker
-    should copy: outside a simulation this channel carries whatever the
-    practice's own dispatch carried — nothing at all, quite often, and
-    something that is not JSON now and then — and neither may stop the
-    agent from answering the phone.
-    """
+    """Read optional dispatch metadata, returning an empty mapping for invalid JSON."""
     try:
         world = json.loads(metadata or "{}")
     except ValueError:
@@ -169,23 +52,11 @@ def dispatched_world(metadata: str) -> dict:
 
 MORNING_SLOT = "9:40"
 AFTERNOON_SLOT = "2:15"
-"""The whole of this agent's calendar, and it is two strings in a file.
-
-There is no backend here on purpose. A fixture that reached a real
-calendar could book a real appointment on a bad day, and one that reached
-a fake server would make every live run depend on that server being up.
-Two constants can do neither.
-"""
+"""Fixed calendar values; no backend, network, or clock dependency."""
 
 
 class FrontDesk(Agent):
-    """The receptionist, as one concrete class.
-
-    One class rather than a bare ``Agent`` because egma's substitution is
-    keyed on ``type(agent)`` exactly: a stand-in registered for this class
-    is consulted for calls made by an instance of this class, and nothing
-    else in the process is touched.
-    """
+    """Concrete agent class because LiveKit mock substitution is keyed by agent type."""
 
     def __init__(self) -> None:
         super().__init__(instructions=INSTRUCTIONS)
@@ -216,14 +87,11 @@ def prewarm(proc: agents.JobProcess) -> None:
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:
-    # This fixture serves two proofs. Its simulation smoke test supplies no
-    # Monitoring settings; the production-monitoring proof supplies both.
-    # A partial setup still calls the helper and gets its direct setup error.
+    # Monitoring is optional for standalone production runs. If either export setting
+    # is present, validate the pair; simulation() requires both for simulation rooms.
     if os.environ.get("EGMA_URL") or os.environ.get("EGMA_API_KEY"):
         monitor(ctx)
-    # The test's own world, off the channel LiveKit teaches agents to read.
-    # Logged rather than said: the live proof reads the value back here, and
-    # a value spoken aloud would be a word on the transcript nobody said.
+    # Log the test-owned tenant value so the live test can verify dispatch delivery.
     world = dispatched_world(ctx.job.metadata)
     logger.info("dispatched %s=%r", TENANT_KEY, world.get(TENANT_KEY))
     await ctx.connect()
@@ -234,13 +102,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         llm=openai.LLM(model="gpt-4o-mini"),
         tts=openai.TTS(model="gpt-4o-mini-tts", voice="ash"),
     )
-    # Both objects exist and the session has not started: the one moment
-    # the agent's tools are all attached and nothing has been said yet.
-    # Outside a simulation this returns having touched nothing.
+    # Attach mocks after tools exist and before the session starts.
     await simulation(agent, ctx, session)
-    # The six lines. A production room is named by the customer's own
-    # system, never with egma's mark, so `chat` is false there and these
-    # are the stock options.
+    # Only chat simulation rooms disable speech and transcription pacing.
     chat = ctx.job.room.name.startswith("egma-sim-chat-")
     options = (
         room_io.RoomOptions(

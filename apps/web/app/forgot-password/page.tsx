@@ -10,22 +10,9 @@ import { Field } from "../../ui/form.tsx";
 import { AuthForm, AuthShell, LinkLine, Notice, StatePage } from "../ui.tsx";
 
 /**
- * Asking for a way back in.
- *
- * **The page says the same thing however it went**, because the API does: an
- * address with an account here and one without get one status and one sentence,
- * so this form is never a way to ask an egma who its customers are. A page that
- * said "no such account" would give away exactly what the API refuses to.
- *
- * Where the link then arrives is the deployment's own business and not a second
- * setting: a platform with mail configured posts it, and one without writes the
- * whole message to its log, which is where a solo self-hoster reads it.
- *
- * **Where the person was headed is sent along with the address.** Somebody who
- * got here from a terminal's approval page has to end up back on it, and the
- * message is the one hop no page survives — it opens a fresh tab, minutes
- * later. So the API is told, and it writes the destination into the link it
- * sends.
+ * Keep the same confirmation for known and unknown email addresses. Forward
+ * the intended destination so the reset link can return the user to their task.
+ * Delivery availability is handled by the API; reset links are not logged here.
  */
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");

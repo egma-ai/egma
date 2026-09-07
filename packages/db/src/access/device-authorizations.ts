@@ -7,15 +7,8 @@ import { ProjectOutsideOrganizationError } from "./errors.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 
 /**
- * What a terminal was authorized for: written when a person approves, read when
- * the terminal collects.
- *
- * The two halves are deliberately different shapes, because their two callers
- * are in different positions. Approving happens in a browser, so it has a
- * session and a context and looks like every other write here. Collecting
- * happens in a terminal holding nothing but the device code it was issued, so
- * the read below takes that code and answers what it resolves to — the same
- * shape as `resolveApiKey`, and safe for the same reason.
+ * Device authorization joins two flows: browser approval records project scope,
+ * and the terminal reads that scope using its secret device code.
  */
 
 /** Which organization and project a terminal is being let into. */
@@ -36,16 +29,8 @@ export type DeviceAuthorizationTarget = {
 };
 
 /**
- * Record which organization and project a pending device authorization is for.
- *
- * The organization is the caller's, from their credential, and never anything
- * the browser sent. The project is named — this is the one moment a person
- * picks one — and a project belonging to somebody else is refused before the
- * write, on top of the database refusing the pairing outright.
- *
- * Nothing here decides whether the authorization is approved. That stays the
- * provider's, so a code that expired or was already answered is still its
- * business rather than a second rule kept in step by hand.
+ * Set the pending authorization's project within the caller's organization.
+ * The auth provider still decides whether the code can be approved.
  */
 export async function recordDeviceAuthorization(
   auth: AuthContext,
@@ -77,16 +62,8 @@ export async function recordDeviceAuthorization(
 }
 
 /**
- * What this device code was aimed at, or nothing.
- *
- * It takes the device code and returns two identifiers, and that is the whole
- * of it: no argument would make it answer about a different terminal, because
- * the device code is a secret the provider issued to exactly one. A caller
- * holding one has already been handed everything this returns.
- *
- * It has to be read before the code is exchanged rather than after, because
- * exchanging consumes the row. That ordering is the reason this exists at all,
- * rather than the terminal's own context answering the question.
+ * Resolve organization and project from the secret device code.
+ * Read before token exchange consumes the row; return undefined if scope is absent.
  */
 export async function resolveDeviceAuthorization(
   deviceCodeSecret: string,

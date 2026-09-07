@@ -1,14 +1,7 @@
-"""Deployment configuration for the simulator process.
-
-The environment configures this worker: its control plane, capacity, media
-bridge, storage, and telemetry. Each claimed work order carries the facts for
-one simulation instead: the pinned persona models, the provider keys selected
-for those models, and the carrier route for a phone connection. Those facts do
-not fall back to this process configuration.
-
-Anything set to something unusable is refused at startup in a sentence that
-names the variable. A work order is validated against its own contract before
-the simulator starts that simulation.
+"""Deployment settings for control plane, capacity, media bridge, storage, and
+telemetry.
+Work orders supply persona models, provider credentials, and carrier routes;
+these do not fall back to deployment settings. Validate each at its boundary.
 """
 
 from __future__ import annotations
@@ -161,18 +154,8 @@ def _one_of(name: str, allowed: tuple[str, ...], fallback: str) -> str:
 
 
 def _writable_directory(name: str, path: Path) -> Path:
-    """A directory the simulator can really write to, proven at startup.
-
-    In a compose deployment both directories are a mounted volume, and a
-    volume that is read-only, or owned by somebody else, or shadowed by a
-    file, does not announce itself. It waits — for the recording at the
-    end of a voice exchange, or for the first report on its way out — and
-    then takes that simulation down with it. A container that cannot keep
-    what it is asked to keep should say so before it claims anything.
-
-    Proving it is also making it, which is the other half of the point: a
-    fresh volume arrives empty and nothing else would create the two
-    directories inside it.
+    """Create the directory and verify write access before claiming work.
+    A bad volume must fail startup rather than a later recording or report.
     """
     try:
         path.mkdir(parents=True, exist_ok=True)
@@ -188,16 +171,9 @@ def _writable_directory(name: str, path: Path) -> Path:
 
 @dataclass(frozen=True)
 class MediaSettings:
-    """How one claimed phone simulation places its call.
-
-    The bridge is deployment configuration. The SIP trunk belongs to the
-    platform and arrives on the work order. :meth:`from_env` reads only the
-    bridge. :meth:`for_simulation` joins it to that work order's carrier.
-    There is no container-level trunk to fall back to.
-
-    A deployment that names no backend and is handed none gets no settings
-    at all and places no calls: dialling is opt-in, and a simulator that
-    never dials should not have to explain a trunk it does not want.
+    """Phone media settings: from_env() reads the deployment bridge;
+    for_simulation() adds the work order's carrier. There is no deployment trunk
+    fallback.
     """
 
     backend: str
@@ -262,20 +238,10 @@ class MediaSettings:
     def for_simulation(
         cls, standing: MediaSettings | None, carrier: PlatformCarrier
     ) -> MediaSettings | None:
-        """The bridge and trunk one simulation is dialled over.
-
-        This container's backend with the platform's carrier laid over it,
-        and it is the one place the two meet. ``None`` means this deployment
-        has no media backend. A work order cannot create one.
-
-        **It never refuses.** This runs for every simulation, and most
-        simulations never dial. Contract v5 gives a phone simulation one
-        complete carrier and gives every non-phone simulation none. A missing
-        deployment media backend is still checked by the phone plug, because
-        failing chat work over a phone path it never uses would be wrong.
-
-        Address, number, username and password always move together from
-        the work order. No field can come from an older container setting.
+        """Combine the deployment bridge with the work order's complete carrier route.
+        Return None without a media backend; only the phone adapter rejects that case.
+        Non-phone simulations need no carrier, and no carrier field falls back to
+        deployment configuration.
         """
         if standing is None:
             return None
@@ -365,27 +331,9 @@ def _needed(variable: str, *, because: str) -> str:
 
 @dataclass(frozen=True)
 class ObjectStoreSettings:
-    """Where this deployment's recordings land, read once at startup.
-
-    A recording written inside the simulator is a recording only that
-    container can read, and a deployment is invited to run more than one
-    simulator — so the second one's audio becomes unreadable with nothing
-    said. Object storage is what the whole deployment shares, and these
-    are the five facts needed to reach it.
-
-    They arrive the way everything else does, and a deployment that names
-    no endpoint gets no settings at all: the filesystem store stands, and
-    a contributor's checkout costs them no container. This is the same
-    shape as :class:`MediaSettings` on purpose — naming the thing is what
-    selects it, and what makes the rest of its variables required.
-
-    What is checked here is what can be checked without a network. That
-    the store is up, that the bucket is there, and that the credential is
-    the right one are answers only the store has, and a simulator that
-    refused to start until it could ask would be a simulator that dies
-    because its object store was five seconds behind it. The deployment
-    orders that instead: the bucket job runs to completion before the
-    simulator starts.
+    """Shared recording-store settings, selected by an endpoint.
+    Without an endpoint, use filesystem storage. Validate settings locally;
+    deployment startup ordering is responsible for store and bucket readiness.
     """
 
     endpoint: str
@@ -475,18 +423,9 @@ class SimulatorConfig:
     """Where report documents are written before they are sent."""
 
     blob_dir: Path | None
-    """Where recordings land, for the filesystem-backed blob store — the
-    one that stands when this deployment names no object-storage endpoint,
-    so a first voice simulation needs no container running. A report
-    carries only the reference.
-
-    ``None`` exactly when :attr:`object_store` is set, and that pairing is
-    checked in ``__post_init__`` rather than trusted: it is what lets the
-    store be chosen by asking which of them is there. It is ``None``
-    rather than an unused path because proving this directory is *writing*
-    to it, and a deployment whose recordings go to a bucket must not be
-    refused over a filesystem it was never going to touch — a read-only
-    root is an ordinary way to harden a container."""
+    """Filesystem recording directory, set only when object_store is absent.
+    Do not create or probe a directory when recordings use object storage.
+    """
 
     log_level: str
 
@@ -516,17 +455,7 @@ class SimulatorConfig:
     where they go instead."""
 
     def __post_init__(self) -> None:
-        """One place for recordings to go, and exactly one.
-
-        :attr:`blob_dir` and :attr:`object_store` are one decision written
-        as two fields, and the whole reason a store can be chosen by
-        asking which of them is there. Held here rather than promised in
-        a docstring, because the two ways of breaking it both fail a long
-        way from the cause: neither set is a ``TypeError`` from inside a
-        write that the conductor then swallows, leaving a simulation that
-        reports no audio and no reason; both set is a deployment writing
-        to a bucket while a directory nobody reads fills up beside it.
-        """
+        """Require exactly one recording store: blob_dir or object_store."""
         if (self.blob_dir is None) == (self.object_store is None):
             raise ValueError(
                 "a simulator needs exactly one place to put recordings: "

@@ -34,16 +34,8 @@ export const FIXTURE_TRACE = {
 } as const;
 
 /**
- * The other capture: a LiveKit agent taking a booking, with three tool calls.
- *
- * The run this one came from is what opened the agent-POV effort — two of its
- * three tool calls were missing from Egma's own record of it, because an
- * unmocked call ran unobserved. It is here so that the fix keeps being proved
- * against the conversation that found the hole rather than against one written
- * to fit it.
- *
- * One OTLP/JSON body rather than fourteen protobuf ones, which is the encoding
- * it arrived in. `fixtures/livekit-appointment-trace/README.md` has the rest.
+ * LiveKit booking capture with three tool calls, used for agent POV regression
+ * coverage. Stored as one OTLP/JSON body; see the fixture README for provenance.
  */
 export const APPOINTMENT_FIXTURE_FILE = path.join(
   import.meta.dirname,

@@ -498,14 +498,8 @@ export async function traceEvidenceStartedAt(
     readonly runId?: string | undefined;
     readonly window: TimeWindow;
     /**
-     * Narrow the probe to one POV's rows.
-     *
-     * A simulation's trace holds two accounts of one conversation — egma's own,
-     * written by the simulator, and the agent's, filed by simulation ingestion
-     * — under one trace id and told apart by this column. Absent asks about the
-     * conversation's evidence as a whole, which is what production wants and
-     * what a lane with only one account wants. `agent` asks the one question
-     * grading has to wait on: has the agent's own POV landed yet?
+     * Optionally restrict the evidence probe by POV emitter. Use agent to check
+     * for the agent POV; omit to search all evidence for the trace.
      */
     readonly emitter?: "egma-runtime" | "agent" | undefined;
   },
@@ -558,36 +552,16 @@ export async function traceEvidenceStartedAt(
 }
 
 /**
- * How long grading waits for the agent's own POV after a simulation completes.
- *
- * **A safety bound and nothing else** (ADR-0024 §6). There is no artificial
- * wait: the moment the agent's account is query-visible, grading is asked for.
- * This exists only so that a broken exporter or a failed platform pull cannot
- * hold a simulation open forever — past it grading proceeds on what there is,
- * and the record says the agent's POV is incomplete. Regrade is what a late
- * arrival is picked up by.
- *
- * The Retell pull's own retries are shorter than this on purpose, so a thin
- * record has run out of attempts before the bound expires.
+ * Maximum wait for an expected agent POV after simulation completion (ADR-0024 §6).
+ * Grade as soon as it is query-visible, or after this bound with available evidence.
+ * A later arrival requires regrading.
  */
 export const AGENT_POV_BOUND_SECONDS = 30;
 
 /**
- * Whether a simulation's evidence is ready to grade, and whether the agent's
- * own account of it was there.
- *
- * **Two questions, and which one is asked depends on the row.** A simulation
- * with no second account coming — egma dials a phone number and nothing of
- * egma's runs on the far end, or the platform gave egma no reference to fetch
- * one by — has one account of the conversation, so its evidence is ready as
- * soon as that account is query-visible. A simulation expecting one is not
- * ready until the agent's own account has landed, or until the bound above has
- * passed since the conversation ended.
- *
- * `agentPovFiled` says which of the two made it ready, so a caller can say out
- * loud that a conversation was graded without the agent's account of it. It is
- * false on every row that never waited for one, which is the honest answer:
- * nothing was missing.
+ * Evidence readiness and agent POV availability. Without an expected agent POV,
+ * wait for any visible evidence and leave agentPovFiled false. Otherwise, become
+ * ready when agent evidence is visible or the wait expires.
  */
 export type SimulationEvidenceReadiness = {
   readonly ready: boolean;
@@ -597,12 +571,8 @@ export type SimulationEvidenceReadiness = {
 };
 
 /**
- * Ask the trace store what this simulation's evidence holds, and answer both.
- *
- * **The agent's POV is asked about first, because its answer is usually the
- * whole answer**: a trace whose agent account has landed is ready, and that
- * account's earliest span is a valid trace start. Only a trace without one asks
- * the second, wider question.
+ * Probe expected agent evidence first. If present, also read the earliest span
+ * across both POVs. After the wait expires, return readiness even without an agent POV.
  */
 export async function simulationEvidenceReadiness(
   auth: AuthContext,
@@ -696,27 +666,9 @@ function simulationTracesIn(
 }
 
 /**
- * Wake grading when durable simulation evidence becomes query-visible.
- *
- * A span never completes a simulation here. The existing simulation row is the
- * only completion authority. This handoff covers the opposite ordering from
- * `completeSimulation`: the row committed first, then its accepted evidence
- * drained. Replays reach the frozen run plan and the same trace-level job.
- *
- * **This is where grading starts for a simulation expecting an agent POV of its
- * own** (ADR-0024 §6). Completion no longer asks for grading on those rows —
- * the agent's account had not arrived when the row closed, and grading a
- * conversation without the account it will be judged on is grading the wrong
- * evidence. So the request waits here, for the drain that carries the agent's
- * own spans. A drain carrying only egma's own POV finds the readiness answer
- * still `false` and asks for nothing, which is the ordinary case for every
- * flush during the conversation.
- *
- * **Asking twice is already harmless**, and nothing here adds a second guard
- * for it: `requestGradingIn` takes a per-trace advisory lock and hands back the
- * job a pending or claimed request already made, or `terminal` once every
- * grader has a result. Two drains of one segment, two replicas and a replay all
- * converge on one job.
+ * Request grading when drained evidence is ready for an already completed simulation.
+ * Only the simulation row determines completion. Wait for an expected agent POV
+ * until its bound expires; requestGradingIn deduplicates requests under a trace lock.
  */
 export async function recordSimulationTraces(
   auth: AuthContext,
@@ -778,16 +730,8 @@ export async function recordSimulationTraces(
 }
 
 /**
- * Whether a second account of this conversation is coming — a fact about the
- * **row**, answerable before any evidence has arrived.
- *
- * Two halves, and both are needed. The lane says whether egma has a way to
- * receive one at all: the SDK exports from inside a LiveKit room, and a Retell
- * web call is fetched back by its call id. And the row's **provider reference**
- * says whether this particular conversation gave egma the handle to file or
- * fetch it under — a room name, a call id. A landing that reported none has
- * nothing to wait for however capable its lane is, so it grades at completion
- * rather than waiting out a bound nothing could ever end.
+ * Expect an agent POV only when the connection supports it and this simulation
+ * has a nonempty provider reference for evidence ingestion.
  */
 function simulationExpectsAnAgentPov(row: {
   readonly providerReference: string | null;
@@ -801,15 +745,8 @@ function simulationExpectsAnAgentPov(row: {
 }
 
 /**
- * When the wait for the agent's POV began: the earlier of what the report said
- * and when egma stamped the landing.
- *
- * **The earlier of the two, because a report cannot postpone its own bound.**
- * The conduction's own `ended_at` is the honest moment and is what the record
- * shows, but it comes from a machine egma does not own — and a clock running
- * ahead would hold a simulation open past every window that could ever settle
- * it. egma's landing stamp is the backstop, and on every ordinary landing the
- * two are within milliseconds of each other.
+ * Start the agent POV wait at the earlier of reported end time and stored heartbeat.
+ * A simulator clock ahead of the platform must not extend the wait.
  */
 function theWaitBeganAt(row: {
   readonly endedAt: Date | null;
@@ -851,35 +788,11 @@ export type SimulationPastTheAgentPovBound = {
 };
 
 /**
- * The agent-POV bound, read on a clock.
- *
- * **The one thing nobody else can say.** Every other way grading starts is
- * somebody's arrival: a landing, or a drain carrying the agent's own spans. A
- * POV that never comes sends nothing, so its absence has to be noticed by a
- * loop — the same argument the orphan sweep is built on, and it runs on the
- * same tick.
- *
- * **What it looks for is a simulation nobody has asked grading about.** The
- * queue row is the record of that asking, so a completed simulation with no
- * grading job is a simulation still waiting — and once a job exists, whether it
- * is pending, claimed or already answered, this sweep has nothing to add.
- * Successful work deletes its job row, and such a row reappears here: the
- * request that follows finds every grader answered and comes back `terminal`,
- * which creates nothing and is reported as nothing. So this is a backstop and
- * never an arbiter — asking twice is made harmless by `requestGradingIn`'s own
- * per-trace lock, not by anything here.
- *
- * **It takes no `AuthContext` and cannot be given one**, on the orphan sweep's
- * exact terms: a bound is read by egma standing behind every organization at
- * once, the only rows it reads are ones egma's own claim machinery stamped, and
- * the answer is identifiers and no content.
- *
- * **Bounded on both sides, and on a clock egma owns.** The floor reads the
- * landing's own heartbeat stamp rather than the conduction's reported
- * `ended_at`: the report supplies that moment, and a simulator whose clock is an
- * hour behind would otherwise write a row this sweep could never see. What
- * `ended_at` is still used for is the thirty seconds themselves, which is the
- * conversation's own moment and the one a person reads.
+ * Check completed simulations without queued grading jobs across all organizations.
+ * Use the platform heartbeat for the lookback window and the earlier reported end
+ * or heartbeat for the wait bound. Request grading when evidence is ready.
+ * Finished jobs may have been deleted; requestGradingIn returns terminal without
+ * creating work when all graders already have results.
  */
 export async function settleSimulationsPastTheAgentPovBound(options?: {
   /**

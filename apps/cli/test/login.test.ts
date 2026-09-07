@@ -355,23 +355,8 @@ describe("which egma a command talks to", () => {
   });
 
   /**
-   * One explicit way to name a platform, and the second one really gone.
-   *
-   * `EGMA_URL` was once a whole-shell name for `--url`, and taking the rung out
-   * of resolution is only half of taking it out: a `--help` line, a README
-   * paragraph or a refusal that still tells somebody to set it is a setting
-   * egma no longer has, offered by egma. The one that would have survived a
-   * careful edit is the refusal — "Remove --url or EGMA_URL" is the sentence a
-   * developer meets at the exact moment they are least able to tell that half
-   * of it is fiction.
-   *
-   * So the whole of what egma ships is scanned rather than the places anybody
-   * remembered — the help text and every refusal are inside `src/`, so both are
-   * covered by reading it. The checks themselves are not scanned: proving the
-   * variable is inert means naming it.
-   *
-   * No shipped CLI source names it. Monitoring setup now points to the skill;
-   * the CLI does not write a worker environment file.
+   * CLI target selection uses --url, not a shell-wide URL override.
+   * Scan shipped source and help for stale instructions as well as testing resolution.
    */
   it("offers one way to name a platform and does not name the old one", async () => {
     // Everything `package.json` puts in the published package, plus the
@@ -536,16 +521,8 @@ describe("writing the key down", () => {
   });
 
   /**
-   * A file egma cannot open is not a file that is not there.
-   *
-   * Only `ENOENT` means nobody has signed in yet. Everything else — a
-   * permission change, a directory standing where the file goes — means the
-   * keys exist and cannot be seen, and the write merges what it reads: treat
-   * that as an empty file and the rename replaces every platform's key with
-   * whichever one this run happened to be writing.
-   *
-   * A directory is used here because no user, root included, can read one as a
-   * file, so this half of the proof holds wherever it is run.
+   * Only ENOENT permits a new keys file. Use a directory to force a read failure
+   * even as root, and verify login does not replace existing credentials.
    */
   it("refuses a keys file it cannot open, rather than taking it for an absent one", async () => {
     await mkdir(workspace.credentialsFile, { recursive: true });

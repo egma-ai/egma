@@ -11,22 +11,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-egma}
       POSTGRES_DB: ${POSTGRES_DB:-egma}
     ports:
-      # **Published to this machine and no further**, which is the object
-      # store's idiom below and the media server's, for the same reason and a
-      # blunter version of it. What answers here is every row this platform
-      # holds — organizations, keys, and sealed connection credentials — and
-      # the user and password it answers to are
-      # written a few lines above, in a public repository. On 0.0.0.0 that is
-      # `docker compose up` on a coffee-shop network offering every customer's
-      # data to the room.
-      #
-      # A default is right for these two where it was wrong for the secrets,
-      # because this file creates the container it names them for: the value is
-      # consistent with itself, and a self-hoster who sets nothing gets the
-      # deployment the README documents. What the default must not also do is
-      # carry that consistency onto the network, so the bind closes the door
-      # the published pair would otherwise open. Widen it deliberately — and
-      # set POSTGRES_PASSWORD in the same breath.
+      # Bind Postgres to loopback by default because the bundled credentials are
+      # public development values. Set a deployment password before widening the bind.
       - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5433}:5432"
     volumes:
       # PostgreSQL cannot open a data directory written by a newer major.
@@ -75,104 +61,25 @@ services:
       timeout: 5s
       retries: 30
 
-  # The object store, and the third thing this deployment keeps. Postgres holds
-  # what happened, ClickHouse holds the traces of it, and this holds the bytes
-  # neither of them should ever carry: a voice simulation's recording, which is
-  # megabytes of audio that a row can only point at.
-  #
-  # It is required rather than optional, and that reverses an earlier position.
-  # A recording written inside the simulator that made it is a recording only
-  # that container can read — so the moment a self-hoster does what this file
-  # invites them to do and starts a second simulator, half their audio becomes
-  # unreadable with nothing said about it. The cost is one container, accepted
-  # knowingly.
-  #
-  # MinIO speaks the S3 API, so nothing above it knows whether it is talking to
-  # this container or to a bucket at any provider: point
-  # EGMA_SIMULATOR_S3_ENDPOINT somewhere else and this container is simply not
-  # used. The release is pinned rather than left on a moving tag, for the reason
-  # ClickHouse's is: what a self-hoster must never get from `docker compose
-  # pull` is a different engine underneath their stored objects.
+  # Store recordings and pending ingestion objects in shared S3-compatible
+  # storage. The pinned MinIO image supplies the bundled store; managed
+  # deployments configure external endpoints instead.
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: ["server", "/data"]
     environment:
-      # The store's own root credential, and the one the simulator writes
-      # with. Interpolated into both from one pair here so the two halves can
-      # never disagree — the same idiom the LiveKit key below uses.
-      #
-      # **It has no default, and that is the point.** It used to be a
-      # development pair written in this file, in a public repository, and
-      # what it opens is the admin surface of the store every recording lives
-      # in — rights to list, replace and delete a customer's call audio. A
-      # deployment must state its own, and one that states none is refused at
-      # `up` with the variable's name rather than started on a password every
-      # reader of this repository holds. MinIO refuses a root password under
-      # eight characters, so a short one fails at `up` too.
+      # Require a deployment-specific MinIO root credential. The bundled simulator
+      # also uses this credential; the playback signer has a separate read-only user.
       MINIO_ROOT_USER: ${EGMA_S3_ACCESS_KEY_ID:?no default — egma self-host up generates the bundled store credential in .egma-platform/platform.env}
       MINIO_ROOT_PASSWORD: ${EGMA_S3_SECRET_ACCESS_KEY:?no default — egma self-host up generates the bundled store credential in .egma-platform/platform.env}
     volumes:
       - minio-data:/data
     ports:
-      # This is that day, and this port is what a signed link costs.
-      #
-      # Until recordings could be heard, nothing outside this network read one:
-      # the simulator wrote over the compose network, by service name, exactly
-      # as it claims from the API, and there was no `ports:` here at all. Then
-      # the control plane started handing a browser a link to an object — and a
-      # link is only useful if the browser can reach what it points at. The
-      # bytes go from this container straight to the browser and never through
-      # the API, which is the whole design: seeking inside a recording is a byte
-      # range this store serves, not megabytes of audio re-proxied by a control
-      # plane whose job was the permission decision.
-      #
-      # So this is published, and what protects it is not the network. It is
-      # that every object in it is reachable only with a signature the control
-      # plane mints, for one object, for fifteen minutes, after checking that
-      # the person asking is in the organization the simulation belongs to. The
-      # credential that mints those signatures is read-only — see the bucket job
-      # below — so the worst a leaked one can do is read a recording, never
-      # replace one.
-      #
-      # **Published to this machine and no further**, which is the LiveKit
-      # server's idiom above and for a sharper version of its reason. What
-      # answers on this port is not only the recordings: it is the store's
-      # admin surface and its *root* credential, which can list, replace and
-      # delete every recording a deployment holds. On 0.0.0.0 that is
-      # `docker compose up` on a coffee-shop network offering every customer's
-      # recording to the room, to read and to overwrite. This product calls a
-      # recording evidence, and evidence somebody else can replace is not
-      # evidence.
-      #
-      # That credential used to have a development default written in this
-      # repository, where anybody could read it, which made the paragraph above
-      # true on the machine's own network too. It has none now — see the store
-      # above — so what stands between a wide bind and a stranger is a password
-      # this deployment chose. The bind stays loopback all the same: a
-      # credential is one mistake away from a wide port, and this is the cheap
-      # half of that pair.
-      #
-      # The loopback bind costs the default deployment nothing, because
-      # EGMA_BLOB_PUBLIC_URL defaults to `http://localhost:9000` — a browser on
-      # this machine, which is the deployment this file is written for.
-      #
-      # **Opening it is one variable, and it is a real decision.** A deployment
-      # whose browsers are somewhere else — a server, a colleague's laptop —
-      # sets `EGMA_S3_BIND=0.0.0.0` and sets EGMA_BLOB_PUBLIC_URL to the
-      # address those browsers use. What that then offers the network is a
-      # writable store behind the credential above, so it is worth having
-      # chosen that one deliberately rather than typed the shortest thing that
-      # got `up` to stop complaining.
-      #
-      # **EGMA_BLOB_PUBLIC_URL on the api service must name this address**, and
-      # naming the wrong one is the single most common way a self-hosted object
-      # store breaks. A signature covers the host it was made for: sign for
-      # `minio:9000`, fetch from `localhost:9000`, and every recording fails
-      # with `SignatureDoesNotMatch`, which names neither address and sends
-      # whoever meets it looking at their credentials for an afternoon. The
-      # default below assumes a browser on this machine. An Egma instance other people
-      # reach — at 192.168.1.10, at egma.example — must say so there, the same
-      # way it already has to say so in EGMA_BASE_URL.
+      # Browsers fetch signed recording URLs directly from this store. Keep the
+      # port on loopback for local use. Remote browsers need a reachable bind and
+      # EGMA_BLOB_PUBLIC_URL matching the host used in the signature. Widening the
+      # bind also exposes the store API, so protect its administrative credentials
+      # and use HTTPS for remote recording access.
       - "${EGMA_S3_BIND:-127.0.0.1}:${EGMA_S3_PORT:-9000}:9000"
     healthcheck:
       # `mc` ships inside this image, so the probe needs no second one. `local`
@@ -182,39 +89,11 @@ services:
       timeout: 5s
       retries: 30
 
-  # The two buckets and their confined users, made once and then never again.
-  #
-  # A fresh volume arrives empty, and an empty object store has no bucket in
-  # it — so without this the first recording of every new deployment fails
-  # against a bucket nobody was told to create, and the error names the bucket
-  # rather than the missing step. It runs to completion and exits; the
-  # simulator waits for that exit rather than for the store, which is what
-  # makes "the deployment creates its bucket on first start" true rather than
-  # nearly true.
-  #
-  # Every step of it is safe to run again, which is what makes it safe to run
-  # on every `up`: `mc mb --ignore-existing` finds the bucket and says nothing,
-  # and `mc admin policy create`, `mc admin user add` and `mc admin policy
-  # attach` each write what is already there and exit zero. That matters more
-  # than it looks — the simulator waits on this job *completing*, so a step that
-  # failed the second time would take the whole deployment down on its first
-  # restart.
-  #
-  # ## Two credentials, and the reason they are two
-  #
-  # The simulator holds one that can write, because writing a recording is what
-  # a simulator does. The control plane holds one that can do nothing but read
-  # one object at a time, because reading is all it ever does: it is handed a
-  # reference by a row it has already checked the reader against, and it signs.
-  # A leaked read credential must not be usable to overwrite a customer's call
-  # recording — a recording is evidence, and evidence somebody else can replace
-  # is not evidence.
-  #
-  # The policy is `s3:GetObject` on this bucket and nothing else. Not `s3:*`,
-  # not a `s3:PutObject` "for later", and deliberately not `s3:ListBucket`: a
-  # credential that can list is a credential that can enumerate every recording
-  # a deployment holds, and nothing in Egma ever asks this store a question it
-  # does not already know the answer to.
+  # Create recording and ingestion buckets and their policies before dependent
+  # services start. This job can run again against an existing store.
+  # The playback user gets only GetObject on recordings; the ingestion user
+  # gets object access and prefix-limited listing for pending ingestion data.
+  # The bundled simulator writes using the store root credential.
   minio-bucket:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     environment:
@@ -246,23 +125,10 @@ services:
       # user holds it.
       EGMA_S3_INGEST_ACCESS_KEY_ID: ${EGMA_S3_INGEST_ACCESS_KEY_ID:-}
       EGMA_S3_INGEST_SECRET_ACCESS_KEY: ${EGMA_S3_INGEST_SECRET_ACCESS_KEY:-}
-    # Everything reaches `mc` through the environment rather than as arguments,
-    # and `$$` is an escaped `$`: compose leaves it alone and the shell inside
-    # the container reads it.
-    #
-    # For the credentials that keeps the store's password out of this
-    # container's command line, which `ps` on the host and `docker top` both
-    # show. For the bucket it is the other reason: a name interpolated
-    # straight into this string is a name a shell then reads, so one carrying
-    # a quote or a `$(...)` would run rather than fail. The simulator refuses
-    # a bucket name no store would take, at startup, by name — this job
-    # trying something else instead of failing the same way is the asymmetry
-    # worth closing, not the privilege, which whoever writes .env already has.
-    #
-    # The policy document is written by `printf` with the bucket as its one
-    # argument, for that same reason: the name goes in as data rather than as
-    # something the shell reads, and `mc` gets a file rather than a here-string
-    # a quote could end early.
+    # Use environment expansion and quoted arguments so values are treated as
+    # data by the shell. Compose preserves $$ as a literal dollar for the container
+    # shell. Write policy JSON through printf arguments. Expanded credentials
+    # still reach mc as process arguments; this does not hide them from process inspection.
     entrypoint:
       - sh
       - -c
@@ -327,38 +193,11 @@ services:
       # rather than answering it about somebody else's machine. `egma
       # self-host up` sets this to the address it prints.
       EGMA_BASE_URL: ${EGMA_BASE_URL:?no default — the whole address a browser reaches egma at, scheme host and port. egma self-host up sets it for you, or set it in .env}
-      # Where **a browser** reaches the recording store, which is not where this
-      # container reaches it. Beside EGMA_BASE_URL because it is the same kind
-      # of fact and gets set at the same moment: an Egma instance other people reach at
-      # 192.168.1.10 or at egma.example has to say so in both.
-      #
-      # A signature covers the host it was made for, so this is the one setting
-      # in the whole deployment that fails silently and expensively when it is
-      # wrong: sign for `minio:9000`, fetch from a browser, and every recording
-      # comes back `SignatureDoesNotMatch` — an error naming neither address.
-      # Which is why the API holds no internal address for the store at all. It
-      # never opens a connection to it; signing is arithmetic, and the bytes go
-      # from the store to the browser.
-      #
-      # **This and EGMA_BASE_URL must agree about http: and https:.** They are
-      # one browser's two addresses. A page served over https: may not fetch
-      # audio over http: — the browser blocks it as mixed content before the
-      # request is even sent, so the store is never asked and the perfect
-      # signature never checked. The API refuses to start on that pair and names
-      # both variables, rather than let it be found one silent player at a time.
-      #
-      # **A plaintext address here has a price, and it is worth knowing before
-      # you type one.** `http://192.168.1.10:9000` works, and it also puts the
-      # recording — a customer's call audio — and the fifteen-minute link that
-      # replays it on the wire readable by anybody who can see that network.
-      # `http://localhost:9000` shows that to nobody. It is allowed rather than
-      # refused because an Egma instance on http: is already handing the same network the
-      # session cookie that opens every recording; put the store behind the same
-      # certificate as Egma on any network you do not trust.
-      #
-      # Leaving it unset is allowed and is not a failure: the platform runs, the
-      # runs run, and a request for a recording answers with the name of this
-      # variable rather than with an empty player.
+      # Use the recording store address that browsers can reach, not its Compose
+      # service name. Signed URLs bind the host, so the playback address must match.
+      # An HTTPS Egma page requires HTTPS recording playback to avoid mixed content.
+      # HTTP exposes audio and signed links to the network. Without a public URL,
+      # recording requests return a configuration refusal.
       EGMA_BLOB_PUBLIC_URL: ${EGMA_BLOB_PUBLIC_URL:-http://localhost:${EGMA_S3_PORT:-9000}}
       EGMA_BLOB_BUCKET: ${EGMA_BLOB_BUCKET:-${EGMA_S3_BUCKET:-egma-recordings}}
       # One region for one store, from one place. The simulator signs its
@@ -555,20 +394,9 @@ services:
       # above and the two halves always match. It has no public default;
       # `egma self-host up` supplies the private workspace value.
       EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:?no default — egma self-host up generates it in .egma-platform/platform.env}
-      # How many simulations one simulator conducts at once. It claims only
-      # what it has room for, so a big run degrades to a queue rather than
-      # to overload — raise this, or start a second simulator, and they
-      # distribute between themselves with nothing in front of them.
-      # Blank means the simulator's own default of two. Compose passes the
-      # variable through but does not restate that default, so a bare process
-      # and a container cannot silently acquire different limits again.
-      #
-      # **It is also this deployment's ceiling on concurrent phone calls**,
-      # because a voice simulation holds a channel on the carrier trunk for
-      # as long as it lasts, and nothing else counts them. Two simulators at
-      # this number is twice this number of calls, and the trunk's own limit
-      # is the one that matters: past it the carrier refuses, and a refused
-      # call is a failed simulation rather than a queued one.
+      # Limit concurrent simulations per worker; blank uses the simulator default.
+      # More replicas increase total capacity. Phone simulations also consume
+      # carrier channels, whose capacity must cover the combined workload.
       EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-}
       # No model, voice or provider key is container configuration. The pinned
       # persona version supplies one complete selection, and the claim adds only
@@ -581,34 +409,16 @@ services:
       # The shipped phone bridge. A work order may supply a carrier route, but
       # it cannot choose or create the deployment's media backend.
       EGMA_SIMULATOR_MEDIA_BACKEND: livekit
-      # The media server this container talks to. It is a third-party
-      # binary that reads its own key and secret when it is *created*, so
-      # it can never reach the platform's database and its address and
-      # credential stay bootstrap configuration on both sides. The default
-      # is the LiveKit beside it, filled in from the same pair the two
-      # containers below authenticate each other with, so the three halves
-      # can never disagree. That pair has no default here: `egma self-host`
-      # generates one for the workspace and hands it to all three, so a
-      # deployment never runs on a credential published in this repository.
-      #
-      # Nothing here makes this simulator dial. The connection type selects the
-      # plug; the platform supplies the carrier route; this deployment supplies
-      # the LiveKit bridge. A platform with no carrier can still run chat work.
+      # Connect to the LiveKit bridge with deployment credentials. The bundled
+      # server, gateway, and simulator share the generated pair. The connection
+      # type selects the adapter and the platform supplies the carrier route;
+      # these media settings alone do not enable dialing.
       EGMA_SIMULATOR_LIVEKIT_URL: ${EGMA_SIMULATOR_LIVEKIT_URL:-ws://livekit:7880}
       EGMA_SIMULATOR_LIVEKIT_API_KEY: ${EGMA_SIMULATOR_LIVEKIT_API_KEY:-${EGMA_LIVEKIT_API_KEY:?no default anywhere — egma self-host up generates this pair and writes it to .egma-platform/platform.env}}
       EGMA_SIMULATOR_LIVEKIT_API_SECRET: ${EGMA_SIMULATOR_LIVEKIT_API_SECRET:-${EGMA_LIVEKIT_API_SECRET:?no default anywhere — egma self-host up generates this pair and writes it to .egma-platform/platform.env}}
-      # Where recordings go. Naming an endpoint is the whole of what sends
-      # them to object storage; naming none keeps them in a directory on
-      # whatever disk the process is running on, which is what a bare
-      # `egma-simulator` and the test suite do. This deployment names one,
-      # so no recording touches the simulator container's disk — which is
-      # the point: a recording only the container that made it can read is
-      # a recording nobody can hear, and starting a second simulator would
-      # silently lose half the audio.
-      #
-      # The service name, not the address a browser uses. They are two
-      # different addresses on nearly every real deployment and confusing
-      # them is the most common way a self-hosted object store breaks.
+      # Upload recordings to shared object storage using its internal endpoint.
+      # The simulator can use local temporary files during recording and upload.
+      # Without an endpoint it retains recordings locally instead.
       EGMA_SIMULATOR_S3_ENDPOINT: ${EGMA_SIMULATOR_S3_ENDPOINT:-http://minio:9000}
       EGMA_SIMULATOR_S3_BUCKET: ${EGMA_SIMULATOR_S3_BUCKET:-${EGMA_S3_BUCKET:-egma-recordings}}
       # The same region the API signs playback links with, from the same
@@ -657,32 +467,12 @@ services:
       # a dial.
       livekit-sip:
         condition: service_started
-    # No `healthcheck` here, unlike every other service, and for the same
-    # reason there is no `ports`: nothing listens. The other four are
-    # probed by asking them something over a port they listen on, and this
-    # one listens on none — a check that only proved the process exists
-    # would prove nothing Docker does not already know, since the process
-    # is the container and its death is the container's exit.
-    #
-    # What could go wrong instead is already answered elsewhere. Bad
-    # configuration stops it before it claims anything, saying which
-    # variable. A control plane it cannot reach is in its log, once and
-    # then once a minute. And a simulator that dies holding claimed work
-    # is the control plane's to notice, by the heartbeats stopping — which
-    # is the one place that can act on it, because it is the only side
-    # that knows what was claimed.
+    # The simulator publishes no listener, so it has no port healthcheck. Startup
+    # validates configuration; logs report API failures, and claim heartbeats
+    # let the control plane detect abandoned work.
 
-  # The grader: the service that grades completed traces. It claims its
-  # work rather than being sent it, so there is no `ports:` here and there
-  # never will be — every arrow points out, exactly as the simulator's do,
-  # and adding this container to a self-host costs no inbound networking at
-  # all. It sits on the control plane's side of the wire, so it reads the two
-  # stores directly rather than through the API; the API gains nothing at all
-  # from grading existing.
-  #
-  # Scaling it is running more copies of it. They claim from one queue, take
-  # what they have room for, and distribute between themselves with nothing in
-  # front of them: `docker compose up --scale grader=3` is the whole dial.
+  # Grader workers claim queued traces and read the stores directly. They
+  # require no published port. Scale replicas to distribute queued grading work.
   grader:
     build:
       context: .
@@ -734,59 +524,15 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    # No `healthcheck` here, for the reason the simulator has none: nothing
-    # listens. The schema is applied by the API on boot, which is what this
-    # waits for — there is no migration container and no manual step, and a
-    # second migrator racing the first would buy nothing.
-    #
-    # What could go wrong instead is answered elsewhere. Bad configuration
-    # stops it before it claims anything, saying which variable. A store it
-    # cannot reach is in its log. And a copy that dies holding a conversation
-    # is the claim's to notice, by the heartbeats stopping — which is the one
-    # place that can act on it, because it is the only side that knows what
-    # was claimed.
+    # Wait for the API to apply the schema before grading starts. The grader
+    # has no listener healthcheck; configuration failures stop startup, store
+    # failures are logged, and expired claims allow abandoned work to be recovered.
 
-  # --- The phone stack --------------------------------------------------------
-  #
-  # Three containers: the LiveKit server (the room a call becomes), its SIP
-  # gateway (the thing that speaks to your carrier), and the Redis those two
-  # find each other through. They start with everything else, because a
-  # `egma self-host up` always brings up the full deployment. It can dial when
-  # the operator's `.env` supplies a complete EGMA_PHONE_* carrier route. The
-  # phone stack was an opt-in overlay until the self-hosted release; that
-  # overlay is gone and nothing needs to be asked for by name.
-  #
-  # ## The network truth, container by container
-  #
-  # | Container         | Reachable from the internet? |
-  # |-------------------|------------------------------|
-  # | simulator         | **never** — it publishes nothing, in any configuration |
-  # | livekit (SFU)     | no — its only clients are the two containers beside it |
-  # | livekit-redis     | no |
-  # | **livekit-sip**   | **yes**, for a call that arrives — SIP and its RTP range |
-  #
-  # The gateway is the one honest exception in the whole deployment, and it is
-  # not ours to remove: it is the piece a carrier sends a call's audio *to*. It
-  # advertises an address and a port in the SDP it sends, and the carrier sends
-  # RTP there. On a server with a public IP, or behind a 1:1 NAT with these
-  # ports forwarded, that is routine. On a laptop behind an ordinary home
-  # router it is not — see the README, which says what actually happens when
-  # you try, because we tried.
-  #
-  # **The escape hatch is one variable.** LiveKit Cloud is the same API behind
-  # the same URL, so a deployment that cannot host a gateway points
-  # EGMA_SIMULATOR_LIVEKIT_URL at Cloud and everything else — the trunk, the
-  # plug, the record — is unchanged.
-  #
-  # ## The RTP range is narrow on purpose
-  #
-  # LiveKit's own reference opens 10000-20000/udp. That is ten thousand ports
-  # on somebody's firewall for a deployment that places a handful of calls, and
-  # a range published to the internet is a range to justify. The default here
-  # is 21 ports — about ten calls at once, two ports each — which is more than
-  # the simulator's default capacity of two can use. Widen it with the two
-  # variables below if you raise capacity, and widen your firewall by exactly
-  # as much.
+  # The phone stack contains LiveKit, its SIP gateway, and Redis. Dialing also
+  # requires a complete carrier route. The SIP gateway needs reachable signaling
+  # and RTP ports; NAT and firewalls must permit the advertised media address.
+  # For a managed bridge, configure its URL and matching credentials. Keep
+  # the RTP range and firewall rules large enough for the intended concurrency.
 
   # The bus the server and the gateway find each other through. Not a store:
   # nothing here is worth keeping across a restart, so there is no volume,
@@ -800,27 +546,10 @@ services:
       timeout: 3s
       retries: 30
 
-  # The room a phone call becomes. The simulator joins it outbound and the
-  # answering phone is put into it by the gateway; from the pipeline's point
-  # of view the two are participants in one room and nothing else.
-  #
-  # Its ports are published to this machine's loopback and no further —
-  # the workbench's idiom, for the same reason: a person at this machine
-  # may want to reach it, and nobody else has any business doing so. The
-  # simulator does not come through here; it uses the compose network.
-  #
-  # The pair below has **no default**, and that is a fix rather than an
-  # omission. It used to fall back to a key and a secret written in this
-  # file, in a public repository, and nothing ever replaced them — so a
-  # deployment that widened `EGMA_LIVEKIT_BIND` for testing from another
-  # machine was accepting anyone who had read the repository. `egma
-  # self-host` now generates a pair for the workspace and hands the same
-  # one to this server, the simulator and the gateway below.
-  #
-  # It is the *required* form rather than merely a missing default, which is
-  # the difference between a refusal and a puzzle. Empty, this server started
-  # on no password at all, the simulator waiting on its health check never
-  # started either, and nothing in either log named a variable.
+  # LiveKit rooms connect simulator and phone participants through the gateway.
+  # Host ports bind to loopback by default; containers use the Compose network.
+  # Require the generated deployment key and secret shared by server, gateway,
+  # and simulator.
   livekit:
     image: livekit/livekit-server:v1.13.5
     environment:

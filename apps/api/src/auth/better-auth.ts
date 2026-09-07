@@ -27,42 +27,12 @@ import {
 import type { WebHandler } from "../http/web-handler.ts";
 
 /**
- * The auth provider, wired against egma's own tables.
- *
- * This file and the one that binds the identity tables are the only two that
- * name the provider's package, and a build rule keeps it that way. Everything
- * else in the codebase sees `SessionIdentityProvider` and egma's own types.
- *
- * What is adopted: `user`, `session`, `account` and `verification`, password
- * hashing, and the session cookie. What is not, and these are settled rather
- * than open:
- *
- * **The organization plugin is not enabled.** egma owns `organization` and
- * `membership`. The provider's authorization is organization-scoped and
- * resource-blind — it never receives a resource id — so egma writes a real
- * authorization layer regardless, and having the provider also perform half the
- * checks means every request runs two kinds of check against two role tables.
- *
- * **`team` is not repurposed as the project.** The provider's team is a group of
- * *people* inside an organization; egma's project is a scope over *resources*.
- * The blocker is structural: `teamMember` is the one table in the plugin that
- * does not accept additional fields, so per-project roles are impossible in it.
- *
- * **The api-key plugin is not used.** egma mints, hashes and verifies keys
- * against its own table, so a request carrying one runs no provider code at
- * all. That asymmetry is deliberate: the programmatic path is the high-volume
- * one and the one a migration would hurt on, and it is provider-free.
- *
- * **Two plugins are enabled.** `deviceAuthorization` is RFC 8628, and it is the
- * only reason a terminal can log in without a secret travelling through a
- * coding agent's chat window. `bearer` is what lets the session the device
- * grant issues be presented as a header — which egma uses once, to ask who
- * approved, before throwing that session away and handing the terminal a key of
- * its own instead.
- *
- * **Its migrator is not wired up.** egma writes the DDL for all five identity
- * tables in its own numbered `.sql` files. The provider reads and writes those
- * tables and cannot alter them.
+ * Better Auth implements the IdentityProvider interface over Egma-owned
+ * identity tables. It handles passwords and sessions; Egma handles
+ * organizations, projects, membership, permissions, invitations, and API keys.
+ * Device authorization and bearer plugins support CLI login. The granted
+ * session is consumed for identity, then deleted before issuing an Egma key.
+ * Schema changes use Egma migrations, not the provider's migrator.
  */
 
 export type IdentityOptions = {
@@ -152,14 +122,9 @@ function decoded(value: string): string {
 }
 
 /**
- * The session a browser request is carrying, or nothing.
- *
- * Two of the provider's conventions are needed to read one, and both are known
- * here and nowhere else: it signs the cookie it sets, so the value is the token
- * with an HMAC appended after a dot, and it marks the name `__Secure-` when the
- * instance is served over https. What leaves this file is a token and a header
- * line — egma's own strings — so the seam still takes a token and the route that
- * signs somebody out learns nothing about who set the cookie.
+ * Extract the session token and a cookie-expiration header for sign-out.
+ * Handle both ordinary and __Secure- cookie names and strip the signature.
+ * This parses the cookie; it does not authenticate the session.
  */
 export function browserSessionIn(request: Request): BrowserSession | null {
   const header = request.headers.get("cookie");
@@ -191,17 +156,8 @@ export function browserSessionIn(request: Request): BrowserSession | null {
 }
 
 /**
- * What a failed token exchange means, said in egma's four words.
- *
- * RFC 8628 gives the transport six error codes and egma's seam has four
- * answers, because two of the six describe the same thing to a terminal that is
- * waiting. `invalid_grant` is a device code the server does not know, and the
- * row is deleted the moment a code expires, is denied, or is collected — so by
- * far the likeliest reason a code is unknown is that its authorization is over,
- * and `expired` is both the truthful answer and the one a person can act on.
- *
- * Anything else is a fault rather than an outcome, and is left to surface as
- * one rather than being flattened into "keep waiting".
+ * Map device-authorization errors to Egma polling states. Treat invalid_grant
+ * as expired because the code is no longer available; propagate unknown faults.
  */
 function devicePollOutcome(cause: unknown): DevicePollOutcome {
   const said =
@@ -277,27 +233,9 @@ export function createIdentity(options: IdentityOptions): Identity {
       },
 
       /**
-       * Work the answer must not wait for, and **the reason it must not is
-       * that waiting is itself an answer.**
-       *
-       * The provider defers exactly the kind of work whose duration gives
-       * something away, and with nowhere to defer it to it simply waits
-       * instead. Asking for a password reset is the case that matters: for an
-       * address nobody holds the provider answers immediately, and for one
-       * somebody does it first posts a message — a quarter of a second to reach
-       * an SMTP server. The two answers are byte for byte identical and one of
-       * them takes twenty times longer, so one unauthenticated request tells a
-       * stranger who has an account here. That is the one thing the reset flow
-       * promises not to say.
-       *
-       * So the message is handed over and the answer goes back. What is left on
-       * the path is a row read and a row written, which is what the provider
-       * already evens out on purpose.
-       *
-       * Nothing is dropped and nothing is added here. The provider attaches its
-       * own failure handling to the promise before handing it over, and writes
-       * what went wrong to the log this instance keeps rather than to a person
-       * who is waiting — so all this has to do is decline to wait for it.
+       * Do not await provider background tasks: SMTP latency on password reset
+       * could expose whether an email address exists. The provider attaches its
+       * error handling before passing the promise to this handler.
        */
       backgroundTasks: {
         handler: () => {},
@@ -321,28 +259,9 @@ export function createIdentity(options: IdentityOptions): Identity {
       resetPasswordTokenExpiresIn: PASSWORD_RESET_LIFETIME_MINUTES * 60,
 
       /**
-       * The reset message, through the one email seam.
-       *
-       * It sits beside the verification message on purpose: **nothing here
-       * decides whether mail is delivered**, because `delivers` on the sender
-       * already does. On a platform with SMTP the link is posted; on one
-       * without, the same message is written to the log and a self-hoster reads
-       * it there. There is no second setting for the two to disagree over.
-       *
-       * The provider's `url` is not used. It points at the provider's own
-       * callback, which would redirect a browser to a page with the raw token
-       * on it; egma sends a link to its own page carrying the token and the
-       * deadline sealed together, so the refusals behind it can say which of
-       * the two things happened.
-       *
-       * **Where to go afterwards travels on the request egma built**, in a
-       * header of egma's own. Somebody who was approving a terminal's login
-       * when they discovered they had forgotten their password has to land back
-       * on that page, and the message is the one hop nothing else survives: a
-       * new tab, minutes later, with no page left holding it. The provider's
-       * body has no field for it and widening what egma asks the provider for
-       * is the cost this seam exists to avoid — so it travels beside the
-       * request, exactly as the names a person chose at signup do.
+       * Send Egma's signed reset link with the provider token and expiration.
+       * Carry the validated return path from Egma's request header so a device-login
+       * flow can resume after reset. The EmailSender controls delivery.
        */
       sendResetPassword: async ({ user, token }, request) => {
         const link = passwordResetLink(
@@ -400,16 +319,9 @@ export function createIdentity(options: IdentityOptions): Identity {
           },
 
           /**
-           * A person now exists, so give them somewhere to be. The provider
-           * runs this after its own write has committed, which is what lets
-           * provisioning open a transaction of its own and see the user row it
-           * is provisioning for.
-           *
-           * If provisioning cannot finish, the identity written moments ago is
-           * taken back out. Signup fully succeeds or fully fails: nobody is
-           * left holding an account with no organization, no project and no way
-           * forward — and no email address is quietly consumed by an account
-           * that was never usable.
+           * Provision after the user insert commits so the new transaction can see it.
+           * If provisioning fails, attempt to delete the identity and log cleanup
+           * failure; this compensation is not atomic with the insert.
            */
           after: async (user) => {
             await refusalsBecomeAnswers(async () => {
@@ -476,15 +388,8 @@ export function createIdentity(options: IdentityOptions): Identity {
       },
 
       /**
-       * Who approved this device code, or why nobody has yet.
-       *
-       * The provider answers by issuing a session, because a session is what it
-       * has to give. egma wants none: the terminal is about to be handed an
-       * API key, which is egma's own credential against egma's own table, and
-       * leaving a live session behind for every login would be a row nobody
-       * ever uses and nobody ever cleans up. So the session is created, read
-       * once for the name on it, and deleted again — all inside this file, so
-       * that the rest of egma never learns one existed.
+       * Resolve the approver from the granted session and delete that session in
+       * finally. CLI login issues an Egma API key instead of retaining the session.
        */
       async pollDeviceAuthorization(
         deviceCode,

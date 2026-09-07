@@ -11,45 +11,12 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * A button that opens a small panel, and everything that has to be true of one
- * before somebody without a pointer can use it.
+ * Use a popover for anchored placement and dismissal, with keyboard navigation
+ * over data-menu-item controls. Prefer data-menu-focus-first on the initial target.
  *
- * The organization and project controls, account menu, and editor choosers all
- * use this behavior. Writing it once is what stops a later control being the
- * first one with the keyboard left out.
- *
- * **The panel is the kit's anchored surface.** `components/ui/popover.tsx` is
- * Radix, so it owns what a hand-written panel keeps getting wrong: it opens
- * against the trigger and stays on screen when there is no room below it,
- * Escape closes it and puts focus back on the button, a press outside or a
- * focus that leaves closes it, and the exit finishes before the panel is
- * removed. Radix also publishes the corner it grew from, which is how
- * `tailwind-theme.css` scales it from the trigger without this file saying so.
- *
- * **The list of items is still this file's, and that is the reason for
- * `Popover` rather than the kit's `DropdownMenu`.** A dropdown menu keeps its
- * own register of items: only what it was handed as an item takes the arrow
- * keys, and it reads every printable key as a jump to a matching item. Some
- * panels here hold a field to type in, which that would take the keys away
- * from, and the account menu's dark-theme switch is a `role="switch"` rather
- * than an item, which that would leave reachable by pointer alone. So the
- * items are found in the DOM by `data-menu-item` — a panel that grows a row
- * gets the arrow keys for free, whatever that row is.
- *
- * - **The arrow keys move between items**, Home and End reach the ends, and
- *   opening moves focus into the panel.
- * - An item marked `data-menu-focus-first` takes focus when the panel opens.
- *   This lets a panel with a field put the keyboard there before its rows.
- *
- * **A panel holding a text field is not a `menu`.** `role="menu"` promises a
- * list of commands, and neither ARIA nor a screen reader's menu mode expects a
- * textbox inside one. A panel that has something to type in is a `dialog`
- * holding ordinary controls; a panel that is only commands stays a `menu`.
- * That is `panelRole`, and it is why `MenuItem` can leave its role off.
- *
- * **Home and End belong to the caret while somebody is typing.** Stealing them
- * to jump to the ends of the list means the ends of the *text* cannot be
- * reached, which is a worse trade than the one it buys.
+ * Command-only panels use menu semantics; panels containing text inputs use
+ * dialog semantics. Keep Home/End with the caret while typing. A dropdown
+ * menu primitive would impose item and typeahead behavior on mixed controls.
  */
 
 export type MenuProps = {
@@ -161,23 +128,9 @@ export function Menu({
   const anchor = ANCHOR[placement];
 
   /**
-   * Handing the keyboard back, now rather than after the panel has gone.
-   *
-   * Radix restores focus itself, one task after the panel is removed. That is
-   * right for a panel somebody clicked away from and wrong for the two ways of
-   * *finishing* with one — Escape, and choosing something — because
-   * `DESIGN.md` says a control answers on press and never after an animation.
-   * So those two paths put focus back on the button first and let the panel
-   * leave behind them. Radix then sees focus has moved out, stops restoring it
-   * a second time, and the panel's exit runs to its end regardless.
-   *
-   * It is also what keeps the project selector's unsaved-work dialog pointing
-   * at the right control. That page walks up from whatever has focus to
-   * `[data-slot="menu"]` to find its own trigger — a walk that now finds
-   * nothing, because the panel is drawn at the end of the page rather than
-   * inside that root, so the walk starts outside it and its answer is always
-   * null. What saves it is the fallback: the dialog it opens takes whatever
-   * has focus, and by then this has already put that back on the trigger.
+   * Return focus to the trigger when choosing an item or pressing Escape, before
+   * exit motion finishes. This also gives a subsequent unsaved-work dialog a
+   * stable return target outside the portaled menu.
    */
   const returnFocus = useCallback(() => triggerRef.current?.focus(), []);
 

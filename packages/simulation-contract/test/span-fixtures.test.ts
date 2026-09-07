@@ -7,17 +7,9 @@ import { describe, expect, it } from "vitest";
 import { MEASURE_CATALOG } from "@egma/metrics";
 
 /**
- * The span fixtures, held to the vocabulary document beside them.
- *
- * These files are the meeting point between the simulator's emitter and the
- * platform's OTLP ingest: they are worked examples of the Egma vocabulary,
- * and the ingest's own suite posts these same files and asserts what lands.
- * What this suite holds is the contract itself — every fixture speaks the one
- * scope, names its simulation on the resource, uses only the span names and
- * attribute keys the document declares, and derives its trace identity from
- * the simulation id the way the document says to. A shape used in a fixture
- * and missing from the document, or the other way round, fails here rather
- * than surfacing as two sides that each believed the other.
+ * Check span fixtures against span-vocabulary.md, including scope, resource
+ * identity, span names, and attribute keys. Ingestion tests post these same
+ * fixtures through the OTLP route.
  */
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -59,17 +51,9 @@ const SPAN_ATTRIBUTE_KEYS = [
 ] as const;
 
 /**
- * The shapes the mock-tool seam used to author, and no longer may.
- *
- * Where the agent's own process runs the egma SDK, that process reports every
- * call it made and that report is the tool record; the seam serves the answer
- * and writes no row. So the stamp saying who answered, the mock tool's own
- * name, and the late-attached caveat all went with it — whether a mock tool
- * answered is read at display time, by name, from the pinned test version.
- *
- * A `tool_call` span itself is not retired: the lane where a platform serves
- * egma's answers itself reports its calls afterwards, and nothing else records
- * them.
+ * The SDK reports tool calls; the pinned test version identifies mock tools
+ * by name. The mock-tool seam must not duplicate that record. Platforms that
+ * serve mock tools themselves may still report tool_call spans.
  */
 const RETIRED_TOOL_SHAPES = [
   "egma.tool.provenance",
@@ -293,14 +277,8 @@ describe("the golden span fixtures", () => {
   });
 
   /**
-   * The shapes the seam retired, held out of the fixtures for good.
-   *
-   * egma's simulator used to author a `tool_call` span for every call the seam
-   * served or refused, stamped with who answered. It authors none of those
-   * now: the agent's own process reports its calls, and whether a mock tool
-   * answered is read by name from the pinned test version at display time. A
-   * fixture that grew one of these stamps back would be a second copy of a
-   * fact the pinned version already holds, free to disagree with it.
+   * Reject retired mock-tool stamps. Whether a tool call was mocked is read
+   * from the pinned test version, not duplicated in span attributes.
    */
   it("carry none of the stamps the seam used to write", () => {
     for (const fixture of [...valid, ...invalid]) {

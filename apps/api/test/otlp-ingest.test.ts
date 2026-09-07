@@ -18,27 +18,10 @@ import {
 import { startObjectStorage, type ObjectStorage } from "./support/object-storage.ts";
 
 /**
- * A real LiveKit agent's telemetry, replayed at the door it will really arrive
- * at.
- *
- * This is the spine: fourteen captured OTLP bodies, byte for byte as an
- * exporter sent them, posted over HTTP to the running API with an ordinary egma
- * API key, staged into a real ingestion bucket and drained into a real
- * ClickHouse. It exercises the credential, the protobuf decoding, the
- * normalisation, the tenancy stamp, the segment and the insert in one pass —
- * because every one of those is a place the path could be right in isolation
- * and wrong end to end.
- *
- * The door answers on object-store durability and writes no row, so each post
- * is followed by a drain. That is the one seam this file stands in for, and it
- * stands in for it the way the drainer does the work: scope out of the sealed
- * object's own header, the segment identity as the insert's deduplication
- * token.
- *
- * What is asserted is the landed shape rather than the code's own opinion of
- * it. The read functions over `spans` belong to the next ticket, so the store
- * is queried directly here with `final`, because two physical copies of one
- * replayed identity are not two spans.
+ * Replay fourteen captured OTLP bodies through authentication, decoding,
+ * normalization, object-store staging, and ClickHouse insertion. Each accepted
+ * object is drained explicitly. Query FINAL to inspect logical spans despite
+ * physical replay copies; this does not exercise the standing drain loop.
  */
 
 const storage: ObjectStorage = await startObjectStorage("otlp-ingest");
