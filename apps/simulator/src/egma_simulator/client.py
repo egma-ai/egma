@@ -21,6 +21,7 @@ answers instead: both ends speak the contract, not each other.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -44,6 +45,11 @@ CLAIM_TIMEOUT_MARGIN_SECONDS = 15.0
 
 # Everything else answers promptly or is broken.
 BRISK_TIMEOUT_SECONDS = 10.0
+
+# Room registration is idempotent and must finish before a worker starts.
+# Keep transient retries short and finite, within the simulation watchdog.
+REGISTRATION_ATTEMPTS = 3
+REGISTRATION_RETRY_SECONDS = 0.25
 
 
 class ClaimFailure(Exception):
@@ -148,13 +154,18 @@ class ControlPlaneClient:
         self, simulation_id: str, claimant: str, provider_reference: str
     ) -> None:
         """Acknowledge the room association before the agent can export into it."""
-        await self._post_document(
-            f"{self._base_url}/v1/simulations/{simulation_id}/provider-reference",
-            json.dumps(
-                {"claimant": claimant, "provider_reference": provider_reference}
-            ).encode(),
-            accepted_statuses=(200,),
-        )
+        url = f"{self._base_url}/v1/simulations/{simulation_id}/provider-reference"
+        serialized = json.dumps(
+            {"claimant": claimant, "provider_reference": provider_reference}
+        ).encode()
+        for attempt in range(REGISTRATION_ATTEMPTS):
+            try:
+                await self._post_document(url, serialized, accepted_statuses=(200,))
+                return
+            except TransientDeliveryFailure:
+                if attempt == REGISTRATION_ATTEMPTS - 1:
+                    raise
+                await asyncio.sleep(REGISTRATION_RETRY_SECONDS * 2**attempt)
 
     async def heartbeat(self, simulation_id: str, claimant: str) -> str | None:
         """One beat for one running simulation; the answer may carry a directive."""
