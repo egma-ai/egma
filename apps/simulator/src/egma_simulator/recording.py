@@ -54,8 +54,10 @@ def dual_channel_wav(
     transcript looks wrong. The shorter track is padded with quiet so a
     file never runs out halfway through the exchange.
 
-    Pipecat's recorder aligns and pads the two tracks on one timeline, so
-    two speakers talking over each other remain audible as exactly that.
+    The recorder has already placed both tracks on one timeline by the
+    clock, so two speakers talking over each other remain audible as
+    exactly that, and the distance between them is the distance the
+    caller lived through.
     """
     frames = max(len(persona_audio), len(agent_audio)) // SAMPLE_WIDTH_BYTES
     interleaved = array("h", bytes(frames * 2 * SAMPLE_WIDTH_BYTES))

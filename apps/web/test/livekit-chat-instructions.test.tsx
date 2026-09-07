@@ -89,9 +89,9 @@ describe("LiveKit testing instructions", () => {
     );
     expect(copy).toContain("audio_input=False");
     expect(copy).toContain("TextOutputOptions(sync_transcription=False)");
-    expect(copy).toContain("from egma import mockable");
-    expect(copy).toContain("await mockable(agent, ctx, session)");
-    expect(copy.indexOf("await mockable(agent, ctx, session)")).toBeLessThan(
+    expect(copy).toContain("from egma import simulation");
+    expect(copy).toContain("await simulation(agent, ctx, session)");
+    expect(copy.indexOf("await simulation(agent, ctx, session)")).toBeLessThan(
       copy.indexOf("await session.start"),
     );
     // The prompt carries the worker's name as well: dispatching by name is
@@ -121,8 +121,8 @@ describe("LiveKit testing instructions", () => {
     const copy = container.textContent ?? "";
     expect(copy).toContain(PYTHON_VOICE_SETUP_PROMPT);
     expect(copy).toContain(PYTHON_VOICE_SETUP_SNIPPET);
-    expect(copy).toContain("from egma import mockable");
-    expect(copy).toContain("await mockable(agent, ctx, session)");
+    expect(copy).toContain("from egma import simulation");
+    expect(copy).toContain("await simulation(agent, ctx, session)");
     expect(copy).toContain("agent_name in its WorkerOptions");
     expect(copy).not.toContain("egma-sim-chat-");
     expect(copy).not.toContain("independent audio publisher");
@@ -172,19 +172,19 @@ describe("LiveKit testing instructions", () => {
     expect(copy).toContain(JAVASCRIPT_CHAT_SETUP_PROMPT);
     expect(copy).toContain(JAVASCRIPT_CHAT_SETUP_SNIPPET);
     expect(copy).toContain(JAVASCRIPT_TESTING_SETUP_INSTALL);
-    expect(copy).toContain("LiveKit Agents 1.5.0 or newer in the 1.x line");
-    expect(copy).toContain('import { mockable } from "@egma/livekit"');
+    expect(copy).toContain("LiveKit Agents 1.5.5 or newer in the 1.x line");
+    expect(copy).toContain('import { simulation } from "@egma/livekit"');
     expect(copy).toContain(
       'ctx.job.room?.name?.startsWith("egma-sim-chat-")',
     );
     expect(copy).toContain("inputOptions: { audioEnabled: false }");
     expect(copy).toContain("outputOptions:");
     expect(copy).toContain("syncTranscription: false");
-    expect(copy.indexOf("await mockable(agent, ctx, session)")).toBeLessThan(
+    expect(copy.indexOf("await simulation(agent, ctx, session)")).toBeLessThan(
       copy.indexOf("await session.start"),
     );
     expect(copy).not.toContain("pip install");
-    expect(copy).not.toContain("from egma import mockable");
+    expect(copy).not.toContain("from egma import simulation");
     expect(copy).not.toMatch(/unsupported/i);
   });
 
@@ -200,11 +200,28 @@ describe("LiveKit testing instructions", () => {
     const copy = container.textContent ?? "";
     expect(copy).toContain(JAVASCRIPT_VOICE_SETUP_PROMPT);
     expect(copy).toContain(JAVASCRIPT_VOICE_SETUP_SNIPPET);
-    expect(copy).toContain('import { mockable } from "@egma/livekit"');
-    expect(copy).toContain("await mockable(agent, ctx, session)");
+    expect(copy).toContain('import { simulation } from "@egma/livekit"');
+    expect(copy).toContain("await simulation(agent, ctx, session)");
     expect(copy).not.toContain("egma-sim-chat-");
     expect(copy).not.toContain("independent audio publisher");
     expect(copy).not.toContain("inputOptions");
+  });
+
+  it("says the SDK is required and what the simulation record holds", () => {
+    render(<InstructionsPicker />);
+
+    const copy = document.body.textContent ?? "";
+    expect(copy).toContain(
+      "Egma answers exactly the tools the running test names",
+    );
+    expect(copy).toContain(
+      "Every other tool runs for real, and every call is on the simulation transcript, from the agent's point of view",
+    );
+    expect(copy).toContain(
+      "The Egma SDK is required for a LiveKit simulation",
+    );
+    expect(copy).toContain("raises NotReported");
+    expect(copy).not.toContain("mockable");
   });
 
   it("keeps the language-specific testing rules in its copied prompts", () => {
@@ -213,7 +230,7 @@ describe("LiveKit testing instructions", () => {
     );
     expect(PYTHON_CHAT_SETUP_PROMPT).toContain("transcription sync off");
     expect(PYTHON_CHAT_SETUP_PROMPT).toContain(
-      "await mockable(agent, ctx, session)",
+      "await simulation(agent, ctx, session)",
     );
     expect(PYTHON_CHAT_SETUP_PROMPT).toContain(
       "agent_name in its WorkerOptions",
@@ -224,7 +241,7 @@ describe("LiveKit testing instructions", () => {
     );
     expect(JAVASCRIPT_CHAT_SETUP_PROMPT).toContain("transcription sync off");
     expect(JAVASCRIPT_CHAT_SETUP_PROMPT).toContain(
-      "await mockable(agent, ctx, session)",
+      "await simulation(agent, ctx, session)",
     );
     expect(JAVASCRIPT_CHAT_SETUP_PROMPT).toContain(
       "agentName in its WorkerOptions",

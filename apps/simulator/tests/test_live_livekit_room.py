@@ -402,7 +402,7 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     # own duration *is* the number, so there is no separate field to read
     # and none to disagree with.
     measures = measures_for(records, SIMULATION)
-    assert "time_to_first_word" in measures
+    assert "turn_response_latency" in measures
     assert "agent_speech_duration" in measures
     timed = [
         record["span"]

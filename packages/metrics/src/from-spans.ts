@@ -1,4 +1,5 @@
 import {
+  AGENT_POV_HEADLINE_MEASURES,
   MEASURE_CATALOG,
   type CatalogedMeasure,
   type MeasureAggregation,
@@ -9,13 +10,15 @@ import type { ReportedOnTrace, TraceSpan } from "./spans.ts";
  * The shared measure module: a conversation in, the measure catalog's numbers
  * out.
  *
- * **Three sources, one answer per measure.** A measure egma timed itself wins;
- * a measure worked out from a recognised framework's own spans comes next; what
- * the agent platform reported about its own conversation comes last. Every step
- * of the chain is absolute — nothing is averaged with anything and nothing is
- * appended to anything — and every number says which step it came from, because
- * a developer reading a grade is entitled to know whether egma watched it
- * happen or was told about it.
+ * **Two POVs, one series each, and the catalog version says which leads.** A
+ * measure egma timed itself is the persona's POV; a measure worked out from a
+ * recognised framework's own spans, or read out of the block the platform
+ * reported, is the agent's. Inside the agent's POV the derivation wins over the
+ * block absolutely — they are one account told two ways. Across the two POVs
+ * nothing is averaged and nothing is appended: a conversation both measured
+ * answers with both series, the second beside the first, and every number says
+ * which POV took it, because a developer reading a grade is entitled to know
+ * whether egma watched it happen or was told about it.
  *
  * **One computation, and that is the whole reason this file exists.** The
  * metrics display reads through it and so does the grader that bounds a
@@ -36,6 +39,13 @@ import type { ReportedOnTrace, TraceSpan } from "./spans.ts";
  * caller who wanted to. The reported block is not a way in for it: it is what a
  * platform said about one conversation, read on its own terms and last of the
  * three, and a simulation carrying one would be read exactly the same way.
+ *
+ * **The POV is an input, and it is not the source wearing another name.**
+ * `source` says who *conducted* the conversation and is deliberately unreadable
+ * here; a span's POV says whose *account* it is, which is a property of the
+ * evidence itself. A simulation's trace holds two accounts of one conversation
+ * under one id, so a reader that could not tell them apart would fold both into
+ * one series — which is the exact blending every rule below exists to prevent.
  *
  * **The catalog decides what is computed and how.** Every measure carries its
  * span-level definition beside its name
@@ -93,24 +103,52 @@ export type Sample = {
   readonly spanId: string;
 };
 
-/** One measure, as this conversation's spans carried it. */
-export type MeasuredFromSpans = {
-  readonly measure: string;
-  /** The catalog's own unit, so nothing downstream has to look it up again. */
-  readonly unit: CatalogedMeasure["unit"];
+/**
+ * Whose account of the conversation a **series** is: the persona's or the
+ * agent's.
+ *
+ * Named for the origin it reads rather than plainly, because the trace store
+ * answers the same question about a **span** from its `emitter` column and the
+ * two must not be mistaken for one another: this one is about who measured a
+ * number, that one about who wrote a row.
+ *
+ * **Two POVs and three origins, because one POV can be told two ways.** egma's
+ * own timing spans are the persona's POV — what egma said, heard and measured
+ * off its own recording. A derivation off the framework's spans and the block
+ * the platform reported are both the *agent's* account of itself, differing
+ * only in granularity, so they rank against each other rather than sitting
+ * side by side.
+ */
+export function povOfOrigin(
+  origin: MeasuredByOnePov["origin"],
+): "persona" | "agent" {
+  return origin === "timed" ? "persona" : "agent";
+}
+
+/**
+ * One measure as **one POV** measured it: the number's provenance and its
+ * samples.
+ *
+ * Split out so the second POV's series can ride beside the first with exactly
+ * the fields that describe a series and none of the ones that describe the
+ * measure — a measure has one name and one unit whoever measured it.
+ */
+export type MeasuredByOnePov = {
   /**
    * Which of the three sources this number came from: a timing span egma's own
    * vocabulary names, a derivation off a recognised framework's own spans, or
    * the platform's own reported block.
    *
-   * A fact about *this* conversation and not about the measure, which is why it
-   * rides the answer instead of sitting in the catalog: the same measure is
-   * timed on a simulation, derived on a stock LiveKit call, and reported on a
-   * Retell one. A page saying where a number came from is the difference
-   * between a grade a developer trusts and one they have to go and check —
-   * and `reported` is the value that most needs saying out loud, because a
-   * platform's measurement of its own agent is a different kind of evidence
-   * from egma's observation of it.
+   * **The POV qualifier, since catalog version 8** — `timed` is the persona's
+   * POV and the other two the agent's (`povOfOrigin` above). A fact about *this*
+   * conversation and not about the measure, which is why it rides the answer
+   * instead of sitting in the catalog: the same measure is timed on a
+   * simulation, derived on a stock LiveKit call, and reported on a Retell one.
+   * A page saying where a number came from is the difference between a grade a
+   * developer trusts and one they have to go and check — and `reported` is the
+   * value that most needs saying out loud, because a platform's measurement of
+   * its own agent is a different kind of evidence from egma's observation of
+   * it.
    *
    * Not the catalog's own `origin`, which says where a measure arrives from in
    * general — a timing span or a terminal fact. This says who measured this
@@ -137,6 +175,28 @@ export type MeasuredFromSpans = {
    * score.
    */
   readonly samples: readonly Sample[];
+};
+
+/** One measure, as this conversation's spans carried it. */
+export type MeasuredFromSpans = MeasuredByOnePov & {
+  readonly measure: string;
+  /** The catalog's own unit, so nothing downstream has to look it up again. */
+  readonly unit: CatalogedMeasure["unit"];
+  /**
+   * The same measure as the **other** POV measured it, where both measured it.
+   *
+   * **Additive, and never blended into the headline.** A simulation has two
+   * accounts of a wait — egma's, off its own recording, and the agent's, off
+   * its own spans — and they differ by the VAD's detection lag and the
+   * playback hop. Averaging them would invent a number nobody measured, and
+   * appending them would file one turn's wait twice and move every percentile.
+   * So the headline stays one series and this is where the second one lives,
+   * saying which POV took it.
+   *
+   * Absent for every conversation only one POV measured, which is every
+   * production trace and every simulation whose agent POV never arrived.
+   */
+  readonly otherPov?: MeasuredByOnePov | undefined;
 };
 
 /**
@@ -221,52 +281,71 @@ export function measuresFromSpans(
 
   const measured: MeasuredFromSpans[] = [];
   for (const cataloged of MEASURE_CATALOG) {
-    const found = samplesOf(cataloged, timed);
-    if (found.length > 0) {
-      measured.push({
-        measure: cataloged.measure,
-        unit: cataloged.unit,
-        origin: "timed",
-        reportedBy: "",
-        samples: found,
-      });
-      continue;
-    }
-    // **egma's own timing vocabulary wins absolutely, and this `continue` is
-    // where.** A conversation carrying both a timed measure and the shapes a
-    // derivation reads has one answer, not two averaged or two appended: the
-    // measurement somebody instrumented on purpose. Deriving beside it would
-    // double the samples of one turn and quietly move every percentile.
-    const worked = derived.get(cataloged.measure) ?? [];
-    if (worked.length > 0) {
-      measured.push({
-        measure: cataloged.measure,
-        unit: cataloged.unit,
-        origin: "derived",
-        reportedBy: "",
-        samples: worked,
-      });
-      continue;
-    }
-    // **And the platform's own numbers are last, for the same reason and by the
-    // same absolute rule.** egma watching the conversation outranks the
-    // platform measuring its own homework, so a measure egma timed or derived is
-    // never joined by what the platform said about it: one answer per measure,
-    // never averaged and never appended. Last is not least — for a Retell trace
-    // it is the only source there is, and the whole difference between a
-    // production conversation with this metric and one with a polite silence.
-    if (reported === undefined) continue;
-    const said = reportedSamplesOf(cataloged, reported);
-    if (said.length === 0) continue;
+    const persona = personaPovOf(cataloged, timed);
+    const agent = agentPovOf(cataloged, derived, reported);
+    // **The catalog version decides which POV a consumer meets first.** Both
+    // series ride out where both exist, and the order is the whole of the
+    // headline: a `find` by name — which is what the latency grader, the
+    // metrics strip and the page's own p90 all do — takes the first.
+    const inOrder = AGENT_POV_HEADLINE_MEASURES.includes(cataloged.measure)
+      ? [agent, persona]
+      : [persona, agent];
+    const [headline, other] = inOrder.filter(
+      (series): series is MeasuredByOnePov => series !== undefined,
+    );
+    if (headline === undefined) continue;
     measured.push({
       measure: cataloged.measure,
       unit: cataloged.unit,
-      origin: "reported",
-      reportedBy: reported.reportedBy,
-      samples: said,
+      ...headline,
+      ...(other === undefined ? {} : { otherPov: other }),
     });
   }
   return measured;
+}
+
+/**
+ * The persona's POV of one measure: what egma timed itself, off its own
+ * recording and its own clock.
+ *
+ * `undefined` where egma timed nothing, which is every production trace.
+ */
+function personaPovOf(
+  cataloged: CatalogedMeasure,
+  timed: ReadonlyMap<string, readonly Sample[]>,
+): MeasuredByOnePov | undefined {
+  const found = samplesOf(cataloged, timed);
+  if (found.length === 0) return undefined;
+  return { origin: "timed", reportedBy: "", samples: found };
+}
+
+/**
+ * The agent's POV of one measure: the agent's own account of itself, told the
+ * better of the two ways it can be told.
+ *
+ * **Derived beats reported, absolutely, and this is where the old three-source
+ * chain still lives.** Both are the agent's account — one worked out from the
+ * framework's own spans, one handed over as a block — so a conversation
+ * carrying both has one agent-POV series, never two averaged or two appended.
+ * The block is not least for being last: on a Retell trace it is the only
+ * account there is, and the whole difference between a production conversation
+ * with this metric and one with a polite silence.
+ *
+ * `undefined` where the agent's process told egma nothing about this measure.
+ */
+function agentPovOf(
+  cataloged: CatalogedMeasure,
+  derived: ReadonlyMap<string, readonly Sample[]>,
+  reported: ReportedOnTrace | undefined,
+): MeasuredByOnePov | undefined {
+  const worked = derived.get(cataloged.measure) ?? [];
+  if (worked.length > 0) {
+    return { origin: "derived", reportedBy: "", samples: worked };
+  }
+  if (reported === undefined) return undefined;
+  const said = reportedSamplesOf(cataloged, reported);
+  if (said.length === 0) return undefined;
+  return { origin: "reported", reportedBy: reported.reportedBy, samples: said };
 }
 
 /**
@@ -568,6 +647,15 @@ function derivedFromFrameworkSpans(
   let root: TimedSpan | undefined;
 
   for (const span of everySpanIn(conversation)) {
+    // **The agent's own spans, and only the agent's.** A simulation stores both
+    // accounts of one conversation under one trace id, and egma's account
+    // carries transcript turns too — the same exchanges, from egma's side, on
+    // egma's own clock. Reading both would measure every wait twice over and
+    // each one wrongly: the persona's turns speak no `speaking` spans, so they
+    // would sit between the agent's turns as barriers that answer nothing.
+    // What egma measured itself is not lost by this — it arrives as timing
+    // spans, which are the persona's POV and are read above.
+    if (span.pov === "persona") continue;
     if (span.kind === HUMAN_TURN || span.kind === AGENT_TURN) {
       // **Every turn joins the list, whatever its timings are worth.** What this
       // list carries is the conversational order, and the walk below reads it
@@ -637,12 +725,23 @@ function put(
 /**
  * How long the agent took to answer, once for every turn the human took.
  *
- * From the **human turn's end** to the first later agent speech before another
- * human turn. LiveKit can open one agent turn for model and tool work, then a
- * second agent turn for the spoken answer, so a silent turn on the way is part
- * of the wait rather than its endpoint. Where the trace carries no
+ * From the **caller's last audible sample** to the first later agent speech
+ * before another human turn. LiveKit can open one agent turn for model and tool
+ * work, then a second agent turn for the spoken answer, so a silent turn on the
+ * way is part of the wait rather than its endpoint. Where the trace carries no
  * `speaking` spans at all, the first agent turn's own start stands in for a
  * framework whose turns begin at their first word.
+ *
+ * **The start is the VAD's end of speech, never the endpointing commit**
+ * (ADR-0024 §5, catalog version 8). In the agent's own spans the caller's last
+ * audible sample is the end of the human turn's last `speaking` child; the
+ * turn's own end is the moment the endpointer *decided* the caller had
+ * finished, which the framework's own defaults put about a second later — a
+ * Silero hangover plus a minimum delay. Measuring from the commit would delete
+ * a second the caller actually waited and make a slow agent look fast. Where
+ * the framework recorded no speech for the caller — Retell's word-bounded
+ * turns, egma's own chat lane — the turn's end is the only instant the trace
+ * holds and stands in for it.
  *
  * **A measurement that runs backwards is not a slow answer and is not kept.**
  * Turn spans overlap on a real captured call — five neighbouring pairs out of
@@ -682,7 +781,7 @@ function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
     if (turn.kind !== HUMAN_TURN) continue;
     const answered = answeringSpeech(turns, at, traceHasNoSpeakingSpans);
     if (answered === undefined) continue;
-    const latency = milliseconds(answered.startedAt - turn.endedAt);
+    const latency = milliseconds(answered.startedAt - stoppedSpeaking(turn));
     if (latency < 0) continue;
     if (latency === 0 && turn.duration === 0n) continue;
     samples.push({ value: latency, spanId: answered.spanId });
@@ -797,6 +896,21 @@ function answeringSpeech(
 /** Whether this trace's emitter recorded speech at all. */
 function hasNoSpeakingSpans(turns: readonly TimedSpan[]): boolean {
   return turns.every((turn) => turn.speech.length === 0);
+}
+
+/**
+ * When this speaker stopped being audible in this turn: the end of the turn's
+ * last `speaking` child, and the turn's own end where the framework recorded
+ * none.
+ *
+ * The children are held earliest first, so the last of them is the one that
+ * ran latest — a caller who paused mid-sentence has several, and it is the last
+ * burst that ends the turn's audible speech.
+ */
+function stoppedSpeaking(turn: TimedSpan): bigint {
+  const last = turn.speech.at(-1);
+  if (last === undefined) return turn.endedAt;
+  return last.startedAt + last.duration;
 }
 
 /**

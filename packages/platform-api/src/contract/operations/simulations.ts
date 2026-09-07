@@ -1,4 +1,5 @@
 import { defineOperation } from "../definition.ts";
+import { traceSpanReference, traceSpanSchema } from "./trace-span.ts";
 import {
   arrayOf,
   dateTimeSchema,
@@ -21,50 +22,6 @@ const stringSchema = { type: "string" } as const;
 const integerSchema = { type: "integer" } as const;
 const booleanSchema = { type: "boolean" } as const;
 
-const traceSpanReference = { $ref: "#/$defs/traceSpan" } as const;
-const traceSpanSchema = {
-  type: "object",
-  properties: {
-    spanId: stringSchema,
-    parentSpanId: stringSchema,
-    name: stringSchema,
-    kind: stringSchema,
-    status: stringSchema,
-    startedAt: dateTimeSchema,
-    durationNs: stringSchema,
-    text: stringSchema,
-    audioUrl: stringSchema,
-    toolName: stringSchema,
-    toolArguments: stringSchema,
-    toolResult: stringSchema,
-    /**
-     * That egma itself answered this tool call, when it did.
-     *
-     * The one value is `mocked`, and the key is absent on every other span. A
-     * real call is the ordinary case and says nothing extra; a mocked one is
-     * the fact a reader of a transcript needs, because the answer they are
-     * looking at came from the test rather than from their own backend.
-     */
-    toolProvenance: { type: "string", enum: ["mocked"] },
-    spans: arrayOf(traceSpanReference),
-  },
-  required: [
-    "spanId",
-    "parentSpanId",
-    "name",
-    "kind",
-    "status",
-    "startedAt",
-    "durationNs",
-    "text",
-    "audioUrl",
-    "toolName",
-    "toolArguments",
-    "toolResult",
-    "spans",
-  ],
-  additionalProperties: false,
-} as const;
 
 const transcriptSchema = {
   type: "object",
@@ -152,6 +109,23 @@ const simulationSchema = {
     endedAt: nullable(dateTimeSchema),
     providerReference: nullable(stringSchema),
     hasRecording: booleanSchema,
+    /**
+     * That this conversation was graded without the agent's own POV of it.
+     *
+     * A simulation stores two accounts of one conversation and grading waits
+     * for the agent's — the SDK's export from inside the room, or the pull from
+     * the platform — for thirty seconds and no longer (ADR-0024 §6). True says
+     * the wait ran out: what is stored is egma's account, and the agent's is
+     * missing or partial. **A reader that shows the agent's POV has to ask**,
+     * because "the rows filed as the agent's" is a fragment here rather than
+     * the conversation, and a fragment shown as the whole is worse than a gap
+     * that says it is one. Regrade picks up a late arrival.
+     *
+     * False on every conversation whose agent POV landed, and on every lane
+     * that files none — a phone number reaches nothing of egma's, so nothing
+     * was ever waited for.
+     */
+    agentPovIncomplete: booleanSchema,
     measures: {
       type: "object",
       properties: {
@@ -274,6 +248,7 @@ const simulationSchema = {
     "endedAt",
     "providerReference",
     "hasRecording",
+    "agentPovIncomplete",
     "measures",
     "metrics",
     "test",

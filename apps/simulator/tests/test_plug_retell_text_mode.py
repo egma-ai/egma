@@ -8,11 +8,11 @@ resume state threaded turn by turn. The counterpart is a real HTTP server
 shaped like the completion API, on loopback — no account, no key, no
 network.
 
-What the plug **saw** is pinned beside it, at the seam that writes it down:
-every tool call the platform reported reaches the mock-tool seam, marked
-``mocked`` exactly where the run's snapshot covers the name. The record
-those become is proved end to end in the acceptance suite; here the
-question is what the plug hands over.
+What the plug **saw** is pinned beside it, at the seam that writes it
+down. This lane is the one that still keeps a tool record of egma's own:
+Retell serves egma's answers itself and reports the calls afterwards,
+nothing of egma's runs inside the agent, and this lane offers no provider
+reference — so a call the seam did not keep would land nowhere at all.
 
 The failure paths get the same treatment, because they are where a
 credential leaks if it ever does: a throttle, a billing wall, a key the
@@ -595,12 +595,13 @@ async def test_a_run_that_mocks_nothing_sends_no_mocks(start_text_mode_stub):
     assert "tool_mocks" not in running.stub.requests[0]["body"]
 
 
-async def test_a_covered_call_is_marked_mocked_and_an_uncovered_one_is_not(
+async def test_a_covered_call_carries_egmas_answer_and_an_uncovered_one_does_not(
     start_text_mode_stub,
 ):
     """The whole honesty claim of this lane, at the tool grain: the platform
     served egma's answer for the covered name and the customer's own backend
-    for the other, and the record says which was which."""
+    for the other, and the record says which was which — by carrying egma's
+    own answer on the one it authored, and nothing on the one it did not."""
     answers = seam(answering("check_calendar", {"slots": ["thu-1430"]}))
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY,
@@ -627,31 +628,29 @@ async def test_a_covered_call_is_marked_mocked_and_an_uncovered_one_is_not(
     answered = await plug.deliver("Anything Thursday?")
     await plug.close()
 
-    # Nothing rides back on the reply itself: the seam is the one writer
-    # that can stamp a call, and two writers would record each call twice.
+    # Nothing rides back on the reply itself: the seam is the one writer of
+    # this lane's tool record, and two writers would record each call twice.
     assert answered.tool_calls == ()
 
-    exchanged = answers.exchanged()
-    assert [(call.name, call.mock_tool) for call in exchanged] == [
-        ("check_calendar", "check_calendar"),
+    reported = answers.exchanged()
+    assert [(call.name, call.answer) for call in reported] == [
+        ("check_calendar", '{"slots":["thu-1430"]}'),
+        # The call the test did not name is on the record as the observation
+        # it is: what was called, with what — and no answer, which is the
+        # record's own way of saying a real backend did the work.
         ("lookup_customer", None),
     ]
-    mocked, real = exchanged
-    assert mocked.arguments == '{"day":"thu"}'
-    assert mocked.answer == '{"slots":["thu-1430"]}'
-    assert mocked.refused is False and mocked.late_attached is False
-    # The call the test did not name is on the record as the observation it
-    # is: what was called, with what — and no stamp, which is the record's
-    # own way of saying a real backend did the work.
-    assert real.arguments == '{"phone":"+1"}'
-    assert real.answer is None
+    assert [call.arguments for call in reported] == [
+        '{"day":"thu"}',
+        '{"phone":"+1"}',
+    ]
 
 
 async def test_a_mocked_failure_reads_back_as_a_failure_not_a_string(
     start_text_mode_stub,
 ):
     """The tag stays on the record for the failure branch, exactly as it
-    does on the room lane, so one authored world reads the same on both."""
+    does on the wire, so one authored world reads the same on both."""
     answers = seam(failing("book_appointment", {"code": 503}))
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY,
@@ -668,37 +667,19 @@ async def test_a_mocked_failure_reads_back_as_a_failure_not_a_string(
 
     (call,) = answers.exchanged()
     assert call.answer == '{"error":{"code":503}}'
-    assert call.mock_tool == "book_appointment"
-async def test_an_answer_spelled_differently_by_the_platform_still_counts(
+
+
+async def test_a_reported_call_is_one_instant_and_carries_no_stamp(
     start_text_mode_stub,
 ):
-    """Two equivalent JSON documents are one answer. A platform that
-    re-serializes egma's answer with spaces in it, or its keys the other
-    way round, has still served it — and failing a working simulation over
-    whitespace would be the check doing more harm than the hole it
-    closes."""
-    answers = seam(answering("check_calendar", {"slots": [], "open": True}))
+    """egma did not conduct this exchange and did not time it, so the row is
+    one instant. And nothing on it says who answered: whether a mock tool did
+    is read at display time, by name, from the pinned test version."""
+    answers = seam(answering("check_calendar", {"slots": []}))
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY,
-        replies=[
-            Reply(),
-            Reply(
-                words="Checked.",
-                extra=[
-                    {
-                        "role": "tool_call_invocation",
-                        "tool_call_id": "respelled",
-                        "name": "check_calendar",
-                        "arguments": "{}",
-                    },
-                    {
-                        "role": "tool_call_result",
-                        "tool_call_id": "respelled",
-                        "content": '{"open": true,  "slots": []}',
-                    },
-                ],
-            ),
-        ],
+        replies=[Reply(), Reply(words="Checked.",
+                                tools=[ToolTurn(name="check_calendar")])],
     )
     plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
@@ -709,7 +690,10 @@ async def test_an_answer_spelled_differently_by_the_platform_still_counts(
     await plug.close()
 
     (call,) = answers.exchanged()
-    assert call.mock_tool == "check_calendar"
+    assert call.at_unix_nano > 0
+    assert not hasattr(call, "mock_tool")
+    assert not hasattr(call, "refused")
+    assert not hasattr(call, "late_attached")
 
 
 # -- Errors, loud and without the key ----------------------------------------

@@ -53,6 +53,7 @@ import { useProjectRead } from "../../../../../ui/resource.ts";
 import { shownScore } from "../../../../../ui/run-status.tsx";
 import {
   ChatTranscript,
+  recordingSpeakerTimeline,
   RecordingEvidence,
   recordingOriginOf,
   SimulationEvidenceSummary,
@@ -587,12 +588,7 @@ function TranscriptAndAudio({
             speakerTimeline={
               evidence.transcript === null
                 ? null
-                : {
-                    startedAt:
-                      recordingStartedAt ?? evidence.transcript.startedAt,
-                    endedAt: evidence.transcript.endedAt,
-                    turns: evidence.transcript.turns,
-                  }
+                : recordingSpeakerTimeline(evidence.transcript)
             }
           />
         </section>

@@ -261,6 +261,7 @@ async function toolSpansOf(simulationId: string): Promise<
     readonly tool_name: string;
     readonly tool_arguments: string;
     readonly tool_result: string;
+    readonly status: string;
     readonly payload: string;
     readonly duration_ns: string;
   }[]
@@ -269,7 +270,7 @@ async function toolSpansOf(simulationId: string): Promise<
   if (store === undefined) throw new Error("this API has no trace store");
   const traceId = traceIdOfSimulation(simulationId);
   return store.rows(
-    `select tool_name, tool_arguments, tool_result, payload, ` +
+    `select tool_name, tool_arguments, tool_result, status, payload, ` +
       `toString(duration_ns) as duration_ns ` +
       `from spans final where trace_id = '${traceId}' and kind = 'tool' ` +
       `order by started_at asc`,
@@ -377,9 +378,9 @@ describe("the two gates", () => {
     const spans = await toolSpansOf(ready.simulationId);
     expect(spans).toHaveLength(1);
     expect(spans[0]?.tool_name).toBe("charge_card");
-    // Egma was in the path and said no. An unstamped span would say the
-    // opposite — that the call went past egma to a real backend.
-    expect(JSON.parse(spans[0]!.payload)["egma.tool.provenance"]).toBe("refused");
+    // Egma was in the path and said no. The refusal is the row's own status,
+    // where every other error is, and there is no answer to record.
+    expect(spans[0]?.status).toBe("error");
     expect(spans[0]?.tool_result).toBe("");
   });
 });
@@ -410,12 +411,11 @@ describe("a tool the customer wrote as a GET", () => {
     // **The cost of dropping the query string, paid where it falls.** A GET
     // tool's arguments ride in the same string as the customer's own static
     // parameters — their credentials among them — and egma cannot tell one
-    // from the other, so it reads none of it. The call, the answer and the
-    // provenance are on the record; the arguments are not.
+    // from the other, so it reads none of it. The call and the answer are on
+    // the record; the arguments are not.
     expect(spans[0]?.tool_arguments).toBe("");
     expect(JSON.stringify(spans[0])).not.toContain("facial");
     const payload = JSON.parse(spans[0]!.payload) as Record<string, unknown>;
-    expect(payload["egma.tool.provenance"]).toBe("mocked");
     expect(payload["egma.tool.arguments"]).toBe("");
   });
 
@@ -536,7 +536,7 @@ describe("the platform's signature", () => {
 });
 
 describe("what the record says afterwards", () => {
-  it("carries the arguments, the answer, the elapsed time and the provenance", async () => {
+  it("carries the arguments, the answer and the elapsed time, and no stamp", async () => {
     const ready = await aRunningSimulation("mock_endpoint_record");
     const body = JSON.stringify({ service: "facial", date: "2026-09-01" });
 
@@ -555,11 +555,12 @@ describe("what the record says afterwards", () => {
       slots: ["Tuesday 14:00"],
     });
 
+    // No stamp says who answered: whether a mock tool did is read at display
+    // time, by name, from the pinned test version's mock tools, and a copy
+    // here could only come to disagree with it.
     const payload = JSON.parse(span.payload) as Record<string, unknown>;
-    expect(payload["egma.tool.provenance"]).toBe("mocked");
-    // The mock tool that answered is named by its tool name, which is the whole
-    // of how one is named now that the answers live on the test.
-    expect(payload["egma.tool.mock_tool"]).toBe("get_availability");
+    expect(payload).not.toHaveProperty("egma.tool.provenance");
+    expect(payload).not.toHaveProperty("egma.tool.mock_tool");
     // The span brackets the exchange, so the duration is a real interval.
     expect(Number(span.duration_ns)).toBeGreaterThanOrEqual(0);
   });
@@ -601,8 +602,6 @@ describe("an authored failure", () => {
     expect(answered.json).toEqual({ error: "the booking service is down" });
 
     const spans = await toolSpansOf(ready.simulationId);
-    const payload = JSON.parse(spans[0]!.payload) as Record<string, unknown>;
-    expect(payload["egma.tool.provenance"]).toBe("mocked");
     expect(JSON.parse(spans[0]!.tool_result)).toEqual({
       error: "the booking service is down",
     });

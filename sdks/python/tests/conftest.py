@@ -31,7 +31,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +43,13 @@ from livekit.agents.voice.run_result import (  # noqa: PLC2701
     _run_mock,
     _SessionMockTools,
 )
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
 from room_stub import SIMULATION_ROOM, StubContext, StubRoom
+
+from egma import export
 
 
 class ReceptionAgent(Agent):
@@ -74,6 +80,79 @@ class ToollessAgent(Agent):
 
     def __init__(self) -> None:
         super().__init__(instructions="You answer the phone and nothing else.")
+
+
+PROJECT_KEY = f"egma_sk_{'a' * 43}"
+"""A key shaped exactly like a real project key and belonging to nobody."""
+
+
+@dataclass
+class Exported:
+    """Where a test's spans went, and on what terms they were sent.
+
+    The exporter is real OpenTelemetry machinery with an in-memory sink,
+    so what a test reads back is what a batch processor really handed the
+    exporter — not a record of what the SDK meant to send.
+    """
+
+    spans: Any
+    """The in-memory sink every configured exporter writes to."""
+
+    provider: TracerProvider
+    """The provider the SDK was handed, standing in for whatever a
+    customer's process already had."""
+
+    built_with: list[tuple[str, str, str]] = field(default_factory=list)
+    """One entry per exporter built: endpoint, key, and the verb that
+    asked."""
+
+    registered: list[tuple[TracerProvider, str]] = field(default_factory=list)
+    """One entry per provider registered with the framework, and the
+    provider reference stamped on its spans — ``""`` for production."""
+
+    selected: list[tuple[str, str]] = field(default_factory=list)
+    """One entry per provider selection: the verb, and the reference it
+    would put on a resource it built itself."""
+
+
+@pytest.fixture(autouse=True)
+def clean_export_state(monkeypatch) -> None:
+    """Give every test a process that has not configured Egma yet.
+
+    The exporter is process-wide by design — one worker, one door — so
+    without this a test would inherit whatever the last one installed.
+    """
+    monkeypatch.setattr(export, "_state", None)
+
+
+@pytest.fixture
+def egma_export(monkeypatch) -> Exported:
+    """Egma's exporter, in memory, with its settings in the environment.
+
+    For every test that runs in a simulation room, because the export is
+    the first thing the simulation verb installs and a room with nowhere
+    to export to is a room that raises before it does anything else.
+    """
+    record = Exported(spans=InMemorySpanExporter(), provider=TracerProvider())
+
+    def select(verb: str, provider_reference: str) -> TracerProvider:
+        record.selected.append((verb, provider_reference))
+        return record.provider
+
+    def register(provider: TracerProvider, provider_reference: str) -> None:
+        record.registered.append((provider, provider_reference))
+
+    def build(endpoint: str, api_key: str, verb: str) -> Any:
+        record.built_with.append((endpoint, api_key, verb))
+        return record.spans
+
+    monkeypatch.setattr(export, "_select_compatible_provider", select)
+    monkeypatch.setattr(export, "_register_provider", register)
+    monkeypatch.setattr(export, "_build_exporter", build)
+    monkeypatch.setenv("EGMA_URL", "https://api.egma.ai")
+    monkeypatch.setenv("EGMA_API_KEY", PROJECT_KEY)
+    yield record
+    record.provider.shutdown()
 
 
 @pytest.fixture

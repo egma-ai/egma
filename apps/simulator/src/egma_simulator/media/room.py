@@ -14,7 +14,13 @@ from typing import Any
 
 from ..contract import ERROR
 from ..mock_tools import MockToolRefusal
-from . import MediaBackendError, RemoteParticipantLeftFrame, VoiceMedia
+from . import (
+    MediaBackendError,
+    PlayoutStamp,
+    RemoteParticipantLeftFrame,
+    VoiceMedia,
+    arrived_now,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +52,7 @@ update.
 
 Nothing links this constant to the far side of the contract, and nothing
 can: the SDK holds its own copy in
-``sdks/python/src/egma/mockable.py``, pinned again by
+``sdks/python/src/egma/simulation_room.py``, pinned again by
 ``sdks/python/tests/room_stub.py`` and
 ``fixtures/livekit-dumb-agent/tests/conftest.py``, and a customer runs
 whichever release of it they installed. A version already deployed cannot
@@ -1051,17 +1057,27 @@ class JoinedRoom:
         room = self
 
         class _Arrival(FrameProcessor):
+            """When the agent's audio reached egma, on egma's own clock.
+
+            The first thing in the pipeline that sees inbound audio, so
+            the stamp it writes is as close to arrival as this side can
+            honestly get. The recording is built on these stamps, which
+            is what makes a wait measured on the file the wait the caller
+            lived through instead of a count of what was buffered.
+            """
+
             async def process_frame(
                 self, frame: Frame, direction: FrameDirection
             ) -> None:
                 await super().process_frame(frame, direction)
                 if isinstance(frame, InputAudioRawFrame):
+                    arrived_now(frame)
                     room.carrying_audio.set()
                 await self.push_frame(frame, direction)
 
         return VoiceMedia(
             input=(input_transport, _Arrival()),
-            output=(transport.output(),),
+            output=(transport.output(), PlayoutStamp()),
             ended=self.ended,
             failed=self.failed,
             transport_name=f"livekit server at {self._quotable(self._url)}",

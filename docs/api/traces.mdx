@@ -6,11 +6,13 @@ description: "Send OpenTelemetry spans from your voice agent to Egma and query t
 
 Traces are the storage record of a conversation. Egma accepts standard
 OTLP/HTTP from an agent process that already emits OpenTelemetry spans. LiveKit
-Agents should use `monitor_livekit(ctx)` from the Egma Python SDK or
-`monitorLiveKit(ctx)` from the Egma JavaScript SDK to create the required
-telemetry setup. Retell Monitoring polls Retell and writes normalized
-production traces without using this ingest endpoint. Use the read endpoints
-below for either source.
+Agents should use `monitor(ctx)` from the Egma Python SDK or the Egma
+JavaScript SDK to create the required telemetry setup for production. The same
+door takes a simulation's spans: the SDK's `simulation(agent, ctx, session)`
+verb stamps each span with the room's name, and Egma files those spans under
+the simulation that opened that room instead of on the Monitoring list. Retell
+Monitoring polls Retell and writes normalized production traces without using
+this ingest endpoint. Use the read endpoints below for either source.
 
 ---
 
@@ -177,20 +179,23 @@ curl "https://your-egma-instance/v1/traces?from=2026-08-01T00:00:00Z&to=2026-08-
   Number of spans that completed with an error status.
 </ResponseField>
 
-<ResponseField name="emitter" type="string">
-  The SDK or agent process that emitted this trace.
+<ResponseField name="pov" type="string">
+  Whose account of the conversation this is: `agent` or `persona`. `agent` is
+  what the agent's own process reported. `persona` is what Egma's own simulator
+  said, heard, measured and recorded. A production conversation has only the
+  agent's.
 </ResponseField>
 
 <ResponseField name="environment" type="string">
-  The deployment environment reported by the emitter, e.g. `"production"`.
+  The deployment environment reported by whatever sent the telemetry, e.g. `"production"`.
 </ResponseField>
 
 <ResponseField name="connectionType" type="string">
-  A connection type only when the emitter explicitly supplied one. Egma does not infer a production connection from an agent platform.
+  A connection type only when the sender explicitly supplied one. Egma does not infer a production connection from an agent platform.
 </ResponseField>
 
 <ResponseField name="providerCallId" type="string">
-  The provider-assigned call identifier, if the emitter included one.
+  The provider-assigned call identifier, if the sender included one.
 </ResponseField>
 
 <ResponseField name="agentPlatform" type="string">
@@ -214,7 +219,7 @@ curl "https://your-egma-instance/v1/traces?from=2026-08-01T00:00:00Z&to=2026-08-
 </ResponseField>
 
 <ResponseField name="agentId" type="string">
-  The agent identifier, if the emitter included one.
+  The agent identifier, if the sender included one.
 </ResponseField>
 
 <ResponseField name="preview" type="string">
@@ -254,15 +259,57 @@ Returns the full transcript, metrics, and trace-level grades.
 </ResponseField>
 
 <ResponseField name="spans" type="array">
-  All spans in the trace, nested under their parents. Each span includes `spanId`, `parentSpanId`, `name`, `kind`, `status`, `startedAt`, `durationNs`, `text`, `audioUrl`, `toolName`, `toolArguments`, `toolResult`, and child `spans`.
+  All spans in the trace, nested under their parents. Each span includes `spanId`, `parentSpanId`, `name`, `kind`, `status`, `startedAt`, `durationNs`, `text`, `audioUrl`, `toolName`, `toolArguments`, `toolResult`, `pov`, and child `spans`.
+
+  `pov` says whose account of the conversation the span is. `agent` is what the
+  agent's own process reported — its turns, its tool calls and its timings.
+  `persona` is what Egma's own simulator said, heard, measured and recorded. A
+  production conversation has only the agent's. A simulation holds both under
+  one trace and this read returns both; read the agent's for one conversation.
+
+  A simulation's tool span can also carry `toolProvenance`. It has one value,
+  `mocked`, and it is absent on every other span: a real call is the ordinary
+  case and says nothing extra. The mock tool that answered is the one named by
+  `toolName`, because a mock tool is matched to a call by name and by nothing
+  else. Egma reads this by name from the simulation's pinned test version, so it
+  never appears on a production trace, which has no test version and no mock
+  tools.
 </ResponseField>
 
 <ResponseField name="spansTruncated" type="boolean">
   `true` when the trace exceeded the store's span limit and only the first spans are returned. Measures computed from a truncated trace are partial.
 </ResponseField>
 
-<ResponseField name="measures" type="array">
-  Computed metrics for this conversation, such as turn response latency. Each entry has `measure`, `unit`, `samples`, `worst`, and `partial`.
+<ResponseField name="metrics" type="array">
+  Computed metrics for this conversation, such as turn response latency. Each
+  entry has `measure`, `unit`, `derived`, `pov`, `samples`, `spanIds`, `mean`,
+  `p50`, `p90`, and `partial`, and may carry `reportedBy` and `otherPov`.
+
+  `pov` says whose account of the conversation this number describes:
+  `persona`, measured off Egma's own recording, or `agent`, off the agent's own
+  process. It is the fact that decides whether two numbers may be compared at
+  all, and Egma never averages or appends across POVs. `derived` says which
+  machinery produced the number, which is a different question.
+
+  `otherPov` is the same measure as the other POV measured it, when both did.
+  It is a simulation only, and it carries its own `pov`, `derived`, `samples`,
+  `spanIds` and `partial`. It is absent on every conversation only one POV
+  measured, which is every production trace.
+
+  **`turn_response_latency`** is the elapsed time from the last audible sample
+  of the caller's speech to the first audible sample of the agent's reply as it
+  reaches the caller. On a simulation Egma measures it off the recording, which
+  is the persona's POV. On a production trace Egma derives it from the agent's
+  own spans, from the VAD's end of the caller's speech — never the end-of-turn
+  commit, which lands about a second later and would delete a second the caller
+  waited.
+
+  On a simulation, `turn_response_latency` and `first_response_latency` lead
+  with the agent's POV. The persona's number is computed and returned beside
+  them under `otherPov`.
+
+  `time_to_first_word` and `persona_speech_duration` described Egma's own
+  caller rather than the agent, and are no longer in the catalog.
 </ResponseField>
 
 <ResponseField name="simulationId" type="string | null">

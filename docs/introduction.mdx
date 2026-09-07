@@ -76,9 +76,12 @@ call-history APIs.
 
 **LiveKit** uses room Connections with Project credentials or a customer token
 endpoint. The coding agent grounds setup in committed worker source. Python and
-JavaScript workers support simulation testing. Production monitoring calls
-`monitor_livekit(ctx)` in Python or `monitorLiveKit(ctx)` in JavaScript before
-`AgentSession.start`.
+JavaScript workers support simulation testing. The Egma SDK has one verb for
+each room: a simulation calls `simulation(agent, ctx, session)` before
+`AgentSession.start`, and production monitoring calls `monitor(ctx)` before
+`AgentSession.start`. The SDK is required for a LiveKit simulation, and an agent
+that cannot report to Egma fails that simulation instead of running against your
+real tools.
 
 ## How setup works
 

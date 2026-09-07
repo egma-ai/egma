@@ -5,7 +5,7 @@ control plane over outbound HTTP, conducts each one as a real conversation
 — the persona on one side, the agent under test on the other — and says
 what happened as it happens, along two lines: the lifecycle — status
 transitions and the terminal facts — as report events, and the
-conversation itself — every turn, tool call and measurement — as
+conversation itself — every turn and measurement — as
 OpenTelemetry spans. It never touches the database and never imports
 monorepo code: the versioned JSON contract in
 `packages/simulation-contract` is its entire connection to the rest of
@@ -106,10 +106,10 @@ plus what only audio can owe:
   an endpoint and a directory for one that does not, so a first voice
   simulation needs no container running — and the report carries only the
   reference, never the bytes and never a URL.
-- **Per-turn measurements**, all read from the audio itself rather than
-  from a clock: `time_to_first_word` (how long the agent was quiet before
-  speaking), `agent_speech_duration` and `persona_speech_duration`. Each
-  is a span, like every other measurement.
+- **Per-turn measurements**, read from the audio itself rather than from a
+  clock: `turn_response_latency` (how long the caller waited for an answer)
+  and `agent_speech_duration` (how long the agent spoke for). Each is a
+  span, like every other measurement.
 
 ## How it runs
 
@@ -137,7 +137,7 @@ has no place to put them even by accident.
 
 ## The conversation, as spans
 
-The OpenTelemetry SDK (`spans.py`) authors every turn, tool call, and
+The OpenTelemetry SDK (`spans.py`) authors every turn and every
 measurement and streams them to the control plane's OTLP ingest while
 the simulation runs — the same door a customer's own agent exports to, so
 a simulation is readable the way a production trace is readable, live and
@@ -146,6 +146,13 @@ attribute keys, how a batch names its simulation, and how a trace id is
 derived from a simulation id — is
 [`packages/simulation-contract/span-vocabulary.md`](../../packages/simulation-contract/span-vocabulary.md),
 pinned as golden fixtures beside it.
+
+**No tool call is authored here.** The record of what the agent's tools
+did is the agent's own — its POV of the simulation, which reaches egma by
+simulation ingestion. The mock-tool seam still serves the answers a test
+asked for and still refuses a name it has no answer for; it writes no row
+of its own. Whether a call was answered by a mock tool is read at display
+time, by name, from the pinned test version's mock tools.
 
 Three things about it are worth knowing before reading the code:
 
@@ -393,9 +400,8 @@ where a refused key and an endpoint nobody answers each end the simulation
 The `retell_text_mode` plug converses with `tests/text_mode_stub.py`: a
 real local HTTP server shaped like the completion API, which matches and
 serves the mocks each request carries the way the platform does — so a
-plug that forgot to send them would see real answers come back, and the
-plug refuses to stamp a call `mocked` until it has checked that the tool
-was really given Egma's own answer.
+plug that forgot to send them would see real answers come back instead of
+the test's own.
 
 Every wire field name that Retell's documentation was not in reach for is
 marked a guess in the plug's docstring. Correcting one after a live run

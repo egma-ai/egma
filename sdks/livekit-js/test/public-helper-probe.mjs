@@ -1,6 +1,6 @@
 import { telemetry } from "@livekit/agents";
 
-import { monitorLiveKit } from "../src/index.ts";
+import { monitor } from "../src/index.ts";
 
 const endpoint = process.env.EGMA_TEST_ENDPOINT;
 const apiKey = process.env.EGMA_TEST_PROJECT_KEY;
@@ -16,7 +16,7 @@ const context = {
   },
 };
 
-monitorLiveKit(context, { endpoint, apiKey });
+monitor(context, { endpoint, apiKey });
 
 const span = telemetry.tracer.startSpan({ name: "public-helper-proof" });
 span.end();
