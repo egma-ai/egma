@@ -1,5 +1,5 @@
 {
-  "id": "c931d103-75d7-4c84-866b-014afb0352b2",
+  "id": "bbc7facf-d96f-4c1e-9c78-7c7c13798bfd",
   "prevId": "11e1df41-55b0-40fa-9028-a38b95c42131",
   "version": "7",
   "dialect": "postgresql",
@@ -5172,332 +5172,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.usage_record": {
-      "name": "usage_record",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "occurred_at": {
-          "name": "occurred_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "run_id": {
-          "name": "run_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "work_kind": {
-          "name": "work_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "simulation_id": {
-          "name": "simulation_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "grading_job_id": {
-          "name": "grading_job_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "attempt": {
-          "name": "attempt",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "trace_id": {
-          "name": "trace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "span_id": {
-          "name": "span_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "operation": {
-          "name": "operation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "unit": {
-          "name": "unit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "quantities": {
-          "name": "quantities",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "measurement": {
-          "name": "measurement",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "provider_ref": {
-          "name": "provider_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "payment_source": {
-          "name": "payment_source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credential_ref": {
-          "name": "credential_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "raw_usage": {
-          "name": "raw_usage",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "amount_micros": {
-          "name": "amount_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "priced_by": {
-          "name": "priced_by",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dedupe_key": {
-          "name": "dedupe_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "usage_record_organization_id_project_id_idx": {
-          "name": "usage_record_organization_id_project_id_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "usage_record_simulation_id_idx": {
-          "name": "usage_record_simulation_id_idx",
-          "columns": [
-            {
-              "expression": "simulation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "usage_record_organization_id_organization_id_fk": {
-          "name": "usage_record_organization_id_organization_id_fk",
-          "tableFrom": "usage_record",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "usage_record_project_organization_fk": {
-          "name": "usage_record_project_organization_fk",
-          "tableFrom": "usage_record",
-          "tableTo": "project",
-          "columnsFrom": [
-            "project_id",
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id",
-            "organization_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "usage_record_simulation_project_fk": {
-          "name": "usage_record_simulation_project_fk",
-          "tableFrom": "usage_record",
-          "tableTo": "simulation",
-          "columnsFrom": [
-            "simulation_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "usage_record_run_project_fk": {
-          "name": "usage_record_run_project_fk",
-          "tableFrom": "usage_record",
-          "tableTo": "run",
-          "columnsFrom": [
-            "run_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "usage_record_dedupe_key_unique": {
-          "name": "usage_record_dedupe_key_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "dedupe_key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "usage_record_id_prefix": {
-          "name": "usage_record_id_prefix",
-          "value": "\"usage_record\".\"id\" ~ '^usg_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "usage_record_work_kind_allowed": {
-          "name": "usage_record_work_kind_allowed",
-          "value": "\"usage_record\".\"work_kind\" in ('simulation', 'grading')"
-        },
-        "usage_record_provider_allowed": {
-          "name": "usage_record_provider_allowed",
-          "value": "\"usage_record\".\"provider\" in ('openai', 'deepgram', 'cartesia')"
-        },
-        "usage_record_operation_allowed": {
-          "name": "usage_record_operation_allowed",
-          "value": "\"usage_record\".\"operation\" in ('openai_chat_completions', 'openai_realtime', 'deepgram', 'cartesia_manual', 'cartesia', 'openai')"
-        },
-        "usage_record_unit_allowed": {
-          "name": "usage_record_unit_allowed",
-          "value": "\"usage_record\".\"unit\" in ('tokens', 'seconds', 'characters')"
-        },
-        "usage_record_measurement_allowed": {
-          "name": "usage_record_measurement_allowed",
-          "value": "\"usage_record\".\"measurement\" in ('provider_reported', 'client_measured')"
-        },
-        "usage_record_payment_source_allowed": {
-          "name": "usage_record_payment_source_allowed",
-          "value": "\"usage_record\".\"payment_source\" in ('platform', 'customer')"
-        },
-        "usage_record_work_kind_names_its_control_record": {
-          "name": "usage_record_work_kind_names_its_control_record",
-          "value": "case \"usage_record\".\"work_kind\"\n        when 'simulation' then \"usage_record\".\"simulation_id\" is not null and \"usage_record\".\"grading_job_id\" is null\n        when 'grading' then \"usage_record\".\"grading_job_id\" is not null\n        else false\n      end"
-        },
-        "usage_record_attempt_is_counted": {
-          "name": "usage_record_attempt_is_counted",
-          "value": "\"usage_record\".\"attempt\" >= 0"
-        },
-        "usage_record_amount_is_not_negative": {
-          "name": "usage_record_amount_is_not_negative",
-          "value": "\"usage_record\".\"amount_micros\" >= 0"
-        },
-        "usage_record_quantities_are_an_object": {
-          "name": "usage_record_quantities_are_an_object",
-          "value": "jsonb_typeof(\"usage_record\".\"quantities\") = 'object'\n        and \"usage_record\".\"quantities\" <> '{}'::jsonb"
-        },
-        "usage_record_raw_usage_is_an_object": {
-          "name": "usage_record_raw_usage_is_an_object",
-          "value": "jsonb_typeof(\"usage_record\".\"raw_usage\") = 'object'"
-        },
-        "usage_record_priced_by_is_an_object": {
-          "name": "usage_record_priced_by_is_an_object",
-          "value": "jsonb_typeof(\"usage_record\".\"priced_by\") = 'object'"
-        },
-        "usage_record_dedupe_key_is_not_blank": {
-          "name": "usage_record_dedupe_key_is_not_blank",
-          "value": "btrim(\"usage_record\".\"dedupe_key\") <> ''"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.cloud_billing_account": {
       "name": "cloud_billing_account",
       "schema": "",
@@ -5544,8 +5218,38 @@
           "primaryKey": false,
           "notNull": false
         },
-        "stripe_subscription_event_at": {
-          "name": "stripe_subscription_event_at",
+        "stripe_subscription_refreshed_at": {
+          "name": "stripe_subscription_refreshed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_period_started_at": {
+          "name": "stripe_period_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_period_ends_at": {
+          "name": "stripe_period_ends_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "activated_at": {
+          "name": "activated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "inference_settled_through": {
+          "name": "inference_settled_through",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settlement_failed_at": {
+          "name": "settlement_failed_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -5556,12 +5260,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
-        },
-        "overage_reported_through": {
-          "name": "overage_reported_through",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -5696,9 +5394,15 @@
           "primaryKey": false,
           "notNull": true
         },
-        "usage_record_id": {
-          "name": "usage_record_id",
-          "type": "text COLLATE \"C\"",
+        "interval_started_at": {
+          "name": "interval_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "interval_ended_at": {
+          "name": "interval_ended_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -5746,19 +5450,6 @@
         }
       },
       "foreignKeys": {
-        "cloud_ledger_entry_usage_record_id_usage_record_id_fk": {
-          "name": "cloud_ledger_entry_usage_record_id_usage_record_id_fk",
-          "tableFrom": "cloud_ledger_entry",
-          "tableTo": "usage_record",
-          "columnsFrom": [
-            "usage_record_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "cloud_ledger_entry_account_fk": {
           "name": "cloud_ledger_entry_account_fk",
           "tableFrom": "cloud_ledger_entry",
@@ -5775,6 +5466,15 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "cloud_ledger_entry_organization_interval_unique": {
+          "name": "cloud_ledger_entry_organization_interval_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "organization_id",
+            "interval_started_at",
+            "interval_ended_at"
+          ]
+        },
         "cloud_ledger_entry_idempotency_key_unique": {
           "name": "cloud_ledger_entry_idempotency_key_unique",
           "nullsNotDistinct": false,
@@ -5795,7 +5495,7 @@
         },
         "cloud_ledger_entry_reference_kind_allowed": {
           "name": "cloud_ledger_entry_reference_kind_allowed",
-          "value": "\"cloud_ledger_entry\".\"reference_kind\" in ('organization', 'usage_record', 'checkout_session', 'operator')"
+          "value": "\"cloud_ledger_entry\".\"reference_kind\" in ('organization', 'settlement_interval', 'checkout_session', 'operator')"
         },
         "cloud_ledger_entry_reference_id_is_not_blank": {
           "name": "cloud_ledger_entry_reference_id_is_not_blank",
@@ -5807,15 +5507,15 @@
         },
         "cloud_ledger_entry_kind_names_its_cause": {
           "name": "cloud_ledger_entry_kind_names_its_cause",
-          "value": "case \"cloud_ledger_entry\".\"kind\"\n        when 'welcome_credit' then \"cloud_ledger_entry\".\"reference_kind\" = 'organization'\n        when 'purchased_credit' then \"cloud_ledger_entry\".\"reference_kind\" = 'checkout_session'\n        when 'inference_charge' then \"cloud_ledger_entry\".\"reference_kind\" = 'usage_record'\n        else true\n      end"
+          "value": "case \"cloud_ledger_entry\".\"kind\"\n        when 'welcome_credit' then \"cloud_ledger_entry\".\"reference_kind\" = 'organization'\n        when 'purchased_credit' then \"cloud_ledger_entry\".\"reference_kind\" = 'checkout_session'\n        when 'inference_charge' then \"cloud_ledger_entry\".\"reference_kind\" = 'settlement_interval'\n        else true\n      end"
         },
-        "cloud_ledger_entry_charge_names_its_usage_record": {
-          "name": "cloud_ledger_entry_charge_names_its_usage_record",
-          "value": "case when \"cloud_ledger_entry\".\"reference_kind\" = 'usage_record'\n        then \"cloud_ledger_entry\".\"usage_record_id\" = \"cloud_ledger_entry\".\"reference_id\"\n        else \"cloud_ledger_entry\".\"usage_record_id\" is null\n      end"
+        "cloud_ledger_entry_interval_matches_kind": {
+          "name": "cloud_ledger_entry_interval_matches_kind",
+          "value": "case when \"cloud_ledger_entry\".\"kind\" = 'inference_charge'\n        then \"cloud_ledger_entry\".\"interval_started_at\" is not null and \"cloud_ledger_entry\".\"interval_ended_at\" is not null\n          and \"cloud_ledger_entry\".\"interval_started_at\" < \"cloud_ledger_entry\".\"interval_ended_at\"\n        else \"cloud_ledger_entry\".\"interval_started_at\" is null and \"cloud_ledger_entry\".\"interval_ended_at\" is null end"
         },
         "cloud_ledger_entry_sign_follows_its_kind": {
           "name": "cloud_ledger_entry_sign_follows_its_kind",
-          "value": "case \"cloud_ledger_entry\".\"kind\"\n        when 'welcome_credit' then \"cloud_ledger_entry\".\"amount_micros\" > 0\n        when 'purchased_credit' then \"cloud_ledger_entry\".\"amount_micros\" > 0\n        when 'inference_charge' then \"cloud_ledger_entry\".\"amount_micros\" <= 0\n        else \"cloud_ledger_entry\".\"amount_micros\" <> 0\n      end"
+          "value": "case \"cloud_ledger_entry\".\"kind\"\n        when 'welcome_credit' then \"cloud_ledger_entry\".\"amount_micros\" > 0\n        when 'purchased_credit' then \"cloud_ledger_entry\".\"amount_micros\" > 0\n        when 'inference_charge' then \"cloud_ledger_entry\".\"amount_micros\" < 0\n        else \"cloud_ledger_entry\".\"amount_micros\" <> 0\n      end"
         }
       },
       "isRLSEnabled": false
@@ -5914,6 +5614,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "billing_activated_at": {
+          "name": "billing_activated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -5970,24 +5676,155 @@
       },
       "isRLSEnabled": false
     },
-    "public.cloud_stripe_event": {
-      "name": "cloud_stripe_event",
+    "public.cloud_meter_period": {
+      "name": "cloud_meter_period",
       "schema": "",
       "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
           "notNull": true
         },
-        "type": {
-          "name": "type",
+        "stripe_subscription_id": {
+          "name": "stripe_subscription_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "received_at": {
-          "name": "received_at",
+        "period_started_at": {
+          "name": "period_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "period_ends_at": {
+          "name": "period_ends_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel": {
+          "name": "channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stripe_customer_id": {
+          "name": "stripe_customer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "meter_id": {
+          "name": "meter_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_name": {
+          "name": "event_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "price_id": {
+          "name": "price_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "invoice_id": {
+          "name": "invoice_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observed_through_hour": {
+          "name": "observed_through_hour",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "accepted_seconds": {
+          "name": "accepted_seconds",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "uncertain_seconds": {
+          "name": "uncertain_seconds",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "last_observed_seconds": {
+          "name": "last_observed_seconds",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "pending_identifier": {
+          "name": "pending_identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_seconds": {
+          "name": "pending_seconds",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_value": {
+          "name": "pending_value",
+          "type": "numeric(30, 12)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_timestamp": {
+          "name": "pending_timestamp",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_hour": {
+          "name": "pending_hour",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_first_sent_at": {
+          "name": "pending_first_sent_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        },
+        "last_outcome": {
+          "name": "last_outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
@@ -5995,18 +5832,83 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "foreignKeys": {
+        "cloud_meter_period_organization_id_organization_id_fk": {
+          "name": "cloud_meter_period_organization_id_organization_id_fk",
+          "tableFrom": "cloud_meter_period",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "cloud_meter_period_pk": {
+          "name": "cloud_meter_period_pk",
+          "columns": [
+            "organization_id",
+            "stripe_subscription_id",
+            "period_started_at",
+            "period_ends_at",
+            "channel"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "cloud_stripe_event_id_is_not_blank": {
-          "name": "cloud_stripe_event_id_is_not_blank",
-          "value": "btrim(\"cloud_stripe_event\".\"id\") <> ''"
+        "cloud_meter_period_channel_allowed": {
+          "name": "cloud_meter_period_channel_allowed",
+          "value": "\"cloud_meter_period\".\"channel\" in ('web_call_minutes', 'phone_minutes')"
         },
-        "cloud_stripe_event_type_is_not_blank": {
-          "name": "cloud_stripe_event_type_is_not_blank",
-          "value": "btrim(\"cloud_stripe_event\".\"type\") <> ''"
+        "cloud_meter_period_state_allowed": {
+          "name": "cloud_meter_period_state_allowed",
+          "value": "\"cloud_meter_period\".\"state\" in ('open', 'needs_attention', 'closed')"
+        },
+        "cloud_meter_period_outcome_allowed": {
+          "name": "cloud_meter_period_outcome_allowed",
+          "value": "\"cloud_meter_period\".\"last_outcome\" is null or \"cloud_meter_period\".\"last_outcome\" in ('accepted', 'duplicate', 'uncertain', 'invoice_closed', 'timestamp_expired')"
+        },
+        "cloud_meter_period_subscription_not_blank": {
+          "name": "cloud_meter_period_subscription_not_blank",
+          "value": "btrim(\"cloud_meter_period\".\"stripe_subscription_id\") <> ''"
+        },
+        "cloud_meter_period_customer_not_blank": {
+          "name": "cloud_meter_period_customer_not_blank",
+          "value": "btrim(\"cloud_meter_period\".\"stripe_customer_id\") <> ''"
+        },
+        "cloud_meter_period_meter_not_blank": {
+          "name": "cloud_meter_period_meter_not_blank",
+          "value": "btrim(\"cloud_meter_period\".\"meter_id\") <> ''"
+        },
+        "cloud_meter_period_event_not_blank": {
+          "name": "cloud_meter_period_event_not_blank",
+          "value": "btrim(\"cloud_meter_period\".\"event_name\") <> ''"
+        },
+        "cloud_meter_period_price_not_blank": {
+          "name": "cloud_meter_period_price_not_blank",
+          "value": "btrim(\"cloud_meter_period\".\"price_id\") <> ''"
+        },
+        "cloud_meter_period_bounds": {
+          "name": "cloud_meter_period_bounds",
+          "value": "\"cloud_meter_period\".\"period_ends_at\" > \"cloud_meter_period\".\"period_started_at\""
+        },
+        "cloud_meter_period_seconds_counted": {
+          "name": "cloud_meter_period_seconds_counted",
+          "value": "\n      \"cloud_meter_period\".\"accepted_seconds\" between 0 and 9007199254740991\n      and \"cloud_meter_period\".\"uncertain_seconds\" between 0 and 9007199254740991\n      and \"cloud_meter_period\".\"last_observed_seconds\" between 0 and 9007199254740991\n    "
+        },
+        "cloud_meter_period_pending_complete": {
+          "name": "cloud_meter_period_pending_complete",
+          "value": "\n      num_nonnulls(\"cloud_meter_period\".\"pending_identifier\", \"cloud_meter_period\".\"pending_seconds\", \"cloud_meter_period\".\"pending_value\",\n        \"cloud_meter_period\".\"pending_timestamp\", \"cloud_meter_period\".\"pending_hour\", \"cloud_meter_period\".\"pending_first_sent_at\") in (0, 6)\n    "
+        },
+        "cloud_meter_period_pending_valid": {
+          "name": "cloud_meter_period_pending_valid",
+          "value": "\"cloud_meter_period\".\"pending_identifier\" is null or (\n      btrim(\"cloud_meter_period\".\"pending_identifier\") <> ''\n      and \"cloud_meter_period\".\"pending_seconds\" between 1 and 9007199254740991\n      and \"cloud_meter_period\".\"pending_value\" > 0\n      and \"cloud_meter_period\".\"pending_timestamp\" >= \"cloud_meter_period\".\"period_started_at\"\n      and \"cloud_meter_period\".\"pending_timestamp\" < \"cloud_meter_period\".\"period_ends_at\"\n    )"
         }
       },
       "isRLSEnabled": false
