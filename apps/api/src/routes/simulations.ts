@@ -8,6 +8,7 @@ import {
   getSimulation,
   getSimulationExecutionEvidence,
   NotPermittedError,
+  readSimulationUsage,
   readTrace,
   readTraceGrading,
   regradeTrace,
@@ -361,6 +362,61 @@ export async function simulationRoutes(
         simulationId,
         reopened: requested.reopened ? 1 : 0,
         alreadyWaiting: requested.alreadyWaiting ? 1 : 0,
+      });
+    },
+  );
+
+  /**
+   * What one simulation cost, by provider and model.
+   *
+   * **Not on `/v1`, and that is the decision rather than an oversight.** The
+   * public contract gains nothing from this effort: usage is a product surface
+   * the pages read, and putting it in the published API would be a shape Egma
+   * has to keep for customers before anybody has asked for one. So it sits on
+   * the browser's own path beside `/api/me`, inside the same credentialed
+   * scope every read on this route group goes through.
+   *
+   * **Every role may read it.** A run that paused for money has to explain
+   * itself to whoever started it, whatever they are allowed to change — so the
+   * refusal a `viewer` meets is on the buttons, never on the number.
+   */
+  app.get(
+    "/api/simulations/:simulationId/usage",
+    async (request, reply) => {
+      const query = (request.query ?? {}) as Record<string, unknown>;
+      const { simulationId } = request.params as { simulationId: string };
+      const acting = await reachingIn(
+        requesterOf(request).auth,
+        projectNamedByPlatform(query),
+      );
+      if ("refusal" in acting) return refuseActing(reply, acting);
+
+      const simulation = await getSimulation(acting.auth, simulationId);
+      if (simulation === undefined) {
+        return notFound(reply, NO_SUCH_SIMULATION);
+      }
+      // An organization-wide credential can find this id across its projects.
+      // Once the row is known, the read uses the exact project the row names,
+      // because spend is filed inside one.
+      const usage = await readSimulationUsage(
+        acting.auth.projectId === simulation.projectId
+          ? acting.auth
+          : { ...acting.auth, projectId: simulation.projectId },
+        simulationId,
+      );
+
+      return reply.send({
+        simulationId,
+        amountMicros: usage.amountMicros,
+        requests: usage.requests,
+        byModel: usage.byModel.map((one) => ({
+          provider: one.provider,
+          model: one.model,
+          unit: one.unit,
+          requests: one.requests,
+          quantities: one.quantities,
+          amountMicros: one.amountMicros,
+        })),
       });
     },
   );

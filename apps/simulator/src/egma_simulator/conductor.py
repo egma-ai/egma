@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    MetricsFrame,
     OutputAudioRawFrame,
     StartFrame,
     TextFrame,
@@ -37,6 +38,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.metrics.metrics import STTUsageMetricsData, TTSUsageMetricsData
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -71,12 +73,14 @@ from .recording import AudioFacts, dual_channel_wav
 from .speech import (
     SCRIPTED_PAIR,
     PersonaVoice,
+    ProviderUsageMetricsData,
     SpeechFault,
     SpeechLegs,
     SpeechProviders,
     build_legs,
     build_vad,
 )
+from .usage import ProviderUsage, audio_seconds_usage, characters_usage
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +108,7 @@ PERSONA_ENDED_SILENCE: Ending = (
 
 OnUtterance = Callable[[str, str, int, int], Awaitable[None]]
 OnMeasured = Callable[[str, int, int], Awaitable[None]]
+OnProviderUsage = Callable[[ProviderUsage], Awaitable[None]]
 OnAnswered = Callable[[], Awaitable[None]]
 
 
@@ -562,6 +567,23 @@ class _PersonaLLMService(LLMService):
         self._reply = None
         self._failure = None
         reply = await self._persona.reply_to(context)
+        if reply.usage is not None:
+            # What the provider says this turn cost, onto the same bus the
+            # speaking and listening legs report on. The model client already
+            # read it out of the body it parsed for the words; putting it here
+            # is what lets one collector at the end of the pipeline see every
+            # provider request a voice simulation makes.
+            await self.push_frame(
+                MetricsFrame(
+                    data=[
+                        ProviderUsageMetricsData(
+                            processor=self.name,
+                            model=reply.usage.model,
+                            usage=reply.usage,
+                        )
+                    ]
+                )
+            )
         await self.push_frame(LLMTextFrame(reply.text))
         reply = await self._execute_tool_calls(reply, context)
         self._reply = reply
@@ -775,6 +797,73 @@ class _Timeline(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+class _UsageLedger(FrameProcessor):
+    """Every provider request this pipeline made, in one place.
+
+    **One collector rather than a callback per leg**, because the legs do not
+    agree about who counts. Cartesia and Deepgram return no usage at all and
+    Pipecat counts what Egma sent them; OpenAI's realtime transcription and the
+    persona's chat completions return their own figures and those are what is
+    billed. A metrics frame is a system frame, so every one of them flows past
+    here whichever service raised it, and this is the only place that has to
+    know which leg speaks to whom.
+
+    It reports and never stores: the record is authored as a span by whoever
+    built this conductor, so a bill reaches the platform on the same ordered,
+    replayable path a transcript does.
+    """
+
+    def __init__(
+        self,
+        *,
+        speech: SpeechProviders,
+        report: Callable[[ProviderUsage], Awaitable[None]],
+    ) -> None:
+        super().__init__()
+        self._speech = speech
+        self._report = report
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, MetricsFrame):
+            for datum in frame.data:
+                usage = self._usage_of(datum)
+                if usage is not None:
+                    await self._report(usage)
+        await self.push_frame(frame, direction)
+
+    def _usage_of(self, datum: object) -> ProviderUsage | None:
+        if isinstance(datum, ProviderUsageMetricsData):
+            # Already whole: a leg that holds the provider's own numbers built
+            # this and there is nothing here to add to it.
+            return datum.usage
+        if isinstance(datum, STTUsageMetricsData):
+            provider = self._speech.stt_provider
+            model = self._speech.stt_model
+            if provider is None or model is None:
+                return None
+            return audio_seconds_usage(
+                datum.value.audio_seconds,
+                provider=provider,
+                model=model,
+                operation=self._speech.stt,
+            )
+        if isinstance(datum, TTSUsageMetricsData):
+            provider = self._speech.tts_provider
+            model = self._speech.tts_model
+            if provider is None or model is None:
+                return None
+            return characters_usage(
+                datum.value,
+                provider=provider,
+                model=model,
+                operation=self._speech.tts,
+            )
+        # Every other metric — time to first byte, processing time — is a
+        # timing fact and not a bill. The measure catalog owns those.
+        return None
+
+
 @dataclass
 class _Record:
     history: list[Turn] = field(default_factory=list)
@@ -807,6 +896,7 @@ class VoiceConductor:
         self._blobs = blobs
         self._recording_key = recording_key
         self._parameters = parameters
+        self._speech = speech
         self._legs = build_legs(speech, voice=voice)
         self._vad = build_vad(speech)
 
@@ -816,6 +906,7 @@ class VoiceConductor:
         self._on_utterance: OnUtterance | None = None
         self._on_measured: OnMeasured | None = None
         self._on_answered: OnAnswered | None = None
+        self._on_provider_usage: OnProviderUsage | None = None
 
         self._media: VoiceMedia | None = None
         self._ear: _AgentEar | None = None
@@ -888,6 +979,7 @@ class VoiceConductor:
         on_utterance: OnUtterance,
         on_measured: OnMeasured,
         on_answered: OnAnswered | None = None,
+        on_provider_usage: OnProviderUsage | None = None,
     ) -> Conducted:
         self._persona = persona
         self._max_turns = max_turns
@@ -895,6 +987,7 @@ class VoiceConductor:
         self._on_utterance = on_utterance
         self._on_measured = on_measured
         self._on_answered = on_answered
+        self._on_provider_usage = on_provider_usage
 
         watchdog = asyncio.create_task(
             _duration_watchdog(max_duration_seconds, controls),
@@ -921,6 +1014,11 @@ class VoiceConductor:
         if controls.cause is not None:
             return self._ended(duration_limit_reached(max_duration_seconds))
         return self._ended(self._ending or turn_limit_reached(max_turns))
+
+    async def _provider_spent(self, usage: ProviderUsage) -> None:
+        """One provider request this conversation made, handed upward."""
+        if self._on_provider_usage is not None:
+            await self._on_provider_usage(usage)
 
     def _ended(self, named: Ending) -> Conducted:
         ending, reason = named
@@ -954,6 +1052,7 @@ class VoiceConductor:
         recorder = _EvidenceRecorder(num_channels=2, auto_start_recording=True)
         media = self._media
         timeline = _Timeline(self, media, recorder)
+        ledger = _UsageLedger(speech=self._speech, report=self._provider_spent)
 
         @recorder.event_handler("on_track_audio_data")
         async def _recorded(
@@ -981,11 +1080,18 @@ class VoiceConductor:
                 *media.output,
                 recorder,
                 timeline,
+                ledger,
             ]
         )
         worker = PipelineWorker(
             pipeline,
-            params=PipelineParams(),
+            # **The usage half of Pipecat's metrics, switched on.** Without it
+            # every service's usage report is a no-op, and the characters a
+            # speaking leg was handed and the seconds a listening leg was sent
+            # are counted by nobody — so a voice simulation would show the
+            # persona's own token cost and nothing else. `enable_metrics` is
+            # its gate: the usage flag alone does nothing.
+            params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
             idle_timeout_secs=None,
             # Native service spans inherit the simulation root already
             # attached by RunningSimulation. Pipecat's interaction-cycle

@@ -51,6 +51,7 @@ from .reporting import Reporter
 from .spans import SpanEmitter, trace_id_for
 from .spec import SimulationSpec
 from .speech import SpeechProviders
+from .usage import ProviderUsage
 
 logger = logging.getLogger(__name__)
 
@@ -311,6 +312,7 @@ class RunningSimulation:
                         on_utterance=self._on_utterance,
                         on_measured=self._on_measured,
                         on_answered=self._on_answered,
+                        on_provider_usage=self._on_provider_usage,
                     )
                 else:
                     assert assembled.plug is not None
@@ -323,6 +325,7 @@ class RunningSimulation:
                         on_timing=self._on_timing,
                         on_tool_call=self._on_tool_call,
                         on_answered=self._on_answered,
+                        on_provider_usage=self._on_provider_usage,
                         controls=self._controls,
                         name=f"sim:{self.simulation_id}",
                     )
@@ -500,6 +503,16 @@ class RunningSimulation:
                 began_unix_nano=call.began_unix_nano,
                 ended_unix_nano=call.ended_unix_nano,
             )
+
+    async def _on_provider_usage(self, usage: ProviderUsage) -> None:
+        """One provider request this simulation made, onto the record.
+
+        Authored as its own span, so it rides the write-ahead log and the one
+        ordered sender the transcript rides — which is what puts every bill on
+        the wire before the terminal report, and what makes a resend of this
+        flush collapse rather than charge twice.
+        """
+        self._spans.provider_usage(usage)
 
     async def _on_timing(self, measure: str, milliseconds: float) -> None:
         self._spans.measure(measure, milliseconds)

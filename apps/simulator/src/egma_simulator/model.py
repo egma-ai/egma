@@ -32,6 +32,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 
 from .client import UNREACHABLE
 from .redaction import REDACTED
+from .usage import ProviderUsage, llm_usage
 
 if TYPE_CHECKING:
     from .spec import SimulationSpec
@@ -85,6 +86,15 @@ class PersonaReply:
     text: str
     concluded: bool
     tool_calls: tuple[PersonaToolCall, ...] = ()
+    usage: ProviderUsage | None = None
+    """What the provider says this reply consumed, where it says anything.
+
+    It rides the reply because this is the one moment both facts exist
+    together: the body that carried the words is the body that carried the
+    bill, and reading one without keeping the other means measuring the call
+    again later or not at all. `None` on the scripted client, which spends
+    nothing.
+    """
 
     @property
     def requests_end_call(self) -> bool:
@@ -275,7 +285,15 @@ class OpenAICompatibleModel:
             text = GOODBYE
         if not text:
             raise ModelFailure("the model's answer had no words to speak")
-        return PersonaReply(text=text, concluded=False, tool_calls=tool_calls)
+        return PersonaReply(
+            text=text,
+            concluded=False,
+            tool_calls=tool_calls,
+            # Kept from the body Egma already has in hand. The pinned catalog
+            # model names it rather than the dated variant the provider says it
+            # served, because the rate card is keyed by the catalog.
+            usage=llm_usage(body, selection_model=self._model_name),
+        )
 
     def _tool_calls_from(self, written: object) -> tuple[PersonaToolCall, ...]:
         """Decode provider tool JSON; Pipecat executes the typed call later."""

@@ -49,6 +49,7 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
+    MetricsFrame,
     StartFrame,
     TextFrame,
     TranscriptionFrame,
@@ -56,6 +57,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
@@ -64,6 +66,7 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 from .config import STT_PROVIDERS, TTS_PROVIDERS, VAD_PROVIDERS
 from .spec import SelectedModels
+from .usage import ProviderUsage, realtime_transcription_usage
 
 logger = logging.getLogger(__name__)
 
@@ -390,6 +393,20 @@ class SpeechFault(RuntimeError):
     """
 
 
+class ProviderUsageMetricsData(MetricsData):
+    """What one provider request cost, on Pipecat's own metrics bus.
+
+    Pipecat already carries client-measured usage — seconds of audio sent,
+    characters handed over — and one collector at the end of the pipeline sees
+    every one of them. Where Egma holds the provider's *own* numbers instead,
+    they have to reach that same collector or they would need a second path
+    with a second set of ordering problems. So they ride the bus as one more
+    kind of metrics datum, and the collector reads all of them the same way.
+    """
+
+    usage: ProviderUsage
+
+
 @dataclass(frozen=True)
 class SpeechProviders:
     """The speech adapters resolved from one pinned persona version."""
@@ -410,6 +427,15 @@ class SpeechProviders:
     tts_model: str | None = None
     """The exact pinned models. Runtime code supplies no default."""
 
+    stt_provider: str | None = None
+    tts_provider: str | None = None
+    """Who bills for each leg.
+
+    The adapter above says which protocol is spoken; this says whose account
+    the request lands on, and a usage record needs both — one model name can be
+    reached over two protocols, and one protocol serves more than one provider.
+    """
+
     @classmethod
     def from_models(cls, models: SelectedModels, *, vad: str) -> SpeechProviders:
         """Resolve the direct adapters from the required models block.
@@ -426,6 +452,8 @@ class SpeechProviders:
             tts_key=models.tts.key,
             stt_model=models.stt.model,
             tts_model=models.tts.model,
+            stt_provider=models.stt.provider,
+            tts_provider=models.tts.provider,
         )
 
     def checked(self) -> SpeechProviders:
@@ -780,6 +808,45 @@ def _openai_realtime_ears(
 
     class OpenAIRealtimeSTTService(PipecatOpenAIRealtimeSTTService):
         """Pipecat's realtime service with the live model's current wire shape."""
+
+        async def _handle_transcription_completed(self, evt: dict) -> None:
+            """Keep what the provider says the transcription cost.
+
+            The completed event is the only place OpenAI states it, and Pipecat
+            reads the transcript out of that event and drops the rest. Two
+            shapes arrive — seconds of committed audio, or audio and text
+            tokens — and which one a model uses is said on the event itself, so
+            both are read rather than assumed.
+
+            Pushed before ``super()``, so the bill is on the bus ahead of the
+            transcription frame the turn is built from — the same ordering
+            Pipecat's own usage report has, and the one that puts the record
+            ahead of the terminal report.
+            """
+            usage = realtime_transcription_usage(
+                evt, selection_model=self._settings.model
+            )
+            if usage is not None:
+                await self.push_frame(
+                    MetricsFrame(data=[ProviderUsageMetricsData(
+                        processor=self.name,
+                        model=self._settings.model,
+                        usage=usage,
+                    )])
+                )
+            await super()._handle_transcription_completed(evt)
+
+        async def emit_stt_usage_metrics(self) -> None:
+            """Say nothing about the seconds Egma sent.
+
+            Pipecat counts the audio submitted to a listening leg and reports
+            it, which is the right answer for a provider that says nothing.
+            This one says something: the completed event carries the figure
+            OpenAI actually bills, and it is read above. Reporting Egma's own
+            count beside it would put two numbers for one request on the bus,
+            and whichever the platform used, one of them would be wrong.
+            """
+            return None
 
         async def _send_session_update(self) -> None:
             if self._settings.model != "gpt-live-transcribe":
