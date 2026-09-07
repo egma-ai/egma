@@ -262,9 +262,8 @@ async function seedExistingWork(): Promise<void> {
 beforeAll(async () => {
   database = await createEmptyDatabase("test_owned_mock_tools_migration");
 
-  // Everything up to the migration under test, from a directory holding
-  // nothing else. Applying the real directory afterwards finds those already
-  // recorded under the same hashes and applies only what follows.
+  // Keep this historical proof at its target schema. Later clean cutovers can
+  // remove the rows and columns whose preservation this migration promises.
   before = await mkdtemp(path.join(tmpdir(), "egma-before-test-owned-"));
   const earlier = (await readdir(MIGRATIONS_DIRECTORY))
     .filter((name) => name.endsWith(".sql") && name < UNDER_TEST)
@@ -288,8 +287,10 @@ afterAll(async () => {
 
 describe("the test-owned mock tools migration over a populated database", () => {
   it("applies over rows an older build already wrote", async () => {
-    const { applied } = await runMigrations(database.url);
-    expect(applied).toContain(UNDER_TEST);
+    if (before === undefined) throw new Error("the migration directory is not ready");
+    await cp(path.join(MIGRATIONS_DIRECTORY, UNDER_TEST), path.join(before, UNDER_TEST));
+    const { applied } = await runMigrations(database.url, before);
+    expect(applied).toEqual([UNDER_TEST]);
   });
 
   it("carries every override across as the version's own mock tools", async () => {

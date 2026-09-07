@@ -18,11 +18,10 @@ import {
  * The mock-tools migration, run the way a real deployment meets it: over a
  * database that already holds connections, runs and finished simulations.
  *
- * **What 0003 added and 0007 kept**, which is the four columns a temporary copy
- * of somebody's Retell agent is tracked by. The connection switch and the
- * project's own mocked world that arrived with them are gone again — proved in
- * `test-owned-mock-tools-migration.test.ts`, which is 0007's own file — so what
- * is asserted here is what a run still remembers.
+ * **What 0003 adds**, which includes the four columns a temporary copy of
+ * somebody's Retell agent is tracked by. The later removal of the connection
+ * switch and the project's own mocked world is proved separately in
+ * `test-owned-mock-tools-migration.test.ts`, which is 0007's own file.
  *
  * **Nothing 0003 wrote is backfilled and it disables no trigger.** The four run
  * columns arrive null, which is their honest value on every run already
@@ -205,9 +204,8 @@ async function seedExistingWork(): Promise<void> {
 beforeAll(async () => {
   database = await createEmptyDatabase("retell_mock_tools_migration");
 
-  // Everything up to the migration under test, from a directory holding
-  // nothing else. Applying the real directory afterwards finds those already
-  // recorded under the same hashes and applies only what follows.
+  // Keep this historical proof at its target schema. Later clean cutovers can
+  // remove the rows and columns whose preservation this migration promises.
   before = await mkdtemp(path.join(tmpdir(), "egma-before-mock-tools-"));
   const earlier = (await readdir(MIGRATIONS_DIRECTORY))
     .filter((name) => name.endsWith(".sql") && name < UNDER_TEST)
@@ -231,8 +229,10 @@ afterAll(async () => {
 
 describe("the mock-tools migration over a populated database", () => {
   it("applies over rows an older build already wrote", async () => {
-    const { applied } = await runMigrations(database.url);
-    expect(applied).toContain(UNDER_TEST);
+    if (before === undefined) throw new Error("the migration directory is not ready");
+    await cp(path.join(MIGRATIONS_DIRECTORY, UNDER_TEST), path.join(before, UNDER_TEST));
+    const { applied } = await runMigrations(database.url, before);
+    expect(applied).toEqual([UNDER_TEST]);
   });
 
   it("carries nothing across, because there is nothing to carry", async () => {
@@ -311,9 +311,10 @@ describe("the mock-tools migration over a populated database", () => {
     await store.sql(
       `insert into run
          (id, organization_id, project_id, suite_id, agent_id, connection_id,
-          status, triggered_via, connection_snapshot,
+          status, triggered_via, connection_snapshot, mock_tool_snapshot,
           expected_simulation_count)
-       values ($1, $2, $3, $4, $5, $6, 'pending', 'manual', '{}'::jsonb, 1)`,
+       values ($1, $2, $3, $4, $5, $6, 'pending', 'manual', '{}'::jsonb,
+         '{"defaults": [], "overrides": {}}'::jsonb, 1)`,
       [
         fresh,
         acme.organization,
