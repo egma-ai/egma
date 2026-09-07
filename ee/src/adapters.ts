@@ -19,6 +19,7 @@ import {
   createBillingAccount,
   openBillingAccount,
   readEntitlementFacts,
+  markInferenceSettlementFailed,
   type BillingAccount,
   type CloudPlan,
   type EntitlementFacts,
@@ -239,6 +240,7 @@ export function cloudBillingPlugIn(
   return {
     entitlements: cloudEntitlementSource(options),
     usage: cloudUsageSink(),
+    pricingUnavailable: markInferenceSettlementFailed,
     async organizationCreated(on, organizationId) {
       await createBillingAccount(on, organizationId, await readPlanCatalog());
     },

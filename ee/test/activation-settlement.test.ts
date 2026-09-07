@@ -14,6 +14,7 @@ import {
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { loadCloudBilling } from "../src/load.ts";
 import { startInferenceSettlementJob } from "../src/settlement.ts";
+import { startRateCardInitialization } from "../../apps/api/src/rate-card.ts";
 import {
   activateBilling,
   openBillingAccount,
@@ -548,4 +549,57 @@ it("does not enforce an existing zero account when its missing welcome credit ca
     (await openBillingAccount(one.organizationId)).settlementFailedAt,
   ).toBeNull();
   expect(await readLedgerBalance(one)).toBe(5_000_000);
+});
+
+it("allows stale zero credit during pricing initialization failure and restores enforcement only after complete collection", async () => {
+  const one = await customer();
+  await activateBilling(cutoff);
+  await database.sql(
+    "update cloud_billing_account set balance_micros = 0 where organization_id = $1",
+    [one.organizationId],
+  );
+  const plugIn = cloudBillingPlugIn();
+  const request = { organizationId: one.organizationId, providers: ["openai"] };
+  expect((await plugIn.entitlements.mayPlatformKeyFund(request)).funded).toBe(
+    false,
+  );
+  await database.sql(
+    "create function fail_pricing_initialization() returns trigger language plpgsql as $$ begin raise exception 'pricing seed unavailable'; end $$",
+  );
+  await database.sql(
+    "create trigger fail_pricing_initialization before insert on rate_card for each row execute function fail_pricing_initialization()",
+  );
+  let reported = false;
+  const job = startRateCardInitialization(
+    {
+      info() {},
+      error() {
+        reported = true;
+      },
+    },
+    plugIn.pricingUnavailable,
+  );
+  try {
+    await expect.poll(() => reported).toBe(true);
+    expect(await plugIn.entitlements.mayPlatformKeyFund(request)).toEqual({
+      funded: true,
+    });
+    await expect(
+      settleInferenceForOrganization(one.organizationId),
+    ).rejects.toThrow();
+    expect(await plugIn.entitlements.mayPlatformKeyFund(request)).toEqual({
+      funded: true,
+    });
+  } finally {
+    job.stop();
+    await database.sql("drop trigger fail_pricing_initialization on rate_card");
+  }
+  await upsertRateCard();
+  expect(await plugIn.entitlements.mayPlatformKeyFund(request)).toEqual({
+    funded: true,
+  });
+  await settleInferenceForOrganization(one.organizationId);
+  expect((await plugIn.entitlements.mayPlatformKeyFund(request)).funded).toBe(
+    false,
+  );
 });

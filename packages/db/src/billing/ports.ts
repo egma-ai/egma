@@ -150,6 +150,8 @@ export type BillingPlugIn = {
   readonly entitlements: EntitlementSource;
   readonly usage: UsageSink;
   organizationCreated(on: Transaction, organizationId: string): Promise<void>;
+  /** A shared pricing failure makes billing facts unreliable until collection recovers. */
+  pricingUnavailable?(): Promise<void>;
 };
 
 /**

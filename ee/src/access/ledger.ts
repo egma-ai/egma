@@ -3,6 +3,7 @@ import {
   authorize,
   fencedDatabase,
   readPlatformUsageTotal,
+  upsertRateCard,
   schema,
   type AuthContext,
 } from "@egma/db";
@@ -23,6 +24,23 @@ export type SettledUsage = {
 export async function settleInferenceForOrganization(
   organizationId: string,
   at = new Date(),
+): Promise<SettledUsage> {
+  await prepareInferenceCollection();
+  return collectInferenceForOrganization(organizationId, at);
+}
+
+async function prepareInferenceCollection(): Promise<void> {
+  try {
+    await upsertRateCard();
+  } catch (fault) {
+    await markInferenceSettlementFailed();
+    throw fault;
+  }
+}
+
+async function collectInferenceForOrganization(
+  organizationId: string,
+  at: Date,
 ): Promise<SettledUsage> {
   try {
     await openBillingAccount(organizationId);
@@ -126,6 +144,7 @@ export async function markInferenceSettlementFailed(
 
 /** Each organization is independent: one billing fault does not skip the others. */
 export async function settleInference(at = new Date()): Promise<SettledUsage> {
+  await prepareInferenceCollection();
   const accounts = await fencedDatabase()
     .select({ organizationId: cloudBillingAccount.organizationId })
     .from(cloudBillingAccount)
@@ -137,7 +156,7 @@ export async function settleInference(at = new Date()): Promise<SettledUsage> {
   let amountMicros = 0;
   for (const account of accounts) {
     try {
-      const settled = await settleInferenceForOrganization(
+      const settled = await collectInferenceForOrganization(
         account.organizationId,
         at,
       );

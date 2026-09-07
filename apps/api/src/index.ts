@@ -8,13 +8,13 @@ import {
   runClickHouseMigrations,
   runMigrations,
   seedPersonaLibrary,
-  upsertRateCard,
 } from "@egma/db";
 
 import { loadCloudBilling, type StoppableJob } from "./billing.ts";
 import { loadConfig, type Config } from "./config.ts";
 import { platformEvent } from "./platform-log.ts";
 import { buildApi } from "./server.ts";
+import { startRateCardInitialization } from "./rate-card.ts";
 
 const config = loadConfig();
 
@@ -68,19 +68,6 @@ const personaShelf = await seedPersonaLibrary();
 // their exact version. Project rows keep only scope and pass threshold. A
 // release that changed nothing writes nothing at all — not even `updated_at`.
 const graderCatalog = await reconcileGraderCatalog();
-
-// The rate card, written from the shipped file onto its table. After the
-// migrations because it writes rows, and before the first request because the
-// door that stores a usage record prices it against this table — a record
-// written before the prices existed would be stored at nothing and could never
-// be corrected, since a stored cost never moves.
-//
-// An insert that does nothing where the price is already there, so every
-// instance can run it on every boot and only a release that added a price
-// writes anything. A price is never updated: a change is a new row with a
-// later effective date, and the old row is what a past simulation is still
-// priced at.
-const rateCard = await upsertRateCard();
 
 // The billing adapter this deployment's settings select.
 //
@@ -168,14 +155,6 @@ if (graderCatalog.definitions.length > 0) {
     "Predefined graders were written to the library",
   );
 }
-if (rateCard.written.length > 0) {
-  // Prices are product catalog facts and are worth saying once: what this
-  // release added, and from which date each applies.
-  app.log.info(
-    { prices: rateCard.written },
-    "Rate-card prices were written from the shipped file",
-  );
-}
 if (cloudBilling !== undefined && cloudBilling.seededPlans.length > 0) {
   // A plan is a price somebody set. Saying which rows this boot wrote is what
   // makes a pricing change readable in a deployment log rather than only in a
@@ -237,11 +216,13 @@ app.log.info(
  * somebody's month.
  */
 let meterJob: StoppableJob | undefined;
+let rateCardJob: StoppableJob | undefined;
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     stopping = true;
     meterJob?.stop();
+    rateCardJob?.stop();
     void (async () => {
       await app.close();
       await disconnect();
@@ -260,6 +241,7 @@ app.log.info(
 
 // Started once the process is serving: it is neither a gate on serving nor
 // something a request waits for.
+rateCardJob = startRateCardInitialization(app.log, running.billing.pricingUnavailable);
 if (cloudBilling !== undefined && config.ingestion.role !== "ingest") {
   meterJob = cloudBilling.startMeterJob(app.log);
 }
