@@ -2593,7 +2593,7 @@ describe("goal-first agent setup", () => {
     ).toBeDefined();
     fireEvent.click(screen.getByRole("tab", { name: "Python" }));
     expect(document.body.textContent).toContain(
-      "await mockable(agent, ctx, session)",
+      "await simulation(agent, ctx, session)",
     );
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
     expect(routed.replace).not.toHaveBeenCalled();
@@ -2708,19 +2708,19 @@ describe("goal-first agent setup", () => {
     fireEvent.click(screen.getByRole("tab", { name: "JavaScript" }));
     expect(document.body.textContent).toContain("npm install @egma/livekit");
     expect(document.body.textContent).toContain(
-      "LiveKit Agents 1.5.0 or newer in the 1.x line",
+      "LiveKit Agents 1.5.5 or newer in the 1.x line",
     );
     expect(document.body.textContent).toContain(
-      'import { mockable } from "@egma/livekit"',
+      'import { simulation } from "@egma/livekit"',
     );
     expect(document.body.textContent).toContain(
-      "await mockable(agent, ctx, session)",
+      "await simulation(agent, ctx, session)",
     );
     expect(document.body.textContent).not.toContain(
       "Egma cannot set up JavaScript testing yet",
     );
     expect(document.body.textContent).not.toContain("pip install");
-    expect(document.body.textContent).not.toContain("from egma import mockable");
+    expect(document.body.textContent).not.toContain("from egma import simulation");
 
     const registration = sent.find(
       (call) => call.url === "/v1/agents?projectId=prj_1",
@@ -2863,7 +2863,7 @@ describe("goal-first agent setup", () => {
     ).toBeDefined();
     fireEvent.click(screen.getByRole("tab", { name: "Python" }));
     expect(document.body.textContent).toContain(
-      "await mockable(agent, ctx, session)",
+      "await simulation(agent, ctx, session)",
     );
 
     // The setup Egma cannot perform, handed over after the connection exists.
@@ -3090,7 +3090,7 @@ describe("goal-first agent setup", () => {
     expect(
       screen.getByText("What language is your LiveKit worker?"),
     ).toBeDefined();
-    expect(document.body.textContent).toContain("monitor_livekit(ctx)");
+    expect(document.body.textContent).toContain("monitor(ctx)");
     expect(
       (screen.getByRole("button", {
         name: "Return to agents",
@@ -3098,8 +3098,8 @@ describe("goal-first agent setup", () => {
     ).toBe(false);
 
     const copy = document.body.textContent ?? "";
-    expect(copy).toContain("monitor_livekit(ctx)");
-    expect(copy.indexOf("monitor_livekit(ctx)")).toBeLessThan(
+    expect(copy).toContain("monitor(ctx)");
+    expect(copy.indexOf("monitor(ctx)")).toBeLessThan(
       copy.indexOf("await ctx.connect()"),
     );
     expect(copy).toContain("await session.start(...)");
@@ -3145,7 +3145,7 @@ describe("goal-first agent setup", () => {
         name: "Add monitoring to your LiveKit agent",
       }),
     ).toBeDefined();
-    expect(document.body.textContent).toContain("monitor_livekit(ctx)");
+    expect(document.body.textContent).toContain("monitor(ctx)");
     fireEvent.click(
       screen.getByRole("button", { name: "Continue to simulation" }),
     );
@@ -3169,7 +3169,7 @@ describe("goal-first agent setup", () => {
       }),
     ).toBeDefined();
     expect(document.body.textContent).toContain(
-      "await mockable(agent, ctx, session)",
+      "await simulation(agent, ctx, session)",
     );
     const leaving = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(leaving);
@@ -3213,14 +3213,16 @@ describe("goal-first agent setup", () => {
       }),
     ).toBeDefined();
     expect(screen.getByText("Install the Egma SDK")).toBeDefined();
-    expect(document.body.textContent).toContain("monitor_livekit(ctx)");
-    expect(document.body.textContent).not.toContain("monitorLiveKit(ctx)");
+    expect(document.body.textContent).toContain("monitor(ctx)");
+    expect(document.body.textContent).not.toContain(
+      'import { monitor } from "@egma/livekit"',
+    );
 
     fireEvent.click(screen.getByRole("tab", { name: "JavaScript" }));
 
     const shown = document.body.textContent ?? "";
     expect(shown).toContain("npm install @egma/livekit");
-    expect(shown).toContain("monitorLiveKit(ctx)");
+    expect(shown).toContain('import { monitor } from "@egma/livekit"');
     expect(shown).toContain(
       "LiveKit Agents 1.5.5 or newer in the 1.x line",
     );
@@ -3249,9 +3251,9 @@ describe("goal-first agent setup", () => {
       }),
     ).toBeDefined();
     expect(document.body.textContent).toContain(
-      'import { mockable } from "@egma/livekit"',
+      'import { simulation } from "@egma/livekit"',
     );
-    expect(document.body.textContent).not.toContain("from egma import mockable");
+    expect(document.body.textContent).not.toContain("from egma import simulation");
     expect(
       sent.some((call) => call.url === "/v1/agents?projectId=prj_1"),
     ).toBe(true);

@@ -17,6 +17,7 @@ import {
   ChatTranscript,
   RecordingEvidence,
   recordingOriginOf,
+  recordingSpeakerTimeline,
   simulationToolCalls,
   transcriptToolCalls,
   type SimulationEvidenceRecording,
@@ -735,12 +736,14 @@ describe("the transcript time rail", () => {
   /**
    * **Who answered a tool call, said once and quietly.**
    *
-   * Egma stamps the span it files for a call it served itself, so a reader
-   * knows the answer in front of them came from the test rather than from
-   * their own backend. A real call is the ordinary case and says nothing
-   * extra — there is no second word for "not mocked" to learn.
+   * A mock tool answered this call, read by name off the test version this
+   * simulation pinned, so a reader knows the answer in front of them came from
+   * the test rather than from their own backend. The mock tool's own name is
+   * the tool's name, already on the row, so the mark does not repeat it. A real
+   * call is the ordinary case and says nothing extra — there is no second word
+   * for "not mocked" to learn.
    */
-  it("marks a tool call egma answered, and leaves a real one unmarked", () => {
+  it("marks a call a mock tool answered, and leaves a real one unmarked", () => {
     const read = evidence();
     const transcript = read.transcript as NonNullable<
       ReturnType<typeof evidence>["transcript"]
@@ -769,7 +772,6 @@ describe("the transcript time rail", () => {
     );
 
     const mocked = screen.getByLabelText("Tool call, lookup_appointment");
-    expect(within(mocked).getByText(/mocked/u)).toBeTruthy();
     expect(mocked.textContent).toContain("mocked · Succeeded");
 
     rendered.rerender(
@@ -1192,6 +1194,214 @@ describe("the transcript time rail", () => {
     expect(
       screen.getByText("No spoken turns were recorded for this trace."),
     ).toBeTruthy();
+  });
+});
+
+/**
+ * **The run view shows the agent's POV, and one conversation once.**
+ *
+ * A simulation stores both accounts of the same call: the persona's, which is
+ * what egma's own simulator said, heard and recorded, and the agent's, which is
+ * what the agent's own process reported — every tool call with the arguments
+ * its model emitted and the result it received. The transcript a developer
+ * reads is the agent's. There is no side-by-side, no threshold and no diff:
+ * the persona's POV is stored, and what it is still drawn for is the recording
+ * underneath and the origin every row seeks against.
+ *
+ * The conversation here is the one that opened this effort — a booking, three
+ * tool calls, one of them mocked and one of them refused.
+ */
+describe("the agent's POV is what a reader is shown", () => {
+  const AGENT_TURNS = [
+    { ...turn("lk_human", "turn:human", "Anything Tuesday?", 1), pov: "agent" },
+    {
+      ...turn("lk_agent", "turn:agent", "Tuesday is fully booked.", 4),
+      pov: "agent",
+    },
+  ];
+
+  function toolCall(over: Record<string, unknown>) {
+    return {
+      spanId: "lk_tool",
+      parentSpanId: "lk_agent",
+      name: "function_tool",
+      kind: "tool" as const,
+      status: "ok" as const,
+      startedAt: "2026-08-15T10:00:06.000000Z",
+      durationNs: "60000000",
+      text: "",
+      audioUrl: "",
+      toolName: "check_availability",
+      toolArguments: '{"preferred_date":"Tuesday"}',
+      toolResult: "The next free slot is Thursday at 10:00 AM.",
+      pov: "agent",
+      spans: [],
+      ...over,
+    };
+  }
+
+  /** Both accounts of one conversation, under one trace. */
+  function bothPovs(tools: readonly Record<string, unknown>[]) {
+    const read = evidence();
+    const transcript = read.transcript as NonNullable<
+      ReturnType<typeof evidence>["transcript"]
+    >;
+    return {
+      ...transcript,
+      turns: [
+        // The persona's account: what egma's simulator heard.
+        ...transcript.turns.map((one) => ({ ...one, pov: "persona" })),
+        ...AGENT_TURNS,
+      ],
+      spans: [...tools],
+    };
+  }
+
+  it("lists the agent's turns and tool calls, and none of the persona's", () => {
+    const withBoth = bothPovs([
+      toolCall({ spanId: "lk_tool_1", toolName: "list_providers" }),
+      // egma's own row for the same conversation, from the lane where a
+      // platform serves egma's answers. It is not shown beside the agent's.
+      {
+        ...toolCall({
+          spanId: "egma_tool",
+          toolName: "check_availability",
+          pov: "persona",
+        }),
+      },
+    ]);
+
+    // The tool calls a reader is shown are the shared walk's, which is what
+    // the run view hands this component.
+    const shown = transcriptToolCalls(withBoth as never);
+    render(
+      <ChatTranscript transcript={withBoth as never} toolCalls={shown} />,
+    );
+
+    // The agent's words, and not the persona simulator's copy of the same
+    // conversation.
+    expect(screen.getByText("Anything Tuesday?")).toBeTruthy();
+    expect(screen.getByText("Tuesday is fully booked.")).toBeTruthy();
+    expect(screen.queryByText("Move Thursday's clean.")).toBeNull();
+    expect(screen.queryByText("You are all set for Tuesday.")).toBeNull();
+
+    // And the agent's tool call, once. egma's own row for the same call is
+    // not drawn beside it.
+    expect(screen.getAllByLabelText(/^Tool call, /u)).toHaveLength(1);
+    expect(screen.getByLabelText("Tool call, list_providers")).toBeTruthy();
+  });
+
+  it("keeps egma's own tool rows when the agent reported none", () => {
+    const read = evidence();
+    const transcript = read.transcript as NonNullable<
+      ReturnType<typeof evidence>["transcript"]
+    >;
+    const onlyEgma = {
+      ...transcript,
+      turns: transcript.turns.map((one) => ({ ...one, pov: "persona" })),
+      spans: [
+        toolCall({
+          spanId: "egma_only",
+          toolName: "get_availability",
+          pov: "persona",
+        }),
+      ],
+    };
+
+    expect(
+      transcriptToolCalls(onlyEgma as never).map((one) => one.toolName),
+    ).toEqual(["get_availability"]);
+  });
+
+  it("shows every call's arguments and result, and marks the mocked one by name", () => {
+    const withBoth = bothPovs([]);
+    const tools = [
+      toolCall({ spanId: "lk_1", toolName: "list_providers", toolArguments: "" }),
+      toolCall({ spanId: "lk_2", toolProvenance: "mocked" }),
+      toolCall({
+        spanId: "lk_3",
+        toolName: "book_appointment",
+        toolArguments: '{"provider":"Doctor Alvarez"}',
+        toolResult: "Booked.",
+      }),
+    ];
+
+    render(
+      <ChatTranscript transcript={withBoth as never} toolCalls={tools as never} />,
+    );
+
+    // One mark, on the one tool the pinned test version answers for. The mock
+    // tool's own name is the tool's name, already on the row.
+    expect(
+      screen.getByLabelText("Tool call, check_availability").textContent,
+    ).toContain("mocked ·");
+    expect(
+      screen.getByLabelText("Tool call, list_providers").textContent,
+    ).not.toContain("mocked");
+    expect(
+      screen.getByLabelText("Tool call, book_appointment").textContent,
+    ).not.toContain("mocked");
+
+    // The arguments the model emitted and the result it received, on the call
+    // that carries them. `list_providers` takes none, and an absent fact stays
+    // absent rather than becoming an empty object nobody wrote.
+    fireEvent.click(
+      screen.getByLabelText("Tool call, book_appointment").querySelector("summary")!,
+    );
+    const booking = screen.getByLabelText("Tool call, book_appointment");
+    expect(booking.textContent).toContain('{"provider":"Doctor Alvarez"}');
+    expect(booking.textContent).toContain("Booked.");
+    fireEvent.click(
+      screen.getByLabelText("Tool call, list_providers").querySelector("summary")!,
+    );
+    expect(
+      screen.getByLabelText("Tool call, list_providers").textContent,
+    ).toContain("No request was recorded.");
+  });
+
+  /**
+   * A call egma refused never reached a backend: the SDK raised, the model saw
+   * that tool fail, and the agent's own span for the call carries the error.
+   * The transcript shows it as a failed call, which is where a reader finds a
+   * protocol mistake instead of a silent real run.
+   */
+  it("shows a call egma refused as the error on the agent's own tool span", () => {
+    const withBoth = bothPovs([]);
+    const refused = toolCall({
+      spanId: "lk_refused",
+      toolName: "charge_card",
+      status: "error",
+      toolArguments: '{"amount_cents":4200}',
+      toolResult: "this simulation has no mock tool for 'charge_card'",
+    });
+
+    render(
+      <ChatTranscript
+        transcript={withBoth as never}
+        toolCalls={[refused as never]}
+      />,
+    );
+
+    const row = screen.getByLabelText("Tool call, charge_card");
+    expect(row.querySelector('[data-state-mark="error"]')).not.toBeNull();
+    expect(row.textContent).toContain("Failed");
+    // Unmarked: nothing answered it, so no mock tool is named.
+    expect(row.textContent).not.toContain("mocked");
+  });
+
+  /**
+   * The persona's POV is what recorded the audio, so its turns are the ones
+   * measured on the recording's own clock — the bands drawn over the waveform
+   * stay hers even while the transcript beside them is the agent's.
+   */
+  it("draws the waveform's speaker bands from the persona's POV", () => {
+    const withBoth = bothPovs([]);
+    const timeline = recordingSpeakerTimeline(withBoth as never);
+    expect(timeline.turns.map((one) => one.startedAt)).toEqual([
+      "2026-08-15T10:00:01.000000Z",
+      "2026-08-15T10:00:04.000000Z",
+    ]);
+    expect(timeline.endedAt).toBe("2026-08-15T10:00:40.000000Z");
   });
 });
 

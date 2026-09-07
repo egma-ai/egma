@@ -279,13 +279,11 @@ def _hand_back(records: list[dict], banked: Path) -> None:
     for speaker, text in turns_for(records, SIMULATION):
         print(f"{speaker:>6}: {text}")
 
-    print("\n--- the mocked tool calls, on the record ---")
+    print("\n--- the tool calls, on the record ---")
     for call in _tool_calls(records):
-        provenance = span_attribute(call, "egma.tool.provenance")
         print(
             f"{span_attribute(call, 'egma.tool.name')}: "
-            f"provenance={provenance}, "
-            f"mock_tool={span_attribute(call, 'egma.tool.mock_tool')}, "
+            f"arguments={span_attribute(call, 'egma.tool.arguments')}, "
             f"result={span_attribute(call, 'egma.tool.result')}"
         )
 
@@ -368,8 +366,10 @@ async def test_a_real_retell_voice_agent_is_conducted_in_text(
         "whose conversation moves through its flow or its states"
     )
 
-    # A mocked tool answer on the record: the other half. Every tool call the
-    # agent made that the run covered is marked mocked, never run for real.
+    # A mocked tool answer on the record: the other half. Nothing of egma
+    # runs inside a Retell agent and this lane offers no provider reference,
+    # so the seam's own record is this lane's whole tool record — and a
+    # covered call carries the answer egma authored for it.
     calls = _tool_calls(records)
     assert calls, (
         "the agent called no tool, so no mocked answer could land: set "
@@ -387,12 +387,9 @@ async def test_a_real_retell_voice_agent_is_conducted_in_text(
         f"{[span_attribute(call, 'egma.tool.name') for call in calls]}"
     )
     for call in mocked:
-        assert span_attribute(call, "egma.tool.provenance") == "mocked", (
-            "a covered tool call was not marked mocked: an authored answer did "
+        assert span_attribute(call, "egma.tool.result"), (
+            "a covered tool call recorded no answer: an authored answer did "
             "not reach the agent"
-        )
-        assert span_attribute(call, "egma.tool.mock_tool"), (
-            "a mocked call carries no mock-tool name"
         )
 
     # Nothing the simulator sent was refused on its way in. A throttled account

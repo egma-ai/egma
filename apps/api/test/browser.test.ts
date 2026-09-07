@@ -1237,7 +1237,11 @@ describe("what a project recorded in production", () => {
         }),
       ).toBe("nowrap");
       expect(shown).toContain("1m 13s");
-      expect(shown).toContain("2.35s");
+      // The p90 of the capture's three answered turns, which nearest-rank
+      // makes its slowest: 3066.59356 ms, measured from the caller's last
+      // audible sample (catalog version 8). `otlp-derived-measures.test.ts`
+      // works all three out by hand from this same capture.
+      expect(shown).toContain("3.07s");
 
       /*
        * **And no column saying `production`.** Every row on this surface is
@@ -1311,7 +1315,7 @@ describe("what a project recorded in production", () => {
         "Turns",
         "P90 turn latency",
       ]);
-      expect(await overview.innerText()).toContain("2.35s");
+      expect(await overview.innerText()).toContain("3.07s");
       expect(
         await sheet
           .getByRole("heading", { name: "Latency", exact: true })
@@ -3186,7 +3190,7 @@ describe("the complete product, walked in order in a second project", () => {
       expect(await sheet.innerText()).toContain(
         "What language is your LiveKit worker?",
       );
-      expect(await sheet.innerText()).toContain("monitor_livekit(ctx)");
+      expect(await sheet.innerText()).toContain("from egma import monitor");
       expect(
         await sheet.getByRole("tab", { name: "Python" }).getAttribute(
           "aria-selected",
@@ -3199,7 +3203,9 @@ describe("the complete product, walked in order in a second project", () => {
       await sheet.getByRole("tab", { name: "JavaScript" }).click();
       const javascriptInstructions = await sheet.innerText();
       expect(javascriptInstructions).toContain("npm install @egma/livekit");
-      expect(javascriptInstructions).toContain("monitorLiveKit(ctx)");
+      expect(javascriptInstructions).toContain(
+        'import { monitor } from "@egma/livekit"',
+      );
       expect(javascriptInstructions).not.toMatch(/unsupported/i);
       await sheet
         .getByRole("button", { name: "Continue to simulation" })
@@ -3241,13 +3247,15 @@ describe("the complete product, walked in order in a second project", () => {
         })
         .waitFor();
       expect(await sheet.innerText()).toContain(
-        "await mockable(agent, ctx, session)",
+        "await simulation(agent, ctx, session)",
       );
       expect(await sheet.innerText()).toContain(
-        'import { mockable } from "@egma/livekit"',
+        'import { simulation } from "@egma/livekit"',
       );
       expect(await sheet.innerText()).toContain("npm install @egma/livekit");
-      expect(await sheet.innerText()).not.toContain("from egma import mockable");
+      expect(await sheet.innerText()).not.toContain(
+        "from egma import simulation",
+      );
       expect(
         await sheet.getByRole("button", { name: /start monitoring/iu }).count(),
         "LiveKit monitoring is configured in customer code, not toggled here",

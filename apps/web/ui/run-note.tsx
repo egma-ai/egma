@@ -10,15 +10,18 @@ import { cn } from "@/lib/utils";
  * **A test carries mock tools and env now, and a connection either uses them or
  * cannot.** A person about to start a run has to know which, because the
  * failure this exists to stop is somebody believing a call was mocked when it
- * reached their real backend. The support table below is the whole of the rule.
+ * reached their real backend. One fact is not about the test's data at all: a
+ * LiveKit run needs the Egma SDK in the customer's own agent or the simulation
+ * fails, so that requirement is said on every LiveKit run. The support table
+ * below is the whole of the rule.
  *
  * **It is one quiet box, under the Connection field of the run-start sheet**
  * (founder, 2026-09-04): the house hairline, the surface fill, no corner, no
  * icon and no title. Muted text at the table's 14px, one short line per fact,
- * two of them in the ordinary case. The box's own edge carries the warning
- * colour where a connection cannot use what a test holds, so a "cannot use"
- * case is still read before an informative one without a coloured bar beside
- * every line. The words themselves say "cannot", so the colour stays
+ * one or two of them in the ordinary case. The box's own edge carries the
+ * warning colour where a connection cannot use what a test holds, so a "cannot
+ * use" case is still read before an informative one without a coloured bar
+ * beside every line. The words themselves say "cannot", so the colour stays
  * supporting information rather than the whole of the news.
  *
  * **The note is said once, where the choice is made.** It used to be drawn on
@@ -65,10 +68,10 @@ export type RunNoteConnection = {
  * At most this many lines, however many facts apply.
  *
  * Three is the ceiling rather than the ordinary case: the loud groups below are
- * two lines each and are mutually exclusive, so the box a person actually meets
- * is two lines, and a third arrives only when a quiet not-used fact stands
- * behind one of them. The ceiling stays because it is what keeps the box a box
- * when a fact is added to the table above.
+ * two lines at most and are mutually exclusive, so the box a person actually
+ * meets is one or two lines, and a third arrives only when a quiet not-used
+ * fact stands behind a two-line one. The ceiling stays because it is what keeps
+ * the box a box when a fact is added to the table above.
  */
 const LINES_AT_MOST = 3;
 
@@ -207,17 +210,29 @@ export function runNoteLines(
     });
   }
 
-  /* On LiveKit the customer's own agent serves the mock, through the SDK. */
-  if (livekit && mocks > 0) {
+  /*
+   * On LiveKit the SDK is the run itself, not an extra that mocking asks for.
+   *
+   * A LiveKit simulation whose agent never reports to egma fails, so the person
+   * about to start the run has to read the requirement whether or not any test
+   * mocks a tool. The requirement is therefore said on every LiveKit run, and
+   * the mock-tools sentence joins it only when some test carries one — on
+   * LiveKit the customer's own agent serves the mock, through that same SDK.
+   */
+  if (livekit) {
     groups.push({
       accent: "brand",
       lines: [
-        "Mock tools on LiveKit need the Egma SDK in your agent.",
-        <>
-          {`${carryOf(mocks, total)} mock tools. They are served only when your agent runs `}
-          <Key>mockable(...)</Key>
-          {". Tools a test does not mock run real."}
-        </>,
+        "A LiveKit simulation needs the Egma SDK in your agent.",
+        ...(mocks > 0
+          ? [
+              <>
+                {`${carryOf(mocks, total)} mock tools. They are served only when your agent runs `}
+                <Key>simulation(...)</Key>
+                {". Tools a test does not mock run real, and every call is on the transcript."}
+              </>,
+            ]
+          : []),
       ],
     });
   }
@@ -273,10 +288,11 @@ export function runNoteLines(
 /**
  * The note itself, or nothing at all when nothing applies.
  *
- * Nothing applying is the ordinary case — a suite of tests with no mock tools
- * and no env on a connection that would use them says nothing, because there
- * is nothing to say. The box is therefore drawn or not drawn; it never stands
- * open and empty under the Connection field.
+ * Nothing applying is an ordinary case — a Retell suite with no mock tools and
+ * no env that connection would use says nothing, because there is nothing to
+ * say. A LiveKit run always has the SDK requirement to say. The box is
+ * therefore drawn or not drawn; it never stands open and empty under the
+ * Connection field.
  */
 export function RunNote({
   className,

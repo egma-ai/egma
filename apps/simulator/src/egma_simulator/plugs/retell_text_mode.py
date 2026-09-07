@@ -487,22 +487,24 @@ class RetellTextMode:
             text="\n".join(said) or None,
             ended=self._ended,
             # Deliberately empty: every tool fact this lane sees goes to
-            # the mock-tool seam, which is the only writer that can stamp
-            # a call `mocked` and say what it was given. Reporting them
-            # here as well would put each call on the record twice.
+            # the mock-tool seam, which is the one writer of this lane's
+            # tool record. Reporting them here as well would put each call
+            # on the record twice.
             tool_calls=(),
             platform_notes=tuple(noted),
         )
 
     def _observed(self, message: dict) -> None:
-        """One tool call Retell reported, handed to the seam that stamps it.
+        """One tool call Retell reported, handed to the seam that keeps it.
 
-        A call whose name the run's snapshot covers is stamped ``mocked``
-        on that basis and on no other. What goes on the record is egma's
-        own rendering — the seam holds the copy that says which branch the
-        answer was — and an uncovered call lands as the bare observation
-        it is, because its return value is the customer's backend's and
-        nothing egma can vouch for.
+        **This lane's whole tool record.** Nothing of egma's runs inside a
+        Retell agent and this lane offers no provider reference, so no
+        report of the agent's own ever arrives: without this, the call
+        would land nowhere at all. What goes on the record is egma's own
+        rendering for a name the pinned version covers — the seam holds the
+        copy that says which branch the answer was — and an uncovered call
+        lands as the observation it is, because its return value is the
+        customer's backend's and nothing egma can vouch for.
         """
         name = message.get("name")
         if not isinstance(name, str) or not name.strip():

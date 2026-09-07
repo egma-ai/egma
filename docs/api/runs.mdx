@@ -209,6 +209,20 @@ grading fields:
   Whole-trace grading progress. See the states above.
 </ResponseField>
 
+<ResponseField name="agentPovIncomplete" type="boolean">
+  `true` when this simulation was graded without the agent's own account of the
+  conversation. A simulation stores two accounts, and grading waits for the
+  agent's — the SDK's export from inside the room, or the pull from the agent
+  platform — for 30 seconds and no longer. `true` says the wait ran out: what is
+  stored is Egma's own account, and the agent's is missing or partial, so a
+  reader that shows the agent's POV has to say so rather than show a fragment as
+  the whole. Regrade picks up a late arrival.
+
+  It is `false` on every simulation whose agent POV landed, and on every lane
+  that files none: a Retell phone call reaches nothing of Egma's, so nothing was
+  ever waited for.
+</ResponseField>
+
 <ResponseField name="grades" type="array">
   The current grade from each selected project grader. Each grade includes
   `projectGraderId`, `graderDefinitionId`, `graderDefinitionVersion`,

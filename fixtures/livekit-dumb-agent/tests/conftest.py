@@ -19,7 +19,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from egma import export
 from livekit.agents import Agent, AgentSession, ToolContext
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
 
 # The agent is a script, not a package: it is run as ``uv run agent.py``,
 # which is how a customer's own worker is run. Reaching it by path keeps
@@ -109,13 +114,18 @@ class StubRoom:
 
 @dataclass
 class StubContext:
-    """A job context, down to the two things the SDK reads of one."""
+    """A job context, down to the three things the SDK reads of one."""
 
     room: StubRoom
     job: StubJob
+    shutdown_callbacks: list[Any] = field(default_factory=list)
 
     async def connect(self) -> None:
         self.room.connect_calls += 1
+
+    def add_shutdown_callback(self, callback: Any) -> None:
+        """Where the span export puts its last flush before the job exits."""
+        self.shutdown_callbacks.append(callback)
 
 
 def outside_egma(
@@ -146,6 +156,38 @@ def inside_egma(
         room=StubRoom(present=()),
         job=StubJob(room=StubJobRoom(name=room_name), metadata=metadata),
     )
+
+
+PROJECT_KEY = f"egma_sk_{'a' * 43}"
+"""A key shaped exactly like a real project key and belonging to nobody."""
+
+
+@pytest.fixture
+def egma_export(monkeypatch):
+    """Somewhere for a simulation's spans to go, in memory.
+
+    ``egma.simulation`` installs the export before it says anything, and a
+    simulation room with nowhere to report is one the SDK refuses — which
+    is the point of the SDK and not a thing this suite is proving. So the
+    exporter is arranged, and what these tests look at is the exchange.
+    """
+    provider = TracerProvider()
+    monkeypatch.setattr(
+        export, "_select_compatible_provider", lambda _verb, _reference: provider
+    )
+    monkeypatch.setattr(
+        export, "_register_provider", lambda _provider, _reference: None
+    )
+    monkeypatch.setattr(
+        export,
+        "_build_exporter",
+        lambda _endpoint, _key, _verb: InMemorySpanExporter(),
+    )
+    monkeypatch.setattr(export, "_state", None)
+    monkeypatch.setenv("EGMA_URL", "https://api.egma.ai")
+    monkeypatch.setenv("EGMA_API_KEY", PROJECT_KEY)
+    yield provider
+    provider.shutdown()
 
 
 @pytest.fixture

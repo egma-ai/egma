@@ -1,12 +1,23 @@
 """The conversation, authored as OpenTelemetry spans.
 
 One ``SpanEmitter`` serves one simulation. Everything a conductor
-observes — each turn with who said it and what was said, each tool call
-the platform reported, each measurement — becomes a span, stamped when it
-happened and handed to a flush as an ordinary OTLP export document. On the wire that
+observes — each turn with who said it and what was said, each measurement
+— becomes a span, stamped when it happened and handed to a flush as an
+ordinary OTLP export document. On the wire that
 document is what any exporter would send, which is the whole point of
 speaking OTLP: a simulation arrives at the same ingest door a customer's
 agent posts to, and is the same shape at rest.
+
+**A call egma's seam conducts is not authored here.** Where the agent's
+own process runs the egma SDK, that process reports every call it made
+and that report is the tool record; the seam serves the answer and writes
+no row, so one call is one row and two records of it cannot disagree.
+Only a call a **platform reports afterwards** — the lane where the
+platform serves egma's answers itself, and nothing of egma's runs inside
+the agent — becomes a `tool_call` span, through
+:meth:`SpanEmitter.tool_call`. Whether a call was answered by a mock tool
+is read at display time, by name, from the pinned test version's mock
+tools, whichever way the call arrived. See ADR-0024 §3.
 
 What the platform and this emitter agree on is written down once, in
 ``packages/simulation-contract/span-vocabulary.md``, and pinned as golden
@@ -124,33 +135,6 @@ USAGE_RAW_ATTRIBUTE = "egma.usage.raw"
 TOOL_NAME_ATTRIBUTE = "egma.tool.name"
 TOOL_ARGUMENTS_ATTRIBUTE = "egma.tool.arguments"
 TOOL_RESULT_ATTRIBUTE = "egma.tool.result"
-TOOL_PROVENANCE_ATTRIBUTE = "egma.tool.provenance"
-MOCK_TOOL_ATTRIBUTE = "egma.tool.mock_tool"
-TOOL_LATE_ATTACHED_ATTRIBUTE = "egma.tool.late_attached"
-
-MOCKED_PROVENANCE = "mocked"
-"""How the call was answered: a mock tool answered, and egma served it.
-
-A result never rides without this, because a result with nothing to say
-where it came from would read as a return value egma observed rather than
-one it authored.
-"""
-
-REFUSED_PROVENANCE = "refused"
-"""How the call was answered: egma was asked and said no.
-
-The agent called a tool egma had told it egma answers for nothing of —
-a protocol error, refused on the wire and never waved through. It carries
-no result, because there was none, and no mock tool, because none
-answered.
-
-**It is a provenance and not an absence, and that is the whole reason it
-exists.** An absent stamp means the call was observed and not answered —
-a connection egma stands outside the tool path of, where the real tool
-ran. A refusal is the opposite fact: egma *was* in the path, and the tool
-did not run. Written the same way, a reader could not tell a refused call
-from a real backend quietly doing the work.
-"""
 
 _NANOSECONDS_PER_MILLISECOND = 1_000_000
 
@@ -332,95 +316,42 @@ class SpanEmitter:
             ended_unix_nano=ended_unix_nano,
         )
 
-    def tool_call(self, name: str, arguments: str | None) -> None:
-        """A tool call, as observed from egma's side of the connection.
-
-        One instant: the platform reports the invocation, not its span, and
-        stretching it over a guess would be inventing a fact nobody
-        measured. Nothing of the answer is recorded for the same reason —
-        egma did not see it. A call egma *answered* is a different story
-        and goes through :meth:`tool_exchange`.
-        """
-        now = self._clock()
-        self.tool_exchange(
-            name,
-            arguments=arguments,
-            began_unix_nano=now,
-            ended_unix_nano=now,
-        )
-
-    def tool_exchange(
+    def tool_call(
         self,
         name: str,
         *,
         arguments: str | None = None,
         answer: str | None = None,
-        mock_tool: str | None = None,
-        late_attached: bool = False,
-        refused: bool = False,
-        began_unix_nano: int,
-        ended_unix_nano: int,
+        at_unix_nano: int,
     ) -> None:
-        """One tool call, bracketed by the exchange egma conducted.
+        """One tool call a platform reported making, after it made it.
 
-        Where egma *answered* the call, the two ends are the moment the
-        call arrived and the moment the answer went back — the round trip
-        — so the time it really took is the span's own duration and no
-        attribute repeats the number for the two to disagree about.
+        **One instant, because that is all anybody measured.** Egma did
+        not conduct this exchange — the platform matched egma's answers and
+        served them itself — so there is no round trip to bracket, and
+        stretching the span over a guess would invent a fact nobody took.
 
-        **A result never rides without its provenance.** The rule that
-        looks like an exception — never record half an exchange nobody
-        observed — is about the *agent's* return values, which egma does
-        not see. An answer egma itself served is not observed, it is
-        authored, and recording it invents nothing. So the two travel
-        together or not at all, and this refuses to write one without the
-        other rather than leaving the record to be read two ways.
+        The answer rides only where egma authored one. A call for a name
+        this simulation covers was answered from egma's own rendering, so
+        recording it invents nothing; a call for any other name ran the
+        customer's real implementation and its return value is neither
+        egma's to vouch for nor this record's to claim.
 
-        **A refused call is stamped too, and for the mirror reason.** No
-        result, no mock tool — nothing answered it — but egma was in the
-        path and said no, and an unstamped span says the opposite: that
-        the call went past egma to a real backend. Two facts that far
-        apart may not share one shape.
+        There is no stamp saying who answered. Whether a mock tool did is
+        read at display time, by name, from the pinned test version's mock
+        tools — the authored world itself, which cannot change under a
+        result — so a second copy of that fact here could only come to
+        disagree with it.
         """
-        if (answer is None) != (mock_tool is None):
-            raise ValueError(
-                "a tool call's result and the mock tool that served it are "
-                "one fact: an answer with nothing to say where it came from "
-                "would read as a result Egma observed rather than authored"
-            )
-        if refused and answer is not None:
-            raise ValueError(
-                "a refused call is one Egma would not answer, so it cannot "
-                "carry an answer: the two stamps describe opposite halves of "
-                "the same moment and only one of them happened"
-            )
-        if late_attached and answer is None:
-            # The flag says a tool the census never named was *served*
-            # anyway. On a call nothing served, it would be a caveat about
-            # arguments nobody was answered about — a stamp with no fact
-            # under it.
-            raise ValueError(
-                "late-attached is a caveat about a call Egma served for a "
-                "tool the census never named, so it has nothing to qualify "
-                "on a call Egma did not answer"
-            )
         attributes: dict[str, str | bool] = {TOOL_NAME_ATTRIBUTE: name}
         if arguments is not None:
             attributes[TOOL_ARGUMENTS_ATTRIBUTE] = arguments
-        if answer is not None and mock_tool is not None:
+        if answer is not None:
             attributes[TOOL_RESULT_ATTRIBUTE] = answer
-            attributes[TOOL_PROVENANCE_ATTRIBUTE] = MOCKED_PROVENANCE
-            attributes[MOCK_TOOL_ATTRIBUTE] = mock_tool
-        elif refused:
-            attributes[TOOL_PROVENANCE_ATTRIBUTE] = REFUSED_PROVENANCE
-        if late_attached:
-            # Only ever true. A stamp for the ordinary case would ride
-            # every span, and a reader would learn nothing from finding it.
-            attributes[TOOL_LATE_ATTACHED_ATTRIBUTE] = True
         self._author(
             TOOL_CALL_SPAN,
-            started_unix_nano=began_unix_nano,
-            ended_unix_nano=ended_unix_nano,
+            started_unix_nano=at_unix_nano,
+            ended_unix_nano=at_unix_nano,
             attributes=attributes,
         )
 

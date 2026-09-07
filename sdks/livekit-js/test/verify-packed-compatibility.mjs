@@ -78,7 +78,7 @@ try {
 
   await writeFile(
     path.join(directory, "consumer.ts"),
-    `import { mockable, monitorLiveKit } from "@egma/livekit";
+    `import { monitor, simulation } from "@egma/livekit";
 import { type JobContext, voice } from "@livekit/agents";
 
 export async function integrate(
@@ -86,8 +86,8 @@ export async function integrate(
   ctx: JobContext,
   session: voice.AgentSession,
 ): Promise<void> {
-  monitorLiveKit(ctx);
-  await mockable(agent, ctx, session);
+  monitor(ctx);
+  await simulation(agent, ctx, session);
   const isEgmaChat =
     ctx.job.room?.name?.startsWith("egma-sim-chat-") ?? false;
   await session.start({
@@ -130,21 +130,31 @@ export async function integrate(
     path.join(directory, "runtime.mjs"),
     `import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mockable, monitorLiveKit } from "@egma/livekit";
+import { simulation } from "@egma/livekit";
 import { initializeLogger, llm, voice } from "@livekit/agents";
 import { z } from "zod";
 
 const liveKitVersion = process.argv[2];
 const projectKey = \`egma_sk_\${"a".repeat(43)}\`;
+// The discard port: an exporter that is real, and a flush that fails fast
+// rather than retrying on a timer while this script waits on it.
+const egmaEndpoint = "http://127.0.0.1:9";
+const [major, minor, patch] = liveKitVersion.split(".").map(Number);
+// Both verbs export spans, so both need LiveKit's public telemetry seam.
+// Below it the peer range still installs and the mock-tool hook still
+// exists, but a simulation Egma cannot be told about must not run.
+const hasTelemetrySeam =
+  major > 1 ||
+  (major === 1 && (minor > 5 || (minor === 5 && patch >= 5)));
 initializeLogger({ pretty: false, level: "silent" });
 
 function forbidReads(target, label) {
   return new Proxy(target, {
     get(_target, property) {
-      throw new Error(\`production mockable read \${label}.\${String(property)}\`);
+      throw new Error(\`production simulation read \${label}.\${String(property)}\`);
     },
     set(_target, property) {
-      throw new Error(\`production mockable wrote \${label}.\${String(property)}\`);
+      throw new Error(\`production simulation wrote \${label}.\${String(property)}\`);
     },
   });
 }
@@ -155,10 +165,10 @@ function allowReads(target, label, allowed) {
       if (allowed.has(property)) {
         return Reflect.get(inner, property, receiver);
       }
-      throw new Error(\`production mockable read \${label}.\${String(property)}\`);
+      throw new Error(\`production simulation read \${label}.\${String(property)}\`);
     },
     set(_target, property) {
-      throw new Error(\`production mockable wrote \${label}.\${String(property)}\`);
+      throw new Error(\`production simulation wrote \${label}.\${String(property)}\`);
     },
   });
 }
@@ -185,8 +195,30 @@ const agent = forbidReads(
   "agent",
 );
 const session = forbidReads(productionSession, "session");
-await mockable(agent, productionContext, session);
+await simulation(agent, productionContext, session);
 await productionSession.close();
+
+if (!hasTelemetrySeam) {
+  // Everything below needs the exporter, and this version has nowhere to
+  // install it. A simulation room says so plainly and stops; the production
+  // room above stayed inert, which is the whole of what this version can do.
+  const belowSeamSession = new voice.AgentSession();
+  await assert.rejects(
+    simulation(
+      new voice.Agent({ instructions: "Compatibility check" }),
+      { job: { room: { name: "egma-sim-packed-below-seam" } } },
+      belowSeamSession,
+      { endpoint: egmaEndpoint, apiKey: projectKey },
+    ),
+    (error) =>
+      error instanceof Error &&
+      error.message.includes(
+        "requires a supported @livekit/agents version (>=1.5.5 <2)",
+      ),
+  );
+  await belowSeamSession.close();
+  process.exit(0);
+}
 
 class CompatibilityAgent extends voice.Agent {
   constructor(execute) {
@@ -237,7 +269,7 @@ function simulationContext(roomName) {
       job: { room: { name: roomName } },
       room,
       async connect() {
-        throw new Error("mockable connected an already-connected room");
+        throw new Error("the simulation verb connected an already-connected room");
       },
       addShutdownCallback(callback) {
         shutdownCallbacks.push(callback);
@@ -258,35 +290,41 @@ function toolCallingSession(input, value) {
 }
 
 let realToolCalls = 0;
-const simulation = simulationContext("egma-sim-packed-compatibility");
-const simulationAgent = new CompatibilityAgent(async () => {
+const oneSimulation = simulationContext("egma-sim-packed-compatibility");
+oneSimulation.agent = new CompatibilityAgent(async () => {
   realToolCalls += 1;
   return "real-calendar";
 });
 const simulationSession = toolCallingSession("find a slot", "Tuesday");
-await mockable(simulationAgent, simulation.value, simulationSession);
-await simulationSession.start({ agent: simulationAgent });
+await simulation(oneSimulation.agent, oneSimulation.value, simulationSession, {
+  endpoint: egmaEndpoint,
+  apiKey: projectKey,
+});
+await simulationSession.start({ agent: oneSimulation.agent });
 await simulationSession.run({ userInput: "find a slot" }).wait();
 
 assert.equal(realToolCalls, 0);
 assert.deepEqual(
-  simulation.room.calls.map(({ method }) => method),
+  oneSimulation.room.calls.map(({ method }) => method),
   ["egma.hello", "egma.tool"],
 );
 assert.deepEqual(
-  simulation.room.calls.map(({ responseTimeout }) => responseTimeout),
+  oneSimulation.room.calls.map(({ responseTimeout }) => responseTimeout),
   [15_000, 45_000],
 );
-const hello = JSON.parse(simulation.room.calls[0].payload);
+const hello = JSON.parse(oneSimulation.room.calls[0].payload);
 assert.deepEqual(hello.tools.map(({ name }) => name), ["check_calendar"]);
-assert.deepEqual(JSON.parse(simulation.room.calls[1].payload), {
+assert.deepEqual(JSON.parse(oneSimulation.room.calls[1].payload), {
   name: "check_calendar",
   arguments: { value: "Tuesday" },
 });
-assert.equal(simulation.shutdownCallbacks.length, 1);
+// Two: the export's own flush goes on first, then the mock table's cleanup.
+assert.equal(oneSimulation.shutdownCallbacks.length, 2);
 
 await simulationSession.close();
-await Promise.all(simulation.shutdownCallbacks.map((callback) => callback()));
+await Promise.all(
+  oneSimulation.shutdownCallbacks.map((callback) => callback()),
+);
 
 let realAfterCleanup = 0;
 const unwrappedAgent = new CompatibilityAgent(async () => {
@@ -297,18 +335,38 @@ const unwrappedSession = toolCallingSession("find another slot", "Friday");
 await unwrappedSession.start({ agent: unwrappedAgent });
 await unwrappedSession.run({ userInput: "find another slot" }).wait();
 assert.equal(realAfterCleanup, 1);
-assert.equal(simulation.room.calls.length, 2);
+assert.equal(oneSimulation.room.calls.length, 2);
 await unwrappedSession.close();
 
+// One LiveKit job per process. The mock table releases on close, but the
+// exporter's resource carries the room this process files spans under and
+// cannot be rewritten — so a second room in this process is refused.
 const nextSimulation = simulationContext("egma-sim-packed-owner-release");
 const nextAgent = new CompatibilityAgent(async () => "real");
 const nextSession = new voice.AgentSession();
-await mockable(nextAgent, nextSimulation.value, nextSession);
-assert.equal(nextSimulation.shutdownCallbacks.length, 1);
-await Promise.all(
-  nextSimulation.shutdownCallbacks.map((callback) => callback()),
+await assert.rejects(
+  simulation(nextAgent, nextSimulation.value, nextSession, {
+    endpoint: egmaEndpoint,
+    apiKey: projectKey,
+  }),
+  (error) =>
+    error instanceof Error && error.message.includes("one job per process"),
 );
+assert.equal(nextSimulation.shutdownCallbacks.length, 0);
 await nextSession.close();
+`,
+  );
+  run(process.execPath, ["runtime.mjs", liveKitVersion]);
+
+  // Its own process, because the one above belongs to a simulation room and
+  // an exporter belongs to one LiveKit job.
+  await writeFile(
+    path.join(directory, "monitoring.mjs"),
+    `import assert from "node:assert/strict";
+import { monitor } from "@egma/livekit";
+
+const liveKitVersion = process.argv[2];
+const projectKey = \`egma_sk_\${"a".repeat(43)}\`;
 
 const shutdownCallbacks = [];
 const monitoringContext = {
@@ -331,12 +389,12 @@ const hasMonitoringSeam =
 
 if (hasMonitoringSeam) {
   assert.doesNotThrow(() =>
-    monitorLiveKit(monitoringContext, monitoringOptions),
+    monitor(monitoringContext, monitoringOptions),
   );
   assert.equal(shutdownCallbacks.length, 1);
 } else {
   assert.throws(
-    () => monitorLiveKit(monitoringContext, monitoringOptions),
+    () => monitor(monitoringContext, monitoringOptions),
     (error) =>
       error instanceof Error &&
       error.message.includes(
@@ -347,7 +405,7 @@ if (hasMonitoringSeam) {
 }
 `,
   );
-  run(process.execPath, ["runtime.mjs", liveKitVersion]);
+  run(process.execPath, ["monitoring.mjs", liveKitVersion]);
 
   process.stdout.write(
     `packed @egma/livekit is compatible with @livekit/agents@${liveKitVersion}\n`,

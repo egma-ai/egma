@@ -17,18 +17,18 @@ import { CopyBlock } from "./copy-block.tsx";
 // installed CLI owns the current LiveKit source contract.
 const PYTHON_INSTALL =
   "pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'";
-const PYTHON_HOOK = `from egma import monitor_livekit
+const PYTHON_HOOK = `from egma import monitor
 
 async def entrypoint(ctx):
-    monitor_livekit(ctx)
+    monitor(ctx)
     await ctx.connect()
     session = AgentSession(...)
     await session.start(...)`;
 const JAVASCRIPT_INSTALL = "npm install @egma/livekit";
-const JAVASCRIPT_HOOK = `import { monitorLiveKit } from "@egma/livekit";
+const JAVASCRIPT_HOOK = `import { monitor } from "@egma/livekit";
 
 export async function entrypoint(ctx: JobContext) {
-  monitorLiveKit(ctx);
+  monitor(ctx);
   await ctx.connect();
   const session = new voice.AgentSession(...);
   await session.start(...);
@@ -144,6 +144,11 @@ export function LiveKitMonitoringInstructions({
           <WorkerSteps language="javascript" />
         </TabsContent>
       </Tabs>
+      <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
+        The SDK has two verbs, and the room decides which one acts. This one
+        sends production conversations. In an Egma simulation room it does
+        nothing, because the simulation verb sends that conversation instead.
+      </p>
       <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
         Create a project key in{" "}
         <Link

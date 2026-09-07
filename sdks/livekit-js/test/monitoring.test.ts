@@ -31,12 +31,12 @@ vi.mock("@livekit/agents", async (importOriginal) => {
 });
 
 import {
-  monitorLiveKit,
-  monitoringStateForTests,
+  exportStateForTests as monitoringStateForTests,
   projectKey,
-  resetMonitoringForTests,
+  resetExportForTests as resetMonitoringForTests,
   traceEndpoint,
-} from "../src/monitoring.ts";
+} from "../src/export.ts";
+import { monitor } from "../src/monitoring.ts";
 
 const PROJECT_KEY = `egma_sk_${"a".repeat(43)}`;
 
@@ -131,7 +131,7 @@ describe("simulation monitoring separation", () => {
         .mockImplementation(() => undefined);
       const ctx = context(roomName);
       const forbiddenSignal = () => {
-        throw new Error("monitorLiveKit read a non-room simulation signal");
+        throw new Error("egma.monitor read a non-room simulation signal");
       };
       Object.defineProperty(ctx.job, "metadata", { get: forbiddenSignal });
       Object.defineProperty(ctx.job.room, "metadata", {
@@ -141,7 +141,7 @@ describe("simulation monitoring separation", () => {
         value: forbiddenSignal,
       });
 
-      monitorLiveKit(asJobContext(ctx));
+      monitor(asJobContext(ctx));
 
       expect(ctx.callbacks).toHaveLength(0);
       expect(monitoringStateForTests()).toBeUndefined();
@@ -152,20 +152,20 @@ describe("simulation monitoring separation", () => {
   );
 });
 
-describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
+describe.runIf(SUPPORTS_SHARED_TELEMETRY)("egma.monitor", () => {
   it("ignores dispatch metadata and LiveKit's simulation context in a production room", () => {
     const { global } = unusedProviders();
     vi.spyOn(trace, "getTracerProvider").mockReturnValue(global);
     const ctx = context();
     const forbiddenSignal = () => {
-      throw new Error("monitorLiveKit read a non-room simulation signal");
+      throw new Error("egma.monitor read a non-room simulation signal");
     };
     Object.defineProperty(ctx.job, "metadata", { get: forbiddenSignal });
     Object.defineProperty(ctx, "simulationContext", {
       value: forbiddenSignal,
     });
 
-    monitorLiveKit(asJobContext(ctx), {
+    monitor(asJobContext(ctx), {
       endpoint: "https://api.egma.ai",
       apiKey: PROJECT_KEY,
     });
@@ -181,8 +181,8 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
     vi.stubEnv("EGMA_API_KEY", PROJECT_KEY);
     const first = context();
 
-    monitorLiveKit(asJobContext(first));
-    monitorLiveKit(asJobContext(first));
+    monitor(asJobContext(first));
+    monitor(asJobContext(first));
 
     expect(monitoringStateForTests()?.endpoint).toBe(
       "https://api.egma.ai/v1/traces",
@@ -197,14 +197,14 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
     vi.spyOn(trace, "getTracerProvider").mockReturnValue(global);
     const firstRoom = "private-first-room";
     const secondRoom = "private-second-room";
-    monitorLiveKit(asJobContext(context(firstRoom)), {
+    monitor(asJobContext(context(firstRoom)), {
       endpoint: "https://api.egma.ai",
       apiKey: PROJECT_KEY,
     });
 
     let message = "";
     try {
-      monitorLiveKit(asJobContext(context(secondRoom)), {
+      monitor(asJobContext(context(secondRoom)), {
         endpoint: "https://api.egma.ai",
         apiKey: PROJECT_KEY,
       });
@@ -212,7 +212,8 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
       message = String(error);
     }
 
-    expect(message).toContain("different job");
+    expect(message).toContain("a different LiveKit job in this process");
+    expect(message).toContain("one job per process");
     expect(message).toContain("Restart");
     expect(message).not.toContain(firstRoom);
     expect(message).not.toContain(secondRoom);
@@ -231,7 +232,7 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
       async shutdown() {},
     };
 
-    monitorLiveKit(asJobContext(context()), {
+    monitor(asJobContext(context()), {
       endpoint: "https://api.egma.ai",
       apiKey: PROJECT_KEY,
     });
@@ -260,7 +261,7 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
       async shutdown() {},
     };
 
-    monitorLiveKit(asJobContext(context("production-room", "")), {
+    monitor(asJobContext(context("production-room", "")), {
       endpoint: "https://api.egma.ai",
       apiKey: PROJECT_KEY,
     });
@@ -280,7 +281,7 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
     vi.spyOn(trace, "getTracerProvider").mockReturnValue(provider);
 
     expect(() =>
-      monitorLiveKit(asJobContext(context()), {
+      monitor(asJobContext(context()), {
         endpoint: "https://api.egma.ai",
         apiKey: PROJECT_KEY,
       }),
@@ -324,7 +325,7 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
     const registerSpanProcessor = (processor: SpanProcessor) =>
       fanout.add(processor);
 
-    monitorLiveKit(asJobContext(context()), {
+    monitor(asJobContext(context()), {
       endpoint: "https://api.egma.ai",
       apiKey: PROJECT_KEY,
       existingTelemetry: {
@@ -371,7 +372,7 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
     expect(globalProvider).toBeInstanceOf(ProxyTracerProvider);
     expect((globalProvider as ProxyTracerProvider).getDelegate()).toBe(provider);
     expect(() =>
-      monitorLiveKit(asJobContext(context()), {
+      monitor(asJobContext(context()), {
         endpoint: "https://api.egma.ai",
         apiKey: PROJECT_KEY,
       }),
@@ -385,14 +386,14 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
     vi.spyOn(trace, "getTracerProvider").mockReturnValue(global);
     const firstKey = `egma_sk_${"a".repeat(43)}`;
     const secondKey = `egma_sk_${"b".repeat(43)}`;
-    monitorLiveKit(asJobContext(context()), {
+    monitor(asJobContext(context()), {
       endpoint: "https://api.egma.ai",
       apiKey: firstKey,
     });
 
     let message = "";
     try {
-      monitorLiveKit(asJobContext(context()), {
+      monitor(asJobContext(context()), {
         endpoint: "https://api.egma.ai",
         apiKey: secondKey,
       });
@@ -407,7 +408,7 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
 
   it("names a wrong context instead of leaking an internal type error", () => {
     expect(() =>
-      monitorLiveKit({} as JobContext, {
+      monitor({} as JobContext, {
         endpoint: "https://api.egma.ai",
         apiKey: PROJECT_KEY,
       }),
@@ -420,7 +421,7 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const ctx = context();
 
-    monitorLiveKit(asJobContext(ctx), {
+    monitor(asJobContext(ctx), {
       endpoint: "https://api.egma.ai",
       apiKey: PROJECT_KEY,
     });
@@ -450,7 +451,7 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
       .spyOn(OTLPTraceExporter.prototype, "export")
       .mockImplementation((_spans, callback) => callback({ code: 0 }));
 
-    monitorLiveKit(asJobContext(context()), {
+    monitor(asJobContext(context()), {
       endpoint: "https://api.egma.ai",
       apiKey: PROJECT_KEY,
     });
@@ -484,14 +485,14 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
       (_spans, callback) => callback({ code: 0 }),
     );
 
-    monitorLiveKit(asJobContext(context()), {
+    monitor(asJobContext(context()), {
       endpoint: "https://api.egma.ai",
       apiKey: PROJECT_KEY,
     });
     const options = setTracerProvider.mock.calls.at(-1)?.[1];
     const createCloudSpanProcessor = options?.createCloudSpanProcessor;
     if (createCloudSpanProcessor === undefined) {
-      throw new Error("monitorLiveKit did not provide a cloud processor factory");
+      throw new Error("egma.monitor did not provide a cloud processor factory");
     }
     const exportThroughGate = vi.fn<SpanExporter["export"]>(
       (_spans, callback) => callback({ code: 0 }),
@@ -518,7 +519,7 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
 });
 
 describe.runIf(!SUPPORTS_SHARED_TELEMETRY)(
-  "monitorLiveKit without LiveKit shared telemetry",
+  "egma.monitor without LiveKit shared telemetry",
   () => {
     it("keeps an Egma simulation inert before checking telemetry support", () => {
       const warning = vi
@@ -526,7 +527,7 @@ describe.runIf(!SUPPORTS_SHARED_TELEMETRY)(
         .mockImplementation(() => undefined);
       const ctx = context("egma-sim-legacy");
 
-      expect(() => monitorLiveKit(asJobContext(ctx))).not.toThrow();
+      expect(() => monitor(asJobContext(ctx))).not.toThrow();
       expect(ctx.callbacks).toHaveLength(0);
       expect(warning).toHaveBeenCalledWith(
         expect.stringContaining("not exported"),
@@ -534,7 +535,7 @@ describe.runIf(!SUPPORTS_SHARED_TELEMETRY)(
     });
 
     it("names the minimum LiveKit version for production monitoring", () => {
-      expect(() => monitorLiveKit(asJobContext(context()))).toThrow(
+      expect(() => monitor(asJobContext(context()))).toThrow(
         /@livekit\/agents>=1\.5\.5/u,
       );
     });

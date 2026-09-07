@@ -54,7 +54,7 @@ unmocked run of it answers the same way every time.
 ## The one line that lets Egma answer
 
 ```python
-await mockable(agent, ctx, session)
+await simulation(agent, ctx, session)
 ```
 
 It sits in `entrypoint`, after the agent and the session exist and before
@@ -106,7 +106,7 @@ options = room_io.RoomOptions(
 ) if chat else room_io.RoomOptions()
 ```
 
-They sit in `entrypoint`, beside the `mockable` line, and the options go
+They sit in `entrypoint`, beside the `simulation` line, and the options go
 to `session.start(..., room_options=options)`. Egma says which kind of
 simulation a room conducts in the room's own name — a chat simulation's
 room begins `egma-sim-chat-` — and these lines read it and answer in
@@ -144,7 +144,7 @@ for it: it then joins only the rooms whose dispatch asks for it.
 The fixture uses the same public function as a customer agent:
 
 ```python
-monitor_livekit(ctx)
+monitor(ctx)
 ```
 
 Set the Egma API origin and an existing project API key where the worker
@@ -223,7 +223,7 @@ cd fixtures/livekit-dumb-agent
 uv run ruff check . && uv run pytest
 ```
 
-What they hold this file to: both tools attached before `mockable` runs,
+What they hold this file to: both tools attached before `simulation` runs,
 the integration line in the right place, and the whole thing untouched in
 a room with no Egma in it.
 

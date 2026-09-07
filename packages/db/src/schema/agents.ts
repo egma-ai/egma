@@ -60,6 +60,48 @@ export const CONNECTION_TYPES = [
 ] as const;
 export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 
+/**
+ * The connection kinds whose conversations can produce an **agent's POV**.
+ *
+ * ADR-0024 §2: a simulation stores both POVs, and the agent's arrives one of
+ * two ways — pushed by the egma SDK over OpenTelemetry from inside a LiveKit
+ * room, or pulled from the platform's own API by the reference the conversation
+ * ran under. Two lanes can do it, and the other three cannot:
+ *
+ * - `phone_number` — egma dials a number and nothing of egma's runs on the
+ *   other end of the line. There is nothing to install into and nothing to ask.
+ * - `retell_text_mode` — egma carries the whole exchange on its own requests
+ *   and Retell hands back no reference to fetch a record by, so there is no
+ *   second account to ask for.
+ * - `retell_chat_api` — the conversation is a Retell *chat*, and its reference
+ *   is a chat id. egma's pull asks for a call record by call id, so a chat id
+ *   would fetch nothing however long anything waited.
+ *
+ * Naming a lane here that can never deliver is worse than leaving it out: every
+ * simulation over it would wait out the whole bound and be recorded as missing
+ * an account that was never coming.
+ *
+ * **A fact about the lane, never about the spans**, which is what makes it
+ * answerable before any evidence has arrived. It is only half the question,
+ * though: the row's own provider reference is the other half, and both are
+ * asked together where grading decides whether to wait.
+ *
+ * Written against `ConnectionType` so that a lane added to the product is a
+ * decision made here as well: a new kind that produces an agent POV is added by
+ * hand, and a name that is not a connection type at all does not compile.
+ */
+export const LANES_WITH_AN_AGENT_POV = [
+  "retell_web_call",
+  "livekit_room",
+] as const satisfies readonly ConnectionType[];
+
+/** Whether a conversation over this connection could have a second account. */
+export function laneProducesAnAgentPov(connectionType: string): boolean {
+  return (LANES_WITH_AN_AGENT_POV as readonly string[]).includes(
+    connectionType,
+  );
+}
+
 /** The authority and configuration used inside one connection type. */
 export const ACCESS_VARIANTS = [
   "retell_chat_api.api_key",

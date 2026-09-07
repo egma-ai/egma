@@ -600,18 +600,31 @@ describe("the suite-first Tests route", () => {
     fireEvent.change(within(room).getByLabelText("Connection *"), {
       target: { value: "con_1" },
     });
-    // A suite whose tests carry nothing has nothing to be told about.
+    // A suite whose tests carry nothing still meets the one fact that is not
+    // about the tests: a LiveKit simulation whose agent never reports to Egma
+    // fails, so the requirement is said on every LiveKit run and stands alone
+    // when no test mocks a tool.
     expect(await screen.findByLabelText("Run name [optional]")).toBeTruthy();
-    expect(room.querySelector('[data-slot="run-note"]')).toBeNull();
+    const bare = await waitFor(() => {
+      const held = room.querySelector('[data-slot="run-note"]');
+      if (held === null) throw new Error("no run note yet");
+      return held;
+    });
+    expect([...bare.querySelectorAll("p")].map((line) => line.textContent)).toEqual([
+      "A LiveKit simulation needs the Egma SDK in your agent.",
+    ]);
+    expect(bare.getAttribute("data-accent")).toBe("brand");
+    expect(bare.className).toContain("border-border");
   });
 
   /**
    * **The rest of the support table, one lane at a time.**
    *
-   * The row above walks a Retell web call and a LiveKit room with nothing to
-   * say. What is left is the LiveKit SDK requirement for mock tools, proof that
-   * token-endpoint dispatch metadata needs no warning, and a Retell lane that
-   * quietly says LiveKit's word is not one it uses.
+   * The row above walks a Retell web call and a LiveKit room whose tests carry
+   * nothing. What is left is the LiveKit SDK requirement with its mock-tools
+   * sentence behind it, proof that token-endpoint dispatch metadata needs no
+   * warning while the requirement is still said, and a Retell lane that quietly
+   * says LiveKit's word is not one it uses.
    */
   it("says what each remaining lane will and will not use", async () => {
     routed.pathname = "/projects/prj_1/runs/new";
@@ -701,7 +714,8 @@ describe("the suite-first Tests route", () => {
     // A phone number is the customer's own published line, answered by Retell.
     // It carries neither a mock nor a dynamic variable, and each line says
     // "cannot" itself, so no summary sentence stands over them: the box's
-    // warning edge is the only other thing that says it.
+    // warning edge is the only other thing that says it. No line names the
+    // Egma SDK, because a call Retell answers never asks for it.
     await noteOn(
       {
         connectionType: "phone_number",
@@ -724,21 +738,22 @@ describe("the suite-first Tests route", () => {
       },
       [MOCKING, PLAIN],
       [
-        "Mock tools on LiveKit need the Egma SDK in your agent.",
-        "1 of 2 tests carries mock tools. They are served only when your agent runs mockable(...). Tools a test does not mock run real.",
+        "A LiveKit simulation needs the Egma SDK in your agent.",
+        "1 of 2 tests carries mock tools. They are served only when your agent runs simulation(...). Tools a test does not mock run real, and every call is on the transcript.",
       ],
     );
 
     // On a token endpoint the customer's own endpoint dispatches the worker,
     // and Egma hands it the test's dispatch metadata inside the token
-    // request — so a suite that carries only that has nothing to be told.
+    // request — so nothing is left unused and no line counts it. The SDK
+    // requirement still stands, alone, because it is true of every LiveKit run.
     await noteOn(
       {
         connectionType: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
       },
       [DISPATCHING, PLAIN],
-      [],
+      ["A LiveKit simulation needs the Egma SDK in your agent."],
     );
 
     // A Retell lane says the same fact quietly: nothing is lost, because

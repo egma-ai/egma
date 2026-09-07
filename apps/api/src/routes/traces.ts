@@ -4,9 +4,9 @@ import {
   authorize,
   NotPermittedError,
   recordProviderUsage,
+  resolveSimulationByProviderReference,
   resolveSimulationStanding,
   type AuthContext,
-  type NewSpan,
   type NewUsageRecord,
   type SimulationStanding,
 } from "@egma/db";
@@ -15,11 +15,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { requesterOf } from "../http/credentialed.ts";
 import {
-  acceptEvidence,
-  acceptEvidenceForProjects,
   IngestionUnavailableError,
   type EvidenceGroup,
 } from "../ingestion/accept.ts";
+import {
+  attributionOf,
+  fileSimulationEvidence,
+  type SimulationFiling,
+} from "../ingestion/simulation-ingestion.ts";
 import {
   notAuthenticated,
   tooManyRequests,
@@ -41,10 +44,13 @@ import {
   type OtlpResourceSpans,
 } from "../otlp/decode.ts";
 import {
+  budgetForOneRequest,
   normaliseOtlpExport,
+  providerReferenceClaimedBy,
   simulationNamedBy,
+  PROVIDER_REFERENCE_ATTRIBUTE,
   SIMULATION_ID_ATTRIBUTE,
-  type SpanAttribution,
+  type NormalisationBudget,
 } from "../otlp/normalise.ts";
 import { providerUsageIn } from "../otlp/provider-usage.ts";
 import {
@@ -62,15 +68,27 @@ import {
  * one code path, and a simulation and a production trace therefore arrive the
  * same way and are the same shape at rest.
  *
- * **The door branches on the credential, and only there.** A customer key
- * resolves tenancy as it always has. The deployment's own service token — the
- * same secret the claim door answers to — resolves to no customer at all:
- * each arriving resource must say which simulation its spans are evidence of
+ * **The door branches on the credential first.** A customer key resolves
+ * tenancy as it always has. The deployment's own service token — the same
+ * secret the claim door answers to — resolves to no customer at all: each
+ * arriving resource must say which simulation its spans are evidence of
  * (`egma.simulation_id`), and the door resolves the organization, the project
  * and the run from that simulation's own row. Spans are accepted for any
  * simulation this deployment conducted, whatever its status: a late-returning
  * orphan's spans are evidence and are kept, even as its lifecycle claims are
  * refused elsewhere.
+ *
+ * **Inside the customer branch there is one more branch, and it is per
+ * resource.** A resource carrying `egma.provider_reference` is the agent's own
+ * POV of a simulation egma conducted — pushed by the egma SDK from a simulation
+ * room, naming the room it ran in — and is filed under that simulation:
+ * `source = simulation`, `emitter = agent`, the run and the version pins off
+ * egma's own row, the framework's trace id kept on each span's payload
+ * (ADR-0024 §2). A resource without it is production traffic and takes the path
+ * it always took. **The reference names a conversation, never a customer**: it
+ * is looked up inside the project the key resolved to, so a reference belonging
+ * to another project resolves to nothing and is refused whole, with the same
+ * sentence a reference nobody carries gets.
  *
  * **The organization and the project come from the credential, or from egma's
  * own row — never from the payload.** A tenancy attribute in the payload is
@@ -276,16 +294,111 @@ declare module "fastify" {
 const A_TRACE_ID = /^[0-9a-f]{32}$/u;
 
 /**
- * The spans of one customer's simulations, with the context they are filed
- * under. One export may carry several simulations — even several customers' —
- * so the resources are gathered by the tenancy their rows resolved to, and
- * each gathering is appended under its own narrowed context, because that
- * context is the only place an organization ever enters a row.
+ * A provider reference as a refusal may quote it back.
+ *
+ * A reference is a room name or a call id — a few dozen characters. What
+ * arrives on the wire is whatever a resource attribute held, and a refusal is
+ * built before anything has looked at its size, so quoting it whole would let a
+ * one-line mistake in an exporter's configuration turn a megabyte of attribute
+ * into a megabyte of error message. The prefix is enough to recognise which
+ * reference was meant, which is the whole job the quote does.
  */
-type AttributedGroup = {
-  readonly auth: AuthContext;
+const LONGEST_QUOTED_REFERENCE = 200;
+
+/**
+ * How many conversations one project-key export may speak for.
+ *
+ * The egma SDK exports from one agent process, which is in one room, so one is
+ * the ordinary number and a handful covers a process that has moved on to the
+ * next simulation before its exporter flushed. More than that is a
+ * misconfiguration, and it is bounded because each distinct reference costs a
+ * store lookup before anything is normalised.
+ */
+const MOST_SIMULATIONS_PER_EXPORT = 8;
+
+function shortened(reference: string): string {
+  return reference.length <= LONGEST_QUOTED_REFERENCE
+    ? reference
+    : `${reference.slice(0, LONGEST_QUOTED_REFERENCE)}…`;
+}
+
+/**
+ * The resources of one simulation, gathered before anything is normalised.
+ *
+ * One export may carry several simulations — even, on the service path,
+ * several customers' — and each is filed on its own, under its own row's
+ * tenancy and its own pins. **Never blended**: a resource whose simulation
+ * resolved elsewhere must not drag another conversation's spans along with it,
+ * so the gathering key is the simulation and not the customer.
+ */
+type SimulationResources = {
+  readonly standing: SimulationStanding;
   readonly resources: OtlpResourceSpans[];
 };
+
+/**
+ * Gather one export's resources by the simulation each of them named, in
+ * arrival order.
+ *
+ * `standingOf` is how this door found the row — by simulation id on the service
+ * path, by provider reference on the project-key path — and a resource it
+ * answers `undefined` for was already refused before this runs.
+ */
+function gatheredBySimulation(
+  resources: readonly OtlpResourceSpans[],
+  standingOf: (resourceSpans: OtlpResourceSpans) => SimulationStanding | undefined,
+): SimulationResources[] {
+  const gathered = new Map<string, SimulationResources>();
+  for (const resourceSpans of resources) {
+    const standing = standingOf(resourceSpans);
+    if (standing === undefined) continue;
+    const held = gathered.get(standing.id);
+    if (held === undefined) {
+      gathered.set(standing.id, { standing, resources: [resourceSpans] });
+    } else {
+      held.resources.push(resourceSpans);
+    }
+  }
+  return [...gathered.values()];
+}
+
+/**
+ * One simulation's gathered resources, normalised and ready for the filing
+ * step, with whatever the normaliser refused counted alongside.
+ *
+ * Normalised per simulation, because a simulation is the unit that is filed and
+ * two of them must never be blended. **The row caps still bound the request**,
+ * not the call: the budget is made once where the request starts and carried
+ * through every one of these calls, so an export naming several simulations
+ * cannot buy several times the bound by naming them.
+ */
+function normalisedFilings(
+  gathered: readonly SimulationResources[],
+  emitter: "egma-runtime" | "agent",
+  rejected: { count: number; firstReason: string },
+  budget: NormalisationBudget,
+): SimulationFiling[] {
+  return gathered.map((one) => {
+    const normalised = normaliseOtlpExport(
+      { resourceSpans: one.resources },
+      () => attributionOf(one.standing, emitter),
+      budget,
+    );
+    rejected.count += normalised.rejected.length;
+    rejected.firstReason ||= normalised.rejected[0]?.reason ?? "";
+
+    // The same function every write in the product goes through, asked with
+    // the narrowed context the row resolved to. It cannot refuse a context
+    // the module itself built — which is the point of asking: a change that
+    // made it refusable would surface here, not in a customer's missing rows.
+    authorize(one.standing.auth, "ingest_traces", {
+      organizationId: one.standing.auth.organizationId,
+      projectId: one.standing.auth.projectId,
+    });
+
+    return { standing: one.standing, emitter, spans: normalised.spans };
+  });
+}
 
 /**
  * The simulator's own path through the door.
@@ -428,44 +541,25 @@ async function simulatorExport(
     }
   }
 
-  // Gathered by the customer each simulation resolved to, in arrival order —
-  // the stamp is per resource, the append is per customer, and neither is
-  // anything the payload said.
-  const groups = new Map<string, AttributedGroup>();
-  for (const [index, resourceSpans] of resources.entries()) {
-    const target = targets.get(named[index] ?? "");
-    if (target === undefined) continue;
-    const key = `${target.auth.organizationId}/${target.auth.projectId ?? ""}`;
-    const group = groups.get(key);
-    if (group === undefined) {
-      groups.set(key, { auth: target.auth, resources: [resourceSpans] });
-    } else {
-      group.resources.push(resourceSpans);
-    }
-  }
-
-  const attributionFor = (resourceSpans: OtlpResourceSpans): SpanAttribution => {
-    const target = targets.get(simulationNamedBy(resourceSpans));
-    if (target === undefined) {
-      // Every resource was checked against the map before any group was
-      // normalised, so this is this file having lost track of its own input.
-      throw new Error("a resource lost its simulation between checks");
-    }
-    return {
-      source: "simulation",
-      emitter: "egma-runtime",
-      runId: target.runId,
-      agentId: target.agentId,
-      testVersionId: target.testVersionId ?? "",
-      personaVersionId: target.personaVersionId,
-    };
-  };
-
+  // Gathered by the simulation each resource named, in arrival order, and
+  // normalised with the stamp that simulation's own row answers — the persona's
+  // POV, because the service token is egma's own simulator and nothing else.
   const rejected: { count: number; firstReason: string } = {
     count: 0,
     firstReason: "",
   };
-  const accepting: EvidenceGroup[] = [];
+  // Held rather than passed straight through, because the bills this flush
+  // carried are read off the same gathering, from the resources themselves.
+  const gathered = gatheredBySimulation(resources, (resourceSpans) =>
+    targets.get(simulationNamedBy(resourceSpans)),
+  );
+  const filings = normalisedFilings(
+    gathered,
+    "egma-runtime",
+    rejected,
+    budgetForOneRequest(),
+  );
+
   /**
    * The bills this flush carried, gathered beside the evidence and written
    * after it is durable.
@@ -490,49 +584,26 @@ async function simulatorExport(
    * operator about, and never a reason to lose a conversation.
    */
   const unreadableBills: string[] = [];
-  for (const group of groups.values()) {
-    // Normalised per gathering, so the row caps guard each customer's append
-    // rather than the request: a bound loosened only by naming more
-    // customers' simulations, which only the deployment's own simulator can.
-    const normalised = normaliseOtlpExport(
-      { resourceSpans: group.resources },
-      attributionFor,
-    );
-    rejected.count += normalised.rejected.length;
-    rejected.firstReason ||= normalised.rejected[0]?.reason ?? "";
-
-    // The same function every write in the product goes through, asked with
-    // the narrowed context the row resolved to. It cannot refuse a context
-    // the module itself built — which is the point of asking: a change that
-    // made it refusable would surface here, not in a customer's missing rows.
-    authorize(group.auth, "ingest_traces", {
-      organizationId: group.auth.organizationId,
-      projectId: group.auth.projectId,
-    });
-
-    accepting.push({ auth: group.auth, spans: normalised.spans });
-
+  for (const one of gathered) {
     // Read from the resources rather than from the normalised rows, because a
     // bill is not a shortened span: it is a set of quantities that has to
     // arrive whole or not at all, and the row a span becomes is deliberately
     // lossy about everything it does not have a column for.
-    const usage = providerUsageIn(group.resources, (resourceSpans) => {
-      const target = targets.get(simulationNamedBy(resourceSpans));
-      if (target === undefined) {
-        throw new Error("a resource lost its simulation between checks");
-      }
-      return {
-        simulationId: simulationNamedBy(resourceSpans),
-        runId: target.runId,
-      };
-    });
+    //
+    // The gathering key is the simulation, so every resource here named the
+    // one row already resolved — the attribution is that row's, and no
+    // resource can reach for another conversation's.
+    const usage = providerUsageIn(one.resources, () => ({
+      simulationId: one.standing.id,
+      runId: one.standing.runId,
+    }));
     unreadableBills.push(...usage.skipped);
     if (usage.records.length > 0) {
-      billing.push({ auth: group.auth, records: usage.records });
+      billing.push({ auth: one.standing.auth, records: usage.records });
     }
   }
 
-  // Every group in one call, and one answer for all of them: a batch naming
+  // Every filing in one call, and one answer for all of them: a batch naming
   // several projects gets a segment each, and it is a success only once every
   // one of them is durable. A per-group answer would tell the simulator its
   // whole flush landed while one project's evidence was still in a local log —
@@ -540,7 +611,7 @@ async function simulatorExport(
   // which stable span identity makes a no-op rather than a duplicate.
   let accepted;
   try {
-    accepted = await acceptEvidenceForProjects(accepting);
+    accepted = await fileSimulationEvidence(filings);
   } catch (cause) {
     if (!(cause instanceof IngestionUnavailableError)) throw cause;
     return unavailable(request, reply, encoding, cause);
@@ -768,13 +839,11 @@ export async function traceRoutes(
       ? request.body
       : Buffer.alloc(0);
 
-    let normalised;
+    let decoded;
     try {
-      normalised = normaliseOtlpExport(
-        decodeOtlpExport(
-          encoding,
-          decompressed(body, request.headers["content-encoding"]),
-        ),
+      decoded = decodeOtlpExport(
+        encoding,
+        decompressed(body, request.headers["content-encoding"]),
       );
     } catch (cause) {
       if (cause instanceof NotOtlpError) {
@@ -789,6 +858,185 @@ export async function traceRoutes(
       throw cause;
     }
 
+    /*
+     * **The one branch on this path, and it is per resource.**
+     *
+     * A resource carrying the egma provider-reference attribute is the agent's
+     * own POV of a simulation egma conducted: the SDK stamps the room it is
+     * running in, and that reference is the one key the agent's account is
+     * matched to its conversation on (ADR-0024 §2). A resource without it is
+     * production traffic and takes the path it always took — the ordinary case,
+     * unchanged, and the reason the branch is here rather than on a second URL.
+     *
+     * The credential still decides the tenancy. The reference is looked up
+     * inside the project the key resolved to, so an export naming a room that
+     * belongs to another customer finds nothing, exactly as one naming a room
+     * nobody has finds nothing, and both are told the same thing.
+     */
+    const resources = decoded.resourceSpans ?? [];
+    // Claimed once per resource, and the answer carried, because the two
+    // filters below are complements: a resource that claims a reference and
+    // one that does not must be built from the same reading, or a resource
+    // whose claim this door could not read would fall through both into
+    // production. `providerReferenceClaimedBy` says why the claim can come
+    // from the resource or from the spans.
+    const claimed = new Map(
+      resources.map((one) => [one, providerReferenceClaimedBy(one)] as const),
+    );
+    const naming = resources.filter(
+      (one) => claimed.get(one)?.kind !== "none",
+    );
+    const named = (one: OtlpResourceSpans): string => {
+      const claim = claimed.get(one);
+      return claim?.kind === "named" ? claim.reference : "";
+    };
+
+    // Stamped spans that disagree name no one conversation, so there is
+    // nothing to look up and nothing safe to guess: one export from one agent
+    // process is one conversation, and filing a disagreeing resource under
+    // either answer would put one customer's turns on another's record. A span
+    // that carries no reference at all is not this case — it opened before the
+    // SDK's stamp existed and is filed under what the rest of the resource
+    // says, which `providerReferenceClaimedBy` explains.
+    const disagreeing = naming.find(
+      (one) => claimed.get(one)?.kind === "disagreeing",
+    );
+    if (disagreeing !== undefined) {
+      const claim = claimed.get(disagreeing);
+      const references =
+        claim?.kind === "disagreeing" ? claim.references : [];
+      return statusResponse(
+        reply,
+        encoding,
+        400,
+        RPC_INVALID_ARGUMENT,
+        `a resource in this export has spans that do not agree on ` +
+          `${PROVIDER_REFERENCE_ATTRIBUTE} (${references
+            .map((one) => `"${shortened(one)}"`)
+            .join(", ")}). One agent process runs one conversation, so the ` +
+          `spans under one resource that carry a reference all name the same ` +
+          `room or call — spans naming two name no conversation to file them ` +
+          `under. Export each room from the process running it. Nothing from ` +
+          `this request was stored.`,
+      );
+    }
+
+    // A malformed export before anything is looked up, because an empty
+    // reference has nothing to look up: the sender said these spans are a
+    // simulation's and left out which. Refused whole, like every other
+    // attribution failure at this door, and told apart from a reference that
+    // simply matched nothing — quoting an empty string back would name nothing
+    // for the developer to go and fix.
+    if (naming.some((one) => named(one) === "")) {
+      return statusResponse(
+        reply,
+        encoding,
+        400,
+        RPC_INVALID_ARGUMENT,
+        `a resource in this export carries ${PROVIDER_REFERENCE_ATTRIBUTE} ` +
+          `with no value. The attribute says these spans are a simulation's ` +
+          `agent POV, and its value is the room or call the conversation ran ` +
+          `in — so an empty one names no conversation to file them under. ` +
+          `Stamp the room name the simulation was reported with, or leave the ` +
+          `attribute off entirely and the spans are production. Nothing from ` +
+          `this request was stored.`,
+      );
+    }
+
+    const references = new Set(naming.map(named));
+    /*
+     * How many conversations one export may speak for.
+     *
+     * The SDK exports one room from one agent process, so a request naming more
+     * than a handful of them is a misconfiguration rather than a use. The bound
+     * is here because everything after it costs: one store lookup per distinct
+     * reference before a byte is normalised, and one segment per simulation
+     * after. The row caps below bound the bytes; this bounds the lookups.
+     */
+    if (references.size > MOST_SIMULATIONS_PER_EXPORT) {
+      return statusResponse(
+        reply,
+        encoding,
+        400,
+        RPC_INVALID_ARGUMENT,
+        `this export names ${references.size} conversations by ` +
+          `${PROVIDER_REFERENCE_ATTRIBUTE}, and Egma files at most ` +
+          `${MOST_SIMULATIONS_PER_EXPORT} from one request. An agent process ` +
+          `runs one room at a time, so an export naming more than a few is a ` +
+          `configuration mistake rather than a batch — export each room from ` +
+          `the process running it. Nothing from this request was stored.`,
+      );
+    }
+
+    const carriers = new Map<string, SimulationStanding>();
+    for (const reference of references) {
+      const standing = await resolveSimulationByProviderReference(auth, reference);
+      if (standing === undefined) {
+        /*
+         * Refused whole, with nothing stored, for the reason the service path
+         * refuses an unknown simulation whole: a partial success would tell the
+         * exporter's own queue that this flush landed when part of it had
+         * nowhere to land, and a 400 is terminal, so the mistake surfaces in
+         * the developer's log instead of looping.
+         *
+         * **One sentence for both refusals.** A reference nobody in this
+         * project carries and a reference another project carries are answered
+         * identically, on purpose: a copied key must not be able to learn which
+         * rooms exist in an account it does not hold, and a sender that owns
+         * the key can only ever be in the first case anyway.
+         */
+        return statusResponse(
+          reply,
+          encoding,
+          400,
+          RPC_INVALID_ARGUMENT,
+          `no simulation in this project carries the provider reference ` +
+            `"${shortened(reference)}". Spans posted with ${PROVIDER_REFERENCE_ATTRIBUTE} ` +
+            `on the resource are a simulation's agent POV, and the reference ` +
+            `is the room or call the conversation ran in — check the key names ` +
+            `the project the run belongs to, and that the SDK stamps the same ` +
+            `reference the simulation was reported with. Nothing from this ` +
+            `request was stored.`,
+        );
+      }
+      carriers.set(reference, standing);
+    }
+
+    const rejected: { count: number; firstReason: string } = {
+      count: 0,
+      firstReason: "",
+    };
+    // One budget for the whole request, spent by every call below: the caps
+    // bound what one request can ask this side for, and naming several
+    // simulations must not buy several times the bound.
+    const budget: NormalisationBudget = budgetForOneRequest();
+
+    // Production, exactly as today: one normalisation of everything that
+    // carried no reference at all, under the credential's own context. An
+    // export with no simulation resources — every export before this branch
+    // existed — reaches acceptance as the one group it always was.
+    const production = normaliseOtlpExport(
+      {
+        resourceSpans: resources.filter(
+          (resourceSpans) => claimed.get(resourceSpans)?.kind === "none",
+        ),
+      },
+      undefined,
+      budget,
+    );
+    rejected.count += production.rejected.length;
+    rejected.firstReason ||= production.rejected[0]?.reason ?? "";
+    const alongside: EvidenceGroup[] = [{ auth, spans: production.spans }];
+
+    const filings = normalisedFilings(
+      gatheredBySimulation(naming, (resourceSpans) =>
+        carriers.get(named(resourceSpans)),
+      ),
+      "agent",
+      rejected,
+      budget,
+    );
+
     // Handed over once and complete, and answered only when it is durable in
     // the ingestion object store. Monitoring health and the grader-owned
     // evidence-ready handoff are effects of that evidence becoming
@@ -796,7 +1044,7 @@ export async function traceRoutes(
     // to a door that would be asserting them about rows nobody has written.
     let accepted;
     try {
-      accepted = await acceptEvidence(normalised.spans, { auth });
+      accepted = await fileSimulationEvidence(filings, alongside);
     } catch (cause) {
       if (!(cause instanceof IngestionUnavailableError)) throw cause;
       return unavailable(request, reply, encoding, cause);
@@ -805,12 +1053,12 @@ export async function traceRoutes(
     return exportResponse(
       reply,
       encoding,
-      normalised.rejected.length + accepted.refused.length,
+      rejected.count + accepted.refused.length,
       // One message, because the field is one string. A record over a
       // documented bound names the field and the two numbers, which is the
       // more actionable of the two, so it speaks first; the rest of either
       // kind is the same mistake repeated.
-      accepted.refused[0]?.reason ?? normalised.rejected[0]?.reason ?? "",
+      accepted.refused[0]?.reason ?? rejected.firstReason,
     );
   });
 }

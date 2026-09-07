@@ -24,6 +24,20 @@ export type TraceSpan = {
    * recognised — by its place in the tree, never by a kind word each platform
    * spells its own way. */
   readonly parentSpanId: string;
+  /**
+   * Whose account of the conversation this span is.
+   *
+   * **A simulation stores both, under one trace id**, so a derivation that did
+   * not ask this would read egma's own transcript turns and the agent's as one
+   * conversation — every wait measured twice over, each one wrongly. The
+   * persona's account is what egma said, heard and measured; the agent's is
+   * what the agent's own process reported. A production trace has one.
+   *
+   * Optional so a caller holding an older shape still assigns, and absent reads
+   * as the agent's: a span whose account nobody named is the conversation's
+   * own, which is what every production row is.
+   */
+  readonly pov?: "persona" | "agent" | undefined;
   readonly name: string;
   readonly kind: string;
   readonly startedAt: string;

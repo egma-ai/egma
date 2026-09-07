@@ -179,18 +179,15 @@ function exchangeSpan(input: {
     agentVersionId: "",
     testVersionId: input.simulation.testVersionId,
     personaVersionId: input.simulation.personaVersionId,
+    // No stamp saying who answered. Whether a mock tool did is read at
+    // display time, by name, from the pinned test version's mock tools — the
+    // authored world itself, which cannot change under a result — so a copy
+    // here could only come to disagree with it. A refusal is on the row as
+    // its own status, where every other error is.
     payload: JSON.stringify({
       "egma.tool.name": input.toolName,
       "egma.tool.arguments": input.heardArguments,
-      ...(refused
-        ? { "egma.tool.provenance": "refused" }
-        : {
-            "egma.tool.result": input.answer,
-            "egma.tool.provenance": "mocked",
-            // The tool's own name, which is the whole of how a mock tool is
-            // named now that the answers live on the test.
-            "egma.tool.mock_tool": input.toolName,
-          }),
+      ...(refused ? {} : { "egma.tool.result": input.answer }),
     }),
     endsTrace: false,
   };

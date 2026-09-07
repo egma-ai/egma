@@ -47,7 +47,9 @@ test object, including the first `versionId` to use in future edits.
 <ParamField body="mockTools" type="object[]">
   The tools this test answers for itself. Egma mocks exactly the tools this list
   names; every other tool the agent calls runs for real. A test that names none
-  runs against your real tools.
+  runs against your real tools. Unmocked tools run real, and are recorded from
+  the agent's point of view, so every call is on the simulation's transcript
+  whether Egma answered it or not.
 
   <Expandable title="mock tool fields">
     <ParamField body="tool" type="string" required>

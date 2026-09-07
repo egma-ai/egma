@@ -263,7 +263,7 @@ async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
 
     # Per-turn timings, measured off the real call, and never backwards.
     measures = measures_for(records, "sim-phone-live-001")
-    assert "time_to_first_word" in measures
+    assert "turn_response_latency" in measures
     assert "agent_speech_duration" in measures
     timed = [
         record["span"]

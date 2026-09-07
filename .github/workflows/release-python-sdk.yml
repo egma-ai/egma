@@ -87,8 +87,8 @@ jobs:
           import asyncio
           import os
           from importlib.metadata import version
-          from egma import mockable, monitor_livekit
-          from egma import monitoring
+          from egma import monitor, simulation
+          from egma import export
           from livekit import agents
 
 
@@ -109,16 +109,16 @@ jobs:
           assert version("egma") == expected
           assert version("openai").split(".", 1)[0] == "2"
           assert agents.JobContext is not None
-          assert callable(mockable)
-          assert callable(monitor_livekit)
+          assert callable(simulation)
+          assert callable(monitor)
           context = Context()
-          monitor_livekit(
+          monitor(
               context,
               endpoint="http://127.0.0.1:9",
               api_key="egma_sk_" + "r" * 43,
           )
-          assert monitoring._state is not None
-          assert monitoring._livekit_provider() is monitoring._state.provider
+          assert export._state is not None
+          assert export._livekit_provider() is export._state.provider
           assert len(context.callbacks) == 1
           asyncio.run(context.callbacks[0]())
           PY
@@ -139,7 +139,13 @@ jobs:
           with open_tar(source) as archive:
               source_names = set(archive.getnames())
 
-          required = {"egma/__init__.py", "egma/monitoring.py", "egma/mockable.py"}
+          required = {
+              "egma/__init__.py",
+              "egma/export.py",
+              "egma/monitoring.py",
+              "egma/room.py",
+              "egma/simulation_room.py",
+          }
           missing = sorted(required - wheel_names)
           if missing:
               raise SystemExit(f"wheel is missing: {', '.join(missing)}")
