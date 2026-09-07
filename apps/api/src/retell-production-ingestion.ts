@@ -1271,7 +1271,7 @@ async function runTarget(
          *
          * A Retell simulation's record is pulled the moment the conversation
          * ends and filed under its simulation — one conversation, one trace,
-         * both POVs (ADR-0015 §2). Listing it here again would put the same
+         * both POVs (ADR-0024 §2). Listing it here again would put the same
          * conversation under Monitoring a second time, where a team reads its
          * *production* traffic, and would judge it as live traffic nobody asked
          * egma to create.

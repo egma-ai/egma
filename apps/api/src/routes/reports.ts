@@ -305,7 +305,7 @@ export async function reportRoutes(
      * conversation ends.
      *
      * Retell exports nothing, so this is where the second POV of a Retell
-     * simulation comes from at all (ADR-0015 §2). It runs on a **completed**
+     * simulation comes from at all (ADR-0024 §2). It runs on a **completed**
      * landing only: a conversation that never ran has no call record to fetch,
      * and asking Retell about one would be a request per failed dispatch.
      *

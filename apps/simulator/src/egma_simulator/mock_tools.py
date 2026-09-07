@@ -61,7 +61,7 @@ own process runs the egma SDK, that process reports every call it made —
 with the arguments its model emitted and the result it received — and
 that report is the tool record. One call is one row, so two records of it
 cannot disagree. The exchange here still serves and still refuses; it
-writes nothing. See ADR-0015 §3.
+writes nothing. See ADR-0024 §3.
 
 **A call a platform reports afterwards is.** On the lane where the
 platform serves egma's answers itself, nothing of egma's runs inside the

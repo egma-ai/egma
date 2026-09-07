@@ -17,7 +17,7 @@ platform serves egma's answers itself, and nothing of egma's runs inside
 the agent — becomes a `tool_call` span, through
 :meth:`SpanEmitter.tool_call`. Whether a call was answered by a mock tool
 is read at display time, by name, from the pinned test version's mock
-tools, whichever way the call arrived. See ADR-0015 §3.
+tools, whichever way the call arrived. See ADR-0024 §3.
 
 What the platform and this emitter agree on is written down once, in
 ``packages/simulation-contract/span-vocabulary.md``, and pinned as golden

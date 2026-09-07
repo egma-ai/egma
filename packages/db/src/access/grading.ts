@@ -561,7 +561,7 @@ export async function traceEvidenceStartedAt(
 /**
  * How long grading waits for the agent's own POV after a simulation completes.
  *
- * **A safety bound and nothing else** (ADR-0015 §6). There is no artificial
+ * **A safety bound and nothing else** (ADR-0024 §6). There is no artificial
  * wait: the moment the agent's account is query-visible, grading is asked for.
  * This exists only so that a broken exporter or a failed platform pull cannot
  * hold a simulation open forever — past it grading proceeds on what there is,
@@ -705,7 +705,7 @@ function simulationTracesIn(
  * drained. Replays reach the frozen run plan and the same trace-level job.
  *
  * **This is where grading starts for a simulation expecting an agent POV of its
- * own** (ADR-0015 §6). Completion no longer asks for grading on those rows —
+ * own** (ADR-0024 §6). Completion no longer asks for grading on those rows —
  * the agent's account had not arrived when the row closed, and grading a
  * conversation without the account it will be judged on is grading the wrong
  * evidence. So the request waits here, for the drain that carries the agent's

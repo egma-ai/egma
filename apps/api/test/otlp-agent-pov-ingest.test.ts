@@ -51,7 +51,7 @@ import {
 /**
  * **The agent's own POV of a simulation, through the door a customer uses.**
  *
- * A simulation stores both POVs and shows the agent's (ADR-0015 §1). The
+ * A simulation stores both POVs and shows the agent's (ADR-0024 §1). The
  * persona's POV is what egma's simulator said, heard and measured; the agent's
  * is what the agent's own process reported — its turns, its tool calls with the
  * arguments the model emitted and the results it received, its per-turn model
@@ -595,7 +595,7 @@ describe.skipIf(!storage.available)(
         agent: FIXTURE_TRACE.agentTurns,
       });
       // The capture's own two calls, both of the example's `lookup_weather`
-      // tool. Before ADR-0015 an unmocked call ran unobserved and none of them
+      // tool. Before ADR-0024 an unmocked call ran unobserved and none of them
       // would be here at all.
       expect(body.transcript?.toolSpanCount).toBe(FIXTURE_TRACE.toolSpans);
 
@@ -984,7 +984,7 @@ describe.skipIf(!storage.available)("the row caps, across an export naming two",
 /**
  * **When grading is asked for, and never before.**
  *
- * ADR-0015 §6: a simulation's evidence is ready when the row is complete *and*
+ * ADR-0024 §6: a simulation's evidence is ready when the row is complete *and*
  * the agent's own POV has been filed — or when 30 seconds have passed since
  * completion on a lane that produces one. Grading a conversation before the
  * account it will be judged on has arrived is grading the wrong evidence, and

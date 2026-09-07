@@ -87,7 +87,7 @@ const HAND_COMPUTED = {
    *
    * **Each wait starts where the caller stopped being audible** — the end of
    * that human turn's last `user_speaking` child, which is the VAD's detected
-   * end of speech (catalog version 8, ADR-0015 §5). The turn's own end is the
+   * end of speech (catalog version 8, ADR-0024 §5). The turn's own end is the
    * endpointing commit, which on this capture sits up to 1.09 s later; the two
    * older numbers are noted beside the new ones so the size of the difference
    * is on the record.

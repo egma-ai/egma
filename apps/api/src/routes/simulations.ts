@@ -209,7 +209,7 @@ function describedMeasures(
  *
  * - the conversation **completed** — nothing else was ever waited for;
  * - a second account was **coming**: the lane can deliver one and this landing
- *   reported the reference to deliver it under (ADR-0015 §2);
+ *   reported the reference to deliver it under (ADR-0024 §2);
  * - **none arrived** — no span under the trace is the agent's;
  * - and the **bound has passed**, so grading has stopped waiting (§6). Inside
  *   the bound nothing is missing yet; it is simply not here yet.
@@ -348,7 +348,7 @@ export async function simulationRoutes(
         // **That grading stopped waiting for the agent's own account of this
         // conversation.** The wait is bounded at thirty seconds so a broken
         // exporter or a failed pull cannot hold a simulation open forever
-        // (ADR-0015 §6), and past the bound the record has to say so: a reader
+        // (ADR-0024 §6), and past the bound the record has to say so: a reader
         // showing the agent's POV would otherwise show whatever fragment
         // arrived as if it were the conversation. False is the ordinary answer
         // — the account landed, or the lane files none.

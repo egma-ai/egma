@@ -80,7 +80,7 @@ import {
  * room, naming the room it ran in — and is filed under that simulation:
  * `source = simulation`, `emitter = agent`, the run and the version pins off
  * egma's own row, the framework's trace id kept on each span's payload
- * (ADR-0015 §2). A resource without it is production traffic and takes the path
+ * (ADR-0024 §2). A resource without it is production traffic and takes the path
  * it always took. **The reference names a conversation, never a customer**: it
  * is looked up inside the project the key resolved to, so a reference belonging
  * to another project resolves to nothing and is refused whole, with the same
@@ -795,7 +795,7 @@ export async function traceRoutes(
      * A resource carrying the egma provider-reference attribute is the agent's
      * own POV of a simulation egma conducted: the SDK stamps the room it is
      * running in, and that reference is the one key the agent's account is
-     * matched to its conversation on (ADR-0015 §2). A resource without it is
+     * matched to its conversation on (ADR-0024 §2). A resource without it is
      * production traffic and takes the path it always took — the ordinary case,
      * unchanged, and the reason the branch is here rather than on a second URL.
      *

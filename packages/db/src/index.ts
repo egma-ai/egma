@@ -97,7 +97,7 @@ export {
 
 /**
  * Whether a conversation over this connection kind could ever produce the
- * agent's own account of itself (ADR-0015 §2).
+ * agent's own account of itself (ADR-0024 §2).
  *
  * A pure question about a word, reaching nothing. It is exported because the
  * read that tells a customer their record is missing the agent's POV has to ask

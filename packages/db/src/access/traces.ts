@@ -141,7 +141,7 @@ const [NORMALISED_KEY = ""] = REPORTED_MEASUREMENTS_PAYLOAD_PATH.split(".");
  * the one carrying the report block.
  *
  * **Two parentless rows are normal now, and this is the rule that makes them
- * safe.** A simulation holds both POVs under one trace (ADR-0015 §1): egma's
+ * safe.** A simulation holds both POVs under one trace (ADR-0024 §1): egma's
  * own root and the agent's session root sit side by side, and before this a
  * reader took whichever opened first — so an agent whose exporter started a
  * millisecond earlier would have moved the block out from under the reader and

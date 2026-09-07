@@ -2198,7 +2198,7 @@ export async function resolveSimulationStanding(
  *
  * The agent's own process knows the room it is running in, never a simulation
  * id, so the agent's POV names its conversation by the platform's identifier
- * and egma turns that into the simulation it belongs to (ADR-0015 §2). This is
+ * and egma turns that into the simulation it belongs to (ADR-0024 §2). This is
  * the whole of that turning.
  *
  * **The project is a parameter, and it comes from the credential.** The
@@ -2289,7 +2289,7 @@ export async function resolveSimulationByProviderReference(
  * **Simulation ingestion by pull.** Retell exports nothing and no SDK runs
  * inside its agents, so the agent's POV of a Retell simulation is fetched by
  * egma the moment the conversation ends — with the connection's own stored
- * credential, which ADR-0015 §2 names as what a pull authenticates with. This
+ * credential, which ADR-0024 §2 names as what a pull authenticates with. This
  * is the whole of that read.
  *
  * **The narrow door beside `resolveSimulationConnection`, on that door's exact
@@ -2850,7 +2850,7 @@ async function landSimulation(
       }
       if (hasPlannedGraders) {
         // **Whether a second account of this conversation is still coming.**
-        // ADR-0015 §6: grading waits for the agent's own POV where one is
+        // ADR-0024 §6: grading waits for the agent's own POV where one is
         // coming, because a conversation graded without the account it will be
         // judged on is graded on the wrong evidence. Two halves, both facts
         // about this row: the lane says whether egma has any way to receive one

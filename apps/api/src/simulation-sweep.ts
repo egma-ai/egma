@@ -19,7 +19,7 @@ import {
  * **A second silence rides the same tick**: the agent's own POV of a completed
  * simulation, which arrives by a push from inside the room or a pull from the
  * platform — and which, when the exporter is broken or the pull failed, arrives
- * never. Grading waits 30 seconds for it and no longer (ADR-0015 §6), and that
+ * never. Grading waits 30 seconds for it and no longer (ADR-0024 §6), and that
  * bound is the same kind of fact as an orphan's: nobody sends it, so a loop has
  * to read it. Two seams, one interval, one in-flight promise — because a second
  * timer would be a second copy of everything below for a question of exactly

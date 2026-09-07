@@ -63,7 +63,7 @@ export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 /**
  * The connection kinds whose conversations can produce an **agent's POV**.
  *
- * ADR-0015 §2: a simulation stores both POVs, and the agent's arrives one of
+ * ADR-0024 §2: a simulation stores both POVs, and the agent's arrives one of
  * two ways — pushed by the egma SDK over OpenTelemetry from inside a LiveKit
  * room, or pulled from the platform's own API by the reference the conversation
  * ran under. Two lanes can do it, and the other three cannot:

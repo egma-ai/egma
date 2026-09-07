@@ -263,7 +263,7 @@ export function simulationNamedBy(resourceSpans: OtlpResourceSpans): string {
  * back; the customer's own agent has never heard of one. What the agent's
  * process does hold is the room it is running in, and that is the one key on
  * which the agent's POV is matched to its simulation — for every platform and
- * framework (ADR-0015 §2). The egma SDK stamps it on the resource of every span
+ * framework (ADR-0024 §2). The egma SDK stamps it on the resource of every span
  * it exports from a simulation room.
  *
  * **A reference is not a tenancy claim and is never read as one.** The

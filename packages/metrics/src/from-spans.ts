@@ -733,7 +733,7 @@ function put(
  * framework whose turns begin at their first word.
  *
  * **The start is the VAD's end of speech, never the endpointing commit**
- * (ADR-0015 §5, catalog version 8). In the agent's own spans the caller's last
+ * (ADR-0024 §5, catalog version 8). In the agent's own spans the caller's last
  * audible sample is the end of the human turn's last `speaking` child; the
  * turn's own end is the moment the endpointer *decided* the caller had
  * finished, which the framework's own defaults put about a second later — a

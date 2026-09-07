@@ -840,7 +840,7 @@ describe("measures derived from a recognised framework's own spans", () => {
   });
 
   /**
-   * **The wait starts where the caller stopped being audible.** ADR-0015 §5
+   * **The wait starts where the caller stopped being audible.** ADR-0024 §5
    * defines the measure from the last audible sample of the caller's speech,
    * and in the agent's own spans that instant is the end of the human turn's
    * last `speaking` child — the VAD's detected end — never the turn's own end,

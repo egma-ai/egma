@@ -8,7 +8,7 @@ arguments the model emitted.
 
 It exists because two of those three calls were invisible in Egma's own record
 of the run that produced it. That run — `run_01M1PRTFM4EATAYBGJ1FBE39J7` — is
-what opened [ADR-0015](https://github.com/egma-ai/egma) and the agent-POV effort:
+what opened [ADR-0024](https://github.com/egma-ai/egma) and the agent-POV effort:
 a simulation stores both POVs now, and an unmocked tool call is on the record
 because the agent itself reported it. This file is the evidence that has to keep
 passing.

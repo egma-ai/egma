@@ -85,7 +85,7 @@
  * a trace whose framework recorded no speaking spans at all.
  *
  * **8** gives `turn_response_latency` one definition and a POV, and drops two
- * measures. The definition is ADR-0015 §5's: the elapsed time from the last
+ * measures. The definition is ADR-0024 §5's: the elapsed time from the last
  * audible sample of the caller's speech to the first audible sample of the
  * agent's reply as it reaches the caller. The agent-POV derivation therefore
  * starts at the **VAD's detected end of speech** — the end of the human turn's

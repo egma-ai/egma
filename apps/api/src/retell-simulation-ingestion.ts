@@ -19,7 +19,7 @@ import {
  * Retell agent, and there is nothing to install one into. So the agent's POV of
  * a Retell simulation is fetched by egma the moment the conversation ends, with
  * the connection's own stored credential, and filed through the same step every
- * other source goes through (ADR-0015 §2).
+ * other source goes through (ADR-0024 §2).
  *
  * **Normalised by the normaliser production ingestion already uses.** A Retell
  * call document means the same thing whether the conversation was a simulation
@@ -55,7 +55,7 @@ import {
  * is filed inside that request, and a thin one goes to a background wait that
  * the door never sees. The timer is `unref`'d, so a deployment shutting down
  * loses at most a thin record's improvement rather than holding the process
- * open, and a POV that never landed is a state ADR-0015 §6 already defines.
+ * open, and a POV that never landed is a state ADR-0024 §6 already defines.
  *
  * **Nothing here throws at its caller.** Retell being slow, unreachable or thin,
  * and this side being unable to make evidence durable, are all logged through
@@ -70,7 +70,7 @@ export type RetellSimulationPullReach = RetellReach;
  * How long the pull waits before each retry of a thin record, in order.
  *
  * Three attempts over about twenty seconds, which sits inside the thirty-second
- * bound ADR-0015 §6 puts on how long grading waits for an agent's POV. Past that
+ * bound ADR-0024 §6 puts on how long grading waits for an agent's POV. Past that
  * bound the record says the POV is incomplete and Regrade is what a late arrival
  * is picked up by, so a fourth attempt would be spending a request on a record
  * nothing is waiting for any more.

@@ -12,7 +12,7 @@ import {
  * **Simulation ingestion: the one filing step.**
  *
  * Three sources produce a simulation's evidence and there is one step that
- * files all three, because ADR-0015 §2 says so in one sentence: *a
+ * files all three, because ADR-0024 §2 says so in one sentence: *a
  * project-authenticated export that names a simulation by its provider
  * reference is filed under that simulation's trace id, `source = simulation`,
  * `emitter = agent`, with the run and version pins.* The sources are

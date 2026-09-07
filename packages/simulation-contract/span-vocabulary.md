@@ -117,7 +117,7 @@ the authored world itself, which cannot change under a result — so a second co
 of that fact on the span could only come to disagree with it. A call Egma refused
 shows as the error the SDK raised, carried on the agent's own span for that call.
 This reverses the earlier rule that Egma observed tool facts at the seam
-(ADR-0015 §3), and retires the `egma.tool.provenance`, `egma.tool.mock_tool` and
+(ADR-0024 §3), and retires the `egma.tool.provenance`, `egma.tool.mock_tool` and
 `egma.tool.late_attached` attributes with it.
 
 ## What the fixtures show

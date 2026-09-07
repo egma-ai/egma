@@ -102,7 +102,7 @@ export const metricSchema = {
     /**
      * Whose account of the conversation this number is — the persona's,
      * measured off egma's own recording, or the agent's, off its own process
-     * (ADR-0015 §5). `derived` says which machinery produced it; this says
+     * (ADR-0024 §5). `derived` says which machinery produced it; this says
      * whose conversation it describes, which is the fact that decides whether
      * two numbers may be compared at all.
      */

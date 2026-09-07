@@ -114,7 +114,7 @@ const simulationSchema = {
      *
      * A simulation stores two accounts of one conversation and grading waits
      * for the agent's — the SDK's export from inside the room, or the pull from
-     * the platform — for thirty seconds and no longer (ADR-0015 §6). True says
+     * the platform — for thirty seconds and no longer (ADR-0024 §6). True says
      * the wait ran out: what is stored is egma's account, and the agent's is
      * missing or partial. **A reader that shows the agent's POV has to ask**,
      * because "the rows filed as the agent's" is a fragment here rather than
