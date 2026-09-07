@@ -79,11 +79,11 @@ export const graderSettingDefinitionSchema = {
   properties: {
     key: stringSchema,
     label: stringSchema,
-    valueType: { type: "string", enum: ["integer"] },
-    defaultValue: integerSchema,
+    valueType: { type: "string", enum: ["integer", "number", "string"] },
+    defaultValue: { oneOf: [{ type: "number" }, stringSchema] },
     unit: nullable(stringSchema),
-    minimum: nullable(integerSchema),
-    maximum: nullable(integerSchema),
+    minimum: nullable({ type: "number" }),
+    maximum: nullable({ type: "number" }),
   },
   required: [
     "key",

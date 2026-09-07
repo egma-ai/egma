@@ -7,6 +7,8 @@ import {
   connectionTypeUsesPlatformCarrier,
   failSimulationDispatch,
   getPersonaVersion,
+  personaModelsOfParameters,
+  validatePersonaParameterValues,
   getRun,
   getSimulationExecutionEvidence,
   LANES_SERVING_MOCK_TOOLS,
@@ -79,7 +81,7 @@ import {
  * — validated against the contract before a byte is sent. This is the only
  * place runtime credential material travels; reports have no field for it.
  *
- * Model choices have one source: the pinned persona version. Provider keys
+ * Model choices have one source: the simulation settings saved at run creation. Provider keys
  * have one source: this deployment's credential source. The carrier route comes
  * straight from this process's deployment environment. These boundaries prevent
  * a model from one provider being combined with another adapter or credential.
@@ -595,7 +597,7 @@ async function assembledSpec(
     // restarting either service.
     models = await modelsBlock(
       claim.modality,
-      personaVersion.models,
+      personaModelsOfParameters(validatePersonaParameterValues(personaVersion.parameterContract, claim.personaParameterValues)),
       providerCredentials,
     );
   } catch (fault) {

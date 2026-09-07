@@ -5267,11 +5267,20 @@
                                 "valueType": {
                                   "type": "string",
                                   "enum": [
-                                    "integer"
+                                    "integer",
+                                    "number",
+                                    "string"
                                   ]
                                 },
                                 "defaultValue": {
-                                  "type": "integer"
+                                  "oneOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ]
                                 },
                                 "unit": {
                                   "anyOf": [
@@ -5286,7 +5295,7 @@
                                 "minimum": {
                                   "anyOf": [
                                     {
-                                      "type": "integer"
+                                      "type": "number"
                                     },
                                     {
                                       "type": "null"
@@ -5296,7 +5305,7 @@
                                 "maximum": {
                                   "anyOf": [
                                     {
-                                      "type": "integer"
+                                      "type": "number"
                                     },
                                     {
                                       "type": "null"
@@ -5593,11 +5602,20 @@
                           "valueType": {
                             "type": "string",
                             "enum": [
-                              "integer"
+                              "integer",
+                              "number",
+                              "string"
                             ]
                           },
                           "defaultValue": {
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "unit": {
                             "anyOf": [
@@ -5612,7 +5630,7 @@
                           "minimum": {
                             "anyOf": [
                               {
-                                "type": "integer"
+                                "type": "number"
                               },
                               {
                                 "type": "null"
@@ -5622,7 +5640,7 @@
                           "maximum": {
                             "anyOf": [
                               {
-                                "type": "integer"
+                                "type": "number"
                               },
                               {
                                 "type": "null"
@@ -6462,11 +6480,20 @@
                               "valueType": {
                                 "type": "string",
                                 "enum": [
-                                  "integer"
+                                  "integer",
+                                  "number",
+                                  "string"
                                 ]
                               },
                               "defaultValue": {
-                                "type": "integer"
+                                "oneOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
                               },
                               "unit": {
                                 "anyOf": [
@@ -6481,7 +6508,7 @@
                               "minimum": {
                                 "anyOf": [
                                   {
-                                    "type": "integer"
+                                    "type": "number"
                                   },
                                   {
                                     "type": "null"
@@ -6491,7 +6518,7 @@
                               "maximum": {
                                 "anyOf": [
                                   {
-                                    "type": "integer"
+                                    "type": "number"
                                   },
                                   {
                                     "type": "null"
@@ -9372,6 +9399,470 @@
         }
       }
     },
+    "/v1/personas/{personaId}/use": {
+      "post": {
+        "operationId": "usePersona",
+        "summary": "Use a persona with project model settings",
+        "tags": [
+          "Personas"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "personaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "models": {
+                    "type": "object",
+                    "properties": {
+                      "llm": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "stt": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "tts": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "voiceId": {
+                            "type": "string"
+                          },
+                          "speed": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model",
+                          "voiceId",
+                          "speed"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "llm",
+                      "stt",
+                      "tts"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The persona with its saved project settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "projectId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "versionId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "identityName": {
+                      "type": "string"
+                    },
+                    "personality": {
+                      "type": "string"
+                    },
+                    "language": {
+                      "type": "string"
+                    },
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "models": {
+                              "type": "object",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string"
+                                    },
+                                    "speed": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "owner": {
+                      "type": "string",
+                      "enum": [
+                        "egma",
+                        "organization"
+                      ]
+                    },
+                    "archivedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "projectId",
+                    "name",
+                    "description",
+                    "version",
+                    "versionId",
+                    "identityName",
+                    "personality",
+                    "language",
+                    "parameterContract",
+                    "settings",
+                    "owner",
+                    "archivedAt",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/personas": {
       "get": {
         "operationId": "listPersonas",
@@ -9473,72 +9964,175 @@
                           "language": {
                             "type": "string"
                           },
-                          "models": {
-                            "type": "object",
-                            "properties": {
-                              "llm": {
+                          "parameterContract": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "key": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "valueType": {
+                                  "type": "string",
+                                  "enum": [
+                                    "integer",
+                                    "number",
+                                    "string"
+                                  ]
+                                },
+                                "defaultValue": {
+                                  "oneOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "unit": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "minimum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "maximum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "key",
+                                "label",
+                                "valueType",
+                                "defaultValue",
+                                "unit",
+                                "minimum",
+                                "maximum"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "settings": {
+                            "anyOf": [
+                              {
                                 "type": "object",
                                 "properties": {
-                                  "provider": {
-                                    "type": "string"
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1
                                   },
-                                  "model": {
-                                    "type": "string"
+                                  "models": {
+                                    "type": "object",
+                                    "properties": {
+                                      "llm": {
+                                        "type": "object",
+                                        "properties": {
+                                          "provider": {
+                                            "type": "string"
+                                          },
+                                          "model": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "provider",
+                                          "model"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "stt": {
+                                        "type": "object",
+                                        "properties": {
+                                          "provider": {
+                                            "type": "string"
+                                          },
+                                          "model": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "provider",
+                                          "model"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "tts": {
+                                        "type": "object",
+                                        "properties": {
+                                          "provider": {
+                                            "type": "string"
+                                          },
+                                          "model": {
+                                            "type": "string"
+                                          },
+                                          "voiceId": {
+                                            "type": "string"
+                                          },
+                                          "speed": {
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": [
+                                          "provider",
+                                          "model",
+                                          "voiceId",
+                                          "speed"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "required": [
+                                      "llm",
+                                      "stt",
+                                      "tts"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "createdAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "updatedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
                                   }
                                 },
                                 "required": [
-                                  "provider",
-                                  "model"
+                                  "id",
+                                  "models",
+                                  "createdAt",
+                                  "updatedAt"
                                 ],
                                 "additionalProperties": false
                               },
-                              "stt": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "provider",
-                                  "model"
-                                ],
-                                "additionalProperties": false
-                              },
-                              "tts": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  },
-                                  "voiceId": {
-                                    "type": "string"
-                                  },
-                                  "speed": {
-                                    "type": "number"
-                                  }
-                                },
-                                "required": [
-                                  "provider",
-                                  "model",
-                                  "voiceId",
-                                  "speed"
-                                ],
-                                "additionalProperties": false
+                              {
+                                "type": "null"
                               }
-                            },
-                            "required": [
-                              "llm",
-                              "stt",
-                              "tts"
-                            ],
-                            "additionalProperties": false
+                            ]
                           },
                           "owner": {
                             "type": "string",
@@ -9577,7 +10171,8 @@
                           "identityName",
                           "personality",
                           "language",
-                          "models",
+                          "parameterContract",
+                          "settings",
                           "owner",
                           "archivedAt",
                           "createdAt",
@@ -9790,8 +10385,7 @@
                   "name",
                   "identityName",
                   "personality",
-                  "language",
-                  "models"
+                  "language"
                 ],
                 "additionalProperties": false
               }
@@ -9851,72 +10445,175 @@
                     "language": {
                       "type": "string"
                     },
-                    "models": {
-                      "type": "object",
-                      "properties": {
-                        "llm": {
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "provider": {
-                              "type": "string"
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            "model": {
-                              "type": "string"
+                            "models": {
+                              "type": "object",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string"
+                                    },
+                                    "speed": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
                             }
                           },
                           "required": [
-                            "provider",
-                            "model"
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
                           ],
                           "additionalProperties": false
                         },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string"
-                            },
-                            "speed": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "owner": {
                       "type": "string",
@@ -9955,7 +10652,8 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
+                    "settings",
                     "owner",
                     "archivedAt",
                     "createdAt",
@@ -10374,72 +11072,175 @@
                     "language": {
                       "type": "string"
                     },
-                    "models": {
-                      "type": "object",
-                      "properties": {
-                        "llm": {
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "provider": {
-                              "type": "string"
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            "model": {
-                              "type": "string"
+                            "models": {
+                              "type": "object",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string"
+                                    },
+                                    "speed": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
                             }
                           },
                           "required": [
-                            "provider",
-                            "model"
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
                           ],
                           "additionalProperties": false
                         },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string"
-                            },
-                            "speed": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "owner": {
                       "type": "string",
@@ -10478,7 +11279,8 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
+                    "settings",
                     "owner",
                     "archivedAt",
                     "createdAt",
@@ -10684,6 +11486,10 @@
                       "tts"
                     ],
                     "additionalProperties": false
+                  },
+                  "expectedVersionId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "additionalProperties": false
@@ -10744,72 +11550,175 @@
                     "language": {
                       "type": "string"
                     },
-                    "models": {
-                      "type": "object",
-                      "properties": {
-                        "llm": {
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "provider": {
-                              "type": "string"
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            "model": {
-                              "type": "string"
+                            "models": {
+                              "type": "object",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string"
+                                    },
+                                    "speed": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
                             }
                           },
                           "required": [
-                            "provider",
-                            "model"
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
                           ],
                           "additionalProperties": false
                         },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string"
-                            },
-                            "speed": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "owner": {
                       "type": "string",
@@ -10848,7 +11757,8 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
+                    "settings",
                     "owner",
                     "archivedAt",
                     "createdAt",
@@ -11139,72 +12049,77 @@
                           "language": {
                             "type": "string"
                           },
-                          "models": {
-                            "type": "object",
-                            "properties": {
-                              "llm": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  }
+                          "parameterContract": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "key": {
+                                  "type": "string"
                                 },
-                                "required": [
-                                  "provider",
-                                  "model"
-                                ],
-                                "additionalProperties": false
+                                "label": {
+                                  "type": "string"
+                                },
+                                "valueType": {
+                                  "type": "string",
+                                  "enum": [
+                                    "integer",
+                                    "number",
+                                    "string"
+                                  ]
+                                },
+                                "defaultValue": {
+                                  "oneOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "unit": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "minimum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "maximum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
                               },
-                              "stt": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "provider",
-                                  "model"
-                                ],
-                                "additionalProperties": false
-                              },
-                              "tts": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  },
-                                  "voiceId": {
-                                    "type": "string"
-                                  },
-                                  "speed": {
-                                    "type": "number"
-                                  }
-                                },
-                                "required": [
-                                  "provider",
-                                  "model",
-                                  "voiceId",
-                                  "speed"
-                                ],
-                                "additionalProperties": false
-                              }
-                            },
-                            "required": [
-                              "llm",
-                              "stt",
-                              "tts"
-                            ],
-                            "additionalProperties": false
+                              "required": [
+                                "key",
+                                "label",
+                                "valueType",
+                                "defaultValue",
+                                "unit",
+                                "minimum",
+                                "maximum"
+                              ],
+                              "additionalProperties": false
+                            }
                           },
                           "createdAt": {
                             "type": "string",
@@ -11218,7 +12133,7 @@
                           "identityName",
                           "personality",
                           "language",
-                          "models",
+                          "parameterContract",
                           "createdAt"
                         ],
                         "additionalProperties": false
@@ -11525,72 +12440,77 @@
                     "language": {
                       "type": "string"
                     },
-                    "models": {
-                      "type": "object",
-                      "properties": {
-                        "llm": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
                           },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
                         },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string"
-                            },
-                            "speed": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
                     },
                     "createdAt": {
                       "type": "string",
@@ -11604,7 +12524,7 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
                     "createdAt"
                   ],
                   "additionalProperties": false
@@ -11780,72 +12700,175 @@
                     "language": {
                       "type": "string"
                     },
-                    "models": {
-                      "type": "object",
-                      "properties": {
-                        "llm": {
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "provider": {
-                              "type": "string"
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            "model": {
-                              "type": "string"
+                            "models": {
+                              "type": "object",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string"
+                                    },
+                                    "speed": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
                             }
                           },
                           "required": [
-                            "provider",
-                            "model"
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
                           ],
                           "additionalProperties": false
                         },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string"
-                            },
-                            "speed": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "owner": {
                       "type": "string",
@@ -11884,7 +12907,8 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
+                    "settings",
                     "owner",
                     "archivedAt",
                     "createdAt",

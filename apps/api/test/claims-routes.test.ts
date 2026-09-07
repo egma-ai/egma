@@ -5,6 +5,7 @@ import {
   getSimulation,
   listRunEvents,
   SPEED_RANGE,
+  RECOMMENDED_PERSONA_MODELS,
   type Persona,
   type PersonaModels,
 } from "@egma/db";
@@ -530,6 +531,7 @@ describe("claiming work", () => {
     expect(pinned?.personaVersionId).toBe(persona.versionId);
 
     const moved = await editPersona(author, persona.id, {
+      expectedVersionId: persona.versionId,
       identityName: "Rita Bellweather",
       personality: "Rita has hung up once already and is out of patience.",
       language: "en-GB",
@@ -1571,5 +1573,41 @@ describe("one source of execution truth", () => {
     expect(String(refused.body.message)).toContain("version 5");
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.status).toBe("queued");
+  });
+});
+
+
+describe("persona settings frozen before dispatch", () => {
+  it.each(["chat", "voice"] as const)("keeps %s model and voice settings through delayed claims and retries", async (modality) => {
+    const load = vi.fn().mockRejectedValueOnce(new ProviderCredentialSourceUnavailableError()).mockResolvedValue({ openai: "openai-test-key", cartesia: "cartesia-test-key", deepgram: "deepgram-test-key" });
+    const { ada, key, connectionId, versionId, persona } = await aCustomerReadyToRun(`claims_frozen_${modality}`, {
+      providerCredentials: { load },
+      retellFetch: modality === "voice" ? RETELL_WEB_CALL_FETCH : RETELL_CHAT_FETCH,
+    }, RECOMMENDED_PERSONA_MODELS, {}, modality === "voice" ? WEB_CALL : RETELL);
+    await aQueuedRun(key, connectionId, versionId);
+    const editedModels: PersonaModels = {
+      llm: { provider: "openai", model: "gpt-4o" },
+      stt: { provider: "deepgram", model: "nova-3-general" },
+      tts: { provider: "openai", model: "tts-1", voiceId: "custom-voice-id", speed: 1.3 },
+    };
+    const moved = await ask(api.app, "PATCH", `/v1/personas/${persona.id}`, key, { expectedVersionId: persona.versionId, personality: "Has one clear question.", models: editedModels });
+    expect(moved.statusCode, JSON.stringify(moved.body)).toBe(200);
+    expect(moved.body.version).toBe(2);
+    const deferred = await claim(api.config.simulatorServiceToken, { claimant: "frozen-settings", capacity: 1, wait_seconds: 0 });
+    expect(deferred.body.specs).toEqual([]);
+    const retried = await claim(api.config.simulatorServiceToken, { claimant: "frozen-settings", capacity: 1, wait_seconds: 0 });
+    const [original] = retried.body.specs as Record<string, unknown>[];
+    expect(original?.persona).toEqual({ name: NEUTRAL_PERSON.identityName, personality: NEUTRAL_PERSON.personality, language: NEUTRAL_PERSON.language });
+    expect(original?.models).toMatchObject({
+      llm: RECOMMENDED_PERSONA_MODELS.llm, stt: RECOMMENDED_PERSONA_MODELS.stt,
+      tts: { provider: RECOMMENDED_PERSONA_MODELS.tts.provider, model: RECOMMENDED_PERSONA_MODELS.tts.model, voice_id: RECOMMENDED_PERSONA_MODELS.tts.voiceId, speed: RECOMMENDED_PERSONA_MODELS.tts.speed },
+    });
+    expect(specComplaints(original)).toEqual([]);
+    await aQueuedRun(key, connectionId, versionId);
+    const later = await claim(api.config.simulatorServiceToken, { claimant: "later-settings", capacity: 1, wait_seconds: 0 });
+    const [next] = later.body.specs as Record<string, unknown>[];
+    expect(next?.persona).toMatchObject({ personality: "Has one clear question." });
+    expect(next?.models).toMatchObject({ llm: editedModels.llm, stt: editedModels.stt, tts: { provider: "openai", model: "tts-1", voice_id: "custom-voice-id", speed: 1.3 } });
+    expect(specComplaints(next)).toEqual([]);
   });
 });

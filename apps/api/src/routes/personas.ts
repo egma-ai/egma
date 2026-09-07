@@ -1,5 +1,7 @@
 import {
   createPersona,
+  usePersona,
+  PersonaVersionConflictError,
   deletePersona,
   editPersona,
   forkPersona,
@@ -249,7 +251,8 @@ function describedPersona(one: Persona): Record<string, unknown> {
     identityName: one.identityName,
     personality: one.personality,
     language: one.language,
-    models: one.models,
+    parameterContract: one.parameterContract,
+    settings: one.settings === null ? null : { id: one.settings.id, models: one.settings.models, createdAt: one.settings.createdAt.toISOString(), updatedAt: one.settings.updatedAt.toISOString() },
     owner: one.owner,
     archivedAt: one.archivedAt?.toISOString() ?? null,
     createdAt: one.createdAt.toISOString(),
@@ -266,7 +269,7 @@ function describedVersion(one: PersonaVersion): Record<string, unknown> {
     identityName: one.identityName,
     personality: one.personality,
     language: one.language,
-    models: one.models,
+    parameterContract: one.parameterContract,
     createdAt: one.createdAt.toISOString(),
   };
 }
@@ -502,14 +505,7 @@ export async function personaRoutes(
       return sendRefusal(reply, "unprocessable", unexpected);
     }
 
-    if (!("models" in body)) {
-      return sendRefusal(
-        reply,
-        "unprocessable",
-        "a persona needs one complete models value with llm, stt and tts",
-      );
-    }
-    const models = validPersonaModels(body.models);
+    const models = "models" in body ? validPersonaModels(body.models) : undefined;
 
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
@@ -522,7 +518,7 @@ export async function personaRoutes(
       identityName: text(body.identityName),
       personality: text(body.personality),
       language: text(body.language),
-      models,
+      ...(models === undefined ? {} : { models }),
     });
 
     return reply.code(201).send(describedPersona(created));
@@ -550,7 +546,7 @@ export async function personaRoutes(
     const refused = mayAuthor(reply, auth, "edit personas");
     if (refused !== undefined) return refused;
 
-    const unexpected = unknownBody(body, PERSONA_BODY_FIELDS);
+    const unexpected = unknownBody(body, [...PERSONA_BODY_FIELDS, "expectedVersionId"]);
     if (unexpected !== undefined) {
       return sendRefusal(reply, "unprocessable", unexpected);
     }
@@ -573,10 +569,26 @@ export async function personaRoutes(
         : {}),
       ...("language" in body ? { language: text(body.language) } : {}),
       ...(models === undefined ? {} : { models }),
+      ...("expectedVersionId" in body ? { expectedVersionId: text(body.expectedVersionId) } : {}),
     });
 
     if (edited === undefined) return noSuchPersona(reply, personaId);
     return reply.send(describedPersona(edited));
+  });
+
+  registerPlatformOperation(app, personaOperations.usePersona, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { personaId } = request.params as { personaId: string };
+    const body = (request.body ?? {}) as Body;
+    const refused = mayAuthor(reply, auth, "use personas");
+    if (refused !== undefined) return refused;
+    const unexpected = unknownBody(body, ["projectId", "models"]);
+    if (unexpected !== undefined) return sendRefusal(reply, "unprocessable", unexpected);
+    const acting = await projectFor(auth, given(text(body.projectId)));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+    const one = await usePersona(acting.auth, personaId, "models" in body ? validPersonaModels(body.models) : undefined);
+    if (one === undefined) return noSuchPersona(reply, personaId);
+    return reply.send(describedPersona(one));
   });
 
   /**
@@ -644,6 +656,9 @@ export async function personaRoutes(
    * fault.
    */
   app.setErrorHandler(async (error, _request, reply) => {
+    if (error instanceof PersonaVersionConflictError) {
+      return sendRefusal(reply, "version_conflict", error.message);
+    }
     if (error instanceof EgmaProvidedPersonaError) {
       return sendRefusal(
         reply,

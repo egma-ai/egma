@@ -1,3 +1,4 @@
+import type { PersonaParameterValues } from "../persona-library/parameters.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 
@@ -781,6 +782,7 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
               connectionId: input.connectionId,
               personaId: pin.personaId,
               personaVersionId: pin.personaVersionId,
+              personaParameterValues: pin.personaParameterValues,
               testId: current.id,
               testVersionId: current.versionId,
               position: simulationCount + index + 1,
@@ -883,11 +885,11 @@ function connectionIdentityToken(
   const canonicalConfig = Object.keys(config)
     .sort()
     .map((key) => `${key}=${config[key]}`)
-    .join(" ");
+    .join("\0");
   return createHash("sha256")
     .update(canonicalConfig)
-    .update("  ")
-    .update(credentialsEnvelope ?? " none")
+    .update("\0\0")
+    .update(credentialsEnvelope ?? "\0none")
     .digest("hex");
 }
 
@@ -1912,6 +1914,7 @@ export type SimulationClaim = {
   /** Who calls, by identity, and the pin the traits are read from. */
   readonly personaId: string;
   readonly personaVersionId: string;
+  readonly personaParameterValues: PersonaParameterValues;
   /** What is being checked, by stable identity and exact immutable version. */
   readonly testId: string;
   readonly testVersionId: string;
@@ -1936,6 +1939,7 @@ const SIMULATION_CLAIM_COLUMNS = {
   connectionId: simulation.connectionId,
   personaId: simulation.personaId,
   personaVersionId: simulation.personaVersionId,
+  personaParameterValues: simulation.personaParameterValues,
   testId: simulation.testId,
   testVersionId: simulation.testVersionId,
   modality: simulation.modality,
@@ -2111,6 +2115,7 @@ export async function claimSimulations(
       connectionId: row.connectionId,
       personaId: row.personaId,
       personaVersionId: row.personaVersionId,
+      personaParameterValues: row.personaParameterValues,
       testId: row.testId,
       testVersionId: row.testVersionId,
       modality: row.modality as Modality,

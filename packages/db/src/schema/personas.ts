@@ -4,13 +4,16 @@ import {
   foreignKey,
   index,
   integer,
-  numeric,
+  jsonb,
   pgTable,
   text,
   unique,
   uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+
+import type { GraderParameter } from "../grader-library/parameters.ts";
+import type { PersonaParameterValues } from "../persona-library/parameters.ts";
 
 import { organization, project } from "./tenancy.ts";
 import { user } from "./identity.ts";
@@ -53,7 +56,7 @@ import {
  */
 
 export const persona = pgTable(
-  "persona",
+  "persona_definition",
   {
     id: idText("id").primaryKey(),
     /** Null together with projectId when this is an Egma-provided persona. */
@@ -126,7 +129,7 @@ export const persona = pgTable(
  * never belong in this immutable authored value.
  */
 export const personaVersion = pgTable(
-  "persona_version",
+  "persona_definition_version",
   {
     id: idText("id").primaryKey(),
     personaId: idText("persona_id")
@@ -141,22 +144,9 @@ export const personaVersion = pgTable(
     identityName: text("identity_name").notNull(),
     personality: text("personality").notNull(),
     language: text("language").notNull(),
-    llmProvider: text("llm_provider").notNull(),
-    llmModel: text("llm_model").notNull(),
-    sttProvider: text("stt_provider").notNull(),
-    sttModel: text("stt_model").notNull(),
-    ttsProvider: text("tts_provider").notNull(),
-    ttsModel: text("tts_model").notNull(),
-    ttsVoiceId: text("tts_voice_id").notNull(),
-    /**
-     * How fast they speak, as a multiplier. Numeric rather than a float so the
-     * stored value is the authored value — 0.9 saved is 0.9 read.
-     */
-    ttsSpeed: numeric("tts_speed", {
-      precision: 3,
-      scale: 2,
-      mode: "number",
-    }).notNull(),
+    parameterContract: jsonb("parameter_contract")
+      .$type<readonly GraderParameter[]>()
+      .notNull(),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
     }),
@@ -167,21 +157,7 @@ export const personaVersion = pgTable(
     nonEmpty("persona_version_identity_name_stated", table.identityName),
     nonEmpty("persona_version_personality_stated", table.personality),
     nonEmpty("persona_version_language_stated", table.language),
-    nonEmpty("persona_version_llm_provider_stated", table.llmProvider),
-    nonEmpty("persona_version_llm_model_stated", table.llmModel),
-    nonEmpty("persona_version_stt_provider_stated", table.sttProvider),
-    nonEmpty("persona_version_stt_model_stated", table.sttModel),
-    nonEmpty("persona_version_tts_provider_stated", table.ttsProvider),
-    nonEmpty("persona_version_tts_model_stated", table.ttsModel),
-    nonEmpty("persona_version_tts_voice_id_stated", table.ttsVoiceId),
-    // The same range `SPEED_RANGE` in `models/selections.ts` enforces at the
-    // authoring boundary, written here as well because a row a script wrote
-    // has to be as executable as a row a form wrote. `schema-shape.test.ts`
-    // holds the two to the same numbers.
-    check(
-      "persona_version_tts_speed_in_range",
-      sql`${table.ttsSpeed} >= 0.6 and ${table.ttsSpeed} <= 1.5`,
-    ),
+    check("persona_definition_version_parameter_contract_is_array", sql`jsonb_typeof(${table.parameterContract}) = 'array'`),
     unique("persona_version_persona_id_version_unique").on(
       table.personaId,
       table.version,
@@ -194,3 +170,19 @@ export const personaVersion = pgTable(
     ),
   ],
 );
+
+/** One project's complete settings for a shared or project-owned persona. */
+export const projectPersona = pgTable("project_persona", {
+  id: idText("id").primaryKey(),
+  organizationId: idText("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+  projectId: idText("project_id").notNull(),
+  personaDefinitionId: idText("persona_definition_id").notNull().references(() => persona.id),
+  parameterValues: jsonb("parameter_values").$type<PersonaParameterValues>().notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (table) => [
+  prefixCheck("project_persona_id_prefix", table.id, "ppr"),
+  foreignKey({ name: "project_persona_project_organization_fk", columns: [table.projectId, table.organizationId], foreignColumns: [project.id, project.organizationId] }).onDelete("cascade"),
+  unique("project_persona_project_definition_unique").on(table.projectId, table.personaDefinitionId),
+  check("project_persona_parameters_are_object", sql`jsonb_typeof(${table.parameterValues}) = 'object'`),
+]);

@@ -1,3 +1,4 @@
+import { listProjectPersonas } from "../../cli/src/platform/personas.ts";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -81,6 +82,9 @@ describe("the CLI and API suite contract", () => {
     const calls: WireCall[] = [];
     const fetchImpl = fetchThrough(api.app, calls);
 
+    const personas = await listProjectPersonas(signedIn, customer.projectId, fetchImpl);
+    expect(personas).toEqual(expect.arrayContaining([expect.objectContaining({ name: "Everyday caller" })]));
+
     const suite = await createTestSuite(
       signedIn,
       { projectId: customer.projectId, name: "Release" },
@@ -135,6 +139,11 @@ describe("the CLI and API suite contract", () => {
       name: "Books a visit",
       version: 1,
     });
+
+    const selectedPersona = personas.find((one) => one.name === "Everyday caller");
+    const currentPersona = await request(api.app, "GET", `/v1/personas/${selectedPersona?.id}`, key);
+    expect(currentPersona.body.settings).toMatchObject({ id: expect.stringMatching(/^ppr_/u), models: expect.any(Object) });
+    expect(pushed.personas).toEqual([{ id: selectedPersona?.id, name: "Everyday caller" }]);
 
     const registered = await request(api.app, "POST", "/v1/agents", key, {
       agentPlatform: "retell",

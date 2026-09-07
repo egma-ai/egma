@@ -197,3 +197,7 @@ export {
 } from "./access/tests.ts";
 export * from "./access/index.ts";
 export * as schema from "./schema/index.ts";
+
+export { usePersona, PersonaVersionConflictError } from "./access/personas.ts";
+export { PERSONA_PARAMETER_CONTRACT, personaParameterContract, personaParametersOfModels, personaModelsOfParameters, validatePersonaParameterContract, validatePersonaParameterValues, type PersonaParameterValues } from "./persona-library/parameters.ts";
+export type { ProjectPersonaSettings } from "./access/project-personas.ts";

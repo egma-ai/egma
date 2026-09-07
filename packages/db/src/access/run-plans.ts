@@ -16,7 +16,9 @@ import {
   graderDefinitionVersion,
   projectGrader,
 } from "../schema/graders.ts";
-import { persona } from "../schema/personas.ts";
+import type { PersonaParameterValues } from "../persona-library/parameters.ts";
+import { readProjectPersonaSettingsOn } from "./project-personas.ts";
+import { persona, personaVersion } from "../schema/personas.ts";
 import { gradingPlan, type GradingPlanState } from "../schema/plans.ts";
 import { simulation } from "../schema/runs.ts";
 import type { AuthContext } from "./context.ts";
@@ -35,7 +37,7 @@ export async function resolvePersonaVersions(
   on: Queryable,
   projectId: string,
   ids: readonly string[],
-): Promise<readonly { personaId: string; personaVersionId: string }[]> {
+): Promise<readonly { personaId: string; personaVersionId: string; personaParameterValues: PersonaParameterValues }[]> {
   const unique = [...new Set(ids)];
   const found = new Map(
     (
@@ -52,13 +54,17 @@ export async function resolvePersonaVersions(
         .for("share")
     ).map((row) => [row.id, row] as const),
   );
-  return ids.map((id) => {
+  return Promise.all(ids.map(async (id) => {
     const row = found.get(id);
     if (row === undefined || row.archivedAt !== null) {
       refuseRun("not_admitted", `persona ${id} is not active in this project`);
     }
-    return { personaId: id, personaVersionId: row.currentVersionId };
-  });
+    const [version] = await on.select({ parameterContract: personaVersion.parameterContract }).from(personaVersion).where(eq(personaVersion.id, row.currentVersionId)).limit(1);
+    if (version === undefined) throw new Error("the persona's current version is missing");
+    const settings = await readProjectPersonaSettingsOn(on, auth, projectId, id, version.parameterContract, true);
+    if (settings === undefined) refuseRun("not_admitted", `persona ${id} has no saved settings in this project`);
+    return { personaId: id, personaVersionId: row.currentVersionId, personaParameterValues: settings.parameterValues };
+  }));
 }
 
 export type GradingPlan = {
