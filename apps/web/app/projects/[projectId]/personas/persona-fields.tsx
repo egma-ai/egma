@@ -14,7 +14,7 @@ import {
   type PersonaForm,
   type PersonaModelCatalogEntry,
 } from "../../../../lib/personas.ts";
-import { Field, FormRow } from "../../../../ui/form.tsx";
+import { Field } from "../../../../ui/form.tsx";
 import { NumberField } from "../../../../ui/number-field.tsx";
 import { SheetSection } from "./sheet-parts.tsx";
 
@@ -191,7 +191,7 @@ export function BehaviorFields({
 }
 
 /**
- * The complete model selection owned by a persona version.
+ * The model settings used for this persona in the current project.
  *
  * **One control per engine, and the control is the pair.** The server's catalog
  * is a list of provider-and-model pairs its adapters can actually execute, so
@@ -277,75 +277,71 @@ export function ModelFields({
   readonly onChange: (draft: ModelsDraft) => void;
 }) {
   return (
-    <SheetSection label="Models">
+    <SheetSection label="Settings">
       <div className="flex flex-col gap-4">
-        <FormRow>
-          <EngineField
-            prefix={prefix}
-            job="llm"
-            label="Language model"
-            selection={{ provider: draft.llmProvider, model: draft.llmModel }}
-            form={form}
-            disabled={disabled}
-            onSelect={(entry) =>
-              onChange({
-                ...draft,
-                llmProvider: entry.provider,
-                llmModel: entry.model,
-              })
-            }
-          />
-          <EngineField
-            prefix={prefix}
-            job="stt"
-            label="Speech-to-text"
-            selection={{ provider: draft.sttProvider, model: draft.sttModel }}
-            form={form}
-            disabled={disabled}
-            onSelect={(entry) =>
-              onChange({
-                ...draft,
-                sttProvider: entry.provider,
-                sttModel: entry.model,
-              })
-            }
-          />
-        </FormRow>
+        <EngineField
+          prefix={prefix}
+          job="llm"
+          label="Language model"
+          selection={{ provider: draft.llmProvider, model: draft.llmModel }}
+          form={form}
+          disabled={disabled}
+          onSelect={(entry) =>
+            onChange({
+              ...draft,
+              llmProvider: entry.provider,
+              llmModel: entry.model,
+            })
+          }
+        />
+        <EngineField
+          prefix={prefix}
+          job="stt"
+          label="Speech-to-text"
+          selection={{ provider: draft.sttProvider, model: draft.sttModel }}
+          form={form}
+          disabled={disabled}
+          onSelect={(entry) =>
+            onChange({
+              ...draft,
+              sttProvider: entry.provider,
+              sttModel: entry.model,
+            })
+          }
+        />
 
-        <FormRow>
-          <EngineField
-            prefix={prefix}
-            job="tts"
-            label="Text-to-speech"
-            selection={{ provider: draft.ttsProvider, model: draft.ttsModel }}
-            form={form}
-            disabled={disabled}
-            onSelect={(entry) =>
-              onChange({
-                ...draft,
-                ttsProvider: entry.provider,
-                ttsModel: entry.model,
-                voiceId: entry.recommendedVoiceId ?? "",
-              })
-            }
-          />
-          {/*
-           * The rate carries no `min`, `max` or `step`, and that is deliberate.
-           * The accepted range is the server's rule, and a bound written here
-           * as well would either refuse a rate egma would have taken or take
-           * one egma will refuse. The one authoritative refusal is the
-           * server's, and the instruction that used to explain the range here
-           * was deleted on the developer's note against this very field.
-           */}
-          <NumberField
-            id={`${prefix}-tts-speed`}
-            label="Speech rate*"
-            value={draft.speed}
-            disabled={disabled}
-            required
-            onChange={(speed) => onChange({ ...draft, speed })}
-          />
-        </FormRow>
+        <EngineField
+          prefix={prefix}
+          job="tts"
+          label="Text-to-speech"
+          selection={{ provider: draft.ttsProvider, model: draft.ttsModel }}
+          form={form}
+          disabled={disabled}
+          onSelect={(entry) =>
+            onChange({
+              ...draft,
+              ttsProvider: entry.provider,
+              ttsModel: entry.model,
+              voiceId: entry.recommendedVoiceId ?? "",
+            })
+          }
+        />
+        {/*
+         * The rate carries no `min`, `max` or `step`, and that is deliberate.
+         * The accepted range is the server's rule, and a bound written here
+         * as well would either refuse a rate egma would have taken or take
+         * one egma will refuse. The one authoritative refusal is the
+         * server's, and the instruction that used to explain the range here
+         * was deleted on the developer's note against this very field.
+         */}
+        <NumberField
+          id={`${prefix}-tts-speed`}
+          label="Speech rate*"
+          value={draft.speed}
+          disabled={disabled}
+          required
+          onChange={(speed) => onChange({ ...draft, speed })}
+        />
 
         <Field
           label="Voice*"

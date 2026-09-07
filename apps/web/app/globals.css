@@ -179,9 +179,22 @@
  * computed `display` is `block`, so the declaration did nothing there.
  */
 @layer base {
+  select[data-slot="select"] {
+    appearance: none;
+    background-image: var(--select-chevron);
+    background-position: right var(--space-3) center;
+    background-size: var(--space-4);
+    background-repeat: no-repeat;
+    cursor: pointer;
+    transition: border-color var(--duration-hover) var(--ease-out);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    select[data-slot="select"]:hover:not(:disabled) { border-color: var(--muted); }
+  }
   @supports (appearance: base-select) {
-    select, ::picker(select) { appearance: base-select; }
+    select, select[data-slot="select"], ::picker(select) { appearance: base-select; }
     select { align-items: center; }
+    select[data-slot="select"]::picker-icon { display: none; }
     ::picker(select) {
       margin-block: var(--space-2);
       padding: var(--space-1);
@@ -191,6 +204,25 @@
       box-shadow: var(--shadow-menu);
       color: var(--foreground);
       overscroll-behavior: contain;
+      opacity: 0;
+      transform: scale(var(--select-picker-scale));
+      transform-origin: center var(--select-picker-origin, top);
+      transition:
+        opacity var(--duration-popover-out) var(--ease-out),
+        transform var(--duration-popover-out) var(--ease-out),
+        display var(--duration-popover-out) allow-discrete,
+        overlay var(--duration-popover-out) allow-discrete;
+    }
+    :open::picker(select) {
+      opacity: 1;
+      transform: scale(1);
+      transition-duration: var(--duration-popover-in);
+    }
+    @starting-style {
+      :open::picker(select) {
+        opacity: 0;
+        transform: scale(var(--select-picker-scale));
+      }
     }
     /*
      * Eight rows, and never more than the room there is. Under 32rem of window
@@ -200,8 +232,38 @@
     @media (min-height: 32rem) {
       ::picker(select) { max-height: min(18rem, calc(50dvh - 2rem)); }
     }
-    select option { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
+    select option {
+      min-height: var(--control-md);
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      color: var(--foreground);
+    }
+    select option::checkmark {
+      order: 1;
+      margin-inline-start: auto;
+      color: var(--accent);
+    }
+    @media (hover: hover) and (pointer: fine) {
+      select option:hover:not(:disabled) { background: var(--surface-soft); }
+    }
+    select option:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: -2px;
+    }
     select option:checked { background: var(--surface-active); }
+    select option:disabled { color: var(--faint); cursor: not-allowed; }
+    @media (pointer: coarse) {
+      select option { min-height: var(--tap-target); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      ::picker(select), :open::picker(select) { transform: none; }
+      @starting-style {
+        :open::picker(select) { transform: none; }
+      }
+    }
   }
 }
 

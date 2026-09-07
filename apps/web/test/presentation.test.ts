@@ -101,7 +101,7 @@ describe("the shared form controls", () => {
   it("centers every enhanced select instead of relying on the browser default", async () => {
     const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
-    expect(css).toMatch(/select, ::picker\(select\) \{ appearance: base-select; \}/);
+    expect(css).toMatch(/select, select\[data-slot="select"\], ::picker\(select\) \{ appearance: base-select; \}/);
     expect(css).toMatch(/select \{ align-items: center; \}/);
   });
 

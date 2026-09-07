@@ -1,3 +1,5 @@
+"use client";
+
 import { cva, type VariantProps } from "class-variance-authority";
 import type { ComponentProps } from "react";
 
@@ -21,7 +23,7 @@ import { cn } from "@/lib/utils";
  * under `components/ui`, `data-slot`, `cn` over the caller's classes, every
  * value a theme key — and its Radix dependency is not.
  *
- * The chevron is the browser's. `globals.css` restyles the open picker itself
+ * The chevron is shared in both themes. `globals.css` restyles the open picker
  * where a browser supports `appearance: base-select`, which is where that
  * belongs: one rule for every select in the product rather than a drawn arrow
  * on each one.
@@ -50,7 +52,7 @@ import { cn } from "@/lib/utils";
  */
 const selectVariants = cva(
   [
-    "w-full rounded-input border border-input bg-surface px-3",
+    "w-full min-w-0 rounded-input border border-input bg-surface pl-3 pr-10",
     "text-base text-foreground",
     "disabled:cursor-not-allowed disabled:opacity-60",
     /* "Pointer targets are at least 44px on coarse pointers." */
@@ -71,9 +73,27 @@ const selectVariants = cva(
   },
 );
 
+/** The browser can flip the picker above the field when there is more room. */
+function followPickerOrigin(select: HTMLSelectElement): void {
+  if (!globalThis.CSS?.supports("appearance", "base-select")) return;
+  requestAnimationFrame(() => {
+    if (!select.isConnected || !select.matches(":open")) return;
+    const selected = select.selectedOptions[0];
+    if (!selected) return;
+    const field = select.getBoundingClientRect();
+    const option = selected.getBoundingClientRect();
+    select.style.setProperty(
+      "--select-picker-origin",
+      option.bottom <= field.top ? "bottom" : "top",
+    );
+  });
+}
+
 function Select({
   className,
   size,
+  onPointerDown,
+  onKeyDown,
   ...props
 }: Omit<ComponentProps<"select">, "size"> &
   VariantProps<typeof selectVariants>) {
@@ -84,6 +104,14 @@ function Select({
       data-slot="select"
       className={cn(selectVariants({ size }), className)}
       {...props}
+      onPointerDown={(event) => {
+        onPointerDown?.(event);
+        if (!event.defaultPrevented) followPickerOrigin(event.currentTarget);
+      }}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (!event.defaultPrevented) followPickerOrigin(event.currentTarget);
+      }}
       /* After the spread, so a caller passing nothing cannot erase the hint. */
       aria-describedby={props["aria-describedby"] ?? hint}
     />

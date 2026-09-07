@@ -12,8 +12,8 @@ import { ownerSaid, type Persona } from "../../../../lib/personas.ts";
  * **They are here rather than in `apps/web/ui/` because they are one screen's
  * arrangement, not a shared behaviour.** The sheet itself, its head, its body,
  * its footer and its motion are `components/ui/sheet.tsx`; what is below is how
- * *a persona* fills one: a labelled group, a read pair, the frozen-version
- * list, and the chip that says which kind of persona a row is.
+ * *a persona* fills one: a labelled group, a read pair,
+ * and the chip that says which kind of persona a row is.
  *
  * Every measurement is read off page `L-0` of the Paper file (boards `RA4-0`
  * through `S6H-0`) with `get_computed_styles`, and every value is spent as a
@@ -34,7 +34,7 @@ import { ownerSaid, type Persona } from "../../../../lib/personas.ts";
  *   it. Nothing here re-pads the panel.
  */
 
-/** A labelled group inside a sheet: `WHO THEY ARE`, `MODELS`, `VERSIONS`. */
+/** A labelled group, separated from the previous group by a hairline. */
 export function SheetSection({
   label,
   children,
@@ -43,12 +43,11 @@ export function SheetSection({
   readonly children: ReactNode;
 }) {
   return (
-    <section className="flex min-w-0 flex-col gap-3" aria-label={label}>
-      {/*
-       * 12px letter-spaced capitals, which is the one thing on these boards
-       * that is genuinely the micro step rather than the caption step.
-       */}
-      <h3 className="m-0 text-2xs font-normal tracking-(--tracking-label) text-faint uppercase">
+    <section
+      className="flex min-w-0 flex-col gap-4 border-border not-first:border-t not-first:pt-5"
+      aria-label={label}
+    >
+      <h3 className="m-0 text-sm font-medium text-foreground">
         {label}
       </h3>
       {children}
@@ -129,77 +128,4 @@ export function PersonaTypeChip({
   readonly owner: Persona["owner"];
 }) {
   return <StateChip>{ownerSaid(owner)}</StateChip>;
-}
-
-/** One row of the frozen-version list. */
-export type VersionRow = {
-  readonly id: string;
-  readonly version: number;
-  readonly written: ReactNode;
-  /** The version this persona is on now. */
-  readonly current: boolean;
-  /** The version this sheet is reading, when it is reading an older one. */
-  readonly reading: boolean;
-  readonly onRead?: () => void;
-};
-
-/**
- * Every version this persona has been, newest first.
- *
- * **It is a section of the sheet rather than a second panel over it.** The
- * history used to be a sheet of its own opened from a page that was already a
- * sheet's worth of reading; the boards fold it in, because "which version is
- * this and what were the others" is one question and not two.
- *
- * A row that can be read is a button rather than a link: reading an older
- * version does not change the address, it changes what this same sheet is
- * showing.
- */
-export function Versions({ rows }: { readonly rows: readonly VersionRow[] }) {
-  return (
-    <ol className="m-0 flex list-none flex-col border border-border p-0">
-      {rows.map((row) => (
-        <li
-          className={cn(
-            "flex min-h-9 min-w-0 flex-wrap items-center justify-between gap-x-3",
-            "border-border px-3 py-1 not-first:border-t",
-            /*
-             * The wash stays here, and only here. It is the *current* mark —
-             * the state `DESIGN.md` gives the wash — and this list is the one
-             * place on the surface that still says "this is the one in force".
-             * The open row on the list behind it is grey for the opposite
-             * reason: it is a row somebody opened, not a value in force.
-             */
-            (row.current || row.reading) && "bg-surface-active",
-          )}
-          key={row.id}
-        >
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span className="font-mono text-sm text-foreground">
-              v{row.version}
-            </span>
-            <span className="text-sm text-muted-foreground">{row.written}</span>
-          </span>
-          {row.reading ? (
-            <span className="text-sm text-faint">Reading</span>
-          ) : row.current ? (
-            <span className="text-sm text-faint">Current</span>
-          ) : row.onRead === undefined ? null : (
-            <button
-              className={cn(
-                "cursor-pointer border-0 bg-transparent p-0 text-sm text-foreground",
-                "underline underline-offset-[3px]",
-                "transition-colors duration-(--duration-hover) ease-out",
-                "pointer-hover:text-primary",
-              )}
-              onClick={row.onRead}
-              type="button"
-            >
-              Read
-            </button>
-          )}
-        </li>
-      ))}
-    </ol>
-  );
 }
