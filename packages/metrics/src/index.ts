@@ -46,7 +46,7 @@ export {
   p90Of,
   everySpanIn,
   measuresFromSpans,
-  povOf,
+  povOfOrigin,
   turnResponseLatencySpanKinds,
   worstSampleOf,
   type MeasuredByOnePov,

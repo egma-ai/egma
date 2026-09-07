@@ -104,7 +104,13 @@ export type Sample = {
 };
 
 /**
- * Whose account of the conversation a series is: the persona's or the agent's.
+ * Whose account of the conversation a **series** is: the persona's or the
+ * agent's.
+ *
+ * Named for the origin it reads rather than plainly, because the trace store
+ * answers the same question about a **span** from its `emitter` column and the
+ * two must not be mistaken for one another: this one is about who measured a
+ * number, that one about who wrote a row.
  *
  * **Two POVs and three origins, because one POV can be told two ways.** egma's
  * own timing spans are the persona's POV — what egma said, heard and measured
@@ -113,7 +119,9 @@ export type Sample = {
  * only in granularity, so they rank against each other rather than sitting
  * side by side.
  */
-export function povOf(origin: MeasuredByOnePov["origin"]): "persona" | "agent" {
+export function povOfOrigin(
+  origin: MeasuredByOnePov["origin"],
+): "persona" | "agent" {
   return origin === "timed" ? "persona" : "agent";
 }
 
@@ -132,7 +140,7 @@ export type MeasuredByOnePov = {
    * the platform's own reported block.
    *
    * **The POV qualifier, since catalog version 8** — `timed` is the persona's
-   * POV and the other two the agent's (`povOf` above). A fact about *this*
+   * POV and the other two the agent's (`povOfOrigin` above). A fact about *this*
    * conversation and not about the measure, which is why it rides the answer
    * instead of sitting in the catalog: the same measure is timed on a
    * simulation, derived on a stock LiveKit call, and reported on a Retell one.

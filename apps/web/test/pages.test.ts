@@ -905,6 +905,7 @@ describe("the turns a grade cites", () => {
       toolName: "",
       toolArguments: "",
       toolResult: "",
+      pov: "agent",
       spans: children,
     };
   }

@@ -833,10 +833,13 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     # rather than carrying an id egma invented for itself.
     assert terminal["facts"]["provider_reference"] is None
 
-    # The tool facts, at the grain the honesty claim is made at: the call
-    # the test named carries what Egma answered with and the stamp that
-    # says Egma authored it; the other carries neither, which is the
-    # record's own way of saying a real backend did the work.
+    # The tool facts, at the grain the honesty claim is made at. Nothing of
+    # Egma runs inside a Retell agent and this lane offers no provider
+    # reference, so no report of the agent's own ever arrives: the seam's
+    # own record is this lane's whole tool record. The call the test named
+    # carries what Egma answered with; the other carries the name and the
+    # arguments alone, which is the record's own way of saying a real
+    # backend did the work.
     calls = [span for span in spans if span["name"] == "tool_call"]
     assert [span_attribute(span, "egma.tool.name") for span in calls] == [
         "get_availability",
@@ -845,11 +848,17 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     mocked, real = calls
     assert span_attribute(mocked, "egma.tool.arguments") == '{"day":"thursday"}'
     assert span_attribute(mocked, "egma.tool.result") == '{"slots":["thu-1430"]}'
-    assert span_attribute(mocked, "egma.tool.provenance") == "mocked"
-    assert span_attribute(mocked, "egma.tool.mock_tool") == "get_availability"
     assert span_attribute(real, "egma.tool.arguments") == '{"phone":"+15551234567"}'
     assert span_attribute(real, "egma.tool.result") is None
-    assert span_attribute(real, "egma.tool.provenance") is None
+    # And no stamp anywhere saying who answered: that is read at display
+    # time, by name, from the pinned test version's mock tools.
+    for span in calls:
+        for entry in span.get("attributes", []):
+            assert entry["key"] in {
+                "egma.tool.name",
+                "egma.tool.arguments",
+                "egma.tool.result",
+            }
 
     # And the platform's side of the same story: every request named the
     # version the spec resolved — never Retell's own moving default — and
@@ -1615,16 +1624,9 @@ async def test_a_chat_simulation_streams_its_conversation_as_spans(
             duration = int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])
             assert duration > 0
 
-    # The tool calls the platform reported, arguments where it gave them.
-    calls = [span for span in spans if span["name"] == "tool_call"]
-    assert [span_attribute(span, "egma.tool.name") for span in calls] == [
-        "reschedule_appointment",
-        "send_confirmation_sms",
-    ]
-    assert span_attribute(calls[0], "egma.tool.arguments") == (
-        '{"appointment_id":"apt-88213"}'
-    )
-    assert span_attribute(calls[1], "egma.tool.arguments") is None
+    # The platform reported two tool calls and neither is a row of Egma's:
+    # the tool record is the agent's own POV of the simulation.
+    assert [span for span in spans if span["name"] == "tool_call"] == []
 
     # One trace, the root last, and every other span named under it.
     root = next(span for span in spans if span["name"] == "simulation")
@@ -1755,16 +1757,21 @@ async def test_a_voice_simulation_ends_on_its_turn_limit_like_a_chat_one(
     assert len(turns_for(records, "sim-voice-limit")) == 3
 
 
-async def test_an_answer_that_only_called_a_tool_is_flushed_like_any_other(
+async def test_an_answer_that_only_called_a_tool_puts_no_row_on_egmas_record(
     workbench, start_simulator
 ):
-    """A flush closes an answer, not a turn.
+    """A tool call is the agent's row, and Egma writes none of its own.
 
-    An agent that calls a tool and says nothing produces no transcript
-    turn, so a flush keyed on turns would leave that answer's tool calls
-    and its measurement sitting in a buffer until the agent next spoke —
-    or until the conversation was over, which is the one moment live
-    evidence is no longer live.
+    The scripted agent answers one turn by calling a tool and saying
+    nothing at all. Egma serves nothing here and observes only that the
+    platform reported it, so the whole of that answer is absent from
+    Egma's record — the call belongs on the agent's own POV of the
+    simulation, filed under it by simulation ingestion, where it arrives
+    once with the arguments the model emitted and the result it received.
+
+    What still holds is everything around it: the transcript is the words
+    that were spoken, a flush still closes an answer, and the spoken
+    answer's measurement still rides the flush its words do.
     """
     spec = scripted_spec(
         "sim-spans-tool-only",
@@ -1792,6 +1799,14 @@ async def test_an_answer_that_only_called_a_tool_is_flushed_like_any_other(
         "Moved — Thursday at three.",
     ]
 
+    # And the call the platform reported is nowhere on Egma's record, nor
+    # is any attribute that used to describe one.
+    for record in recorded:
+        span = record["span"]
+        assert span["name"] != "tool_call"
+        for entry in span.get("attributes", []):
+            assert not entry["key"].startswith("egma.tool.")
+
     def flush_carrying(name: str, said: str | None = None) -> int:
         for record in recorded:
             span = record["span"]
@@ -1802,37 +1817,20 @@ async def test_an_answer_that_only_called_a_tool_is_flushed_like_any_other(
             return record["flush"]
         raise AssertionError(f"no {name} span was ever recorded")
 
-    tool_flush = flush_carrying("tool_call")
     words_flush = flush_carrying("agent_turn", "Moved — Thursday at three.")
     root_flush = flush_carrying("simulation")
+    assert words_flush < root_flush
 
-    # It left while the conversation was still going, not with the root.
-    assert tool_flush < root_flush
-    # And on its own account: the words that came an answer later rode a
-    # later flush, so nothing swept the tool call along with them.
-    assert tool_flush < words_flush
-
-    # A wordless answer takes no latency sample at all, so there is none to
-    # ride with the tool call. `turn_response_latency` runs from the moment
-    # the persona's turn went out to the moment the agent began answering,
-    # and an answer that said nothing never began: a wait that did not
-    # happen is not a wait of zero. The voice lane has always answered this
-    # way, out of the audio, and the chat lane now matches it.
-    assert not any(
-        record["flush"] == tool_flush
-        and record["span"]["name"] == "turn_response_latency"
-        for record in recorded
-    ), "a wordless answer measured a latency it has no finish line for"
-
-    # What "a flush is an answer" means is still held, by the answer that
-    # did say something: its measurement rode the same flush as its words.
+    # What "a flush is an answer" means is held by the answer that did say
+    # something: its measurement rode the same flush as its words.
     assert any(
         record["flush"] == words_flush
         and record["span"]["name"] == "turn_response_latency"
         for record in recorded
     ), "the spoken answer's measurement was split from the words it measured"
 
-    # The invariants the design rests on, unchanged by the extra flush.
+    # The invariants the design rests on: one span leaves once, and the
+    # root leaves last.
     by_flush: dict[int, set[str]] = {}
     for record in recorded:
         by_flush.setdefault(record["flush"], set()).add(record["span"]["spanId"])

@@ -2,7 +2,7 @@ import type { TraceDetail } from "@egma/db";
 import {
   aggregateOf,
   measuresFromSpans,
-  povOf,
+  povOfOrigin,
   type MeasuredByOnePov,
 } from "@egma/metrics";
 
@@ -56,7 +56,7 @@ export function describedMetrics(
       // machinery produced it; this says whose conversation it describes, and
       // catalog version 8 makes that the fact that decides whether two numbers
       // may be compared at all.
-      pov: povOf(measured.origin),
+      pov: povOfOrigin(measured.origin),
       ...(measured.origin === "reported"
         ? { reportedBy: measured.reportedBy }
         : {}),
@@ -92,7 +92,7 @@ function describedPov(
   truncated: boolean,
 ): Record<string, unknown> {
   return {
-    pov: povOf(measured.origin),
+    pov: povOfOrigin(measured.origin),
     derived: measured.origin !== "timed",
     ...(measured.origin === "reported"
       ? { reportedBy: measured.reportedBy }

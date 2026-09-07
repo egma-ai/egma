@@ -40,11 +40,10 @@ part of the words for the reason the words are the transcript: the persona
 is handed those words back, and a transition read as speech is a
 conversation the agent never had."""
 OnTiming = Callable[[str, float], Awaitable[None]]
-OnToolCall = Callable[[str, str | None], Awaitable[None]]
 
 OnAnswered = Callable[[], Awaitable[None]]
 """Everything one agent answer produced is on the record — the words it
-carried, the tool calls it made, the time it took.
+carried and the time it took.
 
 It carries nothing, because it is not an observation: it is the boundary
 between one answer and the next, and turn-taking is the only thing that
@@ -179,7 +178,6 @@ async def conduct(
     on_timing: OnTiming | None,
     controls: ConversationControls,
     name: str,
-    on_tool_call: OnToolCall | None = None,
     on_answered: OnAnswered | None = None,
 ) -> Conducted:
     """Hold one simulation's conversation, turn by turn, and say how it went."""
@@ -285,12 +283,6 @@ async def conduct(
                     answered_in,
                     (returned_at - finish_line) * 1000,
                 )
-            # What the agent did while answering, before what it said: a
-            # tool call happened during the turn, and only a platform that
-            # exposes one reports any at all.
-            if on_tool_call is not None:
-                for call in answer.tool_calls:
-                    await on_tool_call(call.name, call.arguments)
             await record_answer(answer)
             if answer.ended:
                 return ended(AGENT_ENDED)

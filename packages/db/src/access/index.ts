@@ -155,7 +155,9 @@ export {
 } from "./span-identity.ts";
 
 export {
+  fromOnePov,
   listTraces,
+  povOf,
   readTrace,
   MAXIMUM_LIST_LIMIT,
   MAXIMUM_SPANS_PER_TRACE,
@@ -167,6 +169,7 @@ export {
   type TraceDetail,
   type TraceFacts,
   type TraceList,
+  type SpanPov,
   type TraceSpan,
   type TraceSummary,
 } from "./traces.ts";

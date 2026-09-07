@@ -25,8 +25,8 @@ import {
  * temporary version branched from the exact version the agent serves, its tools
  * pointed at Egma, the live version untouched, each simulation conducted
  * against the temporary version, a tool call answered from the pinned test
- * version and landed on the record with `mocked` provenance, and the temporary
- * version deleted when the run ends.
+ * version and landed on the record with the answer egma authored, and the
+ * temporary version deleted when the run ends.
  *
  * And the other half of the promise beside it: a run whose world cannot be
  * built is refused with the reason, before a single simulation is conducted,
@@ -583,9 +583,11 @@ describe("one mocked run, from the test to the teardown", () => {
     expect(spans[0]?.tool_result).toBe(
       JSON.stringify({ slots: ["Tuesday 14:00"] }),
     );
+    // And no stamp saying who answered: whether a mock tool did is read at
+    // display time, by name, from the pinned test version's mock tools.
     const payload = JSON.parse(spans[0]?.payload ?? "{}") as Record<string, unknown>;
-    expect(payload["egma.tool.provenance"]).toBe("mocked");
-    expect(payload["egma.tool.mock_tool"]).toBe("get_availability");
+    expect(payload).not.toHaveProperty("egma.tool.provenance");
+    expect(payload).not.toHaveProperty("egma.tool.mock_tool");
 
     // **No coverage anywhere on the record, and that is the settled answer.**
     // A simulation is answered for what its own test named, and every answered

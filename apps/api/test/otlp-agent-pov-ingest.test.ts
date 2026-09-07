@@ -38,10 +38,12 @@ import {
 } from "./support/object-storage.ts";
 import {
   contextFor,
+  everySpan,
   projectKeyFor,
   signUp,
   NEUTRAL_PERSON,
   type Customer,
+  type DetailSpan,
 } from "./support/traces.ts";
 
 /**
@@ -360,6 +362,10 @@ async function aLandedSimulation(
     startedAt: CONVERSATION_STARTED_AT,
     endedAt: CONVERSATION_ENDED_AT,
   },
+  // What this scenario answers for itself. The pinned version is where a
+  // mocked mark is read from at display time, so a test about that mark says
+  // here which tool the world covers.
+  mockTools: readonly { readonly tool: string; readonly answer: unknown }[] = [],
 ): Promise<{ simulationId: string; runId: string; traceId: string }> {
   const auth = contextFor(person, "member");
   const created = await createAgent(auth, {
@@ -377,6 +383,7 @@ async function aLandedSimulation(
     scenario: "They want today's weather in two cities before they go out.",
     expectedBehaviors: ["gives the weather for every city that was asked about"],
     personaIds: [personaId],
+    ...(mockTools.length === 0 ? {} : { mockTools }),
   });
 
   const started = await startRun(auth, {
@@ -1306,7 +1313,12 @@ describe.skipIf(!storage.available)("both POVs under one trace", () => {
         spans: { spanId: string; parentSpanId: string }[];
       } | null;
     };
-    expect(body.transcript?.spanCount).toBe(FIXTURE_TRACE.spans + 1);
+    // **One conversation, counted once.** Both POVs are stored and both come
+    // back in the tree, but the counts beside them are the agent's POV alone —
+    // otherwise a reader would be told this conversation held one more step
+    // than the agent ever took, and on a trace with two full POVs, twice as
+    // many turns as anybody spoke.
+    expect(body.transcript?.spanCount).toBe(FIXTURE_TRACE.spans);
     const roots = (body.transcript?.spans ?? []).filter(
       (span) => span.parentSpanId === "",
     );
@@ -1362,6 +1374,10 @@ describe.skipIf(!storage.available)("the booking that opened this effort", () =>
         startedAt: new Date("2026-09-04T17:52:00.000Z"),
         endedAt: new Date("2026-09-04T17:55:00.000Z"),
       },
+      // The one tool this test stood in front of. The other two ran for real
+      // inside the agent's own process, which is exactly the case that used to
+      // be invisible.
+      [{ tool: "check_availability", answer: { slots: [] } }],
     );
 
     if (booking === undefined) throw new Error("the booking capture is missing");
@@ -1422,6 +1438,46 @@ describe.skipIf(!storage.available)("the booking that opened this effort", () =>
     expect(tools[1]?.tool_arguments).toContain("Tuesday");
     expect(tools[2]?.tool_arguments).toContain("appointment_slot");
     expect(tools[2]?.tool_arguments).toContain("Doctor Alvarez");
+  });
+
+  /**
+   * **The mocked mark, read by name and from nowhere else.**
+   *
+   * These spans are LiveKit's own: the agent's process wrote them and nothing
+   * of egma's ever touched them, so there is no stamp on them to read. What
+   * says `check_availability` was answered by a mock tool is the test version
+   * this simulation pinned, matched by tool name — the authored world itself,
+   * which cannot change under a result. The two calls that world does not
+   * cover ran for real and carry no mark at all, which is the whole
+   * distinction a developer opens this transcript for.
+   */
+  it("marks the one call a mock tool answered, by name, and no other", async () => {
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${landed.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    const body = read.json() as {
+      transcript: {
+        readonly turns: DetailSpan[];
+        readonly spans: DetailSpan[];
+      } | null;
+    };
+    const transcript = body.transcript;
+    if (transcript === null) throw new Error("the simulation has no transcript");
+
+    const all = everySpan([...transcript.turns, ...transcript.spans]);
+    const tools = all.filter((span) => span.kind === "tool");
+    expect(tools.map((span) => [span.toolName, span.toolProvenance])).toEqual([
+      ["list_providers", undefined],
+      ["check_availability", "mocked"],
+      ["book_appointment", undefined],
+    ]);
+
+    // Every span of this transcript is the agent's own account of the
+    // conversation, which is what the run view renders.
+    expect([...new Set(all.map((span) => span.pov))]).toEqual(["agent"]);
   });
 
   it("files it under the simulation, as the agent's POV, and keeps LiveKit's id", async () => {
