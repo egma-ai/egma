@@ -2773,6 +2773,119 @@ export type UpdateOrganizationResponses = {
 
 export type UpdateOrganizationResponse = UpdateOrganizationResponses[keyof UpdateOrganizationResponses];
 
+export type UsePersonaData = {
+    body?: {
+        projectId?: string;
+        models?: {
+            llm: {
+                provider: string;
+                model: string;
+            };
+            stt: {
+                provider: string;
+                model: string;
+            };
+            tts: {
+                provider: string;
+                model: string;
+                voiceId: string;
+                speed: number;
+            };
+        };
+    };
+    path: {
+        personaId: string;
+    };
+    query?: never;
+    url: '/v1/personas/{personaId}/use';
+};
+
+export type UsePersonaErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type UsePersonaError = UsePersonaErrors[keyof UsePersonaErrors];
+
+export type UsePersonaResponses = {
+    /**
+     * The persona with its saved project settings.
+     */
+    200: {
+        id: string;
+        projectId: string | null;
+        name: string;
+        description: string | null;
+        version: number;
+        versionId: string;
+        identityName: string;
+        personality: string;
+        language: string;
+        parameterContract: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
+        settings: {
+            id: string;
+            models: {
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                stt: {
+                    provider: string;
+                    model: string;
+                };
+                tts: {
+                    provider: string;
+                    model: string;
+                    voiceId: string;
+                    speed: number;
+                };
+            };
+            createdAt: string;
+            updatedAt: string;
+        } | null;
+        owner: 'egma' | 'organization';
+        archivedAt: string | null;
+        createdAt: string;
+        updatedAt: string;
+    };
+};
+
+export type UsePersonaResponse = UsePersonaResponses[keyof UsePersonaResponses];
+
 export type ListPersonasData = {
     body?: never;
     path?: never;
@@ -2828,22 +2941,36 @@ export type ListPersonasResponses = {
             identityName: string;
             personality: string;
             language: string;
-            models: {
-                llm: {
-                    provider: string;
-                    model: string;
+            parameterContract: Array<{
+                key: string;
+                label: string;
+                valueType: 'integer' | 'number' | 'string';
+                defaultValue: number | string;
+                unit: string | null;
+                minimum: number | null;
+                maximum: number | null;
+            }>;
+            settings: {
+                id: string;
+                models: {
+                    llm: {
+                        provider: string;
+                        model: string;
+                    };
+                    stt: {
+                        provider: string;
+                        model: string;
+                    };
+                    tts: {
+                        provider: string;
+                        model: string;
+                        voiceId: string;
+                        speed: number;
+                    };
                 };
-                stt: {
-                    provider: string;
-                    model: string;
-                };
-                tts: {
-                    provider: string;
-                    model: string;
-                    voiceId: string;
-                    speed: number;
-                };
-            };
+                createdAt: string;
+                updatedAt: string;
+            } | null;
             owner: 'egma' | 'organization';
             archivedAt: string | null;
             createdAt: string;
@@ -2863,7 +2990,7 @@ export type CreatePersonaData = {
         identityName: string;
         personality: string;
         language: string;
-        models: {
+        models?: {
             llm: {
                 provider: string;
                 model: string;
@@ -2932,22 +3059,36 @@ export type CreatePersonaResponses = {
         identityName: string;
         personality: string;
         language: string;
-        models: {
-            llm: {
-                provider: string;
-                model: string;
+        parameterContract: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
+        settings: {
+            id: string;
+            models: {
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                stt: {
+                    provider: string;
+                    model: string;
+                };
+                tts: {
+                    provider: string;
+                    model: string;
+                    voiceId: string;
+                    speed: number;
+                };
             };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                voiceId: string;
-                speed: number;
-            };
-        };
+            createdAt: string;
+            updatedAt: string;
+        } | null;
         owner: 'egma' | 'organization';
         archivedAt: string | null;
         createdAt: string;
@@ -3140,22 +3281,36 @@ export type GetPersonaResponses = {
         identityName: string;
         personality: string;
         language: string;
-        models: {
-            llm: {
-                provider: string;
-                model: string;
+        parameterContract: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
+        settings: {
+            id: string;
+            models: {
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                stt: {
+                    provider: string;
+                    model: string;
+                };
+                tts: {
+                    provider: string;
+                    model: string;
+                    voiceId: string;
+                    speed: number;
+                };
             };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                voiceId: string;
-                speed: number;
-            };
-        };
+            createdAt: string;
+            updatedAt: string;
+        } | null;
         owner: 'egma' | 'organization';
         archivedAt: string | null;
         createdAt: string;
@@ -3189,6 +3344,7 @@ export type UpdatePersonaData = {
                 speed: number;
             };
         };
+        expectedVersionId?: string;
     };
     path: {
         personaId: string;
@@ -3244,22 +3400,36 @@ export type UpdatePersonaResponses = {
         identityName: string;
         personality: string;
         language: string;
-        models: {
-            llm: {
-                provider: string;
-                model: string;
+        parameterContract: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
+        settings: {
+            id: string;
+            models: {
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                stt: {
+                    provider: string;
+                    model: string;
+                };
+                tts: {
+                    provider: string;
+                    model: string;
+                    voiceId: string;
+                    speed: number;
+                };
             };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                voiceId: string;
-                speed: number;
-            };
-        };
+            createdAt: string;
+            updatedAt: string;
+        } | null;
         owner: 'egma' | 'organization';
         archivedAt: string | null;
         createdAt: string;
@@ -3322,22 +3492,15 @@ export type ListPersonaVersionsResponses = {
             identityName: string;
             personality: string;
             language: string;
-            models: {
-                llm: {
-                    provider: string;
-                    model: string;
-                };
-                stt: {
-                    provider: string;
-                    model: string;
-                };
-                tts: {
-                    provider: string;
-                    model: string;
-                    voiceId: string;
-                    speed: number;
-                };
-            };
+            parameterContract: Array<{
+                key: string;
+                label: string;
+                valueType: 'integer' | 'number' | 'string';
+                defaultValue: number | string;
+                unit: string | null;
+                minimum: number | null;
+                maximum: number | null;
+            }>;
             createdAt: string;
         }>;
         nextPageToken: string | null;
@@ -3451,22 +3614,15 @@ export type GetPersonaVersionResponses = {
         identityName: string;
         personality: string;
         language: string;
-        models: {
-            llm: {
-                provider: string;
-                model: string;
-            };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                voiceId: string;
-                speed: number;
-            };
-        };
+        parameterContract: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
         createdAt: string;
     };
 };
@@ -3531,22 +3687,36 @@ export type ForkPersonaResponses = {
         identityName: string;
         personality: string;
         language: string;
-        models: {
-            llm: {
-                provider: string;
-                model: string;
+        parameterContract: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
+        settings: {
+            id: string;
+            models: {
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                stt: {
+                    provider: string;
+                    model: string;
+                };
+                tts: {
+                    provider: string;
+                    model: string;
+                    voiceId: string;
+                    speed: number;
+                };
             };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                voiceId: string;
-                speed: number;
-            };
-        };
+            createdAt: string;
+            updatedAt: string;
+        } | null;
         owner: 'egma' | 'organization';
         archivedAt: string | null;
         createdAt: string;

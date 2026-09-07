@@ -6,15 +6,8 @@ import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  connect,
-  disconnect,
-  getPersona,
-  getPersonaVersion,
-  listPersonas,
-  listPersonaVersions,
   MIGRATIONS_DIRECTORY,
   runMigrations,
-  type AuthContext,
 } from "@egma/db";
 
 import {
@@ -22,7 +15,6 @@ import {
   errorCodeOf,
   openSingleConnection,
   POSTGRES_ERROR,
-  TEST_ENCRYPTION_KEY,
   type EmptyDatabase,
   type SingleConnection,
 } from "./support/database.ts";
@@ -42,7 +34,7 @@ import {
  *
  * What it has to show afterwards: nothing authored was lost, every persona
  * carries an identity name taken from the team name they already had, the dead
- * machinery is gone from the catalog, and the ordinary reads answer whole.
+ * machinery is gone from the catalog, and the rewritten storage guards still protect it.
  */
 
 const BASELINE = "0000_baseline.sql";
@@ -71,16 +63,6 @@ const acme = {
 };
 const rita = { id: newId("prs"), v1: newId("prsv"), v2: newId("prsv") };
 const gone = { id: newId("prs"), v1: newId("prsv") };
-
-function actingAsAcme(): AuthContext {
-  return {
-    userId: newId("usr"),
-    organizationId: acme.organization,
-    projectId: acme.project,
-    role: "admin",
-    via: "session",
-  };
-}
 
 let database: EmptyDatabase;
 let baselineOnly: string;
@@ -113,13 +95,14 @@ beforeAll(async () => {
   store = await openSingleConnection(database.url);
 
   await seedOldShapeRows();
-  await runMigrations(database.url);
-
-  connect({ databaseUrl: database.url, encryptionKey: TEST_ENCRYPTION_KEY });
+  // This proof targets the historical 0001 migration. Later clean cutovers
+  // deliberately remove the shape being inspected here.
+  await cp(path.join(MIGRATIONS_DIRECTORY, "0001_persona_rework.sql"),
+    path.join(baselineOnly, "0001_persona_rework.sql"));
+  await runMigrations(database.url, baselineOnly);
 });
 
 afterAll(async () => {
-  await disconnect();
   await store?.close();
   await database?.drop();
   if (baselineOnly !== undefined) {
@@ -329,70 +312,5 @@ describe("the rewritten immutability guard", () => {
   });
 });
 
-describe("the ordinary reads, over migrated rows", () => {
-  it("answer the current version whole", async () => {
-    const found = await getPersona(actingAsAcme(), rita.id);
-
-    expect(found).toMatchObject({
-      id: rita.id,
-      name: "Impatient Rita",
-      description: "Books by phone only",
-      owner: "organization",
-      version: 2,
-      versionId: rita.v2,
-      identityName: "Impatient Rita",
-      personality: "Rita, after the hearing aid arrived.",
-      language: "en-US",
-      archivedAt: null,
-    });
-    expect(found?.models).toEqual(OLD_MODELS);
-  });
-
-  it("answer an old version exactly as it was written", async () => {
-    const first = await getPersonaVersion(actingAsAcme(), rita.v1);
-
-    expect(first).toMatchObject({
-      version: 1,
-      identityName: "Impatient Rita",
-      personality: "Rita, as she was first written.",
-      language: "en-US",
-    });
-    expect(first?.models).toEqual(OLD_MODELS);
-  });
-
-  it("keep the whole history of a migrated persona", async () => {
-    const { items } = await listPersonaVersions(actingAsAcme(), rita.id);
-    expect(items.map((version) => version.version)).toEqual([2, 1]);
-  });
-
-  it("list the living personas and leave the deleted one out", async () => {
-    const { items } = await listPersonas(actingAsAcme());
-    const names = items.map((one) => one.name);
-
-    expect(names).toContain("Impatient Rita");
-    /*
-     * **The name the baseline wrote, not the name the catalog now ships.**
-     * This file applies migrations and nothing else — no boot, so no
-     * `seedPersonaLibrary` — and reconciling the shelf persona to its current
-     * catalog name is that seed's work, not a migration's. So the row here is
-     * still "Default Persona", and it is supposed to be: what this test proves
-     * is that the migration carried the row through, and a migration that
-     * renamed it would be doing something nobody asked a migration to do.
-     */
-    expect(names).toContain("Default Persona");
-    expect(names).not.toContain("Retired Ray");
-  });
-
-  it("still answer a deleted persona asked for by their own id", async () => {
-    const found = await getPersona(actingAsAcme(), gone.id);
-    expect(found?.name).toBe("Retired Ray");
-    expect(found?.archivedAt).toBeInstanceOf(Date);
-    expect(found?.identityName).toBe("Retired Ray");
-  });
-
-  it("hand the seeded catalog persona back under its new identity name", async () => {
-    const found = await getPersona(actingAsAcme(), CATALOG.personaId);
-    expect(found?.owner).toBe("egma");
-    expect(found?.identityName).toBe(CATALOG.identityName);
-  });
-});
+// This historical migration is tested against its own SQL shape above. Current
+// persona APIs use project settings and are covered by persona-project-settings.

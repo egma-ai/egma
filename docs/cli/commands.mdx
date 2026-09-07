@@ -404,7 +404,11 @@ List the personas available to tests in the bound Project:
 egma persona list [--cwd <path>]
 ```
 
-The output gives readable, copyable persona IDs and names. The command writes
+The output gives readable, copyable persona definition IDs and names available
+in the bound project, including shared predefined personas. Custom definitions
+from other projects are not listed. Model and voice settings belong to the
+project and are edited in the [persona settings](/concepts/personas); test files
+select definitions and do not own model settings. The command writes
 nothing.
 
 ## `egma suite create`

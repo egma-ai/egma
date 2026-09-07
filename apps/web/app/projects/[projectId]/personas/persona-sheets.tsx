@@ -8,6 +8,7 @@ import {
   getPersona,
   listPersonaVersions,
   updatePersona,
+  usePersona,
 } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ import {
   modelSaid,
   modelsDraftOf,
   modelsFrom,
+  modelsOfPersona,
   ownerSaid,
   sameBehaviorDraft,
   sameModelsDraft,
@@ -67,17 +69,11 @@ import { Reads, SheetSection, StateChip, Versions, type Read } from "./sheet-par
  * they were reading still scrolled where they left it, and no step in the
  * browser's history that says nothing about where they are.
  *
- * **The distinction the whole panel is arranged around** is which half of a
- * persona a save touches: the team `name` and the description are *live* —
- * rewriting them changes nothing about any simulation that ever ran — and the
- * identity name, the personality, the language and the models are *versioned*,
- * because a run pinned the exact set it used. The one line under the name block
- * says so, and it is the only version arithmetic left on this surface.
- *
- * **A Predefined persona is a read and one action.** No editor, no footer, no
- * history, and Fork alone in its ⋮ — the shared catalog cannot be broken by any
- * project, and a panel offering controls that would all refuse is a panel that
- * wastes somebody's time to tell them so.
+ * Name and description are live metadata. Identity name, personality, and
+ * language have immutable core versions. Models are saved project settings.
+ * Shared personas expose settings, clone, and read-only core history. Custom
+ * personas also expose current-core editing and deletion.
+
  */
 
 /** The words this surface repeats, written once. */
@@ -409,6 +405,7 @@ export function CreatePersonaSheet({
 /** What the editor in this sheet is holding, between reads and writes. */
 type Draft = {
   readonly personaId: string;
+  readonly versionId: string;
   readonly name: string;
   readonly description: string;
   readonly behavior: BehaviorDraft;
@@ -483,7 +480,7 @@ function adopted(
     }
   }
 
-  const theirModels = modelsDraftOf(fromServer.models);
+  const theirModels = modelsDraftOf(modelsOfPersona(fromServer));
   const models = { ...current.models };
   if (submitted.models !== undefined) {
     for (const field of Object.keys(current.models) as (keyof ModelsDraft)[]) {
@@ -497,6 +494,7 @@ function adopted(
 
   return {
     personaId: current.personaId,
+    versionId: submitted.behavior === undefined ? current.versionId : fromServer.versionId,
     name: answered(current.name, submitted.name, fromServer.name),
     description: answered(
       current.description,
@@ -513,6 +511,7 @@ export function PersonaSheet({
   personaId,
   open,
   form,
+  reloadForm,
   role,
   mayAuthor,
   whyNot,
@@ -528,7 +527,8 @@ export function PersonaSheet({
   readonly personaId: string;
   readonly open: boolean;
   /** The authoring choices, read once by the screen and lent to every sheet. */
-  readonly form: PersonaForm | null;
+  readonly form: Answer<PersonaForm> | null;
+  readonly reloadForm: () => void;
   readonly role: string | null;
   readonly mayAuthor: boolean;
   readonly whyNot: string | undefined;
@@ -543,12 +543,13 @@ export function PersonaSheet({
   readonly onFork: (persona: Persona) => void;
   readonly onDelete: (persona: Persona) => void;
 }) {
+  const choices = form?.status === "ready" ? form.value : null;
   const now = useMinuteClock();
   const draftNavigation = useDraftNavigation();
   const nameField = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  const { answer, reload } = useProjectRead<Persona>(
+  const { answer, reload, refresh } = useProjectRead<Persona>(
     (project) =>
       platformAnswer(
         getPersona(
@@ -595,17 +596,20 @@ export function PersonaSheet({
         ? already
         : {
             personaId: persona.id,
+            versionId: persona.versionId,
             name: persona.name,
             description: persona.description ?? "",
             behavior: behaviorDraftOf(persona),
-            models: modelsDraftOf(persona.models),
+            models: modelsDraftOf(modelsOfPersona(persona)),
           },
     );
   }, [answer]);
 
   useEffect(() => {
-    if (answer?.status === "signed-out") window.location.replace("/sign-in");
-  }, [answer]);
+    if (answer?.status === "signed-out" || form?.status === "signed-out") {
+      window.location.replace("/sign-in");
+    }
+  }, [answer, form]);
 
   /**
    * A panel that opens again opens on the record, not on what was left over.
@@ -656,7 +660,7 @@ export function PersonaSheet({
     (held.name !== persona.name ||
       held.description !== (persona.description ?? "") ||
       !sameBehaviorDraft(held.behavior, behaviorDraftOf(persona)) ||
-      !sameModelsDraft(held.models, modelsDraftOf(persona.models)));
+      !sameModelsDraft(held.models, modelsDraftOf(modelsOfPersona(persona))) || persona.settings === null);
   useUnsavedChanges(open && editing && changed && !saving, saving);
 
   /**
@@ -696,6 +700,10 @@ export function PersonaSheet({
     }
     if (written.status !== "ready") {
       setRefusal(written.refusal);
+      if (written.refusal.error === "version_conflict") {
+        refresh();
+        reloadHistory();
+      }
       return null;
     }
 
@@ -711,32 +719,31 @@ export function PersonaSheet({
       held === null ||
       persona === null ||
       !mayAuthor ||
-      persona.owner !== "organization" ||
       saving
     ) {
       return;
     }
 
     const stored = behaviorDraftOf(persona);
-    const nameChanged = held.name !== persona.name;
+    const nameChanged = persona.owner === "organization" && held.name !== persona.name;
     const descriptionChanged =
-      held.description !== (persona.description ?? "");
-    const behaviorChanged = !sameBehaviorDraft(held.behavior, stored);
+      persona.owner === "organization" && held.description !== (persona.description ?? "");
+    const behaviorChanged = persona.owner === "organization" && !sameBehaviorDraft(held.behavior, stored);
     const modelsChanged = !sameModelsDraft(
       held.models,
-      modelsDraftOf(persona.models),
+      modelsDraftOf(modelsOfPersona(persona)),
     );
     if (
       !nameChanged &&
       !descriptionChanged &&
       !behaviorChanged &&
-      !modelsChanged
+      !modelsChanged && persona.settings !== null
     ) {
       return;
     }
 
     const written = await write(
-      updatePersona(
+      persona.settings === null ? usePersona({ personaId: persona.id, projectId, models: modelsFrom(held.models) }, { client: platformClient }) : updatePersona(
         {
           personaId: persona.id,
           projectId,
@@ -744,6 +751,7 @@ export function PersonaSheet({
           ...(descriptionChanged ? { description: held.description } : {}),
           ...(behaviorChanged
             ? {
+                expectedVersionId: held.versionId,
                 identityName: held.behavior.identityName,
                 personality: held.behavior.personality,
                 language: held.behavior.language,
@@ -764,43 +772,6 @@ export function PersonaSheet({
     if (written !== null) setEditing(false);
   }
 
-  /**
-   * An older version, written again as the newest one.
-   *
-   * **It needs no operation of its own**: a version is exactly its identity
-   * name, its personality, its language and its models, so writing those back
-   * through the ordinary update is what "use this again" means — and it arrives
-   * as a *new* version rather than as a rewind, so every run that pinned the
-   * old one still reads the old one.
-   */
-  async function useAsNewVersion(version: PersonaVersion): Promise<void> {
-    if (persona === null || !mayAuthor || saving) return;
-    const written = await write(
-      updatePersona(
-        {
-          personaId: persona.id,
-          projectId,
-          identityName: version.identityName,
-          personality: version.personality,
-          language: version.language,
-          // Reusing history authors a new version under today's model policy.
-          models: modelsFrom(modelsDraftOf(version.models)),
-        },
-        { client: platformClient },
-      ),
-    );
-    if (written !== null) {
-      setHeld({
-        personaId: written.id,
-        name: written.name,
-        description: written.description ?? "",
-        behavior: behaviorDraftOf(written),
-        models: modelsDraftOf(written.models),
-      });
-      setReading(null);
-    }
-  }
-
   function edit(next: Draft): void {
     setHeld(next);
   }
@@ -813,10 +784,11 @@ export function PersonaSheet({
       if (persona !== null && held !== null && held.personaId === persona.id) {
         setHeld({
           personaId: persona.id,
+          versionId: persona.versionId,
           name: persona.name,
           description: persona.description ?? "",
           behavior: behaviorDraftOf(persona),
-          models: modelsDraftOf(persona.models),
+          models: modelsDraftOf(modelsOfPersona(persona)),
         });
       }
     });
@@ -831,11 +803,11 @@ export function PersonaSheet({
   const totalVersions = Math.max(versions.length, persona?.version ?? 0);
   /**
    * Whether this panel is drawing an editor, which is four things at once and
-   * not one: somebody asked for it, the persona is the project's own, egma
-   * knows whose panel this is, and the authoring choices have arrived.
+   * not one: somebody asked for it, the persona is available, egma knows whose
+   * panel this is, and the authoring choices have arrived.
    */
   const editable =
-    editing && persona?.owner === "organization" && role !== null && form !== null;
+    editing && persona !== null && role !== null && choices !== null;
 
   /** The head of the panel: what kind of record it is, and which version. */
   function meta(): string {
@@ -844,7 +816,7 @@ export function PersonaSheet({
     if (reading !== null) {
       return `${kind} · v${String(reading.version)} of ${String(totalVersions)}`;
     }
-    if (editing && persona.owner === "organization") {
+    if (editing) {
       return `${kind} · v${String(persona.version)} · Editing`;
     }
     return `${kind} · v${String(persona.version)}`;
@@ -867,7 +839,7 @@ export function PersonaSheet({
   function readBody(one: Persona) {
     const shown = reading;
     const behavior = shown === null ? behaviorDraftOf(one) : behaviorDraftOf(shown);
-    const models = shown?.models ?? one.models;
+    const models = modelsOfPersona(one);
 
     return (
       <>
@@ -885,18 +857,11 @@ export function PersonaSheet({
           />
         </SheetSection>
 
-        <SheetSection label="Models">
-          <Reads reads={modelReads(models, form)} />
-        </SheetSection>
+        {shown === null ? <SheetSection label={one.settings === null ? "Default models" : "Project settings"}>
+          <Reads reads={modelReads(models, choices)} />
+        </SheetSection> : null}
 
-        {/*
-         * **A Predefined persona's panel ends here.** It has one version that
-         * is never going to become two, and it belongs to Egma rather than to
-         * this project — so the dates a project would read its own record by,
-         * and the history behind them, are facts about nothing anybody here can
-         * change. The boards draw the panel ending at the voice.
-         */}
-        {predefined ? null : (
+        {(
           <>
             <Reads
               reads={[
@@ -929,11 +894,11 @@ export function PersonaSheet({
     );
   }
 
-  /** The editor, which only a Custom persona and only an author ever sees. */
+  /** Shared personas expose settings; custom personas also expose core fields. */
   function editBody(draft: Draft, choices: PersonaForm) {
     return (
       <>
-        <NameFields
+        {predefined ? null : <><NameFields
           prefix="persona"
           name={draft.name}
           description={draft.description}
@@ -947,7 +912,7 @@ export function PersonaSheet({
           draft={draft.behavior}
           disabled={saving}
           onChange={(behavior) => edit({ ...draft, behavior })}
-        />
+        /></>}
         <ModelFields
           prefix="persona"
           draft={draft.models}
@@ -970,35 +935,7 @@ export function PersonaSheet({
     const inert = !mayAuthor || saving || busy;
 
     if (reading !== null) {
-      const frozen = reading;
-      return (
-        <SheetFooter
-          destructive={
-            <span className="text-sm text-faint">
-              Writes v{String(frozen.version)} as v{String(one.version + 1)}.
-            </span>
-          }
-        >
-          <Button
-            type="button"
-            size="lg"
-            busy={saving}
-            disabled={inert}
-            {...why}
-            onClick={() => void useAsNewVersion(frozen)}
-          >
-            {saving ? "Saving…" : "Use as new version"}
-          </Button>
-          <Button
-            type="button"
-            size="lg"
-            variant="secondary"
-            onClick={() => setReading(null)}
-          >
-            Back to v{String(one.version)}
-          </Button>
-        </SheetFooter>
-      );
+      return <SheetFooter><span className="text-sm text-faint">Core history is read-only.</span><Button type="button" size="lg" variant="secondary" onClick={() => setReading(null)}>Back to v{String(one.version)}</Button></SheetFooter>;
     }
 
     if (editable) {
@@ -1011,7 +948,7 @@ export function PersonaSheet({
             disabled={!mayAuthor || !changed || saving}
             {...why}
           >
-            {saving ? "Saving…" : "Save changes"}
+            {saving ? "Saving…" : one.settings === null ? "Use persona" : "Save changes"}
           </Button>
           <Button
             type="button"
@@ -1026,11 +963,6 @@ export function PersonaSheet({
       );
     }
 
-    /*
-     * **A Predefined persona has no footer at all**, which is the boards'
-     * drawing and the honest one: every control it could offer is Fork, and
-     * Fork is in the ⋮ with the rest of what a record's panel can do.
-     */
     return null;
   }
 
@@ -1069,12 +1001,21 @@ export function PersonaSheet({
       );
     }
 
-    if (editing && one.owner === "organization" && role !== null && form === null) {
-      return (
-        <SheetBody ref={bodyRef}>
-          <Loading what="the supported persona models" />
-        </SheetBody>
-      );
+    if (editing && role !== null) {
+      if (form === null || form.status === "signed-out") {
+        return (
+          <SheetBody ref={bodyRef}>
+            <Loading what="the supported persona models" />
+          </SheetBody>
+        );
+      }
+      if (form.status !== "ready") {
+        return (
+          <SheetBody ref={bodyRef}>
+            <Failure message={form.refusal.message} onRetry={reloadForm} />
+          </SheetBody>
+        );
+      }
     }
 
     return (
@@ -1096,7 +1037,7 @@ export function PersonaSheet({
               }
             />
           )}
-          {editable && form !== null ? editBody(held, form) : readBody(one)}
+          {editable && choices !== null ? editBody(held, choices) : readBody(one)}
         </SheetBody>
         {footer(one)}
       </form>
@@ -1107,9 +1048,8 @@ export function PersonaSheet({
    * The record's own actions, in the head beside the close.
    *
    * **Every one of a record's actions is in one menu**, which is what makes a
-   * sheet's head the same shape on every surface in the product. A Predefined
-   * persona's menu holds Fork alone: it cannot be edited and it cannot be
-   * deleted, and offering either would be offering a refusal.
+   * sheet's head the same shape on every surface in the product. Shared cores
+   * stay read-only while their project settings remain editable.
    */
   function actions(one: Persona): ReactNode {
     if (role === null || editing || reading !== null) return undefined;
@@ -1118,7 +1058,7 @@ export function PersonaSheet({
       <SheetMenu label={`Actions for ${one.name}`}>
         {(close) => (
           <>
-            {predefined ? null : (
+            {(
               <MenuItem
                 disabled={inert}
                 onClick={() => {
@@ -1126,7 +1066,7 @@ export function PersonaSheet({
                   setEditing(true);
                 }}
               >
-                Edit
+                {one.settings === null ? "Use" : predefined ? "Edit settings" : "Edit"}
               </MenuItem>
             )}
             <MenuItem
@@ -1136,7 +1076,7 @@ export function PersonaSheet({
                 onFork(one);
               }}
             >
-              Fork
+              Clone
             </MenuItem>
             {predefined ? null : (
               <DeleteItem

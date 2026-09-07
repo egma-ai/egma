@@ -19,16 +19,27 @@ import {
 } from "../persona-library/catalog.ts";
 import {
   RECOMMENDED_PERSONA_MODELS,
-  personaModelsFromRow,
-  samePersonaModels,
   validPersonaModels,
   type PersonaModels,
 } from "../models/selections.ts";
 import {
   persona,
   personaVersion,
+  projectPersona,
 } from "../schema/personas.ts";
 import { project } from "../schema/tenancy.ts";
+import {
+  PERSONA_PARAMETER_CONTRACT,
+  personaParametersOfModels,
+  validatePersonaParameterContract,
+  validatePersonaParameterValues,
+} from "../persona-library/parameters.ts";
+import type { GraderParameter } from "../grader-library/parameters.ts";
+import {
+  ensureProjectPersonaOn,
+  readProjectPersonaSettingsOn,
+  type ProjectPersonaSettings,
+} from "./project-personas.ts";
 import type { AuthContext } from "./context.ts";
 import {
   EgmaProvidedPersonaError,
@@ -82,7 +93,6 @@ export type PersonaBehavior = {
   readonly identityName: string;
   readonly personality: string;
   readonly language: string;
-  readonly models: PersonaModels;
 };
 
 /** Trimmed exactly the way a stored version is, so a save can be compared. */
@@ -91,7 +101,6 @@ function normalizedBehavior(behavior: PersonaBehavior): PersonaBehavior {
     identityName: behavior.identityName.trim(),
     personality: behavior.personality.trim(),
     language: behavior.language.trim(),
-    models: behavior.models,
   };
 }
 
@@ -120,7 +129,8 @@ export type Persona = {
   readonly identityName: string;
   readonly personality: string;
   readonly language: string;
-  readonly models: PersonaModels;
+  readonly parameterContract: readonly GraderParameter[];
+  readonly settings: ProjectPersonaSettings | null;
   /** When they were deleted, or null while they are in use. */
   readonly archivedAt: Date | null;
   readonly createdAt: Date;
@@ -128,14 +138,9 @@ export type Persona = {
 };
 
 /**
- * What an edit may touch. Name and description are identity and version
- * nothing; the behavior fields version on a change. Absent means keep.
- *
- * **No expectation fields, on purpose.** A persona write is last-write-wins.
- * The revision token and the expected version id are gone from this door and
- * from every door above it — pre-launch, with two authors, the ceremony cost
- * more than the clobber it prevented. The reopen condition is written down in
- * the spec: the first real clobber incident.
+ * Metadata saves in place, model choices belong to the acting project, and
+ * changed behavior creates a core version. A core edit names the current base
+ * so a concurrent writer cannot overwrite behavior it has not read.
  */
 export type PersonaChanges = {
   readonly name?: string;
@@ -144,6 +149,7 @@ export type PersonaChanges = {
   readonly personality?: string;
   readonly language?: string;
   readonly models?: PersonaModels;
+  readonly expectedVersionId?: string;
 };
 
 /** One version, frozen: the persona exactly as some simulation met them. */
@@ -154,7 +160,7 @@ export type PersonaVersion = {
   readonly identityName: string;
   readonly personality: string;
   readonly language: string;
-  readonly models: PersonaModels;
+  readonly parameterContract: readonly GraderParameter[];
   readonly createdAt: Date;
 };
 
@@ -172,82 +178,27 @@ const COLUMNS = {
   updatedAt: persona.updatedAt,
 } as const;
 
-/** The stored behavior, column by column. */
+/** Immutable core content has no project model choices. */
 const BEHAVIOR_COLUMNS = {
   identityName: personaVersion.identityName,
   personality: personaVersion.personality,
   language: personaVersion.language,
-  llmProvider: personaVersion.llmProvider,
-  llmModel: personaVersion.llmModel,
-  sttProvider: personaVersion.sttProvider,
-  sttModel: personaVersion.sttModel,
-  ttsProvider: personaVersion.ttsProvider,
-  ttsModel: personaVersion.ttsModel,
-  ttsVoiceId: personaVersion.ttsVoiceId,
-  ttsSpeed: personaVersion.ttsSpeed,
+  parameterContract: personaVersion.parameterContract,
 } as const;
 
-/** One version row's behavior columns, as the value every caller reads. */
-type BehaviorRow = {
-  readonly identityName: string;
-  readonly personality: string;
-  readonly language: string;
-  readonly llmProvider: string;
-  readonly llmModel: string;
-  readonly sttProvider: string;
-  readonly sttModel: string;
-  readonly ttsProvider: string;
-  readonly ttsModel: string;
-  readonly ttsVoiceId: string;
-  readonly ttsSpeed: number;
+type BehaviorRow = PersonaBehavior & {
+  readonly parameterContract: readonly GraderParameter[];
 };
-
-/**
- * The stored columns as one behavior.
- *
- * The models still go through `personaModelsFromRow`, even though the columns
- * are typed now: the types say the row holds text, and the provider catalog
- * says whether that text names something this release can execute. A row
- * somebody hand-edited into naming a model egma cannot run must fail here,
- * loudly and naming itself, rather than reach a work order.
- */
-function behaviorFromRow(row: BehaviorRow, versionId: string): PersonaBehavior {
+function behaviorFromRow(row: BehaviorRow, _versionId: string): BehaviorRow {
   return {
     identityName: row.identityName,
     personality: row.personality,
     language: row.language,
-    models: personaModelsFromRow(
-      {
-        llm: { provider: row.llmProvider, model: row.llmModel },
-        stt: { provider: row.sttProvider, model: row.sttModel },
-        tts: {
-          provider: row.ttsProvider,
-          model: row.ttsModel,
-          voiceId: row.ttsVoiceId,
-          speed: row.ttsSpeed,
-        },
-      },
-      versionId,
-    ),
+    parameterContract: validatePersonaParameterContract(row.parameterContract),
   };
 }
-
-/** One behavior as the columns a version row is written from. */
-function behaviorColumns(behavior: PersonaBehavior): BehaviorRow {
-  const { models } = behavior;
-  return {
-    identityName: behavior.identityName,
-    personality: behavior.personality,
-    language: behavior.language,
-    llmProvider: models.llm.provider,
-    llmModel: models.llm.model,
-    sttProvider: models.stt.provider,
-    sttModel: models.stt.model,
-    ttsProvider: models.tts.provider,
-    ttsModel: models.tts.model,
-    ttsVoiceId: models.tts.voiceId,
-    ttsSpeed: models.tts.speed,
-  };
+function behaviorColumns(behavior: PersonaBehavior): PersonaBehavior {
+  return normalizedBehavior(behavior);
 }
 
 /**
@@ -265,7 +216,6 @@ function stated(value: unknown, sentence: string): asserts value is string {
     throw new UnprocessableInputError(sentence);
   }
 }
-
 const NEEDS_AN_IDENTITY_NAME =
   "a persona needs an identity name, because the agent is told who is calling";
 
@@ -281,7 +231,7 @@ const CREATE_FIELDS = [
   "language",
   "models",
 ] as const;
-const EDIT_FIELDS = CREATE_FIELDS;
+const EDIT_FIELDS = [...CREATE_FIELDS, "expectedVersionId"] as const;
 
 /**
  * Reject stale or misspelled authoring fields before reading a required one.
@@ -353,7 +303,6 @@ const sameBehaviorField: {
   identityName: (a, b) => a.identityName === b.identityName,
   personality: (a, b) => a.personality === b.personality,
   language: (a, b) => a.language === b.language,
-  models: (a, b) => samePersonaModels(a.models, b.models),
 };
 
 /**
@@ -401,7 +350,7 @@ function currentCatalogVersion(entry: EgmaProvidedPersona) {
       );
     }
     validateBehaviorText(version);
-    validPersonaModels(version.models);
+    validatePersonaParameterContract(version.parameterContract);
   });
   return current;
 }
@@ -464,12 +413,8 @@ export async function seedPersonaLibraryInternal(
             id: version.id,
             personaId: entry.id,
             version: version.version,
-            ...behaviorColumns(
-              normalizedBehavior({
-                ...version,
-                models: validPersonaModels(version.models),
-              }),
-            ),
+            ...behaviorColumns(version),
+            parameterContract: validatePersonaParameterContract(version.parameterContract),
             createdBy: null,
             createdAt: version.createdAt,
           })),
@@ -514,10 +459,8 @@ export async function seedPersonaLibraryInternal(
         if (
           stored === undefined ||
           stored.version !== expected.version ||
-          !sameBehavior(behaviorFromRow(stored, stored.id), {
-            ...expected,
-            models: validPersonaModels(expected.models),
-          })
+          !sameBehavior(stored, expected) ||
+          JSON.stringify(validatePersonaParameterContract(stored.parameterContract)) !== JSON.stringify(validatePersonaParameterContract(expected.parameterContract))
         ) {
           throw new Error(
             `fixed Egma-provided persona version ${expected.id} already holds different content`,
@@ -575,6 +518,8 @@ async function insertPersona(
   projectId: string,
   input: Pick<NewPersona, "name" | "description">,
   behavior: PersonaBehavior,
+  models: PersonaModels,
+  parameterContract: readonly GraderParameter[] = PERSONA_PARAMETER_CONTRACT,
 ): Promise<Persona> {
   const id = newId("prs");
   const versionId = newId("prsv");
@@ -592,8 +537,11 @@ async function insertPersona(
     personaId: id,
     version: 1,
     ...behaviorColumns(behavior),
+    parameterContract,
     createdBy: auth.userId,
   });
+
+  await ensureProjectPersonaOn(tx, auth, projectId, id, personaParametersOfModels(models));
 
   // Read through the ordinary seam while both rows and the project lock are
   // still on this transaction. This is the authoritative answer; no hand-built
@@ -623,12 +571,11 @@ export async function createPersona(
     identityName: input.identityName,
     personality: input.personality,
     language: input.language,
-    models: validPersonaModels(input.models ?? RECOMMENDED_PERSONA_MODELS),
   });
 
   return db().transaction(async (tx) => {
     await lockPersonaProject(tx, auth, projectId);
-    return insertPersona(tx, auth, projectId, input, behavior);
+    return insertPersona(tx, auth, projectId, input, behavior, validPersonaModels(input.models ?? RECOMMENDED_PERSONA_MODELS));
   });
 }
 
@@ -651,39 +598,31 @@ function selectWithCurrentVersion(auth: AuthContext, on: Queryable = db()) {
     );
 }
 
-/** One row of that select, as a `Persona`. */
-function personaFrom(
-  row: BehaviorRow & {
-    readonly id: string;
-    readonly organizationId: string | null;
-    readonly versionId: string;
-  },
-): Persona {
-  const {
-    organizationId,
-    identityName: _identityName,
-    personality: _personality,
-    language: _language,
-    llmProvider: _llmProvider,
-    llmModel: _llmModel,
-    sttProvider: _sttProvider,
-    sttModel: _sttModel,
-    ttsProvider: _ttsProvider,
-    ttsModel: _ttsModel,
-    ttsVoiceId: _ttsVoiceId,
-    ttsSpeed: _ttsSpeed,
-    ...identity
-  } = row;
+/** A current core and its acting project's saved settings are separate values. */
+async function personaFrom(
+  on: Queryable,
+  auth: AuthContext,
+  row: Awaited<ReturnType<typeof selectWithCurrentVersion>>[number],
+): Promise<Persona> {
+  const { organizationId, ...identity } = row;
+  const projectId = auth.projectId ?? row.projectId;
+  const settings =
+    projectId === null || projectId === undefined
+      ? null
+      : await readProjectPersonaSettingsOn(
+          on,
+          auth,
+          projectId,
+          row.id,
+          row.parameterContract,
+        );
   return {
-    ...(identity as unknown as Omit<
-      Persona,
-      "owner" | keyof PersonaBehavior
-    >),
+    ...identity,
     owner: organizationId === null ? "egma" : "organization",
     ...behaviorFromRow(row, row.versionId),
+    settings: settings ?? null,
   };
 }
-
 /**
  * The persona as it stands on one connection.
  *
@@ -703,7 +642,7 @@ async function readPersonaOn(
     .limit(1);
 
   if (row === undefined) return undefined;
-  return personaFrom(row);
+  return personaFrom(on, auth, row);
 }
 
 export async function getPersona(
@@ -720,9 +659,8 @@ export async function getPersona(
  * function — the rules live here. Name and description write in place and
  * version nothing. Behavior that differs from the current version inserts the
  * next version and moves the pointer, in one transaction with the identity row
- * locked, so two concurrent edits number one after the other rather than
- * fighting over the same version number. An identical save is not an edit at
- * all: nothing is written, not even `updated_at`, and the current version
+ * locked. Only an edit based on that current version can proceed. An identical
+ * save is not an edit at all: nothing is written, not even `updated_at`, and the current version
  * comes back.
  *
  * Editing what the caller cannot see returns what reading it would have:
@@ -734,7 +672,6 @@ export async function editPersona(
   changes: PersonaChanges,
 ): Promise<Persona | undefined> {
   authorize(auth, "author_definitions", here(auth));
-
   validateAuthoringFields("edit", changes, EDIT_FIELDS);
   if (changes.name !== undefined) validateName(changes.name);
   if (changes.identityName !== undefined) {
@@ -746,117 +683,158 @@ export async function editPersona(
   if (changes.language !== undefined) {
     stated(changes.language, "a persona needs a language");
   }
+  const coreRequested =
+    changes.identityName !== undefined ||
+    changes.personality !== undefined ||
+    changes.language !== undefined;
   const askedModels =
     changes.models === undefined
       ? undefined
       : validPersonaModels(changes.models);
-
   return writing(() =>
     db().transaction(async (tx) => {
       const [locked] = await tx
-        .select({
-          ...COLUMNS,
-          currentVersionId: persona.currentVersionId,
-        })
+        .select({ ...COLUMNS, currentVersionId: persona.currentVersionId })
         .from(persona)
         .where(thePersona(auth, id))
         .limit(1)
         .for("update", { of: persona });
-
       if (locked === undefined) return undefined;
-      if (locked.organizationId === null) {
+      const metadataRequested =
+        changes.name !== undefined || changes.description !== undefined;
+      if (
+        locked.organizationId === null &&
+        (coreRequested || metadataRequested)
+      ) {
         throw new EgmaProvidedPersonaError(locked.id, locked.name);
       }
-      if (locked.projectId === null) {
-        throw new Error(`Custom persona ${locked.id} has no project`);
+      if (coreRequested && changes.expectedVersionId === undefined) {
+        throw new UnprocessableInputError(
+          "editing persona behavior requires expectedVersionId from its current core",
+        );
       }
-      const { currentVersionId, organizationId: _organizationId, ...current } =
-        locked;
-
-      // This select and the update below are the two `where`s in this file that
-      // start from a bare `eq` rather than `within`: each names an id that just
-      // came off the tenancy-checked row locked above, in this same transaction,
-      // so neither predicate can reach further than that check already did.
-      const [currentVersion] = await tx
+      if (
+        changes.expectedVersionId !== undefined &&
+        changes.expectedVersionId !== locked.currentVersionId
+      ) {
+        throw new PersonaVersionConflictError(id);
+      }
+      const [current] = await tx
         .select({
           id: personaVersion.id,
           version: personaVersion.version,
           ...BEHAVIOR_COLUMNS,
         })
         .from(personaVersion)
-        .where(eq(personaVersion.id, currentVersionId))
+        .where(eq(personaVersion.id, locked.currentVersionId))
         .limit(1);
-      if (currentVersion === undefined) {
+      if (current === undefined) {
         throw new Error("the persona's current version is missing");
       }
-
-      const stored = behaviorFromRow(currentVersion, currentVersion.id);
-      const asked: PersonaBehavior = {
-        identityName: changes.identityName ?? stored.identityName,
-        personality: changes.personality ?? stored.personality,
-        language: changes.language ?? stored.language,
-        models: askedModels ?? stored.models,
-      };
-      const next = sameBehavior(stored, asked)
-        ? undefined
-        : normalizedBehavior(asked);
-      const identityChanged =
-        changes.name !== undefined || changes.description !== undefined;
-
-      if (next === undefined && !identityChanged) {
-        return {
-          ...current,
-          owner: "organization" as const,
-          version: currentVersion.version,
-          versionId: currentVersion.id,
-          ...stored,
-        };
+      const asked = normalizedBehavior({
+        identityName: changes.identityName ?? current.identityName,
+        personality: changes.personality ?? current.personality,
+        language: changes.language ?? current.language,
+      });
+      const coreChanged = !sameBehavior(current, asked);
+      if (askedModels !== undefined) {
+        const projectId = auth.projectId ?? locked.projectId;
+        if (projectId === null || projectId === undefined) {
+          throw new UnprocessableInputError(
+            "persona settings belong to a project; choose a project before editing",
+          );
+        }
+        const values = validatePersonaParameterValues(
+          current.parameterContract,
+          personaParametersOfModels(askedModels),
+        );
+        const settings = await ensureProjectPersonaOn(
+          tx,
+          auth,
+          projectId,
+          id,
+          values,
+          true,
+        );
+        if (
+          JSON.stringify(settings.parameterValues) !== JSON.stringify(values)
+        ) {
+          await tx
+            .update(projectPersona)
+            .set({ parameterValues: values, updatedAt: new Date() })
+            .where(eq(projectPersona.id, settings.id));
+        }
       }
-
-      let versionId = currentVersion.id;
-      let version = currentVersion.version;
-      if (next !== undefined) {
+      let versionId = current.id;
+      if (coreChanged) {
         versionId = newId("prsv");
-        version = currentVersion.version + 1;
-        await tx.insert(personaVersion).values({
-          id: versionId,
-          personaId: current.id,
-          version,
-          ...behaviorColumns(next),
-          createdBy: auth.userId,
-        });
+        await tx
+          .insert(personaVersion)
+          .values({
+            id: versionId,
+            personaId: id,
+            version: current.version + 1,
+            ...asked,
+            parameterContract: current.parameterContract,
+            createdBy: auth.userId,
+          });
       }
-
-      const [updated] = await tx
-        .update(persona)
-        .set({
-          ...(changes.name === undefined ? {} : { name: changes.name }),
-          ...(changes.description === undefined
-            ? {}
-            : { description: changes.description }),
-          ...(next === undefined ? {} : { currentVersionId: versionId }),
-          updatedAt: new Date(),
-        })
-        .where(eq(persona.id, current.id))
-        .returning(COLUMNS);
-
-      if (updated === undefined) {
-        throw new Error("the persona was not written");
+      if (coreChanged || metadataRequested) {
+        await tx
+          .update(persona)
+          .set({
+            ...(changes.name === undefined ? {} : { name: changes.name }),
+            ...(changes.description === undefined
+              ? {}
+              : { description: changes.description }),
+            currentVersionId: versionId,
+            updatedAt: new Date(),
+          })
+          .where(eq(persona.id, id));
       }
-      return {
-        ...(() => {
-          const { organizationId: _organizationId, ...identity } = updated;
-          return identity;
-        })(),
-        owner: "organization" as const,
-        version,
-        versionId,
-        ...(next ?? stored),
-      };
+      return readPersonaOn(tx, auth, id);
     }),
   );
 }
 
+export class PersonaVersionConflictError extends Error {
+  readonly personaId: string;
+  constructor(personaId: string) {
+    super(
+      "the persona core changed after you read it; read its current version before editing",
+    );
+    this.name = "PersonaVersionConflictError";
+    this.personaId = personaId;
+  }
+}
+
+/** Use a definition with complete settings; an existing association keeps its values. */
+export async function usePersona(
+  auth: AuthContext,
+  id: string,
+  models?: PersonaModels,
+): Promise<Persona | undefined> {
+  authorize(auth, "author_definitions", here(auth));
+  if (auth.projectId === undefined) {
+    throw new UnprocessableInputError("using a persona requires a project");
+  }
+  const values =
+    models === undefined ? undefined : personaParametersOfModels(models);
+  const projectId = auth.projectId;
+  return writing(() =>
+    db().transaction(async (tx) => {
+      await lockPersonaProject(tx, auth, projectId);
+      const [found] = await tx
+        .select({ id: persona.id })
+        .from(persona)
+        .where(thePersona(auth, id))
+        .limit(1);
+      if (found === undefined) return undefined;
+      await ensureProjectPersonaOn(tx, auth, projectId, id, values);
+      return readPersonaOn(tx, auth, id);
+    }),
+  );
+}
 /**
  * One frozen version, by its own `prsv_` id — the read a run uses to stay
  * interpretable after the persona moves on, and the older-version read a
@@ -952,7 +930,7 @@ export async function listPersonas(
     .limit(limit + 1);
 
   const { items, nextCursor } = pageOf(rows, limit);
-  return { items: items.map(personaFrom), nextCursor };
+  return { items: await Promise.all(items.map((row) => personaFrom(db(), auth, row))), nextCursor };
 }
 
 /**
@@ -1166,7 +1144,9 @@ export async function forkPersona(
         name: source.name,
         description: source.description ?? undefined,
       },
-      normalizedBehavior(behaviorFromRow(current, current.id)),
+      normalizedBehavior(current),
+      (await ensureProjectPersonaOn(tx, auth, projectId, id, undefined, true)).models,
+      current.parameterContract,
     );
   });
 }

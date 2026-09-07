@@ -199,3 +199,15 @@ export * from "./access/index.ts";
 export * as schema from "./schema/index.ts";
 
 export { defaultGraderParameterValues, LLM_GRADER_PARAMETER_CONTRACT, graderModelOfParameters, validateExecutableGraderParameters, validateGraderParameterContract, validateGraderParameterValues, type GraderParameterValues } from "./grader-library/parameters.ts";
+export { usePersona, PersonaVersionConflictError } from "./access/personas.ts";
+export {
+  defaultPersonaParameterValues,
+  PERSONA_PARAMETER_CONTRACT,
+  personaParameterContract,
+  personaParametersOfModels,
+  personaModelsOfParameters,
+  validatePersonaParameterContract,
+  validatePersonaParameterValues,
+  type PersonaParameterValues,
+} from "./persona-library/parameters.ts";
+export type { ProjectPersonaSettings } from "./access/project-personas.ts";

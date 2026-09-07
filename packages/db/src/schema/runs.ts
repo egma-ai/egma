@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { agent, connection, MODALITIES } from "./agents.ts";
+import type { PersonaParameterValues } from "../persona-library/parameters.ts";
 import { personaVersion } from "./personas.ts";
 import { test, testSuite, testVersion } from "./tests.ts";
 import { organization, project } from "./tenancy.ts";
@@ -360,6 +361,7 @@ export const simulation = pgTable(
      */
     personaId: idText("persona_id").notNull(),
     personaVersionId: idText("persona_version_id").notNull(),
+    personaParameterValues: jsonb("persona_parameter_values").$type<PersonaParameterValues>().notNull(),
     /**
      * What was being checked, and the pin — the persona pin's shape exactly,
      * for the same reason. The version is frozen content, so this row says

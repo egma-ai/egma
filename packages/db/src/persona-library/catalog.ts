@@ -1,7 +1,8 @@
 import {
   RECOMMENDED_PERSONA_MODELS,
-  type PersonaModels,
 } from "../models/selections.ts";
+import { personaParameterContract } from "./parameters.ts";
+import type { GraderParameter } from "../grader-library/parameters.ts";
 import { EGMA_PROVIDED_PERSONAS } from "./ids.ts";
 
 export { EGMA_PROVIDED_PERSONAS } from "./ids.ts";
@@ -22,7 +23,7 @@ export type EgmaProvidedPersonaVersion = {
   readonly identityName: string;
   readonly personality: string;
   readonly language: string;
-  readonly models: PersonaModels;
+  readonly parameterContract: readonly GraderParameter[];
   readonly createdAt: Date;
 };
 
@@ -35,13 +36,13 @@ export type EgmaProvidedPersona = {
   readonly versions: readonly EgmaProvidedPersonaVersion[];
 };
 
-const SHELF_PERSONA_MODELS: PersonaModels = {
+const SHELF_PERSONA_CONTRACT = personaParameterContract({
   ...RECOMMENDED_PERSONA_MODELS,
   llm: {
     provider: "openai",
     model: "gpt-5.6-terra",
   },
-};
+});
 
 /**
  * Every persona Egma provides.
@@ -75,7 +76,7 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
         personality:
           "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
         language: "en-US",
-        models: SHELF_PERSONA_MODELS,
+        parameterContract: SHELF_PERSONA_CONTRACT,
         createdAt: new Date("2026-08-19T23:09:01.674Z"),
       },
     ],

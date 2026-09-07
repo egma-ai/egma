@@ -1,3 +1,4 @@
+import { defaultPersonaParameterValues, PERSONA_PARAMETER_CONTRACT } from "@egma/db";
 import { newId } from "@egma/ids";
 import { createPersona, getRun, getSimulation } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
@@ -153,7 +154,7 @@ async function anAgentReadyToRun(label: string): Promise<Ready> {
     [String(suite.body.id)],
   );
   const personaRow = await api.database.sql<{ id: string; current_version_id: string }>(
-    `select id, current_version_id from persona limit 1`,
+    `select id, current_version_id from persona_definition limit 1`,
   );
 
   return {
@@ -234,8 +235,8 @@ async function seedRun(
     `insert into simulation
        (id, run_id, organization_id, project_id, agent_id, connection_id,
         persona_id, persona_version_id, test_id, test_version_id,
-        position, modality, status)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,'voice','queued')`,
+        position, modality, status, persona_parameter_values)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,'voice','queued',$11::jsonb)`,
     [
       simulationId,
       runId,
@@ -247,6 +248,7 @@ async function seedRun(
       ready.personaVersionId,
       ready.testId,
       ready.testVersionId,
+      JSON.stringify(defaultPersonaParameterValues(PERSONA_PARAMETER_CONTRACT)),
     ],
   );
   return { runId, simulationId };

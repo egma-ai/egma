@@ -58,7 +58,10 @@ Egma reads every active test in the suite in one transaction. It then creates
 one simulation for each test and persona combination. You cannot select a
 weaker subset inside the run. An empty suite cannot run.
 
-Each simulation stores the exact test and persona versions that it executed.
+Each simulation stores the exact test and persona core versions and complete
+project persona settings selected when the run was created. Later model or voice
+edits affect future runs; queued work and retries keep the saved selection. See
+[Personas](/concepts/personas).
 This keeps old evidence exact even after you edit a test. A simulation reads its
 world from that pinned version: Egma mocks exactly the tools the test names, and
 every other tool the agent calls runs for real. Unmocked tools run real, and are
