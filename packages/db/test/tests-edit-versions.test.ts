@@ -5,6 +5,7 @@ import {
   createTest,
   editPersona,
   editTest,
+  getPersona,
   getTest,
   getTestVersion,
   NotPermittedError,
@@ -456,7 +457,10 @@ describe("one frozen version", () => {
       personaIds: [nadia],
     });
 
+    const current = await getPersona(actingAsAcme(), nadia);
+    expect(current).toBeDefined();
     const moved = await editPersona(actingAsAcme(), nadia, {
+      expectedVersionId: current!.versionId,
       personality: "Now speaks with deliberate precision.",
     });
     expect(moved?.version).toBe(2);
