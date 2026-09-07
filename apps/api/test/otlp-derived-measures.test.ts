@@ -83,7 +83,10 @@ const HAND_COMPUTED = {
   /**
    * One sample per human turn that reached agent speech before the next human
    * turn. Silent agent turns on the way are the model and tool work that led to
-   * the spoken answer, not the answer itself.
+   * the spoken answer, not the answer itself. A speechless human turn opened
+   * while the agent's own turn was still running is the transcriber delivering
+   * the rest of the caller's last utterance, so it is neither a turn that waits
+   * nor a turn the walk stops at, and the reply it cut off is not an answer.
    *
    * **Each wait starts where the caller stopped being audible** — the end of
    * that human turn's last `user_speaking` child, which is the VAD's detected
@@ -92,17 +95,25 @@ const HAND_COMPUTED = {
    * older numbers are noted beside the new ones so the size of the difference
    * is on the record.
    *
-   * 1. human 1e6796c0e195e424 is followed by silent agent turn
-   *    9ac4333458575745, then another human turn before any agent speech. It
-   *    was not answered and takes no sample.
-   * 2. human baac22a26a96fa9b carries **no** `user_speaking` child, so its own
-   *    end stands in: it starts 1785693902082961920 → 1785693902082961 µs and
-   *    runs 297806362 ns, ending at 1785693902380767362. Agent turn
+   * 1. human 1e6796c0e195e424 said its sentence in three bursts, the last of
+   *    them 149dcf2969e36b11 starting 1785693898613910272 →
+   *    1785693898613910 µs and running 2658486528 ns, so the caller stopped
+   *    being audible at 1785693901272396528. Agent turn 9ac4333458575745 began
+   *    answering the first half of that sentence and was interrupted
+   *    (`lk.interrupted=true`) when the rest of it arrived as human turn
+   *    baac22a26a96fa9b — a false start, and skipped. Agent turn
    *    00820fa943b873e6 does silent tool work; the next turn b2444815bd74fb3b
    *    speaks in 1b8cc4d1064a766d at 1785693904727004928 →
-   *    1785693904727004 µs. 1785693904727004000 − 1785693902380767362 =
-   *    2346236638 ns = 2346.236638 ms — the same as before, because this turn
-   *    has no recorded speech to start from.
+   *    1785693904727004 µs. 1785693904727004000 − 1785693901272396528 =
+   *    3454607472 ns = 3454.607472 ms.
+   * 2. human baac22a26a96fa9b carries **no** `user_speaking` child and opened
+   *    at 1785693902082961920 → 1785693902082961 µs, while agent turn
+   *    9ac4333458575745 was still running — it ended 1785693902100105098. It is
+   *    the rest of the caller's previous sentence, delivered late by the
+   *    transcriber, so it takes no sample of its own: nobody spoke it and
+   *    nobody waited from it. Read as a turn in its own right it measured
+   *    2346.236638 ms from its own end, which is an endpointing commit rather
+   *    than anything the caller heard.
    * 3. human c35b92a87f8121a1 has three `user_speaking` children, the last
    *    b30dd00e322f2443 starting 1785693920313752320 → 1785693920313752 µs and
    *    running 1710489600 ns, so the caller stopped being audible at
@@ -123,7 +134,7 @@ const HAND_COMPUTED = {
    *    1785693946089613000 − 1785693943023019440 = 3066593560 ns =
    *    3066.59356 ms. From the turn's own end it read 1994.917806 ms.
    */
-  turn_response_latency: [2346.236638, 2900.4494, 3066.59356],
+  turn_response_latency: [3454.607472, 2900.4494, 3066.59356],
 
   /**
    * One sample per agent turn that spoke, and four of the eight did. Each has a
