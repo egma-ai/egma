@@ -1131,9 +1131,12 @@ function measureSpanRowAsSpanRow(row: PageMeasureSpanRow): SpanRow {
     tool_arguments: "",
     tool_result: "",
     provider_tool_id: "",
-    // Not read either: this projection feeds the metric arithmetic, which
-    // asks what was measured and never whose POV it was.
-    emitter: "",
+    // The emitter rides through from the row above, and is the one display
+    // field here that is not blank: the metric arithmetic derives from the
+    // agent's own turns alone, so a simulation's two accounts of one
+    // conversation have to arrive still telling each other apart. Blanking it
+    // would hand the derivation two accounts as one and measure every wait
+    // twice over.
   };
 }
 
