@@ -55,7 +55,15 @@ export async function executeExpectedBehaviors(
   const evidence = judgeInputOf(execution.conversation);
   const assertions = await Promise.all(
     behaviors.map(async (behavior, at): Promise<GraderAssertionResult> => {
-      const question: JudgeQuestion = { prompt, criterion: behavior, evidence };
+      const question: JudgeQuestion = {
+        prompt,
+        criterion: behavior,
+        // The key this behavior's result is filed under is also what tells
+        // this call's spend apart from its siblings', which are made in
+        // parallel and differ in nothing else.
+        assertion: behaviorAssertionKey(at),
+        evidence,
+      };
       try {
         return assertionResultOf(
           behaviorAssertionKey(at),

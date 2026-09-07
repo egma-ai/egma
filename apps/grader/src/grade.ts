@@ -1,15 +1,19 @@
 import {
   appendGrades,
+  catalogEntry,
   getSimulation,
   getSimulationTestVersion,
   MAXIMUM_WINDOW_MILLISECONDS,
   MOST_GRADING_ATTEMPTS,
   readTrace,
+  recordProviderUsage,
   type FrozenGradingEntry,
   type GradingClaim,
   type GradingSource,
   type NewGrade,
+  type NewUsageRecord,
   type TraceDetail,
+  type UsageQuantities,
 } from "@egma/db";
 import type {
   ProviderCredentialBundle,
@@ -28,6 +32,7 @@ import {
   judgeFor,
   type AskableJudge,
   type JudgeMakers,
+  type JudgeUsage,
 } from "./judge/index.ts";
 
 /** What grading one claimed trace durably appended. */
@@ -69,10 +74,17 @@ export async function gradeClaim(
   )
     ? await options.providerCredentials.load()
     : {};
+  // What every judge call consumed, gathered as the calls are made. One list
+  // for the whole claim: the records carry which grader and which assertion
+  // spent what, so nothing is lost by pooling them.
+  const spend: NewUsageRecord[] = [];
   const judges = judgesFor(
     claim.entries,
     credentials,
     options.makers ?? JUDGE_MAKERS,
+    (entry, usage) => {
+      spend.push(usageRow(claim, entry, resolved.simulationId, usage));
+    },
   );
   const reading = readingFor(claim, resolved.simulationId);
 
@@ -80,6 +92,13 @@ export async function gradeClaim(
     const result = await resultOf(entry, resolved.conversation, reading, judges);
     return gradeRow(claim, entry, result);
   }));
+
+  // The spend before the grades, and in the same breath: the money was spent
+  // the moment each provider answered, whatever becomes of the grade beside it.
+  // A store failure here retries the whole claim, which makes fresh provider
+  // requests with their own identities — correctly new spend — while the
+  // records already written collapse on theirs.
+  await recordProviderUsage(claim.auth, spend);
 
   // One append after every grader has answered. A store failure therefore
   // retries the whole frozen plan, while ClickHouse keeps every completed retry
@@ -153,6 +172,7 @@ function judgesFor(
   entries: readonly FrozenGradingEntry[],
   credentials: ProviderCredentialBundle,
   makers: JudgeMakers,
+  spent: (entry: FrozenGradingEntry, usage: JudgeUsage) => void,
 ): ReadonlyMap<string, AskableJudge> {
   const judges = new Map<string, AskableJudge>();
   for (const entry of entries) {
@@ -164,10 +184,70 @@ function judgesFor(
     }
     judges.set(
       entry.projectGraderId,
-      judgeFor(entry.definition.judgeModel, credentials, makers),
+      judgeFor(entry.definition.judgeModel, credentials, makers, (usage) => {
+        spent(entry, usage);
+      }),
     );
   }
   return judges;
+}
+
+/**
+ * One judge request, as the record Egma keeps of what it cost.
+ *
+ * **The identity is the work, not a fresh id.** The grading job, the attempt
+ * of it that made the request, the grader, the assertion it decided and which
+ * HTTP attempt answered — every one of those is a fact that does not change
+ * when the same delivery is made again, and together they are the request. So
+ * a retried store write collapses onto one row, while a grading job genuinely
+ * tried again spends again and says so, because its attempt counter moved.
+ */
+function usageRow(
+  claim: GradingClaim,
+  entry: FrozenGradingEntry,
+  simulationId: string | undefined,
+  usage: JudgeUsage,
+): NewUsageRecord {
+  const model = entry.definition.judgeModel;
+  if (model === null) {
+    throw new Error("a judge reported usage for a grader with no judge model");
+  }
+  // **The pinned catalog model, never the provider's own served string.**
+  // OpenAI answers `gpt-5.6-terra-2026-08-01` for a request that asked for
+  // `gpt-5.6-terra`, and the rate card is keyed by the catalog — Egma's
+  // catalog is closed and Egma names the models itself, which is exactly why
+  // it needs no match patterns. Pricing by the dated variant would find no row
+  // and store the call at nothing.
+  const named = model.model;
+  const adapter = catalogEntry("llm", model.provider, named)?.adapter;
+  return {
+    identity: {
+      work: "grading",
+      gradingJobId: claim.id,
+      attempts: claim.attempts,
+      projectGraderId: entry.projectGraderId,
+      assertion: usage.assertion,
+      httpAttempt: usage.httpAttempt,
+    },
+    occurredAt: usage.occurredAt,
+    ...(claim.runId === null ? {} : { runId: claim.runId }),
+    ...(simulationId === undefined ? {} : { simulationId }),
+    traceId: claim.traceId,
+    provider: model.provider,
+    model: named,
+    // A judge speaks chat completions. The catalog is asked anyway, so a
+    // provider whose adapter is something else on the day it arrives is named
+    // by the catalog rather than by an assumption written here.
+    operation: adapter ?? "openai_chat_completions",
+    quantities: usage.quantities as UsageQuantities,
+    // The counts are the provider's own; Egma counts nothing here.
+    measurement: "provider_reported",
+    ...(usage.providerRef === undefined
+      ? {}
+      : { providerRef: usage.providerRef }),
+    paymentSource: "platform",
+    rawUsage: usage.rawUsage,
+  };
 }
 
 function gradeRow(

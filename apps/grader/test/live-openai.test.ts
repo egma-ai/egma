@@ -74,6 +74,7 @@ describe.skipIf(API_KEY === "")(
       const answer = await judge({
         prompt: THE_PROMPT,
         criterion: "the agent confirms the new time back before finishing",
+        assertion: "behavior_1",
         evidence: EVIDENCE,
       });
 
@@ -96,6 +97,7 @@ describe.skipIf(API_KEY === "")(
       const answer = await judge({
         prompt: THE_PROMPT,
         criterion: "the agent quotes the price of the cleaning in dollars",
+        assertion: "behavior_1",
         evidence: EVIDENCE,
       });
 

@@ -4,7 +4,12 @@ import {
   type ProviderCredentialBundle,
 } from "@egma/provider-credentials";
 
-import type { Judge, JudgeMaker, ResolvedJudge } from "./contract.ts";
+import type {
+  Judge,
+  JudgeMaker,
+  JudgeUsageSink,
+  ResolvedJudge,
+} from "./contract.ts";
 import { openaiJudge } from "./openai.ts";
 
 /**
@@ -37,6 +42,7 @@ export function judgeFor(
   model: GraderJudgeModel,
   credentials: ProviderCredentialBundle,
   makers: JudgeMakers = JUDGE_MAKERS,
+  usage?: JudgeUsageSink,
 ): AskableJudge {
   if (model.provider !== "openai") {
     throw new Error(
@@ -56,6 +62,7 @@ export function judgeFor(
       ? {}
       : { reasoningEffort: entry.reasoningEffort }),
     key: credentialFor(credentials, model.provider),
+    ...(usage === undefined ? {} : { usage }),
   };
   return { ask: makers[model.provider](resolved) };
 }
@@ -66,6 +73,8 @@ export {
   type JudgeAnswer,
   type JudgeMaker,
   type JudgeQuestion,
+  type JudgeUsage,
+  type JudgeUsageSink,
   type ResolvedJudge,
 } from "./contract.ts";
 export {

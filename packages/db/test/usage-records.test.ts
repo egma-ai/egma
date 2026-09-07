@@ -2,7 +2,6 @@ import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  NotPermittedError,
   createAgent,
   createPersona,
   createTest,
@@ -42,7 +41,8 @@ const globex = {
   userId: newId("usr"),
 };
 
-function contextFor(
+/** A person, signed in. What every page and every key resolves to. */
+function sessionOf(
   who: typeof acme,
   role: "admin" | "member" | "viewer" = "member",
 ): AuthContext {
@@ -55,12 +55,28 @@ function contextFor(
   };
 }
 
+/**
+ * The simulator conducting one of this customer's claimed simulations —
+ * narrowed to the row's own tenancy, exactly as `claimSimulations` builds one.
+ * The fixtures below are written through it because that is the only context a
+ * usage record is ever written under.
+ */
+function contextFor(who: typeof acme): AuthContext {
+  return {
+    userId: "the-simulator",
+    organizationId: who.organizationId,
+    projectId: who.projectId,
+    role: "member",
+    via: "simulator",
+  };
+}
+
 /** One queued conversation, with everything a run needs around it. */
 async function seedSimulation(who: typeof acme): Promise<{
   simulationId: string;
   runId: string;
 }> {
-  const auth = contextFor(who);
+  const auth = sessionOf(who);
   const label = newId("run").slice(-8);
   const created = await createAgent(auth, {
     agentPlatform: "retell",
@@ -338,20 +354,24 @@ describe("a simulation's cost, by provider and model", () => {
     ).toBe(1);
   });
 
-  it("is readable by every role, and written by nobody read-only", async () => {
+  it("is readable by every role, and written only from a claim", async () => {
     const { simulationId, runId } = await seedSimulation(acme);
     await recordProviderUsage(contextFor(acme), [
       llmRecord(simulationId, runId, "999999999999999a"),
     ]);
+    // Every member of the organization can see what a run cost, whatever they
+    // may change — a paused run has to explain itself to whoever started it.
     expect(
-      (await readSimulationUsage(contextFor(acme, "viewer"), simulationId))
+      (await readSimulationUsage(sessionOf(acme, "viewer"), simulationId))
         .requests,
     ).toBe(1);
+    // And nobody writes spend under a credential. A usage record is Egma
+    // writing down what it just spent, and the claim is its only authority.
     await expect(
-      recordProviderUsage(contextFor(acme, "viewer"), [
+      recordProviderUsage(sessionOf(acme, "admin"), [
         llmRecord(simulationId, runId, "999999999999999b"),
       ]),
-    ).rejects.toBeInstanceOf(NotPermittedError);
+    ).rejects.toThrow(/never under a credential/);
   });
 });
 

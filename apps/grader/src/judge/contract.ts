@@ -34,9 +34,61 @@ export type JudgeQuestion = {
   readonly prompt: string;
   /** The one thing this call decides, in the words it was written in. */
   readonly criterion: string;
+  /**
+   * Which assertion of the grader this call decides, by the stable key the
+   * result is filed under — `behavior_1`, `instruction_1`.
+   *
+   * It rides the question because a usage record's identity needs it: one
+   * grader fans out over several behaviors in parallel, and the calls differ
+   * only by which one they decide. Without it, two of them made in the same
+   * attempt of the same job would be one record, and a fan-out of three would
+   * be charged as one.
+   */
+  readonly assertion: string;
   /** What the judge may read, declared. */
   readonly evidence: JudgeInput;
 };
+
+/**
+ * One provider request a judge actually made, as the grader records it.
+ *
+ * Reported per HTTP attempt that came back with a body, rather than per
+ * question: a retry after a rate limit is a second request the provider
+ * answered, and it is real spend. An attempt that never got a body — a
+ * timeout, a refusal — reports nothing, because there is nothing the provider
+ * said it consumed.
+ */
+export type JudgeUsage = {
+  /** When the provider answered. */
+  readonly occurredAt: Date;
+  /** Which assertion this call decided. */
+  readonly assertion: string;
+  /** Which HTTP attempt of that call this was, counted from one. */
+  readonly httpAttempt: number;
+  /** The model the provider says it served, or the one that was asked for. */
+  readonly model: string;
+  /** The provider's own id for the response, where it gave one. */
+  readonly providerRef: string | undefined;
+  /**
+   * The billable counts, normalised: `input_tokens` is the **uncached** part
+   * of the prompt, because OpenAI's own `prompt_tokens` includes the cached
+   * tokens and rating the whole of it at the uncached price would charge for
+   * the cache twice.
+   */
+  readonly quantities: Readonly<Record<string, number>>;
+  /** The provider's usage object, verbatim, for a later re-rating. */
+  readonly rawUsage: Readonly<Record<string, unknown>>;
+};
+
+/**
+ * Where a judge hands over what one request consumed.
+ *
+ * A sink rather than a field on the answer: a judge makes as many requests as
+ * its retries need and answers once, so the two are not the same event, and an
+ * answer carrying only the last attempt's usage would quietly lose the spend of
+ * every attempt before it.
+ */
+export type JudgeUsageSink = (usage: JudgeUsage) => void;
 
 /**
  * What a judge is allowed to say.
@@ -91,6 +143,12 @@ export type ResolvedJudge = {
   /** Release-owned provider setting for this stored model pair. */
   readonly reasoningEffort?: ReasoningEffort | undefined;
   readonly key: string;
+  /**
+   * Where this judge reports what each of its requests consumed. Absent where
+   * nobody is collecting — a unit test asking one question — and the adapter
+   * then measures nothing rather than holding numbers no one will read.
+   */
+  readonly usage?: JudgeUsageSink | undefined;
 };
 
 /**

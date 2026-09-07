@@ -260,10 +260,25 @@ export async function recordProviderUsage(
   records: readonly NewUsageRecord[],
 ): Promise<RecordedProviderUsage> {
   if (records.length === 0) return { stored: 0, amountMicros: 0 };
-  authorize(auth, "ingest_traces", {
+  // **Only Egma's own two services may write spend, and the check is the
+  // context's provenance rather than a role.** A usage record is not an action
+  // a person takes: it is Egma writing down what it has just spent on somebody
+  // else's behalf, and the only honest authority for one is the claim that
+  // authorised the work — a simulation's, or a grading job's. There is no HTTP
+  // door a person reaches this through, and a session-built context arriving
+  // here would mean somebody had built one.
+  authorize(auth, "read", {
     organizationId: auth.organizationId,
     projectId: auth.projectId,
   });
+  if (auth.via !== "simulator" && auth.via !== "engine") {
+    throw new Error(
+      "a usage record is written by Egma's own simulator or its grading " +
+        "engine, from the claim that authorised the work — never under a " +
+        "credential, because nobody asks Egma to spend money on their behalf " +
+        "except by starting work Egma then claims",
+    );
+  }
   const projectId = projectOf(auth);
   const rates = await ratesFor(records);
 

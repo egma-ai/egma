@@ -38,6 +38,8 @@ export async function executeLlmAsJudge(
   const question: JudgeQuestion = {
     prompt: PROMPT,
     criterion: instructions,
+    // One instruction, one assertion, and the key its result is filed under.
+    assertion: "instruction_1",
     evidence,
   };
   const answer = await judge.ask(question);
