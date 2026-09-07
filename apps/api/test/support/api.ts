@@ -9,6 +9,7 @@ import {
   disconnectClickHouse,
   reconcileGraderCatalog,
   seedPersonaLibrary,
+  upsertRateCard,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 import type { Fetch as RetellFetch } from "@egma/retell";
@@ -278,12 +279,16 @@ export async function createApi(
           },
         };
 
-  // The two fixed-id catalogs the real entry point writes before a project can
+  // The three shipped catalogs the real entry point writes before a project can
   // be created. A new project points directly at the Egma-provided persona, and
   // its project grader points at the predefined catalog, so skipping either
-  // would put this instance in a state no deployment serves requests from.
+  // would put this instance in a state no deployment serves requests from. The
+  // rate card is the third: a usage record is priced where it is stored, so an
+  // instance with an empty rate card would price every provider request at
+  // nothing.
   await seedPersonaLibrary();
   await reconcileGraderCatalog();
+  await upsertRateCard();
 
   const { app, identity, drainer } = buildApi({
     config,

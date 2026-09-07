@@ -1,0 +1,86 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "egma-simulator" } },
+          { "key": "egma.simulation_id", "value": { "stringValue": "sim_01M1X7VHHXE2AA4P7F7JEWPK8Z" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "egma-simulator", "version": "1" },
+          "spans": [
+            {
+              "traceId": "01a07a7dc63d7094a258ef3c9dcb4d1f",
+              "spanId": "cc10000000000011",
+              "parentSpanId": "cc10000000000001",
+              "name": "provider_usage",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1788862447900000000",
+              "endTimeUnixNano": "1788862447900000000",
+              "attributes": [
+                { "key": "egma.usage.provider", "value": { "stringValue": "openai" } },
+                { "key": "egma.usage.model", "value": { "stringValue": "gpt-4o-mini" } },
+                { "key": "egma.usage.operation", "value": { "stringValue": "openai_chat_completions" } },
+                { "key": "egma.usage.measurement", "value": { "stringValue": "provider_reported" } },
+                { "key": "egma.usage.provider_ref", "value": { "stringValue": "chatcmpl-9f2b1c" } },
+                {
+                  "key": "egma.usage.quantities",
+                  "value": { "stringValue": "{\"input_tokens\":1000,\"cached_input_tokens\":400,\"output_tokens\":100}" }
+                },
+                {
+                  "key": "egma.usage.raw",
+                  "value": { "stringValue": "{\"prompt_tokens\":1400,\"completion_tokens\":100,\"total_tokens\":1500,\"prompt_tokens_details\":{\"cached_tokens\":400}}" }
+                }
+              ]
+            },
+            {
+              "traceId": "01a07a7dc63d7094a258ef3c9dcb4d1f",
+              "spanId": "cc10000000000012",
+              "parentSpanId": "cc10000000000001",
+              "name": "provider_usage",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1788862449500000000",
+              "endTimeUnixNano": "1788862449500000000",
+              "attributes": [
+                { "key": "egma.usage.provider", "value": { "stringValue": "openai" } },
+                { "key": "egma.usage.model", "value": { "stringValue": "gpt-live-transcribe" } },
+                { "key": "egma.usage.operation", "value": { "stringValue": "openai_realtime" } },
+                { "key": "egma.usage.measurement", "value": { "stringValue": "provider_reported" } },
+                { "key": "egma.usage.provider_ref", "value": { "stringValue": "item_A1b2C3" } },
+                {
+                  "key": "egma.usage.quantities",
+                  "value": { "stringValue": "{\"audio_seconds\":7.3}" }
+                },
+                {
+                  "key": "egma.usage.raw",
+                  "value": { "stringValue": "{\"type\":\"duration\",\"seconds\":7.3}" }
+                }
+              ]
+            },
+            {
+              "traceId": "01a07a7dc63d7094a258ef3c9dcb4d1f",
+              "spanId": "cc10000000000013",
+              "parentSpanId": "cc10000000000001",
+              "name": "provider_usage",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1788862451100000000",
+              "endTimeUnixNano": "1788862451100000000",
+              "attributes": [
+                { "key": "egma.usage.provider", "value": { "stringValue": "cartesia" } },
+                { "key": "egma.usage.model", "value": { "stringValue": "sonic-3.5" } },
+                { "key": "egma.usage.operation", "value": { "stringValue": "cartesia" } },
+                { "key": "egma.usage.measurement", "value": { "stringValue": "client_measured" } },
+                {
+                  "key": "egma.usage.quantities",
+                  "value": { "stringValue": "{\"characters\":42}" }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

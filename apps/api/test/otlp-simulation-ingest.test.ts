@@ -88,6 +88,8 @@ const VOICE_SIMULATION = "sim_01K3XSW9GJ2Q4RD8VXH0MEKAFP";
 const VOICE_TRACE = "0198fb9e261215c986a37d8828e9a9f6";
 const MOCKED_SIMULATION = "sim_01K3XV2D6H9E4TBQZ7MKR0NFAC";
 const MOCKED_TRACE = "0198fbb134d14b89a5dfe7a4f00abd4c";
+const USAGE_SIMULATION = "sim_01M1X7VHHXE2AA4P7F7JEWPK8Z";
+const USAGE_TRACE = "01a07a7dc63d7094a258ef3c9dcb4d1f";
 
 /** What the test API's configuration holds, and the simulator would be started with. */
 const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
@@ -97,6 +99,7 @@ let acme: Customer;
 let globex: Customer;
 let chatRunId: string;
 let voiceRunId: string;
+let usageRunId: string;
 let acmeSeed: { agentId: string; testVersionId: string; personaVersionId: string };
 
 function store(): NonNullable<TestApi["traceStore"]> {
@@ -228,6 +231,9 @@ beforeAll(async () => {
   const voice = await seedSimulationNamed(globex, "voice", VOICE_SIMULATION);
   voiceRunId = voice.runId;
   await seedSimulationNamed(acme, "mocked", MOCKED_SIMULATION);
+  usageRunId = (
+    await seedSimulationNamed(globex, "usage", USAGE_SIMULATION)
+  ).runId;
 });
 
 afterAll(async () => {
@@ -1125,5 +1131,151 @@ describe.skipIf(!storage.available)("the simulation grading handoff", () => {
       [CHAT_TRACE],
     );
     expect(Number(jobs.rows[0]?.n)).toBe(1);
+  });
+});
+
+/**
+ * The bill, at the same door as the evidence.
+ *
+ * A `provider_usage` span is the simulator saying what one provider request
+ * consumed. The door turns it into a priced usage record in Postgres — priced
+ * here rather than in a worker, so a price change never needs a simulator
+ * release — while the span itself is filed like every other span.
+ *
+ * The three claims are the three ways this can go wrong: a bill that is never
+ * priced, a resend that charges twice, and a price change that reaches
+ * backwards into work already paid for.
+ */
+describe.skipIf(!storage.available)("a provider_usage span", () => {
+  type UsageRow = {
+    organization_id: string;
+    project_id: string;
+    run_id: string;
+    work_kind: string;
+    simulation_id: string;
+    provider: string;
+    model: string;
+    operation: string;
+    unit: string;
+    quantities: Record<string, number>;
+    measurement: string;
+    provider_ref: string | null;
+    payment_source: string;
+    raw_usage: Record<string, unknown>;
+    amount_micros: string;
+    priced_by: Record<string, string>;
+    span_id: string;
+  };
+
+  async function usageOf(simulationId: string): Promise<UsageRow[]> {
+    const { rows } = await api.database.sql<UsageRow>(
+      "select * from usage_record where simulation_id = $1 order by span_id",
+      [simulationId],
+    );
+    return rows;
+  }
+
+  it("becomes one priced record per request, under the simulation's own customer and run", async () => {
+    const flush = await post(await fixture("valid", "voice-provider-usage.json"));
+    expect(flush.statusCode, flush.body).toBe(200);
+    expect(flush.json()).toEqual({});
+
+    const rows = await usageOf(USAGE_SIMULATION);
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      // The tenancy is the simulation row's, never the payload's — Globex owns
+      // this conversation, and the span said nothing about whose it was.
+      expect(row.organization_id).toBe(globex.organizationId);
+      expect(row.project_id).toBe(globex.projectId);
+      expect(row.run_id).toBe(usageRunId);
+      expect(row.work_kind).toBe("simulation");
+      // Nothing on the wire decides who paid. Every request Egma makes today is
+      // made with the deployment's own key.
+      expect(row.payment_source).toBe("platform");
+    }
+
+    const llm = rows.find((row) => row.model === "gpt-4o-mini");
+    expect(llm).toBeDefined();
+    expect(llm?.operation).toBe("openai_chat_completions");
+    expect(llm?.unit).toBe("tokens");
+    expect(llm?.measurement).toBe("provider_reported");
+    expect(llm?.provider_ref).toBe("chatcmpl-9f2b1c");
+    expect(llm?.quantities).toEqual({
+      input_tokens: 1_000,
+      cached_input_tokens: 400,
+      output_tokens: 100,
+    });
+    // 1,000 uncached at $0.15/1M, 400 cached at $0.075/1M, 100 out at $0.60/1M.
+    expect(Number(llm?.amount_micros)).toBe(240);
+    // The provider's own object is kept whole, so a wrong normalisation can be
+    // re-rated later rather than re-measured.
+    expect(llm?.raw_usage).toMatchObject({ total_tokens: 1_500 });
+
+    const stt = rows.find((row) => row.model === "gpt-live-transcribe");
+    expect(stt?.unit).toBe("seconds");
+    // 7.3 seconds at $0.017 a minute is 2,068.33 micros, rounded to the micro.
+    expect(Number(stt?.amount_micros)).toBe(2_068);
+
+    const tts = rows.find((row) => row.model === "sonic-3.5");
+    expect(tts?.unit).toBe("characters");
+    expect(tts?.measurement).toBe("client_measured");
+    // Cartesia returns no usage object at all, so the record keeps none.
+    expect(tts?.raw_usage).toEqual({});
+    // 42 characters at $50 per 1M credits, one credit a character.
+    expect(Number(tts?.amount_micros)).toBe(2_100);
+  });
+
+  it("is stored once however many times the flush is sent", async () => {
+    const again = await post(await fixture("valid", "voice-provider-usage.json"));
+    expect(again.statusCode, again.body).toBe(200);
+
+    // The write-ahead log replays the same bytes, span ids included, so the
+    // second delivery collapses onto the first and nothing is charged twice.
+    expect(await usageOf(USAGE_SIMULATION)).toHaveLength(3);
+  });
+
+  it("files the span itself under its own kind, like every other span", async () => {
+    const kinds = await store().rows<{ kind: string; n: string }>(
+      "select kind, count(*) as n from spans final " +
+        `where trace_id = '${USAGE_TRACE}' and kind = 'usage' group by kind`,
+    );
+    expect(Number(kinds[0]?.n)).toBe(3);
+  });
+
+  it("is priced at the rate that was in force when the provider answered", async () => {
+    // A price change lands with its own effective date, after the flush above.
+    await api.database.sql(
+      "insert into rate_card (id, provider, model, usage_type, unit, " +
+        "usd_per_million, effective_from, source, read_at) values " +
+        "($1, 'openai', 'gpt-4o-mini', 'input_tokens', 'tokens', '1.50', " +
+        "$2, 'https://developers.openai.com/api/docs/pricing', '2027-01-01')",
+      [`rat_${"0".repeat(26)}`, new Date("2027-01-01T00:00:00.000Z")],
+    );
+
+    // The record already stored keeps the price it was written at: a stored
+    // cost never moves.
+    const before = await usageOf(USAGE_SIMULATION);
+    expect(
+      Number(before.find((row) => row.model === "gpt-4o-mini")?.amount_micros),
+    ).toBe(240);
+
+    // And a request made after that date is priced at the new row. The same
+    // fixture with new span ids and a later instant is a different request.
+    const later = JSON.parse(
+      (await fixture("valid", "voice-provider-usage.json"))
+        .replaceAll("cc1000000000001", "cc1000000000009")
+        .replaceAll("1788862447900000000", "1803896047900000000"),
+    ) as Record<string, unknown>;
+    const priced = await post(JSON.stringify(later));
+    expect(priced.statusCode, priced.body).toBe(200);
+
+    const rows = await usageOf(USAGE_SIMULATION);
+    const now = rows.filter((row) => row.span_id.startsWith("cc1000000000009"));
+    expect(now).toHaveLength(3);
+    // $1.50 per 1M on the thousand uncached tokens, and the cached and output
+    // halves still at the prices that did not change.
+    expect(
+      Number(now.find((row) => row.model === "gpt-4o-mini")?.amount_micros),
+    ).toBe(1_500 + 30 + 60);
   });
 });

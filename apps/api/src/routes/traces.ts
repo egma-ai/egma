@@ -3,9 +3,11 @@ import { gunzipSync } from "node:zlib";
 import {
   authorize,
   NotPermittedError,
+  recordProviderUsage,
   resolveSimulationStanding,
   type AuthContext,
   type NewSpan,
+  type NewUsageRecord,
   type SimulationStanding,
 } from "@egma/db";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
@@ -44,6 +46,7 @@ import {
   SIMULATION_ID_ATTRIBUTE,
   type SpanAttribution,
 } from "../otlp/normalise.ts";
+import { providerUsageIn } from "../otlp/provider-usage.ts";
 import {
   EXPORT_TRACE_SERVICE_RESPONSE,
   RPC_STATUS_MESSAGE,
@@ -463,6 +466,17 @@ async function simulatorExport(
     firstReason: "",
   };
   const accepting: EvidenceGroup[] = [];
+  /**
+   * The bills this flush carried, gathered beside the evidence and written
+   * after it is durable.
+   *
+   * A usage record goes to Postgres rather than riding into the trace store
+   * with the span it came on: a balance has to be readable in milliseconds and
+   * a `ReplacingMergeTree` collapses duplicates when it feels like it, which is
+   * the one thing a spend row may not do. The span itself is still stored,
+   * like every other span, so the evidence and the bill agree by construction.
+   */
+  const billing: { auth: AuthContext; records: readonly NewUsageRecord[] }[] = [];
   for (const group of groups.values()) {
     // Normalised per gathering, so the row caps guard each customer's append
     // rather than the request: a bound loosened only by naming more
@@ -484,6 +498,29 @@ async function simulatorExport(
     });
 
     accepting.push({ auth: group.auth, spans: normalised.spans });
+
+    // Read from the resources rather than from the normalised rows, because a
+    // bill is not a shortened span: it is a set of quantities that has to
+    // arrive whole or not at all, and the row a span becomes is deliberately
+    // lossy about everything it does not have a column for.
+    const usage = providerUsageIn(group.resources, (resourceSpans) => {
+      const target = targets.get(simulationNamedBy(resourceSpans));
+      if (target === undefined) {
+        throw new Error("a resource lost its simulation between checks");
+      }
+      return {
+        simulationId: simulationNamedBy(resourceSpans),
+        runId: target.runId,
+      };
+    });
+    // A bill this side cannot read is reported the way a refused span is, and
+    // the conversation is still kept: the evidence is worth having whether or
+    // not the cost beside it could be worked out.
+    rejected.count += usage.skipped.length;
+    rejected.firstReason ||= usage.skipped[0] ?? "";
+    if (usage.records.length > 0) {
+      billing.push({ auth: group.auth, records: usage.records });
+    }
   }
 
   // Every group in one call, and one answer for all of them: a batch naming
@@ -498,6 +535,15 @@ async function simulatorExport(
   } catch (cause) {
     if (!(cause instanceof IngestionUnavailableError)) throw cause;
     return unavailable(request, reply, encoding, cause);
+  }
+
+  // And the bills, once the evidence they describe is durable. Priced here,
+  // against the rate card as it stood when the provider answered, and inserted
+  // on the record's own deterministic identity — so a replay of this flush
+  // stores nothing a second time and a re-executed simulation, whose spans
+  // carry new ids, is correctly new spend.
+  for (const { auth, records } of billing) {
+    await recordProviderUsage(auth, records);
   }
 
   // One truthful answer: the normaliser's rejects plus the records acceptance

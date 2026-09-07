@@ -210,6 +210,11 @@ const SIMULATOR_KINDS: Readonly<Record<string, string>> = {
   human_turn: "turn:human",
   agent_turn: "turn:agent",
   tool_call: "tool",
+  // What one provider request cost, as its own kind. The row is kept like any
+  // other span — the record that prices it is written into Postgres beside
+  // this, because a balance has to be readable in milliseconds and a
+  // ReplacingMergeTree collapses when it feels like it.
+  provider_usage: "usage",
 };
 
 /** The two turn names, which are where the one text attribute is read. */
