@@ -186,11 +186,16 @@ type UsageRow = {
 };
 
 async function usageOf(traceId: string): Promise<UsageRow[]> {
-  const { rows } = await database.sql<UsageRow>(
-    "select * from usage_record where trace_id = $1 order by created_at, id",
-    [traceId],
-  );
-  return rows;
+  const rows = await store.rows<{ organization_id: string; project_id: string; trace_id: string; usage_evidence: string }>(`SELECT organization_id, project_id, trace_id, any(usage_evidence) AS usage_evidence FROM spans WHERE trace_id = '${traceId}' AND usage_identity_hash != '' GROUP BY organization_id, project_id, trace_id, span_id`);
+  return rows.map((row) => {
+    const usage = JSON.parse(row.usage_evidence);
+    return { organization_id: row.organization_id, project_id: row.project_id, trace_id: row.trace_id,
+      work_kind: usage.identity.work, grading_job_id: usage.identity.gradingJobId,
+      simulation_id: usage.simulationId ?? null, attempt: String(usage.identity.attempts),
+      provider: usage.provider, model: usage.model, operation: usage.operation, unit: usage.price.unit,
+      quantities: usage.quantities, measurement: usage.measurement, provider_ref: usage.providerRef,
+      amount_micros: String(usage.price.amountMicros) };
+  });
 }
 
 /** One custom LLM grader on one project, and one production trace to grade. */
@@ -335,17 +340,14 @@ describe("a graded trace", () => {
     expect(spend[0]?.organization_id).toBe(globex.organization);
     expect(Number(spend[0]?.attempt)).toBe(claim.attempts);
 
-    // The same claim graded again against the same answers — the delivery a
-    // retried store write is — stores nothing a second time: the job, its
-    // attempt, the grader, the assertion, the HTTP attempt and the response id
-    // are all the same request.
+    // A second provider call is new spend even if a faulty provider reuses its response ID.
     vi.unstubAllGlobals();
     providerAnswering(
       () => new Response("slow down", { status: 429 }),
       () => answered({ prompt_tokens: 100, completion_tokens: 10 }, "chatcmpl-g-2"),
     );
     await gradeClaim(claim, { providerCredentials: CREDENTIALS });
-    expect(await usageOf(GLOBEX_TRACE)).toHaveLength(1);
+    expect(await usageOf(GLOBEX_TRACE)).toHaveLength(2);
 
     await finishGradingJob(claim.auth, claim.id, claim.claimedBy);
   });

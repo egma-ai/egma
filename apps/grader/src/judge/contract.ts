@@ -10,6 +10,8 @@ export type JudgeQuestion = {
 };
 
 export type JudgeUsage = {
+  /** Created before the HTTP call and retained on accounting retries. */
+  readonly attemptId: string;
   /** When the provider answered. */
   readonly occurredAt: Date;
   /** Which HTTP attempt of that call this was, counted from one. */
@@ -44,7 +46,7 @@ export type JudgeUsage = {
  * answer carrying only the last attempt's usage would quietly lose the spend of
  * every attempt before it.
  */
-export type JudgeUsageSink = (usage: JudgeUsage) => void;
+export type JudgeUsageSink = (usage: JudgeUsage) => void | Promise<void>;
 
 export type Decision = "met" | "not_met" | "cannot_determine";
 export const DECISIONS: readonly Decision[] = ["met", "not_met", "cannot_determine"];

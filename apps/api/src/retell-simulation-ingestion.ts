@@ -1,7 +1,7 @@
 import { resolveRetellSimulationPull, type AuthContext } from "@egma/db";
 import type { FastifyBaseLogger } from "fastify";
 
-import { IngestionUnavailableError } from "./ingestion/accept.ts";
+import { IngestionUnavailableError } from "@egma/ingestion";
 import { fileSimulationEvidence } from "./ingestion/simulation-ingestion.ts";
 import { platformEvent, safeExceptionType } from "./platform-log.ts";
 import { getRetellCall, type RetellReach } from "./retell/api.ts";

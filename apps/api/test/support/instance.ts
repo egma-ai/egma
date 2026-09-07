@@ -15,7 +15,7 @@ import {
 import type { FastifyInstance } from "fastify";
 
 import { loadConfig, type Config } from "../../src/config.ts";
-import type { IngestionStore } from "../../src/ingestion/object-store.ts";
+import type { IngestionStore } from "@egma/ingestion";
 import { buildApi, type ServerOptions } from "../../src/server.ts";
 import {
   holdWebOutputLock,

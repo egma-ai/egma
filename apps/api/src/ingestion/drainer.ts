@@ -1,5 +1,6 @@
 import {
   appendSpans,
+  priceUsageSpans,
   committedSpans,
   AGENT_PLATFORMS,
   projectOfOrganizationState,
@@ -22,9 +23,9 @@ import {
   type IngestionDefect,
   type IngestionLog,
 } from "./defects.ts";
-import type { PendingObjectStore } from "./object-store.ts";
-import { contentHashOf, spanFor, type IngestionRecord } from "./record.ts";
-import { segmentIdIn, type SegmentScope } from "./segment.ts";
+import type { PendingObjectStore } from "@egma/ingestion";
+import { contentHashOf, recordFor, spanFor, type IngestionRecord } from "@egma/ingestion";
+import { segmentIdIn, type SegmentScope } from "@egma/ingestion";
 import { verifiedSegment, type VerifiedSegment } from "./verify.ts";
 
 const meter = openTelemetryMetrics.getMeter("@egma/api/ingestion-drainer");
@@ -404,7 +405,7 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
   }
 
   const auth = authFor(segment.scope);
-  const spans: readonly NewSpan[] = segment.records.map(spanFor);
+  let spans: readonly NewSpan[] = segment.records.map(spanFor);
 
   // The header binds a project to an organization and the checksum covers that
   // binding, so nothing can have edited it — but a pair that was never real, and
@@ -440,6 +441,13 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
           `binding that was never real.`,
       ),
     );
+  }
+
+  try {
+    spans = await priceUsageSpans(auth, spans);
+    segment = { ...segment, records: spans.map(recordFor) };
+  } catch (cause) {
+    return waitAndTryAgain(cause, "usage pricing did not finish; its accepted evidence remains pending");
   }
 
   let authoritative: ReadonlySet<string>;

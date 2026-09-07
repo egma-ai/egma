@@ -15,7 +15,7 @@ import {
   recordFor,
   RECORD_FORMAT_VERSION,
   spanFor,
-} from "../src/ingestion/record.ts";
+} from "@egma/ingestion";
 import {
   UnreadableSegmentError,
   verifiedSegment,
@@ -31,8 +31,8 @@ import {
   stagedFrameFrom,
   stagedFramePayload,
   type SegmentScope,
-} from "../src/ingestion/segment.ts";
-import { openWriteAheadLog } from "../src/ingestion/write-ahead-log.ts";
+} from "@egma/ingestion";
+import { openWriteAheadLog } from "@egma/ingestion";
 import { aRecord } from "./support/ingestion.ts";
 
 /**

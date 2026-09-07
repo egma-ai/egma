@@ -67,7 +67,6 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // resend collapse is a hash and rides its own unique column, because a hash
   // is neither prefixed nor sortable and could never be one of these.
   rate_card: "rat",
-  usage_record: "usg",
   // Egma Cloud's own four. They are in this tree because one schema serves
   // every deployment — a self-hoster carries them empty — and they follow the
   // same rules as everything above: a prefixed identity, typed columns and

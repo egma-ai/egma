@@ -3,11 +3,10 @@ import { gunzipSync } from "node:zlib";
 import {
   authorize,
   NotPermittedError,
-  recordProviderUsage,
+  providerUsageSpan,
   resolveSimulationByProviderReference,
   resolveSimulationStanding,
   type AuthContext,
-  type NewUsageRecord,
   type SimulationStanding,
 } from "@egma/db";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
@@ -17,7 +16,7 @@ import { requesterOf } from "../http/credentialed.ts";
 import {
   IngestionUnavailableError,
   type EvidenceGroup,
-} from "../ingestion/accept.ts";
+} from "@egma/ingestion";
 import {
   attributionOf,
   fileSimulationEvidence,
@@ -424,48 +423,20 @@ async function simulatorExport(
     budgetForOneRequest(),
   );
 
-  /**
-   * The bills this flush carried, gathered beside the evidence and written
-   * after it is durable.
-   *
-   * A usage record goes to Postgres rather than riding into the trace store
-   * with the span it came on: a balance has to be readable in milliseconds and
-   * a `ReplacingMergeTree` collapses duplicates when it feels like it, which is
-   * the one thing a spend row may not do. The span itself is still stored,
-   * like every other span, so the evidence and the bill agree by construction.
-   */
-  const billing: { auth: AuthContext; records: readonly NewUsageRecord[] }[] = [];
-  /**
-   * Bills this side could not read, for this side's log.
-   *
-   * **Deliberately not counted as rejected spans.** OTLP's partial-success
-   * field means *this data was not stored, do not send it again*, and an
-   * exporter is entitled to act on it — the simulator's own does: a non-zero
-   * count raises out of the sender, and the reporter then abandons the
-   * simulation and never files its terminal report. The span itself did land,
-   * whole, payload and all; what could not be read is the cost beside it. So
-   * an unreadable bill is an emitter defect this deployment tells its own
-   * operator about, and never a reason to lose a conversation.
-   */
   const unreadableBills: string[] = [];
+  const usageBySimulation = new Map<string, ReadonlyMap<string, ReturnType<typeof providerUsageSpan>>>>();
   for (const one of gathered) {
-    // Read from the resources rather than from the normalised rows, because a
-    // bill is not a shortened span: it is a set of quantities that has to
-    // arrive whole or not at all, and the row a span becomes is deliberately
-    // lossy about everything it does not have a column for.
-    //
-    // The gathering key is the simulation, so every resource here named the
-    // one row already resolved — the attribution is that row's, and no
-    // resource can reach for another conversation's.
-    const usage = providerUsageIn(one.resources, () => ({
-      simulationId: one.standing.id,
-      runId: one.standing.runId,
-    }));
+    const usage = providerUsageIn(one.resources, () => ({ simulationId: one.standing.id, runId: one.standing.runId }));
     unreadableBills.push(...usage.skipped);
-    if (usage.records.length > 0) {
-      billing.push({ auth: one.standing.auth, records: usage.records });
-    }
+    usageBySimulation.set(one.standing.id, new Map(usage.records.map((record) => {
+      const span = providerUsageSpan(record);
+      return [span.spanId.toLowerCase(), span];
+    })));
   }
+  const measuredFilings = filings.map((filing) => ({ ...filing, spans: filing.spans.map((span) => {
+    const measured = usageBySimulation.get(filing.standing.id)?.get(span.spanId.toLowerCase());
+    return measured ? { ...span, kind: "provider_usage", usage: measured.usage } : span;
+  }) }));
 
   // Every filing in one call, and one answer for all of them: a batch naming
   // several projects gets a segment each, and it is a success only once every
@@ -475,19 +446,10 @@ async function simulatorExport(
   // which stable span identity makes a no-op rather than a duplicate.
   let accepted;
   try {
-    accepted = await fileSimulationEvidence(filings);
+    accepted = await fileSimulationEvidence(measuredFilings);
   } catch (cause) {
     if (!(cause instanceof IngestionUnavailableError)) throw cause;
     return unavailable(request, reply, encoding, cause);
-  }
-
-  // And the bills, once the evidence they describe is durable. Priced here,
-  // against the rate card as it stood when the provider answered, and inserted
-  // on the record's own deterministic identity — so a replay of this flush
-  // stores nothing a second time and a re-executed simulation, whose spans
-  // carry new ids, is correctly new spend.
-  for (const { auth, records } of billing) {
-    await recordProviderUsage(auth, records);
   }
 
   if (unreadableBills.length > 0) {

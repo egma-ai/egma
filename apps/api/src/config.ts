@@ -6,7 +6,7 @@ import {
 
 import { SERVICE_TOKEN_PREFIX } from "./auth/service-token.ts";
 import type { SmtpSettings } from "./auth/email.ts";
-import type { IngestionStore } from "./ingestion/object-store.ts";
+import type { IngestionStore } from "@egma/ingestion";
 import type { BlobStore } from "./recordings/signed-link.ts";
 
 /** The one deployment-owned route used for phone simulations. */

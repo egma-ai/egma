@@ -1,3 +1,4 @@
+import { persistProviderUsage } from "@egma/ingestion";
 import {
   appendGrades,
   catalogEntry,
@@ -8,7 +9,6 @@ import {
   MAXIMUM_WINDOW_MILLISECONDS,
   MOST_GRADING_ATTEMPTS,
   readTrace,
-  recordProviderUsage,
   type FrozenGradingEntry,
   type GradingClaim,
   type GradingSource,
@@ -76,16 +76,12 @@ export async function gradeClaim(
   )
     ? await options.providerCredentials.load()
     : {};
-  // What every judge call consumed, gathered as the calls are made. One list
-  // for the whole claim: the records carry which grader and which HTTP attempt
-  // spent what, so nothing is lost by pooling them.
-  const spend: NewUsageRecord[] = [];
   const judges = judgesFor(
     claim.entries,
     credentials,
     options.makers ?? JUDGE_MAKERS,
-    (entry, usage) => {
-      spend.push(usageRow(claim, entry, resolved.simulationId, usage));
+    async (entry, usage) => {
+      await persistProviderUsage(claim.auth, usageRow(claim, entry, resolved.simulationId, usage));
     },
   );
   const reading = readingFor(claim, resolved.simulationId);
@@ -94,13 +90,6 @@ export async function gradeClaim(
     const result = await resultOf(entry, resolved.conversation, reading, judges);
     return gradeRow(claim, entry, result);
   }));
-
-  // The spend before the grades, and in the same breath: the money was spent
-  // the moment each provider answered, whatever becomes of the grade beside it.
-  // A store failure here retries the whole claim, which makes fresh provider
-  // requests with their own identities — correctly new spend — while the
-  // records already written collapse on theirs.
-  await recordProviderUsage(claim.auth, spend);
 
   // One append after every grader has answered. A store failure therefore
   // retries the whole frozen plan, while ClickHouse keeps every completed retry
@@ -174,16 +163,14 @@ function judgesFor(
   entries: readonly FrozenGradingEntry[],
   credentials: ProviderCredentialBundle,
   makers: JudgeMakers,
-  spent: (entry: FrozenGradingEntry, usage: JudgeUsage) => void,
+  spent: (entry: FrozenGradingEntry, usage: JudgeUsage) => Promise<void>,
 ): ReadonlyMap<string, AskableJudge> {
   const judges = new Map<string, AskableJudge>();
   for (const entry of entries) {
     if (entry.definition.type === "code") continue;
     judges.set(
       entry.projectGraderId,
-      judgeFor(graderModelOfParameters(entry.parameterValues), credentials, makers, (usage) => {
-        spent(entry, usage);
-      }),
+      judgeFor(graderModelOfParameters(entry.parameterValues), credentials, makers, (usage) => spent(entry, usage)),
     );
   }
   return judges;
@@ -216,7 +203,7 @@ function usageRow(
       gradingJobId: claim.id,
       attempts: claim.attempts,
       projectGraderId: entry.projectGraderId,
-      assertion: "request",
+      attemptId: usage.attemptId,
       httpAttempt: usage.httpAttempt,
     },
     occurredAt: usage.occurredAt,

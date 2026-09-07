@@ -4,13 +4,13 @@ import { startDrainer } from "../../src/ingestion/drainer.ts";
 import {
   pendingObjectStore,
   type IngestionStore,
-} from "../../src/ingestion/object-store.ts";
+} from "@egma/ingestion";
 import {
   RECORD_FORMAT_VERSION,
   recordFrom,
   type IngestionRecord,
-} from "../../src/ingestion/record.ts";
-import type { SegmentHeader } from "../../src/ingestion/segment.ts";
+} from "@egma/ingestion";
+import type { SegmentHeader } from "@egma/ingestion";
 
 /**
  * Include secret-like words in transcript and tool evidence to detect

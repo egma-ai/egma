@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   DECISIONS,
   type Judge,
@@ -70,6 +71,7 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
     });
 
     const said = await withRetries(async (httpAttempt) => {
+      const attemptId = randomUUID();
       const response = await fetch(OPENAI_CHAT_COMPLETIONS, {
         method: "POST",
         headers: {
@@ -95,7 +97,12 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       // was still generated and still cost money, and a spend record that
       // depended on Egma liking the answer would under-count exactly the calls
       // worth looking at.
-      report(judge.usage, httpAttempt, answered);
+      try {
+        await report(judge.usage, httpAttempt, attemptId, answered);
+      } catch (cause) {
+        // A paid reply remains the reply even if every accounting store fails.
+        console.error("judge usage could not be retained; this accounting failure will not purchase another model response", cause);
+      }
       return answered;
     });
 
@@ -152,11 +159,12 @@ async function withRetries<T>(
  * the provider said nothing about what it consumed, and inventing a number
  * would be worse than the gap.
  */
-function report(
+async function report(
   sink: JudgeUsageSink | undefined,
   httpAttempt: number,
+  attemptId: string,
   said: unknown,
-): void {
+): Promise<void> {
   if (sink === undefined) return;
   const body = typeof said === "object" && said !== null
     ? (said as Record<string, unknown>)
@@ -182,7 +190,8 @@ function report(
   if (Object.keys(quantities).length === 0) return;
 
   const id = body["id"];
-  sink({
+  await sink({
+    attemptId,
     occurredAt: new Date(),
     httpAttempt,
     providerRef: typeof id === "string" && id !== "" ? id : undefined,
