@@ -81,7 +81,7 @@ barge-in is represented when the persona becomes full-duplex, and
 | `recording` | stored voice recording | Zero. Its start is audio sample zero on the same clock used by spoken turns. It is emitted only after the WAV is stored, before the root closes. | none |
 | `human_turn` | transcript turn spoken by the persona | The turn, ear to ear. Zero on chat, where a message is one instant. | `egma.turn.text` |
 | `agent_turn` | transcript turn spoken by the agent under test | Same terms as `human_turn`. | `egma.turn.text` |
-| `tool_call` | tool call observed from Egma's side of the connection | One instant where the platform reports the invocation and nothing more. Where Egma stood in the tool path — answering the call or refusing it — the span brackets the exchange Egma conducted: the round trip, from the moment the call arrived to the moment the answer went back, so the time it really took is the span's own duration and no attribute repeats the number for the two to disagree about. | `egma.tool.name`, `egma.tool.arguments`, `egma.tool.result`, `egma.tool.provenance`, `egma.tool.mock_tool`, `egma.tool.late_attached` |
+| `tool_call` | tool call a platform reported making | One instant. Egma did not conduct the exchange — the platform matched Egma's answers and served them itself — so there is no round trip to bracket and no duration is claimed. Only that lane emits this span: where the agent's own process runs the Egma SDK, that process reports its own calls and Egma writes no row. | `egma.tool.name`, `egma.tool.arguments`, `egma.tool.result` |
 | *measure name* | measurement | **The measurement itself.** A timing span is named for the measure it takes — `first_response_latency`, `turn_response_latency`, `time_to_first_word`, `agent_speech_duration`, `persona_speech_duration` — and its start and end bracket the measured interval, so the span's duration *is* the number, in nanoseconds. The catalog (`measure-catalog.md`) says what each measure means and who emits it. | none |
 
 The speaker of a turn rides the span name — `human_turn` and `agent_turn` are
@@ -95,79 +95,51 @@ disagree with it.
 | `egma.turn.text` | `human_turn`, `agent_turn` | What was said, as text — spoken and transcribed on voice, sent verbatim on chat. May be empty for a turn that carried no words. |
 | `egma.turn.platform_notes` | `agent_turn` | What the agent's platform said about the turn that nobody said *in* it — a node transition it announced mid-answer, a message in a role Egma has never seen. A JSON array of strings, in the order the platform said them, and absent for every turn that has none, which is nearly all of them. It rides beside `egma.turn.text` rather than inside it because the turn's text is handed back to the persona as the transcript it answers, and because one scenario's chat and voice records are only comparable while neither carries words nobody spoke. Only a connection whose platform reports such things ever emits it. |
 | `egma.tool.name` | `tool_call` | The tool's name, exactly as the platform reported it. |
-| `egma.tool.arguments` | `tool_call` | The arguments, JSON-encoded, exactly as observed — absent where the platform reports the invocation but not its arguments. A string deliberately: the observed bytes are the fact worth keeping. |
-| `egma.tool.result` | `tool_call` | The answer the call was given, JSON-encoded, exactly as it was served. Present only where Egma itself authored the answer; absent for a call Egma merely watched go past, and absent for one Egma refused. |
-| `egma.tool.provenance` | `tool_call` | How the call was answered. Two values: `mocked` — a mock tool answered, and Egma served it; `refused` — Egma was asked and would not answer, so nothing ran. Absent means the call was observed and not answered, which is every call on a connection Egma is not in the path of. |
-| `egma.tool.mock_tool` | `tool_call` | The mock tool that answered, by name. Present only beside `mocked`. |
-| `egma.tool.late_attached` | `tool_call` | A genuine boolean, `true` only where the call was served for a tool the agent had not reported having when the simulation started. Absent elsewhere: a stamp for the ordinary case would ride every span, and a call nothing served has nothing to qualify. |
+| `egma.tool.arguments` | `tool_call` | The arguments, JSON-encoded, exactly as the platform reported them — absent where it reported the invocation and not its arguments. A string deliberately: the reported bytes are the fact worth keeping. |
+| `egma.tool.result` | `tool_call` | The answer the call was given, JSON-encoded — **Egma's own rendering of the answer it authored**, never the platform's echo of it. Present only for a tool this simulation's pinned test version covers, because only there did Egma author the answer; a call for any other name ran the customer's real implementation and its return value is not Egma's to vouch for. |
 
-**Why a result may be recorded at all.** The rule it looks like an exception to
-— never record half an exchange nobody observed — is about *the agent's* return
-values, which Egma does not see. An answer Egma itself served is not observed,
-it is authored: recording it invents nothing, and a served answer with the
-served half missing would be the dishonest record. So the result attribute
-appears only beside `mocked`, and a call Egma only watched go past carries
-neither it nor a stamp.
+**Why there is no tool span for a call Egma served itself.** Where the agent's own
+process runs the Egma SDK, that process is the tool record: every call the agent
+made, with the arguments its model emitted and the result it received, one row
+per call, reaching Egma by simulation ingestion. Egma's mock-tool seam still
+serves the answers a test asked for and still refuses a name it has no answer
+for; it writes no row of its own, so no two records of one call can disagree,
+and a call Egma was never in the path of is on the record like any other.
 
-**Why a refusal is a stamp and not an absence.** Egma tells the agent's side
-exactly which tool names it answers for. A call for any other name is that side
-asking for something it was never offered, and Egma refuses it on the wire
-rather than waving it through — so no backend runs, and no answer is served.
-The three shapes are three different histories and each gets its own:
+The `tool_call` span above is the other lane, and only that one: the platform
+matched Egma's answers and served them itself, nothing of Egma's runs inside the
+agent, and no report of the agent's own ever arrives — so a call Egma did not
+write down would land nowhere at all.
 
-| Shape | What happened |
-| --- | --- |
-| name, arguments, result, `provenance: mocked`, `mock_tool` | Egma stood in the path and answered. The backend was never touched. |
-| name, arguments, `provenance: refused` | Egma stood in the path and would not answer. The backend was never touched, and the agent was told so. |
-| name, arguments, and nothing else | Egma was not in the path. The real tool ran, and Egma saw only that it was called. |
-
-Written the same way, the second and third would be indistinguishable — and
-they are opposite facts about whether the agent's own backend ran. A reader
-telling an isolated call from one that reached a real backend is the whole
-point of the stamp, and a refusal that read as a pass-through would undo it.
-
-**Why the tool's name and the mock tool's name are both written down.**
-`egma.tool.name` is the agent's word — what the platform reported being called.
-`egma.tool.mock_tool` is Egma's own — the name of the mock tool that answered,
-which is the tool's own name, because a mock tool is matched to a call by name
-and by nothing else. So the two always match today, and writing both is what
-makes the day they stop matching visible on the record instead of assumed
-away.
-
-**What `late_attached` owns.** When a simulation starts, the agent reports the
-tools it has. Answers are then held ready for every tool name this simulation
-covers, whether or not that first report named it, so an agent that gains a
-tool afterwards still has that tool answered rather than reaching a real
-backend — the safe way round. What such a call cannot promise is its arguments:
-with no tool of the agent's own to take the shape of, what arrives may be
-trimmed or missing altogether. The flag carries that caveat, so a reader never
-takes thin arguments for an agent that passed none.
+**No stamp says who answered.** Whether a call was answered by a mock tool is
+read at display time, **by name**, from the pinned test version's mock tools —
+the authored world itself, which cannot change under a result — so a second copy
+of that fact on the span could only come to disagree with it. A call Egma refused
+shows as the error the SDK raised, carried on the agent's own span for that call.
+This reverses the earlier rule that Egma observed tool facts at the seam
+(ADR-0015 §3), and retires the `egma.tool.provenance`, `egma.tool.mock_tool` and
+`egma.tool.late_attached` attributes with it.
 
 ## What the fixtures show
 
 - `chat-flush-1-turns.json`, `chat-flush-2-tools.json`,
   `chat-flush-3-root.json` — one chat conversation as the three flushes the
   simulator sends as its Egma-authored record: turns and a first-response
-  measurement while the conversation runs, tool calls and a per-turn
-  measurement as they happen, and the closing turn with the root last. Together
-  they are the whole trace. ClickHouse suppresses a recent byte-identical
-  block. Changed, regrouped, or reordered content is a different block and is
-  retained even when span ids repeat; the reader never collapses stored rows by
-  span id.
+  measurement while the conversation runs, a per-turn measurement and the two
+  tool calls the platform reported as they happen, and the closing turn with the
+  root last. The first of those calls is for a tool this simulation covers, so
+  it carries the answer Egma authored; the second is not, so it carries the name
+  alone — the real implementation ran and its return is not Egma's to claim.
+  Together they are the whole trace. ClickHouse suppresses a recent
+  byte-identical block. Changed, regrouped, or reordered content is a different
+  block and is retained even when span ids repeat; the reader never collapses
+  stored rows by span id.
 - `voice-overlapping-turns.json` — a mid-conversation voice flush where the
   persona starts speaking before the agent finishes: two turns whose intervals
   cross, with the two speech-duration measures beside them.
 - `voice-flush-recording-root.json` — a closing voice flush: the zero-duration
   recording span places audio sample zero on the trace clock, followed by the
   root last.
-- `voice-mocked-tool-calls.json` — a mid-conversation flush of three calls that
-  reached Egma: an ordinary mocked call, arguments whole and its round trip
-  showing as the span's duration; a late-attached one whose arguments never
-  arrived; and one for a tool this simulation answers for nothing of, refused
-  on the wire and stamped `refused` on the record. Beside
-  `chat-flush-2-tools.json`, whose calls carry name and arguments and nothing
-  else because Egma was not in that path at all, it is the whole range this
-  span shape covers.
 - `invalid/resource-naming-no-simulation.json` — a resource with no
   `egma.simulation_id`, which the ingest refuses whole with a body saying what
   to send instead.

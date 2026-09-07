@@ -65,8 +65,8 @@ def test_the_booking_shaped_tool_takes_the_day_it_is_asked_about():
 
     egma copies this signature onto the stand-in it registers, because
     LiveKit trims a call to the parameters the stand-in declares. So the
-    name here is what lands on the record as the call's arguments — rename
-    it and a live record's ``egma.tool.arguments`` changes shape with it.
+    name here is what the agent's own span reports as the call's
+    arguments — rename it and a live record changes shape with it.
     """
     parameters = inspect.signature(FrontDesk.check_availability).parameters
     assert [name for name in parameters if name != "self"] == ["day"]

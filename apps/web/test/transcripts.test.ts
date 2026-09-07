@@ -62,6 +62,7 @@ const FACTS: Facts = {
   erroredSpanCount: 3,
   source: "production",
   emitter: "agent",
+  pov: "agent",
   environment: "default",
   connectionType: "",
   providerCallId: "egma-fixture-capture-1",
@@ -87,6 +88,7 @@ function step(overrides: Partial<Step> = {}): Step {
     toolName: "",
     toolArguments: "",
     toolResult: "",
+    pov: "agent",
     spans: [],
     ...overrides,
   };

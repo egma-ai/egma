@@ -2,7 +2,7 @@
 
 The claim proved here is that a spec naming a chat ``livekit_room``
 connection becomes a whole simulation — a transcript, a distinct ending,
-the mock-tool calls egma answered, and the room's own name as the join to
+the answers egma served, and the room's own name as the join to
 the platform's telemetry — with no LiveKit server, no project, no worker and
 no network anywhere. What stands in for the LiveKit is
 :mod:`room_stub`'s chat half, which is the real chat driver and the real
@@ -306,16 +306,12 @@ async def chat_walk(
     monkeypatch.setattr(chat_plug, "LiveKitChatRoomBackend", stub.driver)
     spec = SimulationSpec.from_document(built_by(**overrides))
     turns: list[tuple[str, str]] = []
-    calls: list[tuple[str, str | None]] = []
 
     async def on_turn(
         speaker: str, text: str, notes: tuple[str, ...] = ()
     ) -> None:
         del notes
         turns.append((speaker, text))
-
-    async def on_tool_call(name: str, arguments: str | None) -> None:
-        calls.append((name, arguments))
 
     assembled = assemble(
         spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
@@ -332,11 +328,10 @@ async def chat_walk(
         max_duration_seconds=spec.limits.max_duration_seconds,
         on_turn=on_turn,
         on_timing=None,
-        on_tool_call=on_tool_call,
         controls=controls if controls is not None else ConversationControls(),
         name="sim:room-chat-test",
     )
-    return conducted, turns, calls, assembled
+    return conducted, turns, assembled
 
 
 def test_the_registry_answers_a_chat_room_spec_with_the_chat_plug():
@@ -372,7 +367,7 @@ async def test_a_chat_livekit_spec_conducts_a_whole_simulation_in_a_room(
         greeting="Lakeside Dental, how can I help?",
         replies=["Of course — could I take your name?", "Booked for Thursday."],
     )
-    conducted, turns, _calls, assembled = await chat_walk(
+    conducted, turns, assembled = await chat_walk(
         tmp_path,
         stub,
         monkeypatch,
@@ -483,7 +478,7 @@ async def test_a_tests_own_modality_key_cannot_touch_the_simulation(
     """
     written = {"modality": "my own word", "simulationId": "their-id"}
     stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
-    conducted, turns, _calls, _assembled = await chat_walk(
+    conducted, turns, _assembled = await chat_walk(
         tmp_path, stub, monkeypatch, job_dispatch_metadata=written
     )
 
@@ -540,7 +535,7 @@ async def test_a_greeting_that_outran_its_wait_is_never_the_first_answer(
         greeting_during_first_send="Welcome to Lakeside Dental!",
         replies=["Thursday at 2:15 is free.", "Booked.", "Anything else?"],
     )
-    conducted, turns, _calls, _assembled = await chat_walk(
+    conducted, turns, _assembled = await chat_walk(
         tmp_path, stub, monkeypatch
     )
 
@@ -589,23 +584,24 @@ async def test_egma_answers_for_the_agents_tools_in_a_typed_room(
     answered = await stub.calls("check_availability", {"day": "Tuesday"})
     assert answered == {"answer": "Nothing free on Tuesday."}
 
-    exchanged = assembled.tool_calls()
-    assert [call.name for call in exchanged] == ["check_availability"]
-    assert exchanged[0].mock_tool == "check_availability"
+    # And egma keeps no copy of what it served. On this lane the agent's
+    # own process reports the call it made, so a row of egma's would be a
+    # second record of one call, free to disagree with the first.
+    assert assembled.tool_calls() == []
     await plug.close()
 
 
-async def test_a_mocked_chat_simulation_comes_back_as_a_record_of_its_tools(
+async def test_a_mocked_chat_simulation_puts_no_tool_row_of_egmas_on_the_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """The whole claim, at the seam the contract draws.
 
     A chat spec naming one mocked tool goes in as a document, held to the
     contract on the way in; a session in the typed room reports two tools
-    and calls the mocked one; and what comes back is everything the
-    simulator would have sent — the tool-call span with its provenance and
-    the mock tool that served it, and no span at all for the tool the test
-    did not name, which ran its own implementation.
+    and calls the mocked one; and what comes back carries no tool row of
+    egma's for either of them. The seam served the answer — that is what
+    the call to it proves — and the record of the call is the agent's own
+    POV of the simulation.
     """
     hurry(monkeypatch)
     stub = ChatStub(greeting="Front desk.", replies=["Nothing free, I am afraid."])
@@ -658,24 +654,16 @@ async def test_a_mocked_chat_simulation_comes_back_as_a_record_of_its_tools(
 
     await asyncio.gather(simulation.run(), agent_side())
 
-    served = [
-        span
+    authored = [
+        span["name"]
         for document in filed
         for resource in document.get("resourceSpans", [])
         for scope in resource["scopeSpans"]
         for span in scope["spans"]
-        if span["name"] == "tool_call"
     ]
-    assert len(served) == 1, "one call was made and one call is on the record"
-    held = {
-        entry["key"]: next(iter(entry["value"].values()))
-        for entry in served[0].get("attributes", [])
-    }
-    assert held["egma.tool.name"] == "check_availability"
-    assert held["egma.tool.mock_tool"] == "check_availability"
-    # The round trip is the span's own duration, with no second field to
-    # disagree with it.
-    assert int(served[0]["endTimeUnixNano"]) >= int(served[0]["startTimeUnixNano"])
+    assert "tool_call" not in authored, (
+        "egma answered the call and must write no row for it"
+    )
 
     facts = next(
         event["facts"]
@@ -736,7 +724,7 @@ async def test_one_agent_turn_may_arrive_in_several_utterances(
         greeting="Front desk.",
         replies=[["Let me look at Thursday.", "Thursday at 2:15 is free."]],
     )
-    _conducted, turns, _calls, _assembled = await chat_walk(
+    _conducted, turns, _assembled = await chat_walk(
         tmp_path, stub, monkeypatch, scenario="One point."
     )
 
@@ -763,7 +751,7 @@ async def test_a_tool_call_pause_inside_a_turn_does_not_end_it(
         replies=[["One moment while I check.", "Thursday at 2:15 is free."]],
         pause_seconds=A_PAUSE,
     )
-    _conducted, turns, _calls, _assembled = await chat_walk(
+    _conducted, turns, _assembled = await chat_walk(
         tmp_path, stub, monkeypatch, scenario="One point."
     )
 
@@ -916,7 +904,7 @@ async def test_a_turn_arrives_in_the_order_it_was_said_not_the_order_it_landed(
             ]
         ],
     )
-    _conducted, turns, _calls, _assembled = await chat_walk(
+    _conducted, turns, _assembled = await chat_walk(
         tmp_path, stub, monkeypatch, scenario="One point."
     )
 
@@ -954,7 +942,7 @@ async def test_a_stream_that_never_closes_bounds_the_turn_and_says_so(
             "Booked.",
         ],
     )
-    _conducted, turns, _calls, _assembled = await chat_walk(
+    _conducted, turns, _assembled = await chat_walk(
         tmp_path, stub, monkeypatch, scenario="One point. Another point."
     )
 
@@ -1123,7 +1111,7 @@ async def test_an_agent_that_publishes_no_state_is_no_worse_off_than_before(
         pause_seconds=A_PAUSE,
     )
     assert stub.agent_states is None, "this agent says nothing about itself"
-    _conducted, turns, _calls, _assembled = await chat_walk(
+    _conducted, turns, _assembled = await chat_walk(
         tmp_path, stub, monkeypatch, scenario="One point."
     )
 
@@ -1552,7 +1540,7 @@ async def test_a_greeting_that_never_comes_lets_the_persona_open(
     every other plug that opens on silence.
     """
     stub = ChatStub(replies=["Certainly, Thursday it is."])
-    conducted, turns, _calls, _assembled = await chat_walk(
+    conducted, turns, _assembled = await chat_walk(
         tmp_path, stub, monkeypatch, scenario="One point."
     )
 
@@ -1570,7 +1558,7 @@ async def test_the_agent_leaving_mid_exchange_is_the_agent_ending_it(
         replies=["I am afraid I have to go. Goodbye."],
         hangs_up_after_replies=True,
     )
-    conducted, turns, _calls, _assembled = await chat_walk(
+    conducted, turns, _assembled = await chat_walk(
         tmp_path,
         stub,
         monkeypatch,
@@ -1709,7 +1697,7 @@ async def test_a_chat_spec_through_a_token_endpoint_conducts_a_whole_simulation(
     )
     written = {"tenant": "acme"}
     with serving(token="minted.by.the.customer") as endpoint:
-        conducted, turns, _calls, assembled = await chat_walk(
+        conducted, turns, assembled = await chat_walk(
             tmp_path,
             stub,
             monkeypatch,
@@ -1887,7 +1875,7 @@ async def test_the_room_is_deleted_however_the_chat_simulation_ends(
     assert natural.deleted == [natural.rooms[0].name]
 
     limited = ChatStub(greeting="Front desk.", replies=["One.", "Two.", "Three."])
-    conducted, _turns, _calls, _assembled = await chat_walk(
+    conducted, _turns, _assembled = await chat_walk(
         tmp_path,
         limited,
         monkeypatch,
@@ -2088,7 +2076,7 @@ async def test_nothing_a_chat_simulation_produces_carries_the_api_secret(
 
     produced: list[str] = []
     try:
-        _conducted, turns, _calls, _assembled = await chat_walk(
+        _conducted, turns, _assembled = await chat_walk(
             tmp_path, stub, monkeypatch, scenario="One point."
         )
         produced += [text for _speaker, text in turns]
@@ -2142,7 +2130,7 @@ async def test_a_cancel_directive_mid_exchange_still_leaves_no_room_behind(
             return await super().guard(coroutine)
 
     stub = ChatStub(greeting="Front desk.", replies=["Noted."])
-    conducted, _turns, _calls, _assembled = await chat_walk(
+    conducted, _turns, _assembled = await chat_walk(
         tmp_path,
         stub,
         monkeypatch,

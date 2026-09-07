@@ -347,6 +347,7 @@ export type ListedTrace = {
   readonly erroredSpanCount: number;
   readonly source: string;
   readonly emitter: string;
+  readonly pov: "persona" | "agent";
   readonly environment: string;
   readonly connectionType: string;
   readonly providerCallId: string;
@@ -382,7 +383,13 @@ export type DetailSpan = {
   readonly toolName: string;
   readonly toolArguments: string;
   readonly toolResult: string;
-  /** `"mocked"` when egma answered the call. Absent on every real one. */
+  /** Whose POV of the conversation this row is. */
+  readonly pov: "persona" | "agent";
+  /**
+   * `"mocked"` when a mock tool of the simulation's pinned test version
+   * answered this call. Absent on every real one, and on every span of a
+   * production conversation, which has no test version to read.
+   */
   readonly toolProvenance?: "mocked";
   readonly spans: DetailSpan[];
 };

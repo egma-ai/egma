@@ -19814,6 +19814,13 @@
                           "emitter": {
                             "type": "string"
                           },
+                          "pov": {
+                            "type": "string",
+                            "enum": [
+                              "persona",
+                              "agent"
+                            ]
+                          },
                           "environment": {
                             "type": "string"
                           },
@@ -19869,6 +19876,7 @@
                           "erroredSpanCount",
                           "source",
                           "emitter",
+                          "pov",
                           "environment",
                           "connectionType",
                           "providerCallId",
@@ -20088,6 +20096,13 @@
                         "emitter": {
                           "type": "string"
                         },
+                        "pov": {
+                          "type": "string",
+                          "enum": [
+                            "persona",
+                            "agent"
+                          ]
+                        },
                         "environment": {
                           "type": "string"
                         },
@@ -20127,6 +20142,7 @@
                         "erroredSpanCount",
                         "source",
                         "emitter",
+                        "pov",
                         "environment",
                         "connectionType",
                         "providerCallId",
@@ -20615,6 +20631,13 @@
           "toolResult": {
             "type": "string"
           },
+          "pov": {
+            "type": "string",
+            "enum": [
+              "persona",
+              "agent"
+            ]
+          },
           "toolProvenance": {
             "type": "string",
             "enum": [
@@ -20641,6 +20664,7 @@
           "toolName",
           "toolArguments",
           "toolResult",
+          "pov",
           "spans"
         ],
         "additionalProperties": false

@@ -260,7 +260,10 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
   it("says which platform produced it without inventing a connection type", async () => {
     const [trace] = (await listed()).traces;
     expect(trace?.source).toBe("production");
+    // The storage word, kept for the clients that already read it, and the
+    // product word beside it.
     expect(trace?.emitter).toBe("agent");
+    expect(trace?.pov).toBe("agent");
     expect(trace?.environment).toBe("default");
     expect(trace?.connectionType).toBe("");
     expect(trace?.providerCallId).toBe(FIXTURE_PROVIDER_CALL_ID);
@@ -587,6 +590,7 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
         "kind",
         "name",
         "parentSpanId",
+        "pov",
         "spanId",
         "spans",
         "startedAt",
@@ -878,16 +882,19 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
 });
 
 /**
- * **Who answered a tool call, on the wire.**
+ * **Who answered a tool call is not this read's question.**
  *
- * Egma writes `egma.tool.provenance` on the span it files for a call it served
- * itself — the mock endpoint on the Retell lanes, the simulator on LiveKit —
- * and writes nothing at all for a call that reached the customer's own
- * backend. The read projects that one word and nothing around it, so a
- * transcript can say "mocked" beside the answer a test supplied without
- * claiming anything about the call beside it.
+ * Whether a mock tool answered a call is read by name from the pinned test
+ * version of the simulation that made it — the authored world itself, which
+ * cannot change under a result. This read is production's: it is given a trace
+ * id and has no simulation to ask, so it says nothing about who answered and
+ * never guesses from a stamp somebody left on a payload. The simulation read
+ * is where the mark belongs, and where it is proved.
+ *
+ * What this holds is that the tool facts themselves still come back whole, and
+ * that no mark comes back with them.
  */
-describe.skipIf(!storage.available)("who answered each tool call", () => {
+describe.skipIf(!storage.available)("what a tool call brings back", () => {
   const MIXED = "1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d";
   const WHEN = {
     from: "2026-08-05T00:00:00Z",
@@ -934,8 +941,9 @@ describe.skipIf(!storage.available)("who answered each tool call", () => {
   beforeAll(async () => {
     await appendSpans(contextFor(acme, "admin"), [
       span({ spanId: "5400000000000001" }),
-      // The one egma stood in front of, written exactly as the mock endpoint
-      // writes it.
+      // One written exactly as the mock endpoint writes it, stamp and all —
+      // rows like this exist in the store and the read must simply pass over
+      // the stamp rather than promote it into an answer.
       span({
         spanId: "5400000000000002",
         parentSpanId: "5400000000000001",
@@ -967,7 +975,7 @@ describe.skipIf(!storage.available)("who answered each tool call", () => {
     ]);
   });
 
-  it("marks the call egma answered, and says nothing about the one it did not", async () => {
+  it("returns both calls whole, and marks neither", async () => {
     const response = await readTraceOverHttp(api.app, acme.secret, MIXED, WHEN);
     expect(response.statusCode, response.body).toBe(200);
     const detail = response.json() as TraceDetailBody;
@@ -978,10 +986,23 @@ describe.skipIf(!storage.available)("who answered each tool call", () => {
     ].filter((one) => one.kind === "tool");
     const byName = new Map(tools.map((one) => [one.toolName, one]));
 
-    expect(byName.get("get_availability")?.toolProvenance).toBe("mocked");
-    // Absent, not empty and not null: a real call carries no key to interpret.
-    const real = byName.get("send_receipt");
-    if (real === undefined) throw new Error("the real tool call is missing");
-    expect("toolProvenance" in real).toBe(false);
+    // What the calls were and what they were given, on both of them.
+    expect(byName.get("get_availability")?.toolArguments).toBe(
+      '{"day":"Tuesday"}',
+    );
+    expect(byName.get("get_availability")?.toolResult).toBe('{"slots":[]}');
+    expect(byName.get("send_receipt")?.toolResult).toBe("ok");
+
+    // And no mark on either, including the one carrying the old payload
+    // stamp. A production read has no pinned test version to read a mocked
+    // mark from, so it makes no claim about who answered.
+    for (const tool of tools) {
+      expect("toolProvenance" in tool, tool.toolName).toBe(false);
+    }
+
+    // What the read does say is whose POV each row is — the storage column,
+    // read as the product word. These rows were filed by egma's own simulator,
+    // so they read as the persona's.
+    for (const tool of tools) expect(tool.pov, tool.toolName).toBe("persona");
   });
 });
