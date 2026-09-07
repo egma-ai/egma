@@ -2077,6 +2077,55 @@ async def test_a_worker_that_joins_and_publishes_nothing_never_joined_either(
     assert stub.deleted == [stub.rooms[0].name]
 
 
+async def test_a_worker_that_never_reports_to_egma_fails_the_simulation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A LiveKit simulation needs the Egma SDK, and says so when it is absent.
+
+    This worker joins, publishes and talks — and never says
+    ``egma.hello``. So every tool it has ran its own implementation, and
+    the record of this simulation would claim nothing about that. Better
+    to fail with a sentence somebody can act on than to file a green
+    result for a test that isolated nothing.
+    """
+    stub = RoomStub(
+        greeting="Front desk.", replies=["Noted."], agent_reports=False
+    )
+
+    with pytest.raises(PlugError) as unreported:
+        await room_walk(tmp_path, stub, monkeypatch, scenario="One point.")
+
+    assert failed_ending(unreported.value) == AGENT_NEVER_JOINED
+    said = str(unreported.value)
+    assert "did not report to Egma" in said
+    assert "egma.hello" in said
+    # Both halves of what to check, in the order they can be checked.
+    assert "reach the room" in said
+    assert "egma.simulation" in said
+    assert stub.deleted == [stub.rooms[0].name]
+
+
+async def test_a_worker_the_sdk_would_not_start_says_that_rather_than_no_audio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The SDK failing closed arrives here as a room that went quiet.
+
+    ``egma.simulation`` raises rather than start a session it could not
+    report, so the worker is in the room and publishes nothing — which
+    looks exactly like a worker that crashed on its first frame. The seam
+    tells them apart: no hello ever arrived, so this is the first.
+    """
+    monkeypatch.setattr(livekit_plug, "AGENT_JOIN_SECONDS", 0.05)
+    stub = RoomStub(agent_publishes_audio=False, agent_reports=False)
+
+    with pytest.raises(PlugError) as unreported:
+        await room_walk(tmp_path, stub, monkeypatch, scenario="One point.")
+
+    assert failed_ending(unreported.value) == AGENT_NEVER_JOINED
+    assert "did not report to Egma" in str(unreported.value)
+    assert "audio" not in str(unreported.value)
+
+
 def test_the_wait_for_a_worker_is_bounded_and_shorter_than_a_simulation():
     """The budget itself, pinned where the tests above shorten it: a wait
     that outran a simulation's duration limit would put ``limit_reached``

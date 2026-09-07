@@ -32,17 +32,23 @@ a clock, a network or a disk.
 
 ## The one line that lets egma answer
 
-``await mockable(agent, ctx, session)`` goes after the agent and the
+``await simulation(agent, ctx, session)`` goes after the agent and the
 session exist and before the session starts. In a room egma named for a
-simulation, it reports these two tools by name and stands egma in front of
-whichever ones this simulation has answers for. It does that on both
+simulation, it reports these two tools by name, stands egma in front of
+whichever ones this simulation has answers for, and sends this agent's own
+spans to egma as that simulation's agent POV. It does that on both
 dispatch styles below, including the unnamed one where this worker is in
 the room before egma is: the SDK reads the room's name, which arrives with
 the job either way, and waits for egma's own participant. **In every other
-room it does nothing at all** — no wrapper, no message, no connect, the
-same two callables — so this file behaves identically whether or not egma
-is anywhere near it, which is the property `tests/test_outside_egma.py`
-holds it to.
+room it does nothing at all** — no wrapper, no message, no exporter, no
+connect, the same two callables — so this file behaves identically whether
+or not egma is anywhere near it, which is the property
+`tests/test_outside_egma.py` holds it to.
+
+It is also the one call here that may raise. A LiveKit simulation needs
+the SDK, so an agent that cannot report to egma raises ``NotReported`` and
+this session never starts. That is deliberate and this fixture does not
+catch it: a run that isolated nothing must not look like one that did.
 
 ## The one line that reads the test's own world
 
@@ -90,10 +96,14 @@ construction rather than by care — which is the property
 
 ## The export that makes this agent visible in Egma
 
-``monitor_livekit(ctx)`` is the public SDK setup. This fixture calls it when
-``EGMA_URL`` or ``EGMA_API_KEY`` is present, so its simulation-only smoke test
-can still run without a Monitoring setup. A real monitored worker calls the
-function directly and treats missing configuration as an error.
+``monitor(ctx)`` is the public SDK setup for a production room. This
+fixture calls it when ``EGMA_URL`` or ``EGMA_API_KEY`` is present, so a
+worker started without a Monitoring setup still runs. A real monitored
+worker calls it directly and treats missing configuration as an error.
+
+The two verbs read the same two settings, and a simulation needs them: in
+an ``egma-sim-`` room the call above is what exports, and ``monitor`` is
+inert there.
 
 ``EGMA_DUMB_AGENT_NAME`` is the name this worker registers under, and it
 is the one prerequisite of the whole arrangement. Egma dispatches by name,
@@ -113,7 +123,7 @@ import json
 import logging
 import os
 
-from egma import mockable, monitor_livekit
+from egma import monitor, simulation
 from livekit import agents
 from livekit.agents import Agent, AgentSession, function_tool, room_io
 from livekit.plugins import openai, silero
@@ -210,7 +220,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # Monitoring settings; the production-monitoring proof supplies both.
     # A partial setup still calls the helper and gets its direct setup error.
     if os.environ.get("EGMA_URL") or os.environ.get("EGMA_API_KEY"):
-        monitor_livekit(ctx)
+        monitor(ctx)
     # The test's own world, off the channel LiveKit teaches agents to read.
     # Logged rather than said: the live proof reads the value back here, and
     # a value spoken aloud would be a word on the transcript nobody said.
@@ -227,7 +237,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # Both objects exist and the session has not started: the one moment
     # the agent's tools are all attached and nothing has been said yet.
     # Outside a simulation this returns having touched nothing.
-    await mockable(agent, ctx, session)
+    await simulation(agent, ctx, session)
     # The six lines. A production room is named by the customer's own
     # system, never with egma's mark, so `chat` is false there and these
     # are the stock options.

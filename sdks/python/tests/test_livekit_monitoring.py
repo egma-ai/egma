@@ -1,9 +1,17 @@
-"""The LiveKit monitoring helper, from setup through the last span.
+"""The exporter both verbs share, and the production verb that uses it.
+
+``egma.monitor`` and ``egma.simulation`` send the same spans to the same
+door, so the machinery under them is written once in ``egma.export`` and
+proved once here: how ``EGMA_URL`` and ``EGMA_API_KEY`` are read, which
+tracer provider is reused, how a customer's own telemetry is left intact,
+and when the last buffered spans are flushed. The two ways the room name
+rides out of a simulation are proved here too, because both are the
+exporter's own doing.
 
 These tests never use an external service. They use real OpenTelemetry
-providers, in-memory exporters, and one local HTTP collector. This proves that
-Egma is added beside existing telemetry only once and that a LiveKit job
-flushes Egma's own processor when it stops.
+providers, in-memory exporters, and one local HTTP collector. This proves
+that Egma is added beside existing telemetry only once and that a LiveKit
+job flushes Egma's own processor when it stops.
 """
 
 from __future__ import annotations
@@ -15,6 +23,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import pytest
+from livekit.agents.telemetry import tracer as livekit_tracer
+from opentelemetry import trace
 from opentelemetry.sdk.trace import SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
@@ -22,10 +32,11 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 from room_stub import PRODUCTION_ROOM, SIMULATION_ROOM, egma_metadata
 
-from egma import monitor_livekit
-from egma import monitoring as livekit_monitoring
+from egma import export, monitor
+from egma.export import PROVIDER_REFERENCE
 
 PROJECT_KEY = f"egma_sk_{'a' * 43}"
+A_SIMULATION_ROOM = SIMULATION_ROOM
 
 
 @dataclass
@@ -57,21 +68,16 @@ def in_the_room(name: str, metadata: str = "") -> StubJobContext:
     return StubJobContext(job=StubJob(room=StubJobRoom(name=name), metadata=metadata))
 
 
-@pytest.fixture(autouse=True)
-def reset_monitoring_state(monkeypatch):
-    """Give every test a process that has not configured Egma yet."""
-
-    monkeypatch.setattr(livekit_monitoring, "_state", None)
-
-
 def install_provider(monkeypatch, provider: TracerProvider) -> None:
     """Keep a test provider local instead of changing Python's global one."""
 
     monkeypatch.setattr(
-        livekit_monitoring, "_select_compatible_provider", lambda: provider
+        export,
+        "_select_compatible_provider",
+        lambda _verb, _reference: provider,
     )
     monkeypatch.setattr(
-        livekit_monitoring, "_register_provider", lambda selected: None
+        export, "_register_provider", lambda _selected, _reference: None
     )
 
 
@@ -80,19 +86,21 @@ def test_environment_configures_the_exact_egma_trace_endpoint(monkeypatch):
     install_provider(monkeypatch, provider)
     built_with: list[tuple[str, str]] = []
 
-    def build_exporter(endpoint: str, api_key: str) -> InMemorySpanExporter:
-        built_with.append((endpoint, api_key))
+    def build_exporter(
+        endpoint: str, api_key: str, verb: str
+    ) -> InMemorySpanExporter:
+        built_with.append((endpoint, api_key, verb))
         return InMemorySpanExporter()
 
-    monkeypatch.setattr(livekit_monitoring, "_build_exporter", build_exporter)
+    monkeypatch.setattr(export, "_build_exporter", build_exporter)
     monkeypatch.setenv("EGMA_URL", "https://api.egma.ai/")
     monkeypatch.setenv("EGMA_API_KEY", PROJECT_KEY)
     context = StubJobContext()
 
-    monitor_livekit(context)
+    monitor(context)
 
     assert built_with == [
-        ("https://api.egma.ai/v1/traces", PROJECT_KEY)
+        ("https://api.egma.ai/v1/traces", PROJECT_KEY, "egma.monitor")
     ]
     assert len(context.shutdown_callbacks) == 1
     provider.shutdown()
@@ -128,7 +136,7 @@ async def test_real_exporter_posts_protobuf_with_the_project_key(monkeypatch):
     key = PROJECT_KEY
 
     try:
-        monitor_livekit(
+        monitor(
             context,
             endpoint=f"http://127.0.0.1:{server.server_port}",
             api_key=key,
@@ -185,9 +193,9 @@ def test_an_egma_simulation_does_not_create_a_production_exporter(
     monkeypatch.delenv("EGMA_API_KEY", raising=False)
 
     with caplog.at_level("WARNING", logger="egma"):
-        monitor_livekit(context)
+        monitor(context)
 
-    assert livekit_monitoring._state is None
+    assert export._state is None
     assert context.shutdown_callbacks == []
     # Said out loud, because a room's name is chosen by whoever mints the
     # join token: a production room named to look like a simulation would
@@ -220,17 +228,17 @@ def test_a_production_room_is_still_exported_whatever_its_metadata_says(
     provider = TracerProvider()
     install_provider(monkeypatch, provider)
     monkeypatch.setattr(
-        livekit_monitoring,
+        export,
         "_build_exporter",
-        lambda _endpoint, _key: InMemorySpanExporter(),
+        lambda _endpoint, _key, _verb: InMemorySpanExporter(),
     )
     context = in_the_room(PRODUCTION_ROOM, metadata)
 
-    monitor_livekit(
+    monitor(
         context, endpoint="https://api.egma.ai", api_key=PROJECT_KEY
     )
 
-    assert livekit_monitoring._state is not None
+    assert export._state is not None
     assert len(context.shutdown_callbacks) == 1
     provider.shutdown()
 
@@ -238,13 +246,13 @@ def test_a_production_room_is_still_exported_whatever_its_metadata_says(
 def test_a_context_with_no_room_still_reaches_the_worded_complaint():
     """The guard is read defensively so a wrong argument stays worded.
 
-    ``monitor_livekit`` names what it needs when it is handed something
+    ``monitor`` names what it needs when it is handed something
     that is not a LiveKit job context. A guard that reached straight
     through the job for a room name would raise an attribute error from
     inside the SDK instead, one step before that sentence.
     """
     with pytest.raises(ValueError) as refused:
-        monitor_livekit(
+        monitor(
             object(), endpoint="https://api.egma.ai", api_key=PROJECT_KEY
         )
 
@@ -267,7 +275,7 @@ def test_missing_configuration_names_the_setting_without_showing_a_key(
         monkeypatch.setenv(name, value)
 
     with pytest.raises(ValueError) as refused:
-        monitor_livekit(StubJobContext())
+        monitor(StubJobContext())
 
     assert said in str(refused.value)
     assert PROJECT_KEY not in str(refused.value)
@@ -277,7 +285,7 @@ def test_invalid_endpoint_never_echoes_a_credential(monkeypatch):
     secret = "egma_sk_do_not_repeat"
 
     with pytest.raises(ValueError) as refused:
-        monitor_livekit(
+        monitor(
             StubJobContext(),
             endpoint="file:///tmp/collector",
             api_key=secret,
@@ -300,7 +308,7 @@ def test_invalid_endpoint_never_echoes_a_credential(monkeypatch):
 )
 def test_invalid_project_key_is_refused_before_exporter_setup(invalid_key):
     with pytest.raises(ValueError) as refused:
-        monitor_livekit(
+        monitor(
             StubJobContext(),
             endpoint="https://api.egma.ai",
             api_key=invalid_key,
@@ -315,20 +323,20 @@ def test_processor_setup_failure_never_echoes_a_credential(monkeypatch):
     install_provider(monkeypatch, provider)
     secret = f"egma_sk_{'b' * 43}"
     monkeypatch.setattr(
-        livekit_monitoring,
+        export,
         "_build_exporter",
-        lambda _endpoint, _key: InMemorySpanExporter(),
+        lambda _endpoint, _key, _verb: InMemorySpanExporter(),
     )
 
     def refuse_processor(_exporter):
         raise RuntimeError(secret)
 
     monkeypatch.setattr(
-        livekit_monitoring, "BatchSpanProcessor", refuse_processor
+        export, "BatchSpanProcessor", refuse_processor
     )
 
     with pytest.raises(ValueError) as refused:
-        monitor_livekit(
+        monitor(
             StubJobContext(),
             endpoint="https://api.egma.ai",
             api_key=secret,
@@ -346,22 +354,22 @@ async def test_existing_telemetry_and_egma_both_receive_the_same_span(
     existing = InMemorySpanExporter()
     egma = InMemorySpanExporter()
     provider.add_span_processor(SimpleSpanProcessor(existing))
-    monkeypatch.setattr(livekit_monitoring, "_livekit_provider", lambda: provider)
+    monkeypatch.setattr(export, "_livekit_provider", lambda: provider)
     monkeypatch.setattr(
-        livekit_monitoring.trace, "get_tracer_provider", lambda: provider
+        export.trace, "get_tracer_provider", lambda: provider
     )
     registered: list[TracerProvider] = []
     monkeypatch.setattr(
-        livekit_monitoring,
+        export,
         "set_tracer_provider",
-        lambda selected: registered.append(selected),
+        lambda selected, **_options: registered.append(selected),
     )
     monkeypatch.setattr(
-        livekit_monitoring, "_build_exporter", lambda _endpoint, _key: egma
+        export, "_build_exporter", lambda _endpoint, _key, _verb: egma
     )
     context = StubJobContext()
 
-    monitor_livekit(
+    monitor(
         context,
         endpoint="https://api.egma.ai",
         api_key=PROJECT_KEY,
@@ -419,14 +427,14 @@ async def test_shared_telemetry_cannot_block_egmas_shutdown_flush(
     install_provider(monkeypatch, provider)
     egma = InMemorySpanExporter()
     monkeypatch.setattr(
-        livekit_monitoring, "BatchSpanProcessor", DeterministicBatchProcessor
+        export, "BatchSpanProcessor", DeterministicBatchProcessor
     )
     monkeypatch.setattr(
-        livekit_monitoring, "_build_exporter", lambda _endpoint, _key: egma
+        export, "_build_exporter", lambda _endpoint, _key, _verb: egma
     )
     context = StubJobContext()
 
-    monitor_livekit(
+    monitor(
         context,
         endpoint="https://api.egma.ai",
         api_key=PROJECT_KEY,
@@ -446,16 +454,18 @@ def test_repeated_setup_adds_one_exporter_and_one_job_callback(monkeypatch):
     install_provider(monkeypatch, provider)
     exporters: list[InMemorySpanExporter] = []
 
-    def build_exporter(_endpoint: str, _key: str) -> InMemorySpanExporter:
+    def build_exporter(
+        _endpoint: str, _key: str, _verb: str
+    ) -> InMemorySpanExporter:
         exporter = InMemorySpanExporter()
         exporters.append(exporter)
         return exporter
 
-    monkeypatch.setattr(livekit_monitoring, "_build_exporter", build_exporter)
+    monkeypatch.setattr(export, "_build_exporter", build_exporter)
     context = StubJobContext()
 
     for _ in range(2):
-        monitor_livekit(
+        monitor(
             context,
             endpoint="https://api.egma.ai/v1/traces",
             api_key=PROJECT_KEY,
@@ -471,16 +481,16 @@ def test_a_second_job_reuses_the_exporter_but_gets_its_own_flush(monkeypatch):
     install_provider(monkeypatch, provider)
     exporters: list[InMemorySpanExporter] = []
     monkeypatch.setattr(
-        livekit_monitoring,
+        export,
         "_build_exporter",
-        lambda _endpoint, _key: exporters.append(InMemorySpanExporter())
+        lambda _endpoint, _key, _verb: exporters.append(InMemorySpanExporter())
         or exporters[-1],
     )
     first = StubJobContext()
     second = StubJobContext()
 
     for context in (first, second):
-        monitor_livekit(
+        monitor(
             context,
             endpoint="https://api.egma.ai",
             api_key=PROJECT_KEY,
@@ -494,24 +504,24 @@ def test_a_second_job_reuses_the_exporter_but_gets_its_own_flush(monkeypatch):
 
 def test_one_existing_provider_is_reused_by_both_telemetry_surfaces(monkeypatch):
     provider = TracerProvider()
-    monkeypatch.setattr(livekit_monitoring, "_livekit_provider", lambda: provider)
+    monkeypatch.setattr(export, "_livekit_provider", lambda: provider)
     monkeypatch.setattr(
-        livekit_monitoring.trace, "get_tracer_provider", lambda: provider
+        export.trace, "get_tracer_provider", lambda: provider
     )
 
-    assert livekit_monitoring._select_compatible_provider() is provider
+    assert export._select_compatible_provider("egma.monitor", "") is provider
     provider.shutdown()
 
 
 def test_livekit_noop_provider_is_treated_as_not_configured(monkeypatch):
-    noop = livekit_monitoring.trace.NoOpTracerProvider()
-    proxy = livekit_monitoring.trace.ProxyTracerProvider()
-    monkeypatch.setattr(livekit_monitoring, "_livekit_provider", lambda: noop)
+    noop = export.trace.NoOpTracerProvider()
+    proxy = export.trace.ProxyTracerProvider()
+    monkeypatch.setattr(export, "_livekit_provider", lambda: noop)
     monkeypatch.setattr(
-        livekit_monitoring.trace, "get_tracer_provider", lambda: proxy
+        export.trace, "get_tracer_provider", lambda: proxy
     )
 
-    provider = livekit_monitoring._select_compatible_provider()
+    provider = export._select_compatible_provider("egma.monitor", "")
 
     assert isinstance(provider, TracerProvider)
     provider.shutdown()
@@ -521,16 +531,16 @@ def test_two_existing_providers_are_refused_instead_of_replacing_one(monkeypatch
     livekit_provider = TracerProvider()
     global_provider = TracerProvider()
     monkeypatch.setattr(
-        livekit_monitoring, "_livekit_provider", lambda: livekit_provider
+        export, "_livekit_provider", lambda: livekit_provider
     )
     monkeypatch.setattr(
-        livekit_monitoring.trace,
+        export.trace,
         "get_tracer_provider",
         lambda: global_provider,
     )
 
     with pytest.raises(ValueError, match="different"):
-        livekit_monitoring._select_compatible_provider()
+        export._select_compatible_provider("egma.monitor", "")
 
     livekit_provider.shutdown()
     global_provider.shutdown()
@@ -540,19 +550,19 @@ def test_changing_configuration_requires_a_worker_restart(monkeypatch):
     provider = TracerProvider()
     install_provider(monkeypatch, provider)
     monkeypatch.setattr(
-        livekit_monitoring,
+        export,
         "_build_exporter",
-        lambda _endpoint, _key: InMemorySpanExporter(),
+        lambda _endpoint, _key, _verb: InMemorySpanExporter(),
     )
     context = StubJobContext()
-    monitor_livekit(
+    monitor(
         context,
         endpoint="https://api.egma.ai",
         api_key=f"egma_sk_{'a' * 43}",
     )
 
     with pytest.raises(ValueError) as refused:
-        monitor_livekit(
+        monitor(
             context,
             endpoint="https://api.egma.ai",
             api_key=f"egma_sk_{'b' * 43}",
@@ -572,9 +582,96 @@ async def test_shutdown_failure_is_safe_and_does_not_stop_the_job(caplog):
             raise RuntimeError(secret)
 
     context = StubJobContext()
-    livekit_monitoring._register_shutdown_flush(context, RefusingProcessor())
+    export._register_shutdown_flush(context, RefusingProcessor(), "egma.monitor")
 
     await context.shutdown_callbacks[0]()
 
     assert "could not flush" in caplog.text
     assert secret not in caplog.text
+
+
+# -- How a simulation's room name rides out with its spans --------------------
+#
+# Egma's door reads one attribute to tell a simulation's agent POV from
+# somebody's production traffic: the provider reference, which for LiveKit
+# is the room's name. It goes out two ways, and both are here because
+# either one alone leaves a real customer uncovered.
+#
+# A resource is fixed when a tracer provider is built, and this SDK does
+# not always build one — a worker already running Langfuse hands it a
+# provider that exists, and that provider must keep working. So the room
+# name also goes on every span, through LiveKit's own metadata seam, which
+# works on any provider whoever built it.
+
+
+def test_the_room_name_is_on_the_resource_when_this_sdk_builds_the_provider(
+    monkeypatch,
+):
+    """The plain case: no other telemetry here, so Egma builds the provider."""
+    monkeypatch.setattr(export, "_livekit_provider", trace.ProxyTracerProvider)
+    monkeypatch.setattr(
+        export.trace, "get_tracer_provider", trace.ProxyTracerProvider
+    )
+
+    provider = export._select_compatible_provider(
+        "egma.simulation", A_SIMULATION_ROOM
+    )
+
+    assert provider.resource.attributes[PROVIDER_REFERENCE] == A_SIMULATION_ROOM
+    provider.shutdown()
+
+
+def test_a_production_provider_carries_no_provider_reference(monkeypatch):
+    """Production traffic names no conversation, and must not start to.
+
+    A resource that carried the attribute would send every production
+    conversation down the simulation branch of Egma's door.
+    """
+    monkeypatch.setattr(export, "_livekit_provider", trace.ProxyTracerProvider)
+    monkeypatch.setattr(
+        export.trace, "get_tracer_provider", trace.ProxyTracerProvider
+    )
+
+    provider = export._select_compatible_provider("egma.monitor", "")
+
+    assert PROVIDER_REFERENCE not in provider.resource.attributes
+    provider.shutdown()
+
+
+def test_the_room_name_is_stamped_on_every_span_through_livekits_own_seam(
+    monkeypatch,
+):
+    """The case that matters: the provider is somebody else's.
+
+    A customer already exporting to their own collector keeps their
+    provider, resource and all — so the room name cannot go on that
+    resource. LiveKit's ``set_tracer_provider(..., metadata=…)`` puts it
+    on every span the provider starts instead, which is the copy Egma's
+    door falls back to.
+    """
+    monkeypatch.setattr(livekit_tracer, "_tracer_provider", None, raising=False)
+    provider = TracerProvider()
+    exported = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exported))
+
+    export._register_provider(provider, A_SIMULATION_ROOM)
+    provider.get_tracer("livekit-agents").start_span("agent turn").end()
+
+    [span] = exported.get_finished_spans()
+    assert span.attributes[PROVIDER_REFERENCE] == A_SIMULATION_ROOM
+    provider.shutdown()
+
+
+def test_a_production_span_is_stamped_with_no_room_name(monkeypatch):
+    """The other half of the same guard, on the span rather than the resource."""
+    monkeypatch.setattr(livekit_tracer, "_tracer_provider", None, raising=False)
+    provider = TracerProvider()
+    exported = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exported))
+
+    export._register_provider(provider, "")
+    provider.get_tracer("livekit-agents").start_span("session").end()
+
+    [span] = exported.get_finished_spans()
+    assert PROVIDER_REFERENCE not in (span.attributes or {})
+    provider.shutdown()

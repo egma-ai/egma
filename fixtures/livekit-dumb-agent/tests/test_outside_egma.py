@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 from conftest import outside_egma
-from egma import mockable
+from egma import simulation
 
 from agent import AFTERNOON_SLOT, MORNING_SLOT, FrontDesk
 
@@ -49,7 +49,7 @@ async def test_a_room_egma_did_not_name_leaves_this_agent_alone(
     before = agent.tools
     context = outside_egma(room_name, metadata)
 
-    await mockable(agent, context, session)
+    await simulation(agent, context, session)
 
     # The very same objects. Not equal, not equivalent — the identical
     # callables this file built the agent with, which is the only claim
@@ -81,7 +81,7 @@ async def test_the_tools_still_answer_out_of_this_file(session):
     says the same thing twice.
     """
     agent = FrontDesk()
-    await mockable(agent, outside_egma(), session)
+    await simulation(agent, outside_egma(), session)
 
     said = await agent.check_availability("Tuesday")
     assert said == await agent.check_availability("Tuesday")
