@@ -316,10 +316,7 @@ export const simulationOperations = {
     path: "/v1/simulations/{simulationId}",
     summary: "Get a simulation",
     description:
-      "Read one test-and-persona execution, its pinned test and persona, connection snapshot, metrics, " +
-      "transcript, and grades. Execution status and gradingState are separate: a completed simulation may " +
-      "still be grading. Inspect each grade's result and details for the verdict and evidence. " +
-      "The combinedScore is a display value, not an overall pass/fail decision.",
+      "Read a simulation’s test, persona, connection, metrics, transcript, and grades. Execution status and gradingState are separate: a completed simulation may still be grading.",
     tag: "Simulations",
     security: "credentialed",
     request: { params: simulationParams, query: projectQuery },
@@ -342,11 +339,7 @@ export const simulationOperations = {
     path: "/v1/simulations/{simulationId}/regrade",
     summary: "Regrade a simulation",
     description:
-      "Queue grading again for a completed simulation that has a recorded trace and a non-empty frozen " +
-      "grader selection. Send no request body. Egma runs the complete grader selection captured at run start " +
-      "against the same evidence; it does not rerun the conversation or apply later grader configuration changes. " +
-      "Previous grades remain in gradeHistory. If grading is already pending or claimed, no duplicate job is queued. " +
-      "Read Get a simulation to follow gradingState and retrieve the new grades. Requires write access.",
+      "Grade a completed simulation again with its original grader selection and recorded evidence. Later grader settings do not apply. Send no body, then follow gradingState with Get a simulation.",
     tag: "Simulations",
     security: "credentialed",
     request: {

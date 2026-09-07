@@ -146,7 +146,7 @@ export const graderLibraryOperations = {
     path: "/v1/grader-library/custom",
     summary: "Create and use a custom LLM grader",
     description:
-      "Creates a custom LLM grader in your organization's library and activates it in this project. The grader returns 1 when the rule is met, 0 when it is not met, or no score when the evidence is insufficient. Its type and model are supplied by Egma.",
+      "Create a custom LLM grader in your organization’s library and activate it in this project. Write the grading instructions and pass/fail criteria; Egma supplies the model.",
     tag: "Graders",
     security: "credentialed",
     request: {

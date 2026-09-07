@@ -381,13 +381,9 @@ export const runOperations = {
     operationId: "createRun",
     method: "POST",
     path: "/v1/runs",
-    summary: "Run one complete test suite",
+    summary: "Create a run",
     description:
-      "Start one run of every active test in a non-empty suite against one agent connection. " +
-      "Egma captures the test versions, personas, connection settings, and grader selection for the run. " +
-      "The response confirms creation; execution and grading continue asynchronously. " +
-      "Keep the returned id, poll List run events until done is true, then inspect the simulations and their grades. " +
-      "Retry the same request with the same idempotencyKey to recover the existing run without creating another.",
+      "Run every active test in a suite against one agent connection. Execution and grading continue after this request returns. Keep the returned id to follow progress and inspect results.",
     tag: "Runs",
     security: "credentialed",
     request: {
@@ -533,11 +529,7 @@ export const runOperations = {
     path: "/v1/runs/{runId}/events",
     summary: "List run events",
     description:
-      "Read execution events in sequence order. Start with after=0, then pass each response's next value as after. " +
-      "While caughtUp is false, continue reading the backlog. When caughtUp is true but done is false, " +
-      "wait briefly before polling again. done becomes true only after execution has finished, the event backlog " +
-      "is consumed, and all gradable simulations have completed or errored grading. It does not indicate that " +
-      "the grades passed. Apply each event sequence at most once when resuming a saved cursor.",
+      "Read run events in sequence order. Pass each response’s next value as after. Continue until done is true, then inspect the simulation grades for pass or fail results.",
     tag: "Runs",
     security: "credentialed",
     request: {

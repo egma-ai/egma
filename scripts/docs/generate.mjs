@@ -29,7 +29,7 @@ for (const [endpoint, item] of Object.entries(spec.paths)) {
     const slug = stableRoutes[id] ?? id.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
     const page = `api/${slug}`;
     if (generated.has(`${page}.mdx`)) throw new Error(`Duplicate API page: ${page}`);
-    generated.set(`${page}.mdx`, `---\nopenapi: ${JSON.stringify(`openapi.json ${method.toUpperCase()} ${endpoint}`)}\n---\n`);
+    generated.set(`${page}.mdx`, `---\nsidebarTitle: ${JSON.stringify(operation.summary)}\nopenapi: ${JSON.stringify(`openapi.json ${method.toUpperCase()} ${endpoint}`)}\n---\n`);
     if (!groups.has(resource)) groups.set(resource, []);
     groups.get(resource).push(page);
   }
@@ -94,7 +94,7 @@ const obsolete = [];
 for (const name of await readdir(path.join(docs, 'api'))) {
   if (!name.endsWith('.mdx') || name === 'overview.mdx' || generated.has(`api/${name}`)) continue;
   const old = await read(`docs/api/${name}`);
-  if (!/^---\nopenapi: [^\n]+\n---\n$/.test(old)) throw new Error(`Unexpected written API page: api/${name}`);
+  if (!/^---\n(?:sidebarTitle: [^\n]+\n)?openapi: [^\n]+\n---\n$/.test(old)) throw new Error(`Unexpected written API page: api/${name}`);
   obsolete.push(`api/${name}`);
 }
 

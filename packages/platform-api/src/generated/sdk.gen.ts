@@ -21,7 +21,7 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 /**
  * Discover agents on an agent platform
  *
- * List the Retell agents visible to a provider API key and the connection candidates available for each. Supply either credentials.apiKey or an existing Egma agentId whose saved Retell key should be used, never both. This request does not register an agent or save a new credential. Choose a returned candidate, then use Register an agent or Add an agent connection with its fields and platformAgentId. LiveKit uses List supported connection options instead of provider discovery.
+ * List the Retell agents and connection candidates available to a provider API key. Supply credentials.apiKey or an existing agentId. This request does not register agents or save credentials.
  */
 export const discoverAgents = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
@@ -60,7 +60,7 @@ export const discoverAgents = <ThrowOnError extends boolean = false>(parameters:
 /**
  * List supported connection options
  *
- * Read the connection catalog used by this Egma server. Each item is one supported platform, connection type, access variant, and modality. Use fields to construct config and credentialFields to construct credentials for Register an agent or Add an agent connection. The catalog does not check a provider account; use Discover agents to obtain Retell identities and confirmed candidates. simulatorAdapter describes implementation support, not whether this deployment's provider or carrier credentials are ready.
+ * List the connection options supported by this server. Use each option’s fields and credentialFields to configure an agent connection. This catalog does not check provider accounts or deployment credentials.
  */
 export const listConnectionOptions = <ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>): RequestResult<ListConnectionOptionsResponses, ListConnectionOptionsErrors, ThrowOnError> => (options?.client ?? client).get<ListConnectionOptionsResponses, ListConnectionOptionsErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }, {
@@ -104,7 +104,7 @@ export const listAgents = <ThrowOnError extends boolean = false>(parameters?: {
 /**
  * Register an agent
  *
- * Create an Egma agent identity in the selected project. Send name and agentPlatform for an agent without connections, or include connection to configure its first simulation connection in the same request. Registration with a connection can reuse the existing agent for the same provider identity and can add a new connection to that agent. Inspect result: created, connection_added, or reused. Keep the returned agent.id and connection.id for run creation.
+ * Register an agent in your project, with an optional first connection. An existing provider identity can be reused. Check result to see whether Egma created an agent, added a connection, or reused one.
  */
 export const registerAgent = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
@@ -244,7 +244,7 @@ export const updateAgent = <ThrowOnError extends boolean = false>(parameters: {
 /**
  * Add an agent connection
  *
- * Add a simulation connection to an existing Egma agent. Select its platform, connection type, access variant, and modality from List supported connection options, then supply that option's config and credentials. For Retell, include platformAgentId from discovery; Egma confirms the selection with the supplied or stored Retell key before saving. For LiveKit, supply the exact worker dispatch name as config.agentName. Use the returned connection.id with this agent's ID when creating a run.
+ * Add a simulation connection to an agent. Use the connection catalog for required fields, Retell discovery for platformAgentId, or your LiveKit worker’s dispatch name for config.agentName.
  */
 export const addConnection = <ThrowOnError extends boolean = false>(parameters: {
     agentId: string;
@@ -675,7 +675,7 @@ export const useGraderInProject = <ThrowOnError extends boolean = false>(paramet
 /**
  * Create and use a custom LLM grader
  *
- * Creates a custom LLM grader in your organization's library and activates it in this project. The grader returns 1 when the rule is met, 0 when it is not met, or no score when the evidence is insufficient. Its type and model are supplied by Egma.
+ * Create a custom LLM grader in your organization’s library and activate it in this project. Write the grading instructions and pass/fail criteria; Egma supplies the model.
  */
 export const createCustomGrader = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
@@ -1597,9 +1597,9 @@ export const listRuns = <ThrowOnError extends boolean = false>(parameters?: {
 };
 
 /**
- * Run one complete test suite
+ * Create a run
  *
- * Start one run of every active test in a non-empty suite against one agent connection. Egma captures the test versions, personas, connection settings, and grader selection for the run. The response confirms creation; execution and grading continue asynchronously. Keep the returned id, poll List run events until done is true, then inspect the simulations and their grades. Retry the same request with the same idempotencyKey to recover the existing run without creating another.
+ * Run every active test in a suite against one agent connection. Execution and grading continue after this request returns. Keep the returned id to follow progress and inspect results.
  */
 export const createRun = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
@@ -1695,7 +1695,7 @@ export const listRunSimulations = <ThrowOnError extends boolean = false>(paramet
 /**
  * List run events
  *
- * Read execution events in sequence order. Start with after=0, then pass each response's next value as after. While caughtUp is false, continue reading the backlog. When caughtUp is true but done is false, wait briefly before polling again. done becomes true only after execution has finished, the event backlog is consumed, and all gradable simulations have completed or errored grading. It does not indicate that the grades passed. Apply each event sequence at most once when resuming a saved cursor.
+ * Read run events in sequence order. Pass each response’s next value as after. Continue until done is true, then inspect the simulation grades for pass or fail results.
  */
 export const listRunEvents = <ThrowOnError extends boolean = false>(parameters: {
     runId: string;
@@ -1742,7 +1742,7 @@ export const cancelRun = <ThrowOnError extends boolean = false>(parameters: {
 /**
  * Get a simulation
  *
- * Read one test-and-persona execution, its pinned test and persona, connection snapshot, metrics, transcript, and grades. Execution status and gradingState are separate: a completed simulation may still be grading. Inspect each grade's result and details for the verdict and evidence. The combinedScore is a display value, not an overall pass/fail decision.
+ * Read a simulation’s test, persona, connection, metrics, transcript, and grades. Execution status and gradingState are separate: a completed simulation may still be grading.
  */
 export const getSimulation = <ThrowOnError extends boolean = false>(parameters: {
     simulationId: string;
@@ -1764,7 +1764,7 @@ export const getSimulation = <ThrowOnError extends boolean = false>(parameters: 
 /**
  * Regrade a simulation
  *
- * Queue grading again for a completed simulation that has a recorded trace and a non-empty frozen grader selection. Send no request body. Egma runs the complete grader selection captured at run start against the same evidence; it does not rerun the conversation or apply later grader configuration changes. Previous grades remain in gradeHistory. If grading is already pending or claimed, no duplicate job is queued. Read Get a simulation to follow gradingState and retrieve the new grades. Requires write access.
+ * Grade a completed simulation again with its original grader selection and recorded evidence. Later grader settings do not apply. Send no body, then follow gradingState with Get a simulation.
  */
 export const regradeSimulation = <ThrowOnError extends boolean = false>(parameters: {
     simulationId: string;

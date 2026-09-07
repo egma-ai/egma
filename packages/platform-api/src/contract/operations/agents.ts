@@ -352,10 +352,7 @@ export const agentOperations = {
     path: "/v1/agents:discover",
     summary: "Discover agents on an agent platform",
     description:
-      "List the Retell agents visible to a provider API key and the connection candidates available for each. " +
-      "Supply either credentials.apiKey or an existing Egma agentId whose saved Retell key should be used, never both. " +
-      "This request does not register an agent or save a new credential. Choose a returned candidate, then use Register an agent " +
-      "or Add an agent connection with its fields and platformAgentId. LiveKit uses List supported connection options instead of provider discovery.",
+      "List the Retell agents and connection candidates available to a provider API key. Supply credentials.apiKey or an existing agentId. This request does not register agents or save credentials.",
     tag: "Agents",
     security: "credentialed",
     request: {
@@ -485,11 +482,7 @@ export const agentOperations = {
     path: "/v1/connection-options",
     summary: "List supported connection options",
     description:
-      "Read the connection catalog used by this Egma server. Each item is one supported platform, connection type, " +
-      "access variant, and modality. Use fields to construct config and credentialFields to construct credentials " +
-      "for Register an agent or Add an agent connection. The catalog does not check a provider account; use Discover agents " +
-      "to obtain Retell identities and confirmed candidates. simulatorAdapter describes implementation support, " +
-      "not whether this deployment's provider or carrier credentials are ready.",
+      "List the connection options supported by this server. Use each option’s fields and credentialFields to configure an agent connection. This catalog does not check provider accounts or deployment credentials.",
     tag: "Connections",
     security: "credentialed",
     responses: {
@@ -600,10 +593,7 @@ export const agentOperations = {
     path: "/v1/agents",
     summary: "Register an agent",
     description:
-      "Create an Egma agent identity in the selected project. Send name and agentPlatform for an agent without connections, " +
-      "or include connection to configure its first simulation connection in the same request. " +
-      "Registration with a connection can reuse the existing agent for the same provider identity and can add a new connection " +
-      "to that agent. Inspect result: created, connection_added, or reused. Keep the returned agent.id and connection.id for run creation.",
+      "Register an agent in your project, with an optional first connection. An existing provider identity can be reused. Check result to see whether Egma created an agent, added a connection, or reused one.",
     tag: "Agents",
     security: "credentialed",
     request: {
@@ -736,11 +726,7 @@ export const agentOperations = {
     path: "/v1/agents/{agentId}/connections",
     summary: "Add an agent connection",
     description:
-      "Add a simulation connection to an existing Egma agent. Select its platform, connection type, access variant, " +
-      "and modality from List supported connection options, then supply that option's config and credentials. " +
-      "For Retell, include platformAgentId from discovery; Egma confirms the selection with the supplied or stored " +
-      "Retell key before saving. For LiveKit, supply the exact worker dispatch name as config.agentName. " +
-      "Use the returned connection.id with this agent's ID when creating a run.",
+      "Add a simulation connection to an agent. Use the connection catalog for required fields, Retell discovery for platformAgentId, or your LiveKit worker’s dispatch name for config.agentName.",
     tag: "Connections",
     security: "credentialed",
     request: { params: agentParams, query: projectQuery, body: connectionInput },
