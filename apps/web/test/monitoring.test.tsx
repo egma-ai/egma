@@ -152,6 +152,7 @@ const FAILED_GRADE: Grade = {
   graderDefinitionId: "grl_latency",
   graderDefinitionVersion: 1,
   graderName: "response_latency",
+  parameterValues: { maximum_response_time_ms: 2_500 },
   score: 0,
   details: {
     rationale: "The p90 response time exceeded the configured maximum.",
@@ -176,6 +177,7 @@ const PASSED_GRADE: Grade = {
   projectGraderId: "grd_policy",
   graderDefinitionId: "grl_policy",
   graderName: "policy_grader",
+  parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
   score: 1,
   details: { rationale: "The policy requirement was satisfied." },
   result: "passed",

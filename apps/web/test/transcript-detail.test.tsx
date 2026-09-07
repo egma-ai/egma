@@ -175,6 +175,7 @@ const GRADE: Grade = {
   graderDefinitionId: "grl_expected",
   graderDefinitionVersion: 1,
   graderName: "expected_behaviors",
+  parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
   score: 1,
   details: {
     rationale: "The agent offered Tuesday and the caller agreed.",
