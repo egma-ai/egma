@@ -822,10 +822,13 @@ export async function traceRoutes(
       return claim?.kind === "named" ? claim.reference : "";
     };
 
-    // Spans that disagree name no one conversation, so there is nothing to
-    // look up and nothing safe to guess: one export from one agent process is
-    // one conversation, and filing a disagreeing resource under either answer
-    // would put one customer's turns on another's record.
+    // Stamped spans that disagree name no one conversation, so there is
+    // nothing to look up and nothing safe to guess: one export from one agent
+    // process is one conversation, and filing a disagreeing resource under
+    // either answer would put one customer's turns on another's record. A span
+    // that carries no reference at all is not this case — it opened before the
+    // SDK's stamp existed and is filed under what the rest of the resource
+    // says, which `providerReferenceClaimedBy` explains.
     const disagreeing = naming.find(
       (one) => claimed.get(one)?.kind === "disagreeing",
     );
@@ -840,12 +843,12 @@ export async function traceRoutes(
         RPC_INVALID_ARGUMENT,
         `a resource in this export has spans that do not agree on ` +
           `${PROVIDER_REFERENCE_ATTRIBUTE} (${references
-            .map((one) => (one === "" ? "spans carrying none" : `"${shortened(one)}"`))
-            .join(", ")}). One agent process runs one conversation, so every ` +
-          `span under one resource names the same room or call — a resource ` +
-          `whose spans disagree names no conversation to file them under. ` +
-          `Export each room from the process running it. Nothing from this ` +
-          `request was stored.`,
+            .map((one) => `"${shortened(one)}"`)
+            .join(", ")}). One agent process runs one conversation, so the ` +
+          `spans under one resource that carry a reference all name the same ` +
+          `room or call — spans naming two name no conversation to file them ` +
+          `under. Export each room from the process running it. Nothing from ` +
+          `this request was stored.`,
       );
     }
 

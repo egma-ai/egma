@@ -178,7 +178,6 @@ from urllib.parse import urlsplit
 from ..contract import AGENT_NEVER_JOINED, ERROR
 from ..mock_tools import (
     HELLO_METHOD,
-    NOT_REPORTED,
     TOOL_METHOD,
     MockToolSeam,
 )
@@ -1559,7 +1558,7 @@ class LiveKitRoomBackend(RoomLifecycle):
             # with no hello in it is the second shape.
             if self._mock_tools is not None and not self._mock_tools.agent_reported:
                 raise MediaBackendError(
-                    NOT_REPORTED, ending=AGENT_NEVER_JOINED
+                    self._mock_tools.why_unreported, ending=AGENT_NEVER_JOINED
                 )
             raise MediaBackendError(
                 f"an agent joined the room but published no audio within "

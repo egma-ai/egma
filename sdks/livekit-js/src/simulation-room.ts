@@ -7,10 +7,13 @@ import {
   HELLO_TIMEOUT_SECONDS,
   RESPONSE_TIMEOUT_SECONDS,
   TOOL_METHOD,
+  UNSUPPORTED_PROTOCOL_VERSION,
   SeamError,
   fitsOnTheWire,
   helloRequest,
   isEgmaNotListeningYet,
+  isEgmaNotReached,
+  isEgmaRefusal,
   mockedToolsIn,
   servedIn,
   toolRequest,
@@ -67,11 +70,23 @@ export type SimulationOptions = ExportOptions;
  * exporter, not one message on the wire, and no connect the agent was not
  * already making.
  *
- * In a simulation room it fails closed. Every way this call can end without a
- * hello Egma answered throws {@link NotReported}, so the session never starts
- * and Egma ends the simulation with the same finding from its own side. The
- * endpoint and key are `EGMA_URL` and `EGMA_API_KEY`, or the matching options;
- * a setting that is missing or malformed throws before anything is sent.
+ * In a simulation room it throws rather than carry on without Egma, and
+ * **which** error says where to look:
+ *
+ * - {@link NotReported} — the exchange itself did not happen. The room would
+ *   not open, no Egma participant arrived, two claimed to be Egma, Egma
+ *   refused the census, or the reply was unreadable. Something about this room
+ *   or this deployment needs fixing.
+ * - a plain `Error` — this worker is misconfigured, and it is said before a
+ *   byte is sent: `EGMA_URL` or `EGMA_API_KEY` missing or malformed, a
+ *   `@livekit/agents` too old to expose the telemetry seam, a tracer provider
+ *   this SDK cannot safely extend, or a second LiveKit job asking for a
+ *   different room in this process. The `endpoint` and `apiKey` options are
+ *   the two settings' other source.
+ *
+ * They are deliberately different types. A misconfigured worker is wrong for
+ * every simulation it will ever run and is a deployment fault; an unreported
+ * simulation is one conversation that must not be graded.
  *
  * **One LiveKit job per process.** Two things in this package are process-wide
  * and cannot be made per-job: the mock-tool table, which LiveKit keys by agent
@@ -131,7 +146,7 @@ export async function simulation(
       const reply = await helloWhenListening(seat, census, deadline);
       mockedTools = mockedToolsIn(reply);
     } catch (error) {
-      throw notReported(roomName, "Egma did not accept the tool census", error);
+      throw notReported(roomName, whyTheHelloWasRefused(error, identity), error);
     }
 
     installLifecycle({ agent, ctx, mockedTools, roomName, seat, session });
@@ -141,6 +156,35 @@ export async function simulation(
       releaseProcess(session);
     }
   }
+}
+
+/**
+ * What a refused census means, in the terms it means it in.
+ *
+ * Four readings, because they send a developer to four different places: a
+ * version neither side shares, a participant that was not there to answer, an
+ * Egma that answered by refusing, and a reply this SDK could not read. The
+ * Python SDK draws the same four, and a developer moving between the two
+ * should get the same diagnosis rather than one summary here and four there.
+ */
+function whyTheHelloWasRefused(error: unknown, identity: string): string {
+  if (error instanceof SeamError) {
+    return `Egma answered ${HELLO_METHOD} in a shape this SDK cannot read (${messageOf(error)})`;
+  }
+  const code = rpcCode(error);
+  if (code === UNSUPPORTED_PROTOCOL_VERSION) {
+    // The one refusal a customer can act on alone. Egma's own sentence
+    // carries the two version numbers; the sentence around this one carries
+    // the package they belong to.
+    return `Egma here speaks a version of the mock-tool exchange this SDK does not: ${messageOf(error)}`;
+  }
+  if (code !== undefined && isEgmaNotReached(code)) {
+    return `no Egma participant answered at ${JSON.stringify(identity)} in this room (${messageOf(error)})`;
+  }
+  if (code !== undefined) {
+    return `Egma refused this agent's census with code ${String(code)}: ${messageOf(error)}`;
+  }
+  return `Egma did not accept the tool census (${messageOf(error)})`;
 }
 
 /**
@@ -278,7 +322,20 @@ async function findEgmaPersona(
   }
 }
 
-function answersToEgma(identity: string): boolean {
+/**
+ * Whether a participant in this room is Egma, by the name it joined as.
+ *
+ * Two forms and no others: the bare name, which is what Egma joins as where it
+ * mints its own token, and the name with the simulation after it, which is
+ * what a customer's token endpoint is asked to mint. A plain prefix test would
+ * also match a name that merely starts with these letters, and a bare
+ * `egma-persona-` names no simulation — so the second form has to carry one.
+ * The whole of the addressing rests on this: the census is the agent's entire
+ * tool inventory.
+ *
+ * @internal Exported for this package's own tests; not exported from the root.
+ */
+export function answersToEgma(identity: string): boolean {
   return (
     identity === EGMA_PERSONA ||
     (identity.startsWith(`${EGMA_PERSONA}-`) &&
@@ -501,6 +558,23 @@ function courier(name: string, seat: Seat): MockTool {
       // a real tool must not be touched, not the moment to touch it. The
       // five transport codes that used to mean "run the real one" are read
       // the same way as every other refusal here.
+      //
+      // Whose complaint it was is said out loud, because the two send a
+      // developer to opposite halves of the system: a mock tool to author, or
+      // a room that could not carry a message. The Python SDK says the same
+      // two things in its own log.
+      const code = rpcCode(error);
+      console.warn(
+        `Egma: ${
+          code === undefined
+            ? "the call could not be made for"
+            : isEgmaRefusal(code)
+              ? "Egma refused"
+              : "the room could not carry"
+        } the call to ${JSON.stringify(name)}${
+          code === undefined ? "" : ` with code ${String(code)}`
+        }. ${messageOf(error)}`,
+      );
       throw new llm.ToolError(
         `Egma could not answer ${name}: ${messageOf(error)}`,
       );
@@ -509,11 +583,16 @@ function courier(name: string, seat: Seat): MockTool {
     try {
       const served = servedIn(reply);
       if (served.failed) {
+        // The branch a test forces on purpose. It is the mock tool author's
+        // own sentence that reaches the model, never this side's words.
         throw new llm.ToolError(served.message);
       }
       return served.value;
     } catch (error) {
       if (error instanceof llm.ToolError) throw error;
+      console.warn(
+        `Egma: it answered the call to ${JSON.stringify(name)} unreadably. ${messageOf(error)}`,
+      );
       throw new llm.ToolError(
         `Egma could not answer ${name}: ${messageOf(error)}`,
       );

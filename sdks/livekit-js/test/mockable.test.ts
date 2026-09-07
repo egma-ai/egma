@@ -38,7 +38,11 @@ import {
   exportStateForTests,
   resetExportForTests,
 } from "../src/export.ts";
-import { NotReported, simulation } from "../src/simulation-room.ts";
+import {
+  NotReported,
+  answersToEgma,
+  simulation,
+} from "../src/simulation-room.ts";
 
 const PROJECT_KEY = `egma_sk_${"a".repeat(43)}`;
 
@@ -57,6 +61,8 @@ class StubRoom extends EventEmitter {
   readonly remoteParticipants = new Map<string, { identity: string }>();
   mockedTools: string[] = [];
   helloErrors: Error[] = [];
+  /** What Egma answers a census with, where a test wants a shape of its own. */
+  helloReply: string | undefined = undefined;
   toolError: Error | undefined;
   toolReply: Record<string, unknown> = { answer: "mocked" };
   readonly localParticipant = {
@@ -64,6 +70,7 @@ class StubRoom extends EventEmitter {
       if (call.method === "egma.hello") {
         const refused = this.helloErrors.shift();
         if (refused !== undefined) throw refused;
+        if (this.helloReply !== undefined) return this.helloReply;
         return JSON.stringify({
           protocol_version: 1,
           mocked_tools: this.mockedTools,
@@ -696,4 +703,60 @@ describe("egma.simulation", () => {
       expect(ctx.room.localParticipant.performRpc).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    [
+      new RpcError(904, "Egma speaks 1 and this one declared 2"),
+      "speaks a version of the mock-tool exchange this SDK does not",
+    ],
+    [
+      new RpcError(1401, "recipient not found"),
+      "no Egma participant answered at",
+    ],
+    [
+      new RpcError(902, "this simulation has no answer"),
+      "refused this agent's census with code 902",
+    ],
+    [
+      new Error("the transport fell over"),
+      "did not accept the tool census",
+    ],
+  ])("says which kind of census refusal this was (%#)", async (refusal, said) => {
+    // Four readings, because they send a developer to four different
+    // places. The Python SDK draws the same four, and somebody moving
+    // between the two SDKs should get the same diagnosis rather than one
+    // summary here and four there.
+    const agent = agentWithTool("check_calendar", async () => "real");
+    const ctx = context("egma-sim-sim_150", { mockedTools: ["check_calendar"] });
+    ctx.room.helloErrors.push(refusal);
+
+    await expect(
+      simulation(agent, asJobContext(ctx), session()),
+    ).rejects.toThrow(new RegExp(said.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  });
+
+  it("refuses a hello reply it cannot read, and says that is what happened", async () => {
+    const agent = agentWithTool("check_calendar", async () => "real");
+    const ctx = context("egma-sim-sim_151", { mockedTools: ["check_calendar"] });
+    ctx.room.helloReply = '{"protocol_version":"one","mocked_tools":[]}';
+
+    await expect(
+      simulation(agent, asJobContext(ctx), session()),
+    ).rejects.toThrow(/in a shape this SDK cannot read/u);
+  });
+
+  it.each([
+    ["egma-persona", true],
+    ["egma-persona-sim_0001", true],
+    // The separator with nothing after it names no simulation, so it is a
+    // prefix rather than an identity. The census is this agent's whole
+    // tool inventory, so a name that is merely alike may never receive it.
+    ["egma-persona-", false],
+    ["egma-personality-quiz", false],
+    ["EGMA-PERSONA", false],
+    ["caller-8871", false],
+    ["", false],
+  ] as const)("answers to Egma's name: %s → %s", (identity, expected) => {
+    expect(answersToEgma(identity)).toBe(expected);
+  });
 });

@@ -206,7 +206,7 @@ function naming(exported: OtlpExport, reference: string): string {
  */
 function namingOnEverySpan(
   exported: OtlpExport,
-  ...references: string[]
+  ...references: (string | undefined)[]
 ): string {
   let at = 0;
   return JSON.stringify({
@@ -588,6 +588,60 @@ describe.skipIf(!storage.available)(
         expect(Number(rows[0]?.n ?? 0)).toBeGreaterThan(0);
       })();
     }, 120_000);
+
+    it("files the spans that opened before the SDK's stamp existed too", () => {
+      /*
+       * The case every customer with their own OpenTelemetry produces.
+       *
+       * The framework's metadata processor stamps a span when the span
+       * *starts*, and the SDK installs it partway through a job that has
+       * already begun — so the job's own entrypoint span, and anything else
+       * open at that moment, ends unstamped and rides the same export. There
+       * is nothing ambiguous about it: nothing else in the resource names
+       * another conversation. Refusing it would refuse the whole export, and
+       * every such customer would lose the agent's POV of every simulation,
+       * silently.
+       */
+      return (async () => {
+        const [first] = captured;
+        if (first === undefined) throw new Error("the capture is empty");
+        const landed = await aLandedSimulation(
+          acme,
+          "livekit-reused-provider",
+          "room-reused-provider",
+          {
+            ...A_LIVEKIT_AGENT,
+            config: {
+              url: "wss://acme.livekit.cloud",
+              agentName: "front-desk-reused-provider",
+            },
+          },
+        );
+
+        // The first span opened before the stamp; every one after it carries
+        // the room.
+        const answered = await post(
+          namingOnEverySpan(first, undefined, "room-reused-provider"),
+          acmeKey,
+        );
+        expect(answered.statusCode, answered.body).toBe(200);
+        await api.drainEvidence();
+
+        // Every span of that resource, the unstamped one included, filed
+        // under the simulation the rest of them named.
+        const posted = (JSON.parse(
+          namingOnEverySpan(first, undefined, "room-reused-provider"),
+        ) as OtlpExport).resourceSpans?.flatMap(
+          (one) => one.scopeSpans?.flatMap((scope) => scope.spans ?? []) ?? [],
+        );
+        expect(
+          await countOf(
+            `select count() as n from spans final
+             where trace_id = '${landed.traceId}' and emitter = 'agent'`,
+          ),
+        ).toBe(posted?.length ?? -1);
+      })();
+    }, 120_000);
   },
 );
 
@@ -663,21 +717,47 @@ describe.skipIf(!storage.available)("a reference that names no simulation", () =
     ).toBe(0);
   });
 
-  it("refuses a resource where only some spans carry the reference", async () => {
+  it("refuses a resource whose stamped spans name two conversations by turns", async () => {
     const [first] = captured;
     if (first === undefined) throw new Error("the capture is empty");
 
-    // Half stamped, half not: the same disagreement wearing a quieter face.
-    // Filing the whole resource under the one reference some spans named
-    // would file spans that never claimed to be a simulation's.
+    // Alternating, so no single span is the odd one out: whichever answer
+    // this door picked, half the spans said the other.
     const answered = await post(
-      namingOnEverySpan(first, "room-lisbon", ""),
+      namingOnEverySpan(first, "room-lisbon", "room-oslo", "room-lisbon"),
       globexKey,
     );
     expect(answered.statusCode).toBe(400);
     expect((answered.json() as { message: string }).message).toContain(
       "do not agree",
     );
+
+    await api.drainEvidence();
+    expect(
+      await countOf(
+        `select count() as n from spans final
+         where project_id = '${globex.projectId}'`,
+      ),
+    ).toBe(0);
+  });
+
+  it("refuses a span-stamped reference another project carries, in the same words", async () => {
+    const [first] = captured;
+    if (first === undefined) throw new Error("the capture is empty");
+
+    // The tenancy rule on the span path, which the resource path already
+    // proves: Globex's key, Acme's room. A reference is never a tenancy
+    // claim, on either path — it is looked up inside the project the
+    // credential resolved to, so a copied key learns nothing about the
+    // rooms in an account it does not hold.
+    const answered = await post(
+      namingOnEverySpan(first, FIXTURE_PROVIDER_CALL_ID),
+      globexKey,
+    );
+    expect(answered.statusCode).toBe(400);
+    const refusal = answered.json() as { message: string };
+    expect(refusal.message).toContain("no simulation in this project carries");
+    expect(refusal.message).toContain(FIXTURE_PROVIDER_CALL_ID);
 
     await api.drainEvidence();
     expect(

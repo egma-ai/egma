@@ -43,6 +43,13 @@ def monitor(
     Repeated calls with the same settings reuse the exporter. Each job gets
     one shutdown callback so its last buffered spans are sent before exit.
 
+    It raises ``ValueError``, and only for a worker that is misconfigured:
+    ``EGMA_URL`` or ``EGMA_API_KEY`` missing or malformed, a LiveKit Agents
+    too old to expose the telemetry provider, a tracer provider this SDK
+    cannot safely extend, or a second LiveKit job in this process asking
+    for different settings. There is no per-conversation failure here — a
+    production conversation is never stopped over telemetry.
+
     In a simulation room this returns having done nothing:
     :func:`egma.simulation` exports that conversation instead, and under
     the simulation it belongs to.

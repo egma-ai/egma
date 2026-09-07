@@ -296,10 +296,22 @@ async def simulation(
     no side table, no exporter, not one message on the wire, and no
     connect the agent was not already making.
 
-    Inside one, it raises :class:`NotReported` rather than carrying on
-    without egma. ``endpoint`` defaults to ``EGMA_URL`` and ``api_key`` to
-    ``EGMA_API_KEY``; a setting that is missing or malformed raises
-    ``ValueError`` from :mod:`egma.export`, before anything is sent.
+    Inside one it raises rather than carry on without egma, and **which**
+    error says where to look:
+
+    - :class:`NotReported` — the exchange itself did not happen. The room
+      would not open, no egma participant arrived, two claimed to be egma,
+      egma refused the census, or the reply was unreadable. Something
+      about this room or this deployment needs fixing.
+    - ``ValueError`` — this worker is misconfigured, and it is said before
+      a byte is sent: ``EGMA_URL`` or ``EGMA_API_KEY`` missing or
+      malformed, a tracer provider this SDK cannot safely extend, or a
+      second LiveKit job asking for a different room in this process.
+      ``endpoint`` and ``api_key`` are the arguments for the first two.
+
+    They are deliberately different types. A misconfigured worker is wrong
+    for every simulation it will ever run and is a deployment fault; an
+    unreported simulation is one conversation that must not be graded.
 
     **One job per process.** The room this process exports under is fixed
     when the exporter is built and cannot be rewritten, so a second job
@@ -375,6 +387,14 @@ async def simulation(
             f"Egma answered {seam.HELLO_METHOD} in a shape this SDK cannot "
             f"read ({unreadable})",
         ) from unreadable
+    except Exception as broke:
+        # Anything else the transport or the framework can throw. Named
+        # last and caught all the same, because the one thing that must
+        # not happen is this call ending in an error that does not say the
+        # simulation went unreported — a developer reading a bare
+        # transport exception has no way to know their simulation isolated
+        # nothing.
+        raise _not_reported(named, f"{type(broke).__name__}: {broke}") from broke
 
     couriers = _install_couriers(agent, mocked, seat, session)
     _install_handoff_couriers(agent, mocked, seat, session, named)
@@ -649,8 +669,18 @@ def _answers_to_egmas_name(identity: str) -> bool:
     it, which is what a customer's token endpoint is asked to mint. A
     plain prefix test would also match a name that merely starts with
     these letters, and the whole of the addressing rests on this.
+
+    So the second form has to carry a simulation after the separator. A
+    bare ``egma-persona-`` names no simulation, and matching it would hand
+    this agent's whole tool inventory to a participant whose name is a
+    prefix rather than an identity.
     """
-    return identity == EGMA_IDENTITY or identity.startswith(f"{EGMA_IDENTITY}-")
+    if identity == EGMA_IDENTITY:
+        return True
+    return (
+        identity.startswith(f"{EGMA_IDENTITY}-")
+        and len(identity) > len(EGMA_IDENTITY) + 1
+    )
 
 
 def _egma_candidates(room: Any) -> list[str]:
@@ -947,6 +977,18 @@ def _courier(
             raise ToolError(
                 f"Egma could not answer {name}: {refused.message}"
             ) from refused
+        except Exception as broke:
+            # Everything else, on the same terms. A courier that let an
+            # unexpected exception through would hand the framework a tool
+            # that failed in a way the model cannot hear, and in the worst
+            # reading a simulation that waits on nothing.
+            logger.warning(
+                "the call to %r could not be made: %s: %s",
+                name,
+                type(broke).__name__,
+                broke,
+            )
+            raise ToolError(f"Egma could not answer {name}: {broke}") from broke
 
         try:
             served = seam.served_in(answered)

@@ -882,6 +882,20 @@ class StubTextRoom(TextRoom):
         """Call a method on egma's participant, the way the transport does."""
         return await performed(self._room.local_participant.methods, method, payload)
 
+    async def _reports(self) -> None:
+        """The hello an ordinary worker's SDK sends, once egma is listening.
+
+        An empty census, for the voice stub's reason: what the plug reads
+        is that a hello arrived at all, and a test that cares which tools
+        were reported sends its own.
+        """
+        await self.stub.standing_ready.wait()
+        with contextlib.suppress(Exception):
+            await self.perform_rpc(
+                HELLO_METHOD,
+                json.dumps({"protocol_version": PROTOCOL_VERSION, "tools": []}),
+            )
+
     # -- The agent's side of the exchange -------------------------------------
 
     def agent_arrives(self) -> None:
@@ -890,6 +904,14 @@ class StubTextRoom(TextRoom):
             return
         self.who_arrived.append(AGENT_IDENTITY)
         self.arrivals.set()
+        if self.stub.agent_reports:
+            # The same hello an ordinary worker's SDK sends in a voice
+            # room. A chat room is a LiveKit simulation too — same verb,
+            # same exchange — so a worker with no SDK in it fails a chat
+            # simulation exactly as it fails a spoken one.
+            self.stub.reporting = asyncio.create_task(
+                self._reports(), name="chat-room-stub-hello"
+            )
         if self.stub.agent_publishes_audio_track:
             self.audio_published.set()
         # A session announces itself the moment it starts, which is before
@@ -1136,6 +1158,16 @@ class ChatStub:
 
     agent_joins: bool = True
     """False for the worker that never comes."""
+
+    agent_reports: bool = True
+    """Whether the worker in this room has the Egma SDK in it.
+
+    False for the worker that joins, types and never says ``egma.hello``:
+    a chat simulation that isolated nothing and would otherwise look like
+    one that did."""
+
+    reporting: asyncio.Task | None = None
+    """The hello in flight, held so a test can wait for it."""
 
     agent_publishes_audio_track: bool = False
     """True for the agent that never took the chat setup and is speaking.

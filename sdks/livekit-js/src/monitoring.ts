@@ -14,6 +14,13 @@ export type MonitorOptions = ExportOptions;
  * `AgentSession.start`. Repeated calls for the same job reuse one process-wide
  * exporter. Each job gets one final flush callback.
  *
+ * It throws a plain `Error`, and only for a worker that is misconfigured:
+ * `EGMA_URL` or `EGMA_API_KEY` missing or malformed, a `@livekit/agents` too
+ * old to expose the telemetry seam, a tracer provider this SDK cannot safely
+ * extend, or a second LiveKit job in this process asking for different
+ * settings. There is no per-conversation failure here — a production
+ * conversation is never stopped over telemetry.
+ *
  * In a simulation room this returns having done nothing: `simulation()`
  * exports that conversation instead, and files it under the simulation it
  * belongs to rather than as a second production call.

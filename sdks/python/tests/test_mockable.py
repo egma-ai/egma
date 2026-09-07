@@ -296,6 +296,10 @@ async def test_two_participants_answering_to_egmas_name_are_refused(session, cap
         pytest.param("egma-personality-quiz", id="a name that merely starts alike"),
         pytest.param("caller-8871", id="an ordinary caller"),
         pytest.param("EGMA-PERSONA", id="the name in another case"),
+        # The separator with nothing after it. It names no simulation, so
+        # it is a prefix rather than an identity — and the census is this
+        # agent's whole tool inventory.
+        pytest.param("egma-persona-", id="the separator naming no simulation"),
     ],
 )
 async def test_a_participant_who_is_not_egma_is_never_asked(
@@ -1269,6 +1273,54 @@ async def test_a_call_egma_never_received_names_the_transport_s_own_complaint(
         )
 
     assert "the recipient disconnected" in str(raised.value)
+
+
+async def test_an_unexpected_fault_in_the_hello_still_ends_the_simulation(
+    session,
+):
+    """Not every fault is one this SDK named in advance.
+
+    A transport that throws something neither ``RpcError`` nor a shape
+    this side can read is still a simulation that went unreported, and it
+    has to say so: a developer reading a bare exception from somebody
+    else's library has no way to know their mocked tools all ran for real.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(
+        mocked_tools=("check_calendar",),
+        refuses_with=RuntimeError("the transport fell over"),
+    )
+
+    with pytest.raises(NotReported) as refused:
+        await simulation(agent, in_a_simulation(room), session)
+
+    assert "did not report to Egma" in str(refused.value)
+    assert "the transport fell over" in str(refused.value)
+    assert couriers_on(session, agent) == {}
+
+
+async def test_an_unexpected_fault_on_a_call_reaches_the_model_as_a_tool_error(
+    session,
+):
+    """The same rule one level down, and for the same reason.
+
+    A courier that let an unexpected exception through would hand the
+    framework a failure the model cannot hear — and would not run the real
+    tool either, so the call would simply vanish.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(
+        mocked_tools=("check_calendar",),
+        refuses_tool_with=RuntimeError("the room fell over"),
+    )
+
+    await simulation(agent, in_a_simulation(room), session)
+    with pytest.raises(ToolError) as raised:
+        await called(couriers_on(session, agent)["check_calendar"], day="Tuesday")
+
+    assert "check_calendar" in str(raised.value)
+    assert "the room fell over" in str(raised.value)
+    assert "really ran" not in str(raised.value)
 
 
 # -- When egma refuses --------------------------------------------------------

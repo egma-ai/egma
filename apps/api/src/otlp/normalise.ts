@@ -287,14 +287,25 @@ export const PROVIDER_REFERENCE_ATTRIBUTE = "egma.provider_reference";
  * a worker that already runs its own OpenTelemetry hands the SDK a provider
  * that exists, and taking that away to add ours is not an option. So the SDK
  * stamps the reference on the resource where it builds the provider, and on
- * *every span* through the framework's own metadata seam where it does not.
- * This door reads the resource first and falls back to the spans.
+ * every span it starts thereafter, through the framework's own metadata seam,
+ * where it does not. This door reads the resource first and falls back to the
+ * spans.
  *
- * **The fallback holds only when every span agrees.** One export from one
- * agent process is one conversation, so spans that disagree — or a resource
- * where only some spans carry the key — are a sender this door cannot file for,
- * and guessing which conversation they belong to is exactly the mistake that
- * puts one customer's turns on another's record. Refused as malformed instead.
+ * **An unstamped span rides along; two stamped spans that disagree do not.**
+ * The framework's metadata processor stamps a span when the span *starts*, and
+ * the SDK installs it partway through a job that has already begun — so a
+ * reused provider always exports a few spans that opened before the stamp
+ * existed, the job's own entrypoint span among them. Refusing those would
+ * refuse the whole export, and every customer who already runs their own
+ * OpenTelemetry would lose the agent's POV of every simulation, silently.
+ * They are not ambiguous: nothing else in the resource names another
+ * conversation, so the one value the stamped spans agree on is the answer for
+ * all of them.
+ *
+ * Two *stamped* spans naming different conversations are the real ambiguity,
+ * and they are refused. One export from one agent process is one conversation,
+ * so this is a sender the door cannot file for, and guessing is exactly the
+ * mistake that puts one customer's turns on another's record.
  *
  * A key present with nothing in it is kept apart from a key that is absent, on
  * the resource and on a span alike: carrying the key is the sender saying *this
@@ -305,9 +316,13 @@ export const PROVIDER_REFERENCE_ATTRIBUTE = "egma.provider_reference";
 export type ProviderReferenceClaim =
   /** No resource attribute and no span carrying the key: production traffic. */
   | { readonly kind: "none" }
-  /** One conversation, named on the resource or agreed by every span. */
+  /**
+   * One conversation: named on the resource, or the one value every stamped
+   * span agrees on. Spans in this resource that carry no reference are filed
+   * under it too.
+   */
   | { readonly kind: "named"; readonly reference: string }
-  /** The spans do not agree, so the export names no one conversation. */
+  /** Stamped spans name more than one conversation, so this names none. */
   | { readonly kind: "disagreeing"; readonly references: readonly string[] };
 
 export function providerReferenceClaimedBy(
@@ -321,7 +336,6 @@ export function providerReferenceClaimedBy(
     (scopeSpans) => scopeSpans.spans ?? [],
   );
   const claimed = new Set<string>();
-  let unstamped = false;
   for (const span of spans) {
     if (
       (span.attributes ?? []).some(
@@ -329,20 +343,15 @@ export function providerReferenceClaimedBy(
       )
     ) {
       claimed.add(attribute(span.attributes, PROVIDER_REFERENCE_ATTRIBUTE));
-    } else {
-      unstamped = true;
     }
   }
 
   if (claimed.size === 0) return { kind: "none" };
   const [only] = [...claimed];
-  if (claimed.size === 1 && !unstamped && only !== undefined) {
+  if (claimed.size === 1 && only !== undefined) {
     return { kind: "named", reference: only };
   }
-  return {
-    kind: "disagreeing",
-    references: [...claimed, ...(unstamped ? [""] : [])].sort(),
-  };
+  return { kind: "disagreeing", references: [...claimed].sort() };
 }
 
 /** Which conversation this **resource** is the agent's POV of, or `""`. */

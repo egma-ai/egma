@@ -101,7 +101,7 @@ from typing import Any
 from ..contract import AGENT_NEVER_JOINED
 from ..media import MediaBackendError, VoiceMedia
 from ..media.livekit_room import LiveKitRoomBackend, RoomSettings
-from ..mock_tools import NOT_REPORTED, MockToolSeam
+from ..mock_tools import MockToolSeam
 from . import PlugError
 
 AGENT_JOIN_SECONDS = 30.0
@@ -219,7 +219,9 @@ class LiveKitRoom:
         except MediaBackendError as refused:
             raise PlugError(str(refused), ending=refused.ending) from refused
         if self._mock_tools is not None and not self._mock_tools.agent_reported:
-            raise PlugError(NOT_REPORTED, ending=AGENT_NEVER_JOINED)
+            raise PlugError(
+                self._mock_tools.why_unreported, ending=AGENT_NEVER_JOINED
+            )
 
     async def close(self) -> None:
         """Leave, and delete the room. Safe from every state."""

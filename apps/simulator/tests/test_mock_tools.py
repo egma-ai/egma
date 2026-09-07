@@ -32,10 +32,12 @@ from egma_simulator.mock_tools import (
     HELLO_METHOD,
     LARGEST_PAYLOAD_BYTES,
     MALFORMED_REQUEST,
+    NOT_REPORTED,
     PROTOCOL_VERSION,
     TOOL_METHOD,
     UNKNOWN_TOOL,
     UNSUPPORTED_PROTOCOL_VERSION,
+    MockToolRefusal,
     MockToolSeam,
 )
 from egma_simulator.model import ScriptedModel
@@ -486,6 +488,30 @@ async def test_the_seam_says_whether_the_agent_ever_reported():
     )
 
     assert seam.agent_reported is True
+
+
+async def test_a_hello_egma_refused_is_told_apart_from_one_that_never_came():
+    """Two failures, two sentences, because they are in two places.
+
+    A hello that never arrived is a worker with no SDK call in it. A hello
+    Egma received and refused told the agent nothing either — so nothing
+    was isolated, and the simulation still fails — but the SDK did call
+    and the fault is on Egma's side or in the test's own mock tools.
+    Sending a developer to add a call they already made is the wrong half
+    of the system.
+    """
+    seam = MockToolSeam((a_mock("check_calendar", {"slots": []}),))
+    assert seam.why_unreported == NOT_REPORTED
+
+    with pytest.raises(MockToolRefusal):
+        await seam.hello('{"protocol_version":99,"tools":[]}')
+
+    assert seam.agent_reported is False
+    said = seam.why_unreported
+    assert said != NOT_REPORTED
+    assert "Egma refused the report" in said
+    # Egma's own words for why, which is the half this sentence cannot know.
+    assert "99" in said
 
 
 async def test_hello_answers_a_test_that_mocks_nothing_with_an_empty_list():
