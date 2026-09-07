@@ -1238,10 +1238,10 @@ describe("what a project recorded in production", () => {
       ).toBe("nowrap");
       expect(shown).toContain("1m 13s");
       // The p90 of the capture's three answered turns, which nearest-rank
-      // makes its slowest: 3066.59356 ms, measured from the caller's last
+      // makes its slowest: 3454.607472 ms, measured from the caller's last
       // audible sample (catalog version 8). `otlp-derived-measures.test.ts`
       // works all three out by hand from this same capture.
-      expect(shown).toContain("3.07s");
+      expect(shown).toContain("3.45s");
 
       /*
        * **And no column saying `production`.** Every row on this surface is
@@ -1315,7 +1315,7 @@ describe("what a project recorded in production", () => {
         "Turns",
         "P90 turn latency",
       ]);
-      expect(await overview.innerText()).toContain("3.07s");
+      expect(await overview.innerText()).toContain("3.45s");
       expect(
         await sheet
           .getByRole("heading", { name: "Latency", exact: true })

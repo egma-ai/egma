@@ -733,15 +733,35 @@ function put(
  * framework whose turns begin at their first word.
  *
  * **The start is the VAD's end of speech, never the endpointing commit**
- * (ADR-0024 §5, catalog version 8). In the agent's own spans the caller's last
- * audible sample is the end of the human turn's last `speaking` child; the
- * turn's own end is the moment the endpointer *decided* the caller had
- * finished, which the framework's own defaults put about a second later — a
- * Silero hangover plus a minimum delay. Measuring from the commit would delete
- * a second the caller actually waited and make a slow agent look fast. Where
+ * (ADR-0024 §5, catalog version 8). In the agent's own spans the nearest thing
+ * to the caller's last audible sample is the end of the human turn's last
+ * `speaking` child. It is not that sample: LiveKit closes the child once its
+ * VAD has waited its silence hangover (0.55 s by default) past the last
+ * speech it heard, so this start sits about half a second after the caller
+ * went quiet, and the agent's own account of its wait is that much short of
+ * the definition — which is one reason the persona's clock, not this one,
+ * leads on a simulation. The turn's own end is worse: the moment the
+ * endpointer *decided* the caller had finished, which the framework's own
+ * defaults put about a second later still — a minimum delay on top of the
+ * hangover. Measuring from the commit would delete a second the caller
+ * actually waited and make a slow agent look fast. Where
  * the framework recorded no speech for the caller — Retell's word-bounded
  * turns, egma's own chat lane — the turn's end is the only instant the trace
  * holds and stands in for it.
+ *
+ * **One utterance the transcriber delivered in two pieces is one wait, not
+ * two.** A human turn carrying no `speaking` child of its own that opened while
+ * the preceding agent turn was still running is a **continuation**: the caller
+ * was not audible then — their speech had already been closed by the VAD — so
+ * what arrived was the rest of the same utterance, late, and the agent cut off
+ * the reply it had begun on the first half. A continuation takes no sample and
+ * does not end the caller's question. The wait it belongs to is the one the
+ * earlier human turn opened, and it closes at the first agent speech after the
+ * reply that was cut off. Reading it as a turn of its own answered a live call
+ * with two numbers where the caller had spoken once and waited once: two
+ * seconds to a forty-millisecond fragment nobody heard, then 2840 ms measured
+ * from a commit instant nobody waited from. The one wait the caller took was
+ * 5178 ms, and egma's own recording of the same wait read 5720 ms.
  *
  * **A measurement that runs backwards is not a slow answer and is not kept.**
  * Turn spans overlap on a real captured call — five neighbouring pairs out of
@@ -777,9 +797,19 @@ function put(
 function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
   const samples: Sample[] = [];
   const traceHasNoSpeakingSpans = hasNoSpeakingSpans(turns);
+  const continuation = continuationsIn(turns, traceHasNoSpeakingSpans);
   for (const [at, turn] of turns.entries()) {
     if (turn.kind !== HUMAN_TURN) continue;
-    const answered = answeringSpeech(turns, at, traceHasNoSpeakingSpans);
+    // The rest of the previous utterance is not a question of its own, so it
+    // opens no wait: the wait it belongs to was opened by the turn that carried
+    // the caller's speech, and is measured there.
+    if (continuation[at] === true) continue;
+    const answered = answeringSpeech(
+      turns,
+      at,
+      traceHasNoSpeakingSpans,
+      continuation,
+    );
     if (answered === undefined) continue;
     const latency = milliseconds(answered.startedAt - stoppedSpeaking(turn));
     if (latency < 0) continue;
@@ -872,25 +902,109 @@ function agentSpeechDuration(turns: readonly TimedSpan[]): readonly Sample[] {
  * on a page, and, in the limit, a bound failed by a duplicate. The unanswered
  * first turn measures nothing, which is what actually happened: the wait it
  * would have measured ended when the caller spoke again, not when the agent did.
+ *
+ * **A false start is not an answer, and the walk goes straight past it.** An
+ * agent turn immediately followed by a continuation human turn is a reply the
+ * framework began on half an utterance and cut off the moment the rest of it
+ * arrived — a fragment of a few dozen milliseconds the caller never heard as an
+ * answer, so stopping there would report a wait that ended in silence. The turn
+ * is skipped whole, its speech included, and the walk carries on to the speech
+ * that did answer. The continuation itself is not a human turn the walk stops
+ * at either: the caller had not spoken again, so their question is still open.
+ * What makes the turn a false start is the continuation's own test — the
+ * reply ended no later than the late turn closed — so an answer the agent
+ * carried on with past a speechless turn is never mistaken for one.
  */
 function answeringSpeech(
   turns: readonly TimedSpan[],
   at: number,
   traceHasNoSpeakingSpans: boolean,
+  continuation: readonly boolean[],
 ): { readonly startedAt: bigint; readonly spanId: string } | undefined {
   let silentAnswer:
     | { readonly startedAt: bigint; readonly spanId: string }
     | undefined;
-  for (const turn of turns.slice(at + 1)) {
+  for (let next = at + 1; next < turns.length; next += 1) {
+    const turn = turns[next];
+    if (turn === undefined) continue;
     if (turn.kind === HUMAN_TURN) {
+      if (continuation[next] === true) continue;
       return traceHasNoSpeakingSpans ? silentAnswer : undefined;
     }
     if (turn.kind !== AGENT_TURN) continue;
+    // A false start — the reply the turn after it cut off. It answered nothing,
+    // so its speech is not the speech that ends the wait.
+    if (continuation[next + 1] === true) continue;
     const speech = turn.speech[0];
     if (speech !== undefined) return speech;
     silentAnswer ??= { startedAt: turn.startedAt, spanId: turn.spanId };
   }
   return traceHasNoSpeakingSpans ? silentAnswer : undefined;
+}
+
+/**
+ * Which human turns are the rest of the caller's previous utterance rather
+ * than turns of the caller's own — one flag per turn, in the turns' order.
+ *
+ * **The caller was not audible when it opened.** A human turn with no
+ * `speaking` child of its own that began while the agent's preceding turn was
+ * still running is the transcriber delivering more words of an utterance whose
+ * speech the VAD had already closed: the framework files those late words as a
+ * new turn and interrupts the reply it had begun on the first half of the
+ * sentence. Nobody spoke, nobody waited, and nobody was answered — so the turn
+ * measures nothing and ends nothing.
+ *
+ * **It is the pair that says so, and never the missing speech alone.** A
+ * speechless human turn that opened after the agent's turn had ended is an
+ * ordinary turn of a framework that records no speech for the caller — Retell's
+ * word-bounded turns, egma's own chat lane — and is measured as one. The agent
+ * turn is the one immediately before it in start order, because that is the
+ * turn the late words cut off — and cut off is the second half of the test:
+ * the agent turn ended no later than the late turn closed. A reply the agent
+ * carried on with past the late turn's end was not cut off by it, so a
+ * speechless turn that opens inside an answer the agent finished — a typed
+ * line, a backchannel the transcriber wrote down and the VAD never gated —
+ * is an ordinary turn, and the answer around it stays the answer it was.
+ *
+ * **Another flush is the same utterance again.** A speechless human turn
+ * straight after a continuation, with no agent turn between, is the
+ * transcriber delivering a third piece before the agent replied to any of
+ * it: a continuation too, and the walk reads the run of them as one. Where a
+ * human turn with speech sits before it instead, the caller genuinely spoke
+ * twice and the second turn is their own.
+ *
+ * **A trace that records no speech for anyone says nothing by one turn's
+ * missing speech.** On Retell's word-bounded turns every human turn is
+ * speechless, so a human turn that opens inside the agent's turn there is the
+ * caller talking over the agent — their own turn, measured as one — and no
+ * continuation is ever read on such a trace.
+ */
+function continuationsIn(
+  turns: readonly TimedSpan[],
+  traceHasNoSpeakingSpans: boolean,
+): readonly boolean[] {
+  const continuation: boolean[] = new Array<boolean>(turns.length).fill(false);
+  if (traceHasNoSpeakingSpans) return continuation;
+  // One pass, earliest first: each answer depends on the turn before it, and
+  // the turn before it has already been answered — so a run of flushes reads
+  // in one walk, however long a trace the door let in.
+  for (const [at, turn] of turns.entries()) {
+    if (turn.kind !== HUMAN_TURN || turn.speech.length > 0) continue;
+    const before = turns[at - 1];
+    if (before === undefined) continue;
+    if (before.kind === HUMAN_TURN) {
+      // Straight after a continuation: the transcriber flushed the same
+      // utterance again before the agent had replied to any of it.
+      continuation[at] = continuation[at - 1] === true;
+      continue;
+    }
+    if (before.kind !== AGENT_TURN) continue;
+    // Opened while the reply ran, and the reply did not outlive it: cut off by
+    // its arrival, not carried on past it.
+    continuation[at] =
+      turn.startedAt < before.endedAt && before.endedAt <= turn.endedAt;
+  }
+  return continuation;
 }
 
 /** Whether this trace's emitter recorded speech at all. */
