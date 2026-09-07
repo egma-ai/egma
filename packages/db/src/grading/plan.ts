@@ -22,6 +22,7 @@ export type PlanItem = {
   readonly type: string;
   readonly passThreshold: number;
   readonly parameterValues: Readonly<Record<string, unknown>>;
+  readonly definition: GraderDefinitionSnapshot;
 };
 
 export type PlanGroup = {
@@ -29,6 +30,12 @@ export type PlanGroup = {
   readonly testId: string;
   readonly testVersionId: string;
   readonly items: readonly PlanItem[];
+};
+
+/** The complete selection written with the run, before any work can be claimed. */
+export type FrozenRunGradingPlan = {
+  readonly capturedAt: string;
+  readonly groups: readonly PlanGroup[];
 };
 
 export type ProjectGraderCandidate = ExecutableProjectGrader & {
@@ -80,6 +87,7 @@ function itemFrom(candidate: ProjectGraderCandidate): PlanItem {
     type: candidate.definition.type,
     passThreshold: candidate.passThreshold,
     parameterValues: candidate.parameterValues,
+    definition: candidate.definition,
   };
 }
 

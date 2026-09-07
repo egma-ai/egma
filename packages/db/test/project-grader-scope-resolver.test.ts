@@ -124,6 +124,7 @@ describe("the pure grader resolver", () => {
             type: "llm_as_judge",
             passThreshold: 0.7,
             parameterValues: { maximum: 7 },
+            definition: onlyFirst.definition,
           },
         ],
       },
