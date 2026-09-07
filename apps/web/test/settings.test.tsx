@@ -103,6 +103,17 @@ const ORGANIZATION = {
   mayManageOrganization: true,
 };
 
+/** What the organization page reads beside the organization itself. */
+const PERIOD_USAGE = {
+  periodStartedAt: "2026-09-01T10:00:00.000Z",
+  resetsAt: "2026-10-01T10:00:00.000Z",
+  allowances: [
+    { kind: "chat_simulations", unit: "simulations", used: 12 },
+    { kind: "web_call_minutes", unit: "minutes", used: 4.5 },
+    { kind: "phone_minutes", unit: "minutes", used: 0 },
+  ],
+};
+
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -201,6 +212,7 @@ const ORGANIZATION_WIDE: readonly {
     page: "Organization",
     answers: {
       "/v1/organization": { status: 200, body: ORGANIZATION },
+      "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
     },
     open: () => render(<OrganizationSettingsPage />),
     removed: /Everything on this page belongs to the whole organization/,
@@ -894,6 +906,7 @@ describe("organization settings", () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
       "/v1/organization": { status: 200, body: organization },
+      "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
     });
     render(<OrganizationSettingsPage />);
   }
@@ -906,6 +919,7 @@ describe("organization settings", () => {
         { status: 200, body: { ...ORGANIZATION, name: "Acme Voice" } },
         { status: 200, body: { ...ORGANIZATION, name: "Acme Voice" } },
       ],
+      "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
     });
     render(<OrganizationSettingsPage />);
 
@@ -969,6 +983,7 @@ describe("organization settings", () => {
         reloadAnswer,
         retryAnswer,
       ],
+      "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
     });
     render(<OrganizationSettingsPage />);
 

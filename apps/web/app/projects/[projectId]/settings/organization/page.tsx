@@ -4,7 +4,11 @@ import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { getOrganization, updateOrganization } from "@egma/platform-api/client";
 
-import type { Refusal } from "../../../../../lib/api.ts";
+import type { Answer, Refusal } from "../../../../../lib/api.ts";
+import {
+  readPeriodUsage,
+  type PeriodUsage,
+} from "../../../../../lib/organization-usage.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
 import type { OrganizationSettings } from "../../../../../lib/settings.ts";
@@ -19,6 +23,7 @@ import {
   Problem,
   Refused,
 } from "../../../../../ui/form.tsx";
+import { OrganizationUsage } from "../../../../../ui/organization-usage.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
 import {
@@ -51,6 +56,25 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   );
   const settled = answer?.status === "ready" ? answer.value : null;
   const mayAdminister = settled?.mayManageOrganization === true;
+
+  /**
+   * What this organization has used this period.
+   *
+   * Its own read rather than a field on the organization: it is a different
+   * kind of fact — a measurement that moves every minute, beside a name that
+   * changes when somebody types — and folding it in would make saving the name
+   * re-read a month of usage and reading the month depend on the form.
+   */
+  const [usage, setUsage] = useState<Answer<PeriodUsage> | null>(null);
+  useEffect(() => {
+    let current = true;
+    void readPeriodUsage().then((answer) => {
+      if (current) setUsage(answer);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
 
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -204,6 +228,13 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
                 </Button>
               </FormActions>
             </Form>
+
+            {/*
+              * Under the form, because the form is what somebody came to this
+              * page to change and this is a fact about the month. Every role
+              * sees it and no role acts on it.
+              */}
+            <OrganizationUsage usage={usage} />
           </div>
         </SettingsLayout>
       </PageBody>
