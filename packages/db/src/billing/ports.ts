@@ -20,8 +20,10 @@ import type { AllowanceKind } from "./allowance.ts";
  * the day billing arrives, no call site moves.
  *
  * **Nothing here asks whether this deployment is the cloud.** The adapter is
- * chosen from the presence of a setting, once, at boot. See
- * `billingPlugInFor` at the foot of this file, and ADR-0024.
+ * chosen from the presence of a setting, once, at boot — and the choosing
+ * happens one layer out, in `apps/api`, because the cloud adapter lives in the
+ * commercially licensed `ee/` package and this package may never import it.
+ * See `billingIsConfigured` at the foot of this file, and ADR-0024.
  */
 
 /** One allowance an organization has spent, and when it comes back. */

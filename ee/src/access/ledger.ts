@@ -48,6 +48,11 @@ export type ChargedUsage = {
  * a sink that assumed otherwise would bill a customer for their own provider
  * account.
  *
+ * **A record that cost nothing writes no row.** A quantity with no price
+ * effective at its instant is stored at zero, and a movement of nothing is not
+ * a movement — the ledger's own check says so. It is real usage and it is on
+ * the usage page; it is simply not money.
+ *
  * **The ledger row and the balance move in one transaction, per organization.**
  * A batch can hold records from more than one customer, so it is grouped first
  * and each customer's charge is one transaction: a failure charges one
