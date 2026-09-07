@@ -139,6 +139,13 @@ const projectKey = \`egma_sk_\${"a".repeat(43)}\`;
 // The discard port: an exporter that is real, and a flush that fails fast
 // rather than retrying on a timer while this script waits on it.
 const egmaEndpoint = "http://127.0.0.1:9";
+const [major, minor, patch] = liveKitVersion.split(".").map(Number);
+// Both verbs export spans, so both need LiveKit's public telemetry seam.
+// Below it the peer range still installs and the mock-tool hook still
+// exists, but a simulation Egma cannot be told about must not run.
+const hasTelemetrySeam =
+  major > 1 ||
+  (major === 1 && (minor > 5 || (minor === 5 && patch >= 5)));
 initializeLogger({ pretty: false, level: "silent" });
 
 function forbidReads(target, label) {
@@ -190,6 +197,28 @@ const agent = forbidReads(
 const session = forbidReads(productionSession, "session");
 await simulation(agent, productionContext, session);
 await productionSession.close();
+
+if (!hasTelemetrySeam) {
+  // Everything below needs the exporter, and this version has nowhere to
+  // install it. A simulation room says so plainly and stops; the production
+  // room above stayed inert, which is the whole of what this version can do.
+  const belowSeamSession = new voice.AgentSession();
+  await assert.rejects(
+    simulation(
+      new voice.Agent({ instructions: "Compatibility check" }),
+      { job: { room: { name: "egma-sim-packed-below-seam" } } },
+      belowSeamSession,
+      { endpoint: egmaEndpoint, apiKey: projectKey },
+    ),
+    (error) =>
+      error instanceof Error &&
+      error.message.includes(
+        "requires a supported @livekit/agents version (>=1.5.5 <2)",
+      ),
+  );
+  await belowSeamSession.close();
+  process.exit(0);
+}
 
 class CompatibilityAgent extends voice.Agent {
   constructor(execute) {

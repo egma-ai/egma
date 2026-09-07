@@ -198,12 +198,25 @@ export async function pullRetellSimulationRecord(
   let held: RetellCall | undefined;
   try {
     held = await ask();
-    if (held !== undefined && retellCallDocumentIsComplete(held)) {
-      await file(held);
-      return;
-    }
   } catch (cause) {
-    return said(log, simulationId, "the first attempt failed", cause);
+    // **A throw here is the transport, not Retell's answer.** A blip on the
+    // first attempt is the exact thing the retries below exist for, so it is
+    // said and then carried past — returning here would spend the whole
+    // bound on one bad socket, and a completion resend deliberately starts no
+    // second pull, so this simulation would lose its agent POV for good.
+    said(log, simulationId, "the first attempt failed", cause);
+  }
+
+  if (held !== undefined && retellCallDocumentIsComplete(held)) {
+    // Complete on the first ask: filed once, and never asked again. Evidence
+    // is filed once and it is the fetch that retries (ADR-0014's identity
+    // rule), so a filing that fails is reported rather than re-attempted.
+    try {
+      await file(held);
+    } catch (cause) {
+      said(log, simulationId, "the record could not be filed", cause);
+    }
+    return;
   }
 
   if (waits.length === 0) {

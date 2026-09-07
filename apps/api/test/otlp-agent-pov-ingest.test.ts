@@ -8,6 +8,7 @@ import {
   getGradingJobForTrace,
   laneProducesAnAgentPov,
   listSimulations,
+  resolveSimulationStanding,
   settleSimulationsPastTheAgentPovBound,
   startRun,
   startSimulation,
@@ -18,6 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { reportPathFor } from "../src/routes/reports.ts";
+import { pullRetellSimulationRecord } from "../src/retell-simulation-ingestion.ts";
 import { decodeOtlpExport, type OtlpExport } from "../src/otlp/decode.ts";
 import {
   PROVIDER_REFERENCE_ATTRIBUTE,
@@ -1830,4 +1832,317 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
     expect(again.statusCode, again.body).toBe(200);
     expect(askedOfRetell).toHaveLength(askedSoFar);
   }, 120_000);
+
+  /**
+   * **A blip on the first attempt is what the retries are for.**
+   *
+   * Retell answering "not yet" and the socket failing are two different
+   * things, and only the first arrives as an answer — a refused connection, a
+   * DNS wobble or a timeout arrives as a throw. Both mean the same to this
+   * simulation: no agent POV yet. So a throw on the first attempt has to fall
+   * into the same bounded retries a thin document does, because the door's
+   * completion resend deliberately starts no second pull — this is the only
+   * pull this conversation will ever get, and losing it loses the transcript
+   * and every tool call Retell holds for good.
+   */
+  it("retries a first attempt that threw, and files what the retry answers", async () => {
+    const auth = contextFor(acme, "member");
+    const created = await createAgent(auth, {
+      agentPlatform: "retell",
+      name: "Front desk retell blip",
+      connection: {
+        agentPlatform: "retell",
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+        modality: "chat",
+        config: { retellAgentId: "agent_front_desk" },
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
+    });
+    const personaId = (
+      await createPersona(auth, {
+        name: "Impatient Rita blip",
+        ...NEUTRAL_PERSON,
+      })
+    ).id;
+    const suiteId = (await createTestSuite(auth, { name: "Weather blip" })).id;
+    await createTest(auth, {
+      suiteId,
+      name: "Asks about the weather after a blip",
+      scenario: "They want today's weather before they go out.",
+      expectedBehaviors: ["gives the weather that was asked about"],
+      personaIds: [personaId],
+    });
+    const started = await startRun(auth, {
+      suiteId,
+      agentId: created.id,
+      connectionId: created.connection?.id ?? "",
+      idempotencyKey: newId("run"),
+    });
+    const page = await listSimulations(auth, started.id, { limit: 1 });
+    const simulation = page?.items[0];
+    if (simulation === undefined) throw new Error("the run has no simulation");
+    const traceId = traceIdOfSimulation(simulation.id) ?? "";
+
+    const [claimed] = await claimSimulations({
+      claimant: CONDUCTOR,
+      capacity: 1,
+    });
+    expect(claimed?.id).toBe(simulation.id);
+    await startSimulation(auth, simulation.id, CONDUCTOR);
+
+    // The landing names a call this deployment's own reach does not answer
+    // for, so the door's pull files nothing and the whole of the agent's POV
+    // is still owed when the retry below is the one asking.
+    const blipCallId = "call_1a2b3c4d5e6f7a8b";
+    const landed = await api.app.inject({
+      method: "POST",
+      url: reportPathFor(simulation.id),
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: {
+        contract_version: 1,
+        simulation_id: simulation.id,
+        events: [
+          {
+            kind: "status",
+            event_id: "evt-000001",
+            at: CONVERSATION_ENDED_AT.toISOString(),
+            status: "completed",
+            reason: null,
+            facts: {
+              ending: "agent_ended",
+              started_at: CONVERSATION_STARTED_AT.toISOString(),
+              ended_at: CONVERSATION_ENDED_AT.toISOString(),
+              turn_count: 3,
+              audio: null,
+              provider_reference: blipCallId,
+            },
+          },
+        ],
+      },
+    });
+    expect(landed.statusCode, landed.body).toBe(200);
+    await api.drainEvidence();
+    expect(await agentRowsUnder(traceId)).toBe(0);
+
+    // The first ask throws the way a refused socket does; the second answers
+    // the whole document.
+    let asks = 0;
+    const blippedReach = {
+      fetchImpl: (async (input: unknown) => {
+        asks += 1;
+        if (asks === 1) throw new Error("connection refused");
+        return new Response(
+          JSON.stringify({ ...RETELL_CALL, call_id: blipCallId }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }) as typeof fetch,
+    };
+
+    // The conducting context the report door holds when it starts a pull. A
+    // connection's credential is unsealed for egma's own simulator and for
+    // nothing else, so a member's session cannot ask for this.
+    const standing = await resolveSimulationStanding(simulation.id);
+    if (standing === undefined) throw new Error("the simulation has no standing");
+
+    await pullRetellSimulationRecord(
+      standing.auth,
+      simulation.id,
+      blippedReach,
+      api.app.log,
+      { retryWaitsMilliseconds: [1], sleep: async () => {} },
+    );
+
+    // The retry runs after the door has answered, so the record arrives a
+    // moment later — but arrive it does, which before this it never did.
+    const filed = await untilAgentRowsLand(traceId);
+    expect(asks).toBe(2);
+    expect(filed).toBeGreaterThan(1);
+
+    const toolNames = await store().rows<{ tool_name: string }>(
+      `select tool_name from spans final
+       where trace_id = '${traceId}' and kind = 'tool'`,
+    );
+    expect(toolNames.map((one) => one.tool_name)).toEqual(["lookup_weather"]);
+  }, 120_000);
 });
+
+/**
+ * **The mark says isolated, so a lane that isolates nothing must not carry it.**
+ *
+ * A mocked mark is read at display time from the pinned test version by tool
+ * name — and by the lane, which is the half the claim has always applied:
+ * a simulation is mocked when its own test named a tool *and* the lane can
+ * serve one. The phone lane deliberately serves none: the real carrier leg,
+ * the real band, the real tools. So a test that pins `book_appointment` and
+ * then runs over a phone number had that call answered by the customer's own
+ * backend, and marking it `mocked` would tell a developer a real booking was
+ * a rehearsal.
+ *
+ * Reachable because the filing step never inspects a simulation's lane: an
+ * export naming this row's provider reference with a project key is filed
+ * under it, whatever the standing or the lane.
+ */
+describe.skipIf(!storage.available)("a tool call on a lane that mocks nothing", () => {
+  it("carries no mocked mark, though the pinned test names that tool", async () => {
+    const auth = contextFor(acme, "member");
+    const created = await createAgent(auth, {
+      agentPlatform: "retell",
+      name: "Reception line phone",
+      connection: {
+        agentPlatform: null,
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+15551234567" },
+      } as never,
+    });
+    const personaId = (
+      await createPersona(auth, { name: "Impatient Rita phone", ...NEUTRAL_PERSON })
+    ).id;
+    const suiteId = (await createTestSuite(auth, { name: "Booking phone" })).id;
+    await createTest(auth, {
+      suiteId,
+      name: "Asks to book, over the phone",
+      scenario: "They want an appointment on Tuesday.",
+      expectedBehaviors: ["books the appointment that was asked for"],
+      personaIds: [personaId],
+      // The world the test author wrote down. The phone lane cannot serve it,
+      // and that is exactly the disagreement this case is about.
+      mockTools: [{ tool: "book_appointment", answer: { booked: true } }],
+    });
+    const started = await startRun(auth, {
+      suiteId,
+      agentId: created.id,
+      connectionId: created.connection?.id ?? "",
+      idempotencyKey: newId("run"),
+    });
+    const page = await listSimulations(auth, started.id, { limit: 1 });
+    const simulation = page?.items[0];
+    if (simulation === undefined) throw new Error("the run has no simulation");
+    const traceId = traceIdOfSimulation(simulation.id) ?? "";
+
+    const [claimed] = await claimSimulations({
+      claimant: CONDUCTOR,
+      capacity: 1,
+    });
+    expect(claimed?.id).toBe(simulation.id);
+    await startSimulation(auth, simulation.id, CONDUCTOR);
+    const reference = "phone-call-1a2b3c";
+    await completeSimulation(auth, simulation.id, CONDUCTOR, {
+      endingReason: "agent_ended",
+      turnCount: 3,
+      providerReference: reference,
+      startedAt: CONVERSATION_STARTED_AT,
+      endedAt: CONVERSATION_ENDED_AT,
+    });
+
+    // An agent POV naming this row, with the project's own key: one session
+    // root and the one tool call the pinned world names.
+    const at = (seconds: number): string =>
+      String(
+        BigInt(CONVERSATION_STARTED_AT.getTime() + seconds * 1000) * 1_000_000n,
+      );
+    const root = `${traceId.slice(0, 14)}a1`;
+    const posted = await post(
+      JSON.stringify({
+        resourceSpans: [
+          {
+            resource: {
+              attributes: [
+                {
+                  key: PROVIDER_REFERENCE_ATTRIBUTE,
+                  value: { stringValue: reference },
+                },
+              ],
+            },
+            scopeSpans: [
+              {
+                scope: { name: "livekit-agents", version: "1" },
+                spans: [
+                  {
+                    traceId: "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+                    spanId: root,
+                    parentSpanId: "",
+                    name: "agent_session",
+                    kind: "SPAN_KIND_INTERNAL",
+                    startTimeUnixNano: at(0),
+                    endTimeUnixNano: at(60),
+                    attributes: [],
+                  },
+                  {
+                    traceId: "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+                    spanId: `${traceId.slice(0, 14)}a2`,
+                    parentSpanId: root,
+                    name: "function_tool",
+                    kind: "SPAN_KIND_INTERNAL",
+                    startTimeUnixNano: at(2),
+                    endTimeUnixNano: at(3),
+                    attributes: [
+                      {
+                        key: "lk.function_tool.name",
+                        value: { stringValue: "book_appointment" },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+      acmeKey,
+    );
+    expect(posted.statusCode, posted.body).toBe(200);
+    await api.drainEvidence();
+
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${simulation.id}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    const body = read.json() as {
+      transcript: {
+        readonly turns: DetailSpan[];
+        readonly spans: DetailSpan[];
+      } | null;
+    };
+    const transcript = body.transcript;
+    if (transcript === null) throw new Error("the simulation has no transcript");
+
+    const tools = everySpan([
+      ...transcript.turns,
+      ...transcript.spans,
+    ]).filter((span) => span.kind === "tool");
+    expect(tools.map((span) => [span.toolName, span.toolProvenance])).toEqual([
+      ["book_appointment", undefined],
+    ]);
+  }, 120_000);
+});
+
+/** How many rows of the agent's own POV this trace holds. */
+async function agentRowsUnder(traceId: string): Promise<number> {
+  return countOf(
+    `select count() as n from spans final
+     where trace_id = '${traceId}' and emitter = 'agent'`,
+  );
+}
+
+/**
+ * Wait for a filing that happens after the call that started it returned.
+ *
+ * The pull answers on its first attempt and leaves the retries running behind
+ * it, deliberately — the report door is not held open for Retell. So a test
+ * about what a retry lands has to read the store until it is there, bounded so
+ * a filing that never comes fails rather than hangs.
+ */
+async function untilAgentRowsLand(traceId: string): Promise<number> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    await api.drainEvidence();
+    const rows = await agentRowsUnder(traceId);
+    if (rows > 0) return rows;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return 0;
+}

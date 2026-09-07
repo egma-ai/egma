@@ -8,6 +8,7 @@ import {
   getRun,
   getSimulation,
   getSimulationExecutionEvidence,
+  LANES_SERVING_MOCK_TOOLS,
   laneProducesAnAgentPov,
   NotPermittedError,
   readTrace,
@@ -72,12 +73,28 @@ function windowOf(
  * span: a second copy is a fact that can come to disagree with the first, and
  * the version is the half that cannot move.
  *
+ * **The lane is the other half of the same question, and this is the same
+ * sentence the claim says.** A simulation is mocked when its own test named a
+ * tool *and* the lane can serve one, which is exactly what the work order
+ * decides with `LANES_SERVING_MOCK_TOOLS` before the simulator ever runs. The
+ * phone lane is deliberately not mockable — the real carrier leg, the real
+ * tools — so a test that pins `book_appointment` and then runs over a phone
+ * number had that call answered by the customer's own backend. Reading the
+ * name alone would mark that real, side-effecting booking as isolated, which
+ * is the one lie this mark exists to prevent.
+ *
  * Empty for a simulation whose test mocked nothing, which is most of them, and
  * then no call carries a mark at all.
  */
 function mockedToolNames(
+  connectionType: string,
   mockTools: readonly { readonly tool: string }[] | undefined,
 ): ReadonlySet<string> {
+  if (
+    !(LANES_SERVING_MOCK_TOOLS as readonly string[]).includes(connectionType)
+  ) {
+    return new Set();
+  }
   return new Set((mockTools ?? []).map((mock) => mock.tool));
 }
 
@@ -304,7 +321,10 @@ export async function simulationRoutes(
       ]);
 
       const testVersion = executionEvidence?.testVersion;
-      const mocked = mockedToolNames(executionEvidence?.mockTools);
+      const mocked = mockedToolNames(
+        run.connectionSnapshot.connectionType,
+        executionEvidence?.mockTools,
+      );
 
       return reply.send({
         id: simulation.id,
