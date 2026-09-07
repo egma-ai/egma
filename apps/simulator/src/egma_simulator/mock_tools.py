@@ -118,6 +118,26 @@ which is why the order is that way round.
 HELLO_METHOD = "egma.hello"
 """Where a session announces itself and learns what egma answers for."""
 
+NOT_REPORTED = (
+    "the agent did not report to Egma: no egma.hello arrived from the "
+    "worker's session, so this simulation isolated nothing and its record "
+    "would say nothing about the tools it ran. The Egma SDK is required for "
+    "a LiveKit simulation — check that the worker can reach the room and "
+    "that Egma's participant was in it, and check that `egma.simulation` is "
+    "called on the agent's session before it starts"
+)
+"""What a LiveKit simulation whose agent never said hello ends on.
+
+Written for whoever has to go and fix it, which for a customer's worker is
+the developer wiring the SDK in. The two halves are in the order they can
+be checked: the room first, because that is what Egma can see, and the
+call in the worker's own code second, because that is the one Egma cannot.
+
+One sentence, in one place, because two things use it: the driver, where
+an agent joined the room and then went silent, and the plug, where an
+agent talked all the way through and never reported.
+"""
+
 TOOL_METHOD = "egma.tool"
 """Where one tool call is asked and answered."""
 
@@ -271,6 +291,27 @@ class MockToolSeam:
         self._exchanged: list[ExchangedToolCall] = []
 
     # -- What the driver does with it -----------------------------------------
+
+    @property
+    def agent_reported(self) -> bool:
+        """Whether the agent's session has said hello at least once.
+
+        The one thing a LiveKit simulation is required to see. A hello is
+        how the agent's own SDK announces itself, and everything else this
+        seam does — answering for tools, refusing names it has none for —
+        follows from one having arrived. A simulation without one ran with
+        every mocked tool calling its real backend, and nothing here would
+        say so.
+
+        Counted rather than remembered separately: a second hello replaces
+        the first, so the count is the whole of the record.
+
+        Named for the agent because :meth:`reported` next door is the
+        platform lane's word for a tool call somebody else says was made,
+        and one name for two unrelated facts is how a reader ends up
+        checking the wrong one.
+        """
+        return self._censuses > 0
 
     def exchanged(self) -> list[ExchangedToolCall]:
         """Every call since this was last asked, and then none.

@@ -178,6 +178,7 @@ from urllib.parse import urlsplit
 from ..contract import AGENT_NEVER_JOINED, ERROR
 from ..mock_tools import (
     HELLO_METHOD,
+    NOT_REPORTED,
     TOOL_METHOD,
     MockToolSeam,
 )
@@ -1548,6 +1549,18 @@ class LiveKitRoomBackend(RoomLifecycle):
             )
         left = deadline - asyncio.get_running_loop().time()
         if left <= 0 or not await first_of(self._room.carrying_audio, within=left):
+            # An agent that joined and went silent has two shapes, and they
+            # send a developer to different places. One is a worker that
+            # subscribes and never publishes. The other is the Egma SDK
+            # refusing to start a session it could not report — which it
+            # does out loud, in the worker's own log, and which arrives
+            # here as exactly the same silence. The seam knows which:
+            # the SDK's hello comes before the session starts, so a room
+            # with no hello in it is the second shape.
+            if self._mock_tools is not None and not self._mock_tools.agent_reported:
+                raise MediaBackendError(
+                    NOT_REPORTED, ending=AGENT_NEVER_JOINED
+                )
             raise MediaBackendError(
                 f"an agent joined the room but published no audio within "
                 f"{seconds:.0f}s; check that the worker publishes a track "
