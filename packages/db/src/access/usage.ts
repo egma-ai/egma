@@ -1,5 +1,7 @@
+import { USAGE_IDENTITIES } from "../clickhouse/usage.ts";
+import { providerUsageSpan, usageEvidenceHash, type ProviderUsageEvidence, type NewUsageRecord, type OrganizationUsage, type RecordedProviderUsage } from "../models/provider-usage.ts";
+export type { ProviderUsageEvidence, NewUsageRecord, OrganizationUsage, RecordedProviderUsage, UsageByModel, UsageIdentity, UsageQuantities } from "../models/provider-usage.ts";
 import { TupleParam } from "@clickhouse/client";
-import { createHash } from "node:crypto";
 import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import { newId } from "@egma/ids";
 import { db } from "../client.ts";
@@ -7,77 +9,19 @@ import { traceStore } from "../clickhouse/client.ts";
 import { allowanceTotalsSelection, begunInThePeriod, periodAt, periodUsageFrom, type PeriodUsage } from "../billing/period-usage.ts";
 export type { PeriodUsage } from "../billing/period-usage.ts";
 import { billableUsageTypesOf, isUsageType, readRateCard, unitOfQuantities, type RateCardEntry, type UsageType, type UsageUnit } from "../models/rate-card.ts";
-import { PROVIDER_CATALOG, type ModelAdapter } from "../models/catalog.ts";
+import { PROVIDER_CATALOG } from "../models/catalog.ts";
 import { rateCard } from "../schema/billing.ts";
 import { simulation } from "../schema/runs.ts";
 import { organization } from "../schema/tenancy.ts";
-import type { UsageMeasurement, UsagePaymentSource } from "../schema/billing.ts";
 import { authorize } from "./permissions.ts";
 import type { AuthContext } from "./context.ts";
 import { theOrganization, within } from "./within.ts";
 import { appendSpans, type NewSpan } from "./spans.ts";
 
-export type UsageQuantities = Readonly<Partial<Record<UsageType, number>>>;
-export type UsageIdentity =
-  | { readonly work: "simulation"; readonly simulationId: string; readonly spanId: string }
-  | { readonly work: "grading"; readonly gradingJobId: string; readonly attempts: number; readonly projectGraderId: string; readonly httpAttempt: number; readonly attemptId: string };
-export type NewUsageRecord = {
-  readonly identity: UsageIdentity;
-  readonly occurredAt: Date;
-  readonly runId?: string | undefined;
-  readonly simulationId?: string | undefined;
-  readonly traceId?: string | undefined;
-  readonly provider: string;
-  readonly model: string;
-  readonly operation: ModelAdapter;
-  readonly quantities: UsageQuantities;
-  readonly measurement: UsageMeasurement;
-  readonly providerRef?: string | undefined;
-  readonly paymentSource: UsagePaymentSource;
-  readonly credentialRef?: string | undefined;
-  readonly rawUsage: Readonly<Record<string, unknown>>;
-};
-export type ProviderUsageEvidence = Omit<NewUsageRecord, "occurredAt"> & {
-  readonly occurredAt: string;
-  /** Receipt is frozen before the first local durable append. */
-  readonly receivedAt: string;
-  readonly price?: { readonly amountMicros: number; readonly pricedBy: Readonly<Record<string, string>>; readonly unit: UsageUnit } | undefined;
-};
-export type RecordedProviderUsage = { readonly stored: number; readonly amountMicros: number };
-export type UsageByModel = { readonly provider: string; readonly model: string; readonly unit: UsageUnit; readonly requests: number; readonly quantities: Readonly<Record<string, number>>; readonly amountMicros: number };
-export type OrganizationUsage = { readonly amountMicros: number; readonly requests: number; readonly byModel: readonly UsageByModel[] };
-
-/** Nested key order cannot make identical measurements into different evidence. */
-export function canonicalUsage(value: unknown): string {
-  if (value === undefined) return "null";
-  if (Array.isArray(value)) return `[${value.map(canonicalUsage).join(",")}]`;
-  if (typeof value === "object" && value !== null) {
-    return `{${Object.entries(value).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonicalUsage(item)}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-export function usageEvidenceHash(usage: ProviderUsageEvidence, priced = true): string {
-  const { receivedAt: _receipt, price, ...measurement } = usage;
-  return createHash("sha256").update(canonicalUsage(priced ? { ...measurement, price } : measurement)).digest("hex");
-}
-
 function requireWriter(auth: AuthContext): void {
   if (auth.via !== "simulator" && auth.via !== "engine") throw new Error("provider usage requires the trusted simulation or grading claim");
   if (!auth.projectId) throw new Error("provider usage requires a project-scoped context");
   authorize(auth, "read", { organizationId: auth.organizationId, projectId: auth.projectId });
-}
-
-/** Make one paid attempt into evidence before any price lookup or store request. */
-export function providerUsageSpan(record: NewUsageRecord, receivedAt = new Date()): NewSpan {
-  if (!record.traceId) throw new Error("provider usage must belong to its trace");
-  const spanId = record.identity.work === "simulation" ? record.identity.spanId : createHash("sha256").update(canonicalUsage(record.identity)).digest("hex").slice(0, 16);
-  return {
-    traceId: record.traceId, spanId, parentSpanId: "", source: record.runId ? "simulation" : "production",
-    emitter: record.identity.work === "grading" ? "grader" : "egma-runtime", environment: "default",
-    startedAtMicroseconds: BigInt(record.occurredAt.getTime()) * 1_000n, durationNanoseconds: 0n,
-    name: "provider_usage", kind: "provider_usage", status: "unset", text: "", audioUrl: "", toolName: "", toolArguments: "", toolResult: "", providerCallId: "", agentPlatform: "", platformAgentId: "", platformAgentName: "", platformAgentVersion: "", connectionType: "", runId: record.runId ?? "", agentId: "", agentVersionId: "", testVersionId: "", personaVersionId: "", payload: "{}", endsTrace: false,
-    usage: { ...record, occurredAt: record.occurredAt.toISOString(), receivedAt: receivedAt.toISOString() },
-  };
 }
 
 /** The `usd_per_million` numeric as Postgres hands it back, exactly. */
@@ -216,26 +160,6 @@ export async function recordProviderUsage(auth: AuthContext, records: readonly N
   const spans = await priceUsageSpans(auth, records.map((record) => providerUsageSpan(record)));
   await appendSpans(auth, spans);
   return { stored: spans.length, amountMicros: spans.reduce((total, span) => total + (span.usage?.price?.amountMicros ?? 0), 0) };
-}
-
-const USAGE_IDENTITIES = `SELECT organization_id, project_id, trace_id, span_id,
-  uniqExact(usage_identity_hash) AS variants,
-  any(usage_amount_micros) AS amount, any(usage_payment_source) AS payment_source,
-  any(usage_occurred_at) AS occurred_at,
-  any(usage_provider) AS provider, any(usage_model) AS model, any(usage_unit) AS unit,
-  any(usage_quantities) AS quantities
- FROM spans WHERE organization_id = {org:String} AND usage_identity_hash != ''
- GROUP BY organization_id, project_id, trace_id, span_id`;
-
-/** One snapshot includes late visible records without treating an interval mark as a watermark. */
-export async function readPlatformUsageTotal(input: { organizationId: string; occurredAtOrAfter: Date }): Promise<{ amountMicros: bigint; requests: bigint }> {
-  const result = await traceStore().query({
-    query: `SELECT toString(sumIf(toUInt128(amount), payment_source = 'platform' AND occurred_at >= fromUnixTimestamp64Milli({floor:Int64}))) AS amount, toString(countIf(payment_source = 'platform' AND occurred_at >= fromUnixTimestamp64Milli({floor:Int64}))) AS requests, countIf(variants != 1) AS conflicts FROM (${USAGE_IDENTITIES})`,
-    query_params: { org: input.organizationId, floor: input.occurredAtOrAfter.getTime() }, format: "JSONEachRow",
-  });
-  const [row] = await result.json<{ amount: string; requests: string; conflicts: number }>();
-  if (!row || Number(row.conflicts) !== 0) throw new Error("provider usage contains conflicting immutable identities");
-  return { amountMicros: BigInt(row.amount), requests: BigInt(row.requests) };
 }
 
 /** Organization-wide provider/model totals for the shared settings read. */

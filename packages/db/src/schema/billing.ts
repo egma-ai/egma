@@ -11,15 +11,7 @@ import {
 import { USAGE_TYPES, USAGE_UNITS } from "../models/rate-card.ts";
 import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
 
-/**
- * Measuring what Egma's work costs, and pricing it. Both tables are the
- * product's, on every deployment: a self-hoster and a customer on their own
- * provider keys see their spend from these two rows and nothing else.
- *
- * Neither table knows anything about who pays. That is the cloud's question
- * and it lives in the cloud's own tables, which reference these and are
- * referenced by nothing here.
- */
+/** Shared versioned rate configuration. Request evidence is stored on ClickHouse spans. */
 
 /** How a quantity was learnt: the provider said so, or Egma counted it. */
 export const USAGE_MEASUREMENTS = ["provider_reported", "client_measured"] as const;

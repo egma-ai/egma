@@ -5,3 +5,4 @@ export * from "./write-ahead-log.ts";
 export * from "./object-store.ts";
 export * from "./settings.ts";
 export * from "./usage.ts";
+export * from "./config.ts";

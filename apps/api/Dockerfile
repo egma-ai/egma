@@ -9,6 +9,7 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY packages/db/package.json packages/db/
+COPY packages/ingestion/package.json packages/ingestion/
 COPY packages/ids/package.json packages/ids/
 COPY packages/lint/package.json packages/lint/
 COPY packages/metrics/package.json packages/metrics/
@@ -29,11 +30,12 @@ COPY packages/provider-credentials packages/provider-credentials
 COPY packages/retell packages/retell
 COPY packages/simulation-contract packages/simulation-contract
 COPY packages/db packages/db
+COPY packages/ingestion packages/ingestion
 RUN --mount=type=bind,target=/workspace \
     if [ -f /workspace/ee/package.json ]; then cp -R /workspace/ee/. ee/; fi
 COPY apps/api apps/api
 RUN pnpm --filter @egma/ee --if-present build \
-    && pnpm exec tsc -b packages/ids packages/platform-api packages/provider-credentials packages/retell packages/db apps/api
+    && pnpm exec tsc -b packages/ids packages/platform-api packages/provider-credentials packages/retell packages/db packages/ingestion apps/api
 
 ENV NODE_ENV=production
 EXPOSE 3100

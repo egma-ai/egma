@@ -505,6 +505,13 @@ services:
       # This copy's own name for itself, in claims and in its log. Unset is
       # fine and usual — it names itself after its host and process, which is
       # what tells two copies apart.
+      # Paid attempts first enter this worker's own recoverable log and shared bucket.
+      EGMA_INGEST_ENDPOINT: ${EGMA_INGEST_ENDPOINT:-http://minio:9000}
+      EGMA_INGEST_BUCKET: ${EGMA_INGEST_BUCKET:-egma-ingestion}
+      EGMA_INGEST_REGION: ${EGMA_INGEST_REGION:-${EGMA_S3_REGION:-}}
+      EGMA_INGEST_ACCESS_KEY_ID: ${EGMA_INGEST_ACCESS_KEY_ID:-${EGMA_S3_INGEST_ACCESS_KEY_ID:-}}
+      EGMA_INGEST_SECRET_ACCESS_KEY: ${EGMA_INGEST_SECRET_ACCESS_KEY:-${EGMA_S3_INGEST_SECRET_ACCESS_KEY:-}}
+      EGMA_INGESTION_LOG_DIR: /var/lib/egma/grader-ingestion
       EGMA_GRADER_CLAIMANT: ${EGMA_GRADER_CLAIMANT:-}
       # How many conversations one copy judges at once. It claims only what it
       # has room for, so a burst of finished simulations degrades to a queue
@@ -545,6 +552,8 @@ services:
       EGMA_TELEMETRY_OTLP_ENDPOINT: ${EGMA_TELEMETRY_OTLP_ENDPOINT:-}
       EGMA_POSTHOG_KEY: ${EGMA_POSTHOG_KEY:-}
       EGMA_POSTHOG_HOST: ${EGMA_POSTHOG_HOST:-}
+    volumes:
+      - grader-ingestion:/var/lib/egma/grader-ingestion
     depends_on:
       api:
         condition: service_healthy
@@ -696,4 +705,5 @@ volumes:
   # a container replacement, which is what makes a restart a recovery rather
   # than a loss; `docker compose down -v` deletes it, and doing that with a
   # backlog in it throws away evidence Egma answered success to.
+  grader-ingestion:
   api-ingestion:

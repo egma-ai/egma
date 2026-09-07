@@ -1,3 +1,4 @@
+import { loadIngestionSettings, type IngestionSettings } from "@egma/ingestion";
 import { hostname } from "node:os";
 
 /**
@@ -6,6 +7,7 @@ import { hostname } from "node:os";
  */
 export type Config = {
   readonly databaseUrl: string;
+  readonly ingestion: IngestionSettings;
   readonly clickhouseUrl: string;
   /** This copy's own name for itself, in claims and in the log. */
   readonly claimant: string;
@@ -93,6 +95,7 @@ export function loadConfig(): Config {
 
   const config: Config = {
     databaseUrl: required("DATABASE_URL"),
+    ingestion: loadIngestionSettings(process.env, { role: "ingest", logDirectory: "/var/lib/egma/grader-ingestion" }),
     clickhouseUrl: required("CLICKHOUSE_URL"),
     claimant: claimant === undefined || claimant === "" ? defaultClaimant() : claimant,
     capacity: positiveWholeNumber("EGMA_GRADER_CAPACITY", DEFAULT_CAPACITY),

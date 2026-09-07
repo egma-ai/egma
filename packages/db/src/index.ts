@@ -273,3 +273,6 @@ export {
   type PersonaParameterValues,
 } from "./persona-library/parameters.ts";
 export type { ProjectPersonaSettings } from "./access/project-personas.ts";
+
+export { readPlatformUsageTotal } from "./billing/usage.ts";
+export { providerUsageSpan } from "./models/provider-usage.ts";
