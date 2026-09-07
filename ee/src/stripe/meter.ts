@@ -126,6 +126,15 @@ async function postOneHour(
   };
 
   for (const [eventName, value] of Object.entries(minutes)) {
+    // **The identifier is Stripe's own duplicate guard, and it is a short
+    // one.** Stripe enforces uniqueness on it for a rolling period of at least
+    // 24 hours, so an hour offered again inside that window is refused rather
+    // than counted twice; the forward-only mark is what keeps an hour from
+    // being offered again at all. The identifier is deliberately *not* also
+    // sent as the request's idempotency key: Stripe answers a repeated key
+    // with the first response for a day, which would make a replayed hour
+    // look posted instead of refused. The SDK keys every POST on its own, so a
+    // retried HTTP attempt of one post is still one write.
     const identifier = meterEventIdentifier(
       eventName,
       overage.organizationId,
@@ -147,10 +156,6 @@ async function postOneHour(
             value: String(value),
           },
         },
-        // The same string twice over: Stripe's own uniqueness on the
-        // identifier is what makes a replayed hour a refusal, and the request
-        // key makes a retried HTTP attempt one write.
-        { idempotencyKey: identifier },
       );
       posted += 1;
     } catch (fault) {
