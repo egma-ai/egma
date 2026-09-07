@@ -19,6 +19,7 @@ import {
   setUpStripe,
   stripeGateway,
   type StripeGateway,
+  openBillingAccount,
 } from "../../src/index.ts";
 import { createApi, type TestApi } from "../../../apps/api/test/support/api.ts";
 import {
@@ -194,7 +195,11 @@ async function aCustomerOn(
   card: "pm_card_visa" | "pm_card_chargeCustomerFail",
   organizationId: string,
   frozenTime: number,
-): Promise<{ readonly customerId: string; readonly clockId: string }> {
+): Promise<{
+  readonly customerId: string;
+  readonly clockId: string;
+  readonly paymentMethodId: string;
+}> {
   const clock = await stripe.testHelpers.testClocks.create({
     frozen_time: frozenTime,
     name: `egma lane ${organizationId.slice(-8)}`,
@@ -207,15 +212,30 @@ async function aCustomerOn(
     address: { line1: "1 Test Way", city: "Denver", state: "CO", postal_code: "80202", country: "US" },
     metadata: { ...TEST_METADATA, egma_organization_id: organizationId },
   });
-  await stripe.paymentMethods.attach(card, { customer: customer.id });
-  await stripe.customers.update(customer.id, {
-    invoice_settings: { default_payment_method: card },
+  // A shared test card such as `pm_card_visa` is a template, not a card: every
+  // use of the name mints a fresh PaymentMethod, and attaching it returns the
+  // one that now belongs to this customer. Everything after this must name
+  // that one, never the template, or Stripe answers "no such PaymentMethod".
+  const attached = await stripe.paymentMethods.attach(card, {
+    customer: customer.id,
   });
+  await stripe.customers.update(customer.id, {
+    invoice_settings: { default_payment_method: attached.id },
+  });
+  // The account has to exist before a customer can be written on it: the
+  // product opens it lazily, at the first billing read, and an update that
+  // finds no row is a silent no-op. Opening it here is the same path the
+  // product takes, welcome credit included.
+  await openBillingAccount(organizationId);
   await api.database.sql(
     "update cloud_billing_account set stripe_customer_id = $2 where organization_id = $1",
     [organizationId, customer.id],
   );
-  return { customerId: customer.id, clockId: clock.id };
+  return {
+    customerId: customer.id,
+    clockId: clock.id,
+    paymentMethodId: attached.id,
+  };
 }
 
 /** The Pro plan as its own row states it: what it includes, and at what price. */
@@ -294,6 +314,7 @@ let paying: Customer;
 let lapsing: Customer;
 let payingCustomerId: string;
 let payingClockId: string;
+let payingPaymentMethodId: string;
 let subscriptionId: string;
 
 describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
@@ -373,6 +394,7 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     const made = await aCustomerOn("pm_card_visa", paying.organizationId, LANE_START);
     payingCustomerId = made.customerId;
     payingClockId = made.clockId;
+    payingPaymentMethodId = made.paymentMethodId;
 
     const page = await openCreditCheckout(
       gateway,
@@ -404,7 +426,7 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
       customer: payingCustomerId,
       amount: 2_500,
       currency: "usd",
-      payment_method: "pm_card_visa",
+      payment_method: payingPaymentMethodId,
       off_session: true,
       confirm: true,
       metadata: { ...TEST_METADATA, egma_organization_id: paying.organizationId },
@@ -454,7 +476,7 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
         { price: prices.phone },
       ],
       automatic_tax: { enabled: true },
-      default_payment_method: "pm_card_visa",
+      default_payment_method: payingPaymentMethodId,
       metadata: { ...TEST_METADATA, egma_organization_id: paying.organizationId },
     });
     subscriptionId = subscription.id;
@@ -479,12 +501,23 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     // The sweep itself, against a real account: this organization ran nothing,
     // so it reports a nought for each meter — which is exactly what proves the
     // customer mapping and the event names are the ones Stripe knows.
-    const hour = previousHour(new Date());
+    //
+    // The hour is the one that closed before the lane's clock, not before the
+    // wall clock. A customer on a test clock lives at the clock's frozen time,
+    // and Stripe refuses a meter event timestamped after it: "The event
+    // timestamp cannot be in future". The lane's clock started two hours ago,
+    // so the wall clock's previous hour is that customer's future. A real
+    // customer has no clock, so the job's own previousHour(now) is right there.
+    const hour = previousHour(new Date(LANE_START * 1_000));
     const report = await reportOverageOwed(gateway, hour);
-    expect(report.organizations).toBe(1);
-    expect(report.hours).toBe(1);
-    expect(report.posted).toBe(2);
-    expect(report.failed).toBe(0);
+    expect(report).toMatchObject({
+      organizations: 1,
+      hours: 1,
+      posted: 2,
+      alreadyReported: 0,
+      failed: 0,
+      tooOld: 0,
+    });
 
     // The mark moved, so the same wake again has nothing left to report.
     const settled = await reportOverageOwed(gateway, hour);
@@ -497,9 +530,7 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
       [paying.organizationId, new Date(hour.startedAt.getTime() - 3_600_000)],
     );
     const replay = await reportOverageOwed(gateway, hour);
-    expect(replay.alreadyReported).toBe(2);
-    expect(replay.posted).toBe(0);
-    expect(replay.failed).toBe(0);
+    expect(replay).toMatchObject({ alreadyReported: 2, posted: 0, failed: 0 });
   }, 180_000);
 
   it("prices overage past the allowance at the plan row's own price", async () => {
