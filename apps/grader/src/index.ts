@@ -1,3 +1,4 @@
+import { openAcceptance, closeAcceptance } from "@egma/ingestion";
 import {
   connect,
   connectClickHouse,
@@ -23,6 +24,8 @@ const log = makeLog(config.logLevel, config.claimant);
 
 connect({ databaseUrl: config.databaseUrl });
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
+
+if (config.ingestion.store !== undefined) openAcceptance({ settings: config.ingestion, log });
 
 const cloud = await loadCloudBilling(config);
 if (cloud !== undefined) {
@@ -56,6 +59,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 }
 
 await service.finished;
+await closeAcceptance();
 await disconnect();
 await disconnectClickHouse();
 log.info(platformEvent("egma.service.stopped"), "grader service stopped");

@@ -21,6 +21,7 @@
       "@egma/platform-api/client": [
         "./packages/platform-api/dist/client.d.ts"
       ],
+      "@egma/ingestion": ["./packages/ingestion/src/index.ts"],
       "@egma/db": ["./packages/db/src/index.ts"],
       "@egma/ee": ["./ee/src/index.ts"],
       "@egma/retell": ["./packages/retell/src/index.ts"],

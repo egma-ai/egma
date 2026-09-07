@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 
 import { ClickHouseError } from "@clickhouse/client";
 
-import { canonicalUsage, usageEvidenceHash, type ProviderUsageEvidence } from "./usage.ts";
+import { canonicalUsage, usageEvidenceHash, type ProviderUsageEvidence } from "../models/provider-usage.ts";
 
 import { billing } from "../billing/ports.ts";
 
@@ -21,8 +21,9 @@ import {
 
 /**
  * Append spans with organization and project stamped from AuthContext.
- * Span identity is organization, project, trace, and span. Callers must compare
- * committedSpans before replaying: this writer cannot detect conflicting evidence.
+ * Span identity is organization, project, trace, and span. Callers compare
+ * committedSpans before replaying. Usage variants also survive merges, so an
+ * ambiguous concurrent insert cannot silently replace a committed charge.
  * Block and segment tokens reduce duplicate inserts within finite store windows;
  * identity-based reads handle exact replays afterward. Reject oversized fields whole.
  */

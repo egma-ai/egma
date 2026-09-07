@@ -81,6 +81,7 @@ export default defineConfig({
         "./packages/platform-api/src/client.ts",
       ),
       "@egma/retell": resolve("./packages/retell/src/index.ts"),
+      "@egma/ingestion": resolve("./packages/ingestion/src/index.ts"),
       "@egma/db": resolve("./packages/db/src/index.ts"),
       "@egma/ee": resolve("./ee/src/index.ts"),
       "@egma/simulation-contract": resolve(

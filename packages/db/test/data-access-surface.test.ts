@@ -241,10 +241,8 @@ const CONTEXT_REQUIRING = [
   // One conversation's spend, by provider and model — what the simulation
   // page shows on every deployment. A read like any other: it is answered
   // inside the context's own project and returns no provider credential.
-  "readPlatformUsageTotal",
   "readOrganizationUsage",
   "priceUsageSpans",
-  "providerUsageSpan",
   "readUsageThisPeriod",
   // The measured provider requests of one piece of work, priced at the write
   // against the rate card. It takes the context the work already runs under —

@@ -1042,7 +1042,7 @@ describe.skipIf(!storage.available)("the simulation grading handoff", () => {
  * The bill, at the same door as the evidence.
  *
  * A `provider_usage` span is the simulator saying what one provider request
- * consumed. The door turns it into a priced usage record in Postgres — priced
+ * consumed. The door turns it into a priced usage span in ClickHouse — priced
  * here rather than in a worker, so a price change never needs a simulator
  * release — while the span itself is filed like every other span.
  *
@@ -1072,11 +1072,16 @@ describe.skipIf(!storage.available)("a provider_usage span", () => {
   };
 
   async function usageOf(simulationId: string): Promise<UsageRow[]> {
-    const { rows } = await api.database.sql<UsageRow>(
-      "select * from usage_record where simulation_id = $1 order by span_id",
-      [simulationId],
-    );
-    return rows;
+    const rows = await store().rows<{ organization_id: string; project_id: string; run_id: string; span_id: string; usage_evidence: string }>(`SELECT organization_id, project_id, any(run_id) AS run_id, span_id, any(usage_evidence) AS usage_evidence FROM spans WHERE usage_identity_hash != '' GROUP BY organization_id, project_id, trace_id, span_id ORDER BY span_id`);
+    return rows.map((row) => {
+      const usage = JSON.parse(row.usage_evidence);
+      return { organization_id: row.organization_id, project_id: row.project_id, run_id: row.run_id, span_id: row.span_id,
+        work_kind: usage.identity.work, simulation_id: usage.identity.simulationId,
+        provider: usage.provider, model: usage.model, operation: usage.operation, unit: usage.price.unit,
+        quantities: usage.quantities, measurement: usage.measurement, provider_ref: usage.providerRef,
+        payment_source: usage.paymentSource, raw_usage: usage.rawUsage,
+        amount_micros: String(usage.price.amountMicros), priced_by: usage.price.pricedBy };
+    }).filter((row) => row.simulation_id === simulationId);
   }
 
   it("becomes one priced record per request, under the simulation's own customer and run", async () => {
@@ -1141,7 +1146,7 @@ describe.skipIf(!storage.available)("a provider_usage span", () => {
   it("files the span itself under its own kind, like every other span", async () => {
     const kinds = await store().rows<{ kind: string; n: string }>(
       "select kind, count(*) as n from spans final " +
-        `where trace_id = '${USAGE_TRACE}' and kind = 'usage' group by kind`,
+        `where trace_id = '${USAGE_TRACE}' and kind = 'provider_usage' group by kind`,
     );
     expect(Number(kinds[0]?.n)).toBe(3);
   });

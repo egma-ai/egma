@@ -39,6 +39,9 @@ importers:
       '@egma/ids':
         specifier: workspace:*
         version: link:../../packages/ids
+      '@egma/ingestion':
+        specifier: workspace:*
+        version: link:../../packages/ingestion
       '@egma/metrics':
         specifier: workspace:*
         version: link:../../packages/metrics
@@ -123,6 +126,9 @@ importers:
       '@egma/ids':
         specifier: workspace:*
         version: link:../../packages/ids
+      '@egma/ingestion':
+        specifier: workspace:*
+        version: link:../../packages/ingestion
       '@egma/metrics':
         specifier: workspace:*
         version: link:../../packages/metrics
