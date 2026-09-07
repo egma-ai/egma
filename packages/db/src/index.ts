@@ -64,6 +64,7 @@ export {
   type PersonaModels,
   type SpeechSelection,
 } from "./models/selections.ts";
+export { fromOnePov, povOf, type SpanPov } from "./models/pov.ts";
 /**
  * The put-it-back note a mocked run leaves behind, and its serialization. Pure:
  * it reads and writes no store.
