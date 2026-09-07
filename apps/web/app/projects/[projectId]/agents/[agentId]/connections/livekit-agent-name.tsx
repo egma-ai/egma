@@ -17,8 +17,17 @@ export type LiveKitAgentNameForm = {
 };
 
 /**
- * Show the LiveKit worker name separately because simulations dispatch that
- * named worker. An incorrect name can leave the room without the agent under test.
+ * The LiveKit part of an existing connection's form: the worker's name, and
+ * whether it is there.
+ *
+ * There is nothing else left to decide here. Egma dispatches the named worker
+ * for every simulation, so the record names the agent it graded — where a
+ * nameless connection would hand each room to whichever worker was listening —
+ * and the name is not a preference.
+ *
+ * The field is lifted out of the generic field list and drawn on its own so
+ * the panel can say what a wrong name costs, which is that the agent never
+ * joins the room.
  */
 export function liveKitAgentNameForm({
   connectionType,

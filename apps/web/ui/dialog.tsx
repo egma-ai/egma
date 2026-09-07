@@ -16,13 +16,39 @@ export type OutsidePointerDismiss =
   | ((target: EventTarget | null) => boolean);
 
 /**
- * Compose shared dialog primitives into modal dialogs/drawers and nonmodal
- * reading sheets. Manage opener focus and delay owner removal until exit
- * finishes, with a watchdog for missing completion events.
+ * A layer that is answered or dismissed before the page goes on.
  *
- * Children receive the shared dismiss path. Owners may close immediately after
- * a successful write; ExitGate must not report a second close on that path.
- * Theme selectors own motion through the data attributes.
+ * The compact mobile shell uses one for its navigation, confirmations use one
+ * to name what they are about, and the evidence panel is the same surface
+ * attached to an edge. So the two rules that are always forgotten are here
+ * rather than in each caller: **Escape closes it**, and **opening it moves
+ * focus inside** so that a keyboard is not still driving the page underneath.
+ *
+ * **The modal lifecycle is the kit's.** `components/ui/dialog.tsx` is Radix,
+ * and Radix traps focus, makes the page behind it inert, turns Escape into a
+ * close, and blocks the page to the pointer while it is up. This file used to
+ * do all of that by hand on a native `<dialog>`; it now says only what the kit
+ * does not know — which of the three shapes to wear, which of them takes the
+ * screen, where focus goes back to, and when the owner may remove it.
+ *
+ * **`onClose` still means "now take me away", and it is called last.** Owners
+ * mount this component and remove it, so an exit has to finish before React
+ * unmounts anything: `ExitGate` below sits inside the panel and reports the
+ * moment Radix lets go of it, which is the moment the closing animation ended.
+ * A dialog is never the security boundary and never the only place a fact is
+ * stated. It is a way of asking, and closing one always leaves the page as it
+ * was.
+ *
+ * A child function receives the same dismiss path as the close button and the
+ * scrim. Successful writes may still call the owner's `onClose` directly,
+ * because the system response should not wait for decoration — the gate below
+ * stays quiet on that path rather than closing the same dialog twice.
+ *
+ * **The motion is not here.** `tailwind-theme.css` keys the entrance, the exit
+ * and the reduced-motion form of both on the `data-slot`, `data-kind` and
+ * `data-state` the kit and this file write — the centred dialog and the
+ * drawer's edge travel alike. The one piece left below is the sheet's travel,
+ * which has no token pair of its own to be given a rule for.
  */
 
 /**
@@ -43,8 +69,17 @@ const PANEL_SHAPE = {
     "overflow-y-auto border-y-0 border-l-0",
   ],
   /*
-   * Reading sheets share the form sheet's appearance but remain nonmodal.
-   * Wide sizes provide room for transcript content while leaving the page usable.
+   * **One side sheet look, with reading widths chosen by content.** This is the
+   * same panel `components/ui/sheet.tsx` draws — right-anchored, Pure Paper
+   * behind a hairline on its left edge, no corner, the same travel — and every
+   * width is the theme's rather than a number written here.
+   *
+   * The two components are still two, and the difference is behaviour: this
+   * one is a *reading* surface that deliberately leaves the page beside it
+   * usable, and that one is a modal form portaled inside `<main>`.
+   * `size="wide"` and `size="extra-wide"` are for reading surfaces, where the
+   * content is a transcript rather than a form and 440px is not enough of a
+   * page.
    */
   sheet: [
     "top-0 right-0 left-auto h-full max-h-none",
@@ -88,8 +123,16 @@ const HEAD_SHAPE = {
 } as const;
 
 /**
- * Fallback deadline for an exit that never reports completion. Keep it longer
- * than normal exit motion so dismissal cannot leave the owner mounted indefinitely.
+ * How long a stuck exit is given before the dialog is taken away anyway.
+ *
+ * Not a motion value, and deliberately not on the motion scale: it is longer
+ * than every exit token so it can never pre-empt one. Both implementations this
+ * file replaced carried the same guard, for the same reason — an exit that ends
+ * in an event ends in an event that can go missing. A browser that never fires
+ * `animationend`, an injected stylesheet that removes the animation, or a tab
+ * that was hidden mid-exit would otherwise leave a dismissed dialog mounted,
+ * the page behind it hidden from assistive technology, and `onClose` never
+ * called.
  */
 const EXIT_WATCHDOG_MS = 600;
 
@@ -110,8 +153,22 @@ function ExitGate({ onGone }: { readonly onGone: () => void }) {
 }
 
 /**
- * Dialogs and navigation drawers are modal. Reading sheets leave the adjacent
- * page usable without an overlay or focus trap.
+ * Which of the three shapes takes the screen, and which sits beside the work.
+ *
+ * A confirmation and the mobile navigation are questions: nothing behind them
+ * can be reached until they are answered, which is `DESIGN.md`'s "dialogs trap
+ * focus, make the background inert". A sheet is not that. It is a panel docked
+ * to an edge, the simulation page opens one by default, and that page is built
+ * to be read with the transcript open beside the grader results — so a sheet
+ * that put the page behind it out of reach would break the page it belongs to.
+ *
+ * A sheet keeps everything else a dialog has: focus moves into it, Escape
+ * closes it, and the control that opened it is focused again afterwards. What
+ * it drops is the scrim, the scroll lock, and the inert page.
+ *
+ * **This is a design call rather than a fact, and it is called out in the pull
+ * request for the developer to overrule.** The surface it changes is the
+ * transcript-and-audio sheet and the persona version history.
  */
 const TAKES_THE_SCREEN = { dialog: true, drawer: true, sheet: false } as const;
 
@@ -180,9 +237,23 @@ export function Dialog({
   };
 
   /**
-   * Restore focus after the closing render releases the modal trap, without
-   * waiting for animation. Preserve focus already moved outside, including the
-   * control clicked to dismiss a nonmodal sheet. Arm the exit watchdog.
+   * The keyboard goes back on the press, not at the end of the exit.
+   *
+   * `DESIGN.md`: "No motion delays input. A control answers on press, not
+   * after an animation." Waiting for the panel to finish leaving is a fifth of
+   * a second with focus sitting on a button that is on its way out, inside a
+   * layer the page behind is still hidden from — a Tab in that window goes
+   * nowhere useful. So focus moves the moment the dialog is told to close.
+   *
+   * **It is an effect rather than a line inside `dismiss`, and the ordering is
+   * the reason.** While the dialog is open the kit traps focus and pulls
+   * anything that leaves straight back in, so focusing the opener during the
+   * press would simply be undone. The trap is released in the same render that
+   * closes the dialog, and React runs that release before this effect — so
+   * this is the first moment the move can stick, and it is still the same
+   * frame as the press.
+   *
+   * The timer is the other half. See `EXIT_WATCHDOG_MS`.
    */
   useEffect(() => {
     if (open) return undefined;
@@ -235,9 +306,14 @@ export function Dialog({
         aria-describedby={undefined}
         onCloseAutoFocus={(event) => {
           /*
-           * These callers do not use DialogTrigger. Suppress default restoration and
-           * restore the opener only if focus fell to body; do not steal focus that the
-           * user moved during exit.
+           * The kit's own answer here is its `DialogTrigger`, which these
+           * callers do not use, so left alone it would drop focus on the page
+           * body. Saying no to it is most of the job — focus has already gone
+           * back, above, at the press. What is left is the case where it fell
+           * to the body anyway, and then this puts it where it belongs. It is
+           * deliberately not unconditional: the exit is long enough to Tab
+           * during, and pulling focus back off somebody mid-exit would be the
+           * same rudeness in the other direction.
            */
           event.preventDefault();
           if (

@@ -12,8 +12,22 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 /**
- * Use the table's trailing action slot so row menus align. Render unavailable
- * actions disabled and associate them with an explanation inside the menu.
+ * The ⋮ at the end of a row, and the two or three things it offers.
+ *
+ * **It lives in the table's own trailing slot**, a fixed 48px lane that every
+ * row carries whether or not it has a menu, so the triggers line up in one
+ * column down the table (`6ZM-0`). The lane belongs to `ui/data-table.tsx`;
+ * what is here is the control that stands in it.
+ *
+ * **The glyph is drawn rather than borrowed.** The boards draw three filled
+ * dots (`71L-0`); every icon in the icon set is line art on a 24 grid, and a
+ * ring is not a dot. Three circles is less code than restyling one.
+ *
+ * **A destructive item a person may not use is disabled and says why, in the
+ * menu.** A disabled control takes no focus and answers no hover, so a tooltip
+ * on one is a reason only a pointer can reach — and here not even that. The
+ * sentence is a line of the panel, and the item names it, which is what makes
+ * disabling rather than hiding worth doing.
  */
 
 export function RowMenuGlyph() {

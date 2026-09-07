@@ -19,8 +19,16 @@ import { SessionLoading } from "../../ui/session-loading.tsx";
 import { AuthForm, AuthShell, LinkLine, Notice, StatePage } from "../ui.tsx";
 
 /**
- * Submit signup with editable organization and project names. Use relative
- * paths so the flow stays on this deployment's origin.
+ * Signing up: one page, one submit, and an organization and a project at the
+ * end of it.
+ *
+ * Both names arrive filled in and both are editable. Nothing here asks a person
+ * which project they mean before they have one, which is the form that would
+ * spend the ten minutes the product is judged on.
+ *
+ * Every path on this page is relative, so the pages are served from whatever
+ * origin the instance runs on and never from a domain egma runs. A self-hoster
+ * depends on nothing they do not operate in order to log in.
  */
 
 type Availability = { open: boolean; message?: string };

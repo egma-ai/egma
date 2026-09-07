@@ -72,8 +72,18 @@ const COPY = {
     "From 0 to 1. A simulation passes this grader at or above this score.",
   reads: "The evidence this grader needs from a simulation.",
   /**
-   * Explain where test-specific rules belong, what evidence the grader reads,
-   * and the provider usage involved in production grading.
+   * The three sentences the create sheet says, and nothing it cannot keep.
+   *
+   * `framing` sends a rule that belongs to one test to the surface that owns
+   * it, because a project-wide grader shaped around one test grades every
+   * other conversation against a question they were never asked.
+   *
+   * `evidence` is what the judge can actually see. Written before the boxes,
+   * because an instruction the evidence cannot answer is the one way this form
+   * fails, and the author cannot know that after the fact.
+   *
+   * `productionCost` is the bill beside the coverage. A custom grader here is
+   * always an LLM judge, so one sampled transcript is one judge call.
    */
   framing:
     "This grader judges every conversation in its scope. For something one " +
@@ -84,7 +94,16 @@ const COPY = {
   productionCost: "Each sampled transcript costs one judge call.",
 } as const;
 
-/** Use an unfilled count badge so identifiers retain their original case. */
+/**
+ * One chip, and every chip on this surface is this one.
+ *
+ * It is the shared `Badge` with two things said about it: the count shape's
+ * 22px height, which is the small chip this product already draws beside a row
+ * of facts, and no fill, because `DESIGN.md` asks a chip for a hairline and a
+ * word. The verdict shape is deliberately not used here — it letter-spaces and
+ * capitalises, and `llm_as_judge` is an identifier that must read exactly as
+ * the API writes it.
+ */
 function GraderChip({
   variant = "neutral",
   mono = false,
@@ -1032,7 +1051,16 @@ function EditGraderForm({
             <GraderModalityChips modalities={grader.modalities} />
           </Fact>
         </Facts>
-        {/* Display fixed scope using the same labels as the grader list. */}
+        {/*
+         * **A scope nobody here can change is read in the same lane the facts
+         * above it are.** It used to be two sentences under a "Fixed by Egma"
+         * caption, which answered a question nobody asked — the controls are
+         * simply not there — while saying the two evidence sources in a shape
+         * that matched neither the list behind the sheet nor the form that
+         * replaces this block on an editable grader. The caption is gone
+         * (developer decision, 2026-08-25) and the two lines are the two
+         * columns of the list, word for word.
+         */}
         <Section title="Scope">
           {grader.scopeEditable ? (
             <ScopeFields
@@ -1101,9 +1129,21 @@ function EditGraderForm({
 }
 
 /**
- * Collect grading instructions, pass/fail conditions, scope, settings, and
- * threshold. The server builds the immutable custom grader definition; this
- * form does not duplicate its prompt template.
+ * Writing one custom grader, as the boundary a binary judge needs.
+ *
+ * **The sheet asks for a boundary rather than for a paragraph**, because that
+ * is what the judge already is: it answers met or not met against one
+ * criterion, and code maps that answer to exactly 1 or 0. Three required
+ * texts — what to decide, what passes, what fails — and the server compiles
+ * them into the one immutable prompt. Nothing here composes that prompt: two
+ * clients writing the template would eventually write two different judges.
+ *
+ * What is not asked for is as deliberate as what is. There is no mechanism
+ * toggle, because create is LLM-judge only and a predefined code grader
+ * arrives through Use in the library. There are no modality checkboxes,
+ * because the judge's evidence is text and both modalities are stored: a
+ * voice-only stamp would silently leave later chat simulations ungraded. The
+ * pass threshold stays exactly as it was.
  */
 export function CreateCustomGraderSheet({
   projectId,

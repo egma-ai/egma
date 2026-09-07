@@ -56,10 +56,20 @@ import {
 import { Reads, SheetSection, type Read } from "./sheet-parts.tsx";
 
 /**
- * Create, read, and edit a persona in a sheet over the list. Name and
- * description are metadata; identity, personality, and language are versioned
- * behavior. Project settings are editable inline. Egma-provided behavior is
- * read-only; Custom personas also support current-version edits and deletion.
+ * A persona, created, read and edited in the panel the boards put it in.
+ *
+ * **The list stays on screen behind it, and the address never moves.** Create,
+ * read and edit are three things this one panel is showing, not three places
+ * anybody is — so none of them is a route. Somebody who opens a persona,
+ * changes their mind and presses Escape is back where they were, with the list
+ * they were reading still scrolled where they left it, and no step in the
+ * browser's history that says nothing about where they are.
+ *
+ * Name and description are live metadata. Identity name, personality, and
+ * language have immutable core versions. Models are saved project settings.
+ * Settings are editable directly. Custom personas also expose current-core
+ * editing and deletion, while shared identities stay read-only.
+
  */
 
 /** The words this surface repeats, written once. */
@@ -416,8 +426,25 @@ type Submitted = {
 };
 
 /**
- * Adopt a server value only for a submitted field whose draft still matches
- * what was sent. Preserve unsubmitted fields and edits made while saving.
+ * The server's answer, taken into the draft.
+ *
+ * **The invariant, stated once: adoption may touch exactly the fields the
+ * request carried, and among those, only where the draft still holds what was
+ * sent.** Everything outside the submitted set is left alone, always.
+ *
+ * Both halves are load-bearing and each was learned the hard way.
+ *
+ * - *Only the submitted fields.* One save sends only fields that changed. A
+ *   reply carries the whole persona, but for a field the request never
+ *   mentioned that value is a **stale read, not an answer**.
+ * - *Only where the draft still holds what was sent.* A save takes a moment,
+ *   and somebody typing during that moment has written something the server
+ *   has never seen. Its reply cannot speak for text it never saw.
+ *
+ * What is left is the case adoption exists for: a field this request sent,
+ * untouched since, which egma stored in a form of its own — such as trimmed
+ * text — and which the author should be looking at rather than their own
+ * draft of it.
  */
 function adopted(
   current: Draft | null,
@@ -1012,9 +1039,15 @@ export function PersonaSheet({
 }
 
 /**
- * Delete removes the persona from lists and pickers while preserving pinned
- * versions for existing simulations. Tests referencing it need another persona
- * before they can be saved or run.
+ * Deleting one persona, and the one question it asks.
+ *
+ * **Delete is the product's word and the confirmation names who it is about.**
+ * Underneath, the row is stamped rather than removed, so every simulation that
+ * pinned this persona still reads exactly what it heard — but that is storage,
+ * not something a person authoring a test is asked to hold in their head. What
+ * they are told is what actually changes for them: the persona leaves every
+ * list and picker, and a test that still names them has to name somebody else
+ * before it can be written or run again.
  */
 export function DeletePersonaDialog({
   persona,

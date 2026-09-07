@@ -49,9 +49,39 @@ import { ConnectionSheet } from "./connection-sheet.tsx";
 import { RenameAgentSheet } from "./rename-sheet.tsx";
 
 /**
- * Project agent list with setup and connection sheets controlled by URL query
- * state. Direct setup URLs remain supported. Keep project selection in requests
- * and use server search so results include records beyond the loaded page.
+ * The agents of one project: the landing page of the product, and the one
+ * screen every agent and connection panel opens over.
+ *
+ * **You start with the system you are testing.** An agent is the customer's
+ * voice agent — the thing egma exists to establish trust in — so this is what a
+ * signed-in person sees first, rather than a home page assembled out of
+ * fragments of everything else.
+ *
+ * **One screen, and every panel is a state of it.** Connecting an agent,
+ * reading a connection and changing one all happen in a side sheet over this
+ * list (`DESIGN.md`, Side sheets). The three addresses that used to be pages
+ * of their own — `agents/new`, `connections/new`, `connections/:id` — still
+ * work and each opens the panel it names, and the agent's own address, whose
+ * page is retired, lands on this list. So a link in the CLI, the docs or
+ * somebody's notes still arrives somewhere honest.
+ *
+ * **Opening a panel never navigates.** Every control here changes query state
+ * on the address the person is already at (the founder's blanket ruling of
+ * 2026-08-24); the old addresses survive as deep-link aliases and nothing
+ * else.
+ *
+ * **Which panel is open is in the address, and nowhere else.** Back closes a
+ * sheet, a copied link opens one, and a reload keeps it. State held in this
+ * component instead would disagree with the address the first time somebody
+ * pressed Back.
+ *
+ * The project is in the address and in the request, every time.
+ *
+ * **Search is asked of the server, never applied to what came back.** A filter
+ * that only reached the page already fetched would answer differently depending
+ * on how far somebody had scrolled — a list of four hundred agents would find
+ * nothing in the three hundred it had not loaded, and would say so as though
+ * the project did not hold it.
  */
 
 /** The panel a route insists on, whatever the query string says. */
@@ -106,8 +136,15 @@ export function AgentsScreen({
   );
 
   /**
-   * Tag appended pages with their project so retained state or late responses
-   * from a previous project cannot appear in the current list.
+   * Pages fetched after the first, kept beside it rather than folded into it,
+   * so that asking again always starts from a clean first page — **and each one
+   * remembers the project it was fetched for.**
+   *
+   * That is not belt and braces. Changing project does not remount this screen:
+   * it is the same route with another project in it, so this state outlives the
+   * change and a read still in flight comes back into a view that has moved on.
+   * Carrying the project in the value means a page fetched for somewhere else
+   * can never be *rendered* here, whatever wrote it and whenever it landed.
    */
   const [after, setAfter] = useState<{
     readonly project: string;
@@ -267,8 +304,17 @@ export function AgentsScreen({
       : null;
 
   /**
-   * Hide actions until the role is known. Then show unavailable actions disabled
-   * with a reason; the server still enforces write permission.
+   * One page for every role, and the control that changes data is disabled
+   * rather than removed. A viewer sees what egma can do here and is told
+   * plainly that this part is not theirs; the server refuses their write either
+   * way, which is where the boundary actually is.
+   *
+   * It is disabled for the same reason on a project this organization does not
+   * hold: there is no project here to connect an agent to.
+   *
+   * **While the role is unknown there is no control at all.** A disabled one
+   * would have to say why, and every sentence it could say would be a claim
+   * about somebody egma has not identified yet.
    */
   const mayConnect = mayAuthor && answer?.status !== "missing";
   const whyNot = mayAuthor
@@ -322,8 +368,15 @@ export function AgentsScreen({
   }
 
   /**
-   * Open setup through query state on the current list URL. /agents/new remains
-   * a supported direct link to the same sheet.
+   * The one action this screen is for, and the same control wherever it stands.
+   *
+   * **It changes query state and never navigates** (the founder's blanket
+   * ruling of 2026-08-24: opening any sheet never redirects or reloads the
+   * page). The panel was always drawn over this list; sending the browser to
+   * `/agents/new` to draw it meant a reload in the middle of the product's
+   * first job. `/agents/new` survives as a deep-link alias that renders the
+   * same panel in place, so every CLI message and every piece of documentation
+   * still lands where it always did.
    */
   const connect = () =>
     role === null ? undefined : mayConnect ? (
@@ -521,8 +574,16 @@ export function AgentsScreen({
   }
 
   /**
-   * Hide the toolbar only for an empty project. Keep it during loading and
-   * zero-result searches so the search control does not disappear while typing.
+   * A project with nothing in it is the whole screen, and it has one thing on
+   * it.
+   *
+   * So the toolbar is not drawn there: a search box for a project with nothing
+   * to search is a control that carries no meaning, and a second Connect an
+   * agent above the one in the middle of the empty state would leave somebody
+   * choosing between two identical primary buttons. Everywhere else — while the
+   * read is in flight, over a list, over a search that matched nothing — the
+   * toolbar stays exactly where it was, because a search box that vanished
+   * under the keystroke that filled it would be unusable.
    */
   const nothingHereYet =
     answer?.status === "ready" &&

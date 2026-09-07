@@ -24,8 +24,25 @@ import type {
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
- * Drive transcript detail states through rendered headings, roles, labels,
- * and text. Source checks alone cannot establish that a state is visible.
+ * **One transcript**, rendered rather than read as source.
+ *
+ * This page had no rendered proof at all. Everything asserted about it lived in
+ * `pages.test.ts` and `transcripts.test.ts` as source-text matches, which is a
+ * real claim about wiring and
+ * says nothing whatever about what a person ends up looking at. A page can hold
+ * every one of those strings and draw an empty screen.
+ *
+ * That mattered the day its layout moved off the last CSS Module in the
+ * application. A migration of 54 class names has one failure mode, and it is
+ * silent: a state that used to draw now draws nothing, or draws twice, and no
+ * source match notices. So the states are asserted here first, through the DOM,
+ * and the migration is held against them.
+ *
+ * **What is asserted is what a reader can see and reach**, never a class list.
+ * Class names are the thing being changed; a test that read them would fail on
+ * every correct migration and pass on none of the wrong ones. So each case asks
+ * for a heading, a role, a label, or a sentence — the page's own words, from
+ * `transcript-copy.ts`, which is where they are checkable.
  */
 
 const routed = vi.hoisted(() => ({
@@ -949,8 +966,14 @@ describe("the inspector", () => {
   });
 
   /**
-   * Production provenance names the agent platform, its agent ID, and version.
-   * Display platform labels such as LiveKit instead of raw identifiers.
+   * **Provenance names the platform that ran the agent**, which is the answer
+   * production monitoring replaced a single *Connection* row with: a person
+   * looking at a production exchange cannot open the connection egma dialled,
+   * because egma dialled nothing. What identifies the agent is the platform's
+   * own name for it, its identifier there, and the version that answered.
+   *
+   * The platform is read out in a reader's words rather than in the wire's —
+   * `livekit` is what arrives and **LiveKit** is what is drawn.
    */
   it("names the platform, and the agent the platform ran", async () => {
     stub({ status: 200, body: detail() });

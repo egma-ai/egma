@@ -64,18 +64,58 @@ import {
 } from "../../../../../ui/shell.tsx";
 
 /**
- * Membership and invitations apply to the organization. Without email
- * transport, show the returned invitation link for manual sharing. Disable
- * admin actions for other roles; the server still enforces permission.
+ * Who is in this organization, and the four things an admin may do about it.
+ *
+ * **Membership is the organization's and not a project's.** The grouped local
+ * navigation says that once; this page can focus on people and invitations.
+ *
+ * **Inviting never depends on email.** With a transport configured the message
+ * is posted; with none, the link comes straight back here and whoever created
+ * it passes it on. A self-hosted install is pleasant right up until the second
+ * person, and requiring SMTP is where that stops.
+ *
+ * Everybody may read the list — a member who cannot see their colleagues cannot
+ * work out who to ask for anything — and the controls that change it are
+ * genuinely disabled for anybody but an admin rather than hidden. The server
+ * refuses their write either way, which is where the boundary is.
  */
 
 type Tab = "people" | "invitations";
 
 /**
- * Use max-content grid tracks to keep named actions side by side, with any
- * disabled-action reason spanning a second row. w-0 min-w-full lets the reason
- * wrap without widening the button tracks. Remove cell padding in stacked
- * layout because the row already supplies it.
+ * The lane a row's own controls stand in.
+ *
+ * The shared table draws the trailing cell as the boards do — a fixed 48px slot
+ * with no side padding, so every ⋮ in the product lines up in one column down
+ * the table (`78X-0`). This row keeps named buttons rather than a ⋮ (the
+ * browser walk measures three controls in it), so the cell is wider than the
+ * slot and needs the row's own padding back inside it, or the last button sits
+ * against the panel's hairline.
+ *
+ * **It is a grid, and a browser is what said so.** `Button` writes `why` as a
+ * `<span>` beside the control it explains, so a cell holding two of them holds
+ * button, sentence, button — and wrapping that in a flex row put the sentence
+ * between the two buttons. Letting the row wrap fixed the sentence and broke
+ * the buttons instead: a wrapping flex box is only as wide as its widest child,
+ * so the table shrank the column to one button and stacked the other under it.
+ * Two `max-content` columns give the cell a minimum the table has to honour,
+ * and the sentence is placed on a second row spanning both — so the buttons sit
+ * side by side whether or not there is a reason under them. The reading order
+ * does not move, which is what `aria-describedby` follows.
+ *
+ * `w-0 min-w-full` on the sentence is the second half of that, and the first
+ * screenshot is what found it: an item spanning two `max-content` tracks hands
+ * its own width to them, so a 600px sentence made two 300px buttons. A width of
+ * zero is what the tracks are measured against; the minimum is a percentage,
+ * which is indefinite while they are being measured and resolves to the whole
+ * pair afterwards. The sentence also has to be told it may wrap: the shared
+ * cell keeps every other fact on one line, and a row control's cell inherits
+ * that.
+ *
+ * **The side padding stops at the narrow layout, because there the row already
+ * pays it.** A stacked row is a padded block — `stacked:px-(--row-padding-x)`
+ * on the row, `stacked:p-0` on every cell — so a control cell keeping its own
+ * would stand at 32px while every value above it sat at 16.
  */
 const ROW_ACTIONS = [
   "grid grid-cols-[max-content_max-content] items-center gap-2",
@@ -345,7 +385,17 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
     {
       key: "actions",
       header: "Actions",
-      /* Mark the cell as an action so table overflow rules do not clip its focus ring. */
+      /*
+       * A row control, said to the table rather than only drawn like one.
+       *
+       * The shared table keeps an `action` cell at the trailing edge and lets
+       * it out of the one-line ellipsis every other cell gets. That second
+       * half is why this is here: the ellipsis comes from `overflow: hidden`
+       * on the cell, and an outline is clipped by an ancestor's overflow, so a
+       * control in an unmarked cell had the Ember focus ring cut off on every
+       * side. Other row controls were already marked; these were the same
+       * concept drawn two ways.
+       */
       action: true,
       cell: (member) => (
         <div className={ROW_ACTIONS}>
@@ -483,8 +533,19 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
 }
 
 /**
- * Keep returned invitation links visible when email is unavailable. Distinguish
- * expired invitations from pending ones and offer resend for expired links.
+ * Asking somebody to join, and the link that comes back when there was nowhere
+ * to post it.
+ *
+ * **The link is the whole promise of this page on a self-hosted install.** A
+ * form that quietly dropped it would leave somebody with an invitation that
+ * exists and cannot be delivered, which is worse than a refusal.
+ *
+ * **An invitation whose day has passed is drawn as its own thing.** The list
+ * route answers with everything nobody has accepted, expired ones included, so
+ * a single "waiting to be accepted" list says something untrue about half of
+ * what is in it — and somebody reading it waits for a person who can no longer
+ * accept. The standing is said in words on the row, and the only thing to do
+ * about a dead invitation, sending another, is the only control it carries.
  */
 function Invitations({
   invitations,

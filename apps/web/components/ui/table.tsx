@@ -3,13 +3,51 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Separate TablePanel from Table so the frame owns surface, scrolling, and
- * container queries. Shared tokens define row sizing, padding, and action width.
+ * The table, as the parts the boards draw it from.
+ *
+ * Read off `6ZM-0`, `71F-0` and `710-0` with `get_computed_styles` on
+ * 2026-08-23: a Pure Paper panel inside one neutral hairline with the corners
+ * clipped and no corner radius; a 40px header row of quiet 14px labels over a
+ * hairline; body rows at least 52px tall with 8px of vertical padding, 16px of
+ * side padding and a hairline between them; and a 48px slot at the trailing
+ * edge that every row carries whether or not it holds a menu.
+ *
+ * **`TablePanel` is separate from `Table`, which is where this leaves the
+ * registry.** shadcn's `Table` renders its own scrolling wrapper around the
+ * `<table>`. This product's table is a *panel* — the border and the surface
+ * belong to the frame, not to the element — and the same frame has to carry the
+ * container query that makes a narrow table stack. Welding the two together
+ * would mean `ui/data-table.tsx` reaching inside a primitive to add a class to
+ * a `<div>` it cannot name.
+ *
+ * Nothing here holds a colour, a size or a radius of its own. The last column's
+ * width is `--table-action-width`, declared in `tailwind-theme.css` beside the
+ * row heights it lines up with.
  */
 
 /**
- * Share the header/body column edge with the test grid. Action columns and
- * stacked label/value rows use their own alignment rules.
+ * The edge every column reads from, written once.
+ *
+ * **A header and the cells under it are one column, so they share one
+ * declaration.** Two copies of the same padding are two things that can be
+ * changed apart, and a header that drifts off its own figures is the defect
+ * this names away. The rule is the wide layout's column alignment: one left
+ * edge per lane, header and value on it, in every table.
+ *
+ * It is exported because one table in the product is not built from these
+ * parts — the inline-editing suite grid in `tests/tests-grid.tsx` — and an
+ * edge two files declare apart is an edge that drifts. What is still written
+ * out by hand is the side padding the two settings tables put back inside
+ * their own control cells, where the class list is a caller's rather than
+ * this file's, and the stacked row's own copy in `ui/data-table.tsx`, which
+ * pads a different layout and cannot drift this one.
+ *
+ * Two things align some other way, and both are deliberate:
+ *
+ * - The row's own control lane, centred in a slot of fixed width.
+ * - Every non-primary value in the **stacked** layout, which `ui/data-table`
+ *   right-aligns against its label. A narrow row is a label-and-value list
+ *   rather than a set of columns, so it has no shared edge to keep.
  */
 export const LANE_X = "px-(--row-padding-x)";
 

@@ -14,8 +14,21 @@ import { Badge, badgeVariants } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 /**
- * Share status appearance across run, simulation, and grading views. Execution
- * completion is not a quality verdict, and pending grading is not failure.
+ * The parts every surface that shows a run is built from — and the reason they
+ * are shared rather than written per page.
+ *
+ * Run state, simulation state, and grading state answer different questions.
+ * An execution failure must never look like a low grade, and unfinished grading
+ * must never look like a failure.
+ *
+ * A page that decided its own colours for those words would be free to decide
+ * differently from its neighbour, and the first one to paint `completed` green
+ * would have turned a machinery word into a quality result. So the mapping from word
+ * to appearance is here, once, and the pages ask for it.
+ *
+ * These live in their own file with their own stylesheet rather than in
+ * the shared control set, which the shared system deliberately
+ * holds closed.
  */
 
 /* ------------------------------------------------------------------------ *
@@ -54,8 +67,14 @@ export type StateMarkKind =
   | "error";
 
 /**
- * Use text plus distinct marks for simulation, grading, and result states.
- * Run status uses text, with a loader while running.
+ * A second, non-colour signal for simulation, grading, and result states.
+ *
+ * The word remains the source of meaning. A square anchors those states and
+ * keeps their marks distinct from radio controls and progress dots. Failed and
+ * errored states use the shared failure fill so they do not read as empty
+ * checkboxes; progress, success, stopped, and not-requested states keep the
+ * quiet outline. A run uses plain text instead, with a loader only while it is
+ * running.
  */
 export function StateMark({
   kind,
@@ -302,7 +321,16 @@ export function RunProgress({
       <span
         className={cn(
           "block size-full origin-left rounded-chip bg-foreground",
-          /* Use a short linear transform transition when the progress value changes. */
+          /*
+           * 200ms is written here rather than read from the theme, and it is
+           * the one duration in this file that is not a `DESIGN.md` motion
+           * token. Those name interface motion — a press, a popover, a dialog
+           * — and this is a value catching up to a new value, which
+           * `DESIGN.md` gives a behaviour for ("transform-based fill, linear
+           * while active") and no token. It is the duration the stylesheet
+           * this replaces already used and it is under the 300ms ceiling.
+           * Called out in the pull request for the developer to overrule.
+           */
           "transition-transform duration-200 ease-linear",
           "motion-reduce:transition-none",
         )}

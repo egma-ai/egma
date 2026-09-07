@@ -52,8 +52,23 @@ import {
 import { PersonaTypeChip } from "./sheet-parts.tsx";
 
 /**
- * List Egma-provided and Custom personas for this project. Create, read, and
- * edit in sheets over the list. Deleted personas are excluded from lists and pickers.
+ * The personas of one project: one screen, and everything else drawn over it.
+ *
+ * **A persona is a first-class thing, not a field on a test.** Egma supplies a
+ * Predefined persona to every project, and a project can author a Custom
+ * persona or fork the shared one. They are used by many tests, which makes a
+ * comparison between two prompt variants honest — the same person meets both.
+ *
+ * **One address, and the panels are state.** Creating, reading and editing a
+ * persona all happen in the side sheet over this list, with no route change and
+ * no reload: the list stays exactly where it was, Escape closes what is over
+ * it, and nothing that is only a change of view puts a step in the browser's
+ * history. It is the arrangement the boards draw, and the one the Graders
+ * surface already uses.
+ *
+ * **One list, and it ends at its last row.** There is no second list of
+ * archived personas and no footer line pointing at one: a deleted persona
+ * leaves every list for good, and the API refuses to be asked for one.
  */
 
 /** How long a person stops typing for before egma asks the server. */
@@ -70,8 +85,16 @@ export default function PersonasPage() {
 }
 
 /**
- * Keep a button on the persona name for keyboard access to the sheet;
- * onRowActivate supplies the larger pointer target.
+ * The row's own name, and the thing that opens it.
+ *
+ * **A persona is read and edited in a sheet, so the row's name is a button
+ * rather than a link.** The boards open the sheet from anywhere on the row; a
+ * real control carrying the name is what makes that reachable by keyboard, and
+ * it takes the product's Ember focus ring from `globals.css` without asking.
+ *
+ * The row as a whole answers the pointer through the shared table's
+ * `onRowActivate`; this button stays because it is the keyboard path and the
+ * one control the accessibility tree holds for the action.
  */
 function RowOpener({
   name,
@@ -218,14 +241,32 @@ function ProjectPersonas({ projectId }: { readonly projectId: string }) {
   const [deleting, setDeleting] = useState<Persona | null>(null);
 
   /**
-   * Do not render a sheet for another project, even before cleanup effects run.
-   * Otherwise its child could request the old persona ID in the new project.
+   * The open record, and only while it is this project's.
+   *
+   * **It is a rendering rule rather than a cleanup, because cleanup is one
+   * commit too late.** A child's effects run before its parent's, so a sheet
+   * still drawn on the render where the project changed would ask the new
+   * project for the old project's persona before the effect below could close
+   * it — and the new project has never heard of that id, so the panel would
+   * fill with "not found" over a list that is perfectly fine. Not drawing it
+   * is what stops the request from being made at all.
    */
   const openedHere = opened !== null && opened.project === projectId ? opened : null;
 
   /**
-   * Clear project-specific sheets, confirmations, and pending-action state on
-   * project change. The shared draft-navigation guard already handles unsaved work.
+   * Another project, and nothing of the last one carried over.
+   *
+   * Every panel here is about one project's record: a sheet on a persona the
+   * next project does not have, a confirmation about deleting it, or — worst
+   * of the three — a half-typed new persona, which would quietly be created in
+   * whichever project somebody switched to. `running` goes with them because a
+   * fork that was in flight drops its answer on a project change and would
+   * otherwise leave every row menu disabled for good.
+   *
+   * **A dirty editor has already been protected before this runs.** The
+   * project control navigates through `draftNavigation.push`, so somebody with
+   * unsaved work has already been asked and has already answered. Asking again
+   * here would be one decision and two questions.
    */
   useEffect(() => {
     setCreating(false);
@@ -237,8 +278,14 @@ function ProjectPersonas({ projectId }: { readonly projectId: string }) {
   }, [projectId]);
 
   /**
-   * Hide actions until the role is known, then show unavailable writes disabled
-   * with a reason. The server enforces permissions.
+   * One page for every role, and the control that changes data is disabled
+   * rather than removed. A viewer sees what egma can do here and is told
+   * plainly that this part is not theirs; the server refuses their write
+   * either way, which is where the boundary actually is.
+   *
+   * **While the role is unknown there is no control at all.** A disabled one
+   * would have to say why, and every sentence it could say would be a claim
+   * about somebody egma has not identified yet.
    */
   const mayAuthor =
     role !== null && canAuthor(role) && answer?.status !== "missing";
@@ -254,8 +301,16 @@ function ProjectPersonas({ projectId }: { readonly projectId: string }) {
   }
 
   /**
-   * A clone keeps the original label, so open its editor with the name selected.
-   * Ignore a result that arrives after switching projects.
+   * A fork, and where it lands.
+   *
+   * `forkPersona` copies the name verbatim and takes no name of its own, so a
+   * fork of "Impatient Rita" is a second row also called "Impatient Rita".
+   * Landing in the editor with that name selected is what makes renaming the
+   * next keystroke instead of a thing somebody has to notice later.
+   *
+   * Whatever comes back is not this screen's to show if the screen has moved to
+   * another project — the same rule the list's paging follows, on the write
+   * path.
    */
   async function fork(persona: Persona): Promise<void> {
     const asked = projectId;

@@ -4,7 +4,18 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 
-/** Display exactly the text that the copy button places on the clipboard. */
+/**
+ * A block of text the person is meant to take away, with the button that takes
+ * it.
+ *
+ * Setup surfaces hand work over that Egma cannot do itself, and each one is
+ * read with a keyboard in one hand and somebody else's editor in the other.
+ * **What is on screen has to be the exact bytes copied away**, so the block
+ * never prettifies what it was given.
+ *
+ * It lives on its own because one shape drawn twice becomes two shapes, and
+ * the day they differed would be the day a customer pasted the older one.
+ */
 type CopyState = "idle" | "copying" | "copied" | "failed";
 
 export function CopyBlock({

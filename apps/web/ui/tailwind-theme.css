@@ -1,15 +1,81 @@
 /*
- * Theme values from DESIGN.md and their Tailwind aliases. Keep the :root
- * values unlayered so they override Tailwind theme defaults, including shared
- * radius and easing names. @theme inline maps utilities to these values.
- * Do not create aliases that reference themselves. Remove unsupported defaults
- * so components cannot silently use values outside the design system.
+ * Egma's values, and the theme that hands them to Tailwind.
+ *
+ * `DESIGN.md` decides the values; this file declares them and is the only
+ * place Tailwind learns them. The two halves are deliberately separate and
+ * deliberately in one file:
+ *
+ * - The `:root` blocks below are egma's own vocabulary — `--action`,
+ *   `--space-5`, `--duration-press`. They are plain CSS in no cascade layer.
+ * - The `@theme` blocks after them are the handoff. **Every key in them is a
+ *   `var()` pointing at a declaration above, never a copied colour, radius, or
+ *   size.** Changing a value means editing the declaration; editing it in the
+ *   theme is not possible, because there is nothing there to edit.
+ *
+ * They used to be two files — `tokens.css` beside this one — because a CSS
+ * Modules surface read the first and a Tailwind surface read the second, and
+ * the split was what stopped the two halves of the product drifting apart.
+ * There is no CSS Modules surface left to serve — the last one,
+ * `app/ui.module.css`, retired with the transcript detail migration. The
+ * declarations stay as they are: still `:root`, still unlayered, still loaded
+ * by `globals.css` first. Two files for one idea outlived the reason for it.
+ *
+ * Two mechanisms carry the handoff, and both are worth knowing:
+ *
+ * 1. **`@theme inline`.** Tailwind normally emits its own custom property and
+ *    makes utilities point at that, which would be a second copy of the value.
+ *    `inline` makes the utility carry the reference instead, so `bg-primary`
+ *    compiles to `background-color: var(--action)` — egma's declaration, in the
+ *    rule itself.
+ * 2. **Unlayered outranks `@layer theme`.** Tailwind's defaults are declared
+ *    inside a cascade layer and the blocks below are `:root` outside every
+ *    layer, so unlayered wins whatever the specificity.
+ *
+ *    **Five names are declared twice, and egma wins all five.** The whole
+ *    list, because a partial one invites somebody to move the block into a
+ *    layer believing the rest are safe:
+ *
+ *    | Name | Tailwind's | egma's |
+ *    | --- | --- | --- |
+ *    | `--radius-sm` | `0.25rem` | `0px` |
+ *    | `--radius-md` | `0.375rem` | `0px` |
+ *    | `--radius-lg` | `0.5rem` | `0px` |
+ *    | `--ease-out` | `cubic-bezier(0, 0, 0.2, 1)` | `cubic-bezier(0.23, 1, 0.32, 1)` |
+ *    | `--ease-in-out` | `cubic-bezier(0.4, 0, 0.2, 1)` | `cubic-bezier(0.77, 0, 0.175, 1)` |
+ *
+ *    This is load-bearing rather than incidental: moving these declarations
+ *    into `@theme` would put them in that layer and hand all five names back
+ *    to Tailwind — every radius in the product and two of its easings. The
+ *    three radii all read `0px` now, and that makes the trick *more*
+ *    load-bearing rather than less: hand them back and every component in the
+ *    product grows a corner again, quietly, in a commit that touched no
+ *    component.
+ *
+ * A key may not reference its own name. `@theme inline { --text-sm:
+ * var(--text-sm) }` compiles, but it emits a circular declaration that only
+ * resolves because the unlayered block happens to overrule it. So every key
+ * references the `DESIGN.md`-named value underneath — `--text-sm` reads
+ * `--text-caption` — which says what it means and cannot go round in a circle.
+ *
+ * Where shadcn has a default and `DESIGN.md` has a rule, `DESIGN.md` wins. The
+ * weights above 500, the cool grey shadow ladder, the radius steps that belong
+ * to no component, and the type steps outside the accepted scale are deleted
+ * below rather than left available to be reached for by accident.
  */
 
 /*
- * Scan component markup directories explicitly. These globs omit .ts files;
- * add a source if class names move there. Comments in scanned files can still
- * produce utilities, so avoid unused class examples.
+ * Markup only, and deliberately narrow.
+ *
+ * Tailwind mints a utility from any bare word it finds that happens to name
+ * one, and this repository writes long prose comments — a sentence with
+ * "rounded" or "block" in it was minting `.rounded` and `.block` out of
+ * explanation. Scanning only the files that carry class attributes stops the
+ * prose being read as markup. No `.ts` file under `apps/web` holds a class
+ * name; a future one that does has to be added here.
+ *
+ * `../ui` is the third glob because the shared components live there, and it
+ * is load-bearing: every one of them is on this theme now, so a class name it
+ * uses that is not scanned is a class name that is never generated.
  */
 @source "../app/**/*.tsx";
 @source "../components/**/*.tsx";
@@ -57,8 +123,18 @@
   --action-text: var(--color-paper);
 
   /*
-   * Primary actions use action-colored text on a wash. Derive hover and press
-   * fills from the active surface so they follow both themes.
+   * The primary action's fill, and its two feedback steps.
+   *
+   * The boards draw the primary button as Ember Wash behind Deep Ember text on
+   * a neutral hairline (`71O-0`), not as a Deep Ember block with white text.
+   * The developer ruled that the wash button *is* the primary action on
+   * 2026-08-23 and retired the filled one. `--action` is still the ink, so the
+   * text steps above are the text's; these three are the fill's.
+   *
+   * Derived rather than fixed, so one declaration follows both themes: each
+   * step pulls a little more Ember into whatever `--surface-active` is in
+   * force. Light theme starts at `#fff5f2` and warms; dark theme starts at
+   * Ember-on-dark and warms the same way.
    */
   --action-wash: var(--surface-active);
   --action-wash-hover: color-mix(in srgb, var(--color-ember) 8%, var(--surface-active));
@@ -95,8 +171,14 @@
   --bad-surface: color-mix(in srgb, var(--bad) 6%, var(--surface));
 
   /*
-   * Derive the scrim from fixed dark ink, not the foreground that becomes
-   * light in dark mode.
+   * The dialog scrim, which is what makes the page behind one read as inert.
+   *
+   * It is mixed from Midnight Ink rather than from `--foreground`, and that is
+   * the whole point: `--foreground` flips to near-white in dark theme, so a
+   * scrim derived from it *brightened* the page it was supposed to put behind
+   * a dialog. A scrim is dark in both themes because dimming is what it means.
+   * In light theme `--foreground` is Midnight Ink, so this is the value that
+   * was already being drawn.
    */
   --scrim: color-mix(in srgb, var(--color-midnight) 32%, transparent);
 
@@ -116,15 +198,34 @@
   --space-13: 100px;
 
   /*
-   * Component corners are square. Keep semantic radius names for their callers;
-   * round control shapes such as radio indicators use separate styling.
+   * Component shape: one radius, and it is none.
+   *
+   * The four names stay because forty class lists read them — `rounded-button`
+   * on a button, `rounded-card` on a panel — and because a name says which
+   * component asked. What changed is every value. The developer ruled it on
+   * 2026-08-23 looking at the Paper boards: "0px radius, sharp corners, on
+   * every component". `DESIGN.md`'s per-component radius table collapsed to
+   * one line in the same change.
+   *
+   * **A round *shape* is not a component corner and is not drawn from here.**
+   * A radio button stays circular because its shape distinguishes it from a
+   * checkbox. The account avatar is square with every other component.
    */
   --radius-sm: 0px;
   --radius-md: 0px;
   --radius-lg: 0px;
   --radius-pill: 0px;
 
-  /* Use the system UI font first, with the accepted type scale and weights. */
+  /*
+   * The accepted type scale.
+   *
+   * **`system-ui` leads, and the reason is the boards.** Paper renders its
+   * artboards in `system-ui`, so a product drawn in Arial first would not look
+   * like the thing that was approved — on a Mac the two are a different face,
+   * not a different hinting. Helvetica and Arial stay behind it, so a machine
+   * with no `system-ui` lands exactly where this product used to. Developer
+   * decision, 2026-08-23. Weights are still 400 and 500 and nothing else.
+   */
   --sans: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   --mono: var(--egma-mono), "IBM Plex Mono", ui-monospace, monospace;
   /*
@@ -236,20 +337,62 @@
   --table-action-width: 48px;
 
   /*
-   * A labeled action column needs room for its heading and padding. Keep its
-   * width separate from the compact column that holds only a menu trigger.
+   * The same lane, on a table that says **Actions** over it.
+   *
+   * A ⋮ needs 48px and a word does not: "Actions" at `--text-sm` is about
+   * 54px, and the header padding either side of it is `--row-padding-x`, so
+   * the lane a labelled trailing column needs is a little over 86px. The
+   * tests grid names its lane out loud and was drawing it at the unlabelled
+   * width, which put the word through the table's own right hairline.
+   *
+   * It is a second token rather than a wider first one because the two are
+   * different facts: a lane holding only a ⋮ is 48px in every list in the
+   * product, and widening all of them to suit one heading would move a lane
+   * a person's eye follows down every table.
    */
   --table-action-labelled-width: 96px;
 
   /*
-   * The editable test grid keeps its columns and scrolls horizontally below
-   * this minimum width. It has no stacked mobile form.
+   * The narrowest the suite grid may be drawn before it scrolls sideways.
+   *
+   * That grid is the one table in the product with no narrow layout: its cells
+   * are edited in place, so the stacked label-and-value form every list uses
+   * on a phone is a screen of its own rather than a variant, and it is not
+   * written yet. Until it is, six percentage columns and a 96px lane share
+   * whatever width there is, and each floor below is the width at which the
+   * narrowest of them stops holding its own heading on one line.
+   *
+   * **900px, and it is no longer under the tablet width.** The floor was 720
+   * for four columns, chosen to sit under 768 so only a phone scrolled. Mock
+   * tools and Env are two more columns of the test's own content, and six
+   * columns plus the lane do not hold their headings inside a tablet — the
+   * arithmetic is `Mock tools` at 14px inside `--row-padding-x` either side,
+   * which wants about 100px, and `Personas` about 90. A tablet scrolls the
+   * grid now. A table that scrolls inside its own panel is the honest failure
+   * here; headings broken across two lines are not.
+   *
+   * The proportions moved on 2026-09-04, when the two JSON cells started
+   * saying sentences rather than counts, and the floor did not have to move
+   * with them: `Personas` at 12% is 108px here and is now the tightest
+   * heading of the six.
    */
   --tests-grid-min-width: 900px;
 
   /*
-   * Shared surface widths. Form sheets are modal; reading sheets keep the page
-   * usable. Production trace reading sheets gain more room on large viewports.
+   * How wide each surface is. Every one of these lived in a class list as a
+   * bare number until 2026-08-23; a size is a design value like a colour is,
+   * and `DESIGN.md` says a component holds neither.
+   *
+   * **Two side-sheet behaviours, with one production reading variant.**
+   * `--sheet-width` is the modal panel the boards draw one record in (`77F-0`):
+   * create, read and edit, over a scrim, with the page behind it inert.
+   * `--sheet-width-wide` is the *reading* surface `ui/dialog.tsx` opens beside
+   * a page that stays usable — a transcript against its grader results, a
+   * persona's version history. A production trace uses the same behaviour but
+   * gets more reading room on a large viewport; the clamp keeps its existing
+   * width until the viewport can give it that room. Collapsing the reading
+   * surface into the form width took 200px off a transcript to make a number
+   * match, which is a worse product for a tidier theme.
    */
   --sheet-width: 440px;
   --sheet-width-wide: 640px;
@@ -281,8 +424,18 @@
   --grade-fact-min: 150px;
 
   /*
-   * Raised surfaces share one warm shadow recipe. Flat panels and controls
-   * use borders without elevation.
+   * Orange-brown elevation, reserved for what is raised off the page.
+   *
+   * **There used to be two recipes and the boards draw one.** The row menu
+   * (`9AH-0`), the side sheet (`77F-0`) and the confirm dialog (`BEM-0`) were
+   * read with `get_computed_styles` on 2026-08-23 and all three carry the same
+   * two-layer stack — the short menu shadow is not on any of them. So
+   * `--shadow-menu` reads the same declaration rather than holding a second
+   * value that nothing draws. The name stays because `shadow-popover` reads
+   * it and because a menu is still what asks.
+   *
+   * Everything the boards give a hairline and no shadow — the table panel, the
+   * sidebar, the topbar, inputs, the search box — keeps the hairline alone.
    */
   --shadow-dialog:
     rgb(122 49 23 / 0.12) -8px 16px 39px 0,
@@ -295,7 +448,17 @@
     rgb(122 49 23 / 0.02) -130px 256px 115px 0;
 }
 
-/* Apply dark values to both the document root and nested design-system previews. */
+/*
+ * Dark theme semantic overrides.
+ *
+ * **Two selectors, and the second one is what makes the proof page honest.**
+ * The document carries `data-theme` on `<html>`, which is what the theme
+ * script writes and what every real page reads. `/design-system` also has to
+ * draw the dark theme *beside* the light one, in a frame, so a person can hold
+ * the two against each other without reloading — and a rule bound to `:root`
+ * alone cannot dress a `<div>`. The attribute means the same thing in both
+ * places: everything inside me is dark.
+ */
 :root[data-theme="dark"],
 [data-theme="dark"] {
   --background: #151514;
@@ -312,7 +475,26 @@
   --foreground: #f2f2ed;
   --muted: #a3a39b;
   --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%23a3a39b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  /* Keep tertiary text readable on the raised dark surface as well as the canvas. */
+  /*
+   * Lifted from `#82827b`, which failed AA on the surface it is most often
+   * drawn on.
+   *
+   * The tertiary step has two grounds in dark theme and they are not the same
+   * test. On the canvas, `#151514`, the old value measured 4.73:1 and passed.
+   * On the raised surface, `#1b1b1a` — a table panel, a form group, a menu —
+   * it measured **4.46:1 and failed**, and that is where a timestamp, a hint
+   * and an empty-state line actually live. A value that passes on the page and
+   * fails inside every panel on it is a value that fails.
+   *
+   * `#94948c` measures 5.98:1 on the canvas and 5.64:1 on the raised surface,
+   * so the worst ground now clears AA with room rather than by a rounding
+   * step. It stays a step below `--muted`, which is 6.79:1 on the same ground:
+   * the three-level hierarchy is what it was, one rung less quiet at the
+   * bottom.
+   *
+   * Light theme was measured too and did not move — its `--faint` is 5.33:1 on
+   * Pure Paper.
+   */
   --faint: #94948c;
   --border: #30302d;
   --border-strong: #4a4a44;
@@ -321,8 +503,22 @@
   --waveform-user: color-mix(in srgb, var(--foreground) 76%, transparent);
   --waveform-agent: color-mix(in srgb, var(--color-ember) 84%, transparent);
   /*
-   * Lighten action text for contrast against dark washes. Hover and press
-   * move further toward paper.
+   * The primary action's ink, lightened for the dark wash it sits on.
+   *
+   * **Deep Ember on the dark wash is 2.69:1, which fails AA and fails even the
+   * 3:1 a non-text control gets.** That was true before this theme change as
+   * well — the wash was already Ember-on-dark and the ink was already
+   * `#c2410c` — so this is a fault being fixed rather than one being created.
+   * Ember alone is 4.3:1, still short. Ember pulled 20% towards paper is
+   * `#ff7554` at **5.26:1**, which passes AA for the 14px label a button
+   * carries, and it is the same colour family the light theme uses.
+   *
+   * Hover and press move *further* towards paper, which is "further from the
+   * surface it sits on" — the same direction, in dark, that the light theme's
+   * darker steps take. `--destructive` above already works this way.
+   *
+   * `DESIGN.md`: "Dark theme uses lighter status values that keep the same
+   * meanings." This is that rule applied to the action family.
    */
   --action: color-mix(in srgb, var(--color-ember) 80%, var(--color-paper));
   --action-hover: color-mix(in srgb, var(--color-ember) 62%, var(--color-paper));
@@ -333,8 +529,19 @@
   --bad: #e27373;
 
   /*
-   * Match destructive styling to the failure color. Use dark text on the
-   * lighter dark-theme fill to preserve contrast.
+   * Destructive follows the failure colour, in both themes.
+   *
+   * `DESIGN.md`: "Dark theme uses lighter status values that keep the same
+   * meanings." Light theme already has one red — `--destructive` and `--bad`
+   * are the same value — and dark theme lightened `--bad` alone, so a dark
+   * page showed a `#b44444` destructive button beside an `#e27373` destructive
+   * menu item and asked somebody to read them as one meaning.
+   *
+   * White text on the lighter red is 3.0:1 and fails AA, so the text on it
+   * flips to Midnight Ink at 5.4:1 — the same contrast the light theme gets
+   * from white on `#b44444`. Hover and press move *towards paper* here, where
+   * light theme moves away from it: both directions are "further from the page
+   * it sits on", which is what the feedback has to say.
    */
   --destructive: var(--bad);
   --destructive-hover: color-mix(in srgb, var(--bad) 86%, var(--color-paper));
@@ -362,8 +569,19 @@
 }
 
 /*
- * Stack tables at the viewport breakpoint or when an opted-in data-table
- * container is narrow. Keep both conditions in this shared variant.
+ * "Mobile may restyle the same DOM as rows." When a table does that is two
+ * questions rather than one, and both have to be asked of every rule.
+ *
+ * A table normally stacks when the *browser* is too narrow — the same 900px at
+ * which the shell stops being two columns. A table inside a narrow content area
+ * can run out of room long before that, so a page may opt in by naming its
+ * wrapper a `data-table` container, and then the table's own width decides.
+ *
+ * A container query against a container that does not exist is false, so the
+ * second half costs nothing on a table that did not opt in, and both halves
+ * apply to one that did. Writing it as one variant is what keeps the two
+ * layouts from drifting: a rule added to `stacked:` cannot be added to one
+ * question and forgotten in the other.
  */
 @custom-variant stacked {
   @media (max-width: 900px) {
@@ -454,8 +672,14 @@
   --color-selected-foreground: var(--foreground);
 
   /*
-   * Keep primary ink and wash aliases separate. The foreground alias remains
-   * for components using a filled primary surface; callers must check contrast.
+   * The primary action.
+   *
+   * `--color-primary` and its two steps are the *ink* — Deep Ember, and the
+   * two darker Ember steps under pointer feedback. `--color-primary-wash` and
+   * its two are the *fill* the boards put behind that ink. `-foreground` is
+   * kept pointing at white for the one thing that still fills with Deep Ember
+   * (nothing in the product today; a pasted shadcn component tomorrow), so a
+   * component that reaches for it lands somewhere legible rather than nowhere.
    */
   --color-primary: var(--action);
   --color-primary-foreground: var(--action-text);
@@ -466,8 +690,20 @@
   --color-primary-wash-pressed: var(--action-wash-pressed);
 
   /*
-   * Publish action and registry-compatible primary aliases from the same
-   * values, including hover and press states.
+   * The same seven declarations under the product's own word.
+   *
+   * **`primary` is shadcn's name for this and `action` is egma's, and a class
+   * that names a key the theme does not publish fails in silence.** `DESIGN.md`
+   * and the spec both say `--action`; the theme published only `--color-primary`,
+   * so `text-action` compiled to nothing at all, drew the inherited body colour,
+   * and looked exactly like somebody's decision. That is how "+ Add a behavior"
+   * shipped as ordinary text until a screenshot caught it.
+   *
+   * Both words now read one declaration. `primary` stays because a component
+   * pasted from the registry arrives asking for it; `action` is what the rest
+   * of the product writes. The two feedback fills are aliased as well, on
+   * purpose: publishing `action-wash` but not `action-wash-hover` would put
+   * the same silent hole back one name along.
    */
   --color-action: var(--action);
   --color-action-hover: var(--action-hover);
@@ -600,10 +836,28 @@
 }
 
 /*
- * Use Radix state attributes and measured trigger origins for surface motion.
- * Keep submenu slots distinct. Exit animations let Radix retain a surface
- * until animationend; transitions alone do not supply that signal. Theme
- * tokens define timing, and reduced-motion rules remove spatial movement.
+ * Motion, at the theme rather than on each component.
+ *
+ * `DESIGN.md` asks for things a class list says badly: an exit that finishes
+ * before the element unmounts, a popover that grows from the control that
+ * opened it, and a reduced-motion form of every one of them. Radix already
+ * publishes what is needed — `data-state` for open and closed, and a
+ * transform-origin measured from the trigger — so the rules key off those and
+ * the component files stay stock shadcn.
+ *
+ * A sub-menu is named beside its parent in every list below rather than being
+ * handed the parent's `data-slot`. Sharing the name is the shorter way to make
+ * a sub-menu move, and it costs the ability to ever address the two apart: a
+ * later rule meant for one silently reaches the other, and the component stops
+ * matching the registry it came from.
+ *
+ * Exits are animations rather than transitions on purpose: Radix waits for
+ * `animationend` before unmounting, and a transition would be cut off halfway.
+ *
+ * The polish bar is "fast, modern, slick" and the floor is unchanged — every
+ * duration here is a `DESIGN.md` motion token, every one is under 300ms, only
+ * `transform` and `opacity` move, and reduced motion keeps the meaning while
+ * dropping the movement.
  */
 
 @keyframes egma-fade-in {
@@ -672,8 +926,24 @@
 }
 
 /*
- * Animate scale separately from the translate used to center the dialog,
- * so the keyframes do not replace its positioning transform.
+ * The dialog scales on the `scale` property rather than inside `transform`,
+ * and that is load-bearing rather than a style preference.
+ *
+ * A centred dialog is held in place by a half-its-own-size shift, and
+ * `transform` is a single property: a keyframe that sets `transform: scale()`
+ * replaces whatever shift was there, and the panel slides down and right for
+ * the length of the animation before snapping back at the end. Today that does
+ * not happen, because Tailwind 4 compiles `-translate-x-1/2` to the separate
+ * `translate` property, which composes with `transform` instead of being
+ * overwritten by it — so the two never meet. But that is Tailwind's
+ * implementation detail holding the dialog together, not anything this file
+ * says, and it was different in Tailwind 3.
+ *
+ * Animating `scale` puts the movement on its own property too. Position lives
+ * on `translate`, motion lives on `scale`, `transform` is written by neither,
+ * and no future centring — however it is expressed — can be cancelled by this
+ * animation. `transform-origin` still applies, so the panel still scales about
+ * its own centre.
  */
 @keyframes egma-dialog-in {
   from { opacity: 0; scale: 0.98; }
@@ -686,8 +956,20 @@
 }
 
 /*
- * Drawer keyframes translate from the attached edge without fading. Use
- * an animation so Radix waits for the drawer's own exit event.
+ * The drawer, which travels and does not fade.
+ *
+ * `DESIGN.md` gives a mobile drawer its own line: "translate from its attached
+ * edge", and its own pair of tokens. Fading or scaling it as well reads as two
+ * events rather than one movement, so these keyframes write `translate` and
+ * nothing else. `translate` is a property of its own, so the panel's resting
+ * position is still whatever its class list says and this only moves it.
+ *
+ * **The length of the exit is load-bearing rather than decoration.** Radix
+ * removes the panel on `animationend`, so whatever animation is running is
+ * what holds the drawer on screen while it leaves. Writing the travel as a
+ * transition instead left it racing the centred dialog's 180ms `scale`, which
+ * is why the drawer used to be cut off at its own edge; an animation of its
+ * own means the drawer waits for the drawer.
  */
 @keyframes egma-drawer-in {
   from { translate: -100% 0; }
@@ -700,8 +982,18 @@
 }
 
 /*
- * Sheets translate from the right and fade using drawer timing tokens.
- * Keep movement on the separate translate property.
+ * The side sheet, which comes in from the right edge and fades with it.
+ *
+ * `DESIGN.md` gives an edge-attached surface one behaviour — "translate from
+ * its attached edge" — and one pair of tokens, the drawer's. A sheet is that
+ * surface on the other edge, so it takes the same movement and the same
+ * durations. The opacity travels with it because a sheet lands over a scrim
+ * rather than over the bare page, and a panel that only slid would look like it
+ * had always been there, just off screen.
+ *
+ * `translate` and nothing else, for the reason the drawer's keyframes give: the
+ * panel's resting position is whatever its class list says, and an animation
+ * that wrote `transform` would replace it.
  */
 @keyframes egma-sheet-in {
   from { opacity: 0; translate: 100% 0; }
@@ -730,8 +1022,16 @@
   }
 
   /*
-   * Rotate the state mark only while active. The text carries the state, so
-   * reduced motion can stop it. This indicates activity, not measured progress.
+   * "Loading: show progress — fast, quiet indicator."
+   *
+   * The mark beside a run's state turns only while the run is moving, which is
+   * what `data-motion="active"` says. It is a `rotate` on a 12px line symbol
+   * and nothing else on the page moves with it. Three drawer-enters is a
+   * complete turn: slow enough to read as progress rather than as a spinner
+   * demanding attention, and still a motion token rather than a number.
+   *
+   * The word beside it is what carries the meaning, so reduced motion drops
+   * the turn and loses nothing.
    */
   [data-slot="state-mark"][data-motion="active"] {
     transform-origin: center;
@@ -746,8 +1046,17 @@
   }
 
   /*
-   * Animate a segment in the session-loading track; the logo stays still.
-   * The global reduced-motion rule shortens the animation and limits it to one iteration.
+   * The same rule for the screen that stands in while a session is unresolved.
+   *
+   * The Egma mark above this never moves — `DESIGN.md` forbids animating the
+   * logo — so one segment crossing a hairline track is the whole of the quiet
+   * indicator. Four drawer-enters for a crossing: a token rather than a number,
+   * and slow enough to read as work rather than as alarm.
+   *
+   * Reduced motion is answered once, in `globals.css`, which holds every
+   * animation to a single frame. What is left is a segment standing in its
+   * track — the same trade the skeleton bars make — and the sentence this
+   * screen announces carries the meaning either way.
    */
   [data-slot="session-progress"] > * {
     animation: egma-session-progress calc(var(--duration-drawer-in) * 4)
@@ -755,10 +1064,32 @@
   }
 
   /*
-   * Delay the loading entrance to avoid flashes for quick responses. A route
-   * fallback owns the fade; suppress the nested card's fade to avoid multiplying
-   * opacities. The global reduced-motion rule keeps the delay while shortening
-   * the animation.
+   * The same rule's other half: a page, or a whole route, that is still
+   * waiting.
+   *
+   * **One appearance assembled out of three elements.** A route fallback wraps
+   * a whole page composition, that composition holds a state card, and the
+   * card holds the bars. Only a rule that can see all three can say "one
+   * entrance, not three", which is why this is here rather than in three class
+   * lists that cannot see each other.
+   *
+   * **The entrance waits before it draws anything.** `--duration-popover-in`
+   * of nothing, held there by `both`, and then a `--duration-hover` fade. A
+   * route that answers inside that wait — a prefetched one, a warm cache, a
+   * second visit — is drawn without this ever having been on screen, and a box
+   * that appears and vanishes inside a fifth of a second reads as a fault
+   * rather than as speed.
+   *
+   * **A fallback owns the entrance; the card inside it does not.** Otherwise
+   * the header would fade as one thing and the card as another, and the two
+   * opacities would multiply for as long as they overlapped.
+   *
+   * **Reduced motion is deliberately not given a rule of its own here.** This
+   * is already opacity and nothing else, and `globals.css` caps every
+   * animation at a single frame under that query while leaving
+   * `animation-delay` alone — so what survives is the wait, and what goes is
+   * the fade. Writing `animation: none` here would throw away the half worth
+   * keeping.
    */
   [data-slot="route-loading"],
   [data-slot="page-state"]:has([data-slot="loading-indicator"]) {
@@ -772,8 +1103,22 @@
   }
 
   /*
-   * Offset skeleton pulses with negative delays so all bars start immediately
-   * at different phases. Reduced motion leaves static bars.
+   * The bars themselves.
+   *
+   * One full breath is `--duration-drawer-in` twice over — 560ms, so each half
+   * of it is one drawer-enter — against the 2s a stock shadcn skeleton
+   * carries. Quicker, and still slow enough to read as waiting rather than as
+   * alarm.
+   *
+   * The stagger is `--duration-hover` per bar and **negative**, so all three
+   * are already moving on the first frame and merely out of phase. A positive
+   * delay would hold the second and third still while the first breathed,
+   * which reads as two bars that failed to start. It is a separate
+   * `animation-delay` and it is safe to be one: both declarations are in this
+   * file, in this order, and the offsets are the more specific of the two.
+   *
+   * The word above them carries the meaning, so reduced motion stops the
+   * breath and leaves the bar — the same trade the state mark makes.
    */
   [data-slot="skeleton"] {
     animation: egma-skeleton-pulse calc(var(--duration-drawer-in) * 2)
@@ -867,9 +1212,21 @@
   }
 
   /*
-   * Animate delayed pointer tooltips. Instant-open states have no entrance
-   * animation. data-input selects pointer exits because closed state alone does
-   * not identify how the tooltip opened.
+   * The tooltip.
+   *
+   * Radix says how it was opened and the two answers want different things.
+   * `delayed-open` is a pointer that waited, so it arrives about its trigger
+   * on opacity and `transform`. `instant-open` is keyboard focus, or a pointer
+   * inside the grouping window, and neither of those gets a rule at all: "do
+   * not animate actions used many times each day, especially keyboard
+   * navigation", and a delay repeated across a row of controls is the tooltip
+   * behaviour everybody complains about.
+   *
+   * The exit is scoped by `data-input`, which the shared `Tooltip` sets on the
+   * way in, because Radix reports "closed" the same way whichever opened it.
+   * An animation is what Radix waits for before unmounting, so the pointer
+   * exit runs to completion and the keyboard one is not made to wait for
+   * anything.
    */
   [data-slot="tooltip-content"][data-state="delayed-open"] {
     animation: egma-anchored-in var(--duration-popover-in) var(--ease-out);
@@ -880,8 +1237,17 @@
   }
 
   /*
-   * Keep toast movement on translate. The controlled component handles exit
-   * presence, with transition events and a timeout fallback.
+   * The toast.
+   *
+   * Position and motion are on separate properties on purpose, which is the
+   * same rule the dialog above follows and for the same reason: a toast
+   * arrives by moving, so its motion is on `translate` and nothing else writes
+   * that property.
+   *
+   * These stay transitions rather than animations, unlike everything else in
+   * this section. `DESIGN.md` asks this one surface for an *interruptible*
+   * exit, and the component keeps itself mounted until the `transitionend`
+   * rather than handing the decision to Radix.
    */
   [data-slot="toast"][data-input="pointer"] {
     transition:
@@ -903,8 +1269,17 @@
   }
 
   /*
-   * Allow reduced-motion previews without changing the OS setting. Tooltips
-   * stay under their preview frame so these descendant selectors can reach them.
+   * The development proof can show the same contract without changing the OS.
+   * Deliberately outside the media query below: this is how the reduced-motion
+   * form is inspected, not a second definition of it.
+   *
+   * **This is why `components/ui/tooltip.tsx` does not portal its panel.** A
+   * portalled tooltip is a child of `body`, and no descendant selector written
+   * here can reach it from the frame it belongs to — the panel would go on
+   * demonstrating full motion while the words above it said the opposite,
+   * which is worse than not demonstrating it. Radix positions the panel
+   * `fixed` either way, so staying in place costs none of the collision
+   * handling; `tooltip.tsx` records the whole trade.
    */
   [data-preview="reduced-motion"]
     [data-slot="tooltip-content"][data-state="delayed-open"] {
@@ -917,8 +1292,18 @@
   }
 
   /*
-   * Remove the body's top gutter when the preceding header already has a
-   * toolbar. display: contents changes layout, not the DOM sibling relationship.
+   * A page that drew its own toolbar row does not pay the top gutter twice.
+   *
+   * `PageHeader` opens the block under the title bar when a page hands it a
+   * purpose statement, an action or a filter, and `PageBody` opens one when
+   * the page did not — so whichever comes first carries the 24px, and the
+   * second one starts where the first left off. It is a sibling rule because
+   * that is the question: *is there already a block above me*, which no class
+   * on either element can answer about the other.
+   *
+   * The header between them is `display: contents`, which changes what is
+   * drawn and not what is a sibling of what — so the match is on the header
+   * that holds a toolbar rather than on the toolbar itself.
    */
   [data-slot="page-header"]:has([data-slot="page-toolbar"])
     + [data-slot="page-body"] {
@@ -926,8 +1311,19 @@
   }
 
   /*
-   * Style links in table cells consistently, including links supplied by pages.
-   * Use an underline at rest and action feedback for fine-pointer hover.
+   * A link inside a table cell.
+   *
+   * The boards underline it in the text colour and turn it Ember under the
+   * pointer (`71C-0`): an underline is what says "this is a link" without
+   * spending the brand colour on every row of a list, and the colour arrives
+   * when somebody is actually pointing at one. It is here rather than in
+   * `ui/data-table.tsx` because the cell's contents are written by the page —
+   * the component never sees the link — and because every list in the product
+   * has to answer this the same way.
+   *
+   * Underline offset and thickness are the board's. Both are properties of the
+   * text rather than values a component chose, and neither has a token because
+   * `DESIGN.md` names no scale for them.
    */
   [data-slot="table-cell"] a {
     color: inherit;
@@ -976,9 +1372,17 @@
   }
 
   /*
-   * Stretch the primary link over the row with a pseudo-element. Raise other
-   * controls above it so their clicks remain independent. This enlarges the
-   * pointer target without adding another accessible link.
+   * A list row whose primary link is stretched across the whole row.
+   *
+   * Keyed on `data-stretch-primary-link`, and in the theme for the same reason
+   * the placement above is: the attribute has to be what does the work. Written
+   * as a class list on the row it was ten arbitrary variants that a test could
+   * only check by re-reading the prop that produced them.
+   *
+   * The `::after` covers the row, so every kind of control a cell may hold is
+   * lifted back above it — otherwise the press meant for an Edit button four
+   * columns along opens the row instead. There is still exactly one link in the
+   * accessibility tree; this adds a pointer target, not a second link.
    */
   [data-slot="data-table-row"][data-stretch-primary-link="true"] {
     position: relative;

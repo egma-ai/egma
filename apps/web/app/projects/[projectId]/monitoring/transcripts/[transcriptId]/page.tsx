@@ -42,8 +42,15 @@ import {
   type Step,
 } from "../../../../../../lib/transcripts.ts";
 /*
- * Use shared speaker labels and score formatting across transcript and
- * simulation evidence views.
+ * Two things this page used to keep its own copy of, taken from where the rest
+ * of the product already keeps them.
+ *
+ * `SPEAKERS` labelled a transcript's two sides here and in `ui/evidence.tsx`,
+ * with the same two words written out twice. `shownScore` turned a score into
+ * a figure here and in `ui/run-status.tsx`, with the same rounding and the
+ * same dash for a proportion of nothing. Two copies of a rule about how a
+ * score reads is two chances for a simulation's page and a production
+ * transcript's page to start saying it differently.
  */
 import { SPEAKERS } from "../../../../../../ui/evidence.tsx";
 import {
@@ -68,9 +75,19 @@ import {
   StatePage,
 } from "../../../../../ui.tsx";
 
-/*
- * Reusable class strings for this page's fact strips, transcript, and inspector layout.
- */
+/* ------------------------------------------------------------------------ *
+ * The page's own layout, which is the only thing it styles for itself.
+ *
+ * These were 54 class names in `app/ui.module.css`, the last CSS Module in the
+ * application. Everything a shared component owns is now composed rather than
+ * dressed — the header, the chips, the arrows, the notice — and what is left
+ * here is the arrangement of one wide evidence page: strips of facts, a
+ * transcript beside an inspector, and three readings of the same steps.
+ *
+ * They are constants rather than repeated class lists because each one is
+ * applied in three or more places and a strip that agreed with its neighbour in
+ * four rules out of five would look right.
+ * ------------------------------------------------------------------------ */
 
 /**
  * The word above one fact: the compact uppercase caption, in the mono face.
@@ -98,8 +115,17 @@ const FACT_VALUE = "text-sm font-normal tabular-nums [overflow-wrap:anywhere]";
 const FACT = "flex min-w-0 flex-col gap-1 border-e border-border p-4 last:border-e-0";
 
 /**
- * Below 620px, arrange facts in two columns and let an odd final fact span
- * both. Keep complete Tailwind class names literal so they are generated.
+ * The five facts above the exchange, and the measures beside them.
+ *
+ * Below 620px it is two columns, and the hairlines turn from a row of uprights
+ * into a grid: every fact grows a top edge, the two on the first row give
+ * theirs back, and the second of each pair drops the upright it no longer has a
+ * neighbour for. An odd count leaves one fact alone on the last row, and it
+ * takes the whole row rather than half of it.
+ *
+ * Every width is written out rather than composed, because Tailwind finds class
+ * names by reading this file as text: a class built from a template literal is
+ * a class that is never generated.
  */
 const SUMMARY_STRIP = cn(
   "mt-6 grid grid-cols-5 overflow-clip rounded-card border border-border bg-surface",
@@ -184,8 +210,18 @@ const VIEWS: readonly { readonly id: View; readonly label: string }[] = [
 ];
 
 /**
- * Read production or simulation evidence as a transcript. The URL must carry
- * the project and bounded time window required by the trace-read API.
+ * One production exchange, read as a **transcript**.
+ *
+ * Re-homed under the project with the rest of the monitoring section, and
+ * unchanged in everything it draws: the turns with their timings, the steps
+ * inside each one, the measures, and its grades.
+ *
+ * **Two things have to be in the address for this page to open at all**, and
+ * both are now there. The window, because a name is not a prefix of the store's
+ * filing order and the read endpoint refuses a lookup that bounded nothing —
+ * the row in the list carries the answer, so nobody types it. And the project,
+ * because a transcript belongs to one: the address names it, the request sends
+ * it, and a link somebody was sent opens the same page for them.
  */
 export default function TranscriptPage({
   params,
@@ -350,9 +386,25 @@ export default function TranscriptPage({
     <AppShell>
       <ProductPage wide>
         {/*
-         * Use the shared page header and its breadcrumb slot to match the loading
-         * state. Show source and environment as record facts in the lead.
-         */}
+          The product's own page header, rather than one this page drew for
+          itself. It used to carry a heading that grew to 56px — type
+          `DESIGN.md` reserves for auth, onboarding and public pages — so the
+          settled transcript did not even match its own loading state, which
+          has always been drawn by the shared header underneath
+          `ProductStatePage`.
+
+          **The trail moved into the title bar with it.** It used to be drawn
+          above the bar as a sibling of `<main>`, where it had none of the
+          page's gutters and sat over the bar rather than in it; `breadcrumbs`
+          is where the shared header keeps a trail, and it is what every other
+          record page in this product hands it.
+
+          Where the trace came from goes into the lead, because a page with a
+          real trail draws no label above its title — and this is the only
+          place the page states which source and which environment this
+          exchange belongs to. It is a fact about the record, the same kind as
+          the two beside it.
+        */}
         <PageHeader
           title={DETAIL.title}
           breadcrumbs={[
@@ -403,10 +455,24 @@ export default function TranscriptPage({
         />
 
         {/*
-         * Keep audio controls outside the view panels so playback remains controllable
-         * when changing views. Resolve recordings only for simulation traces; the
-         * recording route determines availability.
-         */}
+          The audio of this exchange, where egma is the one who had it.
+
+          **Beside the turns, because this is where the doubt is.** Somebody
+          reading a transcript who cannot tell a misbehaving agent from a bad
+          transcription is already looking at the turn; sending them to the run
+          to hear it would put the evidence a page away from the doubt.
+
+          Above the views rather than inside the transcript one, so that
+          switching to the timeline never leaves audio playing behind a panel
+          with no controls on it — a hidden `<audio>` keeps going, and a person
+          hunting for the sound would have no way to stop it.
+
+          `simulationId` is present only for an exchange egma conducted, which
+          is the one question this page can answer for itself; whether that
+          conversation recorded anything is the recording route's answer, and a
+          refusal there shows nothing at all rather than a control that does
+          nothing.
+        */}
         {typeof detail.simulationId === "string" ? (
           <RecordingPlayer
             simulationId={detail.simulationId}
@@ -416,9 +482,15 @@ export default function TranscriptPage({
         ) : null}
 
         {/*
-         * Stack the problem navigator above the view tabs on narrow screens so their
-         * combined controls do not cause horizontal overflow.
-         */}
+          The views, and the way through the problems.
+
+          On a phone the two do not fit on one line — three tab labels and a
+          pair of 44px targets is wider than the screen, and the toolbar was
+          pushing the whole document sideways whenever an exchange had
+          something wrong in it. So the strip becomes a reversed column: the
+          tabs keep the rule they sit on, and the navigator takes the line
+          above them rather than being squeezed into the same one.
+        */}
         <div
           className={cn(
             "mt-8 flex items-center justify-between gap-5 border-b border-border",
@@ -575,9 +647,27 @@ function Summary({ facts }: { facts: TraceFacts }) {
 }
 
 /**
- * Render API measures without recalculating reductions. Metrics describe
- * observations; grades apply criteria, so keep them separate and do not color
- * metrics as verdicts. Show a clear state when no measures are available.
+ * What this exchange measured — the metrics display.
+ *
+ * **Above the grades and apart from them, because a metric records an observed
+ * fact and a grader gives a score.** Nothing here is green or red: a duration is not good or bad
+ * until somebody has written down a bound, and the section below is where that
+ * decision shows up. Putting them in one block would make every number look like
+ * a check that passed.
+ *
+ * **Every number here came off the platform's one shared measure module**, which
+ * is also the only module a future metric-based grader may read — and that
+ * includes the **reduction**, the single measurement a bound is held against. This page
+ * renders what it was handed and derives nothing. Taking the maximum here would
+ * look harmless and would be a second implementation of exactly the number a
+ * grader could use: correct while both happen to take the maximum, silently
+ * wrong the first day a grader reduces by p90 instead. A developer who found the
+ * page and the grade evidence disagreeing would be right to stop believing both.
+ *
+ * A measure the spans do not carry is absent rather than shown empty, and an
+ * exchange with none says so in a sentence — "nothing was measured" is a fact
+ * about the telemetry that arrived, and a blank strip would read as a page that
+ * failed to load.
  */
 function Measures({ measured }: { measured: readonly Measured[] }) {
   return (

@@ -42,9 +42,30 @@ import {
 } from "./[agentId]/connections/livekit-agent-name.tsx";
 
 /**
- * Read and edit a connection in a sheet over the Agents list, including when
- * opened by a direct URL. Show edit and delete actions in the header menu;
- * Delete archives the connection. Reads expose credential hints, not secret values.
+ * One way egma reaches an agent, read and changed in the panel the board draws
+ * (`77F-0`).
+ *
+ * **It opens over whatever a person was reading.** The list stays behind it, so
+ * following a connection off a row and coming back is not two page loads;
+ * `DESIGN.md` records the side sheet as where one record is created, read and
+ * edited. The address `/agents/:agent/connections/:connection` still works and
+ * opens exactly this, so every link in the docs and the CLI still lands
+ * somewhere honest.
+ *
+ * **Read first, edit on purpose, and manage from the ⋮.** Reading is plain
+ * labelled rows with no controls in front of them; Edit connection and Delete
+ * connection live in a menu in the head, and the footer exists only while
+ * something is being edited.
+ *
+ * **The destructive action says "Delete", and the write underneath archives**
+ * (founder ruling, 2026-08-24). The word matches what a person meant; the
+ * sentence in the confirmation is what says what actually happens to stored
+ * transcripts. See `archive.tsx`.
+ *
+ * **The credential is never in this panel, on either side.** A read answers
+ * whether one is present and a hint of which it is; it never answers with the
+ * secret, so there is nothing here to show and nothing to merge. Replacing one
+ * is not a control this product has yet.
  */
 
 type Answered = { readonly connection: ListedConnection };
@@ -104,8 +125,14 @@ export function ConnectionSheet({
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [nameProblem, setNameProblem] = useState<string | null>(null);
   /**
-   * Put the disabled-action reason in the sheet body and reference it from
-   * controls, avoiding repeated long text in the narrow footer.
+   * Where the reason a footer control is not available is written.
+   *
+   * **It is a line of the panel, not a line of the footer.** `Button`'s own
+   * `why` draws the sentence beside the control, which is right in a toolbar
+   * and wrong in a 440px footer: two disabled controls would put two long
+   * sentences between Edit and Archive. The controls still name it, and still
+   * carry it as a `title`, so a pointer, a keyboard and a screen reader all
+   * reach it.
    */
   const whySaid = useId();
 
@@ -338,9 +365,16 @@ export function ConnectionSheet({
             }}
           >
             {/*
-             * Keep the header to the name and actions menu. Connection facts belong in
-             * the body; the footer appears when editing.
-             */}
+              * **The head is the name and a ⋮, and no subtitle** (`ITZ-0`).
+              * The old "Retell phone · Voice" line under the name said what
+              * the Access row says two lines below it, and the first thing a
+              * panel says should be the record rather than its category.
+              *
+              * **Managing lives in the menu, and reading lives in the body.**
+              * Edit and Delete used to stand in the footer under a record
+              * nobody had asked to change yet, which made every read of a
+              * connection look like a form.
+              */}
             <SheetHeader
               {...(connection === null || role === null || editing !== null
                 ? {}
@@ -436,9 +470,29 @@ function ReadRow({
 }
 
 /**
- * Show catalog-labeled facts and stored config. Keep phone numbers in Config
- * to avoid repetition; retain unknown config keys by name. Credential values
- * are absent from the read model.
+ * The record, read.
+ *
+ * **Six kinds of row and no more** (`ITZ-0`, `JYY-0`, `K40-0`): Name, Access,
+ * Modality, the rows the catalog names for what is stored, the Config block,
+ * and Created. Updated-at, Env and Platform left with the 2026-08-24 boards —
+ * Platform because Access already says which product this is, Updated-at
+ * because nobody reads a connection to find out when it was touched, and Env
+ * because the product stopped speaking that word (the column stays where it
+ * is, unspoken).
+ *
+ * **The phone number is not a row.** It shows inside the Config block and
+ * nowhere else, so the panel does not say the same fact twice in two shapes.
+ *
+ * **The labelled rows come from the catalog and the raw block comes from the
+ * record**, and both are drawn because they answer different questions. A row
+ * says what a value *is* — "Retell agent ID" — in the registry's own words.
+ * The block says what egma actually stored. A key from a newer server has no
+ * label in this browser, so it is listed by its own name and loses nothing
+ * while clients and servers roll forward separately.
+ *
+ * **A credential is never here.** A read answers whether one is present and a
+ * hint of which it is; the hint is drawn as its last characters and the secret
+ * is not in the answer at all.
  */
 function ReadConnection({
   connection,

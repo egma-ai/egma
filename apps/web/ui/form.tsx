@@ -8,14 +8,39 @@ import { cn } from "@/lib/utils";
 import { FieldHintContext } from "./field-hint.ts";
 
 /**
- * Shared form compositions built from input primitives: layout, fields,
- * hints, and save/refusal feedback.
+ * A form, the rows it is laid out in, the fields inside it, and the three
+ * sentences a form says.
+ *
+ * The seven pieces are one file because they are one thing: no page decides
+ * for itself how far a form runs across a wide screen, how two fields sit
+ * beside each other, or what a refusal looks like above the form it refused.
+ *
+ * They are here rather than in `components/ui/` because that directory holds
+ * shadcn's own primitives, added with its CLI and named as the registry names
+ * them. These are egma's compositions *of* those primitives — a `Field` wraps
+ * whichever control it is given — so they live beside the product's other
+ * shared components, which is where every page already looks for them.
  */
 
 /**
- * Render trailing required stars in the form accent color and preserve them
- * inside the label. Controls still need aria-required. Grid column headings
- * use their own muted marker and accessible name.
+ * A label's own words, with a mandatory field's star drawn in Ember.
+ *
+ * `DESIGN.md` sets one label grammar for the whole product: a mandatory
+ * field's label ends in `*` and an optional one ends in `[optional]`. The
+ * colour of that star is Ember, and it is decided here rather than by each
+ * screen, so no two form labels can wear a different one.
+ *
+ * The tests grid's column headings are the one place outside a form that draws
+ * the star, and they draw it in the heading's own muted colour: a heading row
+ * carries four of them side by side, and four Ember marks across it read as a
+ * state the table is in (founder, 2026-09-04). That is a heading rather than a
+ * label, and it does not come through here.
+ *
+ * **The star stays inside the label's own text.** It is a `<span>` for its
+ * colour and its 4px of air, not a separate element beside the label, so the
+ * name a screen reader announces is exactly the name it announced before —
+ * and the star's promise is still kept by `aria-required` on the control,
+ * which is the half no styling can stand in for.
  */
 export function LabelText({ label }: { readonly label: string }) {
   if (!label.endsWith("*")) return <>{label}</>;
@@ -27,7 +52,18 @@ export function LabelText({ label }: { readonly label: string }) {
   );
 }
 
-/** Provide the hint ID to nested controls and render the shared label primitive. */
+/**
+ * A labelled field, and the hint it lends to whatever control it wraps.
+ *
+ * The hint's id travels through context rather than through a prop: a caller
+ * wiring `aria-describedby` by hand forgets exactly the fields nobody checks,
+ * because the page still looks right without it. `field-hint.ts` says why it
+ * is a context and holds the context itself.
+ *
+ * The label is the kit's, which is Radix's: a double click on a plain `<label>`
+ * selects the words around it, which is what a person sees when they meant to
+ * select the value in the field beside it.
+ */
 export function Field({
   label,
   htmlFor,
@@ -38,8 +74,14 @@ export function Field({
   readonly label: string;
   readonly htmlFor: string;
   /**
-   * Describe a value mapping beside the label without changing the control's
-   * accessible name. Reserve square brackets for the optional-field marker.
+   * A quiet fact about the value, beside the label rather than inside it.
+   *
+   * `scores · 1` is what the answer means, not what to write, so it is neither
+   * a second help line nor part of the label's own words: the form still reads
+   * in plain language and the mapping is still there to find. It stays outside
+   * the `<label>` element, so the name a screen reader announces does not
+   * change — the control describes itself with it instead. Square brackets are
+   * reserved for `[optional]`, so an annotation never wears them.
    */
   readonly annotation?: string;
   /** One line saying what belongs here, for a field whose name is not enough. */
@@ -81,8 +123,16 @@ export function Field({
 }
 
 /**
- * Limit form reading width and remove the first section's extra top margin
- * where form padding already supplies separation.
+ * The form itself.
+ *
+ * It is held to 72ch because a line somebody has to read across is a line they
+ * lose their place in, and it is the same measure every editor in the product
+ * is set at.
+ *
+ * The first `Section` inside a form loses its top margin: the form's own
+ * padding has already opened the space, and the margin on top of it read as a
+ * gap nobody asked for. The rule is on the form rather than on the section
+ * because it is the form that knows it is first.
  */
 export function Form({
   onSubmit,
@@ -160,7 +210,16 @@ export function Help({
   );
 }
 
-/** Announce field or form refusal without clearing the user's draft. */
+/**
+ * What went wrong with one field, or with the whole form.
+ *
+ * It is announced rather than merely coloured, and it never replaces what
+ * somebody typed. A refusal that cleared the form would make the person type
+ * their work again to find out whether the second attempt fails the same way.
+ *
+ * `Refused` is the same news one level up: this one names a field, that one
+ * heads the form it refused and can carry the way to ask again.
+ */
 export function Problem({
   id,
   children,

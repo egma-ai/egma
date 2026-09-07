@@ -67,9 +67,25 @@ import { settingsPath } from "./settings-nav.tsx";
 import { useTheme } from "./theme.tsx";
 
 /**
- * Shared signed-in frame using theme dimensions. Derive project and current
- * navigation from the URL; an address without a project shows no project
- * navigation rather than selecting a fallback.
+ * The frame every signed-in product page is drawn inside.
+ *
+ * **Compact, because the product is the data.** A narrow sidebar, a page title
+ * that is a label rather than a headline, and controls that sit in a toolbar
+ * instead of becoming one. Every measurement is a theme value, so the hands-on
+ * tuning pass at the end of this effort is an edit to the theme rather than an
+ * edit to every page.
+ *
+ * **Where you are comes from the address.** The project is read out of the
+ * path, the navigation item is read out of the path, and nothing here keeps a
+ * chosen project of its own. Two tabs on two projects are therefore two
+ * ordinary tabs.
+ *
+ * **There is no fallback left, and this paragraph used to describe one.** While
+ * pages were being converted to explicit project context the selector fell back
+ * to the first project so that it had something to say; that half of the
+ * expand-contract change is finished, and both fallbacks — this shell's and the
+ * selector's own — are gone. An address inside no project draws no product
+ * navigation and says **No project**, which is the honest answer.
  */
 
 export type Session = {
@@ -180,8 +196,20 @@ export function ProductShellBoundary({ children }: { readonly children: ReactNod
 }
 
 /**
- * Use one icon set for product navigation, keeping product icons distinct
- * from the Egma logo.
+ * One line symbol per product area, from one set.
+ *
+ * **They are lucide's, and the point is that they are all lucide's.** These
+ * were six hand-drawn path lists before, each authored against a different idea
+ * of how heavy a line should be and how much of a 20px box to fill — a star
+ * that read as solid beside a figure that read as a sketch. A person does not
+ * name that when they call a bar unprofessional; they see it. One set, drawn on
+ * one grid at one weight, is what removes it. lucide is already a dependency of
+ * this application, so nothing was added to get it.
+ *
+ * Each icon says what its row says. `MessageSquareText` for the monitoring row
+ * because the row says Transcripts, and `ScaleIcon` for graders because a
+ * grader weighs a trace and returns a score — neither imitates the Egma mark,
+ * which `DESIGN.md` forbids of a product icon.
  */
 const NAVIGATION_ICONS: Record<SectionId, LucideIcon> = {
   agents: BotIcon,
@@ -209,8 +237,16 @@ function NavigationIcon({ section }: { readonly section: SectionId }) {
 }
 
 /**
- * Render the same navigation groups in the sidebar and mobile drawer. The
- * drawer closes through onNavigate; active state comes from the URL.
+ * The three groups, drawn once for wherever the bar is being shown.
+ *
+ * **One navigation model.** The docked bar and the mobile drawer render this
+ * same component, so the drawer cannot drift into a second, shorter list of
+ * where a person may go. The drawer passes `onNavigate` and the bar does not,
+ * which is the only difference between them: a drawer closes behind the choice
+ * it was opened to make.
+ *
+ * Where an item is lit still comes from the address, never from which group it
+ * happens to be in.
  */
 function Navigation({
   projectId,
@@ -227,8 +263,18 @@ function Navigation({
   return (
     <SidebarProvider onNavigate={onNavigate}>
       {/*
-       * Pad sidebar blocks separately so the organization divider spans the full
-       * width. Row inset plus row padding align icons with project text and group labels.
+       * The 16px gutter is the bar's, and it is on every block in the column
+       * rather than on the column itself. The organization bar's hairline has
+       * to run the full 224px, so the `<aside>` can carry no side padding.
+       *
+       * **8px here, because the gutter belongs to the row's icon and not to the
+       * row's plate.** The Egma mark, the word `Project`, the project name and
+       * every group label all start at 16px; a row whose own padding is 8 puts
+       * its icon on that same line, so the bar reads as one lane top to bottom
+       * instead of a project block and a navigation block 12px apart. The plate
+       * is 8px in from both edges as a result, 208px wide, and the Ember mark
+       * rides its leading edge — absolutely placed, so the icon lane is the same
+       * on the lit row and on every quiet one.
        */}
       <SidebarContent className="px-2" asChild>
         <nav aria-label="Product navigation">
@@ -258,8 +304,32 @@ function Navigation({
 }
 
 /**
- * Show the session's organization name without inventing billing or switcher
- * state. Keep its mark separate from the interactive trigger.
+ * The organization identity at the top of the signed-in sidebar.
+ *
+ * There is one organization per session today, so this panel gives context and
+ * does not offer a false switcher. The paired arrows still open a small
+ * surface: the organization's mark, the quiet word `Organization`, and the name
+ * that word names. Organization settings stay out until that product level
+ * exists.
+ *
+ * **Neither the bar nor the panel claims anything about the organization but
+ * its name.** Both used to carry a "Free" chip and a "Free Plan · Admin" line
+ * under the name. Billing is not part of `/api/me`, so that plan was
+ * hard-written copy standing where a fact belongs, and the role it sat beside
+ * is already said by the account control at the foot of the same sidebar. Two
+ * claims, one of them invented and one of them repeated, above the name they
+ * were meant to describe.
+ *
+ * What stands there now is a label rather than a claim. The panel opens on a
+ * name with no page around it, so the grey `Organization` over it says which
+ * kind of name it is — the same thing the word `Project` does for the control
+ * directly below, drawn the same way. (Developer decision, 2026-08-25 on the
+ * Paper canvas.)
+ *
+ * **The mark is identity, not a control.** It sits beside the menu trigger
+ * rather than inside it, so the hover plate, focus indicator and press feedback
+ * cover only the organization control. The organization name stays on the
+ * 14px product-text step; making it smaller would leave the accepted scale.
  */
 function OrganizationMenu({
   organization,
@@ -288,8 +358,14 @@ function OrganizationMenu({
           data-slot="organization-status"
         >
           {/*
-           * Use a placeholder for the organization name while unresolved. SessionLoading
-           * owns the application-wide waiting message.
+           * **A bar, not a sentence, while nobody has answered.** This slot
+           * used to say "Checking your session…" — the sentence the developer
+           * met on opening the product, one control down. It is also a claim
+           * this bar has no business making: the session is the whole
+           * application's business, `SessionLoading` is what says it, and a
+           * sidebar row saying it too is the same news twice from a place that
+           * cannot act on it. What belongs here is what belongs in any slot
+           * whose value has not arrived: the shape of the value.
            */}
           {settled ? (
             <span className="min-w-0 overflow-hidden text-sm text-ellipsis whitespace-nowrap text-muted-foreground">
@@ -390,8 +466,14 @@ function AccountMenu({
   readonly role: Role | null;
   readonly placement: "below-end" | "right-end";
   /**
-   * Compact account variant for the mobile bar: render the avatar without the
-   * desktop text block.
+   * The mobile top bar, where the control is the avatar and nothing else.
+   *
+   * It used to be the shell's stylesheet reaching into this control by class
+   * name — `.topbar .account`, `.topbar .accountText`, `.topbar .avatar` —
+   * which meant the control's own size depended on which region had drawn it.
+   * It is a prop now, the way the project selector already took the same
+   * question. The hidden text is not rendered rather than `display: none`,
+   * which is the same thing for a screen reader and one element less.
    */
   readonly compact?: boolean;
   /**
@@ -407,8 +489,14 @@ function AccountMenu({
   const [signingOut, setSigningOut] = useState(false);
   const email = me?.user.email ?? "";
   /**
-   * Name this control by account state while the visual slot uses a placeholder
-   * until the account label is available.
+   * The control's own name for whoever it stands for.
+   *
+   * Three states, and the middle one used to be "Checking your session…" —
+   * the application's news, said by a control that is not the application. It
+   * is "Loading account" now: this control is loading this account, which is
+   * both true and the only part of it this control knows. The visible slot
+   * draws a bar rather than the words, because a sentence in a name slot is a
+   * value that is not a name.
    */
   const standing = me !== null ? email : settled ? "Session unavailable" : "Loading account";
   const initial = me !== null ? (email.trim().slice(0, 1).toUpperCase() || "E") : "·";
@@ -437,8 +525,15 @@ function AccountMenu({
         triggerClassName={cn(
           "grid w-full min-w-0 items-center gap-3",
           /*
-           * Subtract the reserved border from trigger padding so the avatar aligns
-           * with borderless navigation icons without shifting on hover.
+           * **7px, and the missing pixel is the plate's own hairline.** This
+           * trigger reserves its hover border as a transparent one so hovering
+           * shifts nothing, and `box-sizing: border-box` means that border spends
+           * a pixel of the inset before the padding starts. Written as 8px it put
+           * the avatar on 17 while every nav icon stood on 16 — the one thing
+           * still out of the bar's lane. Written as 8 minus the hairline it lands
+           * on 16 exactly, and the gap from the plate's visible edge to the
+           * avatar is a true 8px, which is what a borderless nav row already
+           * draws between its plate and its icon.
            */
           "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) py-1",
           "px-[calc(var(--space-2)-1px)]",
@@ -601,8 +696,21 @@ function ShellFrame({
 
   const projects: readonly Project[] = me?.projects ?? [];
   /**
-   * Show project navigation only for a project named in the URL. /new-project
-   * keeps the selector available without inventing a current project.
+   * The project this address names, and **nothing at all when it names none.**
+   *
+   * There used to be a fallback here — `named ?? projects[0]?.id` — left over
+   * from the pages that had not yet been converted to explicit project context.
+   * It is gone with the last of them, and it had to go rather than be left
+   * harmlessly unused: what it did was draw a project's navigation on an
+   * address that is not in that project, so a person with three projects met
+   * links into whichever came first in their list, with nothing saying so. The
+   * grader screens were the last pages it was standing in for, and they are
+   * under `/projects/:projectId/graders` now.
+   *
+   * `/new-project` names no project on purpose. It does not draw project
+   * navigation or a mobile navigation button, because an address that names no
+   * project cannot honestly say which project's links it is opening. The
+   * selector stays visible, so choosing one remains the way into the product.
    */
   const shown = projectIdIn(pathname);
   const settingsHref =
@@ -634,8 +742,18 @@ function ShellFrame({
   );
 
   /**
-   * Cover cold product loads until session resolution. The root entrance owns
-   * its own cover because it must remain covered through the subsequent redirect.
+   * A cold load of a product address, before the session read has answered.
+   *
+   * Opening `/projects/…` from a bookmark, or pressing reload on one, mounts
+   * this whole frame with nobody in it — an organization bar, a project
+   * selector and an account control all standing there with no facts behind
+   * them. That is the same guessed screen the entrance used to draw, on every
+   * other address in the product, so it takes the same cover.
+   *
+   * **The entrance is left to draw its own**, and that is the one exception. It
+   * has to stay covered past the moment the session settles, because `/` never
+   * stops there: it is on its way to a project or to sign-in, and a shell
+   * uncovered between those two moments is the flash all of this removes.
    */
   const unresolved = !session.settled && pathname !== "/";
 
@@ -769,9 +887,28 @@ function ShellFrame({
 }
 
 /**
- * Share one centered, capped content frame across the title, toolbar, and body.
- * The wide option changes the maximum through --page-content-max. Provide a
- * sheet portal host inside main for product forms.
+ * The page itself: a 56px title bar, then the page's own toolbar, then its
+ * content, all inside 24px gutters.
+ *
+ * **The content frame centres only after it reaches its maximum.** Below that
+ * point the ordinary 24px page gutters still own both edges. Above it, the
+ * unused width is split equally instead of collecting at the right edge. The
+ * title bar, toolbar and body all use the same frame, so centring never moves
+ * a title away from the table or form below it. This supersedes the earlier
+ * left-anchored capped frame after the 2026-08-26 browser review found the
+ * unequal trailing space across list pages.
+ *
+ * `wide` is for a page whose subject is wide by nature — a transcript beside
+ * the timing of what happened during it, a run beside its simulations. It is a
+ * different maximum and not a different layout, so a page asks for room rather
+ * than styling itself. It is published as `--page-content-max` because the two
+ * blocks that read it, `PageHeader` and `PageBody`, are this component's
+ * siblings' children rather than its own props.
+ *
+ * **The sheet host is drawn last, inside `<main>`.** Every create, edit and
+ * read panel in the product is portaled into it, so the browser walk's
+ * `page.innerText("main")` reads what a person is actually looking at.
+ * `components/ui/sheet.tsx` records the whole argument.
  */
 export function ProductPage({
   wide = false,
@@ -852,12 +989,55 @@ function PageContentFrame({
 }
 
 /**
- * Render the sticky title bar above a separate toolbar, with filters left and
- * actions right. Breadcrumbs include the current h1; otherwise render title.
- * Keep the final breadcrumb and title consistent. Lead and eyebrow belong
- * below the bar.
- * A display:contents header groups title and controls semantically while
- * allowing both rows to participate in the page layout.
+ * The title bar, and the strip of controls under it.
+ *
+ * **The title moved into a bar of its own**, 56px tall over a hairline with
+ * 24px of side padding, which is `71V-0`. It is where a person looks to answer
+ * "what am I on", so it stays put while the page scrolls under it and it is
+ * the same 56px as the organization bar across the divider from it.
+ *
+ * **The page's actions are not in that bar.** They sit in the toolbar row
+ * below it, hard right, opposite whatever the page filters by — which is the
+ * one shape every list in the product now has (`71N-0`). `toolbar` is the left
+ * half of that row and is new; `action` is the right half and is the prop
+ * every page already passes.
+ *
+ * **The bar holds the page title and nothing else**, which is what `71V-0`
+ * draws. `lead` is a quiet line at the top of the page's own block — the
+ * purpose statement `DESIGN.md` asks for, kept where somebody reads it rather
+ * than squeezed into a 56px strip beside the title it explains.
+ *
+ * **A page with a trail draws one line, and the record is the last step of
+ * it.** "Tests / Livekit agent suite", every step in the trail's own type,
+ * with the section linked and the record the `<h1>` — so the current page
+ * appears once and keeps the same 14px / 400 treatment as its parents. It used
+ * to be two things in one bar — the trail cut short of the record, then the
+ * record beside it as a larger heading — which read as a small link stuck to a
+ * big title with no slash between them (developer decision, 2026-08-26). A
+ * page with no trail keeps its own title bar, because there is no line for it
+ * to join.
+ *
+ * **So a page with a trail names itself in that trail's last step**, and
+ * `title` is what a page without one draws. The two must say the same thing:
+ * a page whose last step and `title` differ shows the step and hides the
+ * title, which is why the transcript's two state pages carry their state
+ * sentence in the trail rather than beside it.
+ *
+ * `eyebrow` moved out of the bar with it, and is drawn in the same quiet
+ * block. **It is not decoration on every page**: the transcript screen puts the
+ * trace's source and environment there — "production / default" — which is a
+ * fact about the record and the only place the page states it. On a list page
+ * it says "Project" over a page whose project the sidebar already names twice,
+ * which is noise; delete the prop when you next touch such a page, and the
+ * label goes with it. Real `breadcrumbs` still draw in the bar, as the trail
+ * into the record being read.
+ *
+ * **One `<header>` wraps both rows, and it is `display: contents`.** A page
+ * that walks up from its own title to find its own controls — the persona page
+ * does exactly that, and a test holds it to it — has to find one element
+ * holding both. A header that generates no box gives them that ancestor while
+ * the two rows still lay out as children of `<main>`, so the bar goes on
+ * sticking to the top of the page rather than to the header.
  */
 export function PageHeader({
   eyebrow,
@@ -965,9 +1145,24 @@ export function PageHeader({
 }
 
 /**
- * Use the shared capped content frame. Remove the body's top gutter when the
- * toolbar already supplies separation. flex-1 min-h-0 lets viewport layouts
- * give the remaining height to their content.
+ * The page's content, under the bar and the toolbar.
+ *
+ * The gutters are the board's — 24px at the sides, 24px above and 40px below —
+ * and the inner block is where `--page-content-max` is spent. It shares the
+ * centred capped frame used by the title and toolbar: see `ProductPage`.
+ *
+ * **The top gutter goes when a toolbar row was drawn, because that row already
+ * carries it.** `71N-0` is a 52px strip — a 36px control with 16px under it —
+ * and `6ZM-0`, the table, starts at the pixel the strip ends on: 132 from the
+ * top of the page, which is the 56px title bar, the 24px gutter and the 52px
+ * strip and nothing else. A body that added a gutter of its own under that
+ * strip put the panel at 156. A page whose header drew no toolbar row keeps the
+ * 24px, because then there is nothing above to carry it. (Read off `6ZJ-0`,
+ * 2026-08-23.)
+ *
+ * `flex-1 min-h-0` on the inner block is what lets a viewport page hand its
+ * remaining height to whatever it holds. `SettingsLayout` asks for `h-full`,
+ * and a percentage height needs a parent with a settled one.
  */
 export function PageBody({ children }: { readonly children: ReactNode }) {
   return (

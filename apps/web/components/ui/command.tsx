@@ -6,9 +6,31 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Use cmdk for combobox/listbox relationships and keyboard selection. Disable
- * its internal filter because callers supply server-filtered rows; filtering
- * again could hide results without changing the displayed count.
+ * A list somebody types to narrow, and the rows it narrows to.
+ *
+ * **This is the kit's combobox, and what it buys is the keyboard.** The product
+ * already had a search-and-tick panel — the tests grid's persona picker — built
+ * by hand: a text field, a `.filter()`, and a column of checkboxes. It worked
+ * with a mouse and it was a wall to anybody driving with a keyboard, because
+ * every row was its own Tab stop and nothing linked the field to the list it
+ * was narrowing. `cmdk` owns that relationship: the field keeps focus, the
+ * arrow keys walk the filtered rows underneath it, and the active row is
+ * published as `aria-activedescendant` so a screen reader is told which row the
+ * typing is pointing at.
+ *
+ * **`role` here is `listbox`, not `menu`.** `ui/menu.tsx` says why in its own
+ * words — a panel with something to type in is not a list of commands — and the
+ * same rule decides this file. `cmdk` writes the listbox and option roles, and
+ * the panel around it is a `dialog`, which is what `PopoverContent` is given.
+ *
+ * **Filtering stays with the caller.** `shouldFilter` is off, because the one
+ * list this draws is narrowed against the server's own page-by-page read and a
+ * second, hidden filter inside the widget would disagree with the count the
+ * panel prints. The rows handed in are the rows drawn.
+ *
+ * No `CommandDialog` here. shadcn ships one for a page-wide palette; this
+ * product has no such surface, and an export nothing renders is a component
+ * that rots.
  */
 function Command({
   className,
@@ -79,8 +101,17 @@ function CommandGroup({
 }
 
 /**
- * cmdk selected state is the active keyboard/pointer row, not multi-selection.
- * Callers must set aria-checked for chosen options independently of the highlight.
+ * One row.
+ *
+ * The highlight is `data-[selected=true]`, which is `cmdk`'s word for "the row
+ * the arrow keys are on" and not for "the row somebody ticked". A multi-select
+ * has both states at once, so they are drawn by different things: the pointer
+ * and keyboard highlight is this background, and whether a row is chosen is
+ * said by `aria-checked`, which `role="option"` supports and which `cmdk` does
+ * not touch. Reading the highlight as the answer is the mistake this comment
+ * exists to stop, and the reason a caller ticking rows must set `aria-checked`
+ * itself: a checkbox drawn inside the row is a picture, and the row is the
+ * control a screen reader is on.
  */
 function CommandItem({
   className,

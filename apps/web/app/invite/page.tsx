@@ -15,9 +15,20 @@ import { SessionLoading } from "../../ui/session-loading.tsx";
 import { AuthForm, AuthShell, LinkLine, Notice, StatePage } from "../ui.tsx";
 
 /**
- * Show the invitation's fixed email address, organization, and role. New users
- * set a password; existing signed-in users can accept directly. Distinguish
- * expired invitations from already accepted ones.
+ * The page a colleague lands on.
+ *
+ * It says what they are joining and at what, and then asks for the one thing it
+ * needs: a password. The address is the invitation's and is shown rather than
+ * asked for, because that is the address the link lets in — there is nothing to
+ * type and nothing to get wrong.
+ *
+ * **An expired link and an already-accepted one say different things**, because
+ * they mean opposite things to the person holding one: ask for another, versus
+ * you are already in, sign in.
+ *
+ * Somebody who already has an account gets a button instead of a form. That is
+ * the person who was removed from an organization and asked back, and without it
+ * they would be told their email address is taken by an account they cannot use.
  */
 
 type Lookup = {
@@ -45,8 +56,14 @@ export default function InvitePage() {
   const [submitting, setSubmitting] = useState(false);
   const [attempt, setAttempt] = useState(0);
   /**
-   * Email awaiting verification when invitation acceptance creates an identity
-   * without a session.
+   * The address a confirmation link was posted to, once one has been.
+   *
+   * **This is the likeliest page in the product to meet it, not the least.**
+   * An invitation can only be delivered by an instance with a mail transport,
+   * and that is exactly the instance on which the provider requires the
+   * address to be confirmed and issues no session for a new identity. So the
+   * colleague who accepted an invitation was the one being walked into a
+   * product they could not open, and turned around at the sign-in door.
    */
   const [confirming, setConfirming] = useState<string | null>(null);
   /** Accepted with a session in hand, and on the way to the product. */
@@ -75,8 +92,17 @@ export default function InvitePage() {
       }
 
       /*
-       * Use a bounded session read to choose the acceptance form. Let the API
-       * reject acceptance by the wrong signed-in identity.
+       * Somebody already signed in is offered the button rather than the form.
+       * Somebody signed in as a different person is told so by the refusal, and
+       * that is better than this page guessing what they meant.
+       *
+       * **Through the bounded read, like every other session read.** This one
+       * decides whether the page leaves `loading`, and `loading` now draws the
+       * cover with the document behind it inert — so a server that accepts the
+       * connection and then says nothing would leave the invited colleague on
+       * a page they cannot retry from, navigate away from, or accept on. It
+       * also stops this page hand-checking the shape of an answer the rest of
+       * the product reads through one type.
        */
       const me = await readSession();
       if (!current) return;

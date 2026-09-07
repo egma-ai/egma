@@ -4,9 +4,28 @@ import { useFieldHint } from "@/ui/field-hint.ts";
 import { cn } from "@/lib/utils";
 
 /**
- * Use a native checkbox for checked state, form behavior, and platform
- * interaction. The wrapper supplies the coarse-pointer target while keeping
- * the visible box compact; callers still associate visible labels.
+ * One binary choice: whether a grader can fail a run, whether a list includes
+ * what has been archived.
+ *
+ * **It is the browser's own checkbox**, for the reasons written on `select.tsx`
+ * and one more of its own: the registry's Radix checkbox is a `<button>` with
+ * `role="checkbox"`, so it carries no `checked` property, submits nothing with
+ * a native form, and is not the element a person's assistive technology has
+ * been taught. `accent-color` is what dresses it, which keeps the platform's
+ * own indeterminate and focus behaviour and costs nothing.
+ *
+ * **The box is 18px and the target is 44px, and they are deliberately not the
+ * same number.** `DESIGN.md` asks for a 44px pointer target on a coarse
+ * pointer; it does not ask for a 44px checkbox, and an 18px box is what this
+ * control has always drawn. So the label wrapper — which is the target,
+ * because a label activates the control it wraps — grows to the tap target on
+ * a coarse pointer and stays at the box's size on a fine one. The box is
+ * centred in it either way, so a mouse sees no change at all.
+ *
+ * This was carried over at 18px by the wave that wrote this file and flagged
+ * for the developer, who approved the fix. Callers with visible copy still
+ * keep that copy visible and point at the control with `htmlFor`, which makes
+ * the whole label a target as well.
  */
 function Checkbox({ className, ...props }: ComponentProps<"input">) {
   const hint = useFieldHint();

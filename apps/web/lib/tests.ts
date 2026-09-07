@@ -3,7 +3,17 @@ import type {
   ListTestsResponse,
 } from "@egma/platform-api/client";
 
-/** Test response types from the generated platform contract. */
+/**
+ * Test wire shapes, as the generated platform contract returns them.
+ *
+ * **What is left is what still has a reader.** The test full page and the
+ * write-a-test sheet retired on 2026-08-24, and everything this file held for
+ * them went with them: the address of a test's own page, the persona-overflow
+ * cell, the live/versioned field lists that told a two-save form which half it
+ * was saving, and the behavior checks that form ran before its Save. The grid
+ * asks those questions of its own cells, and the version shapes have no reader
+ * at all while versioning stays hidden from the interface.
+ */
 export type ListedTest = CreateTestResponse;
 export type TestPage = ListTestsResponse;
 
@@ -19,10 +29,27 @@ export type Read<T> =
   | { readonly ok: false; readonly why: string };
 
 /**
- * Validate parsed JSON before submission, using the API's error messages.
- * Envelope rules come from apps/api/src/routes/tests.ts; content rules come
- * from packages/db/src/access/tests.ts. The server remains authoritative
- * and also checks serialized size. JSON.parse cannot detect duplicate object keys.
+ * The two JSON fields, read the way the platform reads them.
+ *
+ * **These say the platform's own sentences, deliberately.** The grid's dialog
+ * runs this before it sends anything, so a person who wrote `answer` twice sees
+ * why without a round trip — and the sentence they see is the one they would
+ * have got back, rather than a second, quieter opinion this screen invented.
+ * The checks that need the exact serialized bytes stay on the server, because
+ * only the server knows what it is about to write; a refusal from there is
+ * shown in the same place.
+ *
+ * `packages/db/src/access/tests.ts` is where the same rules are kept for the
+ * write itself, and it is the authority. What is here is a copy of the cheap
+ * half of it, and it must say the same words.
+ *
+ * **The envelope has its own authority**, and it is
+ * `apps/api/src/routes/tests.ts`: the door owns the shape of what arrives — a
+ * list, of objects, with no key the shape has no place for — and the access
+ * layer owns everything inside it. So the two sentences about the envelope are
+ * copied from the door and the rest from the access layer, and a person who
+ * writes the same mistake into the dialog and into a request reads one
+ * sentence either way.
  */
 
 /** The two keys an env may carry, and nothing else. */
@@ -232,7 +259,19 @@ export function mockToolsSummary(mockTools: readonly TestMockTool[]): string {
     : `${String(mockTools.length)} mock tools`;
 }
 
-/** Show an editor action for nonempty env values. Empty objects produce no summary. */
+/**
+ * What an Env cell says at rest, and nothing when it holds none.
+ *
+ * **It names the way in rather than the keys.** The cell used to list the
+ * platforms' own key names — `retell_dynamic_variables, job_dispatch_metadata`
+ * is 47 characters of identifier — in the narrowest lane of the grid, where it
+ * ran out through the column and told a reader nothing they could act on. The
+ * cell is a button that opens the editor, so it says what pressing it does and
+ * the keys are read where they can be read whole (founder, 2026-09-04).
+ *
+ * An env of empty objects still says nothing: `readEnv` never stores one, and
+ * a cell that announced a value nobody wrote would be a lie about the row.
+ */
 export function envSummary(env: TestEnv | null): string {
   if (env === null) return "";
   return ENV_KEYS.some((key) => env[key] !== undefined) ? "View env variables" : "";

@@ -12,14 +12,40 @@ import { useDraftNavigation } from "./draft-navigation.tsx";
 import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
 
 /**
- * Keep the current project visible even when only one exists. Selection lives
- * in the URL, independently per tab; this control does not store a session-wide
- * choice. The organization has a separate shell control.
+ * The project where you are working.
+ *
+ * **It is on screen even when there is one project.** An earlier rule hid a
+ * level with one thing in it as clutter. It is not clutter — it is the answer
+ * to *why is this list empty*, and somebody who cannot see which project they
+ * are in cannot tell an empty project from a broken page.
+ *
+ * **Choosing a project changes the address**, and the address is the only place
+ * a choice is kept. Nothing is written to storage and nothing is posted to the
+ * server, which is exactly what lets two tabs sit on two projects and lets a
+ * pasted link open the project it was copied from. Reload, Back and Forward
+ * work because they always did — they restore an address, and an address is the
+ * whole of the state.
+ *
+ * Organization identity now has its own control in the shell. It is still
+ * passed here because the chooser names the organization whose projects it
+ * lists, but it is no longer repeated in this trigger.
  */
 
 /**
- * Label the current project explicitly and keep its text neutral while the
- * menu opens. The compact trigger fits beside mobile navigation and account controls.
+ * The trigger: an explicit label over the current project.
+ *
+ * The word **Project** stays visible even when there is only one. Organization
+ * and project are different scopes, so a quiet label is the small amount of
+ * copy that prevents the current project's name from being mistaken for an
+ * organization. The organization sits in the bar above it.
+ *
+ * The project name stays neutral while the menu is open. Opening a chooser is
+ * not a brand state, and changing its text colour made the current context look
+ * like an action. The menu is a direct list: no search field stands between a
+ * person and the projects they can choose.
+ *
+ * The compact form is the mobile top bar's, where the control shares a 56px row
+ * with a drawer button and the account, so it stays held to a width of its own.
  */
 const TRIGGER = [
   "flex w-full min-w-0 flex-col items-stretch gap-1.5",
@@ -61,8 +87,16 @@ export function ProjectSelector({
   const organizationName = organization?.name ?? "No organization";
 
   /**
-   * Show Unknown project for an inaccessible ID and No project when the URL
-   * has none. Never substitute the first project's label.
+   * What this control says it is showing — and it never says a project the
+   * address does not name.
+   *
+   * Two ways that could go wrong and both are closed. An address naming a
+   * project this membership does not hold says **Unknown project**: falling
+   * back to the first project's name would tell somebody they are working in
+   * Default while the page beside it refuses everything they ask for. And an
+   * address naming no project at all says **No project** — it used to say the
+   * first project's name, which is the same lie told on the one page that is
+   * deliberately outside every project.
    */
   const projectName =
     current?.name ?? (projectId === null ? "No project" : "Unknown project");

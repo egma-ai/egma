@@ -5,8 +5,20 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Use semantic tones for status badges and let text carry the meaning.
- * Brand color is not a result state; callers supply supporting icons when needed.
+ * The chip, square like everything else.
+ *
+ * The variant names are the meanings rather than shadcn's `default`,
+ * `secondary` and `destructive`. A chip in this product usually carries a
+ * product result — success, warning, failure — and `DESIGN.md` is exact about that
+ * being said in words with colour only supporting it. A name like `secondary`
+ * would let a failed run be labelled with whatever colour happened to be
+ * second, so those names are deliberately absent.
+ *
+ * There is no brand variant, for the same reason: "Brand orange does not mean
+ * passed, failed, skipped, or errored."
+ *
+ * The chip carries the word; the caller supplies the icon or shape beside it
+ * where the state needs one.
  */
 const badgeVariants = cva(
   [
@@ -23,8 +35,15 @@ const badgeVariants = cva(
         failure: "border-failure-border text-failure",
       },
       /*
-       * Keep shape separate from tone: verdict uses a compact uppercase label,
-       * while count preserves ordinary text for numbers and identifiers.
+       * Two shapes, and the second one is a chip that holds a number.
+       *
+       * `verdict` is the chip this product has always drawn: a word in
+       * letter-spaced capitals, at the dense control height. `count` is the
+       * overflow chip the boards put at the end of a cell that ran out of room
+       * (`719-0`) — "+3", 22px tall on the quiet neutral surface, in ordinary
+       * sentence case because it is a number and capitals would say nothing.
+       * It is deliberately not a variant of the colour axis above: a count
+       * carries no verdict, and the colours there all do.
        */
       shape: {
         verdict: "min-h-(--control-sm) px-3 tracking-(--tracking-label) uppercase",

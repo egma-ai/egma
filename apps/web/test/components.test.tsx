@@ -40,8 +40,19 @@ import {
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
- * Drive shared component behavior in jsdom. Browser layout and independent
- * tabs require separate browser tests.
+ * The shared components, rendered.
+ *
+ * **This is the fast lane's half of the visual system, and it exists so that
+ * the browser journey does not have to grow.** Ten tickets follow this one into
+ * this shell; if the only way to prove a menu closes on Escape is to start
+ * Postgres, ClickHouse, the API, Next and a real Chrome, then every one of them
+ * will add to that file and the narrow ordered journey the spec asks for will
+ * not survive. What genuinely needs a browser — two independent tabs on two
+ * projects — stays there. Everything a component decides for itself is here.
+ *
+ * Nothing in this file asserts that a component exists or that a source file
+ * contains a string. Every test drives a rendered component the way somebody
+ * with a keyboard would, and reads what the DOM then says.
  */
 
 /**
@@ -456,7 +467,16 @@ describe("nested page navigation", () => {
     expect(page.className).toContain("font-normal");
   });
 
-  /** Require one current heading with deep, short, or absent breadcrumb trails. */
+  /**
+   * One page, one name — the invariant the first cut of this line broke.
+   *
+   * A header that appended its title whenever the trail's last step said
+   * something else drew two steps with no address, and this file draws every
+   * addressless step as an `<h1 aria-current="page">`. Three real pages ended
+   * up with two headings and two current steps, the settled simulation among
+   * them. The trail's type now allows one current step, and this holds the
+   * render to it: a deep trail, a short one, and a page with no trail at all.
+   */
   it("names itself once, whatever shape of page it is", () => {
     /* `steps` is 1 for a page inside a trail and 0 for a page with none. */
     function namesItselfOnce(page: ReactElement, steps: 0 | 1): void {
@@ -494,7 +514,20 @@ describe("nested page navigation", () => {
     namesItselfOnce(<PageHeader title="Tests" />, 0);
   });
 
-  /** Keep the section label and purpose below the title even without breadcrumbs. */
+  /**
+   * The other half of the rule above, and it needs its own case.
+   *
+   * A page with no trail still says which section it is in, and on one screen
+   * that label is a *fact* rather than a repetition: the transcript page puts
+   * the trace's source and environment in it — "production / default" — and
+   * states it nowhere else. Sixty-four call sites pass this prop, so a version
+   * of `PageHeader` that accepted it and quietly drew nothing would take a
+   * line off every one of them and break no test at all. This is that test.
+   *
+   * It is not in the title bar. The bar holds the page title alone, which is
+   * what `71V-0` draws; the label and the purpose statement are the quiet
+   * block under it.
+   */
   it("draws the eyebrow when a page offers no trail, outside the title bar", () => {
     render(
       <PageHeader
@@ -589,8 +622,18 @@ describe("a binary choice", () => {
   });
 
   /**
-   * Check the class mapping for a coarse-pointer target around the compact
-   * checkbox. jsdom cannot verify its computed size.
+   * A 44px target around an 18px box.
+   *
+   * `DESIGN.md` asks for a 44px pointer target on a coarse pointer; it does not
+   * ask for a 44px checkbox. The label is the target, because a label activates
+   * the control it wraps, so it is what grows — and only on a coarse pointer,
+   * so a mouse sees no change at all.
+   *
+   * A class assertion for the reason `design-system.test.tsx` writes down: jsdom
+   * loads no stylesheet, so what is guarded is the mapping. `pointer-coarse` is
+   * an egma variant, not a Tailwind one, and it is the whole of this fix — a
+   * later tidy that drops it takes the target back to 18px and nothing else on
+   * the page would look any different.
    */
   it("gives the checkbox a coarse-pointer target without growing its box", () => {
     render(<Checkbox id="weekly-summary" checked onChange={() => undefined} />);
@@ -630,8 +673,26 @@ describe("a binary choice", () => {
 /* ------------------------------------------------------------------------ */
 
 /**
- * Test Choice keyboard behavior at the shared control so coverage does not
- * depend on which page currently uses it.
+ * The two-list choice, driven the way somebody without a pointer drives it.
+ *
+ * **This test moved here rather than being deleted, and where it came from is
+ * the point.** It lived on the Personas list, because that page was one of the
+ * two that drew this control — and the 2026-08-20 annotation batch took the
+ * archive filter's control off both of them. A test that clicks a control the
+ * page no longer draws is not a weakened test, it is a broken one, so it could
+ * not stay there. `Choice` itself is untouched by that batch: it still does
+ * every one of the things below, and after the removal there was no test in
+ * this repository that asked it to.
+ *
+ * So it is proven where the behavior lives. That is the better home anyway —
+ * `Choice` is a shared control, its keyboard contract belongs to it rather
+ * than to whichever page happened to mount it, and the proof now survives the
+ * next page that adopts or drops it.
+ *
+ * It is the kit's radio group now, which is Radix's, so the contract below is
+ * no longer hand-written. It is still asked for here: what a person gets from
+ * this control is the same list of promises whoever keeps them, and a later
+ * change that swaps the primitive back out has to keep them too.
  */
 describe("a choice between two lists", () => {
   const OPTIONS = [
@@ -671,8 +732,19 @@ describe("a choice between two lists", () => {
   });
 
   /**
-   * Check one Tab stop and arrow-key selection following focus. Flush after
-   * each key because Radix schedules its focus move in a later task.
+   * **One Tab stop, an arrow key inside it, and selection following focus.**
+   * Roving `tabindex` is what keeps a two-option filter from costing two Tab
+   * presses on the way to the table — and a ten-option one from costing ten.
+   * Selection following focus is what keeps the keyboard and the announcement
+   * agreeing: a group that moved the highlight without moving focus would
+   * leave a screen reader saying one thing and the next keypress landing on
+   * another.
+   *
+   * Radix moves focus in a task after the key rather than during it, so React
+   * has committed the new selection before anything is focused. That is why
+   * each key here is followed by a flush: the order a caller sees is `onChange`
+   * and then the focus move, and asking for both in the same tick would be
+   * asking for an order this control does not promise.
    */
   it("chooses the other list from the keyboard, and says which is chosen", async () => {
     const chose = vi.fn();
@@ -859,8 +931,15 @@ describe("a page of rows", () => {
 /* ------------------------------------------------------------------------ */
 
 /**
- * Supply computed animation names because jsdom loads no stylesheet. This
- * exercises Radix presence through an exit event without proving the theme animation.
+ * A closing animation, said out loud, because jsdom runs no stylesheet.
+ *
+ * The kit removes a dialog on `animationend`, and it decides whether there is
+ * an animation to wait for by reading the computed style. jsdom loads no CSS,
+ * so every surface there claims `animationName: ""` and leaves the instant it
+ * is closed — which would make "an exit runs to completion" untestable in this
+ * lane. This answers the way the real theme answers: the entrance while the
+ * surface is open, the exit once it is closed. Nothing else is changed, so the
+ * test still drives the kit's own presence machine rather than a stand-in.
  */
 function finishExit(surface: HTMLElement, animationName: string): void {
   // jsdom has no `AnimationEvent`, so the one property the kit reads is put on
@@ -1086,8 +1165,14 @@ describe("a dialog", () => {
   });
 
   /**
-   * Keep an exit active to verify that focus returns on dismissal, before
-   * the panel is removed and onClose runs.
+   * "No motion delays input. A control answers on press, not after an
+   * animation."
+   *
+   * So this is about *when*, and the animation has to be real for the question
+   * to exist: with no stylesheet the panel leaves in the same tick and every
+   * naive assertion here passes without proving anything. With one in flight,
+   * the panel is still on screen, `onClose` has not been called, and the
+   * keyboard is nevertheless already back on the control that opened it.
    */
   it("hands the keyboard back on the press, not at the end of the exit", () => {
     withClosingAnimation();
@@ -1251,8 +1336,18 @@ describe("a page that is not showing its data", () => {
 /* ------------------------------------------------------------------------ */
 
 /**
- * Check loading-state DOM hooks and their theme rules separately. These tests
- * do not render motion; that needs browser verification.
+ * The loading state, which used to be a sentence and nothing else.
+ *
+ * `DESIGN.md` asks it for a "fast, quiet indicator", and none of what that
+ * costs is written in these components: the wait before anything appears, the
+ * breath in the bars, the phase between them and the reduced-motion form all
+ * live in `tailwind-theme.css`, keyed on the slots the components publish.
+ *
+ * So the tests come in two halves. The first reads the DOM and proves the
+ * components emit the hooks and say the true sentence. The second reads the
+ * theme and proves the rules keyed on those hooks are made of egma's tokens.
+ * Neither half watches anything move — jsdom computes no animation — and the
+ * movement itself is proven in a browser.
  */
 describe("the state a page shows while it is still waiting", () => {
   function loadingState(): HTMLElement {
@@ -1885,8 +1980,16 @@ describe("the role the shell shows", () => {
   });
 
   /**
-   * A page without a project in its URL must not inherit the first project
-   * and show its navigation.
+   * **The last of the first-project fallback, and the reason ticket 12 could
+   * not tick its first two criteria until now.**
+   *
+   * The shell reads the project out of the address. Where the address named
+   * none it used to fall back to `projects[0]`, which drew a project's whole
+   * navigation on a page that is not in that project — so every link in the
+   * sidebar went somewhere the person was not, and the one page that names no
+   * project on purpose was the page it happened on. Every product area is under
+   * `/projects/:projectId/…` now, the graders screens last, so the fallback has
+   * nothing left to stand in for.
    */
   it("draws no product navigation on an address inside no project", async () => {
     routed.pathname = "/new-project";
@@ -1933,7 +2036,17 @@ describe("the role the shell shows", () => {
     }
   });
 
-  /** Check that the rendered sidebar exposes Traces and Runs with their expected URLs. */
+  /**
+   * **Monitoring, drawn rather than declared.** The list above is read from the
+   * navigation module, so it cannot catch an item that exists in the module and
+   * never reaches the sidebar — a missing icon path would do exactly that. This
+   * asks the rendered shell for the item by the words on it, and follows where
+   * it goes.
+   *
+   * The words are the ones the groups left behind: the Monitoring group's item
+   * says `Traces`, and the Simulations group's says `Runs`. Both addresses
+   * are the ones they always were.
+   */
   it("puts Traces in the sidebar, opening this project's transcript list", async () => {
     routed.pathname = "/projects/prj_2/agents";
     apiAnswers({
@@ -2209,9 +2322,18 @@ describe("the Agents page", () => {
 /* ------------------------------------------------------------------------ */
 
 /**
- * Overlapping session covers share ownership of inert marks. Removing one
- * cover must not restore access while another remains, and pre-existing inert
- * marks must survive the last cover.
+ * Who owns the `inert` marks the session cover puts on the document.
+ *
+ * The cover hides the application from eyes; `inert` is what takes it out of
+ * reach of a Tab step and a screen reader as well, and the two have to end
+ * together. Each cover holding its own list of what it marked does not end them
+ * together: the second cover to mount skips everything the first already
+ * marked — which is what keeps a surface Radix made inert from being taken over
+ * — so the first cover to leave hands the whole document back while the second
+ * is still standing opaque in front of it.
+ *
+ * Nothing produces that overlap today, and every reason is a timing invariant
+ * written nowhere near the component. These hold the guarantee itself instead.
  */
 describe("the session cover's hold on the document", () => {
   /** The application's own container, rather than a cover's portal host. */

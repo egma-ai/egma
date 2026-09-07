@@ -1,11 +1,32 @@
 /**
- * Enable browser analytics only when the build enables Egma telemetry and
- * supplies a PostHog key. Public environment values are fixed at build time.
+ * Product analytics for the pages, off unless the build said `on` and gave a
+ * key.
  *
- * Mask input values and explicitly marked credential text. Strip query strings,
- * fragments, and URL userinfo from recognized event URL properties, request
- * names, and DOM href/src attributes. This does not sanitize arbitrary strings.
- * Disable captured headers, bodies, console logs, cross-origin frames, and canvas.
+ * Next loads this file once in every browser session, before the app's own
+ * code. `NEXT_PUBLIC_*` is resolved at build time — the hosted deployment
+ * sets the flag and both variables where it builds (Vercel), and a
+ * self-hoster who sets nothing builds pages that contain empty strings here,
+ * initialize nothing, and send nothing anywhere. The flag is the same
+ * `EGMA_TELEMETRY` every other process reads, mapped through next.config at
+ * build — one flag is the whole decision, so a key left set in a build
+ * environment cannot turn reporting on by itself. The key is a PostHog
+ * project token, which is write-only by design: it can submit events and
+ * read none back, which is what makes it publishable inside a page at all.
+ *
+ * What a key turns on: pageviews, session replay, web vitals, and the errors
+ * pages throw.
+ *
+ * **Replay reads the page, and that is the point.** It used to mask every word
+ * on every page and the recordings were grey blocks that answered nothing. It
+ * records the pages now; `lib/replay-privacy.ts` marks the one thing it must
+ * not read, which is a secret on screen. Inputs stay masked whatever the page
+ * says, so every password and credential field is covered without a mark, and
+ * a URL keeps only its path wherever one is recorded — a presigned recording
+ * link is a credential and it is on the page as an `src`.
+ *
+ * Off for the whole product either way: request and response headers and
+ * bodies, the console, cross-origin frames, canvases, and the query and
+ * fragment of any URL that reaches an event.
  */
 
 import posthog, {
@@ -18,8 +39,15 @@ import { REPLAY_PRIVATE_SELECTOR } from "./lib/replay-privacy.ts";
 const RECORDED_URL_PROPERTY = /(?:url|href|referrer)$/i;
 
 /**
- * Strip secrets from recorded href/src attributes, including signed recording
- * URLs. Apply the same URL sanitizer used for events and captured requests.
+ * **A URL in the page can be the credential itself.** The recording player
+ * hands an `<audio>` a presigned S3 GET, and the whole of its signature is the
+ * query string — so an unstripped `src` in a snapshot is a working link to a
+ * customer's call for as long as it lives.
+ *
+ * So the rule the events and the network capture already follow is the rule
+ * for the DOM too: the path, never the query or the fragment. It costs nothing
+ * to read: the only other `src` in the product is a static brand asset, and a
+ * page's own address is already recorded without its query.
  */
 const RECORDED_URL_ATTRIBUTE = /^(?:href|src)$/i;
 

@@ -66,8 +66,19 @@ function beginProtectingDraft(busy: boolean): () => void {
 }
 
 /**
- * Read organization-scoped settings without adding project context. null
- * means pending; expose the shared Answer states and a reload action.
+ * One read that names **no project**, with the same four answers every product
+ * read has and a way to ask again.
+ *
+ * **Its own hook rather than `useProjectRead` with the project left off**, and
+ * the difference is the whole point: that one exists so a product page cannot
+ * forget to say which project it is asking about. Members, invitations, API
+ * keys, the organization itself and the list of projects are not asked about a
+ * project — they belong to the customer — and sending `?project=` with them
+ * would put a claim in the request that the route does not read and that is not
+ * true.
+ *
+ * `null` is still loading, on the same terms: an answer is something egma said,
+ * and "nothing yet" is not.
  */
 export function useOrganizationRead<T>(read: () => Promise<Answer<T>>): {
   readonly answer: Answer<T> | null;
@@ -100,9 +111,14 @@ export function useOrganizationRead<T>(read: () => Promise<Answer<T>>): {
 }
 
 /**
- * Protect dirty drafts with the browser unload prompt and the shared in-app
- * navigation dialog. Busy writes block guarded navigation while their result
- * is unknown. Callers disable protection after successful save or discard.
+ * Keep an in-product link, a project switch, a reload, or a closed tab from
+ * silently throwing an editable product draft away.
+ *
+ * The browser owns the warning for reload, tab close, and external unload.
+ * Same-origin product navigation uses the shared Egma dialog instead. A busy
+ * write blocks in-product navigation because there is no safe discard decision
+ * while its result is unknown. Callers turn protection off after the draft or
+ * write is safe. The return value lets an editor show its state if that helps.
  */
 export function useUnsavedChanges(
   unsaved: boolean,

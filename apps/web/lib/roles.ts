@@ -1,7 +1,16 @@
 /**
- * Organization roles control which actions the UI offers across projects.
- * Unknown roles use viewer permissions. These helpers do not authorize
- * requests; the server enforces access.
+ * What the role somebody holds in their organization lets them do, as the
+ * pages read it.
+ *
+ * **Hiding a control is not authorization.** Every one of these answers is
+ * about what is worth showing somebody; the server checks the same permission
+ * again on every request and is the only thing standing between a viewer and a
+ * write. That is why an unrecognized role reads as `viewer` here: the worst a
+ * wrong guess can do is show too little, and showing too much is the failure
+ * that would matter.
+ *
+ * A membership is held in the organization and applies to every project in it,
+ * so none of these takes a project. Selecting a project never grants access.
  */
 
 export const ROLES = ["admin", "member", "viewer"] as const;

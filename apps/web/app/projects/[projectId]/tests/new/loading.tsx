@@ -6,7 +6,18 @@ import { projectPath } from "../../../../../lib/project-context.ts";
 import { Loading } from "../../../../../ui/page-state.tsx";
 import { ProductStatePage } from "../../../../../ui/shell.tsx";
 
-/** Match the suite frame that contains the new-test entry row. */
+/**
+ * What the router draws between the press and
+ * `/projects/:projectId/tests/new` arriving.
+ *
+ * Its own boundary rather than the list's, for the same reason the new agent
+ * form has one: **Write a test** must not be answered with “Loading tests…”.
+ *
+ * **What arrives is the suite with the write-a-test panel over it**, so the
+ * fallback wears the suite's shape rather than a page title of its own: the
+ * same trail, the same bar, nothing redrawn a second way on arrival.
+ * `agents/loading.tsx` carries the reasoning every one of these shares.
+ */
 export default function NewTestLoading() {
   const { projectId } = useParams<{ projectId: string }>();
 

@@ -20,8 +20,16 @@ import {
 } from "../../../../../ui/shell.tsx";
 
 /**
- * Resolve a direct test link to its owning suite, where tests are read and
- * edited in the grid.
+ * The old test address, which is a deep link now and nothing else.
+ *
+ * **The test full page is retired.** A test is read and edited in its suite's
+ * grid, beside every other test of that suite, so this address has one job
+ * left: work out which suite the test belongs to and land there. That is a
+ * navigation to a page rather than a panel opening, so a redirect is the honest
+ * shape — the blanket "a panel never navigates" rule is about panels.
+ *
+ * The address survives because links to it were copied, pasted and bookmarked
+ * while the page existed, and a link that used to answer must keep answering.
  */
 export default function TestPage() {
   const { projectId, testId } = useParams<{ projectId: string; testId: string }>();

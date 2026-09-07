@@ -14,9 +14,22 @@ afterEach(() => {
 });
 
 /**
- * Supply live computed animation names for tooltip open/closed states.
- * Radix rereads the declaration after state changes, so a snapshot is insufficient.
- * This tests exit presence, not whether the stylesheet defines the animation.
+ * The one fact jsdom is missing, supplied so the exit can be driven.
+ *
+ * Radix keeps a closing panel mounted only while an exit animation is running,
+ * and it decides that by reading `animation-name` off the element. jsdom loads
+ * no stylesheet, so it answers "none" for everything and every exit is
+ * instant — which would make an exit test pass no matter what the theme said.
+ *
+ * So this teaches `getComputedStyle` the two rules `tailwind-theme.css`
+ * actually declares for `[data-slot="tooltip-content"]`, and nothing else. A
+ * theme that stopped declaring them would not be caught here; what is caught
+ * is the component half — that the panel carries the `data-state` and
+ * `data-input` those rules are keyed on, and that Radix is left to wait for
+ * the animation rather than being torn down under it.
+ *
+ * It is a live view rather than a snapshot because Radix reads the same
+ * declaration object again later, after `data-state` has changed.
  */
 function teachJsdomTheTooltipMotion() {
   const real = window.getComputedStyle.bind(window);
@@ -88,8 +101,17 @@ describe("shared feedback", () => {
   });
 
   /**
-   * Check the pointer delay and keep the tooltip mounted until the simulated
-   * exit event. Computed styles are supplied by the test.
+   * **A pointer waits before the first one, and its exit runs to completion.**
+   *
+   * The delay is what stops a tooltip flashing at every control a pointer
+   * crosses on its way somewhere else.
+   *
+   * The exit is driven rather than described. `DESIGN.md`: "An exit runs to
+   * completion and is never cut off. A surface that is closed finishes leaving
+   * before it is removed." So the pointer leaves, the panel is still there,
+   * and only the end of the animation removes it. Asserting the class that
+   * asks for the animation would pass on a misspelled keyframe and on a panel
+   * Radix tore down underneath it.
    */
   it("delays the first pointer tooltip and lets its exit finish before it goes", () => {
     teachJsdomTheTooltipMotion();
@@ -164,8 +186,20 @@ describe("shared feedback", () => {
   });
 
   /**
-   * Check that error surfaces request failure styling instead of brand styling.
-   * These class assertions do not verify computed colors.
+   * The one rule these two surfaces broke, held where it can fail.
+   *
+   * `DESIGN.md`: "Brand orange does not mean passed, failed, skipped, or
+   * errored." Both of these once drew their error edge in Ember, and the edge
+   * is the only thing separating either from its neutral form at a glance — so
+   * it said "look here" where it had to say "this went wrong".
+   *
+   * These are class assertions rather than colour assertions because jsdom
+   * loads no stylesheet, which is the reason `design-system.test.tsx` gives for
+   * the same shape. What they guard is the mapping: the edge asks for the
+   * theme's `failure`, and `tailwind-theme.css` is what makes `failure` mean
+   * the failure colour. Asserting the absence of `brand` is the half that
+   * matters most — a later wave flipping it back fails here rather than only
+   * looking wrong in a screenshot nobody retakes.
    */
   it("draws an error edge in the failure colour and never in the brand one", () => {
     const { unmount } = render(<Notice tone="error">Egma could not sign you in.</Notice>);

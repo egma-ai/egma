@@ -13,9 +13,27 @@ import { Toaster as Sonner, type ToasterProps } from "sonner";
 import { useTheme } from "@/ui/theme.tsx";
 
 /**
- * Queued notifications using the product's shared theme and status icons.
- * The controlled Toast in ui/feedback.tsx has a separate owner-driven lifecycle;
- * choose based on whether the caller needs a queue or explicit open state.
+ * The registry's notification region, dressed in egma's values.
+ *
+ * It reads the product's own `useTheme` rather than `next-themes`, because
+ * this application already has one place that decides light or dark and two
+ * controls that write to it. A second theme source would be a second answer.
+ *
+ * **The product's own notification is not built on this, and that is
+ * deliberate.** `ui/feedback.tsx` exports a `Toast` a page controls with an
+ * `open` prop, and `DESIGN.md` asks that toast for a short translate plus
+ * opacity on an *interruptible transition*. Sonner is a queue a caller pushes
+ * into, and it leaves on a CSS animation and a fixed unmount timer — so a
+ * dismissal cannot be answered at once, which is what keyboard dismissal has
+ * to be. The two would also disagree about who owns the region. This file is
+ * here, house-correct, for the day a queue is what a surface needs; until
+ * then the shared `Toast` is what pages use, and the icons below are the ones
+ * it draws, so the two would read as one product.
+ *
+ * Every value here is a theme key. Sonner reads its own custom properties, so
+ * they are set to egma's rather than overridden later in a class list, and the
+ * neutral surface with a state-coloured edge is the same shape a status chip
+ * and the shared `Toast` already use.
  */
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme } = useTheme();

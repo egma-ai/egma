@@ -5,10 +5,40 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Describe connection support for the selected tests' mock tools and env at
- * run setup. Include LiveKit SDK requirements and unsupported capabilities.
- * Compute notes from current selections; if limiting output, omit whole facts
- * rather than separating a title from its explanation.
+ * What this run's connection will and will not do with the tests' own data.
+ *
+ * **A test carries mock tools and env now, and a connection either uses them or
+ * cannot.** A person about to start a run has to know which, because the
+ * failure this exists to stop is somebody believing a call was mocked when it
+ * reached their real backend. One fact is not about the test's data at all: a
+ * LiveKit run needs the Egma SDK in the customer's own agent or the simulation
+ * fails, so that requirement is said on every LiveKit run. The support table
+ * below is the whole of the rule.
+ *
+ * **It is one quiet box, under the Connection field of the run-start sheet**
+ * (founder, 2026-09-04): the house hairline, the surface fill, no corner, no
+ * icon and no title. Muted text at the table's 14px, one short line per fact,
+ * one or two of them in the ordinary case. The box's own edge carries the
+ * warning colour where a connection cannot use what a test holds, so a "cannot
+ * use" case is still read before an informative one without a coloured bar
+ * beside every line. The words themselves say "cannot", so the colour stays
+ * supporting information rather than the whole of the news.
+ *
+ * **The note is said once, where the choice is made.** It used to be drawn on
+ * the run page as well, from the versions that run's simulations pinned. That
+ * reading cost two walks of the run — every page of simulations, then every
+ * version they named — to repeat a sentence the person had already read and
+ * acted on, at the one moment they can no longer act on it. (Founder,
+ * 2026-09-04.)
+ *
+ * **A fact is a title and the lines that explain it, and the ceiling drops a
+ * fact whole.** Cutting the list wherever the last line fell left a title
+ * standing with its explanation gone — a note that names a rule and never says
+ * what the rule is.
+ *
+ * **Nothing here is stored.** The lines are computed from the connection and
+ * the suite's tests every time they are drawn. Two runs of one suite can
+ * therefore say different things, which is the truth.
  */
 
 /** How loudly one line speaks, and the only three volumes there are. */

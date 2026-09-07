@@ -9,8 +9,18 @@ import { Select } from "@/components/ui/select";
 import { AuthShell, LinkLine, Notice, StatePage } from "../../ui.tsx";
 
 /**
- * Show the organization and selected project before authorizing the terminal.
- * The terminal collects the API key separately; this page never receives it.
+ * Approving a terminal, and saying what it is being let into.
+ *
+ * The page states the organization and the project plainly, because granting a
+ * terminal access to the wrong customer's data is the mistake this screen
+ * exists to prevent. The project is a choice when there is more than one and a
+ * plain fact when there is not — a level of hierarchy with one thing in it is
+ * clutter rather than information.
+ *
+ * Nothing here is a secret and nothing is shown twice. The key the terminal
+ * ends up holding is minted when the terminal collects it and never passes
+ * through this window at all, which is the entire reason the flow is shaped
+ * this way instead of asking somebody to copy a key across.
  */
 
 type Pending = {
@@ -28,8 +38,16 @@ type State =
   | { at: "unreachable" };
 
 /*
- * Keep row padding small enough for a 44px select inside the 56px minimum
- * row height. Larger vertical padding would make that row taller.
+ * The facts about what is being approved: a list, a row, the name of a fact,
+ * and the fact itself. A row is 56px so that the one row carrying a control
+ * has room for a 44px target without the rows around it changing height.
+ *
+ * **The padding is 4px because the row's height is 56px and not the other way
+ * round.** Box-sizing counts padding inside a `min-height`, so the 12px this
+ * row used to pay left 32px for a 44px select and the Project row came out
+ * 68px tall beside a 56px Organization row — the exact thing the sentence
+ * above promises does not happen. Four is what a 44px control leaves, and its
+ * whole job is to keep a wrapped name off the hairline.
  */
 const FACT_LIST = "m-0 border-t border-border";
 const FACT_ROW =

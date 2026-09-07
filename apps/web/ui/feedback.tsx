@@ -20,10 +20,34 @@ import { cn } from "@/lib/utils";
 export type FeedbackInput = "keyboard" | "pointer";
 
 /**
- * Use shared tooltip behavior for timing, placement, Escape, and accessible
- * descriptions. Track input type for keyboard-specific exit styling.
- * Each tooltip owns a provider, so the instant-reopen window is per tooltip,
- * not shared across neighboring controls. Tooltips must contain no actions.
+ * A short explanation attached to one control.
+ *
+ * Keyboard focus shows it at once and without movement. A pointer gets a short
+ * delay before the first one, which prevents accidental flashes while it
+ * crosses the page, and the same trigger hovered again straight after opens at
+ * once. The tooltip never holds an action; interactive help belongs in a menu
+ * or dialog.
+ *
+ * **All of the timing, the positioning, the Escape, and the `aria-describedby`
+ * are the kit's now**, which is Radix's. What used to be here was a hand-written
+ * pair of timers, a module-level timestamp shared between every tooltip on the
+ * page, and a panel hard-centred over its trigger that ran off the side of a
+ * narrow window rather than answering the edge.
+ *
+ * One thing that global timestamp did is not replaced, and mounting a provider
+ * would not replace it. Radix keeps the "open the next one at once" window on
+ * the provider, and the kit's `Tooltip` wraps every root in a provider of its
+ * own, so each tooltip only ever groups with itself: this trigger re-hovered
+ * is instant, its neighbour still waits the full delay. A provider mounted
+ * higher up changes nothing, because the nearest one wins and the nearest one
+ * is always the inner one. Restoring the shared window means removing that
+ * wrapper *and* mounting one provider above the product — two files at once,
+ * recorded with the coordinator rather than done here.
+ *
+ * `data-input` is only read by the exit: Radix reports "closed" the same way
+ * whichever input opened it, and a keyboard close must not wait for a movement.
+ * It is set on the way in rather than on the way out, so it is already true by
+ * the time the exit runs.
  */
 export function Tooltip({
   label,
@@ -62,9 +86,23 @@ export function Tooltip({
 }
 
 /**
- * Controlled notification with pointer exit motion and immediate keyboard
- * dismissal. Keep it mounted while closing and cancel closure when reopened.
- * Theme attributes select motion; text and icons convey status without color alone.
+ * One controlled, interruptible product notification.
+ *
+ * It stays mounted for a pointer dismissal so its exit can finish. Keyboard
+ * activation and dismissal are instant. The visible word and symbol carry the
+ * state together, so the notification never depends on color alone.
+ *
+ * **It is not built on the kit's sonner Toaster, deliberately.** `DESIGN.md`
+ * asks a toast for a short translate plus opacity on an *interruptible
+ * transition*; sonner leaves on a CSS animation and a fixed unmount timer, so
+ * a dismissal cannot be answered at once. A page here also says whether this
+ * notification is open, rather than pushing into a queue that owns it.
+ * `components/ui/sonner.tsx` is house-correct and waiting for the surface that
+ * wants a queue; the icons below are its icons, so the two read as one product.
+ *
+ * The motion itself is in `tailwind-theme.css`, keyed on `data-slot`,
+ * `data-input` and `data-closing`, so position and motion never share a
+ * property and the reduced-motion form is written beside the full one.
  */
 export function Toast({
   open,
@@ -145,8 +183,15 @@ export function Toast({
       }}
     >
       {/*
-       * Use the same status/error icons as queued notifications. Shape and text
-       * carry the meaning; color is supporting information.
+       * The shape says which state this is and the colour only supports it: a
+       * ticked circle against a crossed octagon reads as two different things
+       * with no colour at all. Neutral for "this happened" and the failure
+       * colour for "this went wrong" — never the brand colour, which
+       * `DESIGN.md` keeps away from every semantic result.
+       *
+       * They are the icons `components/ui/sonner.tsx` draws for the same two
+       * states, so a queued notification and this one would not arrive looking
+       * like two different products.
        */}
       <Mark
         className={cn(

@@ -7,8 +7,25 @@ import { cn } from "@/lib/utils";
 import { Menu, MenuItem } from "./menu.tsx";
 
 /**
- * Shared row actions placed in the data table's trailing slot. Keep the
- * trigger compact and let the table own column alignment.
+ * The ⋮ at the end of a row, and the things it offers.
+ *
+ * **It lives in the table's own trailing slot** — a fixed
+ * `--table-action-width` lane that every row carries whether or not it has a
+ * menu — so the triggers line up in one column down the table and a row with no
+ * menu still holds the lane open (`6ZM-0`, `8YA-0`, `A3H-0`). The lane belongs
+ * to `ui/data-table.tsx`; what is here is the control that stands in it.
+ *
+ * **It is shared rather than a route's, and the move is the one this pair asked
+ * for.** These lived in `app/projects/[projectId]/tests/parts.tsx` while the
+ * Tests screens were the only two drawing them, with a note saying they move
+ * here as soon as a third area grows the same pair. Runs and Running graders
+ * are the third and fourth: both had their acts drawn as buttons inside the
+ * cell, which bent the lane out of line — 0px on Runs, where a finished run
+ * offers nothing, and 156px on Running graders, where two buttons pushed it
+ * open. (2026-08-23.)
+ *
+ * **The control draws no box.** What the boards give it is the dots and
+ * nothing else; the hover fill is the only thing that answers a pointer.
  */
 export function RowMenu({
   label,

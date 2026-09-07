@@ -95,8 +95,14 @@ describe("which project a tab is looking at", () => {
 
 describe("the product navigation", () => {
   /**
-   * Write expected URLs independently so the test cannot copy an incorrect
-   * address from the navigation module.
+   * **The addresses this bar offered before it had groups.**
+   *
+   * Written out rather than derived, because deriving them from the module
+   * under test would make this assertion agree with whatever the module says
+   * today.
+   *
+   * The groups are presentation. Each expected address is written out so the
+   * test cannot copy a wrong address from the module under test.
    */
   const BAR_HREFS = [
     "/projects/prj_2/agents",

@@ -8,9 +8,37 @@ import { cn } from "@/lib/utils";
 import { LabelText } from "./form.tsx";
 
 /**
- * Numeric input with native min/max/step, tabular digits, and an accessible unit.
- * Keep values as strings until submission so empty and partial drafts survive.
- * Hide native spin buttons while retaining keyboard stepping.
+ * A field whose value is a number, with its bounds and its unit on it.
+ *
+ * The shared control set has never had one. Two places in the product needed
+ * one and got a text field told to look numeric instead: a grader's pass
+ * threshold, and the share of production traffic its project scope selects.
+ * Both then had to say the rest in prose — "a whole percentage from 0 to 100" is a
+ * sentence beside a control that would happily take 900, and a bound with a
+ * unit had the unit written into its hint because the field could not show it.
+ *
+ * So this control carries the three things that sentence was standing in for:
+ *
+ * - **The bounds are on the field.** `min`, `max` and `step` are the browser's
+ *   own validation and the browser's own arrow-key stepping. A caller that
+ *   knows the range says it once here instead of twice, once in prose.
+ * - **The unit is beside the value**, inside the field and at the trailing
+ *   edge, and it is part of what the field is described by rather than being
+ *   hidden decoration. A person reading with a screen reader is told the unit.
+ * - **The digits are tabular**, because `DESIGN.md` asks that of every metric,
+ *   and a value somebody is editing against a limit is exactly that.
+ *
+ * **The value stays a string, and that is deliberate.** An input's value is a
+ * string whatever type it wears, and this product converts at the edge that
+ * sends — `filledParams` is where a bound becomes a number. A control that
+ * handed back a number would have to decide what an empty field and a
+ * half-typed minus sign are, and it would decide differently from that edge.
+ *
+ * The native spin buttons are hidden. They are drawn differently by every
+ * browser, they are the one part of a form that never matches the rest of it,
+ * and they take a pointer to a target smaller than this product allows
+ * anywhere else. Nothing is lost to the keyboard: the arrow keys still step
+ * the value, because the field is still `type="number"`.
  */
 export function NumberField({
   id,
@@ -95,8 +123,14 @@ export function NumberField({
         <LabelText label={label} />
       </label>
       {/*
-       * Place the unit beside the input so it takes its measured width instead of
-       * a fixed inset that could overlap a long value.
+       * The unit sits beside the field rather than inside it.
+       *
+       * Inside, the field has to reserve room for it, and the room has to be a
+       * fixed number — which is a guess about the longest unit anybody will
+       * ever pass. The first guess was 56px, and "seconds" already needs more
+       * than that, so a value long enough to reach it would have slid under
+       * the word. Beside it, the field takes whatever is left and every unit
+       * fits, including ones nobody has written yet.
        */}
       <div className="flex items-center gap-2">
         <Input

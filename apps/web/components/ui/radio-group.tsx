@@ -7,8 +7,21 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Use Radix for single-choice state, roving focus, and keyboard handling.
- * Focus appearance comes from the shared stylesheet.
+ * Exactly one of a small closed set.
+ *
+ * Radix supplies the whole radio-group contract, which is the part a
+ * hand-written group loses quietly: the group is one Tab stop, the arrow keys
+ * move inside it and come back round, Home and End reach the ends, selection
+ * follows focus, and every option reports `role="radio"` with `aria-checked`.
+ * None of that shows in a screenshot, so none of it fails visibly when it is
+ * dropped in a refactor.
+ *
+ * Radix moves focus in a task after the key, rather than during it, so React
+ * has committed the new selection before anything is focused. A caller sees
+ * `onChange` and then the focus move, in that order.
+ *
+ * No focus ring here: `globals.css` draws the two-pixel Ember indicator on
+ * every focusable element from outside every cascade layer.
  */
 function RadioGroup({
   className,
@@ -24,8 +37,18 @@ function RadioGroup({
 }
 
 /**
- * Named visual variants retain radio semantics: dot for labeled options,
- * segment for compact filters, and card for larger choices.
+ * The two shapes one option is drawn in.
+ *
+ * The names are egma's, and they follow `button.tsx`: one primitive, more than
+ * one thing it may look like, chosen by a named prop rather than by a class
+ * list each caller reassembles. `dot` is the registry's radio — a small round
+ * box beside its own label. `segment` is the joined strip a filter is drawn
+ * as, where the option carries its own words.
+ *
+ * **`segment` is not a tab and not a toggle group.** Both would draw this, and
+ * both would say something else about it: tabs name panels a page switches
+ * between, and this switches which rows a table is asked for. What the radio
+ * group says is what a person's assistive technology is told.
  */
 const radioItemVariants = cva(
   [
@@ -82,8 +105,19 @@ const radioItemVariants = cva(
           "data-[state=checked]:shadow-[inset_0_2px_0_var(--accent)]",
         ],
         /*
-         * Draw the selected edge as an inset shadow so selection does not change
-         * card dimensions. Keep the radio indicator as an additional state cue.
+         * **One option, drawn as the whole card.** The chosen one carries the
+         * narrow Ember edge this file already asks Ember for — on the leading
+         * edge, which is the edge a person reads first and the same edge the
+         * sidebar's active row marks itself with. It is drawn as an inset
+         * shadow rather than a border so the card never changes size between
+         * states: a border that thickened on selection would shift every word
+         * beside it by a pixel.
+         *
+         * The wash arrives with it, and the two together mean the state is
+         * never colour alone — the indicator's own filled ring says it a third
+         * time. `DESIGN.md` keeps one radius and it is 0, so this is square,
+         * and the only motion is the press scale the base already carries plus
+         * a quiet colour fade.
          */
         card: [
           "relative flex min-h-(--tap-target) w-full items-start gap-3 p-4 text-left",

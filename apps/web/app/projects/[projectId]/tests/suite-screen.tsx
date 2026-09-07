@@ -37,9 +37,31 @@ import { TestsGrid } from "./tests-grid.tsx";
 const SAVED_FOR = 1500;
 
 /**
- * Show a brief Saved message after successful grid commits, since autosave
- * has no button state to acknowledge completion. Keep routine saves unanimated;
- * refusals remain in the cell or dialog where they occurred.
+ * The one word a finished save says, over the grid the save happened in.
+ *
+ * **This grid saves itself, so it has to say when it did** (founder,
+ * 2026-09-04). Every other write surface in the product is a form with a Save
+ * button that goes busy and then says `Saved.` beside itself; a cell that
+ * commits on blur has no button to change, so a person who typed a scenario
+ * and clicked away had nothing at all telling them egma had taken it.
+ * `DESIGN.md`: "Save state is truthful: unchanged, saving, saved, or failed."
+ *
+ * **A word, muted, and no colour** — `DESIGN.md` gives every state a word and
+ * makes the mark beside it optional supporting information, so the check is
+ * `aria-hidden` and the sentence is the whole message. It is not a chip: a
+ * chip is a standing fact about a record, and this is a thing that just
+ * happened.
+ *
+ * **And no motion.** "Do not animate actions used many times each day" — a
+ * cell commit is the most repeated action on this screen, and a word that
+ * faded in and out under every one of them would be decoration on routine
+ * work. It appears, it stands, it goes.
+ *
+ * A refused save says nothing here. The refusal is already written in the cell
+ * or in the dialog it was refused in, which is where the person is looking.
+ *
+ * It lives in this file rather than `ui/` because one screen saves this way.
+ * The moment a second one does, this is what moves.
  */
 function SaveIndicator({ save }: { readonly save: number }) {
   const [showing, setShowing] = useState(false);
@@ -72,9 +94,27 @@ function SaveIndicator({ save }: { readonly save: number }) {
 }
 
 /**
- * Display one suite's editable test grid. /tests/new?suite= opens the entry
- * row on this screen. Run suite opens the run builder; suite rename and delete
- * remain on the suites list.
+ * One suite, and the tests inside it, as a spreadsheet grid.
+ *
+ * **Two addresses draw this screen.** `/tests/suites/:suiteId` is the suite
+ * itself, and `/tests/new?suite=:suiteId` is the same suite with the entry row
+ * already open — the old write-a-test address, kept as a deep link now that the
+ * side sheet it used to open is retired.
+ *
+ * **Suite management is not here, but running is.** Rename and Delete suite
+ * live on the suites list's row menu, where one screen owns them (founder's
+ * ruling, 2026-08-24). Run suite came back to this screen on 2026-08-26 by
+ * developer decision: running is what a suite is for rather than a way of
+ * managing one, and it stands over the tests it runs. It goes to the run
+ * builder with this suite in the address, which is where the suites list's own
+ * Run suite goes.
+ *
+ * **Writing a test is the grid's own verb, and the toolbar holds no second
+ * one.** The ghost row at the foot of the grid says "+ Write a test" where the
+ * row it opens will stand, so a second button in the title bar said the same
+ * word twice and pointed away from the place the caret lands. It went on
+ * 2026-08-25. The two ways in are the ghost row and the `/tests/new?suite=`
+ * address, which both open the entry row in place.
  */
 export function SuiteScreen({
   projectId,
@@ -113,8 +153,17 @@ export function SuiteScreen({
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [shownSuite, setShownSuite] = useState<TestSuite | null>(null);
   /**
-   * Count successful saves to restart the indicator even when two occur within
-   * one millisecond. Cell/dialog saves and entry-row creation share this signal.
+   * How many saves this screen has watched land, which is all the indicator
+   * needs to know.
+   *
+   * A count rather than a timestamp: two saves inside one millisecond are two
+   * saves, and `Date.now()` would call them one — the word would keep the
+   * first one's remaining time instead of starting again.
+   *
+   * **The seam is the two callbacks the grid already has.** `onSaved` is every
+   * landed cell commit and every landed dialog Save; `onCreated` is the entry
+   * row's. Both fire only on a ready answer, so there is nothing for the grid
+   * to tell this screen that it was not already telling it.
    */
   const [saves, setSaves] = useState(0);
   const [search, setSearch] = useState("");

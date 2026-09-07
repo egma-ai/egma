@@ -12,8 +12,20 @@ import type {
 } from "../../../../../../lib/connection-options.ts";
 
 /**
- * Render controls from catalog field definitions. The server owns validation;
- * field kind selects the input shape without duplicating provider-specific rules.
+ * The fields one connection shape asks for, drawn from what the server said
+ * they are.
+ *
+ * **Nothing here knows what a Retell agent id or a LiveKit URL is.** The server
+ * sends a key, a label, a kind, whether it is required and a sentence of help,
+ * and this draws a control for it. That is what keeps the form and the gate in
+ * step: a shape that gains a key gains a box with nothing edited here, and a
+ * shape that loses one loses its box the same way.
+ *
+ * `kind` decides the control and nothing else. The gate on the server is still
+ * the only thing that admits a value, so a form that drew a plain box for a URL
+ * cannot get a bad URL past anything — which is why a `json` field is a text
+ * area rather than a validating editor, and why an `e164` field says what the
+ * shape looks like rather than trying to enforce it.
  */
 
 export type Draft = {

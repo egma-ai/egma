@@ -35,9 +35,23 @@ import {
 } from "../../../../ui/shell.tsx";
 
 /**
- * Edit project metadata with expectedRevision so concurrent saves cannot
- * silently overwrite each other. Keep refused drafts for retry. Server-provided
- * permission disables editing for users who cannot manage projects.
+ * What this project is called and what it is for.
+ *
+ * **The three live fields of one project, and nothing about the organization.**
+ * That separation is the whole shape of this Settings area: what is here
+ * changes one product area, and what is under the Organization group changes
+ * things every project shares. A page that mixed them would leave an admin
+ * unsure which of the two they had just done.
+ *
+ * **Every save names the revision the form was opened at.** Two admins with
+ * this page open in two tabs is ordinary, and the second save is refused rather
+ * than silently overwriting the first — with what was typed still on screen, so
+ * the fix is to read the project again rather than to retype anything.
+ *
+ * A viewer and a member see the same page with the same fields and the controls
+ * that would change data genuinely disabled. The server refuses their write
+ * either way, which is where the boundary actually is; this is a courtesy to a
+ * reader, and never a lock.
  */
 export default function ProjectSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -60,8 +74,19 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
   const settled = answer?.status === "ready" ? answer.value : null;
 
   /**
-   * Use the server's mayManageProjects result instead of duplicating role policy.
-   * Do not state a permission-refusal reason before the read resolves.
+   * The server's own answer, not this page's reading of a role.
+   *
+   * `mayManageProjects` travels with the project because the API computed it
+   * from `permits(auth, "manage_projects", …)` — the same check that decides
+   * whether the write lands. Deriving it here from `role === "admin"` would
+   * make this page a second opinion about what `manage_projects` means, and the
+   * two would part company the moment the permission moved: either controls
+   * withheld from somebody the server would have allowed, or controls offered
+   * whose writes it refuses.
+   *
+   * False until the read answers, which is *not yet known* rather than *no* —
+   * the same rule the role above follows, and the reason the disabled controls
+   * carry no sentence until there is one to give.
    */
   const mayAdminister = settled?.mayManageProjects ?? false;
 
@@ -216,7 +241,16 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
       />
       <PageBody>
         <SettingsLayout projectId={projectId} current="project">
-          {/* One form needs no extra section heading beneath the page title. */}
+          {/*
+            * No section heading over a page that holds one form.
+            *
+            * The title bar says "Project", the line under it says what the
+            * page is for, and the rail says which settings these are. A
+            * "Details" heading over the only thing on the screen was the
+            * largest type on it — larger than the page's own title — and said
+            * less than anything else. A page that grows a second group gets
+            * `Section` back, and then the heading is doing work.
+            */}
           <div className="flex flex-col gap-4">
             {refused === null ? null : (
               <Refused

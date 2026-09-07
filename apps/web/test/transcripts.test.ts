@@ -254,8 +254,14 @@ describe("the addresses the monitoring section holds", () => {
 });
 
 /**
- * Choose one guidance state from window contents, wider history, visible
- * key scopes, and production grader coverage.
+ * What a quiet Monitoring page owes its reader — four states, and never two at
+ * once.
+ *
+ * Each answers a different question, and the wrong one costs an afternoon:
+ * somebody with a week of traffic reading the last hour told to set up an
+ * export they already have, somebody with no export told that no grader watches
+ * production, somebody whose key names the whole organization told to point an
+ * export at egma a second time.
  */
 describe("which guidance a quiet page shows", () => {
   /** An empty page in a project that has never recorded anything, nothing failed. */
@@ -284,8 +290,14 @@ describe("which guidance a quiet page shows", () => {
   });
 
   /**
-   * Use the wider recent-history probe for setup guidance, regardless of the
-   * selected window. It does not establish that the project has never recorded a trace.
+   * **And nothing anywhere is the day-one page, whatever window is selected.**
+   *
+   * A developer who has just signed up lands on the default window, not on the
+   * widest, and an empty page is the one thing standing between them and a
+   * working export. Deciding this by the selected window alone would put a
+   * click in front of the teaching written for exactly this moment — so the
+   * question asked is "has this project ever recorded anything", which the
+   * window cannot answer and one extra read can.
    */
   it("teaches the setup whenever nothing has ever arrived, at any window", () => {
     expect(seen({ listed: 0, everRecorded: 0 })).toBe("set-up-capture");
@@ -529,8 +541,14 @@ describe("what a stored kind is called where somebody reads it", () => {
 });
 
 /**
- * Keep labels for Egma's recording distinct from external audio attached
- * to the agent's spans.
+ * Two different things with one word between them.
+ *
+ * A step on this page can carry audio the agent's **own telemetry** attached to
+ * it — somebody else's file, at somebody else's address. Beside it now sits
+ * egma's own recording of the exchange, both channels, measured off the line
+ * egma drove. Hearing one while believing it is the other is a wrong conclusion
+ * about a production agent, so the rule is that neither is ever called just
+ * "audio": every label that names audio names whose it is.
  */
 describe("the two kinds of audio a transcript can offer", () => {
   const NAMES_WHOSE_IT_IS = /\begma\b|\byour\b/iu;
@@ -707,8 +725,14 @@ describe("the transcript pages", () => {
 });
 
 /**
- * Check source wiring to API metrics and shared formatting. These assertions
- * do not independently prove that no browser code derives a metric.
+ * The metrics display: what this exchange measured, shown beside the exchange.
+ *
+ * **The page derives no number.** Every figure it shows arrived already computed
+ * by the platform's one shared measure module — the same module a future
+ * metric-based grader can read — so a duration worked out in a browser would be a
+ * second answer about one exchange and exactly what that module exists to
+ * prevent. What the page decides is which of the samples to lead with, and it
+ * says which one that is.
  */
 describe("what the exchange measured", () => {
   it("is read from the answer, and never worked out from the timings", async () => {
@@ -730,8 +754,19 @@ describe("what the exchange measured", () => {
   });
 
   /**
-   * Check that metricLine reads and rounds the API's p90 and uses sample
-   * length for the count. The test checks source patterns, not arbitrary arithmetic.
+   * **The reduction is the platform's, and this application must not be able
+   * to repeat it.**
+   *
+   * The number the pages lead with arrives on the answer as `mean`, rounded
+   * once by the shared measure module. Averaging the samples here instead
+   * would look harmless and would be a second implementation of exactly that
+   * figure — correct until the rounding or the samples change under one of
+   * them, with nothing anywhere failing.
+   *
+   * The words live in one shared formatter (`metricLine`), so the transcript
+   * page and the simulation evidence cannot come to word one conversation's
+   * numbers two ways. What is asserted here is the positive half: the
+   * formatter reads the reduced figure it was sent.
    */
   it("prints the reduction it was handed, and never computes one", async () => {
     const shared = await readFile(
@@ -782,8 +817,16 @@ describe("what the exchange measured", () => {
 });
 
 /**
- * Check text and wiring for framework-derived metrics and missing measurements.
- * Missing recognized evidence does not prove the agent measured nothing.
+ * Where a number came from, said on the page that shows it.
+ *
+ * **A grade's evidence must never be a surprise.** Some figures on this
+ * page were not timed by anybody: Egma worked them out from the timings the
+ * agent's own framework already records. A developer whose latency check starts
+ * failing is owed that sentence beside the number, not in a document.
+ *
+ * And the quiet sentence for an exchange that measured nothing stays exactly as
+ * it was, because it is still exactly as true — a framework emitting nothing
+ * Egma recognises still measures nothing.
  */
 describe("saying which numbers Egma worked out", () => {
   it("adds a clause only when a worked-out figure is on the page", async () => {
@@ -822,8 +865,15 @@ describe("saying which numbers Egma worked out", () => {
   });
 
   /**
-   * A platform-reported metric can also have derived=true. Both the inline mark
-   * and panel explanation must use the predicate that excludes reportedBy.
+   * **The wording that must never come back.** A figure a platform reported
+   * arrives `derived: true` as well, because Egma did not time it either — so a
+   * page reading `derived` alone would tell a developer their platform's number
+   * was "worked out from your framework's own timings", about an observation
+   * Egma never made. A caveat that is itself untrue is worse than none: it is
+   * the sentence somebody decides how far to believe a failing check on.
+   *
+   * One predicate answers it for both the mark and the panel's sentence, so the
+   * two can never come to disagree about a figure.
    */
   it("never words a platform-reported figure as one Egma worked out", async () => {
     const page = await readFile(path.join(WEB, DETAIL_PAGE), "utf8");

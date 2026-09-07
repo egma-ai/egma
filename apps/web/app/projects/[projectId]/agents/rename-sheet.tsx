@@ -19,8 +19,18 @@ import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
 import { Field, Help, Refused } from "@/ui/form.tsx";
 
 /**
- * Rename only the Egma agent label. Platform binding, prompt, model, and tools
- * are outside this form.
+ * Changing an agent's name, in the surface every other rename in the product
+ * already uses.
+ *
+ * **The row menu needed somewhere to send Rename.** The agent detail page held
+ * the only name box in the application and it is retired, so this is the house
+ * rename sheet — the same shape as a suite's and a persona's — rather than a
+ * new idea invented for one row (`DESIGN.md`: one record is created, read and
+ * edited in a side sheet).
+ *
+ * **The name is the only thing here.** Prompt, model and tools live at the
+ * provider, and an agent's platform binding is a fact about how Egma reaches
+ * it rather than something a rename may quietly move.
  */
 export function RenameAgentSheet({
   projectId,

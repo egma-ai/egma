@@ -133,8 +133,18 @@ describe("DataTable row links", () => {
 });
 
 /**
- * Check shared header/cell padding tokens and the action-column exception.
- * jsdom cannot verify pixel alignment; data-action identifies the control column.
+ * One left edge per column, header and values on it.
+ *
+ * The rule is written once in `components/ui/table.tsx` and every table in the
+ * product inherits it, so this asserts the token rather than a pixel: a header
+ * and the cells under it name the same padding, and the two deliberate
+ * exceptions — the row's own control lane, and the stacked layout's
+ * right-aligned values — are the ones `components/ui/table.tsx` names.
+ *
+ * The lane's own `px-0` is written unconditionally and applied by the
+ * `data-action` attribute, so the attribute is what proves which cell is the
+ * lane. The class is still read back once, on the lane itself, because the
+ * mark strips nothing unless the rule stays written on the shared parts.
  */
 describe("DataTable column alignment", () => {
   const LANE = "px-(--row-padding-x)";

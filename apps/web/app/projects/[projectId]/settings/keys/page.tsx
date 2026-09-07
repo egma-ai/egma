@@ -53,10 +53,24 @@ import {
 } from "../../../../../ui/shell.tsx";
 
 /**
- * Display a newly minted API secret once; later reads expose only its hint
- * and metadata. All roles can manage their own keys, while admins can also
- * manage others' keys. The server filters reads and enforces revocation rights.
- * Keys belong to the organization and may be scoped to one project.
+ * The keys a terminal authenticates with.
+ *
+ * **A secret exists once.** It is in the answer to the request that minted it
+ * and nowhere else — not in a row, not behind a reveal control, not in any
+ * route. So the page shows it once, says so plainly, and what remains
+ * afterwards is a prefix, four characters, and who minted it.
+ *
+ * **This is the one page where a viewer's controls stay live.** Every other
+ * mutation in the product is an admin's or a member's and is shown disabled to
+ * a viewer; here, creating and revoking *your own* key is something every role
+ * does, because `egma login` mints one as its last step and a credential you
+ * cannot list or revoke is a credential you cannot rotate. An admin
+ * additionally sees and can revoke everybody else's, which is what responding
+ * to a leak requires. Neither of those splits is enforced here — the server
+ * filters the list and refuses the write.
+ *
+ * Keys belong to the organization even when they are scoped to one project, so
+ * the note under the heading says so and every row states its scope.
  */
 export default function ApiKeysSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -70,8 +84,21 @@ export default function ApiKeysSettingsPage() {
 const WHOLE_ORGANIZATION = "";
 
 /**
- * Pad named row actions because the table's trailing slot is sized for a menu
- * trigger. Remove that padding in stacked layout, where the row already supplies it.
+ * The lane a row's own controls stand in.
+ *
+ * The shared table draws the trailing cell as the boards do — a fixed 48px slot
+ * with no side padding, so that every ⋮ in the product lines up in one column
+ * down the table (`78X-0`). A cell holding a named button rather than a ⋮ is
+ * wider than the slot and grows it, and with no padding of its own the button
+ * then sits against the panel's own hairline. This puts the row's padding back
+ * inside the cell, where the width is the caller's problem rather than the
+ * table's. It is the row's padding by name rather than a bare `px-4`, so it
+ * reads the same declaration the cells beside it do.
+ *
+ * **And it stops at the narrow layout, because there the row already pays
+ * it.** A stacked row is a padded block — `stacked:px-(--row-padding-x)` on
+ * the row, `stacked:p-0` on every cell — so a control cell keeping its own
+ * would stand at 32px while every value above it sat at 16.
  */
 const ROW_ACTIONS =
   "flex items-center justify-end gap-2 px-(--row-padding-x) stacked:px-0";
@@ -267,7 +294,15 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
         key: "actions",
         header: "Actions",
         /*
-         * Mark the cell as an action so table overflow rules do not clip its focus ring.
+         * A row control, said to the table rather than only drawn like one.
+         *
+         * The shared table keeps an `action` cell at the trailing edge and lets
+         * it out of the one-line ellipsis every other cell gets. That second
+         * half is why this is here: the ellipsis comes from `overflow: hidden`
+         * on the cell, and an outline is clipped by an ancestor's overflow, so a
+         * control in an unmarked cell had the Ember focus ring cut off on every
+         * side. Other row controls were already marked; these were the same
+         * concept drawn two ways.
          */
         action: true,
         cell: (key) => (

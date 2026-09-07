@@ -1,8 +1,24 @@
 /**
- * Check literal public-asset references found by the source scan. jsdom does
- * not fetch images, so component tests can miss broken paths. This covers
- * the configured source directories and reference pattern, not dynamic URLs.
- * Unused public files are allowed, including convention-based browser assets.
+ * Every file under `public/` that the application names, held against what is
+ * actually there.
+ *
+ * **The one class of fault nothing else in this suite can see.** A component
+ * test renders in jsdom, which fetches no images; the real-browser walk reads
+ * a link by its accessible name rather than by whether the picture behind it
+ * arrived; and Next's `<Image>` asks for a file at request time, so a missing
+ * one is a 404 in the network panel and a blank rectangle on the page. Every
+ * test stays green and every page in the product is wrong.
+ *
+ * A brand-asset migration exposed this gap: source could keep naming a deleted
+ * image while component tests stayed green. This file is the guard that would
+ * have reported the missing file. The public authentication Brand gives the
+ * scan a real asset to hold; the signed-in shell also uses the compact mark.
+ *
+ * It reads the source rather than a list, so an asset added tomorrow is
+ * covered the day it is written, and it deliberately says nothing about which
+ * files `public/` holds: an unused file is not a fault, and demanding that
+ * every asset be referenced would fail on a favicon a browser asks for by
+ * convention.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";

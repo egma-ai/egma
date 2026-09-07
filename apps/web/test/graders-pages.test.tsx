@@ -1008,8 +1008,14 @@ describe("the project Graders surface", () => {
   });
 
   /**
-   * A closed create sheet must unregister its draft even though it remains
-   * mounted and retains field values until the next open.
+   * A sheet that is not open holds no draft.
+   *
+   * The create sheet stays mounted after it closes — the page renders it
+   * unconditionally — and its fields are reset when it opens rather than when
+   * it closes, so what was typed survives and its `changed` stays true. With no
+   * `open` in the condition, that closed sheet kept a draft registered in the
+   * shared registry, and the next product link asked "Leave without saving?"
+   * about a grader that was already created.
    */
   it("stops protecting the custom-grader draft once the sheet closes", async () => {
     apiAnswers(answersThatCreateAGrader());

@@ -96,7 +96,16 @@ import { Actions, SearchField, Section, Toolbar } from "../../ui/section.tsx";
 import { SettingsNav } from "../../ui/settings-nav.tsx";
 import { AppShell, ProductPage } from "../../ui/shell.tsx";
 
-/* Shared class strings for this proof page's route-specific layout. */
+/*
+ * This page's own layout, which was a route CSS Module until ticket 19.
+ *
+ * It stays in this file rather than moving to `ui/` because it is one route's
+ * layout rather than product behaviour, and `DESIGN.md` asks a route page to
+ * "compose shared components and add only route-specific layout". It is named
+ * once rather than written nine times because nine copies drift. Tailwind reads
+ * `.tsx` files as text, so a class named in a constant here is generated
+ * exactly as one written in the markup is.
+ */
 
 /** One proof card: a group on Pure Paper, wearing the card radius. */
 const PANEL = [
@@ -117,11 +126,32 @@ const PANEL_WIDE = [...PANEL, "col-span-full max-[760px]:col-auto"];
 const KICKER =
   "m-0 mb-3 text-sm uppercase tracking-(--tracking-label) text-muted-foreground";
 
-/** Use the same section-heading weight for every component specimen. */
+/**
+ * The heading that names one component inside a panel.
+ *
+ * It is weight 500, because it is a heading and `DESIGN.md` reserves 500 for
+ * "section, state, or dialog titles that need stronger hierarchy" — the same
+ * rule that separates it from `KICKER` above.
+ *
+ * Every `<h3>` on the page reads it, including the six on the older panels that
+ * wrote the same three utilities out by hand. Naming it once is the rule this
+ * file states at the top — "named once rather than written nine times because
+ * nine copies drift" — and a constant that only the newest sections obeyed
+ * would have been a seventh copy with extra steps.
+ */
 const SUBHEAD =
   "m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground";
 
-/** Inset frame shared by component specimens and responsive previews. */
+/**
+ * One inset demonstration: a component shown on the canvas colour inside a
+ * panel, so the panel around it reads as a list of them.
+ *
+ * Both users of it are here rather than in two constants. It started as the
+ * frame for the two responsive and reduced-motion previews, and each primitive
+ * specimen wants the same frame — and two identical strings are the drift this
+ * file names at the top. `PREVIEW_HEAD` stays separate because only the two
+ * previews carry a titled header.
+ */
 const PREVIEW = "min-w-0 rounded-input border border-border bg-background p-4";
 const PREVIEW_HEAD = [
   "mb-4 flex items-baseline justify-between gap-3 text-sm text-foreground",
@@ -422,7 +452,17 @@ export function DesignSystemProof() {
               </div>
             </div>
 
-            {/* Show numeric controls with percentages, fractional seconds, and no unit. */}
+            {/*
+              * The numeric field, which the base has no primitive for.
+              *
+              * Its whole reason for existing is that a bound and a unit belong
+              * on the control rather than in a sentence beside it, so the proof
+              * has to show all three shapes at once: a percentage, a value in
+              * seconds whose step is not a whole number, and a plain count with
+              * no unit at all. A field that only ever appeared with a unit
+              * would leave the unit-less layout unproven, and that is the one
+              * the grader threshold uses.
+              */}
             <div className="flex flex-col gap-4">
               <h3 className={SUBHEAD}>
                 Numeric fields
@@ -658,9 +698,17 @@ export function DesignSystemProof() {
                 panel.
               </p>
               {/*
-               * Use tabs for in-place panels. Grader page navigation uses ordinary links
-               * with aria-current so browser link behavior remains available.
-               */}
+                * Said out loud on the proof surface, because it is the decision
+                * a reviewer is most likely to want to argue with.
+                *
+                * The two grader views are separate addresses. A tab set claims
+                * `role="tab"`, a panel that updates in place, and a roving tab
+                * order — none of which is true of a link that loads a new page
+                * — and it costs the link its middle-click, its copy-link, and
+                * its place in the tab order. So the grader strip stays a
+                * navigation of links marked with `aria-current="page"`, and
+                * this is where a real tab set is proven instead.
+                */}
               <p className="m-0 max-w-[68ch] text-sm text-muted-foreground">
                 The two grader views are not a tab set. They are separate
                 addresses, so they stay a navigation of links.
@@ -712,7 +760,21 @@ export function DesignSystemProof() {
                     </TabsContent>
                   </Tabs>
                 </div>
-                {/* Preview the vertical tab indicator and disabled-tab behavior. */}
+                {/*
+                  * The third shape the component draws, and the one nothing in
+                  * the product uses yet.
+                  *
+                  * A vertical rail marks the current tab down its trailing edge
+                  * instead of under it, which is a separate set of rules from
+                  * the two above — and rules no page would have caught. It is
+                  * here so the shape is proven rather than dead: a strip of
+                  * evidence views is the layout it is waiting for.
+                  *
+                  * The disabled tab is the other half. "Disable rather than
+                  * hide" is this product's decision, so a set that can hold an
+                  * unavailable choice has to show what one looks like: still
+                  * read, still named, and not reachable by the arrow keys.
+                  */}
                 <div className={PREVIEW}>
                   <Tabs defaultValue="turns" orientation="vertical">
                     <TabsList variant="line">
@@ -1145,9 +1207,17 @@ export function DesignSystemProof() {
           <p className={KICKER}>Responsive, theme and motion checks</p>
           <div className="grid grid-cols-2 gap-6 max-[760px]:grid-cols-1 max-[760px]:gap-4">
             {/*
-             * Preview dark tokens beside light tokens. The theme stylesheet supports
-             * data-theme on a nested frame as well as on the document root.
-             */}
+              * **The dark theme, beside the light one rather than instead of
+              * it.** Every shared component has to support both, and the way
+              * that rule is broken is never on purpose — it is a colour written
+              * where a token belonged, and it only shows when the two are held
+              * against each other. The account menu's switch still flips the
+              * whole document; this frame is what makes a difference visible
+              * without leaving the page.
+              *
+              * `data-theme` on a `<div>` works because `tailwind-theme.css`
+              * binds the dark values to the attribute as well as to `:root`.
+              */}
             <section
               className={cn(PREVIEW, "col-span-2 max-[760px]:col-span-1")}
               aria-label="Dark theme component preview"
@@ -1218,10 +1288,33 @@ export function DesignSystemProof() {
             </section>
 
             {/*
-             * Apply reduced-motion preview classes directly to these controls so nested
-             * components are not restyled by broad button selectors. Keep color feedback
-             * without spatial movement. Tooltip previews use data-preview in the theme.
-             */}
+              * The reduced-motion frame, and the two controls that demonstrate it.
+              *
+              * The stylesheet this replaces said it in two rules that reached
+              * the shadcn base button by element name — `.reducedFrame button`
+              * for the transition, and the same selector with
+              * `:active:not(:focus-visible):not(:disabled)` to cancel the
+              * press. That reach is what ticket 19 removes.
+              *
+              * The two rules say one thing: **inside this frame a button is
+              * drawn in its reduced-motion form** — no spatial press, and the
+              * colour feedback kept and made linear, which is the "useful
+              * opacity or color feedback" `DESIGN.md` asks every movement to
+              * have.
+              *
+              * It is written on the two controls rather than kept as a
+              * `[&_button]:` variant, because that variant is the same
+              * element-selector reach in another notation: it would still catch
+              * a button a nested shared component happens to render, which is
+              * how the original rule came to dress the base button in the first
+              * place. The two also need different class lists — the base button
+              * changes only its easing, the trigger states its whole transition
+              * — so one blanket rule could not say both.
+              *
+              * The tooltip half of this frame is not here at all:
+              * `tailwind-theme.css` keys it on `data-preview="reduced-motion"`,
+              * which is why that attribute stays exactly as it is.
+              */}
             <section
               className={PREVIEW}
               aria-label="Reduced motion component preview"

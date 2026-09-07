@@ -10,8 +10,16 @@ import type {
 } from "@egma/platform-api/client";
 
 /**
- * Settings types from the generated API contract. Listed API keys contain
- * metadata; only the creation response includes the new secret.
+ * What the Settings pages read: the organization, the projects in it, the
+ * people, and the keys.
+ *
+ * **The shapes are the API's, spelled once.** Four pages read these and a fifth
+ * will; a page that re-declared `{ id, name, slug }` for itself would be a page
+ * that keeps working after the API stops sending one of them.
+ *
+ * Nothing here can hold a secret. An API key's row carries what it looks like
+ * and never what it is: the plaintext exists once, in the answer to the request
+ * that minted it, and is never readable again from any route.
  */
 
 export type ProjectSettings = CreateProjectResponse &
@@ -30,8 +38,20 @@ export type Invitation = ListInvitationsResponse["invitations"][number];
 export type InvitationList = ListInvitationsResponse;
 
 /**
- * Unaccepted invitations are pending or expired. Invalid dates remain pending;
- * accepted invitations are omitted by the list route.
+ * Whether an invitation can still be accepted.
+ *
+ * **Two states and not one.** The list route answers with every invitation
+ * nobody has accepted, and the ones whose day has passed are in it: they read
+ * as waiting when nothing is coming. Somebody who cannot tell them apart waits
+ * for a person who was never going to be able to accept.
+ *
+ * `accepted` is the third state a link can be in and is deliberately not here —
+ * an accepted invitation is a member, and the roster is where it shows up.
+ *
+ * The comparison is the one `stateOf` makes on the server, on the same field.
+ * A date egma did not send, or sent unreadably, leaves this `pending`: a
+ * standing this could not work out is not grounds for calling an invitation
+ * dead.
  */
 export type InvitationStanding = "pending" | "expired";
 
@@ -69,8 +89,15 @@ export const NEW_PROJECT_PATH = "/new-project";
 export const ASSIGNABLE_ROLES = ["admin", "member", "viewer"] as const;
 
 /**
- * Fall back to an empty array for an absent or malformed list value. This
- * prevents a render error but does not distinguish invalid data from no rows.
+ * The rows an answer actually carried, and none at all when it carried
+ * something these pages cannot read.
+ *
+ * A read whose shape is not the expected one is a deployment mid-upgrade, a
+ * proxy answering for something else, or a write's own reply arriving where a
+ * list was asked for. The cost of trusting it is not a wrong list — it is
+ * `undefined.map`, which takes the whole settings page down and with it the
+ * thing somebody came to change. An empty list renders an honest state; a crash
+ * renders nothing at all.
  */
 export function rowsIn<T>(rows: readonly T[] | undefined): readonly T[] {
   return Array.isArray(rows) ? rows : [];

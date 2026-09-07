@@ -13,10 +13,21 @@ import {
 } from "./transcript-copy.ts";
 
 /**
- * Trace response types, display formatting, and bounded query windows.
- * Preserve wire field names and decimal-string durations. Both read endpoints
- * require a time window: the list uses the last day, and detail uses the
- * record's known window.
+ * What the two v1 read endpoints answer with, and the handful of pure decisions
+ * the pages make about it.
+ *
+ * The types use the contract's own lower-camel field names and storage words.
+ * Durations stay as decimal strings because this is the wire; renaming it here
+ * would mean two vocabularies to keep in step instead of one. Everything a
+ * person reads is decided in `transcript-copy.ts`; nothing below returns a
+ * sentence.
+ *
+ * The window functions are the load-bearing part. **Both endpoints require one
+ * and neither defaults**, deliberately: the store is filed by time, so a read
+ * that named no window would be a read of everything. That refusal is the
+ * server's, and these are the pages' answer to it — a default of the last day
+ * for the list, and, for one transcript, the window it was already known to
+ * have happened in.
  */
 
 /** Trace-level facts, as both endpoints report them. */
@@ -27,23 +38,69 @@ export type Step = TraceSpan;
 export type Grade = GetTraceResponse["grades"][number];
 
 /**
- * Metric samples, reductions, and units supplied by the API. Render these
- * values instead of recomputing the reductions in the browser.
+ * One measure this exchange produced, as the read hands it over.
+ *
+ * **Computed by the platform, never here — the reduction included.** The
+ * samples arrive already worked out by egma's one shared measure module, and
+ * so do the reductions — `mean`, `p50` and `p90`, each computed once in that
+ * module. All of it is the platform's arithmetic, so this application renders
+ * figures rather than deriving any.
+ *
+ * The reduction is the part that matters. Averaging the samples here would look
+ * harmless and would be a second implementation of the exact number the page
+ * leads with — correct until the day the rounding or the samples change under
+ * one of them. A developer who found this page and the platform disagreeing
+ * would be right to stop believing both, so the page is not allowed to be
+ * capable of it.
+ *
+ * The unit rides each measure because the measure catalog owns it: a page that
+ * assumed milliseconds would be wrong the moment somebody bounds a measure
+ * counted in something else.
  */
 export type Measured = GetTraceResponse["metrics"][number];
 
 /**
- * Framework-derived metrics have derived=true and no reportedBy.
- * Agent-platform reported values also set derived, so check both fields.
+ * Whether Egma worked this figure out from the framework's own timings — the
+ * one origin the pages say anything about.
+ *
+ * **`derived` alone does not answer it.** A figure an agent platform reported
+ * arrives derived as well, because Egma did not time it either; `reportedBy`
+ * beside it is what tells the two apart. Without that second half a page would
+ * tell a developer their platform's number was "worked out from your
+ * framework's own timings", which is a claim about an observation Egma never
+ * made. A platform-reported figure takes no mark and no caveat; the rest of
+ * its provenance stays on the record.
  */
 export function workedOutMetric(one: Measured): boolean {
   return one.derived === true && one.reportedBy === undefined;
 }
 
 /**
- * Format the API's p90 rounded to a whole unit. For complete series, include
- * the sample count when greater than one; for partial series, label the limited
- * coverage instead. Add provenance only for framework-derived metrics.
+ * One metric as a person reads it, the same words on every surface that shows
+ * one: the p90 the platform reduced to, its unit, and — where there was more
+ * than one measurement — how many the figure stands over.
+ *
+ * **The p90 leads because the tail is what a caller feels.** The wire also
+ * carries the median and the mean, computed by the same module; which of the
+ * three a surface shows is a display decision, and today's is the p90. One
+ * measurement is simply the number — every reduction of one sample is that
+ * sample, so naming a statistic over it would be dressing.
+ *
+ * **Nothing is worked out here.** `p90` arrives on the answer, nearest-rank
+ * from the shared measure module; this reads it. The series is used for one
+ * thing only, which is saying how many measurements there were. A prefix says
+ * so instead of the count, because the p90 of the part Egma holds is not the
+ * p90 of the call.
+ *
+ * **The figure is printed to the whole unit.** A derived sample carries
+ * nanosecond truth ("1994.917806"), and a person reads none of it: the page
+ * says 1995, and the exact sample stays on the wire beside it for anything
+ * that needs the last digits. Rounded here, in the one formatter, so no two
+ * surfaces can differ in the last digit.
+ *
+ * Written once and imported by the transcript page and the simulation
+ * evidence, so the two surfaces that show one conversation's metrics cannot
+ * come to word the same figure two ways.
  */
 export function metricLine(one: Measured): string {
   const shown = `${String(Math.round(one.p90))} ${one.unit}`;
@@ -111,8 +168,14 @@ const HOUR = 60 * 60 * 1000;
 const CLOCK_SKEW = 60 * 1000;
 
 /**
- * Store the relative window choice in the URL so saved links remain relative
- * to the time they are opened, rather than freezing exact timestamps.
+ * What the list's window is called in the address.
+ *
+ * The chosen window rides there rather than living only in this page's state,
+ * so that a reload, a bookmark and a link somebody was sent all stay on the
+ * window they were looking at. It is deliberately the choice — `7d` — and not
+ * the two instants it computes to: those are a moment's arithmetic and would
+ * freeze the list at whenever the link was made, which is the opposite of what
+ * "the last seven days" means.
  */
 export const WINDOW_PARAMETER = "window";
 
@@ -137,8 +200,16 @@ function hoursIn(choice: WindowChoice): number {
 }
 
 /**
- * The widest offered window, derived from the choices. It is bounded recent
- * history, not an all-time query.
+ * Whether this is the widest window the control offers.
+ *
+ * It is what separates *nothing here* from *nothing in this hour*. A project
+ * with a week of traffic read at the last hour is an empty list and a healthy
+ * project, and the widest choice is as close to "everything" as this page can
+ * ask for — the store caps a read at thirty-one days, so nothing wider exists
+ * to offer.
+ *
+ * Derived from the offered windows rather than written down, so adding a wider
+ * one moves this with it.
  */
 export const WIDEST_WINDOW: WindowChoice = WINDOWS.reduce((one, other) =>
   other.hours > one.hours ? other : one,
@@ -158,8 +229,18 @@ export function recentWindow(choice: WindowChoice, now: Date): Window {
 }
 
 /**
- * Pad detail-query bounds by one second to cover timestamp rounding and the
- * exclusive upper bound. Trace links carry this bounded lookup window.
+ * A second either side of when something happened.
+ *
+ * This is what lets one transcript be a link. The detail endpoint requires a
+ * window too — a name is not a prefix of the store's filing order, so a lookup
+ * naming only a name would have nothing to prune with — and the list already
+ * knows when the exchange happened, so the row carries the answer into the URL
+ * and the page deep-links from then on.
+ *
+ * Padded rather than exact because the end of a window is **open**: a `to` at
+ * the closing instant excludes the very step that ended there. A second is far
+ * more than the microsecond that would strictly be needed, and it costs a query
+ * bounded by the same minute either way.
  */
 const PADDING = 1000;
 
@@ -211,18 +292,65 @@ export function transcriptPath(projectId: string, facts: Facts): string {
   return `${transcriptsPath(projectId)}/${encodeURIComponent(facts.traceId)}?${query.toString()}`;
 }
 
-
+/**
+ * What the store calls the two kinds of traffic, and the one this surface asks
+ * for.
+ *
+ * **Monitoring is production and nothing else.** A simulation has a richer page
+ * of its own inside the run that produced it — the frozen test, the persona, the
+ * graders, the mock tools — so drawing it a second time and poorer, in a mixed
+ * list, is a wrong door. The filter is the server's, in the address of the
+ * request: narrowing what came back would answer differently depending on what
+ * had already been fetched, and would quietly break paging.
+ */
 /* ------------------------------------------------------------------ *
  * What to say when the page is quiet.
  * ------------------------------------------------------------------ */
 
 /**
- * Choose one guidance state from available reads. An empty current window
- * uses wider recent history to choose between widening the window and setup.
- * A visible organization key takes precedence over general setup guidance.
- * With traffic present, suggest grading only when the production grader count
- * is known to be zero. null means unanswered, never zero. Despite its name,
- * everRecorded covers only the widest offered window.
+ * Which guidance a quiet Monitoring page owes its reader — one of four, and
+ * never two at once.
+ *
+ * Each answers a different question, and showing the wrong one sends somebody
+ * the wrong way for an afternoon:
+ *
+ * - `nothing-in-this-window` — the list is empty because of the **window**, not
+ *   because of the project: something *is* recorded further back. A week of
+ *   traffic read at the last hour is an empty page and a healthy project, and
+ *   greeting it with a setup tutorial tells somebody their working export is
+ *   broken. One line and the way out; nothing else, because nothing else is
+ *   known to be wrong.
+ * - `set-up-capture` — nothing has arrived **anywhere**, at any window this page
+ *   can ask about. The reader has an agent and no export, so what they need is
+ *   the address, the two variables and a project key. It does not matter which
+ *   window is selected: a developer whose first
+ *   ever page is empty is the person this teaching exists for, and the default
+ *   window is where they land.
+ * - `key-names-the-organization` — the same emptiness, with a key that names no
+ *   project actually **visible** to this reader. Customer OTLP rejects that
+ *   scope because no project would own the evidence. This state points to the
+ *   specific key change instead of repeating generic export setup.
+ * - `nothing-watches-production` — traffic is arriving and no project grader is
+ *   scoped to it, so grades stay absent. The Expected behaviors grader is fixed
+ *   to simulations, so this is an ordinary first state.
+ *
+ * Nothing at all is the fifth answer, and it is the one a healthy project gets:
+ * traffic arriving, with at least one project grader that grades production.
+ *
+ * The order is the point. With no traffic, telling somebody that no grader
+ * watches production is noise about a problem they do not have yet.
+ *
+ * **A count nobody answered is `null`, and it is never read as a zero.** A
+ * failed grader read folded into "no grader watches production" would put a
+ * claim on screen that egma has no answer for — the same collapse
+ * `ui/page-state.tsx` forbids between failed and empty — so a supporting read
+ * that did not land means one less thing this page says, and never one more.
+ *
+ * `everRecorded` is that rule at its sharpest, because both of the sentences it
+ * decides between are confident ones. Unanswered, the page falls back to the
+ * window line: *nothing here, try a wider window* is true whatever the answer
+ * would have been, while the teaching would be telling somebody with a working
+ * export to go and build one.
  */
 export type Quiet =
   | "nothing-in-this-window"
@@ -234,8 +362,11 @@ export function quietState(seen: {
   /** How many production conversations this window holds. */
   readonly listed: number;
   /**
-   * Count from the widest offered recent window, or null if the read failed.
-   * Read only when the current window is empty; this is not an all-time count.
+   * How many this project holds at the widest window there is — the answer to
+   * *has anything ever arrived* — or `null` where nothing answered.
+   *
+   * Only read when the window on screen is empty, which is the only time the
+   * question is asked.
    */
   readonly everRecorded: number | null;
   /** Visible keys that name no project, or `null` where nothing answered. */

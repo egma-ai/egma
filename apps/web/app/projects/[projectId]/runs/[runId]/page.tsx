@@ -56,9 +56,16 @@ import {
 import { RunScenarioWorkbench } from "./run-scenario-workbench.tsx";
 
 /**
- * Keep run execution and grading progress separate; grades belong to simulation
- * traces, with no run-level pass/fail. Apply feed events by sequence number and
- * refresh loaded simulation pages for fields the feed does not carry.
+ * One run: what it froze, what happened, and how far grading has got.
+ *
+ * Execution state and grading state stay separate. Grade scores belong to each
+ * simulation trace. Egma does not create a run-level pass or fail result.
+ *
+ * **Execution follows the numbered feed.** Each event is applied at most once.
+ * Duration and grading projections do not exist in that feed, so the bounded
+ * simulation pages already opened are refreshed without changing their order or
+ * the selected row. A follower that misses a poll still asks from the last event
+ * number it applied and misses nothing.
  */
 export default function RunDetailPage() {
   const { projectId, runId } = useParams<{
@@ -174,8 +181,14 @@ function RunDetailView({
   const [moreSimulationsRefused, setMoreSimulationsRefused] = useState<Refusal | null>(null);
 
   /**
-   * Remember the last applied event sequence so replayed feed pages do not
-   * apply execution changes twice.
+   * What the feed has changed since the run was read, by conversation, plus the
+   * run's own status.
+   *
+   * **Applied at most once each, by sequence number.** The feed is stateless and
+   * answering the same `after` twice answers the same page twice, so the client's
+   * half of the bargain is to remember what it has applied. That is what lets
+   * this tab be closed, reopened, or left through a dropped connection and still
+   * be right.
    */
   const [moved, setMoved] = useState<ReadonlyMap<string, Moved>>(new Map());
   const [runStatus, setRunStatus] = useState<string | null>(null);

@@ -14,8 +14,19 @@ import { SessionLoading } from "../ui/session-loading.tsx";
 import { ProductStatePage } from "../ui/shell.tsx";
 
 /**
- * Resolve the session at the root, then redirect to the first accessible
- * project's landing page or sign-in. Subsequent product URLs carry the project ID.
+ * The root address is an entrance, not a second product page.
+ *
+ * A current session enters the product at **Agents**, under the first project
+ * its membership reaches — you start with the system you are testing, and a
+ * generic home page would be a page with nothing on it. Everybody else reaches
+ * the sign-in page directly instead of first opening a protected page and
+ * finding a sign-in link there.
+ *
+ * **This is the one address that chooses a project for you**, and it is the
+ * right one to: an entrance with nothing in it has to pick a door. Every
+ * address it sends somebody to names its project explicitly from then on, so
+ * the choice is made once, in the open, and lands in the address bar where a
+ * person can see it and change it.
  */
 export default function RootPage() {
   const router = useRouter();
@@ -58,8 +69,20 @@ export default function RootPage() {
   }, [attempt, router]);
 
   /*
-   * Keep the entrance covered until its redirect completes. The shared shell
-   * may finish its session read before this page has navigated.
+   * Nothing is guessed while the read is in flight. The product shell this
+   * used to draw in the meantime was a dashboard shown to somebody who may
+   * have no account open at all.
+   *
+   * **The entrance covers itself rather than leaving it to the shell**, and
+   * the reason is what happens after the answer arrives: `/` is the one
+   * address that never stops here, and the shell's own cover comes down the
+   * moment the session settles — which is the moment *before* the redirect
+   * lands, not after it.
+   *
+   * `signed-out` is written beside `null` for that same reason, and it is a
+   * lock rather than a live branch: the redirect above returns before
+   * `setAnswer`, so no render reaches this holding that status today. It costs
+   * one word, and it is the one state that must never uncover.
    */
   if (answer === null || answer.status === "signed-out") {
     return <SessionLoading label="Opening Egma" />;
@@ -87,9 +110,20 @@ export default function RootPage() {
           * `Actions` is the shared group a page's controls stand in.
           */}
         {/*
-         * Use a disabled button for users who cannot create projects. aria-disabled
-         * on an anchor alone would not prevent navigation.
-         */}
+          * A way forward rather than a dead end. Signup provisions a project, so
+          * an organization reaching this state is rare — and the person looking
+          * at it is standing in front of a product shell with nothing in it,
+          * which is exactly when being told what to do next matters. A viewer
+          * or a member sees the same control, genuinely disabled, and the
+          * sentence that says who to ask.
+          *
+          * **A disabled control is genuinely inert or it is a lie.** A link
+          * cannot be disabled: `aria-disabled` on an anchor greys it out and it
+          * still follows on click and still takes the keyboard. So when this is
+          * not theirs it stops being a link and becomes a disabled button,
+          * which carries the reason where a keyboard and a screen reader can
+          * reach it.
+          */}
         <Actions>
           {role === "admin" ? (
             <Button asChild>
