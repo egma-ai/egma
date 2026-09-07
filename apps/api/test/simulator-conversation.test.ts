@@ -8,6 +8,7 @@ import path from "node:path";
 
 import {
   createPersona,
+  getGraderDefinitionVersion,
   listProjectGraders,
   readTraceGrades,
   type AuthContext,
@@ -837,7 +838,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           [THE_BEHAVIOR]: {
             decision: "met",
             rationale: "the agent named an afternoon back before finishing.",
-            citedTurns: [3],
+            cited_turns: [3],
           },
         },
       });
@@ -1046,6 +1047,12 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
 
       // The row names both the project policy and the shared definition version.
       const seeded = await theProjectsGrader(auth);
+      const seededCore = await getGraderDefinitionVersion(
+        auth,
+        seeded.definitionId,
+        seeded.definitionVersion,
+      );
+      expect(seededCore).toBeDefined();
       expect(grade).toMatchObject({
         projectGraderId: seeded.id,
         graderDefinitionId: seeded.definitionId,
@@ -1071,8 +1078,12 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       // The judge was shown the conversation egma assembled, not a report:
       // four turns, the ending the row records, and no tool call, because the
       // counterpart made none.
+      expect(judge.asked).toHaveLength(1);
       const [asked] = judge.asked;
-      expect(asked?.criterion).toBe(THE_BEHAVIOR);
+      expect(asked?.criterion).toBe(seededCore?.prompt);
+      expect(asked?.expectedBehaviors).toEqual([
+        { id: "behavior_1", text: THE_BEHAVIOR },
+      ]);
       expect(asked?.evidence.transcript).toHaveLength(4);
       expect(asked?.evidence.outcome).toMatchObject({
         happened: true,

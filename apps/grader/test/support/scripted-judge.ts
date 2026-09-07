@@ -2,6 +2,7 @@ import type { Judging } from "../../src/graders/index.ts";
 import type {
   Judge,
   JudgeAnswer,
+  JudgeResult,
   JudgeMakers,
   JudgeQuestion,
   ResolvedJudge,
@@ -27,7 +28,8 @@ import { judgeFor } from "../../src/judge/index.ts";
  */
 
 /** An answer, or what the provider does instead of answering. */
-export type Scripted = JudgeAnswer | Error;
+export type CriterionAnswer = Omit<JudgeResult, "id">;
+export type Scripted = CriterionAnswer | JudgeAnswer | Error;
 
 export type ScriptedJudge = {
   /** Hand this to the service or to `gradeClaim`. */
@@ -53,10 +55,10 @@ export function scriptedJudge(options: ScriptedJudgeOptions): ScriptedJudge {
   const asked: JudgeQuestion[] = [];
   const configured: ResolvedJudge[] = [];
 
-  const cannotTell: JudgeAnswer = {
+  const cannotTell: CriterionAnswer = {
     decision: "cannot_determine",
     rationale: "nothing was scripted for this criterion.",
-    citedTurns: [],
+    cited_turns: [],
   };
 
   const makers: JudgeMakers = {
@@ -64,9 +66,16 @@ export function scriptedJudge(options: ScriptedJudgeOptions): ScriptedJudge {
       configured.push(judge);
       return async (question: JudgeQuestion): Promise<JudgeAnswer> => {
         asked.push(question);
-        const said = options.answers[question.criterion] ?? options.otherwise ?? cannotTell;
+        const said = options.answers[question.criterion] ?? options.otherwise;
         if (said instanceof Error) throw said;
-        return said;
+        if (said && "results" in said) return said;
+        if (said || question.expectedBehaviors.length === 0) return { results: [{ id: "instruction_1", ...(said ?? cannotTell) }] };
+        return { results: question.expectedBehaviors.map((behavior) => {
+          const one = options.answers[behavior.text] ?? cannotTell;
+          if (one instanceof Error) throw one;
+          if ("results" in one) throw new Error("scripted behavior must contain one decision");
+          return { id: behavior.id, ...one };
+        }) };
       };
     },
   };
@@ -113,17 +122,17 @@ export function noJudgeWanted(): Judging {
 }
 
 /** An answer in one line, for the ordinary case. */
-export function met(rationale: string, citedTurns: readonly number[] = []): JudgeAnswer {
-  return { decision: "met", rationale, citedTurns };
+export function met(rationale: string, citedTurns: readonly number[] = []): CriterionAnswer {
+  return { decision: "met", rationale, cited_turns: citedTurns };
 }
 
 export function notMet(
   rationale: string,
   citedTurns: readonly number[] = [],
-): JudgeAnswer {
-  return { decision: "not_met", rationale, citedTurns };
+): CriterionAnswer {
+  return { decision: "not_met", rationale, cited_turns: citedTurns };
 }
 
-export function cannotDetermine(rationale: string): JudgeAnswer {
-  return { decision: "cannot_determine", rationale, citedTurns: [] };
+export function cannotDetermine(rationale: string): CriterionAnswer {
+  return { decision: "cannot_determine", rationale, cited_turns: [] };
 }

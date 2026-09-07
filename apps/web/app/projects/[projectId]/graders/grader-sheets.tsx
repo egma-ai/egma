@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   createCustomGrader,
+  cloneGrader,
+  updateGraderDefinition,
+  getGraderForm,
   getGraderLibraryEntry,
   updateGrader,
   useGraderInProject,
@@ -45,7 +48,9 @@ import {
   platformAnswer,
   platformClient,
 } from "../../../../lib/platform-client.ts";
+import { Select } from "@/components/ui/select";
 import { Field, Refused } from "../../../../ui/form.tsx";
+import { useDraftNavigation } from "../../../../ui/draft-navigation.tsx";
 import { NumberField } from "../../../../ui/number-field.tsx";
 import { Loading } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
@@ -245,11 +250,11 @@ function initialSettings(
   return Object.fromEntries(
     definitions.map((definition) => {
       const held = values?.[definition.key];
-      const value = typeof held === "number" ? held : definition.defaultValue;
+      const value = typeof held === "number" || typeof held === "string" ? held : definition.defaultValue;
       return [
         definition.key,
         definition.unit === "milliseconds"
-          ? String(value / 1_000)
+          ? String(Number(value) / 1_000)
           : String(value),
       ];
     }),
@@ -259,13 +264,14 @@ function initialSettings(
 function settingValue(
   definition: GraderSettingDefinition,
   value: string,
-): number | null {
+): number | string | null {
   if (value.trim() === "") return null;
+  if (definition.valueType === "string") return value.trim();
   const read = Number(value);
   if (!Number.isFinite(read)) return null;
   const converted =
     definition.unit === "milliseconds" ? Math.round(read * 1_000) : read;
-  if (!Number.isInteger(converted)) return null;
+  if (definition.valueType === "integer" && !Number.isInteger(converted)) return null;
   if (definition.minimum !== null && converted < definition.minimum) return null;
   if (definition.maximum !== null && converted > definition.maximum) return null;
   return converted;
@@ -274,8 +280,8 @@ function settingValue(
 function settingsFrom(
   definitions: readonly GraderSettingDefinition[],
   draft: SettingsDraft,
-): Readonly<Record<string, number>> | null {
-  const pairs: Array<readonly [string, number]> = [];
+): Readonly<Record<string, number | string>> | null {
+  const pairs: Array<readonly [string, number | string]> = [];
   for (const definition of definitions) {
     const value = settingValue(definition, draft[definition.key] ?? "");
     if (value === null) return null;
@@ -286,7 +292,7 @@ function settingsFrom(
 
 function defaultSettingLabel(definition: GraderSettingDefinition): string {
   if (definition.unit === "milliseconds") {
-    return `${String(definition.defaultValue / 1_000)} seconds`;
+    return `${String(Number(definition.defaultValue) / 1_000)} seconds`;
   }
   return definition.unit === null
     ? String(definition.defaultValue)
@@ -294,11 +300,13 @@ function defaultSettingLabel(definition: GraderSettingDefinition): string {
 }
 
 function SettingsFields({
+  projectId,
   definitions,
   draft,
   disabled,
   onChange,
 }: {
+  readonly projectId: string;
   readonly definitions: readonly GraderSettingDefinition[];
   readonly draft: SettingsDraft;
   readonly disabled: boolean;
@@ -307,10 +315,19 @@ function SettingsFields({
   if (definitions.length === 0) return null;
   return (
     <Section title="Settings">
-      {definitions.map((definition) => {
+      {definitions.some((definition) => definition.key === "llm_model") ? (
+        <GraderModelField projectId={projectId} draft={draft} disabled={disabled} onChange={onChange} />
+      ) : null}
+      {definitions.filter((definition) => definition.key !== "llm_model" && definition.key !== "llm_provider").map((definition) => {
         const value = draft[definition.key] ?? "";
         const converted = settingValue(definition, value);
         const milliseconds = definition.unit === "milliseconds";
+        if (definition.valueType === "string") return (
+          <Field key={definition.key} label={`${definition.label}*`} htmlFor={`grader-setting-${definition.key}`}>
+            <Input id={`grader-setting-${definition.key}`} value={value} disabled={disabled} aria-required="true"
+              onChange={(event) => onChange({ ...draft, [definition.key]: event.target.value })} />
+          </Field>
+        );
         return (
           <NumberField
             key={definition.key}
@@ -339,7 +356,7 @@ function SettingsFields({
             invalid={converted === null}
             hint={
               milliseconds
-                ? "The grader compares the trace's average response time with this value."
+                ? "The grader compares the trace's p90 response time with this value."
                 : undefined
             }
           />
@@ -347,6 +364,30 @@ function SettingsFields({
       })}
     </Section>
   );
+}
+
+function GraderModelField({ projectId, draft, disabled, onChange }: {
+  readonly projectId: string; readonly draft: SettingsDraft; readonly disabled: boolean;
+  readonly onChange: (draft: SettingsDraft) => void;
+}) {
+  const { answer, reload } = useProjectRead(
+    (projectId) => platformAnswer(getGraderForm({ projectId }, { client: platformClient })), projectId,
+  );
+  if (answer === null) return <Loading what="grader models" />;
+  if (answer.status !== "ready") return <Refused message={answer.status === "signed-out" ? "Sign in to choose a model." : answer.refusal.message}
+    action={<Button type="button" variant="secondary" onClick={reload}>Try again</Button>} />;
+  return <Field label="Language model*" htmlFor="grader-language-model">
+    <Select id="grader-language-model" aria-required="true" disabled={disabled}
+      value={`${draft.llm_provider}/${draft.llm_model}`}
+      onChange={(event) => {
+        const selected = answer.value.modelCatalog.find((entry) => `${entry.provider}/${entry.model}` === event.target.value);
+        if (selected) onChange({ ...draft, llm_provider: selected.provider, llm_model: selected.model });
+      }}>
+      {answer.value.modelCatalog.map((entry) => <option key={`${entry.provider}/${entry.model}`} value={`${entry.provider}/${entry.model}`}>
+        {entry.label} · {entry.model}
+      </option>)}
+    </Select>
+  </Field>;
 }
 
 function PassThresholdField({
@@ -535,12 +576,17 @@ export function LibraryGraderSheet({
   readonly onUsed: () => void;
   readonly onEditActive: (projectGraderId: string) => void;
 }) {
-  const [mode, setMode] = useState<"details" | "use">(opened);
+  const draftNavigation = useDraftNavigation();
+  const [mode, setMode] = useState<"details" | "use" | "clone" | "core">(opened);
+  const [selectedVersion, setSelectedVersion] = useState(definitionVersion ?? entry.currentDefinitionVersion);
   useEffect(() => {
-    if (open) setMode(opened);
-  }, [open, opened]);
+    if (open) {
+      setMode(opened);
+      setSelectedVersion(definitionVersion ?? entry.currentDefinitionVersion);
+    }
+  }, [open, opened, definitionVersion, entry.currentDefinitionVersion]);
   return (
-    <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
+    <Sheet open={open} onOpenChange={(next) => !next && draftNavigation.request(onClose)}>
       <SheetContent aria-describedby={undefined}>
         <SheetHeader>
           <SheetTitle>
@@ -553,33 +599,56 @@ export function LibraryGraderSheet({
               ? `Definition v${String(definitionVersion)} used for this recorded result.`
               : mode === "details"
               ? "Review this grader before choosing it for the project."
+              : mode === "clone"
+              ? "Create an independent grader from the current core."
+              : mode === "core"
+              ? "Edit this project's current grader core."
               : "Choose how this project will use the grader."}
           </SheetDescription>
         </SheetHeader>
         <DefinitionRead
           projectId={projectId}
           definitionId={entry.id}
-          definitionVersion={definitionVersion}
+          definitionVersion={selectedVersion}
         >
-          {(read) =>
-            definitionVersion !== undefined || mode === "details" ? (
+          {(read) => {
+            const historical = definitionVersion !== undefined || read.definitionVersion !== read.currentDefinitionVersion;
+            return <>
+              {definitionVersion === undefined && (mode === "details" || historical) ? (
+                <div>
+                  <Field label="Core version" htmlFor="grader-core-version">
+                    <Select id="grader-core-version" value={String(read.definitionVersion)}
+                      onChange={(event) => setSelectedVersion(Number(event.target.value))}>
+                      {Array.from({ length: read.currentDefinitionVersion }, (_, at) => at + 1).reverse().map((version) =>
+                        <option key={version} value={String(version)}>v{version}{version === read.currentDefinitionVersion ? " · Current" : " · Read-only"}</option>)}
+                    </Select>
+                  </Field>
+                </div>
+              ) : null}
+            {historical || mode === "details" ? (
               <LibraryDetails
                 entry={read}
-                historical={definitionVersion !== undefined}
-                mayAuthor={mayAuthor && definitionVersion === undefined}
+                historical={historical}
+                mayAuthor={mayAuthor && !historical}
                 onUse={() => setMode("use")}
                 onEditActive={onEditActive}
+                onClone={() => setMode("clone")}
+                onEditCore={() => setMode("core")}
               />
+            ) : mode === "clone" || mode === "core" ? (
+              <GraderCoreForm key={`${read.definitionVersion}:${mode}`} entry={read} projectId={projectId}
+                open={open} cloning={mode === "clone"} onDone={onUsed} onCancel={() => draftNavigation.request(() => setMode("details"))} />
             ) : (
               <UseGraderForm
                 entry={read}
                 projectId={projectId}
                 open={open}
-                onCancel={() => setMode("details")}
+                onCancel={() => draftNavigation.request(() => setMode("details"))}
                 onUsed={onUsed}
               />
-            )
-          }
+            )}
+            </>;
+          }}
         </DefinitionRead>
       </SheetContent>
     </Sheet>
@@ -592,11 +661,15 @@ function LibraryDetails({
   mayAuthor,
   onUse,
   onEditActive,
+  onClone,
+  onEditCore,
 }: {
   readonly entry: GraderLibraryEntry;
   readonly historical: boolean;
   readonly mayAuthor: boolean;
   readonly onUse: () => void;
+  readonly onClone: () => void;
+  readonly onEditCore: () => void;
   readonly onEditActive: (projectGraderId: string) => void;
 }) {
   return (
@@ -648,6 +721,10 @@ function LibraryDetails({
             View active grader
           </Button>
         )}
+        {!historical && mayAuthor && entry.type === "llm_as_judge" ? <>
+          <Button type="button" size="lg" variant="secondary" onClick={onClone}>Clone grader</Button>
+          {entry.owner === "project" ? <Button type="button" size="lg" variant="secondary" onClick={onEditCore}>Edit core</Button> : null}
+        </> : null}
         <SheetClose asChild>
           <Button type="button" size="lg" variant="secondary">
             Close
@@ -656,6 +733,50 @@ function LibraryDetails({
       </SheetFooter>
     </>
   );
+}
+
+function GraderCoreForm({ entry, projectId, open, cloning, onDone, onCancel }: {
+  readonly entry: GraderLibraryEntry; readonly projectId: string; readonly open: boolean; readonly cloning: boolean;
+  readonly onDone: () => void; readonly onCancel: () => void;
+}) {
+  const initialName = cloning ? `${graderDefinitionDisplayName(entry.id, entry.name)} copy` : entry.name;
+  const [name, setName] = useState(initialName);
+  const [description, setDescription] = useState(entry.description ?? "");
+  const [instructions, setInstructions] = useState(entry.gradingInstructions ?? "");
+  const [saving, setSaving] = useState(false);
+  const [refused, setRefused] = useState<Refusal | null>(null);
+  const changed = name !== initialName || description !== (entry.description ?? "") || instructions !== entry.gradingInstructions;
+  useUnsavedChanges(open && changed && !saving, saving);
+  async function save() {
+    if (saving || name.trim() === "" || (!cloning && instructions.trim() === "")) return;
+    setSaving(true); setRefused(null);
+    const answer = cloning
+      ? await platformAnswer(cloneGrader({ graderDefinitionId: entry.id, projectId, name: name.trim(), description: description.trim() || null }, { client: platformClient }))
+      : await platformAnswer(updateGraderDefinition({ graderDefinitionId: entry.id, projectId,
+          baseDefinitionVersion: entry.definitionVersion, name: name.trim(), description: description.trim() || null,
+          gradingInstructions: instructions.trim() }, { client: platformClient }));
+    setSaving(false);
+    if (answer.status === "signed-out") { window.location.replace("/sign-in"); return; }
+    if (answer.status !== "ready") { setRefused(answer.refusal); return; }
+    onDone();
+  }
+  return <form className="flex min-h-0 flex-1 flex-col gap-5" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+    <SheetBody>
+      {refused === null ? null : <Refused message={refused.message} />}
+      <SheetLead>{cloning ? "Copy the current instructions and this project's settings into an independent grader." : "Save changed instructions as the next core version. Earlier versions stay read-only."}</SheetLead>
+      <Field label="Name*" htmlFor="grader-core-name"><Input id="grader-core-name" value={name} aria-required="true" disabled={saving} onChange={(event) => setName(event.target.value)} /></Field>
+      <Field label="Description [optional]" htmlFor="grader-core-description"><Input id="grader-core-description" value={description} disabled={saving} onChange={(event) => setDescription(event.target.value)} /></Field>
+      {cloning ? null : <Field label="Grading instructions*" htmlFor="grader-core-instructions">
+        <Textarea id="grader-core-instructions" value={instructions} rows={10} aria-required="true" disabled={saving} onChange={(event) => setInstructions(event.target.value)} />
+      </Field>}
+    </SheetBody>
+    <SheetFooter>
+      <Button type="submit" size="lg" busy={saving} disabled={name.trim() === "" || (!cloning && (!changed || instructions.trim() === ""))}>
+        {saving ? "Saving…" : cloning ? "Clone grader" : "Save core"}
+      </Button>
+      <Button type="button" size="lg" variant="secondary" disabled={saving} onClick={onCancel}>Back</Button>
+    </SheetFooter>
+  </form>;
 }
 
 function UseGraderForm({
@@ -739,6 +860,7 @@ function UseGraderForm({
           onValidityChange={setScopeValid}
         />
         <SettingsFields
+          projectId={projectId}
           definitions={entry.settingDefinitions}
           draft={settings}
           disabled={saving}
@@ -955,6 +1077,7 @@ function EditGraderForm({
           )}
         </Section>
         <SettingsFields
+          projectId={projectId}
           definitions={entry.settingDefinitions}
           draft={settings}
           disabled={saving || !mayAuthor}
@@ -1027,6 +1150,18 @@ export function CreateCustomGraderSheet({
   readonly onClose: () => void;
   readonly onCreated: () => void;
 }) {
+  const { answer: form, reload: reloadForm } = useProjectRead(
+    (projectId) => platformAnswer(getGraderForm({ projectId }, { client: platformClient })), projectId,
+  );
+  const definitions = form?.status === "ready" ? form.value.settingDefinitions : [];
+  const [settings, setSettings] = useState<SettingsDraft>({});
+  useEffect(() => {
+    if (open && form?.status === "ready") setSettings(initialSettings(form.value.settingDefinitions));
+  }, [open, form]);
+  useEffect(() => {
+    if (form?.status === "signed-out") window.location.replace("/sign-in");
+  }, [form]);
+  const filledSettings = form?.status === "ready" ? settingsFrom(definitions, settings) : null;
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [instructions, setInstructions] = useState("");
@@ -1058,6 +1193,7 @@ export function CreateCustomGraderSheet({
   }, [open]);
   const filledThreshold = thresholdValue(threshold);
   const valid =
+    filledSettings !== null &&
     name.trim() !== "" &&
     instructions.trim() !== "" &&
     passesWhen.trim() !== "" &&
@@ -1065,6 +1201,7 @@ export function CreateCustomGraderSheet({
     scopeValid &&
     filledThreshold !== null;
   const changed =
+    JSON.stringify(settings) !== JSON.stringify(initialSettings(definitions)) ||
     name !== "" ||
     description !== "" ||
     instructions !== "" ||
@@ -1075,7 +1212,7 @@ export function CreateCustomGraderSheet({
   useUnsavedChanges(open && changed && !saving, saving);
 
   async function create(): Promise<void> {
-    if (!valid || saving || filledThreshold === null) return;
+    if (!valid || saving || filledThreshold === null || filledSettings === null) return;
     setSaving(true);
     setRefused(null);
     const answer = await platformAnswer(
@@ -1091,6 +1228,7 @@ export function CreateCustomGraderSheet({
             simulations: [...scope.simulations],
             production: scope.production,
           },
+          settings: filledSettings,
           passThreshold: filledThreshold,
         },
         { client: platformClient },
@@ -1114,7 +1252,7 @@ export function CreateCustomGraderSheet({
         <SheetHeader>
           <SheetTitle>Create custom grader</SheetTitle>
           <SheetDescription>
-            Create a grader for this organization and use it in this project.
+            Create a grader for this project.
           </SheetDescription>
         </SheetHeader>
         <form
@@ -1209,6 +1347,15 @@ export function CreateCustomGraderSheet({
                 onChange={setThreshold}
               />
             </div>
+            {form === null || form.status === "signed-out" ? (
+              <Loading what="grader models" />
+            ) : form.status !== "ready" ? (
+              <Refused message={form.refusal.message} action={
+                <Button type="button" variant="secondary" onClick={reloadForm}>Try again</Button>
+              } />
+            ) : (
+              <SettingsFields projectId={projectId} definitions={definitions} draft={settings} disabled={saving} onChange={setSettings} />
+            )}
             <Section title="Scope">
               <ScopeFields
                 key={scopeRevision}

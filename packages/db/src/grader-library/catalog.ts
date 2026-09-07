@@ -1,21 +1,36 @@
-import { RECOMMENDED_GRADER_MODEL } from "../models/selections.ts";
+import { LLM_GRADER_PARAMETER_CONTRACT } from "./parameters.ts";
 import type {
   GraderDefinitionType,
-  GraderJudgeModel,
   GraderModality,
 } from "../schema/graders.ts";
 import type { GraderParameter } from "./parameters.ts";
 
 export type { GraderParameter } from "./parameters.ts";
 
-const EXPECTED_BEHAVIORS_PROMPT = [
-  "You grade one expected behavior against one recorded simulation.",
-  "Decide only the expected behavior you are given.",
-  "Set decision to exactly one of met, not_met, or cannot_determine.",
-  "Use met when the evidence shows the expected behavior happened.",
-  "Use not_met when the evidence shows the expected behavior did not happen.",
-  "Use cannot_determine when the evidence does not settle the expected behavior.",
-  "Answer with JSON containing decision, rationale, and cited_turns.",
+export const EXPECTED_BEHAVIORS_PROMPT = [
+  "You grade the supplied expected behaviors against one recorded simulation.",
+  "Decide only the expected behaviors you are given.",
+  "Evaluate each expected behavior separately.",
+  "",
+  "For each expected behavior:",
+  "- Set decision to exactly one of met, not_met, or cannot_determine.",
+  "- Use met when the evidence shows the expected behavior happened.",
+  "- Use not_met when the evidence shows the expected behavior did not happen.",
+  "- Use cannot_determine when the evidence does not settle the expected behavior.",
+  "",
+  "Return exactly one result for every supplied expected behavior.",
+  "Preserve each behavior's supplied ID.",
+  "Do not skip, combine, duplicate, or invent expected behaviors.",
+  "",
+  "Answer with a JSON object containing a results array.",
+  "Each result must contain:",
+  "- id: the supplied expected behavior ID.",
+  "- decision: met, not_met, or cannot_determine.",
+  "- rationale: an explanation of the decision.",
+  "- cited_turns: supporting transcript turn numbers, or an empty array when no specific turns can be cited.",
+  "",
+  "Follow the required JSON response schema.",
+  "Do not calculate the overall score; Egma calculates it from the decisions.",
 ].join("\n");
 
 export type PredefinedGraderDefinition = {
@@ -27,7 +42,6 @@ export type PredefinedGraderDefinition = {
   readonly prompt: string | null;
   readonly parameterContract: readonly GraderParameter[];
   readonly modalities: readonly GraderModality[];
-  readonly judgeModel: GraderJudgeModel | null;
   readonly createdAt: Date;
 };
 
@@ -37,18 +51,6 @@ export const PREDEFINED_GRADERS = {
 } as const;
 
 export const MAXIMUM_RESPONSE_TIME_PARAMETER = "maximum_response_time_ms";
-
-/**
- * What this setting was called while Response latency graded the mean.
- *
- * Kept because it is stored data, not a name: every project that turned the
- * grader on holds its answer under this key, and the boot door moves those
- * answers to the key above rather than leaving a project with a setting the
- * current contract does not name. Delete it only once no project grader row
- * carries it.
- */
-export const MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER =
-  "maximum_average_response_time_ms";
 
 const SHIPPED = new Date("2026-08-14T00:00:00.000Z");
 const RESPONSE_LATENCY_SHIPPED = new Date("2026-08-24T00:00:00.000Z");
@@ -63,9 +65,8 @@ export const GRADER_DEFINITION_CATALOG: readonly PredefinedGraderDefinition[] = 
     type: "llm_as_judge",
     scopeEditable: false,
     prompt: EXPECTED_BEHAVIORS_PROMPT,
-    parameterContract: [],
+    parameterContract: LLM_GRADER_PARAMETER_CONTRACT,
     modalities: ["chat", "voice"],
-    judgeModel: RECOMMENDED_GRADER_MODEL,
     createdAt: SHIPPED,
   },
   {
@@ -88,7 +89,6 @@ export const GRADER_DEFINITION_CATALOG: readonly PredefinedGraderDefinition[] = 
       },
     ],
     modalities: ["chat", "voice"],
-    judgeModel: null,
     createdAt: RESPONSE_LATENCY_SHIPPED,
   },
 ];

@@ -3,13 +3,15 @@ title: "Custom graders"
 description: "Create a reusable check for behavior that matters to your product."
 ---
 
-A custom grader uses an LLM to decide one rule from conversation evidence. It
-returns `1` when the rule is met and `0` when it is not met. If the evidence is
-insufficient, it returns a grading error with no score.
+A custom grader uses an LLM to check conversation evidence against your
+instructions. It belongs to one project. You choose its model, scope, and pass
+threshold.
 
-The grader reads the agent's transcript and tool calls when available. If your
-rule depends on a tool result, make sure that evidence reached Egma before you
-interpret the grade. See [Check which evidence arrived](/guides/start-and-follow-a-run#check-which-evidence-arrived).
+The grader receives the transcript, ending outcome, tool names and arguments,
+observed metrics, and any expected behaviors from the test. Tool return
+payloads are not sent to the LLM. Use rules that this evidence can answer.
+The transcript and tool calls prefer the agent's evidence when available.
+See [Check which evidence arrived](/guides/start-and-follow-a-run#check-which-evidence-arrived).
 
 ## Create a grader
 
@@ -20,23 +22,24 @@ For an appointment agent, use:
 
 | Field | Value |
 | --- | --- |
-| Name | Booking confirmation |
-| Grading instructions | Decide whether the agent makes only supported claims about completed bookings. Use the transcript and booking tool results. |
-| Passes when | Every claim that an appointment is booked is supported by a successful booking tool result. If the agent makes no booking claim, the rule is met. |
-| Fails when | The agent says an appointment is booked before the booking tool succeeds, after the tool fails, or without a booking tool result. |
+| Name | Appointment recap |
+| Grading instructions | Decide whether the agent repeats the chosen appointment date and time and asks the caller to confirm them. Use the transcript. |
+| Passes when | The agent repeats the chosen date and time and asks for confirmation. If no appointment is chosen, the rule is met. |
+| Fails when | An appointment is chosen and the agent ends the conversation without repeating both its date and time and asking for confirmation. |
 | Pass threshold | `1` |
 
-Under **Scope**, select **Grades simulations** and **All simulations**, or
-choose the test suites and tests that use booking tools. Select **Create grader**.
-Egma creates the grader in your organization's library and adds it to the
-current project's active graders.
+Choose **Language model** from the supported options. Under **Scope**, select
+**Grades simulations** and **All simulations**, or
+choose the test suites and tests that book appointments. Select **Create grader**.
+Egma saves the instructions as the first definition version and adds the
+grader to this project's active graders with the chosen settings.
 
 ## Write a check the evidence can settle
 
 State what to inspect and what each result means. Include the case where the
 conversation never reaches the behavior being checked.
 
-For example, a rule about booking confirmation should say what happens when
+For example, a rule about an appointment recap should say what happens when
 the caller asks only about opening hours. Without that boundary, two reasonable
 readings can produce different results.
 
@@ -48,21 +51,35 @@ independent concerns into separate graders so the result tells you what failed.
 1. Run a test where the agent follows the rule and one where it breaks the rule.
 2. Read the grader's rationale and cited evidence in each simulation's
    **Results**.
-3. Check cases where the relevant action does not occur, a tool fails, or
+3. Check cases where the relevant action does not occur, the caller declines, or
    evidence is missing.
 4. Set the [scope and pass threshold](/guides/configure-graders) for future
    conversations once the boundary is useful.
 
-The current custom grader form creates an LLM check. It does not accept custom
-code, a model selection, or a free-form numeric scoring scale.
+## Read the score
 
-## Reuse or replace a grader
+A check of one instruction returns `1` when met or `0` when not met. A prompt
+that checks each supplied expected behavior can return a fractional score:
+the number of met behaviors divided by the total. Egma computes this score
+from the decisions; the model does not choose an arbitrary numeric score.
 
-Other projects in your organization can select the definition from
-**Grader library** and choose **Use in project**. Each project sets its own
-scope and pass threshold.
+If the model cannot determine a result, the grade has no score. An incomplete
+or invalid response also produces a grading error. Read the rationale and
+citations before changing your threshold. See [Scores and thresholds](/guides/scores-and-thresholds).
 
-The current editor changes project policy. To change a custom grader's
-instructions, create a new grader with the revised rule and remove the old
-grader from future project use. Start a new run to test the new rule. Earlier
-run evidence retains the original grader definition and threshold.
+## Edit or clone a grader
+
+Open the current custom definition in **Grader library** and select **Edit
+core** to change its grading instructions. A changed prompt creates a new
+immutable definition version. The name and description can change without
+creating a version. History and Egma-provided definitions are read-only.
+
+Select **Clone grader** on a current LLM definition to copy its instructions
+and this project's effective settings into an independent custom grader. A
+clone receives no updates from its source. Code graders and historical
+versions cannot be cloned.
+
+Use **Edit** in **Active graders** to change the model, settings, scope, or
+threshold. These project settings do not create a definition version. Start
+a new run to use changed instructions or settings; queued runs and retries
+keep their saved selection.

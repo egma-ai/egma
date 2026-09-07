@@ -1156,9 +1156,9 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
     await setup.sql(
       `insert into grader_definition_version
          (definition_id, version, type, prompt, parameter_contract,
-          modalities, judge_model)
+          modalities)
        values ($1, 1, 'code', null, '[]'::jsonb,
-               '["voice"]'::jsonb, null)`,
+               '["voice"]'::jsonb)`,
       [productionDefinitionId],
     );
     await setup.sql("commit");

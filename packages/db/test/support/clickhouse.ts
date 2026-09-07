@@ -101,9 +101,10 @@ export type MigratedTraceStore = EmptyTraceStore & {
 
 export async function createMigratedTraceStore(
   label: string,
+  migrationsDirectory?: string,
 ): Promise<MigratedTraceStore> {
   const store = await createEmptyTraceStore(label);
-  await runClickHouseMigrations(store.url);
+  await runClickHouseMigrations(store.url, migrationsDirectory);
 
   const client = createClient({ url: store.url, max_open_connections: 4 });
 

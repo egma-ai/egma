@@ -1487,6 +1487,68 @@ export type RevokeApiKeyResponses = {
 
 export type RevokeApiKeyResponse = RevokeApiKeyResponses[keyof RevokeApiKeyResponses];
 
+export type GetGraderFormData = {
+    body?: never;
+    path?: never;
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/grader-form';
+};
+
+export type GetGraderFormErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type GetGraderFormError = GetGraderFormErrors[keyof GetGraderFormErrors];
+
+export type GetGraderFormResponses = {
+    /**
+     * Supported grader model pairs and the default LLM contract.
+     */
+    200: {
+        modelCatalog: Array<{
+            provider: string;
+            model: string;
+            label: string;
+        }>;
+        settingDefinitions: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
+    };
+};
+
+export type GetGraderFormResponse = GetGraderFormResponses[keyof GetGraderFormResponses];
+
 export type ListGraderLibraryData = {
     body?: never;
     path?: never;
@@ -1528,14 +1590,14 @@ export type ListGraderLibraryError = ListGraderLibraryErrors[keyof ListGraderLib
 
 export type ListGraderLibraryResponses = {
     /**
-     * Grader definitions visible to the organization, with current-project use state.
+     * Grader definitions visible to the project, with current-project use state.
      */
     200: {
         graderLibraryEntries: Array<{
             id: string;
             name: string;
             description: string | null;
-            owner: 'egma' | 'organization';
+            owner: 'egma' | 'project';
             type: 'llm_as_judge' | 'code';
             scopeEditable: boolean;
             currentDefinitionVersion: number;
@@ -1546,8 +1608,8 @@ export type ListGraderLibraryResponses = {
             settingDefinitions: Array<{
                 key: string;
                 label: string;
-                valueType: 'integer';
-                defaultValue: number;
+                valueType: 'integer' | 'number' | 'string';
+                defaultValue: number | string;
                 unit: string | null;
                 minimum: number | null;
                 maximum: number | null;
@@ -1611,7 +1673,7 @@ export type GetGraderLibraryEntryResponses = {
         id: string;
         name: string;
         description: string | null;
-        owner: 'egma' | 'organization';
+        owner: 'egma' | 'project';
         type: 'llm_as_judge' | 'code';
         scopeEditable: boolean;
         currentDefinitionVersion: number;
@@ -1622,8 +1684,8 @@ export type GetGraderLibraryEntryResponses = {
         settingDefinitions: Array<{
             key: string;
             label: string;
-            valueType: 'integer';
-            defaultValue: number;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
             unit: string | null;
             minimum: number | null;
             maximum: number | null;
@@ -1635,6 +1697,88 @@ export type GetGraderLibraryEntryResponses = {
 };
 
 export type GetGraderLibraryEntryResponse = GetGraderLibraryEntryResponses[keyof GetGraderLibraryEntryResponses];
+
+export type UpdateGraderDefinitionData = {
+    body: {
+        baseDefinitionVersion: number;
+        gradingInstructions?: string;
+        name?: string;
+        description?: string | null;
+    };
+    path: {
+        graderDefinitionId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/grader-library/{graderDefinitionId}';
+};
+
+export type UpdateGraderDefinitionErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type UpdateGraderDefinitionError = UpdateGraderDefinitionErrors[keyof UpdateGraderDefinitionErrors];
+
+export type UpdateGraderDefinitionResponses = {
+    /**
+     * The current core. A prompt change creates the next immutable version.
+     */
+    200: {
+        id: string;
+        name: string;
+        description: string | null;
+        owner: 'egma' | 'project';
+        type: 'llm_as_judge' | 'code';
+        scopeEditable: boolean;
+        currentDefinitionVersion: number;
+        definitionVersion: number;
+        modalities: Array<'chat' | 'voice'>;
+        gradingInstructions: string | null;
+        requiredEvidence: Array<'transcript' | 'ending_outcome' | 'tool_calls' | 'observed_metrics' | 'test_expected_behaviors' | 'turn_response_latency'>;
+        settingDefinitions: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
+        activeProjectGraderId: string | null;
+        createdAt: string;
+        updatedAt: string;
+    };
+};
+
+export type UpdateGraderDefinitionResponse = UpdateGraderDefinitionResponses[keyof UpdateGraderDefinitionResponses];
 
 export type UseGraderInProjectData = {
     body: {
@@ -1656,9 +1800,9 @@ export type UseGraderInProjectData = {
             } | null;
         };
         /**
-         * Values required by the definition's settingDefinitions. Use an empty object for a grader with no settings.
+         * Complete values for the definition's settingDefinitions. Omit settings to save the declared defaults on first use. LLM graders use llm_provider and llm_model; Response latency uses maximum_response_time_ms.
          */
-        settings: {
+        settings?: {
             [key: string]: unknown;
         };
         /**
@@ -1718,7 +1862,7 @@ export type UseGraderInProjectResponses = {
         graderDefinitionId: string;
         name: string;
         description: string | null;
-        owner: 'egma' | 'organization';
+        owner: 'egma' | 'project';
         type: 'llm_as_judge' | 'code';
         modalities: Array<'chat' | 'voice'>;
         scopeEditable: boolean;
@@ -1765,6 +1909,12 @@ export type CreateCustomGraderData = {
          */
         failsWhen: string;
         /**
+         * A complete llm_provider and llm_model pair from Get grader model choices. Omit settings to use the declared defaults.
+         */
+        settings?: {
+            [key: string]: unknown;
+        };
+        /**
          * The future simulations and/or production sample this project should grade.
          */
         scope: {
@@ -1782,7 +1932,7 @@ export type CreateCustomGraderData = {
             } | null;
         };
         /**
-         * Use 1 to require this binary check to pass.
+         * The minimum score for this grader's individual result to pass.
          */
         passThreshold: number;
     };
@@ -1835,7 +1985,7 @@ export type CreateCustomGraderResponses = {
             id: string;
             name: string;
             description: string | null;
-            owner: 'egma' | 'organization';
+            owner: 'egma' | 'project';
             type: 'llm_as_judge' | 'code';
             scopeEditable: boolean;
             currentDefinitionVersion: number;
@@ -1846,8 +1996,8 @@ export type CreateCustomGraderResponses = {
             settingDefinitions: Array<{
                 key: string;
                 label: string;
-                valueType: 'integer';
-                defaultValue: number;
+                valueType: 'integer' | 'number' | 'string';
+                defaultValue: number | string;
                 unit: string | null;
                 minimum: number | null;
                 maximum: number | null;
@@ -1862,7 +2012,7 @@ export type CreateCustomGraderResponses = {
             graderDefinitionId: string;
             name: string;
             description: string | null;
-            owner: 'egma' | 'organization';
+            owner: 'egma' | 'project';
             type: 'llm_as_judge' | 'code';
             modalities: Array<'chat' | 'voice'>;
             scopeEditable: boolean;
@@ -1892,6 +2042,120 @@ export type CreateCustomGraderResponses = {
 };
 
 export type CreateCustomGraderResponse = CreateCustomGraderResponses[keyof CreateCustomGraderResponses];
+
+export type CloneGraderData = {
+    body: {
+        name: string;
+        description?: string | null;
+    };
+    path: {
+        graderDefinitionId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/grader-library/{graderDefinitionId}/clone';
+};
+
+export type CloneGraderErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type CloneGraderError = CloneGraderErrors[keyof CloneGraderErrors];
+
+export type CloneGraderResponses = {
+    /**
+     * The independent custom definition and its copied project settings.
+     */
+    201: {
+        definition: {
+            id: string;
+            name: string;
+            description: string | null;
+            owner: 'egma' | 'project';
+            type: 'llm_as_judge' | 'code';
+            scopeEditable: boolean;
+            currentDefinitionVersion: number;
+            definitionVersion: number;
+            modalities: Array<'chat' | 'voice'>;
+            gradingInstructions: string | null;
+            requiredEvidence: Array<'transcript' | 'ending_outcome' | 'tool_calls' | 'observed_metrics' | 'test_expected_behaviors' | 'turn_response_latency'>;
+            settingDefinitions: Array<{
+                key: string;
+                label: string;
+                valueType: 'integer' | 'number' | 'string';
+                defaultValue: number | string;
+                unit: string | null;
+                minimum: number | null;
+                maximum: number | null;
+            }>;
+            activeProjectGraderId: string | null;
+            createdAt: string;
+            updatedAt: string;
+        };
+        grader: {
+            id: string;
+            projectId: string;
+            graderDefinitionId: string;
+            name: string;
+            description: string | null;
+            owner: 'egma' | 'project';
+            type: 'llm_as_judge' | 'code';
+            modalities: Array<'chat' | 'voice'>;
+            scopeEditable: boolean;
+            removable: boolean;
+            scope: {
+                simulations: Array<{
+                    kind: 'all';
+                } | {
+                    kind: 'test_suite';
+                    id: string;
+                } | {
+                    kind: 'test';
+                    id: string;
+                }>;
+                production: {
+                    samplePercent: number;
+                } | null;
+            };
+            settings: {
+                [key: string]: unknown;
+            };
+            passThreshold: number;
+            createdAt: string;
+            updatedAt: string;
+        };
+    };
+};
+
+export type CloneGraderResponse = CloneGraderResponses[keyof CloneGraderResponses];
 
 export type ListGradersData = {
     body?: never;
@@ -1939,7 +2203,7 @@ export type ListGradersResponses = {
             graderDefinitionId: string;
             name: string;
             description: string | null;
-            owner: 'egma' | 'organization';
+            owner: 'egma' | 'project';
             type: 'llm_as_judge' | 'code';
             modalities: Array<'chat' | 'voice'>;
             scopeEditable: boolean;
@@ -2040,7 +2304,7 @@ export type UpdateGraderData = {
             } | null;
         };
         /**
-         * Values for the definition's settingDefinitions. Response latency uses maximum_response_time_ms, a positive integer in milliseconds.
+         * Complete values for the definition's settingDefinitions. LLM graders use llm_provider and llm_model. Response latency uses maximum_response_time_ms, a positive integer in milliseconds. These settings belong to this project and do not create a definition version.
          */
         settings?: {
             [key: string]: unknown;
@@ -2098,7 +2362,7 @@ export type UpdateGraderResponses = {
         graderDefinitionId: string;
         name: string;
         description: string | null;
-        owner: 'egma' | 'organization';
+        owner: 'egma' | 'project';
         type: 'llm_as_judge' | 'code';
         modalities: Array<'chat' | 'voice'>;
         scopeEditable: boolean;
@@ -2686,6 +2950,149 @@ export type UpdateOrganizationResponses = {
 
 export type UpdateOrganizationResponse = UpdateOrganizationResponses[keyof UpdateOrganizationResponses];
 
+export type UsePersonaData = {
+    body?: {
+        projectId?: string;
+        /**
+         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+         */
+        models?: {
+            llm: {
+                provider: string;
+                model: string;
+            };
+            stt: {
+                provider: string;
+                model: string;
+            };
+            tts: {
+                provider: string;
+                model: string;
+                /**
+                 * A voice identifier supported by the selected text-to-speech provider.
+                 */
+                voiceId: string;
+                /**
+                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 */
+                speed: number;
+            };
+        };
+    };
+    path: {
+        personaId: string;
+    };
+    query?: never;
+    url: '/v1/personas/{personaId}/use';
+};
+
+export type UsePersonaErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type UsePersonaError = UsePersonaErrors[keyof UsePersonaErrors];
+
+export type UsePersonaResponses = {
+    /**
+     * The persona with its saved project settings.
+     */
+    200: {
+        id: string;
+        projectId: string | null;
+        name: string;
+        description: string | null;
+        version: number;
+        versionId: string;
+        /**
+         * The human name the caller gives the agent, separate from the library name.
+         */
+        identityName: string;
+        /**
+         * How the caller behaves and speaks. Put the situation and goal in the test scenario.
+         */
+        personality: string;
+        /**
+         * The caller's language, such as en-US.
+         */
+        language: string;
+        parameterContract: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
+        /**
+         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
+         */
+        settings: {
+            id: string;
+            /**
+             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+             */
+            models: {
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                stt: {
+                    provider: string;
+                    model: string;
+                };
+                tts: {
+                    provider: string;
+                    model: string;
+                    /**
+                     * A voice identifier supported by the selected text-to-speech provider.
+                     */
+                    voiceId: string;
+                    /**
+                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     */
+                    speed: number;
+                };
+            };
+            createdAt: string;
+            updatedAt: string;
+        } | null;
+        owner: 'egma' | 'organization';
+        archivedAt: string | null;
+        createdAt: string;
+        updatedAt: string;
+    };
+};
+
+export type UsePersonaResponse = UsePersonaResponses[keyof UsePersonaResponses];
+
 export type ListPersonasData = {
     body?: never;
     path?: never;
@@ -2750,31 +3157,48 @@ export type ListPersonasResponses = {
              * The caller's language, such as en-US.
              */
             language: string;
+            parameterContract: Array<{
+                key: string;
+                label: string;
+                valueType: 'integer' | 'number' | 'string';
+                defaultValue: number | string;
+                unit: string | null;
+                minimum: number | null;
+                maximum: number | null;
+            }>;
             /**
-             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+             * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
              */
-            models: {
-                llm: {
-                    provider: string;
-                    model: string;
+            settings: {
+                id: string;
+                /**
+                 * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+                 */
+                models: {
+                    llm: {
+                        provider: string;
+                        model: string;
+                    };
+                    stt: {
+                        provider: string;
+                        model: string;
+                    };
+                    tts: {
+                        provider: string;
+                        model: string;
+                        /**
+                         * A voice identifier supported by the selected text-to-speech provider.
+                         */
+                        voiceId: string;
+                        /**
+                         * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                         */
+                        speed: number;
+                    };
                 };
-                stt: {
-                    provider: string;
-                    model: string;
-                };
-                tts: {
-                    provider: string;
-                    model: string;
-                    /**
-                     * A voice identifier supported by the selected text-to-speech provider.
-                     */
-                    voiceId: string;
-                    /**
-                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
-                     */
-                    speed: number;
-                };
-            };
+                createdAt: string;
+                updatedAt: string;
+            } | null;
             owner: 'egma' | 'organization';
             archivedAt: string | null;
             createdAt: string;
@@ -2809,7 +3233,7 @@ export type CreatePersonaData = {
         /**
          * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
          */
-        models: {
+        models?: {
             llm: {
                 provider: string;
                 model: string;
@@ -2893,31 +3317,48 @@ export type CreatePersonaResponses = {
          * The caller's language, such as en-US.
          */
         language: string;
+        parameterContract: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
         /**
-         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
          */
-        models: {
-            llm: {
-                provider: string;
-                model: string;
+        settings: {
+            id: string;
+            /**
+             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+             */
+            models: {
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                stt: {
+                    provider: string;
+                    model: string;
+                };
+                tts: {
+                    provider: string;
+                    model: string;
+                    /**
+                     * A voice identifier supported by the selected text-to-speech provider.
+                     */
+                    voiceId: string;
+                    /**
+                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     */
+                    speed: number;
+                };
             };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                /**
-                 * A voice identifier supported by the selected text-to-speech provider.
-                 */
-                voiceId: string;
-                /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
-                 */
-                speed: number;
-            };
-        };
+            createdAt: string;
+            updatedAt: string;
+        } | null;
         owner: 'egma' | 'organization';
         archivedAt: string | null;
         createdAt: string;
@@ -3128,31 +3569,48 @@ export type GetPersonaResponses = {
          * The caller's language, such as en-US.
          */
         language: string;
+        parameterContract: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
         /**
-         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
          */
-        models: {
-            llm: {
-                provider: string;
-                model: string;
+        settings: {
+            id: string;
+            /**
+             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+             */
+            models: {
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                stt: {
+                    provider: string;
+                    model: string;
+                };
+                tts: {
+                    provider: string;
+                    model: string;
+                    /**
+                     * A voice identifier supported by the selected text-to-speech provider.
+                     */
+                    voiceId: string;
+                    /**
+                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     */
+                    speed: number;
+                };
             };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                /**
-                 * A voice identifier supported by the selected text-to-speech provider.
-                 */
-                voiceId: string;
-                /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
-                 */
-                speed: number;
-            };
-        };
+            createdAt: string;
+            updatedAt: string;
+        } | null;
         owner: 'egma' | 'organization';
         archivedAt: string | null;
         createdAt: string;
@@ -3207,6 +3665,10 @@ export type UpdatePersonaData = {
                 speed: number;
             };
         };
+        /**
+         * The current versionId from Get a persona. Required when editing identityName, personality, or language. A stale value returns 409 version_conflict.
+         */
+        expectedVersionId?: string;
     };
     path: {
         personaId: string;
@@ -3271,31 +3733,48 @@ export type UpdatePersonaResponses = {
          * The caller's language, such as en-US.
          */
         language: string;
+        parameterContract: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
         /**
-         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
          */
-        models: {
-            llm: {
-                provider: string;
-                model: string;
+        settings: {
+            id: string;
+            /**
+             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+             */
+            models: {
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                stt: {
+                    provider: string;
+                    model: string;
+                };
+                tts: {
+                    provider: string;
+                    model: string;
+                    /**
+                     * A voice identifier supported by the selected text-to-speech provider.
+                     */
+                    voiceId: string;
+                    /**
+                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     */
+                    speed: number;
+                };
             };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                /**
-                 * A voice identifier supported by the selected text-to-speech provider.
-                 */
-                voiceId: string;
-                /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
-                 */
-                speed: number;
-            };
-        };
+            createdAt: string;
+            updatedAt: string;
+        } | null;
         owner: 'egma' | 'organization';
         archivedAt: string | null;
         createdAt: string;
@@ -3367,31 +3846,15 @@ export type ListPersonaVersionsResponses = {
              * The caller's language, such as en-US.
              */
             language: string;
-            /**
-             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
-             */
-            models: {
-                llm: {
-                    provider: string;
-                    model: string;
-                };
-                stt: {
-                    provider: string;
-                    model: string;
-                };
-                tts: {
-                    provider: string;
-                    model: string;
-                    /**
-                     * A voice identifier supported by the selected text-to-speech provider.
-                     */
-                    voiceId: string;
-                    /**
-                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
-                     */
-                    speed: number;
-                };
-            };
+            parameterContract: Array<{
+                key: string;
+                label: string;
+                valueType: 'integer' | 'number' | 'string';
+                defaultValue: number | string;
+                unit: string | null;
+                minimum: number | null;
+                maximum: number | null;
+            }>;
             createdAt: string;
         }>;
         nextPageToken: string | null;
@@ -3514,31 +3977,15 @@ export type GetPersonaVersionResponses = {
          * The caller's language, such as en-US.
          */
         language: string;
-        /**
-         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
-         */
-        models: {
-            llm: {
-                provider: string;
-                model: string;
-            };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                /**
-                 * A voice identifier supported by the selected text-to-speech provider.
-                 */
-                voiceId: string;
-                /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
-                 */
-                speed: number;
-            };
-        };
+        parameterContract: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
         createdAt: string;
     };
 };
@@ -3612,31 +4059,48 @@ export type ForkPersonaResponses = {
          * The caller's language, such as en-US.
          */
         language: string;
+        parameterContract: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
         /**
-         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
          */
-        models: {
-            llm: {
-                provider: string;
-                model: string;
+        settings: {
+            id: string;
+            /**
+             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+             */
+            models: {
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                stt: {
+                    provider: string;
+                    model: string;
+                };
+                tts: {
+                    provider: string;
+                    model: string;
+                    /**
+                     * A voice identifier supported by the selected text-to-speech provider.
+                     */
+                    voiceId: string;
+                    /**
+                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     */
+                    speed: number;
+                };
             };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                /**
-                 * A voice identifier supported by the selected text-to-speech provider.
-                 */
-                voiceId: string;
-                /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
-                 */
-                speed: number;
-            };
-        };
+            createdAt: string;
+            updatedAt: string;
+        } | null;
         owner: 'egma' | 'organization';
         archivedAt: string | null;
         createdAt: string;
@@ -4787,15 +5251,23 @@ export type GetSimulationResponses = {
             projectGraderId: string;
             graderDefinitionId: string;
             graderDefinitionVersion: number;
+            /**
+             * The model or numeric settings used for this grading attempt. Retained for successful and errored grades, including after temporary jobs are removed. Contains no credentials.
+             */
+            parameterValues: {
+                [key: string]: unknown;
+            };
             graderName: string;
             score: number | null;
             details: {
                 rationale?: string;
                 assertions?: Array<{
                     key: string;
+                    decision?: 'met' | 'not_met' | 'cannot_determine';
                     score?: number;
                     rationale?: string;
                     citedSpanIds?: Array<string>;
+                    citedTurns?: Array<number>;
                     error?: string;
                 }>;
                 error?: string;
@@ -4812,15 +5284,23 @@ export type GetSimulationResponses = {
             projectGraderId: string;
             graderDefinitionId: string;
             graderDefinitionVersion: number;
+            /**
+             * The model or numeric settings used for this grading attempt. Retained for successful and errored grades, including after temporary jobs are removed. Contains no credentials.
+             */
+            parameterValues: {
+                [key: string]: unknown;
+            };
             graderName: string;
             score: number | null;
             details: {
                 rationale?: string;
                 assertions?: Array<{
                     key: string;
+                    decision?: 'met' | 'not_met' | 'cannot_determine';
                     score?: number;
                     rationale?: string;
                     citedSpanIds?: Array<string>;
+                    citedTurns?: Array<number>;
                     error?: string;
                 }>;
                 error?: string;
@@ -4859,7 +5339,7 @@ export type GetSimulationResponses = {
          */
         metrics: Array<{
             /**
-             * Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the start of the agent's reply, using speech boundaries for voice when available. first_response_latency measures the time from conversation start to the agent's first reply. Both use milliseconds.
+             * Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the agent's reply. For voice simulations, it runs from the end of the caller's played audio, including trailing padding, to the arrival of the agent's audio. first_response_latency measures the wait from conversation start to the first reply. Both use milliseconds.
              */
             measure: string;
             unit: string;
@@ -4922,7 +5402,6 @@ export type GetSimulationResponses = {
             config: unknown;
         };
         gradingPlan: {
-            state: 'run_start';
             capturedAt: string;
             items: Array<{
                 projectGraderId: string;
@@ -6218,7 +6697,7 @@ export type GetTraceResponses = {
         spansTruncated: boolean;
         metrics: Array<{
             /**
-             * Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the start of the agent's reply, using speech boundaries for voice when available. first_response_latency measures the time from conversation start to the agent's first reply. Both use milliseconds.
+             * Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the agent's reply. For voice simulations, it runs from the end of the caller's played audio, including trailing padding, to the arrival of the agent's audio. first_response_latency measures the wait from conversation start to the first reply. Both use milliseconds.
              */
             measure: string;
             unit: string;
@@ -6255,15 +6734,23 @@ export type GetTraceResponses = {
             projectGraderId: string;
             graderDefinitionId: string;
             graderDefinitionVersion: number;
+            /**
+             * The model or numeric settings used for this grading attempt. Retained for successful and errored grades, including after temporary jobs are removed. Contains no credentials.
+             */
+            parameterValues: {
+                [key: string]: unknown;
+            };
             graderName: string;
             score: number | null;
             details: {
                 rationale?: string;
                 assertions?: Array<{
                     key: string;
+                    decision?: 'met' | 'not_met' | 'cannot_determine';
                     score?: number;
                     rationale?: string;
                     citedSpanIds?: Array<string>;
+                    citedTurns?: Array<number>;
                     error?: string;
                 }>;
                 error?: string;
@@ -6280,15 +6767,23 @@ export type GetTraceResponses = {
             projectGraderId: string;
             graderDefinitionId: string;
             graderDefinitionVersion: number;
+            /**
+             * The model or numeric settings used for this grading attempt. Retained for successful and errored grades, including after temporary jobs are removed. Contains no credentials.
+             */
+            parameterValues: {
+                [key: string]: unknown;
+            };
             graderName: string;
             score: number | null;
             details: {
                 rationale?: string;
                 assertions?: Array<{
                     key: string;
+                    decision?: 'met' | 'not_met' | 'cannot_determine';
                     score?: number;
                     rationale?: string;
                     citedSpanIds?: Array<string>;
+                    citedTurns?: Array<number>;
                     error?: string;
                 }>;
                 error?: string;

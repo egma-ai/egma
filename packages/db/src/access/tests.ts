@@ -1,3 +1,4 @@
+import { ensureProjectPersonaOn } from "./project-personas.ts";
 import { isId, newId } from "@egma/ids";
 import {
   and,
@@ -1122,6 +1123,7 @@ async function validateNamedPersonas(
         `persona ${id} is deleted, and a test cannot name a deleted persona`,
       );
     }
+    await ensureProjectPersonaOn(on, auth, projectId, id);
   }
 }
 

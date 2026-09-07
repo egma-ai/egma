@@ -52,10 +52,10 @@ name when asked and confirm that you want the appointment.
 
 ## Expected behaviors
 
-1. The agent checks availability before offering an appointment time.
-2. The agent offers only a time returned by check_availability.
-3. The agent gets the caller's confirmation before calling book_appointment.
-4. The agent confirms the appointment only after book_appointment succeeds.
+1. The agent calls check_availability.
+2. The agent offers only 15:00 or 16:30 on October 14, 2026.
+3. The agent asks the caller to confirm October 14 at 15:00.
+4. The agent calls book_appointment for October 14 at 15:00.
 
 ## Mock tools
 
@@ -99,6 +99,11 @@ name when asked and confirm that you want the appointment.
 Use one clear claim per expected behavior. The grader checks each statement
 against the completed conversation. Three or four concrete checks are usually
 enough for one situation. Put an unrelated failure case in another test.
+
+The grader receives the transcript and tool names and arguments, but not tool
+return payloads. For a fixed mock, name the expected outcome in the behavior
+statement. Inspect the tool result in the transcript when you need to check
+what the backend returned.
 
 ## Set the agent's startup context
 

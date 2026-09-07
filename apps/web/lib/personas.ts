@@ -31,7 +31,7 @@ import type {
 
 export type Persona = GetPersonaResponse;
 
-export type PersonaModels = Persona["models"];
+export type PersonaModels = NonNullable<Persona["settings"]>["models"];
 export type ModelSelection = PersonaModels["llm"];
 export type PersonaPage = ListPersonasResponse;
 
@@ -205,4 +205,15 @@ export function modelSaid(
  */
 export function ownerSaid(owner: Persona["owner"]): string {
   return owner === "egma" ? "Predefined" : "Custom";
+}
+
+/** Library preview uses its declared defaults; an applied persona uses saved settings. */
+export function modelsOfPersona(persona: Persona): PersonaModels {
+  if (persona.settings !== null) return persona.settings.models;
+  const values = Object.fromEntries(persona.parameterContract.map((field) => [field.key, field.defaultValue]));
+  return {
+    llm: { provider: String(values.llm_provider), model: String(values.llm_model) },
+    stt: { provider: String(values.stt_provider), model: String(values.stt_model) },
+    tts: { provider: String(values.tts_provider), model: String(values.tts_model), voiceId: String(values.tts_voice_id), speed: Number(values.tts_speed) },
+  };
 }

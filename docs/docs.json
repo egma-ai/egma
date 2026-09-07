@@ -156,6 +156,7 @@
           {
             "group": "Personas",
             "pages": [
+              "api/use-persona",
               "api/list-personas",
               "api/create-persona",
               "api/get-persona-form",
@@ -191,10 +192,13 @@
           {
             "group": "Graders",
             "pages": [
+              "api/get-grader-form",
               "api/list-grader-library",
               "api/get-grader-library-entry",
+              "api/update-grader-definition",
               "api/use-grader-in-project",
               "api/create-custom-grader",
+              "api/clone-grader",
               "api/list-graders",
               "api/update-grader",
               "api/remove-grader"
@@ -515,6 +519,14 @@
     {
       "source": "/docs/scores-and-thresholds",
       "destination": "/guides/scores-and-thresholds"
+    },
+    {
+      "source": "/api/personas",
+      "destination": "/api/list-personas"
+    },
+    {
+      "source": "/concepts/personas",
+      "destination": "/guides/personas"
     }
   ]
 }

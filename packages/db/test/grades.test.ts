@@ -44,6 +44,7 @@ function grade(overrides: Partial<NewGrade> = {}): NewGrade {
     projectGraderId: newId("grd"),
     graderDefinitionId: newId("grl"),
     graderDefinitionVersion: 3,
+    parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
     score: 0.5,
     details: {
       rationale: "One of two expected behaviors passed.",

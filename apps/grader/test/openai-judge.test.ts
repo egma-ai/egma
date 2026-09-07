@@ -53,6 +53,7 @@ const QUESTION: JudgeQuestion = {
   prompt: THE_PROMPT,
   criterion: "the agent confirms the new time",
   evidence: EVIDENCE,
+  expectedBehaviors: [],
 };
 
 const A_KEY = "sk-openai-test-NEVERLEAKME";
@@ -64,9 +65,11 @@ const A_KEY = "sk-openai-test-NEVERLEAKME";
 type Answering = () => Response;
 
 function answering(content: unknown): Answering {
+  const response = typeof content === "object" && content !== null && "decision" in content
+    ? { results: [{ id: "instruction_1", ...content }] } : content;
   return () =>
     new Response(
-      JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }),
+      JSON.stringify({ choices: [{ message: { content: JSON.stringify(response) } }] }),
       { status: 200, headers: { "content-type": "application/json" } },
     );
 }
@@ -123,28 +126,13 @@ describe("one judge call", () => {
     // The same conversation and the same criterion should get the same decision
     // twice, as far as a model can promise that at all.
     expect(body["temperature"]).toBe(0);
-    expect(body["response_format"]).toEqual({
-      type: "json_schema",
-      json_schema: {
-        name: "egma_judge_answer",
-        strict: true,
-        schema: {
-          type: "object",
-          properties: {
-            decision: {
-              type: "string",
-              enum: ["met", "not_met", "cannot_determine"],
-            },
-            rationale: { type: "string" },
-            cited_turns: {
-              type: "array",
-              items: { type: "integer" },
-            },
-          },
-          required: ["decision", "rationale", "cited_turns"],
-          additionalProperties: false,
-        },
-      },
+    expect(body["response_format"]).toMatchObject({
+      type: "json_schema", json_schema: { name: "egma_judge_answer", strict: true, schema: {
+        type: "object", required: ["results"], additionalProperties: false,
+        properties: { results: { type: "array", items: {
+          type: "object", required: ["id", "decision", "rationale", "cited_turns"], additionalProperties: false,
+        } } },
+      } },
     });
   });
 
@@ -189,7 +177,7 @@ describe("one judge call", () => {
     const asked = body.messages.at(-1)?.content ?? "";
 
     expect(declared).toContain("met, not_met, or cannot_determine");
-    expect(asked).toContain("## Criterion");
+    expect(asked).toContain("## Instruction (instruction_1)");
     expect(asked).toContain("the agent confirms the new time");
     expect(asked).toContain("## Transcript");
     expect(asked).toContain("[2] persona: Move my cleaning to Thursday.");
@@ -209,9 +197,9 @@ describe("one judge call", () => {
     );
 
     expect(await judge(QUESTION)).toEqual({
-      decision: "not_met",
+      results: [{ id: "instruction_1", decision: "not_met",
       rationale: "the agent never said the day back.",
-      citedTurns: [1, 2],
+      cited_turns: [1, 2] }],
     });
   });
 
@@ -224,7 +212,7 @@ describe("one judge call", () => {
       }),
     );
 
-    expect((await judge(QUESTION)).decision).toBe("cannot_determine");
+    expect((await judge(QUESTION)).results[0]?.decision).toBe("cannot_determine");
   });
 });
 
@@ -235,7 +223,7 @@ describe("a provider that does not answer", () => {
       answering({ decision: "met", rationale: "read back.", cited_turns: [] }),
     );
 
-    expect((await judge(QUESTION)).decision).toBe("met");
+    expect((await judge(QUESTION)).results[0]?.decision).toBe("met");
     expect(calls).toHaveLength(2);
   });
 
@@ -263,7 +251,7 @@ describe("a provider that does not answer", () => {
       answering({ decision: "probably", rationale: "hmm", cited_turns: [] }),
     );
 
-    await expect(judge(QUESTION)).rejects.toThrow(/decision Egma does not know/);
+    await expect(judge(QUESTION)).rejects.toThrow(/invalid id, decision/);
   });
 
   it("never puts the request — and so never the key — in what it throws", async () => {

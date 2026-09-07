@@ -25,7 +25,7 @@ Retell and LiveKit connection credentials are supplied when you connect an agent
 
 ## Model providers
 
-The persona version selects its language model, speech-to-text model, text-to-speech model, and voice. LLM graders select their own model. Environment variables provide access to those selected providers; they do not change the selection.
+Project persona settings select the language model, speech-to-text model, text-to-speech model, and voice. Project grader settings select the model used for LLM grading. Environment variables provide access to those selected providers; they do not change the selection. Runs save their selections before workers start, so queued work and retries use the same settings.
 
 | Variable | Used for |
 | --- | --- |

@@ -163,6 +163,11 @@ For Retell startup data, add:
 
 For LiveKit, use `job_dispatch_metadata` instead. The worker reads that value as JSON from `ctx.job.metadata`. Put only the field your platform uses in the test. See [Write a test](/guides/write-a-test) for test design and [Personas](/guides/personas) for persona selection.
 
+Test files select personas. Model and voice settings belong to the project
+and are edited in **Personas**. First use saves the persona's default settings;
+all tests selecting that persona share the saved values. `pull` and `push`
+keep the selection in the file without copying those settings into it.
+
 ## Sync with Egma
 
 ```bash
@@ -249,7 +254,7 @@ Append `--help` to any command to see its arguments and options. Use `--cwd` to 
 | `egma agent monitoring setup` | Set up Retell monitoring; show SDK guidance for LiveKit. |
 | `egma agent monitoring stop` | Stop Retell monitoring; show SDK guidance for LiveKit. |
 | `egma project api-key create` | Create a project key and print it once. |
-| `egma persona list` | List available persona names and IDs. |
+| `egma persona list` | List shared personas and this project's custom persona names and IDs. |
 | `egma suite create` | Create a remote suite and its local directory. |
 | `egma suite delete` | Delete a suite and its local directory. |
 | `egma test delete` | Delete a test and its local file. |

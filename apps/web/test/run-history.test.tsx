@@ -231,6 +231,7 @@ function simulationEvidence(overrides: Record<string, unknown> = {}) {
         graderDefinitionId: EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID,
         graderDefinitionVersion: 2,
         graderName: "expected_behaviors",
+        parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
         score: 1,
         details: {
           rationale: "The agent found and confirmed the appointment.",
@@ -285,7 +286,6 @@ function simulationEvidence(overrides: Record<string, unknown> = {}) {
       config: {},
     },
     gradingPlan: {
-      state: "run_start",
       capturedAt: "2026-08-21T10:00:00.000Z",
       items: [
         {
@@ -1827,6 +1827,7 @@ describe("one run after suites", () => {
               graderDefinitionId: "grl_2",
               graderDefinitionVersion: 1,
               graderName: "policy_grader",
+              parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
               score: 0.4,
               details: { rationale: "The requested day was not confirmed." },
               passThreshold: 0.8,
@@ -1835,7 +1836,6 @@ describe("one run after suites", () => {
             },
           ],
           gradingPlan: {
-            state: "run_start",
             capturedAt: "2026-08-21T10:00:00.000Z",
             items: [
               {
@@ -2024,6 +2024,7 @@ describe("one run after suites", () => {
       projectGraderId: "grd_policy",
       graderDefinitionId: "grl_policy",
       graderName: "policy_grader",
+      parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
       score: 0.65,
       result: "failed",
       details: { rationale: "The agent did not confirm consent." },

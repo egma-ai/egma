@@ -17,7 +17,6 @@ function definition(): GraderDefinitionSnapshot {
     prompt: null,
     parameterContract: [],
     modalities: ["chat", "voice"],
-    judgeModel: null,
   };
 }
 

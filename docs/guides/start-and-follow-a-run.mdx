@@ -6,6 +6,11 @@ description: "Run a complete test suite and inspect each simulation's evidence a
 Before starting, connect a [Retell](/guides/retell) or
 [LiveKit](/guides/livekit) agent and add at least one test to your suite.
 
+When the run is created, Egma saves the test and persona behavior versions,
+project persona settings, and grader selection, versions, settings, and
+thresholds. Queued simulations and retries use that saved selection. Changes
+to models, voices, or grading policy apply to future runs.
+
 ## Start from your repository
 
 Run `egma pull` to refresh the agent and connection IDs in `egma/config.yaml`.
@@ -77,10 +82,13 @@ measure the same event, the API returns the second series in `otherPov`. Egma
 keeps the two sets of samples separate.
 
 `turn_response_latency` measures the wait from the end of the caller's turn to
-the start of the agent's reply. For voice, it uses speech boundaries when
-available. `first_response_latency` measures the time from the start of the
-conversation to the agent's first reply. Both use milliseconds and prefer the
-agent's series when it is available. The
+the start of the agent's reply. For voice simulations, it starts at the end of
+the caller's played audio, including the voice's trailing padding, and ends
+when the agent's audio reaches the caller. `first_response_latency` measures
+the time from the start of the conversation to the agent's first reply. Both
+use milliseconds. Simulations prefer the caller's series when it is available;
+the agent's series is returned separately in `otherPov`. Production traces use
+the agent's evidence. The
 [Response latency grader](/guides/built-in-graders#response-latency) uses the
 same primary series shown in the metrics.
 

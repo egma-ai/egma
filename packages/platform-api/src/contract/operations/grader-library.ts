@@ -9,6 +9,7 @@ import {
 } from "../schemas.ts";
 import {
   graderLibraryEntrySchema,
+  graderSettingDefinitionSchema,
   projectGraderPolicyInputProperties,
   projectGraderSchema,
 } from "./grader-shapes.ts";
@@ -39,13 +40,30 @@ const commonWriteRefusals = {
 } as const;
 
 export const graderLibraryOperations = {
+  getGraderForm: defineOperation({
+    operationId: "getGraderForm", method: "GET", path: "/v1/grader-form",
+    summary: "Get grader model choices", tag: "Graders", security: "credentialed",
+    description: "Read supported provider/model pairs and default settings before creating or configuring an LLM grader.",
+    request: { query: projectQuery },
+    responses: {
+      200: { description: "Supported grader model pairs and the default LLM contract.", schema: {
+        type: "object", properties: {
+          modelCatalog: arrayOf({ type: "object", properties: {
+            provider: stringSchema, model: stringSchema, label: stringSchema,
+          }, required: ["provider", "model", "label"], additionalProperties: false }),
+          settingDefinitions: arrayOf(graderSettingDefinitionSchema),
+        }, required: ["modelCatalog", "settingDefinitions"], additionalProperties: false,
+      } }, ...commonReadRefusals,
+    },
+  }),
+
   listGraderLibrary: defineOperation({
     operationId: "listGraderLibrary",
     method: "GET",
     path: "/v1/grader-library",
     summary: "List the grader library for a project",
     description:
-      "Includes Egma's built-in graders and custom graders from your organization. activeProjectGraderId identifies a definition already in use by this project; null means it can be added.",
+      "Includes Egma's built-in graders and custom graders owned by this project. activeProjectGraderId identifies a definition already in use by this project; null means it can be added.",
     tag: "Graders",
     security: "credentialed",
     request: {
@@ -57,7 +75,7 @@ export const graderLibraryOperations = {
     responses: {
       200: {
         description:
-          "Grader definitions visible to the organization, with current-project use state.",
+          "Grader definitions visible to the project, with current-project use state.",
         schema: {
           type: "object",
           properties: {
@@ -114,14 +132,14 @@ export const graderLibraryOperations = {
           settings: {
             ...projectGraderPolicyInputProperties.settings,
             description:
-              "Values required by the definition's settingDefinitions. Use an empty object for a grader with no settings.",
+              "Complete values for the definition's settingDefinitions. Omit settings to save the declared defaults on first use. LLM graders use llm_provider and llm_model; Response latency uses maximum_response_time_ms.",
           },
           passThreshold: {
             ...projectGraderPolicyInputProperties.passThreshold,
             description: "The minimum score for this grader's individual result to pass.",
           },
         },
-        required: ["scope", "settings", "passThreshold"],
+        required: ["scope", "passThreshold"],
         additionalProperties: false,
         examples: [{
           scope: { simulations: [{ kind: "all" }], production: null },
@@ -146,7 +164,7 @@ export const graderLibraryOperations = {
     path: "/v1/grader-library/custom",
     summary: "Create and use a custom LLM grader",
     description:
-      "Create a custom LLM grader in your organization’s library and activate it in this project. Write the grading instructions and pass/fail criteria; Egma supplies the model.",
+      "Create a custom LLM grader owned by this project. Set its instructions, model, scope, and pass threshold. Omit settings to save the declared model defaults at creation.",
     tag: "Graders",
     security: "credentialed",
     request: {
@@ -169,6 +187,10 @@ export const graderLibraryOperations = {
             ...stringSchema,
             description: "The evidence that makes the rule fail.",
           },
+          settings: {
+            ...projectGraderPolicyInputProperties.settings,
+            description: "A complete llm_provider and llm_model pair from Get grader model choices. Omit settings to use the declared defaults.",
+          },
           scope: {
             ...projectGraderPolicyInputProperties.scope,
             description:
@@ -176,7 +198,7 @@ export const graderLibraryOperations = {
           },
           passThreshold: {
             ...projectGraderPolicyInputProperties.passThreshold,
-            description: "Use 1 to require this binary check to pass.",
+            description: "The minimum score for this grader's individual result to pass.",
           },
         },
         required: [
@@ -189,13 +211,13 @@ export const graderLibraryOperations = {
         ],
         additionalProperties: false,
         examples: [{
-          name: "Booking confirmation",
+          name: "Appointment recap",
           gradingInstructions:
-            "Decide whether the agent makes only supported claims about completed bookings. Use the transcript and booking tool results.",
+            "Decide whether the agent repeats the chosen appointment date and time and asks the caller to confirm them. Use the transcript.",
           passesWhen:
-            "Every booking claim follows a successful booking tool result. If the agent makes no booking claim, the rule is met.",
+            "The agent repeats the chosen date and time and asks for confirmation. If no appointment is chosen, the rule is met.",
           failsWhen:
-            "The agent claims a booking before the tool succeeds, after it fails, or without a booking tool result.",
+            "An appointment is chosen and the agent ends the conversation without repeating both its date and time and asking for confirmation.",
           scope: { simulations: [{ kind: "all" }], production: null },
           passThreshold: 1,
         }],
@@ -217,5 +239,36 @@ export const graderLibraryOperations = {
       },
       ...commonWriteRefusals,
     },
+  }),
+
+  cloneGrader: defineOperation({
+    operationId: "cloneGrader", method: "POST", path: "/v1/grader-library/{graderDefinitionId}/clone",
+    summary: "Clone a grader", tag: "Graders", security: "credentialed",
+    description: "Copy the current LLM definition and this project's effective settings into an independent custom grader. Historical versions and code graders cannot be cloned. The clone receives no source updates.",
+    request: {
+      params: definitionParams, query: projectQuery, bodyRequired: true,
+      body: { type: "object", properties: { name: stringSchema, description: nullable(stringSchema) }, required: ["name"], additionalProperties: false },
+    },
+    responses: {
+      201: { description: "The independent custom definition and its copied project settings.", schema: {
+        type: "object", properties: { definition: graderLibraryEntrySchema, grader: projectGraderSchema },
+        required: ["definition", "grader"], additionalProperties: false,
+      } }, ...commonWriteRefusals,
+    },
+  }),
+  updateGraderDefinition: defineOperation({
+    operationId: "updateGraderDefinition", method: "PATCH", path: "/v1/grader-library/{graderDefinitionId}",
+    summary: "Update grader instructions", tag: "Graders", security: "credentialed",
+    description: "Edit the current custom definition's prompt or display labels. Send its definitionVersion as baseDefinitionVersion. A changed prompt creates a version; label edits do not. Egma-owned definitions are read-only.",
+    request: {
+      params: definitionParams, query: projectQuery, bodyRequired: true,
+      body: {
+        type: "object", properties: {
+          baseDefinitionVersion: { type: "integer", minimum: 1 }, gradingInstructions: stringSchema,
+          name: stringSchema, description: nullable(stringSchema),
+        }, required: ["baseDefinitionVersion"], minProperties: 2, additionalProperties: false,
+      },
+    },
+    responses: { 200: { description: "The current core. A prompt change creates the next immutable version.", schema: graderLibraryEntrySchema }, ...commonWriteRefusals },
   }),
 } as const;

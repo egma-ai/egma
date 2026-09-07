@@ -36,8 +36,9 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   membership: "mbr",
   invitation: "inv",
   api_key: "key",
-  persona: "prs",
-  persona_version: "prsv",
+  persona_definition: "prs",
+  project_persona: "ppr",
+  persona_definition_version: "prsv",
   agent: "agt",
   connection: "con",
   project_grader: "grd",
@@ -56,9 +57,6 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   run: "run",
   run_event: "run",
   simulation: "sim",
-  // One run's frozen grading plan: which versions and non-secret models grade
-  // each pinned test version.
-  grading_plan: "gpl",
   // The operations a client may safely send twice. Its identity is the whole
   // five-column key rather than an id of its own, so it pins its leading
   // column — the shape both junction tables have, for the same reason.
@@ -221,9 +219,8 @@ describe("every table", () => {
    * through many.
    */
   const REVISION_COLUMNS: Readonly<Record<string, number>> = {
-    // A project grader has no live revision column. Updating project policy does
-    // not create a grader-definition version, and the current product exposes no
-    // project-grader archive or delete flow for a revision to guard.
+    // A project grader has no live revision column. Settings and removal change
+    // live policy without creating a grader-definition version.
     project: 1,
     test: 1,
   };
@@ -409,13 +406,13 @@ describe("the grader definition's nullable tenancy", () => {
         column.table_name === "grader_definition" && column.column_name === name,
     );
 
-  it("uses one nullable organization owner and no project owner", () => {
+  it("uses a nullable matching organization and project owner", () => {
     const organization = tenancy("organization_id");
     expect(organization).toBeDefined();
     expect(organization?.type_name).toBe("text");
     expect(organization?.collation_name).toBe("C");
     expect(organization?.not_null).toBe(false);
-    expect(tenancy("project_id")).toBeUndefined();
+    expect(tenancy("project_id")?.not_null).toBe(false);
   });
 
   /**
@@ -436,7 +433,7 @@ describe("the grader definition's nullable tenancy", () => {
     expect(nullable.map((column) => column.table_name).sort()).toEqual([
       "device_code",
       "grader_definition",
-      "persona",
+      "persona_definition",
     ]);
   });
 
@@ -506,81 +503,28 @@ describe("every timestamp", () => {
  * filled in on anybody's behalf, and every rule about one is a check a reader
  * can read.
  */
-describe("a persona version is executable by itself", () => {
-  const AUTHORED = [
-    "identity_name",
-    "personality",
-    "language",
-    "llm_provider",
-    "llm_model",
-    "stt_provider",
-    "stt_model",
-    "tts_provider",
-    "tts_model",
-    "tts_voice_id",
-    "tts_speed",
-  ] as const;
-
-  it("requires every authored field and defaults none of them", () => {
-    for (const name of AUTHORED) {
-      const column = columns.find(
-        (candidate) =>
-          candidate.table_name === "persona_version" &&
-          candidate.column_name === name,
-      );
-      expect(column, `persona_version.${name}`).toBeDefined();
-      expect(column?.not_null, `persona_version.${name} not null`).toBe(true);
-      expect(column?.has_default, `persona_version.${name} default`).toBe(false);
+describe("persona core and settings ownership", () => {
+  it("requires immutable core behavior and its parameter contract", () => {
+    for (const name of ["identity_name", "personality", "language", "parameter_contract"]) {
+      expect(columns.find((column) => column.table_name === "persona_definition_version" && column.column_name === name)).toMatchObject({ not_null: true, has_default: false });
     }
+    const versionColumns = columns.filter((column) => column.table_name === "persona_definition_version").map((column) => column.column_name);
+    expect(versionColumns).not.toEqual(expect.arrayContaining(["llm_provider", "tts_speed"]));
   });
-
-  it("keeps no jsonb bag of behavior behind", () => {
-    const bags = columns.filter(
-      (column) =>
-        column.table_name === "persona_version" && column.type_name === "jsonb",
-    );
-    expect(bags).toEqual([]);
-  });
-
-  it("holds every authored text field to a stated-value check", async () => {
-    const { rows } = await database.sql<{ conname: string }>(
-      `select conname from pg_constraint
-        where conrelid = 'persona_version'::regclass
-          and contype = 'c'
-          and conname like '%_stated'
-        order by conname`,
-    );
-    expect(rows.map((row) => row.conname).sort()).toEqual(
-      AUTHORED.filter((name) => name !== "tts_speed")
-        .map((name) => `persona_version_${name}_stated`)
-        .sort(),
-    );
-  });
-
-  it("holds the speaking speed to the same range the module enforces", async () => {
-    const { rows } = await database.sql<{ definition: string }>(
-      `select pg_get_constraintdef(oid) as definition
-         from pg_constraint
-        where conrelid = 'persona_version'::regclass
-          and conname = 'persona_version_tts_speed_in_range'`,
-    );
-    expect(rows).toHaveLength(1);
-    // The column and `SPEED_RANGE` are two statements of one release decision,
-    // and this is what stops them drifting apart.
-    expect(rows[0]?.definition).toContain(String(SPEED_RANGE.slowest));
-    expect(rows[0]?.definition).toContain(String(SPEED_RANGE.fastest));
+  it("keeps required complete settings on the project and simulation", () => {
+    expect(columns.find((column) => column.table_name === "project_persona" && column.column_name === "parameter_values")).toMatchObject({ not_null: true, type_name: "jsonb", has_default: false });
+    expect(columns.find((column) => column.table_name === "simulation" && column.column_name === "persona_parameter_values")).toMatchObject({ not_null: true, type_name: "jsonb", has_default: false });
   });
 });
 
 describe("grader execution ownership", () => {
-  it("stores type and the non-secret model only on the immutable grader version", () => {
+  it("stores core type on the immutable version and keeps model values off it", () => {
     const model = columns.find(
       (column) =>
         column.table_name === "grader_definition_version" &&
         column.column_name === "judge_model",
     );
-    expect(model?.type_name).toBe("jsonb");
-    expect(model?.has_default).toBe(false);
+    expect(model).toBeUndefined();
     expect(columns.some(
       (column) =>
         column.table_name === "grader_definition_version" &&
@@ -611,14 +555,11 @@ describe("grader execution ownership", () => {
     expect(values?.has_default).toBe(false);
   });
 
-  it("keeps no credential reference on a grading plan", () => {
-    expect(
-      columns.some(
-        (column) =>
-          column.table_name === "grading_plan" &&
-          column.column_name === "judge_credential_ids",
-      ),
-    ).toBe(false);
+  it("stores the complete grading plan on the run without a separate table", () => {
+    expect(columns.find(
+      (column) => column.table_name === "run" && column.column_name === "grading_plan",
+    )).toMatchObject({ type_name: "jsonb", not_null: true, has_default: false });
+    expect(columns.some((column) => column.table_name === "grading_plan")).toBe(false);
   });
 });
 

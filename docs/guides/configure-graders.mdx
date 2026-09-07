@@ -37,9 +37,20 @@ maximum response time in milliseconds. These settings control how it computes
 the score; the pass threshold controls how that score becomes an individual
 result.
 
+For an LLM grader, choose **Language model** from the supported choices.
+This includes **Expected behaviors**. Each project saves its own model and
+settings. Saving them does not create a grader definition version.
+
+Egma saves defaults when you first use a grader. Compatible updates to an
+Egma-provided definition apply to future work and preserve your saved model,
+settings, scope, and threshold. A custom clone is independent of its source.
+
 Save the policy, then start a new run. A simulation keeps the grader selection,
 definition versions, settings, and pass thresholds captured for its run.
 Changes apply to future work.
+
+Production grading saves its selection when the conversation is selected for
+grading. Later policy changes do not change that work or its retries.
 
 ## Regrade a simulation
 
@@ -62,6 +73,10 @@ when those spans arrive.
 
 Earlier grades remain in the history. The API returns the latest grade from
 each project grader in `grades`, and all attempts in `gradeHistory`.
+
+Each grade's `parameterValues` records the settings used for that attempt,
+including its model or numeric settings. Both successful and errored grades
+keep these values; they contain no credentials.
 
 ## Remove an optional grader
 

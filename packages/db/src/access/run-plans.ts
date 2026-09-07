@@ -1,8 +1,7 @@
-import { newId } from "@egma/ids";
 import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
-import { validateGraderParameterValues } from "../grader-library/parameters.ts";
+import { validateExecutableGraderParameters } from "../grader-library/parameters.ts";
 import { snapshotGraderDefinition } from "../grader-library/snapshot.ts";
 import {
   productionSampleSelected,
@@ -16,12 +15,12 @@ import {
   graderDefinitionVersion,
   projectGrader,
 } from "../schema/graders.ts";
-import { persona } from "../schema/personas.ts";
-import { gradingPlan, type GradingPlanState } from "../schema/plans.ts";
-import { simulation } from "../schema/runs.ts";
+import type { PersonaParameterValues } from "../persona-library/parameters.ts";
+import { readProjectPersonaSettingsOn } from "./project-personas.ts";
+import { persona, personaVersion } from "../schema/personas.ts";
+import { run, simulation } from "../schema/runs.ts";
 import type { AuthContext } from "./context.ts";
 import { RunWriteRefusedError, type RunWriteRefusal } from "./errors.ts";
-import { getExecutableGraderDefinition } from "./graders.ts";
 import { personaAvailableToProject } from "./persona-availability.ts";
 import { within } from "./within.ts";
 
@@ -35,7 +34,13 @@ export async function resolvePersonaVersions(
   on: Queryable,
   projectId: string,
   ids: readonly string[],
-): Promise<readonly { personaId: string; personaVersionId: string }[]> {
+): Promise<
+  readonly {
+    personaId: string;
+    personaVersionId: string;
+    personaParameterValues: PersonaParameterValues;
+  }[]
+> {
   const unique = [...new Set(ids)];
   const found = new Map(
     (
@@ -47,23 +52,57 @@ export async function resolvePersonaVersions(
         })
         .from(persona)
         .where(
-          personaAvailableToProject(auth, projectId, inArray(persona.id, unique)),
+          personaAvailableToProject(
+            auth,
+            projectId,
+            inArray(persona.id, unique),
+          ),
         )
-        .for("share")
+        .orderBy(asc(persona.id))
+        .for("share", { of: persona })
     ).map((row) => [row.id, row] as const),
   );
-  return ids.map((id) => {
-    const row = found.get(id);
-    if (row === undefined || row.archivedAt !== null) {
-      refuseRun("not_admitted", `persona ${id} is not active in this project`);
-    }
-    return { personaId: id, personaVersionId: row.currentVersionId };
-  });
+  return Promise.all(
+    ids.map(async (id) => {
+      const row = found.get(id);
+      if (row === undefined || row.archivedAt !== null) {
+        refuseRun(
+          "not_admitted",
+          `persona ${id} is not active in this project`,
+        );
+      }
+      const [version] = await on
+        .select({ parameterContract: personaVersion.parameterContract })
+        .from(personaVersion)
+        .where(eq(personaVersion.id, row.currentVersionId))
+        .limit(1);
+      if (version === undefined) {
+        throw new Error("the persona's current version is missing");
+      }
+      const settings = await readProjectPersonaSettingsOn(
+        on,
+        auth,
+        projectId,
+        id,
+        version.parameterContract,
+        true,
+      );
+      if (settings === undefined) {
+        refuseRun(
+          "not_admitted",
+          `persona ${id} has no saved settings in this project`,
+        );
+      }
+      return {
+        personaId: id,
+        personaVersionId: row.currentVersionId,
+        personaParameterValues: settings.parameterValues,
+      };
+    }),
+  );
 }
-
 export type GradingPlan = {
   readonly runId: string;
-  readonly state: GradingPlanState;
   readonly capturedAt: Date;
   readonly groups: readonly PlanGroup[];
 };
@@ -80,7 +119,6 @@ const CANDIDATE_COLUMNS = {
   prompt: graderDefinitionVersion.prompt,
   parameterContract: graderDefinitionVersion.parameterContract,
   modalities: graderDefinitionVersion.modalities,
-  judgeModel: graderDefinitionVersion.judgeModel,
 } as const;
 
 /** Read the active project policy and its one current immutable definition. */
@@ -89,6 +127,24 @@ export async function applicableGraders(
   on: Queryable,
   projectId: string,
 ): Promise<readonly ProjectGraderCandidate[]> {
+  // Lock definitions before their project rows. Settings and publication use
+  // this same order, so a selection cannot pair a new core with stale values.
+  const definitions = await on
+    .select({ id: graderDefinition.id })
+    .from(graderDefinition)
+    .innerJoin(projectGrader, eq(projectGrader.graderDefinitionId, graderDefinition.id))
+    .where(within(auth, projectGrader, and(
+      eq(projectGrader.projectId, projectId),
+      isNull(projectGrader.archivedAt),
+      or(
+        and(isNull(graderDefinition.organizationId), isNull(graderDefinition.projectId)),
+        and(eq(graderDefinition.organizationId, auth.organizationId), eq(graderDefinition.projectId, projectId)),
+      ),
+    )))
+    .orderBy(asc(graderDefinition.id))
+    .for("share", { of: graderDefinition });
+  if (definitions.length === 0) return [];
+
   const rows = await on
     .select(CANDIDATE_COLUMNS)
     .from(projectGrader)
@@ -113,12 +169,13 @@ export async function applicableGraders(
           projectGrader,
           and(
             eq(projectGrader.projectId, projectId),
+            inArray(projectGrader.graderDefinitionId, definitions.map((one) => one.id)),
             isNull(projectGrader.archivedAt),
           ),
         ),
         or(
-          isNull(graderDefinition.organizationId),
-          eq(graderDefinition.organizationId, auth.organizationId),
+          and(isNull(graderDefinition.organizationId), isNull(graderDefinition.projectId)),
+          and(eq(graderDefinition.organizationId, auth.organizationId), eq(graderDefinition.projectId, projectId)),
         ),
       ),
     )
@@ -131,7 +188,8 @@ export async function applicableGraders(
       projectGraderId: row.projectGraderId,
       graderName: row.graderName,
       passThreshold: row.passThreshold,
-      parameterValues: validateGraderParameterValues(
+      parameterValues: validateExecutableGraderParameters(
+        definition.type,
         definition.parameterContract,
         row.parameterValues,
       ),
@@ -171,49 +229,23 @@ export async function resolveProductionGraders(
     }));
 }
 
-export async function writeGradingPlan(
-  auth: AuthContext,
-  on: Queryable,
-  input: {
-    readonly runId: string;
-    readonly groups: readonly PlanGroup[];
-    readonly capturedAt: Date;
-  },
-): Promise<void> {
-  if (auth.projectId === undefined) {
-    throw new TypeError("writing a grading plan requires a project-scoped context");
-  }
-  await on.insert(gradingPlan).values({
-    id: newId("gpl"),
-    runId: input.runId,
-    organizationId: auth.organizationId,
-    projectId: auth.projectId,
-    state: "run_start",
-    capturedAt: input.capturedAt,
-    groups: input.groups,
-  });
-}
-
 export async function getGradingPlan(
   auth: AuthContext,
   runId: string,
 ): Promise<GradingPlan | undefined> {
   const [row] = await db()
     .select({
-      runId: gradingPlan.runId,
-      state: gradingPlan.state,
-      capturedAt: gradingPlan.capturedAt,
-      groups: gradingPlan.groups,
+      runId: run.id,
+      gradingPlan: run.gradingPlan,
     })
-    .from(gradingPlan)
-    .where(within(auth, gradingPlan, eq(gradingPlan.runId, runId)))
+    .from(run)
+    .where(within(auth, run, eq(run.id, runId)))
     .limit(1);
   if (row === undefined) return undefined;
   return {
     runId: row.runId,
-    state: row.state as GradingPlanState,
-    capturedAt: row.capturedAt,
-    groups: row.groups as readonly PlanGroup[],
+    capturedAt: new Date(row.gradingPlan.capturedAt),
+    groups: row.gradingPlan.groups,
   };
 }
 
@@ -226,15 +258,15 @@ async function selectedSimulationPlanGroupOn(
     .select({
       testId: simulation.testId,
       testVersionId: simulation.testVersionId,
-      groups: gradingPlan.groups,
+      gradingPlan: run.gradingPlan,
     })
     .from(simulation)
-    .innerJoin(gradingPlan, eq(gradingPlan.runId, simulation.runId))
+    .innerJoin(run, eq(run.id, simulation.runId))
     .where(within(auth, simulation, eq(simulation.id, simulationId)))
     .limit(1);
   if (row === undefined) return undefined;
 
-  const group = (row.groups as readonly PlanGroup[]).find(
+  const group = row.gradingPlan.groups.find(
     (one) =>
       one.tag === "test" &&
       one.testId === row.testId &&
@@ -265,27 +297,12 @@ export async function pinnedSimulationGradersOn(
   const group = await selectedSimulationPlanGroupOn(auth, on, simulationId);
   if (group === undefined) return undefined;
 
-  return Promise.all(
-    group.items.map(async (item) => {
-      const definition = await getExecutableGraderDefinition(
-        auth,
-        on,
-        item.graderDefinitionId,
-        item.graderDefinitionVersion,
-      );
-      if (definition === undefined || definition.type !== item.type) {
-        throw new Error(
-          `grading plan for simulation ${simulationId} names an unreadable grader definition`,
-        );
-      }
-      return {
-        projectGraderId: item.projectGraderId,
-        passThreshold: item.passThreshold,
-        parameterValues: item.parameterValues,
-        definition,
-      };
-    }),
-  );
+  return group.items.map((item) => ({
+    projectGraderId: item.projectGraderId,
+    passThreshold: item.passThreshold,
+    parameterValues: item.parameterValues,
+    definition: item.definition,
+  }));
 }
 
 export function pinnedSimulationGraders(

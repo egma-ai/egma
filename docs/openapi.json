@@ -5396,11 +5396,223 @@
         }
       }
     },
+    "/v1/grader-form": {
+      "get": {
+        "operationId": "getGraderForm",
+        "summary": "Get grader model choices",
+        "description": "Read supported provider/model pairs and default settings before creating or configuring an LLM grader.",
+        "tags": [
+          "Graders"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Supported grader model pairs and the default LLM contract.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "modelCatalog": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model",
+                          "label"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settingDefinitions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "modelCatalog",
+                    "settingDefinitions"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/grader-library": {
       "get": {
         "operationId": "listGraderLibrary",
         "summary": "List the grader library for a project",
-        "description": "Includes Egma's built-in graders and custom graders from your organization. activeProjectGraderId identifies a definition already in use by this project; null means it can be added.",
+        "description": "Includes Egma's built-in graders and custom graders owned by this project. activeProjectGraderId identifies a definition already in use by this project; null means it can be added.",
         "tags": [
           "Graders"
         ],
@@ -5434,7 +5646,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Grader definitions visible to the organization, with current-project use state.",
+            "description": "Grader definitions visible to the project, with current-project use state.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5466,7 +5678,7 @@
                             "type": "string",
                             "enum": [
                               "egma",
-                              "organization"
+                              "project"
                             ]
                           },
                           "type": {
@@ -5537,11 +5749,20 @@
                                 "valueType": {
                                   "type": "string",
                                   "enum": [
-                                    "integer"
+                                    "integer",
+                                    "number",
+                                    "string"
                                   ]
                                 },
                                 "defaultValue": {
-                                  "type": "integer"
+                                  "oneOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ]
                                 },
                                 "unit": {
                                   "anyOf": [
@@ -5556,7 +5777,7 @@
                                 "minimum": {
                                   "anyOf": [
                                     {
-                                      "type": "integer"
+                                      "type": "number"
                                     },
                                     {
                                       "type": "null"
@@ -5566,7 +5787,7 @@
                                 "maximum": {
                                   "anyOf": [
                                     {
-                                      "type": "integer"
+                                      "type": "number"
                                     },
                                     {
                                       "type": "null"
@@ -5793,7 +6014,7 @@
                       "type": "string",
                       "enum": [
                         "egma",
-                        "organization"
+                        "project"
                       ]
                     },
                     "type": {
@@ -5864,11 +6085,20 @@
                           "valueType": {
                             "type": "string",
                             "enum": [
-                              "integer"
+                              "integer",
+                              "number",
+                              "string"
                             ]
                           },
                           "defaultValue": {
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "unit": {
                             "anyOf": [
@@ -5883,7 +6113,7 @@
                           "minimum": {
                             "anyOf": [
                               {
-                                "type": "integer"
+                                "type": "number"
                               },
                               {
                                 "type": "null"
@@ -5893,7 +6123,7 @@
                           "maximum": {
                             "anyOf": [
                               {
-                                "type": "integer"
+                                "type": "number"
                               },
                               {
                                 "type": "null"
@@ -5986,6 +6216,359 @@
             }
           },
           "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateGraderDefinition",
+        "summary": "Update grader instructions",
+        "description": "Edit the current custom definition's prompt or display labels. Send its definitionVersion as baseDefinitionVersion. A changed prompt creates a version; label edits do not. Egma-owned definitions are read-only.",
+        "tags": [
+          "Graders"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "graderDefinitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "baseDefinitionVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "gradingInstructions": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "baseDefinitionVersion"
+                ],
+                "minProperties": 2,
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The current core. A prompt change creates the next immutable version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "owner": {
+                      "type": "string",
+                      "enum": [
+                        "egma",
+                        "project"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "llm_as_judge",
+                        "code"
+                      ]
+                    },
+                    "scopeEditable": {
+                      "type": "boolean"
+                    },
+                    "currentDefinitionVersion": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "definitionVersion": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "modalities": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "chat",
+                          "voice"
+                        ]
+                      },
+                      "minItems": 1,
+                      "uniqueItems": true
+                    },
+                    "gradingInstructions": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "requiredEvidence": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "transcript",
+                          "ending_outcome",
+                          "tool_calls",
+                          "observed_metrics",
+                          "test_expected_behaviors",
+                          "turn_response_latency"
+                        ]
+                      }
+                    },
+                    "settingDefinitions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "activeProjectGraderId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "owner",
+                    "type",
+                    "scopeEditable",
+                    "currentDefinitionVersion",
+                    "definitionVersion",
+                    "modalities",
+                    "gradingInstructions",
+                    "requiredEvidence",
+                    "settingDefinitions",
+                    "activeProjectGraderId",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "The request was refused.",
             "content": {
               "application/json": {
@@ -6167,7 +6750,7 @@
                   "settings": {
                     "type": "object",
                     "additionalProperties": true,
-                    "description": "Values required by the definition's settingDefinitions. Use an empty object for a grader with no settings."
+                    "description": "Complete values for the definition's settingDefinitions. Omit settings to save the declared defaults on first use. LLM graders use llm_provider and llm_model; Response latency uses maximum_response_time_ms."
                   },
                   "passThreshold": {
                     "type": "number",
@@ -6178,7 +6761,6 @@
                 },
                 "required": [
                   "scope",
-                  "settings",
                   "passThreshold"
                 ],
                 "additionalProperties": false,
@@ -6239,7 +6821,7 @@
                       "type": "string",
                       "enum": [
                         "egma",
-                        "organization"
+                        "project"
                       ]
                     },
                     "type": {
@@ -6486,7 +7068,7 @@
       "post": {
         "operationId": "createCustomGrader",
         "summary": "Create and use a custom LLM grader",
-        "description": "Create a custom LLM grader in your organization’s library and activate it in this project. Write the grading instructions and pass/fail criteria; Egma supplies the model.",
+        "description": "Create a custom LLM grader owned by this project. Set its instructions, model, scope, and pass threshold. Omit settings to save the declared model defaults at creation.",
         "tags": [
           "Graders"
         ],
@@ -6540,6 +7122,11 @@
                   "failsWhen": {
                     "type": "string",
                     "description": "The evidence that makes the rule fail."
+                  },
+                  "settings": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "A complete llm_provider and llm_model pair from Get grader model choices. Omit settings to use the declared defaults."
                   },
                   "scope": {
                     "type": "object",
@@ -6639,7 +7226,7 @@
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
-                    "description": "Use 1 to require this binary check to pass."
+                    "description": "The minimum score for this grader's individual result to pass."
                   }
                 },
                 "required": [
@@ -6653,10 +7240,10 @@
                 "additionalProperties": false,
                 "examples": [
                   {
-                    "name": "Booking confirmation",
-                    "gradingInstructions": "Decide whether the agent makes only supported claims about completed bookings. Use the transcript and booking tool results.",
-                    "passesWhen": "Every booking claim follows a successful booking tool result. If the agent makes no booking claim, the rule is met.",
-                    "failsWhen": "The agent claims a booking before the tool succeeds, after it fails, or without a booking tool result.",
+                    "name": "Appointment recap",
+                    "gradingInstructions": "Decide whether the agent repeats the chosen appointment date and time and asks the caller to confirm them. Use the transcript.",
+                    "passesWhen": "The agent repeats the chosen date and time and asks for confirmation. If no appointment is chosen, the rule is met.",
+                    "failsWhen": "An appointment is chosen and the agent ends the conversation without repeating both its date and time and asking for confirmation.",
                     "scope": {
                       "simulations": [
                         {
@@ -6704,7 +7291,7 @@
                           "type": "string",
                           "enum": [
                             "egma",
-                            "organization"
+                            "project"
                           ]
                         },
                         "type": {
@@ -6775,11 +7362,20 @@
                               "valueType": {
                                 "type": "string",
                                 "enum": [
-                                  "integer"
+                                  "integer",
+                                  "number",
+                                  "string"
                                 ]
                               },
                               "defaultValue": {
-                                "type": "integer"
+                                "oneOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
                               },
                               "unit": {
                                 "anyOf": [
@@ -6794,7 +7390,7 @@
                               "minimum": {
                                 "anyOf": [
                                   {
-                                    "type": "integer"
+                                    "type": "number"
                                   },
                                   {
                                     "type": "null"
@@ -6804,7 +7400,7 @@
                               "maximum": {
                                 "anyOf": [
                                   {
-                                    "type": "integer"
+                                    "type": "number"
                                   },
                                   {
                                     "type": "null"
@@ -6895,7 +7491,554 @@
                           "type": "string",
                           "enum": [
                             "egma",
-                            "organization"
+                            "project"
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "llm_as_judge",
+                            "code"
+                          ]
+                        },
+                        "modalities": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "chat",
+                              "voice"
+                            ]
+                          },
+                          "minItems": 1,
+                          "uniqueItems": true
+                        },
+                        "scopeEditable": {
+                          "type": "boolean"
+                        },
+                        "removable": {
+                          "type": "boolean"
+                        },
+                        "scope": {
+                          "type": "object",
+                          "properties": {
+                            "simulations": {
+                              "type": "array",
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "all"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "test_suite"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "id"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "test"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "id"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              }
+                            },
+                            "production": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "samplePercent": {
+                                      "type": "number",
+                                      "minimum": 1,
+                                      "maximum": 100
+                                    }
+                                  },
+                                  "required": [
+                                    "samplePercent"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "simulations",
+                            "production"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "settings": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "passThreshold": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "graderDefinitionId",
+                        "name",
+                        "description",
+                        "owner",
+                        "type",
+                        "modalities",
+                        "scopeEditable",
+                        "removable",
+                        "scope",
+                        "settings",
+                        "passThreshold",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "definition",
+                    "grader"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/grader-library/{graderDefinitionId}/clone": {
+      "post": {
+        "operationId": "cloneGrader",
+        "summary": "Clone a grader",
+        "description": "Copy the current LLM definition and this project's effective settings into an independent custom grader. Historical versions and code graders cannot be cloned. The clone receives no source updates.",
+        "tags": [
+          "Graders"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "graderDefinitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The independent custom definition and its copied project settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "definition": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "owner": {
+                          "type": "string",
+                          "enum": [
+                            "egma",
+                            "project"
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "llm_as_judge",
+                            "code"
+                          ]
+                        },
+                        "scopeEditable": {
+                          "type": "boolean"
+                        },
+                        "currentDefinitionVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "definitionVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "modalities": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "chat",
+                              "voice"
+                            ]
+                          },
+                          "minItems": 1,
+                          "uniqueItems": true
+                        },
+                        "gradingInstructions": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "requiredEvidence": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "transcript",
+                              "ending_outcome",
+                              "tool_calls",
+                              "observed_metrics",
+                              "test_expected_behaviors",
+                              "turn_response_latency"
+                            ]
+                          }
+                        },
+                        "settingDefinitions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "valueType": {
+                                "type": "string",
+                                "enum": [
+                                  "integer",
+                                  "number",
+                                  "string"
+                                ]
+                              },
+                              "defaultValue": {
+                                "oneOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "unit": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "minimum": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "maximum": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "key",
+                              "label",
+                              "valueType",
+                              "defaultValue",
+                              "unit",
+                              "minimum",
+                              "maximum"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "activeProjectGraderId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "description",
+                        "owner",
+                        "type",
+                        "scopeEditable",
+                        "currentDefinitionVersion",
+                        "definitionVersion",
+                        "modalities",
+                        "gradingInstructions",
+                        "requiredEvidence",
+                        "settingDefinitions",
+                        "activeProjectGraderId",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "grader": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "projectId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "graderDefinitionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "owner": {
+                          "type": "string",
+                          "enum": [
+                            "egma",
+                            "project"
                           ]
                         },
                         "type": {
@@ -7223,7 +8366,7 @@
                             "type": "string",
                             "enum": [
                               "egma",
-                              "organization"
+                              "project"
                             ]
                           },
                           "type": {
@@ -7469,7 +8612,7 @@
       "patch": {
         "operationId": "updateGrader",
         "summary": "Update a project grader's policy",
-        "description": "Changes policy for future work. Existing simulation grading plans keep their selected definition, settings, and threshold, including when regraded. Expected behaviors has fixed scope; its pass threshold remains editable.",
+        "description": "Change model settings, scope, or threshold for future work. Existing simulation plans keep their selected definitions and settings, including when regraded. Expected behaviors has fixed scope; its model and threshold are editable.",
         "tags": [
           "Graders"
         ],
@@ -7605,7 +8748,7 @@
                   "settings": {
                     "type": "object",
                     "additionalProperties": true,
-                    "description": "Values for the definition's settingDefinitions. Response latency uses maximum_response_time_ms, a positive integer in milliseconds."
+                    "description": "Complete values for the definition's settingDefinitions. LLM graders use llm_provider and llm_model. Response latency uses maximum_response_time_ms, a positive integer in milliseconds. These settings belong to this project and do not create a definition version."
                   },
                   "passThreshold": {
                     "type": "number",
@@ -7662,7 +8805,7 @@
                       "type": "string",
                       "enum": [
                         "egma",
-                        "organization"
+                        "project"
                       ]
                     },
                     "type": {
@@ -9696,6 +10839,481 @@
         }
       }
     },
+    "/v1/personas/{personaId}/use": {
+      "post": {
+        "operationId": "usePersona",
+        "summary": "Use a persona",
+        "description": "Save this project's first model settings for the persona. Omit models to use its declared defaults. Repeated use returns the existing settings; use Update a persona to change them.",
+        "tags": [
+          "Personas"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "personaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "models": {
+                    "type": "object",
+                    "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
+                    "properties": {
+                      "llm": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "stt": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "tts": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "voiceId": {
+                            "type": "string",
+                            "description": "A voice identifier supported by the selected text-to-speech provider."
+                          },
+                          "speed": {
+                            "type": "number",
+                            "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model",
+                          "voiceId",
+                          "speed"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "llm",
+                      "stt",
+                      "tts"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The persona with its saved project settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "projectId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "versionId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "identityName": {
+                      "type": "string",
+                      "description": "The human name the caller gives the agent, separate from the library name."
+                    },
+                    "personality": {
+                      "type": "string",
+                      "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
+                    },
+                    "language": {
+                      "type": "string",
+                      "description": "The caller's language, such as en-US."
+                    },
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "models": {
+                              "type": "object",
+                              "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string",
+                                      "description": "A voice identifier supported by the selected text-to-speech provider."
+                                    },
+                                    "speed": {
+                                      "type": "number",
+                                      "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version."
+                    },
+                    "owner": {
+                      "type": "string",
+                      "enum": [
+                        "egma",
+                        "organization"
+                      ]
+                    },
+                    "archivedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "projectId",
+                    "name",
+                    "description",
+                    "version",
+                    "versionId",
+                    "identityName",
+                    "personality",
+                    "language",
+                    "parameterContract",
+                    "settings",
+                    "owner",
+                    "archivedAt",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/personas": {
       "get": {
         "operationId": "listPersonas",
@@ -9800,75 +11418,179 @@
                             "type": "string",
                             "description": "The caller's language, such as en-US."
                           },
-                          "models": {
-                            "type": "object",
-                            "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                            "properties": {
-                              "llm": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  }
+                          "parameterContract": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "key": {
+                                  "type": "string"
                                 },
-                                "required": [
-                                  "provider",
-                                  "model"
-                                ],
-                                "additionalProperties": false
-                              },
-                              "stt": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  }
+                                "label": {
+                                  "type": "string"
                                 },
-                                "required": [
-                                  "provider",
-                                  "model"
-                                ],
-                                "additionalProperties": false
+                                "valueType": {
+                                  "type": "string",
+                                  "enum": [
+                                    "integer",
+                                    "number",
+                                    "string"
+                                  ]
+                                },
+                                "defaultValue": {
+                                  "oneOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "unit": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "minimum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "maximum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
                               },
-                              "tts": {
+                              "required": [
+                                "key",
+                                "label",
+                                "valueType",
+                                "defaultValue",
+                                "unit",
+                                "minimum",
+                                "maximum"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "settings": {
+                            "anyOf": [
+                              {
                                 "type": "object",
                                 "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  },
-                                  "voiceId": {
+                                  "id": {
                                     "type": "string",
-                                    "description": "A voice identifier supported by the selected text-to-speech provider."
+                                    "minLength": 1
                                   },
-                                  "speed": {
-                                    "type": "number",
-                                    "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                                  "models": {
+                                    "type": "object",
+                                    "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
+                                    "properties": {
+                                      "llm": {
+                                        "type": "object",
+                                        "properties": {
+                                          "provider": {
+                                            "type": "string"
+                                          },
+                                          "model": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "provider",
+                                          "model"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "stt": {
+                                        "type": "object",
+                                        "properties": {
+                                          "provider": {
+                                            "type": "string"
+                                          },
+                                          "model": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "provider",
+                                          "model"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "tts": {
+                                        "type": "object",
+                                        "properties": {
+                                          "provider": {
+                                            "type": "string"
+                                          },
+                                          "model": {
+                                            "type": "string"
+                                          },
+                                          "voiceId": {
+                                            "type": "string",
+                                            "description": "A voice identifier supported by the selected text-to-speech provider."
+                                          },
+                                          "speed": {
+                                            "type": "number",
+                                            "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                                          }
+                                        },
+                                        "required": [
+                                          "provider",
+                                          "model",
+                                          "voiceId",
+                                          "speed"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "required": [
+                                      "llm",
+                                      "stt",
+                                      "tts"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "createdAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "updatedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
                                   }
                                 },
                                 "required": [
-                                  "provider",
-                                  "model",
-                                  "voiceId",
-                                  "speed"
+                                  "id",
+                                  "models",
+                                  "createdAt",
+                                  "updatedAt"
                                 ],
                                 "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
                               }
-                            },
-                            "required": [
-                              "llm",
-                              "stt",
-                              "tts"
                             ],
-                            "additionalProperties": false
+                            "description": "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version."
                           },
                           "owner": {
                             "type": "string",
@@ -9907,7 +11629,8 @@
                           "identityName",
                           "personality",
                           "language",
-                          "models",
+                          "parameterContract",
+                          "settings",
                           "owner",
                           "archivedAt",
                           "createdAt",
@@ -10011,7 +11734,7 @@
       "post": {
         "operationId": "createPersona",
         "summary": "Create a persona",
-        "description": "Creates a custom persona and its first immutable behavior version. Add its ID or unambiguous name to a test's personas to use it in future runs.",
+        "description": "Create a project-owned persona with its first behavior version and complete model settings. Omit models to use the declared defaults. Add its ID or unambiguous name to a test to use it.",
         "tags": [
           "Personas"
         ],
@@ -10128,8 +11851,7 @@
                   "name",
                   "identityName",
                   "personality",
-                  "language",
-                  "models"
+                  "language"
                 ],
                 "additionalProperties": false,
                 "examples": [
@@ -10217,75 +11939,179 @@
                       "type": "string",
                       "description": "The caller's language, such as en-US."
                     },
-                    "models": {
-                      "type": "object",
-                      "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                      "properties": {
-                        "llm": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
                           },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
+                          "label": {
+                            "type": "string"
                           },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
                         },
-                        "tts": {
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
+                            "id": {
                               "type": "string",
-                              "description": "A voice identifier supported by the selected text-to-speech provider."
+                              "minLength": 1
                             },
-                            "speed": {
-                              "type": "number",
-                              "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                            "models": {
+                              "type": "object",
+                              "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string",
+                                      "description": "A voice identifier supported by the selected text-to-speech provider."
+                                    },
+                                    "speed": {
+                                      "type": "number",
+                                      "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
                             }
                           },
                           "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
                       ],
-                      "additionalProperties": false
+                      "description": "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version."
                     },
                     "owner": {
                       "type": "string",
@@ -10324,7 +12150,8 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
+                    "settings",
                     "owner",
                     "archivedAt",
                     "createdAt",
@@ -10750,75 +12577,179 @@
                       "type": "string",
                       "description": "The caller's language, such as en-US."
                     },
-                    "models": {
-                      "type": "object",
-                      "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                      "properties": {
-                        "llm": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
                           },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
+                          "label": {
+                            "type": "string"
                           },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
                         },
-                        "tts": {
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
+                            "id": {
                               "type": "string",
-                              "description": "A voice identifier supported by the selected text-to-speech provider."
+                              "minLength": 1
                             },
-                            "speed": {
-                              "type": "number",
-                              "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                            "models": {
+                              "type": "object",
+                              "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string",
+                                      "description": "A voice identifier supported by the selected text-to-speech provider."
+                                    },
+                                    "speed": {
+                                      "type": "number",
+                                      "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
                             }
                           },
                           "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
                       ],
-                      "additionalProperties": false
+                      "description": "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version."
                     },
                     "owner": {
                       "type": "string",
@@ -10857,7 +12788,8 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
+                    "settings",
                     "owner",
                     "archivedAt",
                     "createdAt",
@@ -10942,7 +12874,7 @@
       "patch": {
         "operationId": "updatePersona",
         "summary": "Update a persona",
-        "description": "Omitted fields keep their current values. Changing identityName, personality, language, or models creates a new immutable version; name and description are live metadata. Existing simulations keep their pinned version. Provided personas are read-only.",
+        "description": "Change project model settings or the current custom behavior. Behavior edits require expectedVersionId and create a version when changed. Model settings and display labels create no version. Egma-owned behavior is read-only; its project settings are editable.",
         "tags": [
           "Personas"
         ],
@@ -11071,6 +13003,11 @@
                       "tts"
                     ],
                     "additionalProperties": false
+                  },
+                  "expectedVersionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The current versionId from Get a persona. Required when editing identityName, personality, or language. A stale value returns 409 version_conflict."
                   }
                 },
                 "additionalProperties": false
@@ -11134,75 +13071,179 @@
                       "type": "string",
                       "description": "The caller's language, such as en-US."
                     },
-                    "models": {
-                      "type": "object",
-                      "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                      "properties": {
-                        "llm": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
                           },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
+                          "label": {
+                            "type": "string"
                           },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
                         },
-                        "tts": {
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
+                            "id": {
                               "type": "string",
-                              "description": "A voice identifier supported by the selected text-to-speech provider."
+                              "minLength": 1
                             },
-                            "speed": {
-                              "type": "number",
-                              "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                            "models": {
+                              "type": "object",
+                              "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string",
+                                      "description": "A voice identifier supported by the selected text-to-speech provider."
+                                    },
+                                    "speed": {
+                                      "type": "number",
+                                      "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
                             }
                           },
                           "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
                       ],
-                      "additionalProperties": false
+                      "description": "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version."
                     },
                     "owner": {
                       "type": "string",
@@ -11241,7 +13282,8 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
+                    "settings",
                     "owner",
                     "archivedAt",
                     "createdAt",
@@ -11535,75 +13577,77 @@
                             "type": "string",
                             "description": "The caller's language, such as en-US."
                           },
-                          "models": {
-                            "type": "object",
-                            "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                            "properties": {
-                              "llm": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  }
+                          "parameterContract": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "key": {
+                                  "type": "string"
                                 },
-                                "required": [
-                                  "provider",
-                                  "model"
-                                ],
-                                "additionalProperties": false
+                                "label": {
+                                  "type": "string"
+                                },
+                                "valueType": {
+                                  "type": "string",
+                                  "enum": [
+                                    "integer",
+                                    "number",
+                                    "string"
+                                  ]
+                                },
+                                "defaultValue": {
+                                  "oneOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "unit": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "minimum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "maximum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
                               },
-                              "stt": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "provider",
-                                  "model"
-                                ],
-                                "additionalProperties": false
-                              },
-                              "tts": {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  },
-                                  "voiceId": {
-                                    "type": "string",
-                                    "description": "A voice identifier supported by the selected text-to-speech provider."
-                                  },
-                                  "speed": {
-                                    "type": "number",
-                                    "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
-                                  }
-                                },
-                                "required": [
-                                  "provider",
-                                  "model",
-                                  "voiceId",
-                                  "speed"
-                                ],
-                                "additionalProperties": false
-                              }
-                            },
-                            "required": [
-                              "llm",
-                              "stt",
-                              "tts"
-                            ],
-                            "additionalProperties": false
+                              "required": [
+                                "key",
+                                "label",
+                                "valueType",
+                                "defaultValue",
+                                "unit",
+                                "minimum",
+                                "maximum"
+                              ],
+                              "additionalProperties": false
+                            }
                           },
                           "createdAt": {
                             "type": "string",
@@ -11617,7 +13661,7 @@
                           "identityName",
                           "personality",
                           "language",
-                          "models",
+                          "parameterContract",
                           "createdAt"
                         ],
                         "additionalProperties": false
@@ -11927,75 +13971,77 @@
                       "type": "string",
                       "description": "The caller's language, such as en-US."
                     },
-                    "models": {
-                      "type": "object",
-                      "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                      "properties": {
-                        "llm": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
                           },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
                         },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string",
-                              "description": "A voice identifier supported by the selected text-to-speech provider."
-                            },
-                            "speed": {
-                              "type": "number",
-                              "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
                     },
                     "createdAt": {
                       "type": "string",
@@ -12009,7 +14055,7 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
                     "createdAt"
                   ],
                   "additionalProperties": false
@@ -12092,7 +14138,7 @@
     "/v1/personas/{personaId}/fork": {
       "post": {
         "operationId": "forkPersona",
-        "summary": "Fork a persona",
+        "summary": "Clone a persona",
         "description": "Creates an editable custom copy of the persona's current behavior and model settings. The original persona and tests that select it stay unchanged.",
         "tags": [
           "Personas"
@@ -12189,75 +14235,179 @@
                       "type": "string",
                       "description": "The caller's language, such as en-US."
                     },
-                    "models": {
-                      "type": "object",
-                      "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                      "properties": {
-                        "llm": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
+                    "parameterContract": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
                           },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
+                          "label": {
+                            "type": "string"
                           },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer",
+                              "number",
+                              "string"
+                            ]
+                          },
+                          "defaultValue": {
+                            "oneOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unit": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
                         },
-                        "tts": {
+                        "required": [
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settings": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
+                            "id": {
                               "type": "string",
-                              "description": "A voice identifier supported by the selected text-to-speech provider."
+                              "minLength": 1
                             },
-                            "speed": {
-                              "type": "number",
-                              "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                            "models": {
+                              "type": "object",
+                              "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
+                              "properties": {
+                                "llm": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "stt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "tts": {
+                                  "type": "object",
+                                  "properties": {
+                                    "provider": {
+                                      "type": "string"
+                                    },
+                                    "model": {
+                                      "type": "string"
+                                    },
+                                    "voiceId": {
+                                      "type": "string",
+                                      "description": "A voice identifier supported by the selected text-to-speech provider."
+                                    },
+                                    "speed": {
+                                      "type": "number",
+                                      "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                                    }
+                                  },
+                                  "required": [
+                                    "provider",
+                                    "model",
+                                    "voiceId",
+                                    "speed"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "llm",
+                                "stt",
+                                "tts"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
                             }
                           },
                           "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
+                            "id",
+                            "models",
+                            "createdAt",
+                            "updatedAt"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
                       ],
-                      "additionalProperties": false
+                      "description": "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version."
                     },
                     "owner": {
                       "type": "string",
@@ -12296,7 +14446,8 @@
                     "identityName",
                     "personality",
                     "language",
-                    "models",
+                    "parameterContract",
+                    "settings",
                     "owner",
                     "archivedAt",
                     "createdAt",
@@ -16174,6 +18325,11 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "parameterValues": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "The model or numeric settings used for this grading attempt. Retained for successful and errored grades, including after temporary jobs are removed. Contains no credentials."
+                          },
                           "graderName": {
                             "type": "string"
                           },
@@ -16203,6 +18359,14 @@
                                     "key": {
                                       "type": "string"
                                     },
+                                    "decision": {
+                                      "type": "string",
+                                      "enum": [
+                                        "met",
+                                        "not_met",
+                                        "cannot_determine"
+                                      ]
+                                    },
                                     "score": {
                                       "type": "number",
                                       "minimum": 0,
@@ -16215,6 +18379,13 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string"
+                                      }
+                                    },
+                                    "citedTurns": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer",
+                                        "minimum": 1
                                       }
                                     },
                                     "error": {
@@ -16255,6 +18426,7 @@
                           "projectGraderId",
                           "graderDefinitionId",
                           "graderDefinitionVersion",
+                          "parameterValues",
                           "graderName",
                           "score",
                           "details",
@@ -16283,6 +18455,11 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "parameterValues": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "The model or numeric settings used for this grading attempt. Retained for successful and errored grades, including after temporary jobs are removed. Contains no credentials."
+                          },
                           "graderName": {
                             "type": "string"
                           },
@@ -16312,6 +18489,14 @@
                                     "key": {
                                       "type": "string"
                                     },
+                                    "decision": {
+                                      "type": "string",
+                                      "enum": [
+                                        "met",
+                                        "not_met",
+                                        "cannot_determine"
+                                      ]
+                                    },
                                     "score": {
                                       "type": "number",
                                       "minimum": 0,
@@ -16324,6 +18509,13 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string"
+                                      }
+                                    },
+                                    "citedTurns": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer",
+                                        "minimum": 1
                                       }
                                     },
                                     "error": {
@@ -16364,6 +18556,7 @@
                           "projectGraderId",
                           "graderDefinitionId",
                           "graderDefinitionVersion",
+                          "parameterValues",
                           "graderName",
                           "score",
                           "details",
@@ -16486,11 +18679,11 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "description": "One metric from one side of the conversation. Turn response latency and first response latency prefer the agent's series when available. A second series stays separate in otherPov.",
+                        "description": "One metric from one side of the conversation. Simulation metrics prefer the persona's series when available. Production traces use the agent's evidence. A second series stays separate in otherPov.",
                         "properties": {
                           "measure": {
                             "type": "string",
-                            "description": "Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the start of the agent's reply, using speech boundaries for voice when available. first_response_latency measures the time from conversation start to the agent's first reply. Both use milliseconds."
+                            "description": "Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the agent's reply. For voice simulations, it runs from the end of the caller's played audio, including trailing padding, to the arrival of the agent's audio. first_response_latency measures the wait from conversation start to the first reply. Both use milliseconds."
                           },
                           "unit": {
                             "type": "string"
@@ -16836,12 +19029,6 @@
                           "type": "object",
                           "description": "The grader definitions, versions, and pass thresholds frozen when the run started. Regrading uses this selection.",
                           "properties": {
-                            "state": {
-                              "type": "string",
-                              "enum": [
-                                "run_start"
-                              ]
-                            },
                             "capturedAt": {
                               "type": "string",
                               "format": "date-time"
@@ -16884,7 +19071,6 @@
                             }
                           },
                           "required": [
-                            "state",
                             "capturedAt",
                             "items"
                           ],
@@ -18529,8 +20715,8 @@
                     "description": "The caller asks for an appointment when the calendar is full.",
                     "scenario": "Ask Harbor Clinic for an afternoon appointment. If none is available, ask how to arrange a callback.",
                     "expectedBehaviors": [
-                      "The agent checks availability before offering an appointment.",
-                      "The agent does not invent an available time when the tool returns no slots."
+                      "The agent calls check_availability.",
+                      "The agent says that no appointments are available and does not offer a time."
                     ],
                     "personas": [
                       "Everyday caller"
@@ -20850,11 +23036,11 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "description": "One metric from one side of the conversation. Turn response latency and first response latency prefer the agent's series when available. A second series stays separate in otherPov.",
+                        "description": "One metric from one side of the conversation. Simulation metrics prefer the persona's series when available. Production traces use the agent's evidence. A second series stays separate in otherPov.",
                         "properties": {
                           "measure": {
                             "type": "string",
-                            "description": "Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the start of the agent's reply, using speech boundaries for voice when available. first_response_latency measures the time from conversation start to the agent's first reply. Both use milliseconds."
+                            "description": "Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the agent's reply. For voice simulations, it runs from the end of the caller's played audio, including trailing padding, to the arrival of the agent's audio. first_response_latency measures the wait from conversation start to the first reply. Both use milliseconds."
                           },
                           "unit": {
                             "type": "string"
@@ -20993,6 +23179,11 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "parameterValues": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "The model or numeric settings used for this grading attempt. Retained for successful and errored grades, including after temporary jobs are removed. Contains no credentials."
+                          },
                           "graderName": {
                             "type": "string"
                           },
@@ -21022,6 +23213,14 @@
                                     "key": {
                                       "type": "string"
                                     },
+                                    "decision": {
+                                      "type": "string",
+                                      "enum": [
+                                        "met",
+                                        "not_met",
+                                        "cannot_determine"
+                                      ]
+                                    },
                                     "score": {
                                       "type": "number",
                                       "minimum": 0,
@@ -21034,6 +23233,13 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string"
+                                      }
+                                    },
+                                    "citedTurns": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer",
+                                        "minimum": 1
                                       }
                                     },
                                     "error": {
@@ -21074,6 +23280,7 @@
                           "projectGraderId",
                           "graderDefinitionId",
                           "graderDefinitionVersion",
+                          "parameterValues",
                           "graderName",
                           "score",
                           "details",
@@ -21102,6 +23309,11 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "parameterValues": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "The model or numeric settings used for this grading attempt. Retained for successful and errored grades, including after temporary jobs are removed. Contains no credentials."
+                          },
                           "graderName": {
                             "type": "string"
                           },
@@ -21131,6 +23343,14 @@
                                     "key": {
                                       "type": "string"
                                     },
+                                    "decision": {
+                                      "type": "string",
+                                      "enum": [
+                                        "met",
+                                        "not_met",
+                                        "cannot_determine"
+                                      ]
+                                    },
                                     "score": {
                                       "type": "number",
                                       "minimum": 0,
@@ -21143,6 +23363,13 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string"
+                                      }
+                                    },
+                                    "citedTurns": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer",
+                                        "minimum": 1
                                       }
                                     },
                                     "error": {
@@ -21183,6 +23410,7 @@
                           "projectGraderId",
                           "graderDefinitionId",
                           "graderDefinitionVersion",
+                          "parameterValues",
                           "graderName",
                           "score",
                           "details",

@@ -931,6 +931,7 @@ describe("equal-time grade history", () => {
     graderDefinitionId: "grl_expected",
     graderDefinitionVersion: 1,
     graderName: "expected_behaviors",
+    parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
     score: 1,
     details: { rationale: "the reclaimed worker scored it" },
     passThreshold: 0.5,

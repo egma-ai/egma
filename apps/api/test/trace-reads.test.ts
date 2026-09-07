@@ -258,11 +258,15 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
      * from the capture's raw timestamps, held as the store keeps them: starts
      * truncated to the microsecond, durations exact.
      *
-     * 1. human `baac22a26a96fa9b` carries no `user_speaking` child, so its own
-     *    end stands in: it starts 1785693902082961920 → 1785693902082961 µs and
-     *    runs 297806362 ns, ending 1785693902380767362. Agent speech
+     * 1. human `1e6796c0e195e424`'s last `user_speaking` `149dcf2969e36b11`
+     *    starts 1785693898613910272 → 1785693898613910 µs and runs
+     *    2658486528 ns, so the caller stops being audible at
+     *    1785693901272396528. The agent turn that began answering the first
+     *    half of that sentence was cut off when the rest of it arrived as the
+     *    speechless human turn `baac22a26a96fa9b` — a false start followed by a
+     *    continuation, and neither is an answer or a question. Agent speech
      *    `1b8cc4d1064a766d` begins 1785693904727004928 → 1785693904727004 µs.
-     *    1785693904727004000 − 1785693902380767362 = 2346236638 ns.
+     *    1785693904727004000 − 1785693901272396528 = 3454607472 ns.
      * 2. human `c35b92a87f8121a1`'s last `user_speaking` `b30dd00e322f2443`
      *    starts 1785693920313752320 → 1785693920313752 µs and runs
      *    1710489600 ns, so the caller stops being audible at
@@ -276,13 +280,13 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
      *    1785693946089613 µs.
      *    1785693946089613000 − 1785693943023019440 = 3066593560 ns.
      *
-     * So the series is 2346.236638, 2900.4494 and 3066.59356 ms, and the
+     * So the series is 3454.607472, 2900.4494 and 3066.59356 ms, and the
      * nearest-rank p90 of three samples is the third of them sorted — a
      * measurement that actually happened, and the slowest answer the caller
      * waited through.
      */
     expect(turnLatency?.derived).toBe(true);
-    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(3066.59356);
+    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(3454.607472);
     expect(trace?.turnResponseLatencyP90Milliseconds).toBe(turnLatency?.p90);
     expect(trace?.turnResponseLatencyP90Partial).toBe(false);
   });

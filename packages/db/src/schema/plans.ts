@@ -2,87 +2,14 @@ import { sql } from "drizzle-orm";
 import {
   check,
   foreignKey,
-  index,
-  jsonb,
   pgTable,
   primaryKey,
   text,
-  unique,
 } from "drizzle-orm/pg-core";
 
-import { run } from "./runs.ts";
 import { organization, project } from "./tenancy.ts";
 import { user } from "./identity.ts";
-import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
-
-/**
- * The two things run creation has to write down beside the run itself: what
- * will grade its traces, and which request created it.
- *
- * They live together because they are the same kind of fact — a decision made
- * once, at the door, that nothing afterwards may quietly change — and because
- * neither belongs to the run's execution lifecycle, which `runs.ts` is about.
- */
-
-/**
- * When a run's grading plan was decided, and whether one was decided at all.
- *
- * Every run freezes its plan at start. There is no unrecorded runtime state.
- */
-export const GRADING_PLAN_STATES = ["run_start"] as const;
-export type GradingPlanState = (typeof GRADING_PLAN_STATES)[number];
-
-export const gradingPlan = pgTable(
-  "grading_plan",
-  {
-    id: idText("id").primaryKey(),
-    /** One plan per run, and the unique below is what makes that true. */
-    runId: idText("run_id").notNull(),
-    organizationId: idText("organization_id")
-      .notNull()
-      .references(() => organization.id, { onDelete: "cascade" }),
-    projectId: idText("project_id").notNull(),
-    state: text("state").notNull(),
-    /** When the plan below was frozen during run start. */
-    capturedAt: moment("captured_at").notNull(),
-    /**
-     * One frozen group per test. Each group carries that test's exact identity
-     * and version plus the project graders selected by its own suite/test scope
-     * and the run modality. `access/run-plans.ts` owns the shape and is the only
-     * writer.
-     */
-    groups: jsonb("groups").notNull(),
-    createdAt: createdAt(),
-  },
-  (table) => [
-    prefixCheck("grading_plan_id_prefix", table.id, "gpl"),
-    oneOf("grading_plan_state_allowed", table.state, [...GRADING_PLAN_STATES]),
-    // One plan per run: the plan is a property of the run, and a second one
-    // would leave two answers to "what grades this" with nothing to choose
-    // between them.
-    unique("grading_plan_run_id_unique").on(table.runId),
-    check(
-      "grading_plan_groups_are_a_list",
-      sql`jsonb_typeof(${table.groups}) = 'array'`,
-    ),
-    // The tenancy triangle, edge by edge, as everywhere else: the project is
-    // this organization's, and the run is that project's.
-    foreignKey({
-      name: "grading_plan_project_organization_fk",
-      columns: [table.projectId, table.organizationId],
-      foreignColumns: [project.id, project.organizationId],
-    }).onDelete("cascade"),
-    foreignKey({
-      name: "grading_plan_run_project_fk",
-      columns: [table.runId, table.projectId],
-      foreignColumns: [run.id, run.projectId],
-    }).onDelete("cascade"),
-    index("grading_plan_organization_id_project_id_idx").on(
-      table.organizationId,
-      table.projectId,
-    ),
-  ],
-);
+import { createdAt, idText, oneOf, prefixCheck } from "./columns.ts";
 
 /**
  * The operations a client may safely send twice.

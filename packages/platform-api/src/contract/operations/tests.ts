@@ -235,8 +235,8 @@ const createTestBody = {
     scenario:
       "Ask Harbor Clinic for an afternoon appointment. If none is available, ask how to arrange a callback.",
     expectedBehaviors: [
-      "The agent checks availability before offering an appointment.",
-      "The agent does not invent an available time when the tool returns no slots.",
+      "The agent calls check_availability.",
+      "The agent says that no appointments are available and does not offer a time.",
     ],
     personas: ["Everyday caller"],
     mockTools: [{ tool: "check_availability", answer: { slots: [] } }],

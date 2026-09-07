@@ -1,3 +1,4 @@
+import { graderSettingDefinitionSchema } from "./grader-shapes.ts";
 import { defineOperation } from "../definition.ts";
 import {
   arrayOf,
@@ -88,6 +89,13 @@ const personaModels = {
   additionalProperties: false,
 } as const;
 
+const parameterContract = arrayOf(graderSettingDefinitionSchema);
+
+const projectPersonaSettings = {
+  type: "object", properties: { id: stringIdSchema, models: personaModels, createdAt: dateTimeSchema, updatedAt: dateTimeSchema },
+  required: ["id", "models", "createdAt", "updatedAt"], additionalProperties: false,
+} as const;
+
 const persona = {
   type: "object",
   properties: {
@@ -98,7 +106,11 @@ const persona = {
     version: { type: "integer", minimum: 1 },
     versionId: stringIdSchema,
     ...behavior,
-    models: personaModels,
+    parameterContract,
+    settings: {
+      ...nullable(projectPersonaSettings),
+      description: "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.",
+    },
     owner: { type: "string", enum: ["egma", "organization"] },
     archivedAt: nullable(dateTimeSchema),
     createdAt: dateTimeSchema,
@@ -112,7 +124,8 @@ const persona = {
     "version",
     "versionId",
     ...behaviorRequired,
-    "models",
+    "parameterContract",
+    "settings",
     "owner",
     "archivedAt",
     "createdAt",
@@ -128,7 +141,7 @@ const personaVersion = {
     personaId: stringIdSchema,
     version: { type: "integer", minimum: 1 },
     ...behavior,
-    models: personaModels,
+    parameterContract,
     createdAt: dateTimeSchema,
   },
   required: [
@@ -136,7 +149,7 @@ const personaVersion = {
     "personaId",
     "version",
     ...behaviorRequired,
-    "models",
+    "parameterContract",
     "createdAt",
   ],
   additionalProperties: false,
@@ -224,7 +237,7 @@ const createPersonaBody = {
     ...behavior,
     models: personaModels,
   },
-  required: ["name", ...behaviorRequired, "models"],
+  required: ["name", ...behaviorRequired],
   additionalProperties: false,
   examples: [{
     name: "Caller in a hurry",
@@ -241,20 +254,16 @@ const createPersonaBody = {
   }],
 } as const;
 
-/**
- * The same shape with every field optional, and nothing else.
- *
- * **No expectation field, on purpose.** A persona write is last-write-wins:
- * the revision token and the expected version id are gone from this body and
- * from the door underneath it. What the body leaves out, the persona keeps;
- * a behavioral field that differs from the current version answers with the
- * next one.
- */
+/** Partial update. Behavior edits must name the current core version. */
 const updatePersonaBody = {
   type: "object",
   properties: {
     ...createPersonaBody.properties,
     description: nullable({ type: "string" }),
+    expectedVersionId: {
+      ...stringIdSchema,
+      description: "The current versionId from Get a persona. Required when editing identityName, personality, or language. A stale value returns 409 version_conflict.",
+    },
   },
   additionalProperties: false,
 } as const;
@@ -280,6 +289,12 @@ const writeRefusals = {
 } as const;
 
 export const personaOperations = {
+  usePersona: defineOperation({
+    operationId: "usePersona", method: "POST", path: "/v1/personas/{personaId}/use", summary: "Use a persona", tag: "Personas", security: "credentialed",
+    description: "Save this project's first model settings for the persona. Omit models to use its declared defaults. Repeated use returns the existing settings; use Update a persona to change them.",
+    request: { params: personaParams, body: { type: "object", properties: { projectId: stringIdSchema, models: personaModels }, additionalProperties: false }, bodyRequired: false },
+    responses: { 200: { description: "The persona with its saved project settings.", schema: persona }, ...writeRefusals },
+  }),
   listPersonas: defineOperation({
     operationId: "listPersonas",
     method: "GET",
@@ -372,7 +387,7 @@ export const personaOperations = {
     path: "/v1/personas",
     summary: "Create a persona",
     description:
-      "Creates a custom persona and its first immutable behavior version. Add its ID or unambiguous name to a test's personas to use it in future runs.",
+      "Create a project-owned persona with its first behavior version and complete model settings. Omit models to use the declared defaults. Add its ID or unambiguous name to a test to use it.",
     tag: "Personas",
     security: "credentialed",
     request: { body: createPersonaBody },
@@ -388,7 +403,7 @@ export const personaOperations = {
     path: "/v1/personas/{personaId}",
     summary: "Update a persona",
     description:
-      "Omitted fields keep their current values. Changing identityName, personality, language, or models creates a new immutable version; name and description are live metadata. Existing simulations keep their pinned version. Provided personas are read-only.",
+      "Change project model settings or the current custom behavior. Behavior edits require expectedVersionId and create a version when changed. Model settings and display labels create no version. Egma-owned behavior is read-only; its project settings are editable.",
     tag: "Personas",
     security: "credentialed",
     request: { params: personaParams, body: updatePersonaBody },
@@ -402,7 +417,7 @@ export const personaOperations = {
     operationId: "forkPersona",
     method: "POST",
     path: "/v1/personas/{personaId}/fork",
-    summary: "Fork a persona",
+    summary: "Clone a persona",
     description:
       "Creates an editable custom copy of the persona's current behavior and model settings. The original persona and tests that select it stay unchanged.",
     tag: "Personas",

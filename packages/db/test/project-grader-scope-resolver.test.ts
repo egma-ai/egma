@@ -25,7 +25,6 @@ function candidate(
       prompt: "Grade it",
       parameterContract: [],
       modalities,
-      judgeModel: { provider: "openai", model: "gpt-5" },
     },
   };
 }
@@ -125,6 +124,7 @@ describe("the pure grader resolver", () => {
             type: "llm_as_judge",
             passThreshold: 0.7,
             parameterValues: { maximum: 7 },
+            definition: onlyFirst.definition,
           },
         ],
       },

@@ -102,8 +102,34 @@
  * `persona_speech_duration` leave the catalog: the first is defined out of
  * audio egma does not hold outside a simulation, and the second measures
  * egma's own synthetic caller rather than anything the agent did.
+ *
+ * **9** puts the persona's POV back in front of the agent's for
+ * `turn_response_latency` and `first_response_latency` on a simulation, which
+ * is what version 8 said the recorder's fix would buy. No measure joined or
+ * left and no definition changed: a conversation both POVs measured hands back
+ * the same two series version 8 handed back, in the other order, with the
+ * agent's as `otherPov`. What did change is the clock the persona's series is
+ * taken on: the recorder places each channel where its transport says it
+ * happened. The persona's stop is the pipeline's own mark for the end of its
+ * played audio, the mouth's trailing padding included — about a tenth of a
+ * second past the last audible sample, a constant per voice, and by decision
+ * not trimmed by any code of egma's own. Its acceptance against the agent's
+ * own account of the same calls: egma's clock reads 0.5 to 0.6 s longer per
+ * turn and stays in that band across the call — the detection lag at the
+ * front and the playback hop at the back, and nothing that grows — where the
+ * old recorder was 1.5 to 1.8 s out and drifting. A number measured off the
+ * audio the caller heard, differing from the agent's own by a constant a
+ * reader can name, is the one to lead with. A production trace answers exactly as it did at version 8: egma
+ * conducted nothing there, so the agent's POV is the only POV and still the
+ * headline. Version 9 also reads the agent's own spans one way more carefully:
+ * a caller turn with no speech of its own that opened inside the agent turn
+ * immediately before it, and that the agent turn did not outlive, is the rest
+ * of the caller's last sentence, delivered late, and the reply it cut off is
+ * no answer — so one sentence the transcriber split is one wait, not two. A
+ * word-bounded trace records no speech for any turn, so nothing there is read
+ * as a continuation.
  */
-export const MEASURE_CATALOG_VERSION = 8;
+export const MEASURE_CATALOG_VERSION = 9;
 
 /**
  * The measures this catalog version leads with the agent's own POV for.
@@ -113,16 +139,17 @@ export const MEASURE_CATALOG_VERSION = 8;
  * consumer meets first — the metric a page leads with, the number a grader
  * reduces — is decided here and nowhere else. No flag, no per-project setting:
  * a run graded under version 8 was graded against the agent's own account of
- * its waits, and the release that flips this list back is a catalog version of
- * its own, which is exactly what these numbers are for.
+ * its waits, and version 9 is the release that flipped this list back, which
+ * is exactly what these numbers are for.
  *
- * Empty for every other measure, which keeps leading with what egma timed
- * itself.
+ * **Empty at version 9**, so every measure leads with what egma timed itself
+ * and the agent's account rides beside it: the recorder's clock is the adopted
+ * definition again, and the two response latencies rejoined everything else.
+ * The list stays rather than going with them, because the decision it holds
+ * stays — leading with one POV or the other is this one line and a version
+ * note, and what a consumer met under a stored version is read here.
  */
-export const AGENT_POV_HEADLINE_MEASURES: readonly string[] = [
-  "turn_response_latency",
-  "first_response_latency",
-];
+export const AGENT_POV_HEADLINE_MEASURES: readonly string[] = [];
 
 /**
  * How a metric series can be reduced to one observed number.

@@ -306,7 +306,6 @@ export function runRoutes(options: {
         simulation.grades.length === 0
           ? null
           : {
-              state: "run_start",
               capturedAt: "2026-01-01T00:00:00.000Z",
               items: simulation.grades.map((grade) => ({
                 projectGraderId: grade.projectGraderId,

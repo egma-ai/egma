@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import { buildClientParams, type Client, type ClientMeta, type Options as Options2, type RequestResult, type TDataShape } from './client/index.js';
-import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateCustomGraderErrors, CreateCustomGraderResponses, CreateInvitationErrors, CreateInvitationResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeletePersonaErrors, DeletePersonaResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetGraderLibraryEntryErrors, GetGraderLibraryEntryResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveGraderErrors, RemoveGraderResponses, RemoveMemberErrors, RemoveMemberResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, StartMonitoringErrors, StartMonitoringResponses, StopMonitoringErrors, StopMonitoringResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses, UseGraderInProjectErrors, UseGraderInProjectResponses } from './types.gen.js';
+import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CloneGraderErrors, CloneGraderResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateCustomGraderErrors, CreateCustomGraderResponses, CreateInvitationErrors, CreateInvitationResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeletePersonaErrors, DeletePersonaResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetGraderFormErrors, GetGraderFormResponses, GetGraderLibraryEntryErrors, GetGraderLibraryEntryResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveGraderErrors, RemoveGraderResponses, RemoveMemberErrors, RemoveMemberResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, StartMonitoringErrors, StartMonitoringResponses, StopMonitoringErrors, StopMonitoringResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderDefinitionErrors, UpdateGraderDefinitionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses, UseGraderInProjectErrors, UseGraderInProjectResponses, UsePersonaErrors, UsePersonaResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -573,9 +573,30 @@ export const revokeApiKey = <ThrowOnError extends boolean = false>(parameters: {
 };
 
 /**
+ * Get grader model choices
+ *
+ * Read supported provider/model pairs and default settings before creating or configuring an LLM grader.
+ */
+export const getGraderForm = <ThrowOnError extends boolean = false>(parameters?: {
+    projectId?: string;
+}, options?: Options<never, ThrowOnError>): RequestResult<GetGraderFormResponses, GetGraderFormErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [{ in: 'query', key: 'projectId' }] }]);
+    return (options?.client ?? client).get<GetGraderFormResponses, GetGraderFormErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/grader-form',
+        ...options,
+        ...params
+    });
+};
+
+/**
  * List the grader library for a project
  *
- * Includes Egma's built-in graders and custom graders from your organization. activeProjectGraderId identifies a definition already in use by this project; null means it can be added.
+ * Includes Egma's built-in graders and custom graders owned by this project. activeProjectGraderId identifies a definition already in use by this project; null means it can be added.
  */
 export const listGraderLibrary = <ThrowOnError extends boolean = false>(parameters?: {
     projectId?: string;
@@ -622,6 +643,44 @@ export const getGraderLibraryEntry = <ThrowOnError extends boolean = false>(para
 };
 
 /**
+ * Update grader instructions
+ *
+ * Edit the current custom definition's prompt or display labels. Send its definitionVersion as baseDefinitionVersion. A changed prompt creates a version; label edits do not. Egma-owned definitions are read-only.
+ */
+export const updateGraderDefinition = <ThrowOnError extends boolean = false>(parameters: {
+    graderDefinitionId: string;
+    projectId?: string;
+    baseDefinitionVersion: number;
+    gradingInstructions?: string;
+    name?: string;
+    description?: string | null;
+}, options?: Options<never, ThrowOnError>): RequestResult<UpdateGraderDefinitionResponses, UpdateGraderDefinitionErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [
+                { in: 'path', key: 'graderDefinitionId' },
+                { in: 'query', key: 'projectId' },
+                { in: 'body', key: 'baseDefinitionVersion' },
+                { in: 'body', key: 'gradingInstructions' },
+                { in: 'body', key: 'name' },
+                { in: 'body', key: 'description' }
+            ] }]);
+    return (options?.client ?? client).patch<UpdateGraderDefinitionResponses, UpdateGraderDefinitionErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/grader-library/{graderDefinitionId}',
+        ...options,
+        ...params,
+        headers: {
+            'Content-Type': 'application/json',
+            ...options?.headers,
+            ...params.headers
+        }
+    });
+};
+
+/**
  * Use a grader in the current project
  *
  * Adds an available definition with this project's scope, settings, and pass threshold. These settings apply to future work; adding a grader does not change earlier simulation plans. A definition can be active only once per project. The example settings are for Response latency.
@@ -643,7 +702,7 @@ export const useGraderInProject = <ThrowOnError extends boolean = false>(paramet
             samplePercent: number;
         } | null;
     };
-    settings: {
+    settings?: {
         [key: string]: unknown;
     };
     passThreshold: number;
@@ -675,7 +734,7 @@ export const useGraderInProject = <ThrowOnError extends boolean = false>(paramet
 /**
  * Create and use a custom LLM grader
  *
- * Create a custom LLM grader in your organization’s library and activate it in this project. Write the grading instructions and pass/fail criteria; Egma supplies the model.
+ * Create a custom LLM grader owned by this project. Set its instructions, model, scope, and pass threshold. Omit settings to save the declared model defaults at creation.
  */
 export const createCustomGrader = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
@@ -684,6 +743,9 @@ export const createCustomGrader = <ThrowOnError extends boolean = false>(paramet
     gradingInstructions: string;
     passesWhen: string;
     failsWhen: string;
+    settings?: {
+        [key: string]: unknown;
+    };
     scope: {
         simulations: Array<{
             kind: 'all';
@@ -707,6 +769,7 @@ export const createCustomGrader = <ThrowOnError extends boolean = false>(paramet
                 { in: 'body', key: 'gradingInstructions' },
                 { in: 'body', key: 'passesWhen' },
                 { in: 'body', key: 'failsWhen' },
+                { in: 'body', key: 'settings' },
                 { in: 'body', key: 'scope' },
                 { in: 'body', key: 'passThreshold' }
             ] }]);
@@ -717,6 +780,40 @@ export const createCustomGrader = <ThrowOnError extends boolean = false>(paramet
                 type: 'apiKey'
             }],
         url: '/v1/grader-library/custom',
+        ...options,
+        ...params,
+        headers: {
+            'Content-Type': 'application/json',
+            ...options?.headers,
+            ...params.headers
+        }
+    });
+};
+
+/**
+ * Clone a grader
+ *
+ * Copy the current LLM definition and this project's effective settings into an independent custom grader. Historical versions and code graders cannot be cloned. The clone receives no source updates.
+ */
+export const cloneGrader = <ThrowOnError extends boolean = false>(parameters: {
+    graderDefinitionId: string;
+    projectId?: string;
+    name: string;
+    description?: string | null;
+}, options?: Options<never, ThrowOnError>): RequestResult<CloneGraderResponses, CloneGraderErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [
+                { in: 'path', key: 'graderDefinitionId' },
+                { in: 'query', key: 'projectId' },
+                { in: 'body', key: 'name' },
+                { in: 'body', key: 'description' }
+            ] }]);
+    return (options?.client ?? client).post<CloneGraderResponses, CloneGraderErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/grader-library/{graderDefinitionId}/clone',
         ...options,
         ...params,
         headers: {
@@ -774,7 +871,7 @@ export const removeGrader = <ThrowOnError extends boolean = false>(parameters: {
 /**
  * Update a project grader's policy
  *
- * Changes policy for future work. Existing simulation grading plans keep their selected definition, settings, and threshold, including when regraded. Expected behaviors has fixed scope; its pass threshold remains editable.
+ * Change model settings, scope, or threshold for future work. Existing simulation plans keep their selected definitions and settings, including when regraded. Expected behaviors has fixed scope; its model and threshold are editable.
  */
 export const updateGrader = <ThrowOnError extends boolean = false>(parameters: {
     graderId: string;
@@ -1067,6 +1164,59 @@ export const updateOrganization = <ThrowOnError extends boolean = false>(paramet
 };
 
 /**
+ * Use a persona
+ *
+ * Save this project's first model settings for the persona. Omit models to use its declared defaults. Repeated use returns the existing settings; use Update a persona to change them.
+ */
+export const usePersona = <ThrowOnError extends boolean = false>(parameters: {
+    personaId: string;
+    projectId?: string;
+    models?: {
+        llm: {
+            provider: string;
+            model: string;
+        };
+        stt: {
+            provider: string;
+            model: string;
+        };
+        tts: {
+            provider: string;
+            model: string;
+            /**
+             * A voice identifier supported by the selected text-to-speech provider.
+             */
+            voiceId: string;
+            /**
+             * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+             */
+            speed: number;
+        };
+    };
+}, options?: Options<never, ThrowOnError>): RequestResult<UsePersonaResponses, UsePersonaErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [
+                { in: 'path', key: 'personaId' },
+                { in: 'body', key: 'projectId' },
+                { in: 'body', key: 'models' }
+            ] }]);
+    return (options?.client ?? client).post<UsePersonaResponses, UsePersonaErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/personas/{personaId}/use',
+        ...options,
+        ...params,
+        headers: {
+            'Content-Type': 'application/json',
+            ...options?.headers,
+            ...params.headers
+        }
+    });
+};
+
+/**
  * List personas
  */
 export const listPersonas = <ThrowOnError extends boolean = false>(parameters?: {
@@ -1094,7 +1244,7 @@ export const listPersonas = <ThrowOnError extends boolean = false>(parameters?: 
 /**
  * Create a persona
  *
- * Creates a custom persona and its first immutable behavior version. Add its ID or unambiguous name to a test's personas to use it in future runs.
+ * Create a project-owned persona with its first behavior version and complete model settings. Omit models to use the declared defaults. Add its ID or unambiguous name to a test to use it.
  */
 export const createPersona = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
@@ -1103,7 +1253,7 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
     identityName: string;
     personality: string;
     language: string;
-    models: {
+    models?: {
         llm: {
             provider: string;
             model: string;
@@ -1218,7 +1368,7 @@ export const getPersona = <ThrowOnError extends boolean = false>(parameters: {
 /**
  * Update a persona
  *
- * Omitted fields keep their current values. Changing identityName, personality, language, or models creates a new immutable version; name and description are live metadata. Existing simulations keep their pinned version. Provided personas are read-only.
+ * Change project model settings or the current custom behavior. Behavior edits require expectedVersionId and create a version when changed. Model settings and display labels create no version. Egma-owned behavior is read-only; its project settings are editable.
  */
 export const updatePersona = <ThrowOnError extends boolean = false>(parameters: {
     personaId: string;
@@ -1250,6 +1400,7 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
             speed: number;
         };
     };
+    expectedVersionId?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdatePersonaResponses, UpdatePersonaErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'personaId' },
@@ -1259,7 +1410,8 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
                 { in: 'body', key: 'identityName' },
                 { in: 'body', key: 'personality' },
                 { in: 'body', key: 'language' },
-                { in: 'body', key: 'models' }
+                { in: 'body', key: 'models' },
+                { in: 'body', key: 'expectedVersionId' }
             ] }]);
     return (options?.client ?? client).patch<UpdatePersonaResponses, UpdatePersonaErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -1344,7 +1496,7 @@ export const getPersonaVersion = <ThrowOnError extends boolean = false>(paramete
 };
 
 /**
- * Fork a persona
+ * Clone a persona
  *
  * Creates an editable custom copy of the persona's current behavior and model settings. The original persona and tests that select it stay unchanged.
  */

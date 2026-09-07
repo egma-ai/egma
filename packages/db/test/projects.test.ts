@@ -119,7 +119,7 @@ describe("creating a project", () => {
     expect(after.some((one) => one.name === "Half a project")).toBe(false);
 
     const { rows } = await database.sql<{ count: string }>(
-      "select count(*) as count from persona where project_id not in (select id from project)",
+      "select count(*) as count from persona_definition where project_id not in (select id from project)",
     );
     expect(rows[0]?.count).toBe("0");
   });

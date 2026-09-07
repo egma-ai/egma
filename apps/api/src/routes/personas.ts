@@ -1,5 +1,7 @@
 import {
   createPersona,
+  usePersona,
+  PersonaVersionConflictError,
   deletePersona,
   editPersona,
   forkPersona,
@@ -51,20 +53,18 @@ import { sendRefusal } from "../http/refusals.ts";
  *
  * **Identity is live and behavior is versioned, and the wire says which is
  * which.** Name and description write in place. Identity name, personality,
- * language and models mint an immutable version, and values identical to the
- * current version mint nothing.
+ * and language mint an immutable version. Model choices save as the acting
+ * project's settings and create no core history.
  *
- * **No write names an expectation.** A persona write is last-write-wins: there
- * is no revision token and no expected version id on this surface, and none
- * underneath it. Pre-launch, with two authors, the ceremony cost more than the
- * clobber it prevented.
+ * Core edits name expectedVersionId from a current read. A stale edit is
+ * refused. Metadata and settings saves need no core expectation.
  *
  * **Delete is the word and there is no way back.** One route takes a Custom
  * persona out of every list and picker for good; underneath the row is stamped
  * rather than removed, so every version stays readable and a simulation that
  * pinned one still reads true. Predefined personas — Egma's own — cannot be
- * deleted or changed at all, and Fork is how a team gets a Custom version of
- * one.
+ * deleted or have their cores edited. Each project may edit its own settings
+ * or Clone the current core into a Custom persona.
  *
  * **Names are not unique, so nothing here is addressed by one.** Every address
  * and every reference is a stable `prs_` identifier. Two personas called
@@ -118,8 +118,8 @@ const REFUSALS = {
    * branches on; the sentence is what a person reads.
    */
   predefinedPersona: (personaId: string): string =>
-    `Persona ${personaId} is Predefined and cannot be changed or deleted. ` +
-    `Fork it to make a Custom persona you can edit.`,
+    `Persona ${personaId} is Predefined. Its core and metadata cannot be changed, and it cannot be deleted. ` +
+    `Clone it to make a Custom persona you can edit.`,
 
   invalidCursor: (cursor: string): string =>
     `Cursor ${cursor} is not valid for this list. Remove it and start from ` +
@@ -249,7 +249,8 @@ function describedPersona(one: Persona): Record<string, unknown> {
     identityName: one.identityName,
     personality: one.personality,
     language: one.language,
-    models: one.models,
+    parameterContract: one.parameterContract,
+    settings: one.settings === null ? null : { id: one.settings.id, models: one.settings.models, createdAt: one.settings.createdAt.toISOString(), updatedAt: one.settings.updatedAt.toISOString() },
     owner: one.owner,
     archivedAt: one.archivedAt?.toISOString() ?? null,
     createdAt: one.createdAt.toISOString(),
@@ -266,7 +267,7 @@ function describedVersion(one: PersonaVersion): Record<string, unknown> {
     identityName: one.identityName,
     personality: one.personality,
     language: one.language,
-    models: one.models,
+    parameterContract: one.parameterContract,
     createdAt: one.createdAt.toISOString(),
   };
 }
@@ -502,14 +503,7 @@ export async function personaRoutes(
       return sendRefusal(reply, "unprocessable", unexpected);
     }
 
-    if (!("models" in body)) {
-      return sendRefusal(
-        reply,
-        "unprocessable",
-        "a persona needs one complete models value with llm, stt and tts",
-      );
-    }
-    const models = validPersonaModels(body.models);
+    const models = "models" in body ? validPersonaModels(body.models) : undefined;
 
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
@@ -522,25 +516,15 @@ export async function personaRoutes(
       identityName: text(body.identityName),
       personality: text(body.personality),
       language: text(body.language),
-      models,
+      ...(models === undefined ? {} : { models }),
     });
 
     return reply.code(201).send(describedPersona(created));
   });
 
   /**
-   * A partial edit — the same shape with every field optional.
-   *
-   * What the body leaves out, the persona keeps. A name or a description is
-   * identity and writes in place; the identity name, personality, language and
-   * models mint a version unless they are identical to the current one, in
-   * which case nothing is written at all and a nervous re-save leaves no
-   * history behind.
-   *
-   * **It names no expectation, and that is the decision rather than an
-   * omission.** Persona writes are last-write-wins. A body still carrying an
-   * `expectedRevision` or an `expectedVersionId` is refused as an unknown key,
-   * because a client sending one believes in a guard that is not there.
+   * Absent fields stay saved. Core edits require the current base; settings
+   * and live metadata save without creating a version.
    */
   registerPlatformOperation(app, personaOperations.updatePersona, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -550,7 +534,7 @@ export async function personaRoutes(
     const refused = mayAuthor(reply, auth, "edit personas");
     if (refused !== undefined) return refused;
 
-    const unexpected = unknownBody(body, PERSONA_BODY_FIELDS);
+    const unexpected = unknownBody(body, [...PERSONA_BODY_FIELDS, "expectedVersionId"]);
     if (unexpected !== undefined) {
       return sendRefusal(reply, "unprocessable", unexpected);
     }
@@ -573,10 +557,26 @@ export async function personaRoutes(
         : {}),
       ...("language" in body ? { language: text(body.language) } : {}),
       ...(models === undefined ? {} : { models }),
+      ...("expectedVersionId" in body ? { expectedVersionId: text(body.expectedVersionId) } : {}),
     });
 
     if (edited === undefined) return noSuchPersona(reply, personaId);
     return reply.send(describedPersona(edited));
+  });
+
+  registerPlatformOperation(app, personaOperations.usePersona, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { personaId } = request.params as { personaId: string };
+    const body = (request.body ?? {}) as Body;
+    const refused = mayAuthor(reply, auth, "use personas");
+    if (refused !== undefined) return refused;
+    const unexpected = unknownBody(body, ["projectId", "models"]);
+    if (unexpected !== undefined) return sendRefusal(reply, "unprocessable", unexpected);
+    const acting = await projectFor(auth, given(text(body.projectId)));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+    const one = await usePersona(acting.auth, personaId, "models" in body ? validPersonaModels(body.models) : undefined);
+    if (one === undefined) return noSuchPersona(reply, personaId);
+    return reply.send(describedPersona(one));
   });
 
   /**
@@ -644,6 +644,9 @@ export async function personaRoutes(
    * fault.
    */
   app.setErrorHandler(async (error, _request, reply) => {
+    if (error instanceof PersonaVersionConflictError) {
+      return sendRefusal(reply, "version_conflict", error.message);
+    }
     if (error instanceof EgmaProvidedPersonaError) {
       return sendRefusal(
         reply,

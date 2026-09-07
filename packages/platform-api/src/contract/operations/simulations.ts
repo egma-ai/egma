@@ -85,11 +85,10 @@ const gradingPlanSchema = {
   type: "object",
   description: "The grader definitions, versions, and pass thresholds frozen when the run started. Regrading uses this selection.",
   properties: {
-    state: { type: "string", enum: ["run_start"] },
     capturedAt: dateTimeSchema,
     items: arrayOf(planItemSchema),
   },
-  required: ["state", "capturedAt", "items"],
+  required: ["capturedAt", "items"],
   additionalProperties: false,
 } as const;
 

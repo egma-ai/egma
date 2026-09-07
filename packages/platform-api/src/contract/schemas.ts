@@ -95,11 +95,11 @@ const povSeriesSchema = {
 
 export const metricSchema = {
   type: "object",
-  description: "One metric from one side of the conversation. Turn response latency and first response latency prefer the agent's series when available. A second series stays separate in otherPov.",
+  description: "One metric from one side of the conversation. Simulation metrics prefer the persona's series when available. Production traces use the agent's evidence. A second series stays separate in otherPov.",
   properties: {
     measure: {
       type: "string",
-      description: "Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the start of the agent's reply, using speech boundaries for voice when available. first_response_latency measures the time from conversation start to the agent's first reply. Both use milliseconds.",
+      description: "Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the agent's reply. For voice simulations, it runs from the end of the caller's played audio, including trailing padding, to the arrival of the agent's audio. first_response_latency measures the wait from conversation start to the first reply. Both use milliseconds.",
     },
     unit: { type: "string" },
     derived: { type: "boolean" },

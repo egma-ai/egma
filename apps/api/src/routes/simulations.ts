@@ -169,7 +169,6 @@ function describedPlanForSimulation(
     );
   }
   return {
-    state: plan.state,
     capturedAt: plan.capturedAt.toISOString(),
     items: group.items.map((item) => ({
       projectGraderId: item.projectGraderId,

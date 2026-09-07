@@ -58,7 +58,7 @@ export const graderOperations = {
     path: "/v1/graders/{graderId}",
     summary: "Update a project grader's policy",
     description:
-      "Changes policy for future work. Existing simulation grading plans keep their selected definition, settings, and threshold, including when regraded. Expected behaviors has fixed scope; its pass threshold remains editable.",
+      "Change model settings, scope, or threshold for future work. Existing simulation plans keep their selected definitions and settings, including when regraded. Expected behaviors has fixed scope; its model and threshold are editable.",
     tag: "Graders",
     security: "credentialed",
     request: {
@@ -75,7 +75,7 @@ export const graderOperations = {
           settings: {
             ...projectGraderPolicyInputProperties.settings,
             description:
-              "Values for the definition's settingDefinitions. Response latency uses maximum_response_time_ms, a positive integer in milliseconds.",
+              "Complete values for the definition's settingDefinitions. LLM graders use llm_provider and llm_model. Response latency uses maximum_response_time_ms, a positive integer in milliseconds. These settings belong to this project and do not create a definition version.",
           },
           passThreshold: {
             ...projectGraderPolicyInputProperties.passThreshold,

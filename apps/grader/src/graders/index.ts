@@ -5,7 +5,6 @@ import type {
   GraderExecutor,
   GraderResult,
 } from "./contract.ts";
-import { executeExpectedBehaviors } from "./expected-behaviors.ts";
 import { executeLlmAsJudge } from "./llm-as-judge.ts";
 import { executeResponseLatency } from "./response-latency.ts";
 
@@ -15,9 +14,6 @@ const GENERIC_LLM_EXECUTOR: GraderExecutor = {
 
 /** The shared definitions this worker knows how to execute. */
 const EXECUTORS: Readonly<Record<string, GraderExecutor | undefined>> = {
-  [PREDEFINED_GRADERS.expectedBehaviors]: {
-    execute: executeExpectedBehaviors,
-  },
   [PREDEFINED_GRADERS.responseLatency]: {
     execute: executeResponseLatency,
   },
@@ -25,10 +21,9 @@ const EXECUTORS: Readonly<Record<string, GraderExecutor | undefined>> = {
 
 /** Execute one frozen grader definition and return one top-level result. */
 export async function execute(execution: Execution): Promise<GraderResult> {
-  const executor = EXECUTORS[execution.definition.definitionId] ??
-    (execution.definition.type === "llm_as_judge"
-      ? GENERIC_LLM_EXECUTOR
-      : undefined);
+  const executor = execution.definition.type === "llm_as_judge"
+    ? GENERIC_LLM_EXECUTOR
+    : EXECUTORS[execution.definition.definitionId];
   if (executor === undefined) {
     return {
       score: null,
