@@ -4208,7 +4208,6 @@ export type CreateRunData = {
         suiteId: string;
         agentId: string;
         connectionId: string;
-        idempotencyKey: string;
         name?: string;
         expectedTestVersions?: Array<{
             testId: string;

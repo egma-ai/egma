@@ -78,17 +78,6 @@ export const CODES = {
   /** A provider needed for setup did not answer. The customer may retry. */
   provider_unavailable: 503,
   /**
-   * A start action that named no idempotency key. 422 rather than 409: nothing
-   * conflicts, something required is missing, and the fix is to send one.
-   */
-  idempotency_key_required: 422,
-  /**
-   * A key reused over a different request. Answering the original run would
-   * tell somebody their new selection had started when it had not, so the
-   * third answer is the only honest one.
-   */
-  idempotency_conflict: 409,
-  /**
    * A Retry that could not be derived, because something the earlier run used
    * is no longer active or no longer applies. Its own code rather than a plain
    * conflict because the fix is a specific one and a page can offer it: the
@@ -266,15 +255,6 @@ export const REFUSALS = {
   projectSlugTaken: (slug: string): string =>
     `Project slug ${slug} is already in use in this organization. Choose a ` +
     "different slug and save the project again.",
-
-  idempotencyKeyRequired:
-    "Starting a run requires an idempotency key. Send one stable key for " +
-    "this start action and try again.",
-
-  idempotencyConflict: (key: string): string =>
-    `Idempotency key ${key} already started a different run. Reuse the ` +
-    "original request, or send a new key for this run.",
-
 } as const;
 
 /** The body could never be written, whatever is there. */

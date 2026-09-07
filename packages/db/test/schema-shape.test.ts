@@ -21,8 +21,7 @@ const IDENTIFIER_SQL_TYPE = 'text COLLATE "C"';
  * with the factory.
  *
  * A table whose identity is somebody else's key pins that key's prefix, which
- * is why `organization_settings` pins `org_` and the junction naming who calls
- * about a test version pins `tstv_`.
+ * is why the junction naming who calls about a test version pins `tstv_`.
  */
 const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   user: "usr",
@@ -31,7 +30,6 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   verification: "vrf",
   device_code: "dvc",
   organization: "org",
-  organization_settings: "org",
   project: "prj",
   membership: "mbr",
   invitation: "inv",
@@ -57,10 +55,6 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   run: "run",
   run_event: "run",
   simulation: "sim",
-  // The operations a client may safely send twice. Its identity is the whole
-  // five-column key rather than an id of its own, so it pins its leading
-  // column — the shape both junction tables have, for the same reason.
-  idempotent_operation: "org",
   grading_job: "gjb",
   // One pulled agent's machine notebook: cursor, windows, lease, retry clock.
   monitoring_state: "mst",

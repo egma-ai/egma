@@ -100,7 +100,6 @@ async function aRun(suiteId = oneCallerSuite) {
     suiteId,
     agentId,
     connectionId,
-    idempotencyKey: newId("run"),
   });
 }
 

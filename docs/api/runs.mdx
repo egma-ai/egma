@@ -27,12 +27,6 @@ persona versions that it executes. A later test edit cannot change old evidence.
   The `con_…` connection ID. It must belong to the selected agent.
 </ParamField>
 
-<ParamField body="idempotencyKey" type="string" required>
-  A client-generated key for safe network recovery. Sending the same request
-  with the same key returns the original run header instead of starting a
-  second run. Using the key for different input is refused.
-</ParamField>
-
 <ParamField body="name" type="string">
   An optional display name for this run.
 </ParamField>
@@ -56,12 +50,13 @@ curl -X POST https://your-egma-host/v1/runs \
     "suiteId": "ste_01JXMK8P2QN4R6S9T1UV3WX5Y",
     "agentId": "agt_01JXMK8P2QN4R6S9T1UV3WX5Y",
     "connectionId": "con_01JXMK8P2QN4R6S9T1UV3WX5Y",
-    "idempotencyKey": "release-2026-08-21-northside",
     "name": "Northside release check"
   }'
 ```
 
-The start response is a bounded run header. It does not embed every simulation.
+Each accepted start request creates a new run, including a repeated request
+with the same input. The start response is a bounded run header. It does not
+embed every simulation.
 
 ## Run header fields
 

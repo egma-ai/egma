@@ -18,7 +18,6 @@ import {
   getTest,
   getTestSuite,
   IdentityConflictError,
-  IdempotencyConflictError,
   latestRunEventSequence,
   listRunEvents,
   listRuns,
@@ -81,7 +80,6 @@ function runInput(suiteId: string, extra: Partial<NewRun> = {}): NewRun {
     suiteId,
     agentId: world.frontDesk,
     connectionId,
-    idempotencyKey: newId("run"),
     ...extra,
   };
 }
@@ -379,22 +377,25 @@ describe("permanent deletion", () => {
 });
 
 describe("complete-suite runs", () => {
-  it("replays one network idempotency key and refuses a changed request", async () => {
-    const suite = await createTestSuite(actingAsAcme(), { name: "Idempotent run" });
-    await testIn(suite.id, "Run once");
-    const input = runInput(suite.id, { idempotencyKey: "network-attempt-1" });
+  it("creates separate runs for repeated and concurrent start requests", async () => {
+    const suite = await createTestSuite(actingAsAcme(), { name: "Repeated runs" });
+    await testIn(suite.id, "Run each time");
+    const input = runInput(suite.id);
 
     const first = await startRun(actingAsAcme(), input);
-    const replay = await startRun(actingAsAcme(), input);
-    expect(replay.id).toBe(first.id);
-    const { rows } = await database.sql<{ count: string }>(
-      "select count(*)::text as count from run where id = $1",
-      [first.id],
+    const repeated = await startRun(actingAsAcme(), input);
+    const concurrent = await Promise.all([
+      startRun(actingAsAcme(), input),
+      startRun(actingAsAcme(), input),
+    ]);
+    const ids = [first.id, repeated.id, ...concurrent.map((run) => run.id)];
+    expect(new Set(ids).size).toBe(4);
+    const { rows } = await database.sql<{ id: string; count: string }>(
+      "select run_id as id, count(*)::text as count from simulation where run_id = any($1::text[]) group by run_id",
+      [ids],
     );
-    expect(rows).toEqual([{ count: "1" }]);
-    await expect(
-      startRun(actingAsAcme(), { ...input, name: "Different request" }),
-    ).rejects.toThrow(IdempotencyConflictError);
+    expect(rows).toHaveLength(4);
+    expect(rows.every((row) => row.count === "1")).toBe(true);
   });
 
   it("requires the current version for content edits and refuses stale writes", async () => {

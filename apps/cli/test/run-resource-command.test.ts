@@ -207,13 +207,12 @@ describe("Run resource commands", () => {
       connectionId: "con_one",
       expectedTestVersions: [{ testId: TEST_ID, versionId: VERSION_ID }],
     });
-    expect(runInputs[0]?.idempotencyKey).toMatch(/^run_[0-9a-f-]+$/u);
+    expect(runInputs[0]).not.toHaveProperty("idempotencyKey");
     expect(failed).toEqual([]);
     expect(out).toEqual([
       `Started Run ${RUN_ID}.`,
       `View its progress in Egma: ${URL}/projects/${PROJECT_ID}/runs/${RUN_ID}`,
     ]);
-    expect(out.join("\n")).not.toContain("idempotency");
     expect(calls.some((call) => call.includes("/simulations"))).toBe(false);
     expect(calls.some((call) => call.includes("/events"))).toBe(false);
     expect(

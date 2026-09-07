@@ -361,7 +361,6 @@ describe("a browser working in a project that is not the first", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
       name: "The first run in Outbound",
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
@@ -478,7 +477,6 @@ describe("a browser working in a project that is not the first", () => {
       suiteId,
       agentId,
       connectionId: (registered.body.connection as { id: string }).id,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
@@ -571,7 +569,6 @@ describe("a browser working in a project that is not the first", () => {
       suiteId,
       agentId,
       connectionId: (registered.body.connection as { id: string }).id,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
@@ -709,7 +706,6 @@ describe("a browser working in a project that is not the first", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
       name: "Started from the address",
     });
     expect(started.statusCode, started.body).toBe(201);
@@ -864,7 +860,6 @@ describe("a key for the whole organization, where the organization holds two pro
       suiteId,
       agentId,
       connectionId: (registered.body.connection as { id: string }).id,
-      idempotencyKey: newId("run"),
       name: "The first run in Outbound",
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);

@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
  * projects apart, that a real Chrome makes audio of a signed link, and that
  * clicking through in order gets somebody where they were going. **A matrix is
  * never one of those.** Every combination of role, lifecycle state, revision,
- * refusal, idempotency key and repository format is proved at
+ * refusal, run start and repository format is proved at
  * a seam where one case costs nothing, and the browser walks one path through
  * it.
  *
@@ -77,9 +77,9 @@ const PROVED_IN_THE_FAST_LANE: readonly {
     says: /expectedRevision/u,
   },
   {
-    concern: "idempotency keys on a run",
-    file: "apps/api/test/runs-suite-contract.test.ts",
-    says: /idempotency/iu,
+    concern: "each repeated run start creates a separate run",
+    file: "packages/db/test/test-suites.test.ts",
+    says: /creates separate runs for repeated/iu,
   },
   {
     concern: "repository synchronization, atomicity, and what it refuses",

@@ -63,7 +63,7 @@ it.each(["grader", "persona"] as const)("selects a coherent run after waiting fo
   let launch: ReturnType<typeof request> | undefined;
   try {
     const publisherPid = await blockedBy(gatePid);
-    launch = request("POST", "/v1/runs", { suiteId: suite.id, agentId: registered.agent.id, connectionId: registered.connection.id, idempotencyKey: newId("run"), expectedTestVersions: [{ testId: test.id, versionId: test.versionId }] });
+    launch = request("POST", "/v1/runs", { suiteId: suite.id, agentId: registered.agent.id, connectionId: registered.connection.id, expectedTestVersions: [{ testId: test.id, versionId: test.versionId }] });
     await blockedBy(publisherPid);
     await gate.sql("commit");
     await publication;
