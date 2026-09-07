@@ -271,11 +271,11 @@ describe("the race between deleting a persona and naming them", () => {
       // the persona, and the stamp it is about to commit.
       await connection.sql("begin");
       await connection.sql(
-        "select id from persona where id = $1 for update",
+        "select id from persona_definition where id = $1 for update",
         [cora],
       );
       await connection.sql(
-        "update persona set archived_at = now() where id = $1",
+        "update persona_definition set archived_at = now() where id = $1",
         [cora],
       );
 
@@ -318,7 +318,7 @@ describe("the race between deleting a persona and naming them", () => {
       // about to name, then the rows that name them.
       await connection.sql("begin");
       await connection.sql(
-        "select id from persona where id = $1 for share",
+        "select id from persona_definition where id = $1 for share",
         [cyrus],
       );
       const written = await writeTestNaming(connection, {

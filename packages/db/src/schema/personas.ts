@@ -32,7 +32,7 @@ import {
  * nothing about what they want on a given occasion (the test's business) and
  * nothing about how the agent under test is reached.
  *
- * Two tables so that two different things can be pointed at. A test names the
+ * A test names the
  * identity row — this persona, however they currently behave. A run
  * pins a version row — this persona, frozen exactly as they were when
  * the simulation happened, so editing today never rewrites what an old result
@@ -114,14 +114,9 @@ export const persona = pgTable(
 );
 
 /**
- * One frozen version: who this persona is, and how they execute.
- *
- * **Typed columns, and plainly checked.** Behavior was two jsonb bags held
- * shut by eighty-odd lines of jsonpath, which bought flexibility and then
- * forbade it. Every field a version can carry is now a column Postgres knows
- * the type of, and every rule about one is a check a reader can read. A trait
- * that returns comes back as a column, together with the runtime that consumes
- * it, in one change.
+ * One frozen core: who this persona is and which settings it declares.
+ * Project choices live on project_persona and simulations freeze those choices
+ * independently. A version owns only core behavior and the parameter contract.
  *
  * The provider catalog, not Postgres, decides which provider, model and
  * adapter combinations this release can execute; these checks protect the
@@ -172,17 +167,37 @@ export const personaVersion = pgTable(
 );
 
 /** One project's complete settings for a shared or project-owned persona. */
-export const projectPersona = pgTable("project_persona", {
-  id: idText("id").primaryKey(),
-  organizationId: idText("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
-  projectId: idText("project_id").notNull(),
-  personaDefinitionId: idText("persona_definition_id").notNull().references(() => persona.id),
-  parameterValues: jsonb("parameter_values").$type<PersonaParameterValues>().notNull(),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-}, (table) => [
-  prefixCheck("project_persona_id_prefix", table.id, "ppr"),
-  foreignKey({ name: "project_persona_project_organization_fk", columns: [table.projectId, table.organizationId], foreignColumns: [project.id, project.organizationId] }).onDelete("cascade"),
-  unique("project_persona_project_definition_unique").on(table.projectId, table.personaDefinitionId),
-  check("project_persona_parameters_are_object", sql`jsonb_typeof(${table.parameterValues}) = 'object'`),
-]);
+export const projectPersona = pgTable(
+  "project_persona",
+  {
+    id: idText("id").primaryKey(),
+    organizationId: idText("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    projectId: idText("project_id").notNull(),
+    personaDefinitionId: idText("persona_definition_id")
+      .notNull()
+      .references(() => persona.id),
+    parameterValues: jsonb("parameter_values")
+      .$type<PersonaParameterValues>()
+      .notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    prefixCheck("project_persona_id_prefix", table.id, "ppr"),
+    foreignKey({
+      name: "project_persona_project_organization_fk",
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [project.id, project.organizationId],
+    }).onDelete("cascade"),
+    unique("project_persona_project_definition_unique").on(
+      table.projectId,
+      table.personaDefinitionId,
+    ),
+    check(
+      "project_persona_parameters_are_object",
+      sql`jsonb_typeof(${table.parameterValues}) = 'object'`,
+    ),
+  ],
+);

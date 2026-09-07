@@ -128,6 +128,23 @@ const RECOMMENDED_MODELS: PersonaModels = {
   },
 };
 
+const PARAMETER_CONTRACT: Persona["parameterContract"] = [
+  ...Object.entries({
+    llm_provider: "openai",
+    llm_model: "gpt-4o-mini",
+    stt_provider: "openai",
+    stt_model: "gpt-live-transcribe",
+    tts_provider: "cartesia",
+    tts_model: "sonic-3.5",
+    tts_voice_id: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+  }).map(([key, defaultValue]) => ({
+    key, label: key, valueType: "string" as const, defaultValue,
+    unit: null, minimum: null, maximum: null,
+  })),
+  { key: "tts_speed", label: "Speaking speed", valueType: "number", defaultValue: 1,
+    unit: null, minimum: 0.6, maximum: 1.5 },
+];
+
 const PERSONA_FORM: PersonaForm = {
   modelCatalog: [
     { provider: "openai", job: "llm", model: "gpt-4o-mini", label: "OpenAI" },
@@ -257,7 +274,8 @@ const RITA: Persona = {
   identityName: "Rita",
   personality: "Seventy, hard of hearing, and gets louder when she mishears.",
   language: "en-GB",
-  models: RECOMMENDED_MODELS,
+  parameterContract: PARAMETER_CONTRACT,
+  settings: { id: "ppr_1", models: RECOMMENDED_MODELS, createdAt: "2026-08-15T10:00:00.000Z", updatedAt: "2026-08-20T10:00:00.000Z" },
   archivedAt: null,
   createdAt: "2026-08-15T10:00:00.000Z",
   updatedAt: "2026-08-20T10:00:00.000Z",
@@ -275,10 +293,8 @@ const PREDEFINED: Persona = {
   personality:
     "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time.",
   language: "en-US",
-  models: {
-    ...RECOMMENDED_MODELS,
-    llm: { provider: "openai", model: "gpt-5.6-terra" },
-  },
+  parameterContract: PARAMETER_CONTRACT.map(field => field.key === "llm_model" ? { ...field, defaultValue: "gpt-5.6-terra" } : field),
+  settings: null,
   archivedAt: null,
   createdAt: "2026-08-19T23:09:01.674Z",
   updatedAt: "2026-08-19T23:09:01.674Z",
@@ -292,7 +308,7 @@ const RITA_VERSIONS: readonly PersonaVersion[] = [
     identityName: "Rita",
     personality: "Seventy, hard of hearing, and gets louder when she mishears.",
     language: "en-GB",
-    models: RECOMMENDED_MODELS,
+    parameterContract: PARAMETER_CONTRACT,
     createdAt: "2026-08-20T10:00:00.000Z",
   },
   {
@@ -302,7 +318,7 @@ const RITA_VERSIONS: readonly PersonaVersion[] = [
     identityName: "Rita",
     personality: "Rita, as she was first written.",
     language: "en-US",
-    models: RECOMMENDED_MODELS,
+    parameterContract: PARAMETER_CONTRACT,
     createdAt: "2026-08-15T10:00:00.000Z",
   },
 ];
@@ -449,7 +465,7 @@ describe("the Personas list", () => {
     render(<PersonasPage />);
 
     expect(await screen.findByText("Impatient Rita")).toBeTruthy();
-    expect(await rowMenuItems("Impatient Rita")).toEqual(["Fork", "Delete"]);
+    expect(await rowMenuItems("Impatient Rita")).toEqual(["Clone", "Delete"]);
     fireEvent.keyDown(
       await screen.findByRole("menu", {
         name: "Open the menu for Impatient Rita",
@@ -457,7 +473,7 @@ describe("the Personas list", () => {
       { key: "Escape" },
     );
     /* A Predefined persona cannot be deleted, so it is not offered. */
-    expect(await rowMenuItems("Everyday caller")).toEqual(["Fork"]);
+    expect(await rowMenuItems("Everyday caller")).toEqual(["Clone"]);
   });
 
   it("marks the open record's row with Ember Wash and a leading mark", async () => {
@@ -701,7 +717,7 @@ describe("one persona's sheet", () => {
     ]);
     expect(within(sheet).getByText("Rita")).toBeTruthy();
 
-    expect(readsUnder(sheet, "Models")).toEqual([
+    expect(readsUnder(sheet, "Project settings")).toEqual([
       "Language model",
       "Speech-to-text",
       "Text-to-speech",
@@ -730,7 +746,7 @@ describe("one persona's sheet", () => {
     ).toBeTruthy();
   });
 
-  it("carries Edit, Fork and Delete in the sheet's own ⋮", async () => {
+  it("carries Edit, Clone and Delete in the sheet's own ⋮", async () => {
     ritaOpen();
     render(<PersonasPage />);
     await openRow("Impatient Rita");
@@ -740,10 +756,10 @@ describe("one persona's sheet", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Edit", "Fork", "Delete"]);
+    ).toEqual(["Edit", "Clone", "Delete"]);
   });
 
-  it("edits in place, sends the flat fields, and guards nothing with a revision", async () => {
+  it("edits the current core and sends its version as the edit base", async () => {
     const saved: Persona = {
       ...RITA,
       version: 4,
@@ -786,46 +802,51 @@ describe("one persona's sheet", () => {
       language: RITA.language,
     });
     expect(written).not.toHaveProperty("expectedRevision");
-    expect(written).not.toHaveProperty("expectedVersionId");
+    expect(written).toHaveProperty("expectedVersionId", RITA.versionId);
     expect(written).not.toHaveProperty("traits");
     /* Untouched halves are not sent at all. */
     expect(written).not.toHaveProperty("name");
     expect(written).not.toHaveProperty("models");
   });
 
-  it("reads an older version in the same panel and writes it forward", async () => {
+  it("keeps a conflicted draft until cancel, then edits the current core", async () => {
+    const current = { ...RITA, version: 4, versionId: "prsv_4", personality: "The saved newer behavior." };
     const { asked } = ritaOpen({
-      "PATCH /v1/personas/prs_1": {
-        status: 200,
-        body: { ...RITA, version: 4, versionId: "prsv_4" },
-      },
+      "GET /v1/personas/prs_1": [{ status: 200, body: RITA }, { status: 200, body: current }],
+      "PATCH /v1/personas/prs_1": { status: 409, body: { error: "version_conflict", message: "The persona core changed. Read its current version before editing." } },
     });
     render(<PersonasPage />);
     const sheet = await openRow("Impatient Rita");
-
-    fireEvent.click(within(sheet).getAllByRole("button", { name: "Read" })[0]!);
-
-    expect(await within(sheet).findByText("Custom · v1 of 3")).toBeTruthy();
-    expect(within(sheet).getByText("Older version")).toBeTruthy();
-    expect(
-      within(sheet).getByText("Rita, as she was first written."),
-    ).toBeTruthy();
-
-    fireEvent.click(
-      within(sheet).getByRole("button", { name: "Use as new version" }),
-    );
-
-    await waitFor(() =>
-      expect(asked.some((one) => one.method === "PATCH")).toBe(true),
-    );
-    expect(asked.find((one) => one.method === "PATCH")?.body).toMatchObject({
-      identityName: "Rita",
-      personality: "Rita, as she was first written.",
-      language: "en-US",
-    });
+    await openSheetMenu("Impatient Rita");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Edit" }));
+    fireEvent.change(within(sheet).getByLabelText("Personality*"), { target: { value: "My unsaved behavior." } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save changes" }));
+    await within(sheet).findByText("The persona core changed. Read its current version before editing.");
+    await waitFor(() => expect(asked.filter(request => request.method === "GET" && request.path.startsWith("/v1/personas/prs_1?")).length).toBe(2));
+    expect((within(sheet).getByLabelText("Personality*") as HTMLTextAreaElement).value).toBe("My unsaved behavior.");
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Discard changes" }));
+    await within(sheet).findByText("Custom · v4");
+    await openSheetMenu("Impatient Rita");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Edit" }));
+    expect((within(sheet).getByLabelText("Personality*") as HTMLTextAreaElement).value).toBe(current.personality);
   });
 
-  it("reads a Predefined persona as a shelf record with Fork as its one action", async () => {
+  it("reads an older core version without project models or restoration", async () => {
+    const { asked } = ritaOpen({});
+    render(<PersonasPage />);
+    const sheet = await openRow("Impatient Rita");
+    fireEvent.click(within(sheet).getAllByRole("button", { name: "Read" })[0]!);
+    expect(await within(sheet).findByText("Custom · v1 of 3")).toBeTruthy();
+    expect(within(sheet).getByText("Rita, as she was first written.")).toBeTruthy();
+    expect(within(sheet).getByText("Core history is read-only.")).toBeTruthy();
+    expect(within(sheet).queryByRole("button", { name: "Use as new version" })).toBeNull();
+    expect(within(sheet).queryByText("Language model")).toBeNull();
+    expect(asked.some((one) => one.method === "PATCH")).toBe(false);
+  });
+
+  it("offers project settings and cloning for a Predefined persona", async () => {
     apiAnswers({
       ...screenWith("admin", [RITA, PREDEFINED]),
       "GET /v1/personas/prs_0": { status: 200, body: PREDEFINED },
@@ -841,15 +862,15 @@ describe("one persona's sheet", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Fork"]);
+    ).toEqual(["Use", "Clone"]);
     fireEvent.keyDown(menu, { key: "Escape" });
 
     /* No footer, no history, and nothing about who it is shared with. */
     expect(sheet.querySelector("[data-slot=sheet-footer]")).toBeNull();
-    expect(within(sheet).queryByRole("region", { name: "Versions" })).toBeNull();
+    expect(within(sheet).getByRole("region", { name: "Versions" })).toBeTruthy();
     expect(within(sheet).queryByRole("region", { name: "Used by" })).toBeNull();
     expect(within(sheet).queryByText(/shared with/iu)).toBeNull();
-    expect(within(sheet).queryByText("Created")).toBeNull();
+    expect(within(sheet).getByText("Created")).toBeTruthy();
   });
 
   /** The editor, open on Rita, with one unsaved change in it. */

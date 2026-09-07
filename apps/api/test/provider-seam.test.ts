@@ -111,7 +111,7 @@ describe("the provider's footprint on the schema", () => {
     "organization",
     "organization_settings",
     "persona",
-    "persona_version",
+    "persona_definition_version",
     "project",
     "project_grader",
     "retell_call_retry",

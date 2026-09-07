@@ -363,7 +363,7 @@ function ProjectPersonas({ projectId }: { readonly projectId: string }) {
                 void fork(persona);
               }}
             >
-              Fork
+              Clone
             </MenuItem>
             {predefined ? null : (
               <>
