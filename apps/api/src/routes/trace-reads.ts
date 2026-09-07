@@ -259,6 +259,7 @@ function describedFacts(facts: TraceFacts): Record<string, unknown> {
     toolSpanCount: facts.toolSpanCount,
     erroredSpanCount: facts.erroredSpanCount,
     source: facts.source,
+    emitter: facts.emitter,
     pov: facts.pov,
     environment: facts.environment,
     connectionType: facts.connectionType,

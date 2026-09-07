@@ -40,6 +40,12 @@ const traceFactsSchema = {
     toolSpanCount: integerSchema,
     erroredSpanCount: integerSchema,
     source: { type: "string", enum: ["simulation", "production"] },
+    /**
+     * The storage word, `egma-runtime` or `agent`, kept for the clients that
+     * already read it; `pov` beside it is the same fact in the product's own
+     * word, `persona` or `agent`.
+     */
+    emitter: stringSchema,
     pov: { type: "string", enum: ["persona", "agent"] },
     environment: stringSchema,
     connectionType: stringSchema,
@@ -61,6 +67,7 @@ const traceFactsSchema = {
     "toolSpanCount",
     "erroredSpanCount",
     "source",
+    "emitter",
     "pov",
     "environment",
     "connectionType",

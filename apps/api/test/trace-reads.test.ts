@@ -260,6 +260,9 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
   it("says which platform produced it without inventing a connection type", async () => {
     const [trace] = (await listed()).traces;
     expect(trace?.source).toBe("production");
+    // The storage word, kept for the clients that already read it, and the
+    // product word beside it.
+    expect(trace?.emitter).toBe("agent");
     expect(trace?.pov).toBe("agent");
     expect(trace?.environment).toBe("default");
     expect(trace?.connectionType).toBe("");

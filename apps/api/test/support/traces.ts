@@ -346,6 +346,7 @@ export type ListedTrace = {
   readonly toolSpanCount: number;
   readonly erroredSpanCount: number;
   readonly source: string;
+  readonly emitter: string;
   readonly pov: "persona" | "agent";
   readonly environment: string;
   readonly connectionType: string;

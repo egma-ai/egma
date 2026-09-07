@@ -257,6 +257,12 @@ export type TraceFacts = {
   readonly erroredSpanCount: number;
   readonly source: string;
   /**
+   * The storage column these facts were counted over, verbatim:
+   * `egma-runtime` or `agent`. Kept beside `pov`, which is the same fact in
+   * the product's own word.
+   */
+  readonly emitter: string;
+  /**
    * **Whose POV these facts count** — the product word for the `emitter`
    * column, which never reaches a screen.
    *
@@ -1152,6 +1158,7 @@ function factsOf(traceId: string, row: SummaryRow): TraceFacts {
     toolSpanCount: counted(row.tool_span_count),
     erroredSpanCount: counted(row.errored_span_count),
     source: row.source,
+    emitter: row.emitter,
     pov: povOf(row.emitter),
     environment: row.environment,
     connectionType: row.connection_type,
