@@ -50,6 +50,7 @@ import {
 } from "../../../../lib/platform-client.ts";
 import { Select } from "@/components/ui/select";
 import { Field, Refused } from "../../../../ui/form.tsx";
+import { useDraftNavigation } from "../../../../ui/draft-navigation.tsx";
 import { NumberField } from "../../../../ui/number-field.tsx";
 import { Loading } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
@@ -575,9 +576,9 @@ export function LibraryGraderSheet({
   readonly onUsed: () => void;
   readonly onEditActive: (projectGraderId: string) => void;
 }) {
+  const draftNavigation = useDraftNavigation();
   const [mode, setMode] = useState<"details" | "use" | "clone" | "core">(opened);
   const [selectedVersion, setSelectedVersion] = useState(definitionVersion ?? entry.currentDefinitionVersion);
-  const historical = definitionVersion !== undefined || selectedVersion !== entry.currentDefinitionVersion;
   useEffect(() => {
     if (open) {
       setMode(opened);
@@ -585,7 +586,7 @@ export function LibraryGraderSheet({
     }
   }, [open, opened, definitionVersion, entry.currentDefinitionVersion]);
   return (
-    <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
+    <Sheet open={open} onOpenChange={(next) => !next && draftNavigation.request(onClose)}>
       <SheetContent aria-describedby={undefined}>
         <SheetHeader>
           <SheetTitle>
@@ -605,24 +606,26 @@ export function LibraryGraderSheet({
               : "Choose how this project will use the grader."}
           </SheetDescription>
         </SheetHeader>
-        {definitionVersion === undefined && mode === "details" ? (
-          <div>
-            <Field label="Core version" htmlFor="grader-core-version">
-              <Select id="grader-core-version" value={String(selectedVersion)}
-                onChange={(event) => setSelectedVersion(Number(event.target.value))}>
-                {Array.from({ length: entry.currentDefinitionVersion }, (_, at) => at + 1).reverse().map((version) =>
-                  <option key={version} value={String(version)}>v{version}{version === entry.currentDefinitionVersion ? " · Current" : " · Read-only"}</option>)}
-              </Select>
-            </Field>
-          </div>
-        ) : null}
         <DefinitionRead
           projectId={projectId}
           definitionId={entry.id}
           definitionVersion={selectedVersion}
         >
-          {(read) =>
-            historical || mode === "details" ? (
+          {(read) => {
+            const historical = definitionVersion !== undefined || read.definitionVersion !== read.currentDefinitionVersion;
+            return <>
+              {definitionVersion === undefined && (mode === "details" || historical) ? (
+                <div>
+                  <Field label="Core version" htmlFor="grader-core-version">
+                    <Select id="grader-core-version" value={String(read.definitionVersion)}
+                      onChange={(event) => setSelectedVersion(Number(event.target.value))}>
+                      {Array.from({ length: read.currentDefinitionVersion }, (_, at) => at + 1).reverse().map((version) =>
+                        <option key={version} value={String(version)}>v{version}{version === read.currentDefinitionVersion ? " · Current" : " · Read-only"}</option>)}
+                    </Select>
+                  </Field>
+                </div>
+              ) : null}
+            {historical || mode === "details" ? (
               <LibraryDetails
                 entry={read}
                 historical={historical}
@@ -634,17 +637,18 @@ export function LibraryGraderSheet({
               />
             ) : mode === "clone" || mode === "core" ? (
               <GraderCoreForm key={`${read.definitionVersion}:${mode}`} entry={read} projectId={projectId}
-                open={open} cloning={mode === "clone"} onDone={onUsed} onCancel={() => setMode("details")} />
+                open={open} cloning={mode === "clone"} onDone={onUsed} onCancel={() => draftNavigation.request(() => setMode("details"))} />
             ) : (
               <UseGraderForm
                 entry={read}
                 projectId={projectId}
                 open={open}
-                onCancel={() => setMode("details")}
+                onCancel={() => draftNavigation.request(() => setMode("details"))}
                 onUsed={onUsed}
               />
-            )
-          }
+            )}
+            </>;
+          }}
         </DefinitionRead>
       </SheetContent>
     </Sheet>
@@ -749,7 +753,7 @@ function GraderCoreForm({ entry, projectId, open, cloning, onDone, onCancel }: {
     const answer = cloning
       ? await platformAnswer(cloneGrader({ graderDefinitionId: entry.id, projectId, name: name.trim(), description: description.trim() || null }, { client: platformClient }))
       : await platformAnswer(updateGraderDefinition({ graderDefinitionId: entry.id, projectId,
-          baseDefinitionVersion: entry.currentDefinitionVersion, name: name.trim(), description: description.trim() || null,
+          baseDefinitionVersion: entry.definitionVersion, name: name.trim(), description: description.trim() || null,
           gradingInstructions: instructions.trim() }, { client: platformClient }));
     setSaving(false);
     if (answer.status === "signed-out") { window.location.replace("/sign-in"); return; }
@@ -1146,7 +1150,7 @@ export function CreateCustomGraderSheet({
   readonly onClose: () => void;
   readonly onCreated: () => void;
 }) {
-  const { answer: form } = useProjectRead(
+  const { answer: form, reload: reloadForm } = useProjectRead(
     (projectId) => platformAnswer(getGraderForm({ projectId }, { client: platformClient })), projectId,
   );
   const definitions = form?.status === "ready" ? form.value.settingDefinitions : [];
@@ -1154,6 +1158,9 @@ export function CreateCustomGraderSheet({
   useEffect(() => {
     if (open && form?.status === "ready") setSettings(initialSettings(form.value.settingDefinitions));
   }, [open, form]);
+  useEffect(() => {
+    if (form?.status === "signed-out") window.location.replace("/sign-in");
+  }, [form]);
   const filledSettings = form?.status === "ready" ? settingsFrom(definitions, settings) : null;
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -1340,7 +1347,15 @@ export function CreateCustomGraderSheet({
                 onChange={setThreshold}
               />
             </div>
-            <SettingsFields projectId={projectId} definitions={definitions} draft={settings} disabled={saving} onChange={setSettings} />
+            {form === null || form.status === "signed-out" ? (
+              <Loading what="grader models" />
+            ) : form.status !== "ready" ? (
+              <Refused message={form.refusal.message} action={
+                <Button type="button" variant="secondary" onClick={reloadForm}>Try again</Button>
+              } />
+            ) : (
+              <SettingsFields projectId={projectId} definitions={definitions} draft={settings} disabled={saving} onChange={setSettings} />
+            )}
             <Section title="Scope">
               <ScopeFields
                 key={scopeRevision}

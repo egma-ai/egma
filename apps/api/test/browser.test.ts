@@ -5565,6 +5565,15 @@ describe("project grader model settings", () => {
       library = proof.getByRole("dialog", { name: "Cloned behavior core" });
       await library.getByRole("button", { name: "Edit core", exact: true }).click();
       await library.getByLabel("Grading instructions").fill("The agent must speak clearly.");
+      await library.getByRole("button", { name: "Back", exact: true }).click();
+      let draftQuestion = proof.getByRole("dialog", { name: "Leave without saving?" });
+      await draftQuestion.getByRole("button", { name: "Keep editing", exact: true }).click();
+      await draftQuestion.waitFor({ state: "hidden" });
+      expect(await library.getByLabel("Grading instructions").inputValue()).toBe("The agent must speak clearly.");
+      await library.getByRole("button", { name: "Close", exact: true }).click();
+      draftQuestion = proof.getByRole("dialog", { name: "Leave without saving?" });
+      await draftQuestion.getByRole("button", { name: "Keep editing", exact: true }).click();
+      await draftQuestion.waitFor({ state: "hidden" });
       await library.getByRole("button", { name: "Save core", exact: true }).click();
       await library.waitFor({ state: "hidden" });
       await proof.getByRole("tab", { name: "Grader library" }).click();

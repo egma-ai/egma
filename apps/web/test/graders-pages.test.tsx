@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -106,7 +107,7 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-type Stubbed = { readonly status: number; readonly body: unknown };
+type Stubbed = { readonly status: number; readonly body: unknown; readonly waitFor?: Promise<void> };
 
 function apiAnswers(answers: Record<string, Stubbed | Stubbed[]>): {
   readonly asked: {
@@ -134,6 +135,7 @@ function apiAnswers(answers: Record<string, Stubbed | Stubbed[]>): {
       const answer = Array.isArray(held)
         ? (held[Math.min(at, held.length - 1)] as Stubbed)
         : held;
+      await answer.waitFor;
       return json(answer.status, answer.body);
     }),
   );
@@ -1512,5 +1514,111 @@ describe("the project Graders surface", () => {
     expect(
       within(sheet).getByLabelText("Maximum response time (p90)"),
     ).toBeTruthy();
+  });
+});
+
+const REVIEW_CORE: GraderLibraryEntry = {
+  ...EXPECTED_DEFINITION,
+  id: "grl_review",
+  name: "Reviewed core",
+  owner: "project",
+  scopeEditable: true,
+  gradingInstructions: "The version one instruction.",
+  activeProjectGraderId: null,
+};
+
+describe("grader review regressions", () => {
+  it("treats a fetched old core as read-only when the library row missed another editor's version", async () => {
+    const current = { ...REVIEW_CORE, definitionVersion: 2, currentDefinitionVersion: 2, gradingInstructions: "The version two instruction." };
+    const { asked } = apiAnswers({
+      ...standardAnswers("admin", [EXPECTED], [REVIEW_CORE]),
+      "GET /v1/grader-library/grl_review": [
+        { status: 200, body: { ...REVIEW_CORE, currentDefinitionVersion: 2 } },
+        { status: 200, body: current },
+      ],
+    });
+    render(<GradersPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Grader library" }));
+    await openRow("Reviewed core");
+    const sheet = await screen.findByRole("dialog", { name: "Reviewed core" });
+    await within(sheet).findByText("The version one instruction.");
+    for (const name of ["Edit core", "Clone grader", "Use in project"]) {
+      expect(within(sheet).queryByRole("button", { name })).toBeNull();
+    }
+    expect(within(sheet).getByRole("option", { name: "v1 · Read-only" })).toBeTruthy();
+    fireEvent.change(within(sheet).getByLabelText("Core version"), { target: { value: "2" } });
+    await within(sheet).findByText("The version two instruction.");
+    fireEvent.click(within(sheet).getByRole("button", { name: "Edit core" }));
+    expect((within(sheet).getByLabelText("Grading instructions*") as HTMLTextAreaElement).value).toBe(current.gradingInstructions);
+    expect(asked.filter((one) => one.method === "PATCH")).toEqual([]);
+  });
+
+  it("protects core drafts on Back and close, blocks closing during save, and keeps a stale save's original base", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const { asked } = apiAnswers({
+      ...standardAnswers("admin", [EXPECTED], [REVIEW_CORE]),
+      "GET /v1/grader-library/grl_review": { status: 200, body: REVIEW_CORE },
+      "PATCH /v1/grader-library/grl_review": {
+        status: 409, body: { error: "conflict", message: "This core changed. Read the current version before editing." }, waitFor: pending,
+      },
+    });
+    render(<GradersPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Grader library" }));
+    await openRow("Reviewed core");
+    const sheet = await screen.findByRole("dialog", { name: "Reviewed core" });
+    fireEvent.click(await within(sheet).findByRole("button", { name: "Edit core" }));
+    fireEvent.change(within(sheet).getByLabelText("Name*"), { target: { value: "My unsaved name" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Back" }));
+    let question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    fireEvent.click(within(question).getByRole("button", { name: "Keep editing" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull());
+    expect((within(sheet).getByLabelText("Name*") as HTMLInputElement).value).toBe("My unsaved name");
+    fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+    question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    fireEvent.click(within(question).getByRole("button", { name: "Keep editing" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull());
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save core" }));
+    await waitFor(() => expect(currentDraftState()).toBe("saving"));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("dialog", { name: "Reviewed core" })).toBe(sheet);
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+    await act(async () => { release(); });
+    await within(sheet).findByText("This core changed. Read the current version before editing.");
+    expect(asked.find((one) => one.method === "PATCH")?.body).toMatchObject({
+      baseDefinitionVersion: 1, gradingInstructions: REVIEW_CORE.gradingInstructions, name: "My unsaved name",
+    });
+    expect((within(sheet).getByLabelText("Name*") as HTMLInputElement).value).toBe("My unsaved name");
+    fireEvent.click(within(sheet).getByRole("button", { name: "Back" }));
+    question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    fireEvent.click(within(question).getByRole("button", { name: "Discard changes" }));
+    await within(sheet).findByRole("button", { name: "Edit core" });
+    expect(within(sheet).queryByLabelText("Name*")).toBeNull();
+  });
+
+  it("shows model-form loading and a failed read's retry without losing the create draft", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const answers = standardAnswers();
+    const form = answers["GET /v1/grader-form"] as Stubbed;
+    apiAnswers({
+      ...answers,
+      "GET /v1/grader-form": [
+        { status: 503, body: { error: "unavailable", message: "Grader model choices are unavailable. Try again." }, waitFor: pending },
+        form,
+      ],
+    });
+    render(<GradersPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Create custom grader" }));
+    const sheet = await screen.findByRole("dialog", { name: "Create custom grader" });
+    expect(await within(sheet).findByText("Loading grader models…")).toBeTruthy();
+    fillCustomGrader(sheet);
+    expect((within(sheet).getByRole("button", { name: "Create grader" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { release(); });
+    expect(await within(sheet).findByText("Grader model choices are unavailable. Try again.")).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Try again" }));
+    await within(sheet).findByLabelText("Language model*");
+    await waitFor(() => expect((within(sheet).getByRole("button", { name: "Create grader" }) as HTMLButtonElement).disabled).toBe(false));
+    expect((within(sheet).getByLabelText("Name*") as HTMLInputElement).value).toBe("Polite resolution");
   });
 });
