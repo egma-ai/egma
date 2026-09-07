@@ -206,6 +206,22 @@ export const cloudBillingAccount = pgTable(
     stripeSubscriptionId: text("stripe_subscription_id"),
     stripeSubscriptionStatus: text("stripe_subscription_status"),
     /**
+     * The `created` instant of the last subscription event applied to this
+     * account, as Stripe stamped it, or `null` where none has been.
+     *
+     * **What makes an out-of-order delivery harmless.** Stripe does not
+     * promise the order its webhooks arrive in, and the three columns above
+     * are written from whichever one turns up — so an older `updated` (active)
+     * arriving after a newer `deleted` would put a customer who cancelled back
+     * on Pro, and their next invoice would say so. The plan, the status and
+     * the anchor are only overwritten by an event stamped later than this, and
+     * the write that moves them moves this in the same statement.
+     *
+     * Null on every account until its first subscription event, which is every
+     * Hobby account for ever: a plan nobody bought has no event to be behind.
+     */
+    stripeSubscriptionEventAt: moment("stripe_subscription_event_at"),
+    /**
      * The inference balance in millionths of a US dollar, as a materialised
      * sum of the ledger. Signed: see the note above.
      */

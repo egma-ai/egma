@@ -92,6 +92,7 @@ function creditFrom(
 function subscriptionFactFrom(
   subscription: Stripe.Subscription,
   finished: boolean,
+  occurredAt: Date,
 ): StripeFact {
   const customerId = idOf(subscription.customer);
   if (customerId === null) {
@@ -117,6 +118,9 @@ function subscriptionFactFrom(
     status: subscription.status,
     periodStart: periodStartOf(subscription),
     finished,
+    // The envelope's own instant, which is the only thing in a delivery that
+    // says where it belongs in the order Stripe did not deliver it in.
+    occurredAt,
   };
 }
 
@@ -170,6 +174,7 @@ export function deliveryFrom(event: Stripe.Event): StripeDelivery {
         fact: subscriptionFactFrom(
           event.data.object,
           event.type === "customer.subscription.deleted",
+          occurredAt,
         ),
       };
     default:

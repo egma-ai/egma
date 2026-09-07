@@ -9,7 +9,7 @@ import {
   type AuthContext,
   type Queryable,
 } from "@egma/db";
-import { and, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 
 import { purchasedCreditKey } from "../idempotency.ts";
 import {
@@ -274,11 +274,34 @@ async function creditFrom(
  * them.
  *
  * **Level-triggered, never edge-triggered.** The status decides the plan every
- * time, so a delivery that arrives late or out of order settles on the same
- * answer as the one that arrived on time — there is no "was active, became
- * past_due" transition to miss. A finished subscription puts the anchor back
- * to the organization's own creation instant, which is what a Hobby month has
- * always been counted from and needs no Stripe object to exist.
+ * time, so a delivery that arrives late settles on the same answer as the one
+ * that arrived on time — there is no "was active, became past_due" transition
+ * to miss. A finished subscription puts the anchor back to the organization's
+ * own creation instant, which is what a Hobby month has always been counted
+ * from and needs no Stripe object to exist.
+ *
+ * **Level-triggered is not order-proof, and that is what the mark is for.**
+ * Stripe does not promise the order it delivers in, and every state here is
+ * read off the event rather than off Stripe — so an older
+ * `customer.subscription.updated` (active) arriving after a newer
+ * `customer.subscription.deleted` would restore Pro for a customer who had
+ * cancelled, and nothing would correct it until Stripe sent something else.
+ * The account remembers the `created` instant of the last subscription event
+ * applied, and an event stamped no later than it changes nothing. Equal counts
+ * as stale: two events Stripe stamped in the same second cannot be put in
+ * order, and keeping the state already applied is the half that cannot sell
+ * somebody a plan they cancelled.
+ *
+ * **The comparison is in the `where`, not in a branch above it.** Two
+ * deliveries for one customer can be applied at the same moment, and a read
+ * followed by a write would let the older one win the race it lost on the
+ * clock. The row not matching is the whole of what "stale" means here: the
+ * account was found by its own id one statement ago, so the mark is the only
+ * predicate that can refuse it.
+ *
+ * The event is recorded either way — the row is written before any of this, in
+ * the same transaction — so a stale delivery is answered rather than retried
+ * for ever.
  */
 async function subscriptionFrom(
   tx: Queryable,
@@ -286,7 +309,7 @@ async function subscriptionFrom(
   fact: Extract<StripeFact, { kind: "subscription" }>,
 ): Promise<AppliedDelivery> {
   const paying = !fact.finished && isPaying(fact.status);
-  await tx
+  const [applied] = await tx
     .update(cloudBillingAccount)
     .set({
       planCode: paying ? "pro" : "hobby",
@@ -296,10 +319,23 @@ async function subscriptionFrom(
         paying && fact.periodStart !== null
           ? fact.periodStart
           : account.organizationCreatedAt,
+      stripeSubscriptionEventAt: fact.occurredAt,
       updatedAt: new Date(),
     })
-    .where(eq(cloudBillingAccount.id, account.id));
-  return { applied: true, effect: "plan_changed" };
+    .where(
+      and(
+        eq(cloudBillingAccount.id, account.id),
+        or(
+          isNull(cloudBillingAccount.stripeSubscriptionEventAt),
+          lt(cloudBillingAccount.stripeSubscriptionEventAt, fact.occurredAt),
+        ),
+      ),
+    )
+    .returning({ id: cloudBillingAccount.id });
+
+  return applied === undefined
+    ? { applied: true, effect: "subscription_stale" }
+    : { applied: true, effect: "plan_changed" };
 }
 
 /* ─────────────────── the objects a plan is sold through ────────────────── */

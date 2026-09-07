@@ -186,7 +186,14 @@ function creditDelivery(
   };
 }
 
-/** One subscription, as the webhook reads a `customer.subscription.*` event. */
+/**
+ * One subscription, as the webhook reads a `customer.subscription.*` event.
+ *
+ * **Every one of them says when Stripe stamped it**, because that is what
+ * decides which of two deliveries about one subscription is the later one.
+ * There is no default: a suite that let two events share an instant by
+ * accident would be a suite that proved the ordering rule by luck.
+ */
 function subscriptionDelivery(
   eventId: string,
   who: typeof acme,
@@ -197,6 +204,8 @@ function subscriptionDelivery(
       | "past_due"
       | "unpaid"
       | "canceled";
+    /** The event's own `created`, never the subscription's. */
+    readonly at: Date;
     readonly periodStart?: Date | undefined;
     readonly finished?: boolean | undefined;
     readonly type?: string | undefined;
@@ -212,6 +221,7 @@ function subscriptionDelivery(
       status: said.status,
       periodStart: said.periodStart ?? null,
       finished: said.finished ?? false,
+      occurredAt: said.at,
     },
   };
 }
@@ -343,10 +353,26 @@ describe("an event type Egma does not act on", () => {
 /** Stripe's period start for the subscription this suite moves Acme onto. */
 const STRIPE_PERIOD_START = new Date("2026-09-03T17:30:00.000Z");
 
+/**
+ * What Stripe stamped each of Acme's subscription events with, in the order
+ * the events happened — which is deliberately not the order a webhook has to
+ * arrive in. The last two are stamped before the deletion and delivered after
+ * it, which is the fault this block exists to refuse.
+ */
+const STAMPED = {
+  created: new Date("2026-09-03T17:30:02.000Z"),
+  pastDue: new Date("2026-10-03T17:31:00.000Z"),
+  unpaid: new Date("2026-10-24T09:00:00.000Z"),
+  backToPro: new Date("2026-10-25T09:00:00.000Z"),
+  deleted: new Date("2026-11-01T09:00:00.000Z"),
+  staleUpdate: new Date("2026-10-30T09:00:00.000Z"),
+} as const;
+
 describe("what a subscription does to a plan", () => {
   it("moves the organization to Pro with Stripe's period start as its anchor", async () => {
     const applied = await applyStripeEvent(
       subscriptionDelivery("evt_sub_created", acme, {
+        at: STAMPED.created,
         status: "active",
         periodStart: STRIPE_PERIOD_START,
         type: "customer.subscription.created",
@@ -365,6 +391,7 @@ describe("what a subscription does to a plan", () => {
   it("keeps Pro while Stripe is still retrying a failed renewal", async () => {
     await applyStripeEvent(
       subscriptionDelivery("evt_sub_past_due", acme, {
+        at: STAMPED.pastDue,
         status: "past_due",
         periodStart: STRIPE_PERIOD_START,
       }),
@@ -378,7 +405,7 @@ describe("what a subscription does to a plan", () => {
 
   it("returns the organization to Hobby when Stripe gives up", async () => {
     await applyStripeEvent(
-      subscriptionDelivery("evt_sub_unpaid", acme, { status: "unpaid" }),
+      subscriptionDelivery("evt_sub_unpaid", acme, { at: STAMPED.unpaid, status: "unpaid" }),
     );
 
     const account = await accountRow(acme);
@@ -392,6 +419,7 @@ describe("what a subscription does to a plan", () => {
   it("returns it to Hobby when the subscription ends at period end", async () => {
     await applyStripeEvent(
       subscriptionDelivery("evt_sub_back_to_pro", acme, {
+        at: STAMPED.backToPro,
         status: "active",
         periodStart: STRIPE_PERIOD_START,
       }),
@@ -400,6 +428,7 @@ describe("what a subscription does to a plan", () => {
 
     await applyStripeEvent(
       subscriptionDelivery("evt_sub_deleted", acme, {
+        at: STAMPED.deleted,
         status: "canceled",
         finished: true,
         type: "customer.subscription.deleted",
@@ -409,6 +438,48 @@ describe("what a subscription does to a plan", () => {
     const account = await accountRow(acme);
     expect(account.plan_code).toBe("hobby");
     expect(account.period_anchor.toISOString()).toBe(CREATED_AT.toISOString());
+  });
+
+  it("refuses an update stamped before the deletion it arrives after", async () => {
+    // Stripe promises no order, so the `active` update this customer's
+    // cancellation replaced can land after the deletion did. Applying it would
+    // put somebody who cancelled back on Pro and invoice them for it, and
+    // nothing would correct it until Stripe sent something else.
+    const applied = await applyStripeEvent(
+      subscriptionDelivery("evt_sub_stale_update", acme, {
+        at: STAMPED.staleUpdate,
+        status: "active",
+        periodStart: STRIPE_PERIOD_START,
+      }),
+    );
+
+    expect(applied).toEqual({ applied: true, effect: "subscription_stale" });
+    const account = await accountRow(acme);
+    expect(account.plan_code).toBe("hobby");
+    expect(account.stripe_subscription_status).toBe("canceled");
+    expect(account.period_anchor.toISOString()).toBe(CREATED_AT.toISOString());
+    // Recorded all the same. A stale event is answered rather than left for
+    // Stripe to redeliver until it gives up.
+    expect(await recordedEvents()).toContainEqual({
+      id: "evt_sub_stale_update",
+      type: "customer.subscription.updated",
+    });
+  });
+
+  it("refuses one Stripe stamped in the same second as the one applied", async () => {
+    // Two events stamped in the same second cannot be put in order, so the
+    // state already applied is the one that stands. The event id is different,
+    // so this is not the redelivery the event table already refuses.
+    const applied = await applyStripeEvent(
+      subscriptionDelivery("evt_sub_same_second", acme, {
+        at: STAMPED.deleted,
+        status: "active",
+        periodStart: STRIPE_PERIOD_START,
+      }),
+    );
+
+    expect(applied).toEqual({ applied: true, effect: "subscription_stale" });
+    expect((await accountRow(acme)).plan_code).toBe("hobby");
   });
 
   it("never touches the customer the delivery does not name", async () => {

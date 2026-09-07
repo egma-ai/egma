@@ -92,6 +92,18 @@ export type StripeFact =
       readonly periodStart: Date | null;
       /** True for `customer.subscription.deleted`: this one is over. */
       readonly finished: boolean;
+      /**
+       * When Stripe stated this — the **event's** own `created`, never the
+       * subscription's.
+       *
+       * **What tells two deliveries about one subscription apart.** Stripe
+       * does not promise the order it delivers in, so "the last one to arrive"
+       * is not "the last one that happened": an older `updated` (active)
+       * landing after a newer `deleted` would put a customer who cancelled
+       * back on Pro. The account remembers this instant, and an event stamped
+       * no later than the one already applied is recorded and passed over.
+       */
+      readonly occurredAt: Date;
     };
 
 /** One signed delivery, read into what Egma acts on. */
@@ -113,7 +125,12 @@ export type AppliedDelivery = {
     | "ignored"
     | "credited"
     | "plan_changed"
-    | "credit_already_written";
+    | "credit_already_written"
+    /**
+     * A subscription event older than the one this account is already at.
+     * Recorded, so Stripe stops redelivering it, and applied to nothing.
+     */
+    | "subscription_stale";
 };
 
 /** One hour of the clock, half-open at both ends. */
