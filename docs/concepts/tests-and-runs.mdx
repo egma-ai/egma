@@ -64,7 +64,7 @@ world from that pinned version: Egma mocks exactly the tools the test names, and
 every other tool the agent calls runs for real. Unmocked tools run real, and are
 recorded from the agent's point of view: the transcript is the agent's own
 account of the conversation, so every tool call it made is there, and a call a
-mock tool answered is marked with that mock tool's name. Two tests in one suite
+mock tool answered is marked `mocked`, beside the tool's own name. Two tests in one suite
 can carry different worlds, so one run can hold a simulation with mock tools
 beside one without any.
 

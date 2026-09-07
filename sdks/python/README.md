@@ -135,9 +135,9 @@ from end to end.
 **Unmocked tools run real, and are recorded from the agent's POV.** The
 record of a simulation is your agent's own account of the conversation, so
 every call it made is on it, with the arguments the model sent and the
-result it received. A call a mock tool answered is marked by that mock
-tool's name; a call Egma refused shows as the error this package raised on
-it; a call carrying neither is a real one that ran.
+result it received. A call a mock tool answered is marked `mocked`, beside
+the tool's own name; a call Egma refused shows as the error this package
+raised on it; a call carrying neither is a real one that ran.
 
 A mock tool whose name never matches one of your agent's tools runs
 nothing and leaves no trace: the model never calls that name, and the

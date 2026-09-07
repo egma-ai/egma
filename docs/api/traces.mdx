@@ -264,11 +264,13 @@ Returns the full transcript, metrics, and trace-level grades.
   production conversation has only the agent's. A simulation holds both under
   one trace and this read returns both; read the agent's for one conversation.
 
-  A simulation's tool span can also carry `toolProvenance` and `mockTool`.
-  `toolProvenance` has one value, `mocked`, and is absent on every other span.
-  `mockTool` is the mock tool that answered, by name, and is present only beside
-  `toolProvenance`. Both are read by name from the simulation's pinned test
-  version, so they never appear on a production trace.
+  A simulation's tool span can also carry `toolProvenance`. It has one value,
+  `mocked`, and it is absent on every other span: a real call is the ordinary
+  case and says nothing extra. The mock tool that answered is the one named by
+  `toolName`, because a mock tool is matched to a call by name and by nothing
+  else. Egma reads this by name from the simulation's pinned test version, so it
+  never appears on a production trace, which has no test version and no mock
+  tools.
 </ResponseField>
 
 <ResponseField name="spansTruncated" type="boolean">

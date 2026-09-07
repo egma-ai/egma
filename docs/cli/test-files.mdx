@@ -180,7 +180,8 @@ real backend from end to end.
 Unmocked tools run real, and are recorded from the agent's point of view. The
 simulation's transcript is the agent's own account of the conversation, so every
 tool call is there with the arguments the model sent and the result it received.
-A call this section answered is marked with that mock tool's name.
+A call this section answered is marked `mocked` on the transcript, beside the
+tool's own name.
 
 A mock tool belongs to the test that writes it, and versions with the test.
 There is no project-wide list and no file outside the test.

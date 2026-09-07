@@ -217,8 +217,8 @@ export function LiveKitTestingInstructions({
       <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
         Egma answers exactly the tools the running test names. Every other tool
         runs for real, and every call is on the simulation transcript, from the
-        agent&apos;s point of view. A call a mock tool answered is marked with
-        that mock tool&apos;s name.
+        agent&apos;s point of view. A call a mock tool answered is marked
+        mocked, beside the tool&apos;s own name.
       </p>
       <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
         The Egma SDK is required for a LiveKit simulation, and it fails closed.

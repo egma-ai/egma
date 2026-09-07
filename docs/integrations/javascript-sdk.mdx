@@ -101,8 +101,8 @@ runs your agent against your real backend from end to end.
 **Unmocked tools run real, and are recorded from the agent's point of view.**
 The transcript of a simulation is the agent's own account of the conversation:
 its turns, and every tool call it made, with the arguments the model sent and
-the result it received. A call a mock tool answered is marked on the transcript
-with that mock tool's name. A call Egma refused shows as the error the SDK threw
+the result it received. A call a mock tool answered is marked `mocked` on the
+transcript, beside the tool's own name. A call Egma refused shows as the error the SDK threw
 on that call.
 
 A mock tool whose name never matches one of the agent's tools runs nothing and
