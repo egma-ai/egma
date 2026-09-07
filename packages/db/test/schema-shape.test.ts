@@ -76,7 +76,27 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // is neither prefixed nor sortable and could never be one of these.
   rate_card: "rat",
   usage_record: "usg",
+  // Egma Cloud's own four. They are in this tree because one schema serves
+  // every deployment — a self-hoster carries them empty — and they follow the
+  // same rules as everything above: a prefixed identity, typed columns and
+  // Egma's usual checks. `cloud_stripe_event` is the one exception and it is
+  // named below: its identity is Stripe's, not Egma's.
+  cloud_plan: "cpl",
+  cloud_billing_account: "cba",
+  cloud_ledger_entry: "cle",
 };
+
+/**
+ * The one table whose identity another system mints.
+ *
+ * `cloud_stripe_event` holds one row per Stripe webhook event Egma has already
+ * applied, and its primary key is Stripe's own `evt_...`. That is the whole
+ * mechanism: a redelivery inserts nothing. Minting an Egma identifier beside
+ * it would let one event be applied under two names, which is exactly the
+ * failure the table exists to prevent — so it carries no `idText` column and
+ * pins no prefix, and this is where that is said out loud.
+ */
+const TABLES_WITH_ANOTHER_SYSTEMS_IDENTITY = ["cloud_stripe_event"];
 
 const declaredTables = (Object.values(schema) as unknown[])
   .filter((value): value is PgTable => is(value, PgTable))
@@ -122,19 +142,23 @@ afterAll(async () => {
   await database.drop();
 });
 
+/** Every table the migrations build, named once for the two checks below. */
+const EVERY_TABLE = [
+  ...Object.keys(TABLE_PREFIX),
+  ...TABLES_WITH_ANOTHER_SYSTEMS_IDENTITY,
+].sort();
+
 describe("the tables this pass builds", () => {
   it("are the identity and tenancy tables, and only those", async () => {
     const { rows } = await database.sql<{ tablename: string }>(
       "select tablename from pg_tables where schemaname = 'public' order by tablename",
     );
-    expect(rows.map((row) => row.tablename)).toEqual(
-      Object.keys(TABLE_PREFIX).sort(),
-    );
+    expect(rows.map((row) => row.tablename)).toEqual(EVERY_TABLE);
   });
 
   it("match the schema the application queries through", () => {
     const declared = declaredTables.map((table) => table.name).sort();
-    expect(declared).toEqual(Object.keys(TABLE_PREFIX).sort());
+    expect(declared).toEqual(EVERY_TABLE);
 
     for (const table of declaredTables) {
       const live = columns
@@ -153,9 +177,18 @@ describe("every identifier column", () => {
       .map((column) => ({ table: table.name, column: column.name })),
   );
 
-  it("exists on every table", () => {
+  it("exists on every table but the one whose identity is Stripe's", () => {
     expect(declaredIdentifierColumns.length).toBeGreaterThan(0);
     for (const table of declaredTables) {
+      if (TABLES_WITH_ANOTHER_SYSTEMS_IDENTITY.includes(table.name)) {
+        expect(
+          declaredIdentifierColumns.some(
+            (column) => column.table === table.name,
+          ),
+          `${table.name} mints no identifier of its own`,
+        ).toBe(false);
+        continue;
+      }
       expect(
         declaredIdentifierColumns.some((column) => column.table === table.name),
       ).toBe(true);
