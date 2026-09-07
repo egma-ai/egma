@@ -1,6 +1,8 @@
+import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { newId } from "@egma/ids";
-import { allowancePeriodAt, createPersona } from "@egma/db";
+import { allowancePeriodAt, createPersona, claimGradingJobs, releaseGradingJob, requestGrading, installBillingPlugIn, openBillingPlugIn } from "@egma/db";
 import {
+  activateBilling,
   billingRoutes,
   cloudBillingPlugIn,
   seedCloudPlans,
@@ -70,6 +72,7 @@ const RETELL_CHAT_FETCH: typeof fetch = async () =>
 /** An instance standing in for a deployment that named a Stripe secret. */
 async function aBillingDeployment(label: string): Promise<void> {
   api = await createApi(label, {
+    traceStore: true,
     retellFetch: RETELL_CHAT_FETCH,
     billing: cloudBillingPlugIn(),
     installBilling: true,
@@ -77,6 +80,7 @@ async function aBillingDeployment(label: string): Promise<void> {
   });
   // The plan rows the entry point writes on boot, from the file in `ee/`.
   await seedCloudPlans();
+  await activateBilling(ANCHOR);
 }
 
 type Seeded = {
@@ -104,6 +108,7 @@ async function aCustomerWithARun(
     "update organization set created_at = $2 where id = $1",
     [customer.organizationId, ANCHOR],
   );
+  await api.database.sql("update cloud_billing_account set period_anchor = $2, activated_at = $2 where organization_id = $1", [customer.organizationId, ANCHOR]);
   const key = await projectKeyFor(api.app, customer);
   await createPersona(contextFor(customer, "member"), {
     name: "Impatient Rita",
@@ -223,12 +228,7 @@ type BillingAnswer = {
   periodStartedAt: string;
   resetsAt: string;
   mayManageBilling: boolean;
-  charges: {
-    provider: string;
-    model: string;
-    requests: number;
-    amountMicros: number;
-  }[];
+  ledger: { entries: { kind: string; amountMicros: number }[]; nextCursor: string | null };
 };
 
 describe("what the Billing section reads", () => {
@@ -253,9 +253,9 @@ describe("what the Billing section reads", () => {
     expect(read.balanceMicros).toBe(WELCOME_CREDIT_MICROS);
     expect(read.mayManageBilling).toBe(true);
     expect(read.plan.allowances).toEqual([
-      { kind: "chat_simulations", unit: "simulations", allowed: 500 },
-      { kind: "web_call_minutes", unit: "minutes", allowed: 500 },
-      { kind: "phone_minutes", unit: "minutes", allowed: 500 },
+      { kind: "chat_simulations", unit: "simulations", allowed: 500, used: 0, overageMicrosPerMinute: 0 },
+      { kind: "web_call_minutes", unit: "minutes", allowed: 500, used: 0, overageMicrosPerMinute: 0 },
+      { kind: "phone_minutes", unit: "minutes", allowed: 500, used: 0, overageMicrosPerMinute: 0 },
     ]);
     // The month is the organization's own, counted from the day it was made.
     expect(read.periodStartedAt).toBe(PERIOD.startedAt.toISOString());
@@ -298,7 +298,7 @@ describe("what the Billing section reads", () => {
     ).toBeNull();
   });
 
-  it("gives a member the plan and the balance, and no breakdown", async () => {
+  it("gives a member the plan, balance and ledger", async () => {
     await aBillingDeployment("cloud_billing_member");
     const acme = await aCustomerWithARun("ada@acme.example", "Acme");
 
@@ -317,7 +317,7 @@ describe("what the Billing section reads", () => {
     const read = answer.body as unknown as BillingAnswer;
     expect(read.balanceMicros).toBe(WELCOME_CREDIT_MICROS);
     expect(read.mayManageBilling).toBe(false);
-    expect(read.charges).toEqual([]);
+    expect(read.ledger.entries).toMatchObject([{ kind: "welcome_credit", amountMicros: 5000000 }]);
   });
 
   it("refuses a request with no credential", async () => {
@@ -408,119 +408,15 @@ async function spendTheBalance(seeded: Seeded): Promise<void> {
   );
 }
 
-type HoldAnswer = {
-  runId: string;
-  holds: {
-    held: string;
-    allowance?: string;
-    resetsAt?: string;
-    providers?: string[];
-    message: string;
-  }[];
-};
-
-describe("why a run's queued work is waiting", () => {
-  it("names the spent allowance while the month is spent", async () => {
-    await aBillingDeployment("cloud_billing_run_hold");
-    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
-    await chatConversations(acme, 500);
-
-    const answer = await ask(
-      api.app,
-      "GET",
-      `/api/runs/${acme.runId}/billing-hold`,
-      acme.key,
-    );
-    expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
-    const read = answer.body as unknown as HoldAnswer;
-    expect(read.runId).toBe(acme.runId);
-    const allowance = read.holds.find((hold) => hold.held === "allowance");
-    expect(allowance?.allowance).toBe("chat_simulations");
-    expect(allowance?.resetsAt).toBe(PERIOD.resetsAt.toISOString());
-    expect(allowance?.message).toContain("Hobby");
-  });
-
-  it("names the unfunded providers when the balance is spent", async () => {
-    await aBillingDeployment("cloud_billing_run_hold_funding");
-    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
-
-    await spendTheBalance(acme);
-
-    const answer = await ask(
-      api.app,
-      "GET",
-      `/api/runs/${acme.runId}/billing-hold`,
-      acme.key,
-    );
-    expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
-    const read = answer.body as unknown as HoldAnswer;
-    const funding = read.holds.find((hold) => hold.held === "funding");
-    // A chat simulation needs its persona's LLM and nothing else.
-    expect(funding?.providers).toEqual(["openai"]);
-    expect(funding?.message).toContain("$0.00");
-  });
-
-  it("says nothing about a run with nothing waiting", async () => {
-    await aBillingDeployment("cloud_billing_run_hold_quiet");
-    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
-    await chatConversations(acme, 500);
-    // Nothing of this run is still waiting.
-    await api.database.sql(
-      "delete from simulation where run_id = $1 and status = 'queued'",
-      [acme.runId],
-    );
-
-    const answer = await ask(
-      api.app,
-      "GET",
-      `/api/runs/${acme.runId}/billing-hold`,
-      acme.key,
-    );
-    expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
-    expect((answer.body as unknown as HoldAnswer).holds).toEqual([]);
-  });
-
-  it("answers nothing at all on a deployment that does not bill", async () => {
-    // No plug-in, no routes: every allowance unlimited and every provider
-    // funded, which is the deployment every self-hoster runs.
-    api = await createApi("cloud_billing_absent", {
-      retellFetch: RETELL_CHAT_FETCH,
-    });
-    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
-    await chatConversations(acme, 500);
-
-    const hold = await ask(
-      api.app,
-      "GET",
-      `/api/runs/${acme.runId}/billing-hold`,
-      acme.key,
-    );
-    expect(hold.statusCode, JSON.stringify(hold.body)).toBe(200);
-    expect((hold.body as unknown as HoldAnswer).holds).toEqual([]);
-
-    // The Billing section is not mounted, so its address is not there.
-    const billing = await ask(
-      api.app,
-      "GET",
-      "/api/organization/billing",
-      acme.key,
-    );
-    expect(billing.statusCode).toBe(404);
-
-    // And a run past five hundred chat simulations still starts.
-    const started = await ask(api.app, "POST", "/v1/runs", acme.key, {
-      suiteId: acme.suiteId,
-      agentId: acme.agentId,
-      connectionId: acme.connectionId,
-    });
-    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-
-    // No cloud row was written for anybody.
-    const { rows } = await api.database.sql(
-      "select 1 from cloud_billing_account",
-    );
-    expect(rows).toHaveLength(0);
-  });
+it("keeps billing absent on OSS and removes the run billing surface", async () => {
+  api = await createApi("billing_absent", { retellFetch: RETELL_CHAT_FETCH });
+  const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+  const hold = await ask(api.app, "GET", `/api/runs/${acme.runId}/billing-hold`, acme.key);
+  expect(hold.statusCode).toBe(404);
+  expect((await ask(api.app, "GET", "/api/organization/billing", acme.key)).statusCode).toBe(404);
+  await chatConversations(acme, 500);
+  const started = await ask(api.app, "POST", "/v1/runs", acme.key, { suiteId: acme.suiteId, agentId: acme.agentId, connectionId: acme.connectionId });
+  expect(started.statusCode).toBe(201);
 });
 
 describe("what the claim door does when a customer's month is spent", () => {
@@ -616,15 +512,76 @@ describe("what the claim door does when a customer's month is spent", () => {
     );
     expect(rows.map((row) => row.status)).toEqual(["queued"]);
 
-    // And the run page says which of the two reasons it was, by name.
-    const hold = await ask(
-      api.app,
-      "GET",
-      `/api/runs/${acme.runId}/billing-hold`,
-      acme.key,
-    );
-    const read = hold.body as unknown as HoldAnswer;
-    expect(read.holds.map((one) => one.held)).toEqual(["funding"]);
-    expect(read.holds[0]?.providers).toEqual(["openai"]);
+
   });
+});
+
+
+async function completedSimulation(seeded: Seeded): Promise<string> {
+  await api.database.sql("update simulation set status = 'claimed', claimed_by = 'simulator', claimed_at = now(), heartbeat_at = now() where run_id = $1", [seeded.runId]);
+  await api.database.sql("update simulation set status = 'running', started_at = now() where run_id = $1", [seeded.runId]);
+  const { rows } = await api.database.sql<{ id: string }>(
+    "update simulation set status = 'completed', started_at = now(), ended_at = now(), ending_reason = 'persona_concluded' where run_id = $1 returning id", [seeded.runId],
+  );
+  if (!rows[0]) throw new Error("Missing simulation");
+  return rows[0].id;
+}
+
+it("refuses unfunded regrades for both session and API key before queueing", async () => {
+  await aBillingDeployment("regrade_billing_refusal");
+  const acme = await aCustomerWithARun("regrade@acme.example", "Acme");
+  const id = await completedSimulation(acme);
+  await spendTheBalance(acme);
+  const path = `/v1/simulations/${id}/regrade?project=${acme.customer.projectId}`;
+  expect((await ask(api.app, "POST", path, acme.key)).statusCode).toBe(422);
+  const session = await api.app.inject({ method: "POST", url: path, headers: { cookie: acme.customer.cookie, origin: api.config.baseUrl } });
+  expect(session.statusCode, session.body).toBe(422);
+  expect(await claimGradingJobs({ claimant: "grader", capacity: 10 })).toEqual([]);
+});
+
+it("finishes an admitted simulation regrade and its retries after the balance falls", async () => {
+  await aBillingDeployment("regrade_billing_admitted");
+  const acme = await aCustomerWithARun("regrade@acme.example", "Acme");
+  const id = await completedSimulation(acme);
+  const path = `/v1/simulations/${id}/regrade?project=${acme.customer.projectId}`;
+  expect((await ask(api.app, "POST", path, acme.key)).statusCode).toBe(200);
+  await spendTheBalance(acme);
+  const [first] = await claimGradingJobs({ claimant: "grader", capacity: 10 });
+  expect(first?.simulationId).toBe(id);
+  if (!first) throw new Error("Missing grading claim");
+  await releaseGradingJob(first.auth, first.id, "grader", "retry the obtained work");
+  const [retry] = await claimGradingJobs({ claimant: "grader", capacity: 10 });
+  expect(retry?.id).toBe(first.id);
+  expect(retry?.attempts).toBe(2);
+});
+
+it("finishes automatic simulation grading at zero and admits regrades during a billing outage", async () => {
+  await aBillingDeployment("automatic_grading_billing");
+  const acme = await aCustomerWithARun("automatic@acme.example", "Acme");
+  const id = await completedSimulation(acme);
+  const traceId = traceIdOfSimulation(id);
+  if (!traceId) throw new Error("Missing trace");
+  await spendTheBalance(acme);
+  await requestGrading(contextFor(acme.customer, "member"), { source: "simulation", traceId,
+    traceStartedAt: new Date(), runId: acme.runId, endsTrace: true, evidenceReady: true, modality: "chat" });
+  const [initial] = await claimGradingJobs({ claimant: "grader", capacity: 10 });
+  expect(initial?.simulationId).toBe(id);
+  if (!initial) throw new Error("Missing initial grading claim");
+  await releaseGradingJob(initial.auth, initial.id, "grader", "retry automatic grading");
+  const [second] = await claimGradingJobs({ claimant: "grader", capacity: 10 });
+  expect(second?.id).toBe(initial.id);
+  if (!second) throw new Error("Missing retry");
+  await releaseGradingJob(second.auth, second.id, "grader", "retry again");
+  const [third] = await claimGradingJobs({ claimant: "grader", capacity: 10 });
+  if (!third) throw new Error("Missing final attempt");
+  await releaseGradingJob(third.auth, third.id, "grader", "no result before exhaustion");
+  expect((await ask(api.app, "POST", `/v1/simulations/${id}/regrade`, acme.key)).statusCode).toBe(422);
+  expect(await claimGradingJobs({ claimant: "grader", capacity: 10 })).toEqual([]);
+  const restore = installBillingPlugIn({ ...openBillingPlugIn(), entitlements: {
+    mayStart: () => Promise.resolve({ allowed: true }),
+    mayPlatformKeyFund: () => Promise.reject(new Error("billing unavailable")),
+  } });
+  try {
+    expect((await ask(api.app, "POST", `/v1/simulations/${id}/regrade`, acme.key)).statusCode).toBe(200);
+  } finally { restore(); }
 });

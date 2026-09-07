@@ -477,6 +477,7 @@ const THE_BILLING_SEAM = [
   "discardingUsageSink",
   "entitlementSourceContract",
   "installBillingPlugIn",
+  "faultTolerantEntitlements",
   "openBillingPlugIn",
   "openEntitlementSource",
   "usageSinkContract",
@@ -571,6 +572,7 @@ const VALUES = [
   // four codes between them, and a sentence apiece — which is why the reason
   // travels as a value rather than being read back out of the prose.
   "RunWriteRefusedError",
+  "FundingRefusedError",
   // An edit refused because somebody moved the test since it was written. It
   // carries both versions and the test's identity, because the caller's next
   // move is to go and read the test as it now stands.

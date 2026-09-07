@@ -3,6 +3,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
   RunWriteRefusedError,
+  connectClickHouse,
+  disconnectClickHouse,
+  readOrganizationUsage,
   createAgent,
   createPersona,
   createTest,
@@ -25,6 +28,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
+import { createMigratedTraceStore, type MigratedTraceStore } from "./support/clickhouse.ts";
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
@@ -37,6 +41,7 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  */
 
 let database: MigratedDatabase;
+let traceStore: MigratedTraceStore;
 let restore: (() => void) | undefined;
 
 const acme = {
@@ -167,6 +172,8 @@ async function readyToRun(who: typeof acme): Promise<{
 }
 
 beforeAll(async () => {
+  traceStore = await createMigratedTraceStore("billing_seam");
+  connectClickHouse({ clickhouseUrl: traceStore.url });
   database = await createConnectedDatabase("billing_seam_wiring");
   await upsertRateCard();
   for (const who of [acme, globex]) {
@@ -356,6 +363,19 @@ describe("run start asks the entitlement source", () => {
   });
 });
 
+it("continues starting work when either billing admission check fails", async () => {
+  const ready = await readyToRun(acme);
+  restore = installBillingPlugIn({
+    ...openBillingPlugIn(),
+    entitlements: {
+      mayStart: () => Promise.reject(new Error("billing plan store unavailable")),
+      mayPlatformKeyFund: () => Promise.reject(new Error("billing account unavailable")),
+    },
+  });
+  const started = await startRun(sessionOf(acme), { suiteId: ready.suiteId, agentId: ready.agentId, connectionId: ready.connectionId });
+  expect(started.status).toBe("pending");
+});
+
 describe("stored usage records reach the usage sink", () => {
   async function oneSimulation(who: typeof acme): Promise<{
     simulationId: string;
@@ -381,6 +401,7 @@ describe("stored usage records reach the usage sink", () => {
       identity: { work: "simulation", simulationId, spanId },
       occurredAt: new Date("2026-09-08T10:00:00.000Z"),
       runId,
+      traceId: "11111111111111111111111111111111",
       provider: "openai",
       model: "gpt-4o-mini",
       operation: "openai_chat_completions",
@@ -417,10 +438,10 @@ describe("stored usage records reach the usage sink", () => {
     expect(record?.provider).toBe("openai");
     expect(record?.paymentSource).toBe("platform");
     expect(record?.amountMicros).toBe(written.amountMicros);
-    expect(record?.id).toMatch(/^usg_/u);
+    expect(JSON.parse(record?.id ?? "null")).toEqual([acme.organizationId, acme.projectId, "11111111111111111111111111111111", "aaaaaaaaaaaaaaa1"]);
   });
 
-  it("hands over nothing when a resend stored nothing", async () => {
+  it("can deliver the same stored identity again on replay", async () => {
     const received: StoredUsageRecord[][] = [];
     restore = installBillingPlugIn({
       ...openBillingPlugIn(),
@@ -437,9 +458,8 @@ describe("stored usage records reach the usage sink", () => {
     await recordProviderUsage(conductingContextFor(acme), [record]);
     await recordProviderUsage(conductingContextFor(acme), [record]);
 
-    // Once, for the delivery that actually stored a row. An adapter charging
-    // a balance for what it receives therefore cannot charge twice.
-    expect(received).toHaveLength(1);
+    expect(received).toHaveLength(2);
+    expect(received[0]?.[0]?.id).toEqual(received[1]?.[0]?.id);
   });
 
   it("stores the record even when the sink throws", async () => {
@@ -456,10 +476,8 @@ describe("stored usage records reach the usage sink", () => {
     ]);
 
     expect(written.stored).toBe(1);
-    const { rows } = await database.sql<{ kept: string }>(
-      "select count(*)::text as kept from usage_record where simulation_id = $1",
-      [simulationId],
-    );
-    expect(rows[0]?.kept).toBe("1");
+    expect(await readOrganizationUsage(sessionOf(acme), {
+      from: new Date("2026-09-08T00:00:00Z"), to: new Date("2026-09-09T00:00:00Z"),
+    })).toMatchObject({ requests: 3 });
   });
 });

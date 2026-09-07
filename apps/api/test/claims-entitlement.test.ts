@@ -2,6 +2,7 @@ import { newId } from "@egma/ids";
 import {
   createPersona,
   discardingUsageSink,
+  openBillingPlugIn,
   openEntitlementSource,
   type EntitlementSource,
   type StartRequest,
@@ -144,7 +145,6 @@ async function aCustomerWithQueuedWork(
       suiteId: String(suite.body.id),
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -197,7 +197,7 @@ describe("what the claim door asks the deployment", () => {
     const listener = recording();
     api = await createApi("claims_entitlement_once", {
       retellFetch: RETELL_CHAT_FETCH,
-      billing: { entitlements: listener.source, usage: discardingUsageSink() },
+      billing: { ...openBillingPlugIn(), entitlements: listener.source, usage: discardingUsageSink() },
     });
     const ada = await aCustomerWithQueuedWork("ada@acme.example", "Acme", [
       RETELL_CHAT,
@@ -220,7 +220,7 @@ describe("what the claim door asks the deployment", () => {
     const listener = recording();
     api = await createApi("claims_entitlement_per_customer", {
       retellFetch: RETELL_CHAT_FETCH,
-      billing: { entitlements: listener.source, usage: discardingUsageSink() },
+      billing: { ...openBillingPlugIn(), entitlements: listener.source, usage: discardingUsageSink() },
     });
     const ada = await aCustomerWithQueuedWork("ada@acme.example", "Acme", [
       RETELL_CHAT,
@@ -244,6 +244,7 @@ describe("what the claim door asks the deployment", () => {
     api = await createApi("claims_entitlement_withheld", {
       retellFetch: RETELL_CHAT_FETCH,
       billing: {
+        ...openBillingPlugIn(),
         entitlements: {
           mayStart: () =>
             Promise.resolve({
@@ -314,7 +315,7 @@ describe("what the claim door asks the deployment", () => {
 
     api = await createApi("claims_entitlement_concurrent", {
       retellFetch: RETELL_CHAT_FETCH,
-      billing: { entitlements, usage: discardingUsageSink() },
+      billing: { ...openBillingPlugIn(), entitlements, usage: discardingUsageSink() },
     });
     await aCustomerWithQueuedWork("ada@acme.example", "Acme", [RETELL_CHAT]);
     await aCustomerWithQueuedWork("bob@globex.example", "Globex", [
@@ -346,4 +347,16 @@ describe("what the claim door asks the deployment", () => {
       "claimed",
     );
   });
+});
+
+it("hands out claimed work when both billing checks fail", async () => {
+  api = await createApi("claims_billing_outage", {
+    retellFetch: RETELL_CHAT_FETCH,
+    billing: { ...openBillingPlugIn(), entitlements: {
+      mayStart: () => Promise.reject(new Error("billing unavailable")),
+      mayPlatformKeyFund: () => Promise.reject(new Error("billing unavailable")),
+    } },
+  });
+  await aCustomerWithQueuedWork("outage@acme.example", "Acme", [RETELL_CHAT]);
+  expect((await claim(10)).specs).toHaveLength(1);
 });

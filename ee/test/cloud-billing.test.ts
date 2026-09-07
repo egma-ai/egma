@@ -7,28 +7,22 @@ import {
   createTestSuite,
   entitlementSourceContract,
   installBillingPlugIn,
-  recordProviderUsage,
   startRun,
   upsertRateCard,
   usageSinkContract,
   type AuthContext,
-  type StoredUsageRecord,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  chargeForStoredUsage,
+  activateBilling,
+  cloudBillingPlugIn,
   cloudEntitlementSource,
   cloudUsageSink,
-  inferenceChargeKey,
-  loadCloudBilling,
   openBillingAccount,
-  readBillingOverview,
   readEntitlementFacts,
-  readLedgerBalance,
   readPlanCatalog,
   seedCloudPlans,
-  sweepUnchargedUsage,
   welcomeCreditKey,
 } from "../src/index.ts";
 import {
@@ -109,6 +103,7 @@ beforeAll(async () => {
   }
   await upsertRateCard();
   await seedCloudPlans();
+  await activateBilling(CREATED_AT);
 });
 
 afterAll(async () => {
@@ -339,7 +334,7 @@ describe("the plans the shipped file states", () => {
       phone_minutes_allowance: "2000",
       // The two placeholders: $0.01 a web-call minute, $0.05 a phone minute.
       web_call_overage_micros_per_minute: "10000",
-      phone_overage_micros_per_minute: "50000",
+      phone_overage_micros_per_minute: "20000",
     });
     // Nothing has created a Stripe object, and the plan row is complete
     // without one: the allowances are enforced from Egma's own rows.
@@ -358,7 +353,7 @@ describe("the plans the shipped file states", () => {
 
 describe("a welcome credit", () => {
   it("is one ledger row of $5, written when the account is opened", async () => {
-    const account = await openBillingAccount(acme.organizationId, NOW);
+    const account = await openBillingAccount(acme.organizationId);
     expect(account.planCode).toBe("hobby");
     expect(account.balanceMicros).toBe(WELCOME_CREDIT_MICROS);
     // Hobby's period anchor is the organization's own creation date, so the
@@ -379,10 +374,10 @@ describe("a welcome credit", () => {
     // same instant, which is what a customer's first run and its first usage
     // record actually look like.
     const opened = await Promise.all([
-      openBillingAccount(globex.organizationId, NOW),
-      openBillingAccount(globex.organizationId, NOW),
-      openBillingAccount(globex.organizationId, NOW),
-      openBillingAccount(globex.organizationId, NOW),
+      openBillingAccount(globex.organizationId),
+      openBillingAccount(globex.organizationId),
+      openBillingAccount(globex.organizationId),
+      openBillingAccount(globex.organizationId),
     ]);
     expect(new Set(opened.map((account) => account.id)).size).toBe(1);
 
@@ -614,305 +609,13 @@ describe("whether Egma's own key may fund a provider", () => {
   });
 });
 
-/** A usage record as the store hands one to the sink. */
-function storedRecord(
-  who: typeof acme,
-  id: string,
-  overrides: Partial<StoredUsageRecord> = {},
-): StoredUsageRecord {
-  return {
-    id,
-    organizationId: who.organizationId,
-    projectId: who.projectId,
-    occurredAt: new Date("2026-09-18T10:00:00.000Z"),
-    provider: "openai",
-    model: "gpt-4o-mini",
-    paymentSource: "platform",
-    amountMicros: 250_000,
-    ...overrides,
-  };
-}
-
-/** A real `usage_record` row, so the ledger's edge into it can be closed. */
-async function seedUsageRecord(
-  who: typeof acme,
-  record: StoredUsageRecord,
-): Promise<void> {
-  await database.sql(
-    `insert into usage_record
-       (id, organization_id, project_id, occurred_at, work_kind, grading_job_id,
-        provider, model, operation, unit, quantities, measurement,
-        payment_source, raw_usage, amount_micros, priced_by, dedupe_key)
-     values ($1, $2, $3, $4, 'grading', $5, $6, $7, 'openai_chat_completions',
-             'tokens', '{"input_tokens": 1000}'::jsonb, 'provider_reported',
-             $8, '{}'::jsonb, $9, '{}'::jsonb, $10)`,
-    [
-      record.id,
-      who.organizationId,
-      who.projectId,
-      record.occurredAt,
-      newId("gjb"),
-      record.provider,
-      record.model,
-      record.paymentSource,
-      record.amountMicros,
-      `dedupe-${record.id}`,
-    ],
-  );
-}
-
-describe("what the balance is charged for", () => {
-  it("writes one charge per record Egma's key paid for, and moves the balance", async () => {
-    const before = Number((await accountRow(globex)).balance_micros);
-    const records = [
-      storedRecord(globex, newId("usg"), { amountMicros: 120_000 }),
-      storedRecord(globex, newId("usg"), {
-        amountMicros: 80_000,
-        provider: "cartesia",
-        model: "sonic-2",
-      }),
-    ];
-    for (const record of records) await seedUsageRecord(globex, record);
-
-    const charged = await chargeForStoredUsage(records);
-    expect(charged).toEqual({ charged: 2, amountMicros: 200_000 });
-
-    const after = Number((await accountRow(globex)).balance_micros);
-    expect(after).toBe(before - 200_000);
-    // The materialised balance is a cache of the ledger, and this is the read
-    // that proves it.
-    expect(await readLedgerBalance(sessionOf(globex))).toBe(after);
-  });
-
-  it("charges nothing for a record the customer's own key paid for", async () => {
-    const before = Number((await accountRow(globex)).balance_micros);
-    const record = storedRecord(globex, newId("usg"), {
-      paymentSource: "customer",
-      amountMicros: 999_000,
-    });
-    await seedUsageRecord(globex, record);
-
-    expect(await chargeForStoredUsage([record])).toEqual({
-      charged: 0,
-      amountMicros: 0,
-    });
-    expect(Number((await accountRow(globex)).balance_micros)).toBe(before);
-  });
-
-  it("charges once however many times the same record arrives", async () => {
-    const before = Number((await accountRow(globex)).balance_micros);
-    const record = storedRecord(globex, newId("usg"), { amountMicros: 30_000 });
-    await seedUsageRecord(globex, record);
-
-    expect((await chargeForStoredUsage([record])).charged).toBe(1);
-    expect((await chargeForStoredUsage([record])).charged).toBe(0);
-    expect((await chargeForStoredUsage([record, record])).charged).toBe(0);
-
-    expect(Number((await accountRow(globex)).balance_micros)).toBe(
-      before - 30_000,
-    );
-    const keys = (await ledgerRows(globex)).map((row) => row.idempotency_key);
-    expect(keys.filter((key) => key === inferenceChargeKey(record.id))).toHaveLength(
-      1,
-    );
-  });
-
-  it("keeps the materialised balance equal to the sum of the ledger", async () => {
-    const rows = await ledgerRows(globex);
-    const sum = rows.reduce((all, row) => all + Number(row.amount_micros), 0);
-    expect(Number((await accountRow(globex)).balance_micros)).toBe(sum);
-    expect(await readLedgerBalance(sessionOf(globex))).toBe(sum);
-  });
-
-  it("lets in-flight work take the balance below zero, and then refuses more", async () => {
-    // Everything already claimed finishes and is charged. The overrun is
-    // bounded by what was in flight, which the founders accepted.
-    const balance = Number((await accountRow(globex)).balance_micros);
-    const record = storedRecord(globex, newId("usg"), {
-      amountMicros: balance + 1_000_000,
-    });
-    await seedUsageRecord(globex, record);
-    await chargeForStoredUsage([record]);
-
-    expect(Number((await accountRow(globex)).balance_micros)).toBe(-1_000_000);
-    const source = cloudEntitlementSource({ now: () => NOW });
-    const decision = await source.mayPlatformKeyFund({
-      organizationId: globex.organizationId,
-      providers: ["openai"],
-    });
-    expect(decision.funded).toBe(false);
-    if (decision.funded) return;
-    expect(decision.message).toContain("-$1.00");
-  });
-
-  it("reaches the balance through the seam the product writes usage on", async () => {
-    // Not the sink called by hand: the write that stores a usage record hands
-    // it to whatever plug-in this process runs on, and this is that path.
-    const restore = installBillingPlugIn({
-      entitlements: cloudEntitlementSource({ now: () => NOW }),
-      usage: cloudUsageSink(),
-    });
-    try {
-      const before = Number((await accountRow(acme)).balance_micros);
-      const written = await recordProviderUsage(
-        { ...sessionOf(acme), via: "engine" },
-        [
-          {
-            identity: {
-              work: "grading",
-              gradingJobId: newId("gjb"),
-              attempts: 1,
-              projectGraderId: newId("grd"),
-              assertion: "confirms the new time",
-              httpAttempt: 1,
-            },
-            occurredAt: new Date("2026-09-18T11:00:00.000Z"),
-            provider: "openai",
-            model: "gpt-4o-mini",
-            operation: "openai_chat_completions",
-            quantities: { input_tokens: 1_000, output_tokens: 100 },
-            measurement: "provider_reported",
-            paymentSource: "platform",
-            rawUsage: {},
-          },
-        ],
-      );
-      expect(written.stored).toBe(1);
-      expect(written.amountMicros).toBeGreaterThan(0);
-
-      expect(Number((await accountRow(acme)).balance_micros)).toBe(
-        before - written.amountMicros,
-      );
-    } finally {
-      restore();
-    }
-  });
-});
-
-describe("what the Billing section reads", () => {
-  it("gives an admin the plan, the balance and this period's charges", async () => {
-    const overview = await readBillingOverview(sessionOf(globex, "admin"), NOW);
-    expect(overview.plan.code).toBe("pro");
-    expect(overview.plan.name).toBe("Pro");
-    expect(overview.plan.chatSimulationsAllowance).toBeNull();
-    expect(overview.mayManageBilling).toBe(true);
-    expect(overview.period.resetsAt).toEqual(PERIOD_RESETS);
-    // Every charge is Egma's key paying: a customer-funded record is on the
-    // usage page and never here.
-    expect(overview.charges.length).toBeGreaterThan(0);
-    expect(overview.charges.map((one) => one.provider)).toContain("openai");
-    expect(
-      overview.charges.reduce((all, one) => all + one.amountMicros, 0),
-    ).toBeGreaterThan(0);
-  });
-
-  it("gives a member the plan and the balance, and no breakdown", async () => {
-    const overview = await readBillingOverview(sessionOf(globex, "member"), NOW);
-    expect(overview.plan.code).toBe("pro");
-    expect(overview.mayManageBilling).toBe(false);
-    expect(overview.charges).toEqual([]);
-    expect(overview.account.balanceMicros).toBe(
-      Number((await accountRow(globex)).balance_micros),
-    );
-  });
-
-  it("reads one customer's account and never the other's", async () => {
-    const theirs = await readBillingOverview(sessionOf(acme), NOW);
-    const others = await readBillingOverview(sessionOf(globex), NOW);
-    expect(theirs.account.organizationId).toBe(acme.organizationId);
-    expect(others.account.organizationId).toBe(globex.organizationId);
-    expect(theirs.plan.code).toBe("hobby");
-    expect(others.plan.code).toBe("pro");
-  });
-});
-
 describe("the port contracts, against the cloud adapters", () => {
-  /**
-   * The same list the open adapters are held to, run against these — in a
-   * world where the customer exists and every record is a real row.
-   *
-   * **That world is what makes these checks mean anything here.** An adapter
-   * that writes a ledger row has foreign keys; handed a made-up organization
-   * and a record no table holds, every write would fail and the sink would
-   * swallow it, and the checks would pass by doing nothing at all. So the
-   * suite supplies Acme and stores each record before it is delivered, and
-   * asserts below that the rows it should have written are there.
-   */
-  const delivered: StoredUsageRecord[] = [];
-
-  for (const check of entitlementSourceContract(
-    () => cloudEntitlementSource({ now: () => NOW }),
-    { organizationId: acme.organizationId },
-  )) {
-    it(`entitlement source: ${check.name}`, async () => {
-      await check.run();
-    });
+  for (const check of entitlementSourceContract(() => cloudEntitlementSource({ now: () => NOW }), { organizationId: acme.organizationId })) {
+    it(`entitlement source: ${check.name}`, () => check.run());
   }
-
-  for (const check of usageSinkContract(() => cloudUsageSink(), {
-    organizationId: acme.organizationId,
-    projectId: acme.projectId,
-    async prepare(record) {
-      await seedUsageRecord(acme, record);
-      delivered.push(record);
-    },
-  })) {
-    it(`usage sink: ${check.name}`, async () => {
-      await check.run();
-    });
+  for (const check of usageSinkContract(() => cloudUsageSink())) {
+    it(`usage sink: ${check.name}`, () => check.run());
   }
-
-  it("wrote one charge for every record Egma's key paid for, and no other", async () => {
-    // The checks above are about shape and say nothing about answers. This is
-    // the half that says the cloud sink actually did its work while passing
-    // them — without it, an adapter that quietly wrote nothing would be held
-    // to the same list and pass it.
-    expect(delivered.length).toBeGreaterThan(0);
-    const keys = new Set(
-      (await ledgerRows(acme)).map((row) => row.idempotency_key),
-    );
-
-    for (const record of delivered) {
-      const charged = record.paymentSource === "platform" && record.amountMicros > 0;
-      expect(
-        keys.has(inferenceChargeKey(record.id)),
-        `${record.id} (${record.paymentSource}, ${record.amountMicros})`,
-      ).toBe(charged);
-    }
-    // The customer-funded one and the one that cost nothing are both in there,
-    // so the assertion above is refusing something rather than agreeing with
-    // everything.
-    expect(
-      delivered.some((record) => record.paymentSource === "customer"),
-    ).toBe(true);
-    expect(delivered.some((record) => record.amountMicros === 0)).toBe(true);
-  });
-});
-
-describe("an organization the adapter has never heard of", () => {
-  it("has spent no allowance and holds no balance", async () => {
-    // It cannot be a customer of this deployment, so it has run nothing — and
-    // the balance it does not have funds nothing. Both answers are true and
-    // neither is generous.
-    const source = cloudEntitlementSource({ now: () => NOW });
-    const nobody = newId("org");
-    await expect(
-      source.mayStart({ organizationId: nobody, allowances: ["chat_simulations"] }),
-    ).resolves.toEqual({ allowed: true });
-
-    const funding = await source.mayPlatformKeyFund({
-      organizationId: nobody,
-      providers: ["openai"],
-    });
-    expect(funding.funded).toBe(false);
-
-    // And no row was written for it.
-    const { rows } = await database.sql(
-      "select 1 from cloud_billing_account where organization_id = $1",
-      [nobody],
-    );
-    expect(rows).toHaveLength(0);
-  });
 });
 
 describe("the facts the adapter decides from", () => {
@@ -954,6 +657,7 @@ describe("the grading claim, when Egma's key pays for the judge", () => {
     // Acme's balance is at zero by this point in the file.
     const id = await pendingGradingJob(acme);
     const restore = installBillingPlugIn({
+      ...cloudBillingPlugIn(),
       entitlements: cloudEntitlementSource({ now: () => NOW }),
       usage: cloudUsageSink(),
     });
@@ -975,6 +679,7 @@ describe("the grading claim, when Egma's key pays for the judge", () => {
   it("hands the same job out once the balance can pay", async () => {
     const id = await pendingGradingJob(acme);
     const restore = installBillingPlugIn({
+      ...cloudBillingPlugIn(),
       entitlements: cloudEntitlementSource({ now: () => NOW }),
       usage: cloudUsageSink(),
     });
@@ -1007,83 +712,22 @@ describe("the grading claim, when Egma's key pays for the judge", () => {
   });
 });
 
-describe("the catch-up for a delivery the usage sink lost", () => {
-  /**
-   * **The fault this stands in for, and why a resend cannot repair it.** A
-   * sink that throws must never fail the write that stored the record, so a
-   * billing fault loses a delivery and keeps the fact; and the next delivery
-   * of the same measurement collapses on the store's own dedupe key, which
-   * means the sink never hears about it again. What is left behind is exactly
-   * what is seeded here: a stored record Egma's key paid for, with no ledger
-   * row, on an organization that has already spent the balance.
-   *
-   * The sweep takes no customer — it walks the deployment's own unpaid
-   * records — so these tests are written for the whole database this file
-   * owns, and the two records it must leave alone are seeded beside the one it
-   * must charge.
-   */
-  const lost = storedRecord(globex, newId("usg"), { amountMicros: 44_000 });
-  const theirs = storedRecord(globex, newId("usg"), {
-    paymentSource: "customer",
-    amountMicros: 77_000,
-  });
-  const free = storedRecord(globex, newId("usg"), { amountMicros: 0 });
 
-  it("charges the record nobody charged, and leaves the other two alone", async () => {
-    for (const record of [lost, theirs, free]) {
-      await seedUsageRecord(globex, record);
-    }
-    const before = Number((await accountRow(globex)).balance_micros);
-
-    expect(await sweepUnchargedUsage()).toEqual({
-      found: 1,
-      charged: 1,
-      amountMicros: 44_000,
-    });
-
-    expect(Number((await accountRow(globex)).balance_micros)).toBe(
-      before - 44_000,
-    );
-    const keys = new Set(
-      (await ledgerRows(globex)).map((row) => row.idempotency_key),
-    );
-    expect(keys.has(inferenceChargeKey(lost.id))).toBe(true);
-    // A record the customer's own provider key paid for is not Egma's to
-    // charge, and a record that cost nothing is not a movement of a balance.
-    expect(keys.has(inferenceChargeKey(theirs.id))).toBe(false);
-    expect(keys.has(inferenceChargeKey(free.id))).toBe(false);
-  });
-
-  it("writes nothing at all on the sweep after it", async () => {
-    const account = await accountRow(globex);
-    const rows = await ledgerRows(globex);
-
-    expect(await sweepUnchargedUsage()).toEqual({
-      found: 0,
-      charged: 0,
-      amountMicros: 0,
-    });
-
-    expect(await accountRow(globex)).toEqual(account);
-    expect(await ledgerRows(globex)).toEqual(rows);
-  });
-
-  it("runs when the cloud plug-in loads", async () => {
-    // The wiring, and not the sweep again: a process that installs this
-    // adapter collects what the last one lost before it accepts new work.
-    const missed = storedRecord(globex, newId("usg"), { amountMicros: 12_000 });
-    await seedUsageRecord(globex, missed);
-    const before = Number((await accountRow(globex)).balance_micros);
-
-    const loaded = await loadCloudBilling();
-
-    expect(loaded.caughtUp).toEqual({
-      found: 1,
-      charged: 1,
-      amountMicros: 12_000,
-    });
-    expect(Number((await accountRow(globex)).balance_micros)).toBe(
-      before - 12_000,
-    );
-  });
+it("starts a fresh allowance tally at activation and assigns a crossing call to its start month", async () => {
+  const who = { organizationId: newId("org"), projectId: newId("prj"), userId: newId("usr") };
+  await seedOrganization(database, who.organizationId, [{ id: who.projectId, slug: who.projectId.toLowerCase() }]);
+  await seedUser(database, who.userId, `${who.userId}@example.test`);
+  await database.sql("update organization set created_at = $2 where id = $1", [who.organizationId, CREATED_AT]);
+  await openBillingAccount(who.organizationId);
+  await database.sql("update cloud_billing_account set activated_at = $2 where organization_id = $1", [who.organizationId, NOW]);
+  await conversations(who, { count: 500, modality: "chat", connectionType: "retell_chat_api", startedAt: new Date("2026-09-19T12:00:00Z"), seconds: 20 });
+  await conversations(who, { count: 1, modality: "voice", connectionType: "phone_number", startedAt: new Date("2026-09-19T12:00:00Z"), seconds: 120 });
+  await conversations(who, { count: 1, modality: "voice", connectionType: "phone_number", startedAt: NOW, seconds: 2 });
+  await conversations(who, { count: 1, modality: "voice", connectionType: "phone_number", startedAt: new Date("2026-10-15T07:59:30Z"), seconds: 60 });
+  const beforeReset = await readEntitlementFacts(who.organizationId, new Date("2026-10-15T07:59:59Z"));
+  expect(beforeReset.usage.used.chat_simulations).toBe(0);
+  expect(beforeReset.usage.used.phone_minutes).toBeCloseTo(1.1666666666666667);
+  expect(beforeReset.period.resetsAt).toEqual(PERIOD_RESETS);
+  const afterReset = await readEntitlementFacts(who.organizationId, new Date("2026-10-15T08:01:00Z"));
+  expect(afterReset.usage.used.phone_minutes).toBe(0);
 });

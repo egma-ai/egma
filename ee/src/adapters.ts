@@ -210,7 +210,7 @@ export function cloudEntitlementSource(
       // balance — a month's allowance is the other question's business. Asking
       // for the whole entitlement picture here would run the period aggregate
       // over a customer's conversations to read one integer beside it.
-      const account = await openBillingAccount(request.organizationId, now());
+      const account = await openBillingAccount(request.organizationId);
 
       // **Above zero, and not "enough".** Egma cannot know what a simulation
       // will cost before it runs, so the rule is the one the founders set: new

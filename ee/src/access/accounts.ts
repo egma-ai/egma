@@ -196,12 +196,10 @@ export async function createBillingAccount(
 
 export async function openBillingAccount(
   organizationId: string,
-  _at: Date = new Date(),
-  catalog?: PlanCatalog,
 ): Promise<BillingAccount> {
   const held = await accountRow(fencedDatabase(), organizationId);
   if (held !== undefined) return held;
-  const read = catalog ?? (await readPlanCatalog());
+  const read = await readPlanCatalog();
   return fencedDatabase().transaction((tx) =>
     createBillingAccount(tx, organizationId, read),
   );
