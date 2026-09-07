@@ -38,11 +38,9 @@ import type { StripeGateway } from "./stripe/gateway.ts";
  * is handed the context the API already resolved.
  *
  * **Every role reads the plan, the allowances and the balance.** A run that
- * paused for money has to explain itself to whoever started it. What an admin
- * alone reads is the breakdown of what the money went on, and what an admin
- * alone does — buy credit, move to Pro, stop at period end, open the Customer
- * Portal — is the four `POST`s below, each of which asks the permission before
- * it asks Stripe anything.
+ * paused for money has to explain itself to whoever started it. Every member
+ * can also read the ledger. Only admins take payment actions, and each action
+ * checks permission before reaching Stripe.
  *
  * **The webhook door at the foot of this file is not in that scope.** Stripe
  * holds no credential of Egma's, so its signature is the whole gate and the

@@ -23,9 +23,8 @@ export type PlanCode = schema.PlanCode;
  * reader that refuses a file which drifted from it. Nothing here reaches a
  * store.
  *
- * **Every refusal below is a boot failure by design.** A deployment that
- * started with a plan it could not read would enforce an allowance nobody set,
- * which is worse than not starting.
+ * Invalid plan data raises a billing fault. The process can keep serving while
+ * the billing initialization retries.
  */
 
 /** One plan, exactly as a row of `cloud_plan` holds it. */
