@@ -201,18 +201,9 @@ function agentPovIncomplete(
   }
   if (transcript?.agentEvidenceIncomplete === true) return true;
   if (transcript?.agentEvidenceComplete === true) return false;
-  // The wait began when the conversation ended, on the earlier of the two
-  // clocks that answer for that — the same reading grading itself takes, so a
-  // report from a machine running ahead cannot make this say "still waiting"
-  // forever.
-  const reported = simulation.endedAt;
-  const stamped = simulation.heartbeatAt;
-  const began =
-    reported === null
-      ? stamped
-      : stamped === null || reported < stamped
-        ? reported
-        : stamped;
+  // Use Egma's completion receipt so provider clock skew cannot shorten or
+  // extend the evidence wait. Historical rows may have only a reported end.
+  const began = simulation.heartbeatAt ?? simulation.endedAt;
   if (began === null) return false;
   return Date.now() - began.getTime() >= AGENT_POV_BOUND_SECONDS * 1_000;
 }
@@ -310,13 +301,8 @@ export async function simulationRoutes(
         // A result is read here, so it answers here — never by fetching the
         // run to find out.
         hasRecording: simulation.recordingReference !== null,
-        // **That grading stopped waiting for the agent's own account of this
-        // conversation.** The wait is bounded at thirty seconds so a broken
-        // exporter or a failed pull cannot hold a simulation open forever
-        // (ADR-0024 §6), and past the bound the record has to say so: a reader
-        // showing the agent's POV would otherwise show whatever fragment
-        // arrived as if it were the conversation. False is the ordinary answer
-        // — the account landed, or the lane files none.
+        // Use the grading wait bound to distinguish evidence still arriving
+        // from evidence missing after the deadline.
         agentPovComplete: transcript?.agentEvidenceComplete === true,
         agentPovIncomplete: agentPovIncomplete(simulation, run, transcript),
         measures: describedMeasures(simulation, transcript),
@@ -424,6 +410,12 @@ export async function simulationRoutes(
         traceId,
         runId: simulation.runId,
       });
+      if (requested.kind === "waiting") {
+        return unprocessable(
+          reply,
+          "the final platform transcript is still arriving. Grading will start when it is ready.",
+        );
+      }
       if (requested.kind === "not_requested") {
         return unprocessable(
           reply,

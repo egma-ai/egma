@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   normaliseRetellCall,
+  retellCallDocumentIsComplete,
   traceIdFor,
   type RetellCall,
 } from "../src/retell/normalise.ts";
@@ -779,5 +780,24 @@ describe("a payload the normalizer cannot fully read", () => {
         callStatus,
       ).toBe(false);
     }
+  });
+});
+
+
+describe("Retell final call records", () => {
+  it("does not accept an ongoing call with only a start time as complete", () => {
+    const ongoing = capturedCall({
+      call_status: "ongoing",
+      end_timestamp: undefined,
+      transcript: undefined,
+      transcript_object: undefined,
+      transcript_with_tool_calls: undefined,
+    });
+
+    expect(retellCallDocumentIsComplete(ongoing)).toBe(false);
+    const retained = normaliseRetellCall(ongoing, FILED_INTO, NOW);
+    expect(retained.endReported).toBe(false);
+    expect(retained.degraded).toBe(true);
+    expect(retained.spans).toHaveLength(1);
   });
 });

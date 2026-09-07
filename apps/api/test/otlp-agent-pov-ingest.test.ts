@@ -1,4 +1,5 @@
 import {
+  AGENT_POV_BOUND_SECONDS,
   claimSimulations,
   cancelRun,
   completeSimulation,
@@ -16,7 +17,7 @@ import {
   startSimulation,
 } from "@egma/db";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { reportPathFor } from "../src/routes/reports.ts";
@@ -78,6 +79,13 @@ let acme: Customer;
 let globex: Customer;
 let acmeKey: string;
 let globexKey: string;
+
+afterEach(() => vi.useRealTimers());
+
+function advancePastEvidenceWait(): void {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(Date.now() + AGENT_POV_BOUND_SECONDS * 1_000 + 1);
+}
 
 /** Every captured request, already decoded, so a resource can be stamped. */
 let captured: OtlpExport[] = [];
@@ -528,9 +536,18 @@ describe.skipIf(!storage.available)("LiveKit evidence while the call is running"
     }
     await api.drainEvidence();
     expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(endedAt.getTime() + 60_000);
     const pending = await api.app.inject({ method: "GET", url: `/v1/simulations/${landed.simulationId}`,
       headers: { authorization: `Bearer ${acmeKey}` } });
-    expect(pending.json()).toMatchObject({ agentPovComplete: false, agentPovIncomplete: false });
+    expect(pending.json()).toMatchObject({ gradingState: "pending", agentPovComplete: false, agentPovIncomplete: false });
+    const prematureRegrade = await api.app.inject({ method: "POST", url: `/v1/simulations/${landed.simulationId}/regrade`,
+      headers: { authorization: `Bearer ${acmeKey}` } });
+    expect(prematureRegrade.statusCode, prematureRegrade.body).toBe(422);
+    expect(prematureRegrade.body).toContain("final platform transcript is still arriving");
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+    // The ingestion publisher rotates segments on the real clock.
+    vi.useRealTimers();
     for (const exported of current) expect((await post(naming(exported, room), acmeKey)).statusCode).toBe(200);
     await api.drainEvidence();
     expect(await getGradingJobForTrace(auth, landed.traceId)).toMatchObject({ traceId: landed.traceId });
@@ -548,7 +565,10 @@ describe.skipIf(!storage.available)("LiveKit evidence while the call is running"
     await api.drainEvidence();
     const read = () => api.app.inject({ method: "GET", url: `/v1/simulations/${landed.simulationId}`,
       headers: { authorization: `Bearer ${acmeKey}` } });
+    expect((await read()).json()).toMatchObject({ agentPovComplete: false, agentPovIncomplete: false });
+    advancePastEvidenceWait();
     expect((await read()).json()).toMatchObject({ agentPovComplete: false, agentPovIncomplete: true });
+    vi.useRealTimers();
     await exportTheCapture(acmeKey, room);
     expect((await read()).json()).toMatchObject({ agentPovComplete: true, agentPovIncomplete: false });
   });
@@ -1120,6 +1140,7 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     const auth = contextFor(acme, "member");
     expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
 
+    advancePastEvidenceWait();
     const settled = await settleSimulationsPastTheAgentPovBound();
     expect(settled.map((one) => one.id)).toContain(landed.simulationId);
     expect(
@@ -1167,8 +1188,9 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     const auth = contextFor(acme, "member");
     expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
 
-    // The standing window, unwidened: six hours outside it by the report's own
-    // clock, and inside it by the stamp egma wrote when the landing arrived.
+    // A clock behind Egma does not spend the wait before the report arrives.
+    expect((await settleSimulationsPastTheAgentPovBound()).map((one) => one.id)).not.toContain(landed.simulationId);
+    advancePastEvidenceWait();
     const settled = await settleSimulationsPastTheAgentPovBound();
     expect(settled.map((one) => one.id)).toContain(landed.simulationId);
     expect(
@@ -1942,6 +1964,7 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
       payload: terminalReport(running.simulationId, status, `missing_${running.simulationId}`),
     });
     expect(landed.statusCode, landed.body).toBe(200);
+    advancePastEvidenceWait();
     const read = await api.app.inject({ method: "GET", url: `/v1/simulations/${running.simulationId}`,
       headers: { authorization: `Bearer ${acmeKey}` } });
     expect(read.statusCode, read.body).toBe(200);

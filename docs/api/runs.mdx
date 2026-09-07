@@ -205,13 +205,18 @@ grading fields:
 </ResponseField>
 
 <ResponseField name="agentPovIncomplete" type="boolean">
-  `true` when this simulation was graded without the agent's own account of the
-  conversation. A simulation stores two accounts, and grading waits for the
-  agent's — the SDK's export from inside the room, or the pull from the agent
-  platform — for 30 seconds and no longer. `true` says the wait ran out: what is
-  stored is Egma's own account, and the agent's is missing or partial, so a
-  reader that shows the agent's POV has to say so rather than show a fragment as
-  the whole. Regrade picks up a late arrival.
+  `true` when the final platform record is still missing after the evidence
+  wait, or the received record is explicitly incomplete. For LiveKit and
+  Retell simulations, grading waits up to 245 seconds from Egma receiving the
+  completion report. Grading starts as soon as the complete agent record is
+  available. Regrade can use evidence that arrives after the wait expires.
+
+  Retell call records are checked immediately, every five seconds through the
+  first minute, then at 70, 90, 130, 190, and 240 seconds. Each request has a
+  five-second timeout, with at most 18 requests per simulation. Polling stops
+  when the final call record has a usable transcript. After those attempts,
+  Egma does not fetch again automatically, and Regrade only uses stored
+  evidence. LiveKit sends its record through the SDK and needs no polling.
 
   It is `false` on every simulation whose agent POV landed, and on every lane
   that files none: a Retell phone call reaches nothing of Egma's, so nothing was
