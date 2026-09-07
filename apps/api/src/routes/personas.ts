@@ -1,5 +1,7 @@
 import {
   createPersona,
+  usePersona,
+  PersonaVersionConflictError,
   deletePersona,
   editPersona,
   forkPersona,
@@ -35,41 +37,13 @@ import { registerPlatformOperation } from "../http/platform-operation.ts";
 import { sendRefusal } from "../http/refusals.ts";
 
 /**
- * The personas available to one project: the shared definitions Egma ships,
- * the Custom definitions a team authors, their history and their uses.
- *
- * A **persona** is the synthetic person who speaks with the agent.
- *
- * Four shapes here are contract rather than convenience.
- *
- * **A persona has two names, and they live different lives.** `name` is the
- * team's word for the library row — shown in lists and pickers, written in
- * place, never spoken. `identityName` is the human name this persona gives the
- * agent, it is pinned on the version a simulation records, and changing it
- * mints the next version. So the same test always hears the same person, and
- * relabeling a library never pollutes the history a result is read against.
- *
- * **Identity is live and behavior is versioned, and the wire says which is
- * which.** Name and description write in place. Identity name, personality,
- * language and models mint an immutable version, and values identical to the
- * current version mint nothing.
- *
- * **No write names an expectation.** A persona write is last-write-wins: there
- * is no revision token and no expected version id on this surface, and none
- * underneath it. Pre-launch, with two authors, the ceremony cost more than the
- * clobber it prevented.
- *
- * **Delete is the word and there is no way back.** One route takes a Custom
- * persona out of every list and picker for good; underneath the row is stamped
- * rather than removed, so every version stays readable and a simulation that
- * pinned one still reads true. Predefined personas — Egma's own — cannot be
- * deleted or changed at all, and Fork is how a team gets a Custom version of
- * one.
- *
- * **Names are not unique, so nothing here is addressed by one.** Every address
- * and every reference is a stable `prs_` identifier. Two personas called
- * "Impatient caller" is an ordinary thing for a project to hold, and a surface
- * that resolved a name would have to pick one of them.
+ * Project persona routes expose Egma-provided and Custom definitions.
+ * Library name and description are live metadata. Identity name, personality,
+ * and language are versioned behavior; behavior edits require the current
+ * expectedVersionId. Model choices are project settings, outside core history.
+ * Egma-provided behavior is read-only; projects can change settings or clone
+ * it into a Custom persona. Custom deletion retains version history without
+ * a restore route. Names need not be unique; routes use stable persona IDs.
  */
 
 export type PersonaRoutesOptions = {
@@ -118,8 +92,8 @@ const REFUSALS = {
    * branches on; the sentence is what a person reads.
    */
   predefinedPersona: (personaId: string): string =>
-    `Persona ${personaId} is Predefined and cannot be changed or deleted. ` +
-    `Fork it to make a Custom persona you can edit.`,
+    `Persona ${personaId} is Predefined. Its core and metadata cannot be changed, and it cannot be deleted. ` +
+    `Clone it to make a Custom persona you can edit.`,
 
   invalidCursor: (cursor: string): string =>
     `Cursor ${cursor} is not valid for this list. Remove it and start from ` +
@@ -140,16 +114,8 @@ function noSuchPersona(reply: FastifyReply, personaId: string): FastifyReply {
 }
 
 /**
- * Whether this credential may author here, answered before anything is read.
- *
- * **The server is the boundary and the browser is not.** A viewer's write is
- * refused here whether or not a page ever offered them a control, and the
- * data-access module refuses it again underneath — this one exists so that the
- * refusal carries the sentence a person can act on rather than the factory's
- * internal one.
- *
- * It is checked *first*, before the persona is looked for, so that a viewer is
- * refused for being a viewer rather than told which personas exist.
+ * Check authoring permission before reading the persona, with user-facing
+ * guidance. The data layer enforces the permission again.
  */
 function mayAuthor(
   reply: FastifyReply,
@@ -174,14 +140,8 @@ function mayAuthor(
 /* -------------------------------------------------------------- the shapes */
 
 /**
- * The keys an authoring body may carry, and no others.
- *
- * **A key this surface does not know is refused rather than dropped.** The
- * shapes this replaced carried a `traits` wrapper, two expectation tokens, an
- * accent, and a background noise; a body still written that way would otherwise
- * be answered `200` with nothing of it applied — a client told its edit landed
- * when the persona never moved. There is no old shape to accept: the sentence
- * names the offending key and lists what a persona body actually carries.
+ * Reject unknown authoring keys so obsolete payloads cannot succeed while
+ * silently applying none of their requested changes.
  */
 const PERSONA_BODY_FIELDS = [
   "projectId",
@@ -202,15 +162,8 @@ function unknownBody(body: Body, allowed: readonly string[]): string | undefined
 }
 
 /**
- * The same rule for a query string, on the two routes that need it.
- *
- * **The list needs it because a parameter was taken away.** `archived=true`
- * used to choose the second list, and there is no second list; ignoring it
- * would answer somebody's question about deleted personas with the living
- * ones and call that success. Delete has it because a route addressed by an id
- * carries one filter and nothing else, which is how every other Delete on this
- * API reads. The plain reads keep no such check: nothing was removed from them,
- * so there is nothing they could quietly ignore.
+ * Validate query keys on list/delete routes. Reject unsupported filters,
+ * including archived, rather than silently returning a different selection.
  */
 function unknownQuery(
   query: Query,
@@ -249,7 +202,8 @@ function describedPersona(one: Persona): Record<string, unknown> {
     identityName: one.identityName,
     personality: one.personality,
     language: one.language,
-    models: one.models,
+    parameterContract: one.parameterContract,
+    settings: one.settings === null ? null : { id: one.settings.id, models: one.settings.models, createdAt: one.settings.createdAt.toISOString(), updatedAt: one.settings.updatedAt.toISOString() },
     owner: one.owner,
     archivedAt: one.archivedAt?.toISOString() ?? null,
     createdAt: one.createdAt.toISOString(),
@@ -266,7 +220,7 @@ function describedVersion(one: PersonaVersion): Record<string, unknown> {
     identityName: one.identityName,
     personality: one.personality,
     language: one.language,
-    models: one.models,
+    parameterContract: one.parameterContract,
     createdAt: one.createdAt.toISOString(),
   };
 }
@@ -274,14 +228,8 @@ function describedVersion(one: PersonaVersion): Record<string, unknown> {
 /* ------------------------------------------------------------ the project */
 
 /**
- * Which project this request is about.
- *
- * **A browser names it every time.** The project a tab is looking at lives in
- * that tab's address and nowhere else, so a session that named none is a
- * request egma cannot answer — and answering it about *some* project would be
- * the silent narrowing this codebase has already had to find once. An API key
- * is different: one minted for a project already names it, and
- * `actingIn` resolves that without the caller repeating it.
+ * Sessions must name the tab's project. API keys can use their stored project
+ * scope; actingIn resolves it without a repeated query parameter.
  */
 async function projectFor(
   auth: AuthContext,
@@ -437,12 +385,8 @@ export async function personaRoutes(
   });
 
   /**
-   * Which active tests currently name them.
-   *
-   * **It no longer stands between anybody and a Delete.** Delete asks nothing
-   * and refuses nothing but a Predefined persona. What this answers is the
-   * question somebody about to press it wants answered — who goes quiet if I do
-   * — and the page shows it beside the button rather than after it.
+   * List active tests that use this persona for the detail page. Usage does
+   * not block deletion of a Custom persona.
    */
   registerPlatformOperation(app, personaOperations.getPersonaUsage, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -502,14 +446,7 @@ export async function personaRoutes(
       return sendRefusal(reply, "unprocessable", unexpected);
     }
 
-    if (!("models" in body)) {
-      return sendRefusal(
-        reply,
-        "unprocessable",
-        "a persona needs one complete models value with llm, stt and tts",
-      );
-    }
-    const models = validPersonaModels(body.models);
+    const models = "models" in body ? validPersonaModels(body.models) : undefined;
 
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
@@ -522,25 +459,15 @@ export async function personaRoutes(
       identityName: text(body.identityName),
       personality: text(body.personality),
       language: text(body.language),
-      models,
+      ...(models === undefined ? {} : { models }),
     });
 
     return reply.code(201).send(describedPersona(created));
   });
 
   /**
-   * A partial edit — the same shape with every field optional.
-   *
-   * What the body leaves out, the persona keeps. A name or a description is
-   * identity and writes in place; the identity name, personality, language and
-   * models mint a version unless they are identical to the current one, in
-   * which case nothing is written at all and a nervous re-save leaves no
-   * history behind.
-   *
-   * **It names no expectation, and that is the decision rather than an
-   * omission.** Persona writes are last-write-wins. A body still carrying an
-   * `expectedRevision` or an `expectedVersionId` is refused as an unknown key,
-   * because a client sending one believes in a guard that is not there.
+   * Absent fields stay saved. Core edits require the current base; settings
+   * and live metadata save without creating a version.
    */
   registerPlatformOperation(app, personaOperations.updatePersona, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -550,7 +477,7 @@ export async function personaRoutes(
     const refused = mayAuthor(reply, auth, "edit personas");
     if (refused !== undefined) return refused;
 
-    const unexpected = unknownBody(body, PERSONA_BODY_FIELDS);
+    const unexpected = unknownBody(body, [...PERSONA_BODY_FIELDS, "expectedVersionId"]);
     if (unexpected !== undefined) {
       return sendRefusal(reply, "unprocessable", unexpected);
     }
@@ -573,16 +500,31 @@ export async function personaRoutes(
         : {}),
       ...("language" in body ? { language: text(body.language) } : {}),
       ...(models === undefined ? {} : { models }),
+      ...("expectedVersionId" in body ? { expectedVersionId: text(body.expectedVersionId) } : {}),
     });
 
     if (edited === undefined) return noSuchPersona(reply, personaId);
     return reply.send(describedPersona(edited));
   });
 
+  registerPlatformOperation(app, personaOperations.usePersona, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { personaId } = request.params as { personaId: string };
+    const body = (request.body ?? {}) as Body;
+    const refused = mayAuthor(reply, auth, "use personas");
+    if (refused !== undefined) return refused;
+    const unexpected = unknownBody(body, ["projectId", "models"]);
+    if (unexpected !== undefined) return sendRefusal(reply, "unprocessable", unexpected);
+    const acting = await projectFor(auth, given(text(body.projectId)));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+    const one = await usePersona(acting.auth, personaId, "models" in body ? validPersonaModels(body.models) : undefined);
+    if (one === undefined) return noSuchPersona(reply, personaId);
+    return reply.send(describedPersona(one));
+  });
+
   /**
-   * A Custom persona carrying the source's current name, description, authored
-   * person, and model selections. A fork starts its own history and is editable
-   * even when the source is a Predefined persona.
+   * Fork the current persona into an editable Custom persona with its own
+   * history, including name, description, behavior, and model selections.
    */
   registerPlatformOperation(app, personaOperations.forkPersona, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -602,21 +544,10 @@ export async function personaRoutes(
   });
 
   /**
-   * Delete: they leave every list and picker, and nothing else changes.
-   *
-   * **One route, one confirmation, and nothing to nominate.** It replaces an
-   * Archive that asked for a revision and sometimes for a successor, and a
-   * Restore that put somebody back. Underneath, the row is stamped rather than
-   * removed, so every version stays readable and a simulation that pinned one
-   * still reads true — but no surface here offers a way back.
-   *
-   * **Only a Predefined persona refuses it.** A live test naming this persona
-   * does not: that protection sits where the loss would happen — a run for such
-   * a test is refused, and the test's next write has to name somebody alive.
-   *
-   * Deleting somebody already deleted answers the same `204`. Two tabs pressing
-   * Delete is an ordinary thing to happen, and the second one has nothing to
-   * complain about.
+   * Permanently hide a Custom persona while retaining versions for history.
+   * Egma-provided personas cannot be deleted. Existing test references do not
+   * block deletion; later runs and test edits reject deleted selections.
+   * Repeated deletion returns 204.
    */
   registerPlatformOperation(app, personaOperations.deletePersona, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -644,6 +575,9 @@ export async function personaRoutes(
    * fault.
    */
   app.setErrorHandler(async (error, _request, reply) => {
+    if (error instanceof PersonaVersionConflictError) {
+      return sendRefusal(reply, "version_conflict", error.message);
+    }
     if (error instanceof EgmaProvidedPersonaError) {
       return sendRefusal(
         reply,

@@ -14,35 +14,14 @@ import {
   type PersonaForm,
   type PersonaModelCatalogEntry,
 } from "../../../../lib/personas.ts";
-import { Field, FormRow } from "../../../../ui/form.tsx";
+import { Field } from "../../../../ui/form.tsx";
 import { NumberField } from "../../../../ui/number-field.tsx";
 import { SheetSection } from "./sheet-parts.tsx";
 
 /**
- * The fields a persona is authored in, in the three groups the boards draw.
- *
- * **One set of fields, two sheets.** Create and edit ask for exactly the same
- * things — the boards `RKF-0` and `S6H-0` are the same form with a different
- * head, a different footer, and one extra line of small print. Writing them
- * twice is how the two come to disagree about a placeholder, and this surface
- * has eleven fields to disagree about.
- *
- * **The label grammar is the product's, and it is kept by two halves.** A
- * mandatory label ends in `*`, drawn Ember by `LabelText`; an optional one ends
- * in `[optional]`. The star is never only a picture, so every starred control
- * here also carries `aria-required`. `DESIGN.md` calls a starred label with no
- * required semantics a bug rather than a style choice.
- *
- * **A field says what to write, and nothing about how egma stores it.** The
- * release-defaults note, the speed instruction and the version arithmetic that
- * used to sit in these groups were deleted on the developer's own reading of
- * the boards. What a save does to the version number is said once, in the one
- * line under the name block, where the distinction it draws is the point.
- *
- * The ids are prefixed because the create sheet and the read sheet can both be
- * mounted at once — one opening while the other finishes closing — and two
- * elements answering to `#persona-name` would leave every label pointing at
- * whichever the document happened to hold first.
+ * Share persona fields between create and edit sheets. Prefix control IDs
+ * because both sheets can overlap during transitions. Required labels must
+ * also carry aria-required; optional labels use the product's optional marker.
  */
 
 /** Which sheet these fields are in, and so which ids they answer to. */
@@ -191,19 +170,9 @@ export function BehaviorFields({
 }
 
 /**
- * The complete model selection owned by a persona version.
- *
- * **One control per engine, and the control is the pair.** The server's catalog
- * is a list of provider-and-model pairs its adapters can actually execute, so
- * choosing from those pairs cannot produce a combination that does not exist.
- * The provider and the model used to be two selects that had to be kept in step
- * by hand; the boards draw one, and one is also the honest count of decisions
- * being made.
- *
- * Credentials do not appear here at all. The voice belongs to the text-to-speech
- * provider that speaks it, so changing that engine takes the new engine's
- * recommended voice with it — keeping the old one would leave a persona
- * pointing at a voice its new provider has never heard of.
+ * Edit model settings for the persona in this project. Each engine control
+ * selects a catalog provider/model pair. Changing the speech engine also
+ * selects its recommended voice so the voice matches the provider.
  */
 function EngineField({
   prefix,
@@ -277,75 +246,71 @@ export function ModelFields({
   readonly onChange: (draft: ModelsDraft) => void;
 }) {
   return (
-    <SheetSection label="Models">
+    <SheetSection label="Settings">
       <div className="flex flex-col gap-4">
-        <FormRow>
-          <EngineField
-            prefix={prefix}
-            job="llm"
-            label="Language model"
-            selection={{ provider: draft.llmProvider, model: draft.llmModel }}
-            form={form}
-            disabled={disabled}
-            onSelect={(entry) =>
-              onChange({
-                ...draft,
-                llmProvider: entry.provider,
-                llmModel: entry.model,
-              })
-            }
-          />
-          <EngineField
-            prefix={prefix}
-            job="stt"
-            label="Speech-to-text"
-            selection={{ provider: draft.sttProvider, model: draft.sttModel }}
-            form={form}
-            disabled={disabled}
-            onSelect={(entry) =>
-              onChange({
-                ...draft,
-                sttProvider: entry.provider,
-                sttModel: entry.model,
-              })
-            }
-          />
-        </FormRow>
+        <EngineField
+          prefix={prefix}
+          job="llm"
+          label="Language model"
+          selection={{ provider: draft.llmProvider, model: draft.llmModel }}
+          form={form}
+          disabled={disabled}
+          onSelect={(entry) =>
+            onChange({
+              ...draft,
+              llmProvider: entry.provider,
+              llmModel: entry.model,
+            })
+          }
+        />
+        <EngineField
+          prefix={prefix}
+          job="stt"
+          label="Speech-to-text"
+          selection={{ provider: draft.sttProvider, model: draft.sttModel }}
+          form={form}
+          disabled={disabled}
+          onSelect={(entry) =>
+            onChange({
+              ...draft,
+              sttProvider: entry.provider,
+              sttModel: entry.model,
+            })
+          }
+        />
 
-        <FormRow>
-          <EngineField
-            prefix={prefix}
-            job="tts"
-            label="Text-to-speech"
-            selection={{ provider: draft.ttsProvider, model: draft.ttsModel }}
-            form={form}
-            disabled={disabled}
-            onSelect={(entry) =>
-              onChange({
-                ...draft,
-                ttsProvider: entry.provider,
-                ttsModel: entry.model,
-                voiceId: entry.recommendedVoiceId ?? "",
-              })
-            }
-          />
-          {/*
-           * The rate carries no `min`, `max` or `step`, and that is deliberate.
-           * The accepted range is the server's rule, and a bound written here
-           * as well would either refuse a rate egma would have taken or take
-           * one egma will refuse. The one authoritative refusal is the
-           * server's, and the instruction that used to explain the range here
-           * was deleted on the developer's note against this very field.
-           */}
-          <NumberField
-            id={`${prefix}-tts-speed`}
-            label="Speech rate*"
-            value={draft.speed}
-            disabled={disabled}
-            required
-            onChange={(speed) => onChange({ ...draft, speed })}
-          />
-        </FormRow>
+        <EngineField
+          prefix={prefix}
+          job="tts"
+          label="Text-to-speech"
+          selection={{ provider: draft.ttsProvider, model: draft.ttsModel }}
+          form={form}
+          disabled={disabled}
+          onSelect={(entry) =>
+            onChange({
+              ...draft,
+              ttsProvider: entry.provider,
+              ttsModel: entry.model,
+              voiceId: entry.recommendedVoiceId ?? "",
+            })
+          }
+        />
+        {/*
+         * The rate carries no `min`, `max` or `step`, and that is deliberate.
+         * The accepted range is the server's rule, and a bound written here
+         * as well would either refuse a rate egma would have taken or take
+         * one egma will refuse. The one authoritative refusal is the
+         * server's, and the instruction that used to explain the range here
+         * was deleted on the developer's note against this very field.
+         */}
+        <NumberField
+          id={`${prefix}-tts-speed`}
+          label="Speech rate*"
+          value={draft.speed}
+          disabled={disabled}
+          required
+          onChange={(speed) => onChange({ ...draft, speed })}
+        />
 
         <Field
           label="Voice*"

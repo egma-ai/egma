@@ -109,8 +109,8 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     });
     suites = suiteGroup.controls;
 
-    // Egma's Predefined persona belongs to no project, so every project can
-    // name one before anybody authors anything.
+    // Egma-provided personas are shared, so projects can use them before creating
+    // Custom personas.
     const personaGroup = personaRoutes({ holdsKey, projectId });
     personas = personaGroup.controls;
 

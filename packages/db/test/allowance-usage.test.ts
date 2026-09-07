@@ -183,7 +183,6 @@ async function seedRun(
     suiteId: suite.id,
     agentId: created.id,
     connectionId: connections.get("retell_chat_api") ?? "",
-    idempotencyKey: newId("run"),
   });
   const one = (await listSimulations(auth, started.id))?.items[0];
   if (one === undefined) throw new Error("the run has no simulation");
@@ -240,9 +239,10 @@ async function conversation(
        (id, run_id, organization_id, project_id, agent_id, connection_id,
         persona_id, persona_version_id, test_id, test_version_id,
         position, modality, connection_type, status, ending_reason,
-        started_at, ended_at, claimed_by, claimed_at, heartbeat_at)
+        started_at, ended_at, claimed_by, claimed_at, heartbeat_at, persona_parameter_values)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-             $16, $17, $18, $19, $19)`,
+             $16, $17, $18, $19, $19,
+             (select persona_parameter_values from simulation where run_id = $2 limit 1))`,
     [
       newId("sim"),
       seeded.runId,

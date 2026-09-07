@@ -129,19 +129,8 @@ function chatCandidate(platformAgentId: string): RetellConnectionCandidate {
 }
 
 /**
- * The web-call lane, offered for every Retell voice agent.
- *
- * **It is offered whether or not the agent has a telephone number**, and that
- * is the difference between it and the phone candidate beside it: Egma creates
- * this call itself against the agent, so there is nothing to be routed and
- * nothing to dial. It is also the lane a mocked run is conducted over — the
- * published number is never dialled for one — so an agent whose only candidate
- * was its phone number would be an agent the tick could do nothing for.
- *
- * A web call is WebRTC and not the phone band, so a simulation over it is a
- * different unit from a phone simulation of the same agent. The registry's
- * connection-band rule is what keeps the two from being compared; this only
- * offers the choice.
+ * Offer web calls for Retell voice agents even without a phone number.
+ * Web calls support mock tools; phone simulations use a separate connection type.
  */
 function webCallCandidate(platformAgentId: string): RetellConnectionCandidate {
   return {
@@ -259,16 +248,7 @@ export async function confirmRetellCandidate(
   platformAgentId: string,
   candidate: RetellCandidateToConfirm,
   fetchImpl: ProviderFetch = fetch,
-  /**
-   * Where Retell answers for this connection, when its config names somewhere
-   * other than Retell's own address.
-   *
-   * **The same address the run start will use.** The door and the run ask one
-   * question — is this agent's engine one this lane can reach — and two
-   * different servers could answer it two different ways: a connection
-   * confirmed against Retell and then conducted against a proxy would have
-   * been checked somewhere it never runs.
-   */
+  /** Use the configured Retell endpoint for both connection validation and runs. */
   baseUrl?: string | undefined,
 ): Promise<RetellCandidateConfirmation> {
   const key = credential(apiKey);
@@ -309,19 +289,8 @@ export async function confirmRetellCandidate(
       };
     }
 
-    // **The engine is read here, beside the listing, because the engine is a
-    // platform fact.** A custom LLM's brain and tools live on the customer's
-    // own socket server, so this lane cannot reach it — and being told that
-    // when the connection is registered is a sentence to act on, where being
-    // told it at the first run is a suite that will not start for a reason
-    // nobody expected. The run start asks the same question again through the
-    // same read, so the two refusals are one sentence in one place.
-    //
-    // **Without the bindings, though.** Registering a connection conducts
-    // nothing and pins no version, so the customer's phone numbers decide
-    // nothing here — and a door that read them would refuse a registration
-    // when that listing failed, for a run that does not exist. The last
-    // argument is what says so.
+    // Validate text-mode engine support during registration, using the same read
+    // as run start. Skip number bindings because registration pins no run version.
     const world = await readTextModeWorld(
       {
         apiKey,

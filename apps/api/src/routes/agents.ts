@@ -60,33 +60,10 @@ import {
 } from "../http/refusals.ts";
 
 /**
- * Registering an agent, reading it back, and attaching another way to reach it.
- *
- * The group mirrors the factory behind it, and three shapes are load-bearing:
- *
- * - **Agent-rooted, always.** A connection is only ever reached through its
- *   agent, so there is no `/v1/connections`. Naming the wrong agent answers
- *   exactly what naming a connection that does not exist answers.
- * - **No resource is rooted at a project, and the organization is in no
- *   address at all.** A write may *name* a project in its body and a read may
- *   filter by one; which customer this is comes from the credential and from
- *   nowhere else, which is what stops a copied key writing into somebody
- *   else's account by asking nicely.
- * - **A sealed secret never comes back.** What arrives is sealed before it
- *   touches a row, and every read answers its last four characters and nothing
- *   more. The field is absent from the read shape rather than blanked, so
- *   leaking one through a serializer is not a thing that can be forgotten.
- *
- * **Inline API registration is retry-safe by construction.** A create carrying
- * a connection goes through the factory's reuse rule, and the reply's `result`
- * says which of the three things happened — created, reused, or the same agent
- * reached a new way. A coding agent retrying after an uncertain network
- * failure therefore never mints a second identity for one vendor agent, and
- * never has to guess whether it did.
- *
- * **The inline connection and the standalone one are one body shape**, read by
- * one function below. Two dialects for one thing is how a client comes to
- * work on one path and fail on the other.
+ * Agent routes expose identity and agent-owned connections. Organization
+ * scope comes from the credential; requests can select a permitted project.
+ * Reads omit credential envelopes. Inline and attached connections share
+ * validation, and registration reuse follows the connection registry's rule.
  */
 
 export type AgentRoutesOptions = {
@@ -99,14 +76,8 @@ export type AgentRoutesOptions = {
 type Body = Record<string, unknown>;
 
 /**
- * What a refusal is, before it becomes a reply.
- *
- * Tagged, so a function answering "a value or a refusal" is told apart by a
- * field that exists for exactly that and never by sniffing for a property the
- * other side might one day grow. The tag is never sent: `refused` below writes
- * out the two fields the contract has, and the status comes off the one code
- * table in `http/refusals.ts`, so this group cannot carry a code that list
- * does not hold.
+ * Internal tagged refusal. Responses expose only error/message and derive
+ * status from the shared refusal table.
  */
 type Refusal = {
   readonly refused: true;
@@ -304,30 +275,9 @@ function boundedLimit(value: unknown): number | undefined | Refusal {
 }
 
 /**
- * The project a request about one agent acts in.
- *
- * **Every route that names an agent or a connection goes through this, reads
- * included.** The reason is the session's default: a browser's context is built
- * with the organization's *first* project in it, because that is all the door
- * knows before a request names one. A route that then used the context as it
- * found it would scope every read and every write to that first project — so
- * somebody working in a second project would open an agent and be told there is
- * no such agent, and, worse, an archive aimed at one project would be evaluated
- * against another.
- *
- * The spec is explicit that this must not happen: project middleware validates
- * the URL's project and adds it to the request, and the first project must
- * never become the fixed authorization scope. `readingIn` and `writingIn` below
- * are that validation, and they narrow only — the organization still comes from
- * the credential, so naming a project can only ever pick among what this
- * membership already reaches.
- *
- * It is also what keeps a plain fault out of the handler. `archiveAgent` and
- * `restoreAgent` refuse a credential acting in no project, exactly as the
- * grader, persona and mock-tool factories refuse their own project-scoped
- * writes — and, exactly as there, the API resolves a project before calling, so
- * the refusal is documentation of an invariant rather than a 500 waiting for an
- * organization-wide key to find it.
+ * Resolve explicit project selection for agent and connection routes before
+ * data access. Sessions may select sibling projects; project-scoped keys may
+ * not. Writes must resolve one project even for an organization-wide key.
  */
 async function actingProject(
   auth: AuthContext,
@@ -378,17 +328,9 @@ function agentPlatformIn(value: unknown): AgentPlatform | Refusal {
 }
 
 /**
- * Which Retell agent this connection reaches, and the key that proves it.
- *
- * **One shape, two spellings.** A request says `platformAgentId` beside
- * `credentials` (the flow the connect sheet uses since 2026-08-24), or wraps
- * both in the older `agentPlatformSelection` envelope. They are read into this
- * before anything else looks at them, so the confirmation, the seal and the
- * switch all have exactly one thing to read.
- *
- * The key is optional here and only here: an agent that already holds its
- * sealed copy is never asked for it again, and the route lends that copy to
- * the confirmation.
+ * Normalize either direct platformAgentId/credentials or the
+ * agentPlatformSelection envelope. The direct form can omit a key when
+ * the route can reuse the agent's stored credential.
  */
 type RetellChoice = {
   readonly platformAgentId: string;
@@ -454,19 +396,9 @@ function agentPlatformSelectionIn(
 }
 
 /**
- * One connection payload, read the one way — inline on a registration and
- * standalone on an attach.
- *
- * Almost nothing is checked here: the registry behind the seam owns what a
- * access variant's config fields and credential rule, and the kind's modalities,
- * credential, and it says so in sentences written to be relayed. Duplicating
- * any of that would produce a second opinion that could disagree. What this
- * does own is the shape of the envelope: which keys exist at all, and that the
- * ones carrying text carry text.
- *
- * **Topology is not in the list on purpose.** It is derived from the connection type — it
- * predicts who moves first when a simulation starts — so a guess would just be
- * wrong, and a supplied one is refused as the unknown key it is.
+ * Parse the shared inline/attach connection envelope. The registry validates
+ * access-variant configuration, credentials, and modality. Topology is derived
+ * from connection type and is not accepted as input.
  */
 function connectionIn(value: unknown): NewConnection | Refusal {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -575,18 +507,10 @@ type ConfirmedConnection = {
 };
 
 /**
- * Confirm the picked Retell agent with the key, immediately before the write.
- *
- * **Discovery is only a snapshot**, so the id a person picked minutes ago is
- * re-read here: the agent still exists, it is still the right modality, and —
- * for a phone connection — the number typed into the sheet is still routed to
- * that agent. A number that has stopped answering is refused rather than
- * stored, which is the whole reason the save spends a round trip.
- *
- * Only the normalized connection reaches the database. The key travels no
- * further than the agent's own sealed column, and Retell chat keeps its own
- * copy on the connection because that access method needs it for every
- * simulation.
+ * Revalidate the selected Retell agent and connection before saving because
+ * discovery can be stale. Confirm phone routing when applicable. Return the
+ * normalized connection and credential custody to persist; API-based Retell
+ * connections also keep the key for execution.
  */
 async function confirmRetellAgent(
   wanted: NewConnection,
@@ -738,19 +662,9 @@ async function confirmRetellAgent(
 }
 
 /**
- * The custody half of a connect save: the key lands on the agent, and the
- * checkbox — when it was ticked — starts the pull.
- *
- * **The seal happens whether or not the switch does.** A key is pasted once
- * per agent, ever, so the agent has to hold it from the first save even when
- * nobody asked for monitoring yet; that is what lets the next connect flow for
- * the same agent ask for no key at all.
- *
- * **A refusal here is relayed, never thrown.** The binding rule and the pull
- * switch both answer in sentences a person reads, so they come back as
- * refusals rather than as a fault. `boundElsewhere` below is checked before
- * the connection is written wherever the agent is known in advance, so the
- * ordinary way to meet this rule is a save that wrote nothing at all.
+ * Seal the agent platform key even when pull monitoring is off, then enable
+ * pull if requested. Map expected binding and uniqueness errors to refusals;
+ * unexpected errors propagate. These writes are separate from connection creation.
  */
 async function takeCustody(
   acting: AuthContext,
@@ -794,25 +708,9 @@ async function takeCustody(
 }
 
 /**
- * The agent a registration would land on, when it would land on one that
- * already exists — asked before anything is written.
- *
- * **A registration can reuse.** `registerAgent` matches a living connection
- * naming the same vendor agent and answers with the agent that already holds
- * it, so a request that names no agent id can still settle on one that is
- * already bound. That is the path where the binding rule used to be met only
- * *after* the agent and its connection were written, which left a live
- * connection on an agent the save was refused for — and a second press wrote
- * a second one.
- *
- * **It reads the reuse key rather than re-deciding reuse.** The factory owns
- * the rule and keeps owning it; this asks the same question of the page of
- * agents the project can already answer with, and it asks it only for the one
- * connection shape that has a reuse key. Everything else creates a fresh,
- * unbound agent, which no binding rule can refuse.
- *
- * A miss here is not a hole: `takeCustody` still meets the access layer's own
- * refusal, and the register route undoes its connection when it does.
+ * Best-effort precheck for a reusable retell_chat_api agent on the first
+ * agent page. This is narrower than registerAgent's reuse rules; data-layer
+ * checks and the route's cleanup still handle misses and races.
  */
 async function reusedAgentFor(
   acting: AuthContext,
@@ -837,16 +735,8 @@ async function reusedAgentFor(
 }
 
 /**
- * Whether a write lost to the one-switched-on-agent rule.
- *
- * The same reading `monitoring.ts` does, and for the same reason: the index is
- * what decides, because a read that checked first and wrote second would be a
- * race with the very next request. What it buys here is the sentence — without
- * it a person who ticked "Pull production calls" for a platform agent another
- * egma agent already watches got a fault, after their connection was written.
- *
- * It walks the `cause` chain because the query layer hands the driver's error
- * back wrapped.
+ * Recognize the pull-uniqueness constraint through wrapped driver errors.
+ * The database index remains authoritative when concurrent writes race.
  */
 function lostToPullUniqueness(error: unknown): boolean {
   for (
@@ -863,17 +753,8 @@ function lostToPullUniqueness(error: unknown): boolean {
 }
 
 /**
- * The binding rule, asked *before* anything is written.
- *
- * **One egma agent binds to one platform agent.** The access layer refuses the
- * second binding inside the transaction that would replace the first, which is
- * where the rule has to live to be race-free. This asks the same question one
- * step earlier, so the ordinary refusal leaves no connection behind on an
- * agent the save was never allowed to touch.
- *
- * It is not a substitute for the guard underneath and is not written as one:
- * two saves arriving together both read `null` here and one of them still
- * meets the real rule in the transaction.
+ * Precheck an existing platform binding before writing a connection.
+ * The data-layer transaction enforces the rule if concurrent saves race.
  */
 function boundElsewhere(
   known: Agent,
@@ -898,15 +779,8 @@ function boundElsewhere(
 }
 
 /**
- * An agent, as every read of one describes it.
- *
- * **The provider's half of an agent has no line here and never will.** Prompt,
- * model and tools live at the provider, where egma cannot freeze them and has
- * no business editing them; what egma owns is the name, the platform binding
- * and the identity every result accumulates against. A read that carried a copy of
- * provider configuration would be a copy going stale from the moment it was
- * taken, and an editor built on it would be egma quietly becoming a second
- * place to configure an agent.
+ * Serialize Egma-owned agent identity and platform binding, without copying
+ * provider prompt, model, or tool configuration into the resource.
  */
 function describedAgent(one: Agent): Record<string, unknown> {
   return {
@@ -969,18 +843,8 @@ function describedConnection(one: Connection): Record<string, unknown> {
 }
 
 /**
- * An agent as a *list* of them describes it: the identity above, and every
- * living way egma can reach it.
- *
- * **One shape, not a second dialect.** The connections are the same objects
- * `GET /v1/agents/{agentId}` answers, described by the same function, so a
- * client that can read a connection from one read can read it from the other.
- * The alternative — a smaller connection here, a fuller one there — is how a
- * client comes to work on one path and fail on the other.
- *
- * They are the living ones. An archived connection is how egma *used* to reach
- * an agent, and that question is asked of the agent's own read with
- * `?archived=true`, exactly as it always was.
+ * List agents with active connections using the same connection serializer
+ * as detail reads. Archived connections are requested through detail reads.
  */
 function describedListedAgent(
   one: AgentWithConnections,
@@ -1009,20 +873,8 @@ function refusalOf(acting: ActingRefusal): Refusal {
 }
 
 /**
- * The project a request named, checked against what the credential may reach.
- *
- * **One rule for reads and writes.** A surface that refuses a stranger's
- * project on a write and answers an empty list on a read has two rules, and
- * the empty list is the worse half: it reads as "you have no agents there"
- * rather than as "that is not yours to ask about".
- *
- * The check itself is `http/acting.ts`'s — one membership rule for every
- * route group. Only the wording is this group's own, and it lives beside the
- * other group's in that module, where the two can be unified in one edit the
- * day the dev picks a winner.
- *
- * This function decides whether the credential may reach the project. Reading
- * where the caller wrote the project down is a separate concern in the route.
+ * Use shared project-scope validation with this route group's wording.
+ * An explicit inaccessible project is refused on both reads and writes.
  */
 async function reachableProject(
   auth: AuthContext,
@@ -1227,21 +1079,9 @@ export async function agentRoutes(
   );
 
   /**
-   * Every simulation connection option egma supports, as a form may be drawn
-   * from it.
-   *
-   * **The web application must never keep its own copy of any of this.** The
-   * registry decides which config keys an access variant holds, which modalities the kind
-   * speaks, and whether a credential is required, forbidden or optional; a
-   * second handwritten copy in a browser would be a second opinion able to
-   * disagree with the gate, and the disagreement would surface as a form that
-   * asks for the wrong things and a create that refuses for reasons the form
-   * cannot explain.
-   *
-   * **What crosses is labels, field shapes, the credential rule and two adapter
-   * facts.** No gate function, no hint function, no refusal sentence, no
-   * credential value. It is built by reading the registry rather than by
-   * copying it, so nothing can be left behind when an option is added.
+   * Publish connection form metadata from the registry so the web app uses
+   * the same fields, credential rules, and adapter support. Omit validation
+   * functions and credential values.
    */
   registerPlatformOperation(
     app,
@@ -1284,14 +1124,9 @@ export async function agentRoutes(
   );
 
   /**
-   * Register an Agent identity, with an optional first way of reaching it in
-   * the same request.
-   *
-   * When a connection is present, both rows are written or neither is: a
-   * payload the registry turns away leaves no agent behind. The reuse rule
-   * runs inside that same transaction, so two machines registering one vendor
-   * agent at the same instant settle to one agent rather than one of them
-   * losing a race it should never have been in.
+   * Register identity and optional connection through the data-layer transaction.
+   * Reuse follows registry identity rules. Retell custody and pull enablement
+   * are later writes with separate cleanup.
    */
   registerPlatformOperation(app, agentOperations.registerAgent, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -1306,14 +1141,8 @@ export async function agentRoutes(
     const agentPlatform = agentPlatformIn(body.agentPlatform);
     if (isRefusal(agentPlatform)) return refused(reply, agentPlatform);
     /*
-     * **The query and the body**, with the query winning when both name a
-     * project. A door that reads only one of the two ignores the other rather
-     * than refusing it, which once made this route write to the wrong project.
-     *
-     * The connection gate stays this group's own, and it has to run first: a
-     * `projectId` that is not text is refused **by name** here, and
-     * a permissive reader would treat it as absent and silently fall back to
-     * the credential's own project.
+     * Validate the body project type before choosing query over body.
+     * Otherwise invalid body input could silently become the credential default.
      */
     const said = textWhenGiven(body.projectId, "a project");
     if (isRefusal(said)) return refused(reply, said);
@@ -1398,29 +1227,9 @@ export async function agentRoutes(
       );
       if (stopped !== undefined) {
         /*
-         * **A refusal un-writes exactly what this request wrote, and nothing
-         * else.** That is the whole rule, and each of its three halves was
-         * learned by getting it wrong:
-         *
-         * - **The connection, when this request created one.** `created` and
-         *   `connection_added` each wrote a row; `reused` wrote none. On
-         *   `reused` the connection predates this request — the registration
-         *   rotated its credential and nothing more — so archiving it would
-         *   take away a working way into an agent over a refusal that was only
-         *   ever about the pull switch, and could leave that agent with no way
-         *   in at all.
-         * - **Never the agent.** An agent this request created is unbound the
-         *   instant it is written, so its custody step can only be refused if
-         *   another writer bound it in the window between the insert and the
-         *   seal — which means the agent is theirs, and `archiveAgent`
-         *   cascades over every live connection on it, including the one they
-         *   had just attached.
-         * - **Never a row this request only read.** The pre-check above
-         *   catches the ordinary case before anything is written at all; this
-         *   is the raced one, and a racing request owns less than it thinks.
-         *
-         * A refused creator therefore leaves at worst an empty live agent row,
-         * which is a row and not a loss.
+         * Archive only a connection this request created. A reused connection must
+         * remain active, and archiving the agent could cascade to concurrent work.
+         * This compensation can leave an empty agent; it is not a full transaction rollback.
          */
         if (
           registered.connection !== undefined &&
@@ -1456,20 +1265,8 @@ export async function agentRoutes(
   });
 
   /**
-   * One page of the agents this credential can reach, newest first.
-   *
-   * A project is a filter in the query and never a level in the address. The
-   * cursor is the last id of the page: the ids sort by mint time, so a list
-   * changing underneath a reader never shows a row twice and never skips one.
-   *
-   * `pageSize` chooses up to 200 agents. `pageToken` carries a reader through
-   * the rest without repeating or skipping a row when the list changes.
-   *
-   * **Each agent carries its living connections.** Which agents egma can reach,
-   * and how, is the question a list of agents is opened to answer, and one
-   * request answers it for the whole page. There is no flag for it: a read that
-   * sometimes carried them and sometimes did not would be two shapes behind one
-   * address, and a client would work against one of them by accident.
+   * Return a newest-first ID-cursor page with active connections. Project is
+   * an optional query filter. Pagination does not freeze the changing list.
    */
   registerPlatformOperation(app, agentOperations.listAgents, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -1614,16 +1411,8 @@ export async function agentRoutes(
       const stopped = await takeCustody(acting, agentId, confirmed.custody, pull);
       if (stopped !== undefined) {
         /*
-         * **A refused save leaves nothing live behind**, the same backstop the
-         * register path carries. `boundElsewhere` above catches the ordinary
-         * case before a row exists; this is the raced one — two requests both
-         * read an unbound agent, both write, and custody serializes them, so
-         * the loser is holding a connection on an agent it was not allowed to
-         * bind. For Retell chat that connection carries its own sealed key,
-         * which makes leaving it a live way in rather than only a stray row.
-         *
-         * The agent is never archived here: this path is only ever given one
-         * that already existed, so it was not this request's to remove.
+         * Archive this newly attached connection if custody fails after the precheck.
+         * Keep the pre-existing agent and its other connections.
          */
         await archiveConnection(acting, agentId, added.id);
         return refused(reply, stopped);
@@ -1634,18 +1423,8 @@ export async function agentRoutes(
   });
 
   /**
-   * The Egma-owned half of an agent, edited last-writer-wins: the revision
-   * column was dropped pre-launch (ADR-0015), so two people editing one agent
-   * from two browsers is a silent overwrite.
-   *
-   * The name, and nothing else. The provider's prompt, model and tools are not
-   * here, are not in the read, and are not coming: they live where the customer
-   * configures them, and egma being a second place to edit them would make two
-   * answers to one question with no rule to choose between.
-   *
-   * **Mocking is not an agent setting.** It is a switch on each connection,
-   * because the lane is what decides whether a mocked run is a thing Egma can
-   * conduct — so it is edited where a connection is edited.
+   * Edit the Egma agent name with last-write-wins semantics. Provider
+   * configuration stays on the agent platform; mock tools belong to test versions.
    */
   registerPlatformOperation(app, agentOperations.updateAgent, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -1737,15 +1516,8 @@ export async function agentRoutes(
   });
 
   /**
-   * Change a connection: its name, its label, its config, or the whole of its
-   * credential.
-   *
-   * **The credential replaces whole or is left alone.** There is no merge,
-   * because a merge would mean reading the stored plaintext back out to edit
-   * it, and the one door to that opens for egma's own simulator and for
-   * nothing else. Rotation is therefore just this request carrying a whole new
-   * credential, which is why there is no separate rotate verb to keep in step
-   * with this one.
+   * Update connection metadata, configuration, or credentials. Supplied
+   * credentials replace the whole stored value; omission retains it.
    */
   registerPlatformOperation(
     app,
@@ -1924,14 +1696,8 @@ export async function agentRoutes(
     }
 
     /**
-     * Who is asking may not, said in the product's own sentence.
-     *
-     * The layer below writes a sentence for a terminal — `a viewer may not
-     * configure_agents` — which names an internal action word and reads as an
-     * error rather than as a next move. This is the browser's reader: it names
-     * the role somebody holds, what it cannot do in ordinary words, and the one
-     * person who can change it. The code is what a client branches on and is
-     * unchanged; only the sentence is.
+     * Keep the refusal code while replacing internal action names with
+     * role-specific guidance for the user.
      */
     if (error instanceof NotPermittedError) {
       return reply.code(403).send({

@@ -95,14 +95,8 @@ describe("holding the web output directory", () => {
 
 describe("several processes racing for it at once", () => {
   /**
-   * The one case the six above cannot make: contention.
-   *
-   * Every sequential test passes against a lock that excludes nobody, because
-   * a lock is only wrong in the moment two processes want it. So this starts
-   * real processes, on a path nothing has touched, and asks the only question
-   * that matters — was anybody ever inside it at the same time as somebody
-   * else. `support/race-for-the-lock.ts` is the child, and it witnesses with a
-   * marker file of its own rather than with the lock it is testing.
+   * Use competing processes to test exclusion. An independent marker records
+   * overlap so the test does not rely on the lock being correct.
    */
   it("lets exactly one of them in at a time", async () => {
     const lockPath = await aLockPath();
@@ -142,17 +136,8 @@ describe("several processes racing for it at once", () => {
 
 describe("a process id the operating system has given to somebody else", () => {
   /**
-   * The way a lock used to become permanent.
-   *
-   * A holder that is killed leaves its file behind. Operating systems reuse
-   * process numbers, so sooner or later something unrelated is given that
-   * number, `kill(pid, 0)` answers yes, and every build and browser test after
-   * that is refused by a process that never held anything. The lock records
-   * when its holder started as well as which number it had, so a number
-   * wearing a different start time is a different process.
-   *
-   * The number below is this very process, so it is genuinely running — which
-   * is the whole point. Only the start time says it is not the holder.
+   * A live PID with a different start time is not the recorded holder. Use
+   * this process's PID to exercise reuse without relying on OS PID allocation.
    */
   it("is not mistaken for the holder that has gone", async () => {
     const lockPath = await aLockPath();
@@ -176,16 +161,8 @@ describe("a process id the operating system has given to somebody else", () => {
   });
 
   /**
-   * The same defect, reached through a lock file this code did not write.
-   *
-   * A `.next.lock` left by the version before start times were recorded carries
-   * a process number and nothing to confirm the number is still that process.
-   * Reading the missing field as an empty string and comparing it with another
-   * empty string is how two unknowns became a match — and how an unrelated
-   * process wearing a recycled number became the holder forever.
-   *
-   * Refused, not stolen. Unreadable is not abandoned, and a record this version
-   * cannot verify is unreadable in every way that matters.
+   * A legacy lock without a start time cannot establish holder identity.
+   * Treat it as unreadable rather than reclaiming it from a live PID.
    */
   it("is refused, not matched, when the lock predates start times", async () => {
     const shapes = [
@@ -230,14 +207,8 @@ describe("a process id the operating system has given to somebody else", () => {
 
 describe("handing the directory back", () => {
   /**
-   * `kill` is a signal, not a departure.
-   *
-   * The child below takes a moment to go after it is asked to, which is what a
-   * Next development server closing its watchers does — and it is still writing
-   * `apps/web/.next` for all of that moment. So the question is not whether the
-   * lock is eventually released; it is whether the lock was still held at the
-   * instant the child died. That is read off the file system from inside the
-   * child's own `exit` event, not inferred afterwards.
+   * Keep the lock until the child actually exits, including its shutdown delay.
+   * Check the lock from the exit event rather than after eventual cleanup.
    */
   it("keeps the lock until the process writing the directory has gone", async () => {
     const lockPath = await aLockPath();

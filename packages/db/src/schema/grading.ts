@@ -48,17 +48,9 @@ export const GRADING_SOURCES = ["simulation", "production"] as const;
 export type GradingSource = (typeof GRADING_SOURCES)[number];
 
 /**
- * Temporary work for one completed trace.
- *
- * One row contains every frozen grader entry for the trace. Workers never read
- * live scope, sampling, versions, or thresholds. The row is an ordinary
- * Postgres `SKIP LOCKED` lease: notification wakes workers quickly and the
- * claim query remains the durable source of work.
- *
- * Completion is decided before this row is inserted. There are no root-span or
- * silence columns here because neither fact is allowed to complete production
- * grading. The exact OpenTelemetry trace id and start time name the evidence
- * for both simulation and production.
+ * Temporary grading work for a completed trace, with all selected grader entries
+ * frozen before claim. Workers lease rows with SKIP LOCKED; notifications only
+ * wake the durable queue read. The trace ID and start time locate its evidence.
  */
 export const gradingJob = pgTable(
   "grading_job",

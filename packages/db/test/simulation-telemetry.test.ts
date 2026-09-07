@@ -21,21 +21,9 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * The standing resolver's telemetry duty: where a simulation's arriving spans
- * file.
- *
- * The OTLP ingest door meets the simulator's spans holding no customer
- * context at all — the service token resolves to nobody — and each arriving
- * resource names only a simulation. The door asks `resolveSimulationStanding`
- * the same way the report and heartbeat doors do, and files the spans under
- * what it answers. The resolver's own lifecycle answers are proven beside the
- * report machinery in `runs.test.ts`; what this file pins down is the part
- * the telemetry door leans on: the answer carries the row's pins — the run,
- * the agent, the versions the conversation executed — so a span row is
- * stamped from egma's own row and never from the wire; it reaches every
- * customer's simulations, because the evidence door stands behind them all;
- * and it answers for a row the sweep already called orphaned, because a
- * late-returning orphan's spans are evidence and are kept.
+ * Resolve simulation ingestion scope from stored state, not incoming span
+ * attributes. Late spans from an orphaned simulation still retain the run,
+ * agent, and version pins needed to store its evidence.
  */
 
 let database: MigratedDatabase;
@@ -124,7 +112,6 @@ async function oneQueuedSimulation(
     suiteId: suite.id,
     agentId: created.id,
     connectionId: created.connection?.id ?? "",
-    idempotencyKey: newId("run"),
   });
   const simulation = (await listSimulations(auth, started.id))?.items[0];
   if (simulation === undefined) throw new Error("the run has no simulation");

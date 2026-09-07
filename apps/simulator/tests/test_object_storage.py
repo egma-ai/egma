@@ -1,16 +1,6 @@
-"""The blob seam's second implementation, against a real object store.
-
-`test_blob.py` pins what a reference *is* — resolvable, confined, readable
-when it was already plain — against the filesystem store. This file holds
-the same rules against the store a deployment actually runs, because the
-rules are the seam's and not one implementation's, and because everything
-that goes wrong between a client and an object store goes wrong on the
-wire: a signature, an addressing style, a bucket that is not there.
-
-So there is no fake here. A stand-in would agree with whatever this code
-believed about all three. What runs is MinIO, in a container, and where
-one cannot be started the tests skip and say so — see the `object_storage`
-fixture in `conftest.py`.
+"""Verify recording-reference behavior against the real MinIO fixture.
+Check confinement, addressing, signatures, and readable objects.
+Skip with a reason if the fixture cannot start its container.
 """
 
 from __future__ import annotations
@@ -41,18 +31,8 @@ from egma_simulator.config import DEFAULT_S3_REGION
 OBJECT_STORAGE_TIMEOUT_SECONDS = (
     OBJECT_STORAGE_START_SECONDS + OBJECT_STORAGE_READY_SECONDS + 120
 )
-"""How long one test here may take, fixture included.
-
-pytest's own timeout — 120 seconds, in `pyproject.toml` — covers a
-fixture's setup as well as a test's body, and this file's fixture is
-allowed longer than that on purpose: the first run on a machine fetches a
-175 MB image. Left alone, a contributor with docker and no cached image
-would get `Failed: Timeout >120.0s` where this suite promises a skip,
-which is the one outcome it is written never to produce.
-
-So the marker below is the fixture's whole budget with room for the
-conversation a test then conducts. What runs out first is the fixture's
-own budget, which skips and says why.
+"""Include image-pull and fixture-start budgets in the pytest timeout, plus test time.
+The fixture must reach its own skip before pytest terminates setup.
 """
 
 pytestmark = pytest.mark.timeout(OBJECT_STORAGE_TIMEOUT_SECONDS)
@@ -111,16 +91,8 @@ async def test_writing_twice_replaces_rather_than_grows(object_storage):
     ],
 )
 async def test_no_key_can_name_anything_outside_the_bucket(object_storage, key):
-    """A simulation id carrying a separator names an object in this bucket
-    and nothing anywhere else.
-
-    The rule is shared rather than written twice: what this asserts is
-    that the object store's implementation calls the same
-    :func:`confined_key` the filesystem one does, so there is one rule to
-    get right and one place it is tested. A second copy of it would be a
-    second chance to get it wrong — and the two stores disagreeing about
-    what a key means is a recording that cannot be found by the reference
-    its own simulation reported.
+    """Object storage must use the same confined key as filesystem storage
+    when a simulation ID contains path separators.
     """
     store = store_for(object_storage)
 
@@ -220,17 +192,8 @@ async def test_the_simulator_keeps_no_audio_of_its_own(
 async def test_neither_half_of_the_write_credential_leaves_the_process(
     workbench, start_simulator, object_storage
 ):
-    """A simulator that really holds an object-storage credential emits it
-    nowhere.
-
-    Both halves the store was stood up with are sentinels, so this is the
-    same scan the spec-credential tests run — over the reports, over every
-    byte the child wrote, and over the write-ahead log — with the process
-    at its loudest, which is both the level somebody turns on when a
-    recording is not arriving and the level botocore writes request headers
-    at. Both halves rather than the secret alone, because the key id is
-    kept out of logs on the same terms and a claim with no scan behind it
-    is worth nothing.
+    """At DEBUG level, scan reports, process output, and the write-ahead log
+    for both sentinel storage credential values.
     """
     spec = loopback_spec(
         "sim-object-storage-secret",
@@ -254,23 +217,9 @@ async def test_neither_half_of_the_write_credential_leaves_the_process(
 async def test_a_refused_credential_leaves_nothing_behind_either(
     workbench, start_simulator, object_storage
 ):
-    """The other half of the scan: the credential that does not work.
-
-    A credential that works is never mentioned by anybody. A credential
-    that does not is what a client complains about, out loud, with the
-    request it signed — and the complaint travels as an exception, which
-    is a different path through logging than an ordinary line. So the
-    simulator is given a secret the store will refuse, at DEBUG, and every
-    byte it wrote is read afterwards.
-
-    What it also documents is what a refused upload does to a simulation:
-    nothing. The conversation is conducted, the transcript is reported,
-    and the terminal record simply carries no audio. That is today's
-    behaviour on purpose and it is not a good one — see the spec's Further
-    Notes, where the gap is written down.
-
-    The log keeps a stable failure event and exception class, but it does
-    not copy the object store's runtime error text or request details.
+    """Scan DEBUG output when the store rejects the upload credentials.
+    The simulation currently completes without audio; logs retain the failure event
+    and exception class without provider error text or request details.
     """
     spec = loopback_spec(
         "sim-object-storage-refused",

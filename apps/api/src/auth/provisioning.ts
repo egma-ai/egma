@@ -26,21 +26,9 @@ import {
 } from "./seam.ts";
 
 /**
- * What happens the moment a person exists: they land somewhere, and there are
- * two somewheres.
- *
- * Somebody who came on their own gets an organization and its first project,
- * together, and they are its admin. Somebody following an invitation gets the
- * organization that invited them, at the role it invited them at. Both are one
- * transaction: there is no state in which somebody has an organization and no
- * project, and none in which an invitation is spent without a membership coming
- * out of it.
- *
- * Both refusals are thrown from hooks that run inside the provider's own request
- * handling, which is why they are `SignupRefusedError`s carrying the answer they
- * should become. Put in egma's signup route instead, they would be bypassed by
- * posting straight at the provider's signup endpoint — and on a claimed
- * self-hosted instance that bypass is the whole attack.
+ * Signup either provisions an organization and first project for an admin,
+ * or accepts an invitation at its stored role. Provider hooks enforce these
+ * rules even when a request bypasses Egma's signup route.
  */
 
 /**
@@ -53,18 +41,8 @@ import {
 const SLUG_ATTEMPTS = 5;
 
 /**
- * Whether this person may exist here.
- *
- * An invitation is the thing that gets somebody through a closed door, so it is
- * checked here rather than only where the membership is written — otherwise a
- * claimed instance would refuse an invited person before their identity existed
- * and there would be no way in at all.
- *
- * The link is checked twice: once here, before the identity is written, and
- * again when it is accepted. That is not belt and braces, it is the two
- * questions being different. This one asks *may an account be created for this
- * address*; the other asks *is this link still live at the moment it is spent*,
- * under a lock, which is what makes it single-use.
+ * Check admission before creating the identity. Invitation acceptance checks
+ * the link again under a lock because it can expire or be spent in between.
  */
 export function admitIdentity(
   singleOrganization: boolean,
@@ -193,13 +171,9 @@ function constraintViolated(error: unknown): string | undefined {
 }
 
 /**
- * The hook the provider fires once an identity is written.
- *
- * A new project receives its seeded grader in the same database transaction.
- * It receives no persona and points at none: Egma's Predefined personas belong
- * to no organization and no project, so a new project can name one the moment
- * it exists. The grader version owns its model selection; provider credentials
- * belong to the deployment.
+ * After identity creation, provision a project and its seeded grader in one
+ * database transaction. Egma-provided personas remain shared catalog entries;
+ * tests must choose their personas explicitly.
  */
 export function onIdentityCreated(): IdentityHooks["onIdentityCreated"] {
   return async (identity, intent) => {
@@ -212,18 +186,8 @@ export function onIdentityCreated(): IdentityHooks["onIdentityCreated"] {
 }
 
 /**
- * An invited person, put in the organization that invited them.
- *
- * Nothing is created here: the organization, its projects and its first admin
- * already exist, and what this adds is one membership at the role the
- * invitation named. The default is `admin`, because that is the default for
- * everybody in this version — an organization whose second person cannot invite
- * a third is a two-person product.
- *
- * The refusals below are the same four the door check makes, and they are made
- * again because the door check and the write are not the same moment. Between
- * them a link can be spent by somebody else, which is exactly the race the
- * lock inside `acceptInvitation` exists for.
+ * Accept the invitation at its stored role. Recheck validity under the
+ * acceptance lock; admission and membership creation occur at different times.
  */
 async function join(
   identity: ExternalIdentity,

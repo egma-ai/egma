@@ -1,24 +1,7 @@
 /**
- * The credential the media server, the simulator and the SIP gateway
- * authenticate each other with.
- *
- * **It is a password between egma's own parts**, in the same class as the
- * Postgres password: generated when a workspace is prepared, written beside the
- * other bootstrap variables, and never seen, chosen or typed by the operator.
- *
- * It exists because the alternative was live. All three containers used to fall
- * back to a key and a secret written into the compose file in the public
- * repository, and nothing in the CLI, the skills or the documentation ever
- * replaced them. Published to loopback the exposure is small — but the compose
- * file invites a wider bind for testing from another machine, and at that
- * moment the media server accepts anyone who read the repository.
- *
- * **A pair that already exists is left exactly as it is.** The three containers
- * hold whatever they were created with, so a preparation that minted a fresh
- * pair would leave a running deployment whose parts no longer agree — and the
- * symptom is every phone simulation failing to authenticate, a long way from
- * the command that caused it. Regenerating is therefore the one thing this must
- * never do on its own.
+ * Shared media credentials generated once per platform workspace.
+ * Preserve an existing pair: changing it during preparation would leave running
+ * media components with different credentials.
  */
 
 import { randomBytes } from "node:crypto";
@@ -50,23 +33,9 @@ export type MediaCredential = {
 };
 
 /**
- * The first pair any of these sources carries, or a fresh one where none does.
- *
- * Sources are given in order of precedence, and the caller's order is the same
- * one `up` already uses for the platform's address: the environment first,
- * because a self-hoster who exported this pair meant it, then the workspace's
- * own configuration. A pair egma is handed is a pair egma keeps.
- *
- * **Half a pair counts as none, one source at a time.** A key with no secret
- * authenticates nothing, and a key from one source beside a secret from another
- * is two halves of two different passwords — worse than either. So a source
- * carrying one of the two is passed over whole, and the two are always minted
- * together.
- *
- * Both generated values are drawn from `A-Za-z0-9_-` alone. They travel through
- * a `NAME=value` file with no quoting, a child process environment, and a YAML
- * scalar in the compose file, and a character that needed escaping in any one
- * of those would break a deployment in a way that reads as a wrong password.
+ * Use the first complete credential pair in source-precedence order, or generate one.
+ * Skip incomplete sources as a unit; never combine halves from different sources.
+ * Generated values use only A-Za-z0-9_- for unquoted file and Compose compatibility.
  */
 export function mediaCredential(
   ...sources: readonly Readonly<Record<string, string | undefined>>[]
@@ -95,14 +64,9 @@ export function mediaCredential(
 }
 
 /**
- * Every credential the bundled self-hosted platform uses only between its own
- * containers, grouped where two halves must always move together.
- *
- * None is an operator decision. A self-hoster chooses external provider keys;
- * Egma chooses these values once per platform workspace and records them in
- * `platform.env`. An existing value from `.env` is adopted before generation,
- * which is how an older deployment moves to the smaller operator interface
- * without losing the encryption key that opens its stored credentials.
+ * Inter-service bootstrap credentials grouped by values that must move together.
+ * Adopt existing values before generating any, then store them in platform.env.
+ * Provider keys remain operator-supplied deployment settings.
  */
 const INTERNAL_CREDENTIALS = [
   {
@@ -336,29 +300,9 @@ const LOCK_POLL_MS = 25;
 const ATTEMPTS = 3;
 
 /**
- * The pair this workspace uses, written down if it was not already, with
- * exactly one winner when two commands ask at the same moment.
- *
- * Two concurrent `egma self-host up` commands can both reach here. Left
- * unguarded, each could generate its own pair, write the file, and hand a
- * different pair to Compose. The read-decide-write step therefore has one
- * winner.
- *
- * So the read-decide-write step has one winner. The loser waits, re-reads, and
- * **adopts** what the winner recorded rather than overwriting it. The value
- * returned is read back off the disk after the step, so the pair handed to
- * Compose is the pair in the file by construction rather than by argument.
- *
- * A file lock rather than an exclusive create of the configuration itself:
- * the configuration file can already hold the platform address, so creating it
- * exclusively would decide nothing there.
- *
- * **A holder that was displaced starts over rather than trusting itself.** A
- * lock old enough to look abandoned is taken from whoever left it, and a
- * process that stalled past that window — a closed lid, a machine deep in swap
- * — wakes to find its turn was given away, possibly after it had already
- * written a pair. What it decided is then worth nothing, so it goes back to
- * the top and reads the disk again like any other latecomer.
+ * Lock the workspace read/decide/write step so concurrent up commands adopt one pair.
+ * Read the final value back from disk before passing it to Compose.
+ * If ownership was displaced during a stall, restart and adopt the current file.
  */
 export async function recordMediaCredential(
   workspace: string,
@@ -428,22 +372,9 @@ export type MintingLock = {
 };
 
 /**
- * Hold the workspace until the returned lock is released.
- *
- * `wx` is the whole mechanism: creating a file that must not already exist is
- * one atomic operation, so of any number of commands asking at once exactly
- * one succeeds and the rest see `EEXIST`.
- *
- * **The file carries a token naming this holder**, because a lock file's
- * existence does not say whose it is. Without one, a holder that stalled past
- * the takeover window would come back and delete its successor's lock, and a
- * third command would then walk straight into the step beside that successor.
- * So every removal — a release, and a takeover — first reads the token and
- * acts only on the lock it meant to act on.
- *
- * Exported so the ownership contract can be checked directly. The alternative
- * is a test that stalls a real process for longer than the takeover window,
- * which is half a minute of waiting to assert one comparison.
+ * Acquire the workspace lock through atomic wx creation.
+ * Check the holder token before release or takeover so a displaced process
+ * cannot remove its successor's lock. Exported for ownership tests.
  */
 export async function takeMintingLock(workspace: string): Promise<MintingLock> {
   const file = path.join(platformDirectory(workspace), MINTING_LOCK_FILE);

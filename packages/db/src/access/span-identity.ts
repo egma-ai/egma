@@ -7,42 +7,10 @@ import { authorize, here } from "./permissions.ts";
 import type { TimeWindow } from "./traces.ts";
 
 /**
- * Asking the trace store what it already holds, without reading any of it.
- *
- * Two questions, and both are about identity rather than about evidence: which
- * of these spans are already committed and what each of them says, and which of
- * these traces exist at all. Both are asked in a batch, because both are asked
- * about a page or a segment at a time and a call per row is a round trip per
- * row.
- *
- * **Its own module rather than part of `traces.ts`, on purpose.** That module's
- * contract is the product's reads: a window, a refusal past thirty-one days, a
- * page, a transcript, a tree. These answer neither a page nor a transcript —
- * `committedSpans` returns fingerprints and no evidence, and `committedTraces`
- * returns which ids were found and nothing about them. Growing the read module
- * with them would put a probe behind a door built to refuse a wide product
- * question, and would let a later change to one contract silently move the
- * other.
- *
- * **A window is still required, and the caller's own bounds are what fills it.**
- * The partition key is `toYYYYMM(started_at)`, so a probe without a window is a
- * full scan of every month a customer ever had. The bound must come from what
- * the caller is already working through — a scan's fixed ends, the span times
- * inside a segment — and never from `now`: a poller that measured its window
- * from the current clock would stop recognising its own older evidence the
- * moment the window slid past it, and would re-import what it already had.
- *
- * The thirty-one-day ceiling the product reads refuse past is deliberately not
- * repeated here. It exists so that no *person* can ask for an unbounded page;
- * these are asked by egma's own machinery about work it is already holding, and
- * a thirty-day import that ran long is a legitimate question about a bounded
- * set of ids.
- *
- * Both ask for `read` all the same. Neither can answer with a word a customer
- * wrote — one returns fingerprints of ids the caller already named, the other
- * returns which of those ids were found — but both reach a customer's rows, and
- * a probe that skipped the permission because its answer looks small would be a
- * precedent for the next one whose answer is not.
+ * Batched ingestion probes for committed span hashes and trace IDs. Require read
+ * permission and a time window derived from the segment or scan being processed,
+ * not the current clock. These internal probes do not apply the product read
+ * window limit; older evidence still needs bounded replay checks.
  */
 
 const SPANS_TABLE = "spans";
@@ -66,15 +34,8 @@ export type SpanIdentity = {
 /** A span the store already holds, and what it says. */
 export type CommittedSpan = SpanIdentity & {
   /**
-   * The fingerprint stored beside the row, to compare against the fingerprint
-   * of the record about to be written. Equal is an exact replay and a no-op;
-   * different is an integrity defect, and the row already here is the one that
-   * stays.
-   *
-   * Empty on evidence written before the fingerprint existed, which is the
-   * simulation evidence carried through the identity rebuild. A caller that
-   * cannot compare must treat the stored row as authoritative rather than
-   * assume a match.
+   * Stored evidence hash: equal means replay; different means conflicting evidence.
+   * An empty legacy hash cannot prove equality. Preserve the stored row in that case.
    */
   readonly contentHash: string;
   /** Earliest visible span for this trace inside the caller's bounded window. */
@@ -169,17 +130,8 @@ export async function committedSpans(
 }
 
 /**
- * Which of these traces the store already holds any span of.
- *
- * What a poller asks before it fetches a provider's document: a call whose
- * trace is already committed needs no second fetch, no second normalization and
- * no second write. One statement per batch of ids, in place of a round trip per
- * call.
- *
- * A trace is *held*, never *complete* — a trace with one span answers yes. That
- * is the right answer for the question this exists for, which is whether egma
- * has already done this work, and it is deliberately not the question of
- * whether a conversation has ended.
+ * Find trace IDs with any committed span before polling fetches full records.
+ * Presence does not mean the trace is complete.
  */
 export async function committedTraces(
   auth: AuthContext,

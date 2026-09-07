@@ -254,8 +254,6 @@ export async function runCreateCommand(
 
   let answer;
   try {
-    // `startRun` mints the per-request idempotency value required by the
-    // existing API. It is deliberately not part of this public command.
     answer = await startRun(
       signedIn,
       {

@@ -24,14 +24,8 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * List, update, Archive and Restore — through the factory functions only, like the create
- * and fetch tests before them. Raw SQL appears in fixtures and in the one read
- * proving a deleted agent's connection rows are still in the table, which is
- * precisely what no seam may show; every id an assertion needs comes off the
- * seam itself.
- *
- * Each concern acts in a project of its own, so no assertion here depends on
- * what another describe block created.
+ * Each describe block uses its own project. Raw SQL verifies retained
+ * connection rows that archived-agent reads do not expose.
  */
 
 let database: MigratedDatabase;

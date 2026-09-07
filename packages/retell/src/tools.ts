@@ -1,12 +1,6 @@
 /**
- * The tools an engine declares, and which of them Egma can route.
- *
- * Two things live here, and both are reads of a configuration rather than acts
- * against an account: where an engine keeps its tools, and whether Egma can
- * stand in front of one. Nothing here writes, nothing here needs a run, and
- * nothing here assumes a mocked run is what is being prepared — a surface that
- * only wants to *show* a developer what their agent declares asks exactly
- * these two questions.
+ * Read declared tools from an engine configuration and identify routable custom tools.
+ * No account mutation or run state is needed.
  */
 
 import type { EngineConfiguration } from "./versions.ts";
@@ -65,22 +59,9 @@ export type EngineTool = {
 export const INTERCEPTED_TOOL_TYPE = "custom";
 
 /**
- * Whether a mocked draft makes this tool routable.
- *
- * **Everything else runs for real, and that is the settled answer.** Two kinds
- * of tool are not custom webhooks and never can be: the ones Retell executes
- * inside its own infrastructure — a code tool, a transfer, an SMS, a digit
- * press, a variable extraction, an end-call, its own Cal.com booking — where
- * no URL leads at all; and MCP servers, which Retell reaches over their own
- * protocol from an array this transform never writes. Both run against the
- * customer's own world on every simulation, mocked run or not.
- *
- * Egma used to sort every tool into three classes and stamp them onto the
- * record. That stamp is gone: a simulation is answered for exactly the tools
- * its own test names, every answered call is on the transcript, and a second
- * summarised version of the same fact is a field two readers could come to
- * disagree about. What is left is this one question, which is the only one the
- * transform ever needed.
+ * Whether the draft URL transform can route this tool.
+ * Only custom webhooks have a URL this transform changes. Built-in tools and MCP
+ * servers retain their real execution path.
  */
 export function isIntercepted(tool: EngineTool): boolean {
   return tool.type === INTERCEPTED_TOOL_TYPE;

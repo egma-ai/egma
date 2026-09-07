@@ -687,14 +687,9 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   }
 
   /**
-   * Flip the pull switch through the one commit `startMonitoring` is.
-   *
-   * `agentId` is the egma agent the flow started from, when there is one.
-   * Without it the server resolves the platform agent by (project, platform,
-   * platform agent id) and registers one under `name` when nothing answers —
-   * watching an unregistered agent means registering it (ADR-0015). The
-   * stored key is spent only when an egma agent is named, because that is the
-   * only entry shape the omitted-key preflight accepts.
+   * Start monitoring through the API. With no Egma agent ID, the server finds
+   * or registers the platform agent. Reusing a stored credential requires an
+   * explicit Egma agent ID.
    */
   async function startRetellMonitoringWatch(target: {
     readonly agentId: string | null;
@@ -793,15 +788,8 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   }
 
   /**
-   * Every picked lane, written onto **one** egma agent, in one pass.
-   *
-   * The first lane registers the agent (or finds the one that is already
-   * there); every lane after it is an addition to *that* agent. Two egma agents
-   * for one Retell voice agent would split a team's results history in half,
-   * which is the failure this loop exists to prevent.
-   *
-   * A lane that will not save stops the pass and says so, rather than carrying
-   * on and leaving a half-connected agent nobody asked for.
+   * Save selected connection types under one Egma agent. Stop on refusal and
+   * retain progress for retry; earlier successful writes are not rolled back.
    */
   async function finishRetellLanes(): Promise<void> {
     if (goal === "" || selectedRetellAgent === undefined) return;

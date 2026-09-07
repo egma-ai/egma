@@ -1,10 +1,10 @@
-import { newId } from "@egma/ids";
 import {
   createPersona,
   editPersona,
   getSimulation,
   listRunEvents,
   SPEED_RANGE,
+  RECOMMENDED_PERSONA_MODELS,
   type Persona,
   type PersonaModels,
 } from "@egma/db";
@@ -33,15 +33,9 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The simulator's claim door, over real HTTP against real Postgres.
- *
- * This is the one route a customer credential can never open: the service
- * token is the whole gate, the claim reaches every customer's queue at once,
- * and what comes back is the fully assembled spec — credentials included —
- * that the shipped simulator conducts from. So what is asserted here is what
- * that simulator observes: the token gate's one sentence, the held claim
- * answering the moment work arrives, every outgoing spec speaking the
- * contract, and a budget that belongs to no organization being spent by none.
+ * Claim-route coverage against Postgres: service-token access, held claims,
+ * assembled simulation specs, and no use of organization request budgets.
+ * Real socket lifecycle behavior is covered in claims-hold.test.ts.
  */
 
 let api: TestApi;
@@ -343,7 +337,6 @@ async function aQueuedRun(
     suiteId: String(version.body.suiteId),
     agentId: agent.id,
     connectionId,
-    idempotencyKey: newId("run"),
     expectedTestVersions: [{
       testId: String(version.body.testId),
       versionId,
@@ -505,20 +498,8 @@ describe("claiming work", () => {
   });
 
   /**
-   * **The spec speaks the version the simulation pinned, never the persona as
-   * they stand now — and this is the test that can tell the two apart.**
-   *
-   * Everywhere else in this file the persona is created and never edited, so
-   * the pinned version and the current one are the same row: an assembler that
-   * quietly read `getPersona` instead of `getPersonaVersion` would pass every
-   * one of them. That is the whole guarantee this effort exists for — the same
-   * test hears the same person on every run, and an old result can still say
-   * who the agent actually heard — so it gets a test that fails when it breaks.
-   *
-   * The pin is taken when the run is created, so the edit below lands strictly
-   * after this simulation already names version 1 by its own `prsv_` id. Every
-   * authored field moves at once, because each of the three travels in the work
-   * order and each would be a separate way to leak the current row.
+   * Edit all persona behavior fields after run creation to distinguish the
+   * pinned persona version from the current one in the claimed spec.
    */
   it("speaks the persona version the simulation pinned, not the edit that came after", async () => {
     const { ada, key, connectionId, versionId, persona } =
@@ -530,6 +511,7 @@ describe("claiming work", () => {
     expect(pinned?.personaVersionId).toBe(persona.versionId);
 
     const moved = await editPersona(author, persona.id, {
+      expectedVersionId: persona.versionId,
       identityName: "Rita Bellweather",
       personality: "Rita has hung up once already and is out of patience.",
       language: "en-GB",
@@ -685,17 +667,8 @@ describe("claiming work", () => {
 
   it("leaves Egma's own variables off a call placed on the serving version", async () => {
     /*
-     * **The run branched a copy, and this simulation is not on it.** A web-call
-     * run makes one temporary version for the tests that mock, and conducts
-     * every other test against the version real callers reach. The routing
-     * variables are names that only the temporary version declares, so a call
-     * on the serving version is handed none of them — a row of empty
-     * `egma_url_…` on the customer's own call record would name variables that
-     * version never had.
-     *
-     * The run's world is written here rather than branched, because branching
-     * one is Retell's business and this door's business is what it hands the
-     * simulator once one exists.
+     * An unmocked test uses the serving version without temporary routing
+     * variables. Seed mock metadata directly here; Retell branching has separate coverage.
      */
     const { key, connectionId, versionId } = await aCustomerReadyToRun(
       "claims_serving_version_variables",
@@ -1571,5 +1544,41 @@ describe("one source of execution truth", () => {
     expect(String(refused.body.message)).toContain("version 5");
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.status).toBe("queued");
+  });
+});
+
+
+describe("persona settings frozen before dispatch", () => {
+  it.each(["chat", "voice"] as const)("keeps %s model and voice settings through delayed claims and retries", async (modality) => {
+    const load = vi.fn().mockRejectedValueOnce(new ProviderCredentialSourceUnavailableError()).mockResolvedValue({ openai: "openai-test-key", cartesia: "cartesia-test-key", deepgram: "deepgram-test-key" });
+    const { ada, key, connectionId, versionId, persona } = await aCustomerReadyToRun(`claims_frozen_${modality}`, {
+      providerCredentials: { load },
+      retellFetch: modality === "voice" ? RETELL_WEB_CALL_FETCH : RETELL_CHAT_FETCH,
+    }, RECOMMENDED_PERSONA_MODELS, {}, modality === "voice" ? WEB_CALL : RETELL);
+    await aQueuedRun(key, connectionId, versionId);
+    const editedModels: PersonaModels = {
+      llm: { provider: "openai", model: "gpt-4o" },
+      stt: { provider: "deepgram", model: "nova-3-general" },
+      tts: { provider: "openai", model: "tts-1", voiceId: "custom-voice-id", speed: 1.3 },
+    };
+    const moved = await ask(api.app, "PATCH", `/v1/personas/${persona.id}`, key, { expectedVersionId: persona.versionId, personality: "Has one clear question.", models: editedModels });
+    expect(moved.statusCode, JSON.stringify(moved.body)).toBe(200);
+    expect(moved.body.version).toBe(2);
+    const deferred = await claim(api.config.simulatorServiceToken, { claimant: "frozen-settings", capacity: 1, wait_seconds: 0 });
+    expect(deferred.body.specs).toEqual([]);
+    const retried = await claim(api.config.simulatorServiceToken, { claimant: "frozen-settings", capacity: 1, wait_seconds: 0 });
+    const [original] = retried.body.specs as Record<string, unknown>[];
+    expect(original?.persona).toEqual({ name: NEUTRAL_PERSON.identityName, personality: NEUTRAL_PERSON.personality, language: NEUTRAL_PERSON.language });
+    expect(original?.models).toMatchObject({
+      llm: RECOMMENDED_PERSONA_MODELS.llm, stt: RECOMMENDED_PERSONA_MODELS.stt,
+      tts: { provider: RECOMMENDED_PERSONA_MODELS.tts.provider, model: RECOMMENDED_PERSONA_MODELS.tts.model, voice_id: RECOMMENDED_PERSONA_MODELS.tts.voiceId, speed: RECOMMENDED_PERSONA_MODELS.tts.speed },
+    });
+    expect(specComplaints(original)).toEqual([]);
+    await aQueuedRun(key, connectionId, versionId);
+    const later = await claim(api.config.simulatorServiceToken, { claimant: "later-settings", capacity: 1, wait_seconds: 0 });
+    const [next] = later.body.specs as Record<string, unknown>[];
+    expect(next?.persona).toMatchObject({ personality: "Has one clear question." });
+    expect(next?.models).toMatchObject({ llm: editedModels.llm, stt: editedModels.stt, tts: { provider: "openai", model: "tts-1", voice_id: "custom-voice-id", speed: 1.3 } });
+    expect(specComplaints(next)).toEqual([]);
   });
 });

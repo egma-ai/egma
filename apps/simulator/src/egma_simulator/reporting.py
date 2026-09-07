@@ -1,37 +1,13 @@
-"""Reporting: everything minted as it happens, delivered in order, at least once.
+"""Per-simulation ordered delivery of lifecycle reports and OTLP evidence.
+Validate reports, then serialize and append both document types to one local
+write-ahead log. A single sender retries identical bytes, preserving IDs
+and timestamps for receiver deduplication.
 
-One ``Reporter`` serves one simulation and carries two kinds of document
-to the control plane: the lifecycle report events, and the conversation
-itself as OTLP span batches. Both are stamped and serialized at the moment
-they happen; the serialized bytes are appended to a local write-ahead log
-and then posted by a single sender task, so delivery is ordered and a
-resend replays byte-identical documents — ids and timestamps included,
-which lets the control plane dedup report event ids and ClickHouse suppress a
-recent exact repeat of an insert block. The report schema is applied to every report
-document before it is logged or sent: an invalid report is a bug in this
-process, and it fails here, loudly, rather than at the receiver.
-
-**One queue for both kinds, and that is the design rather than a saving.**
-Because span batches and lifecycle documents share the one ordered sender,
-the terminal report leaves only after every span batch minted before it
-landed. So when the control plane records a simulation terminal, the
-evidence a grader will read is already in the trace store — there is no
-window in which a conversation is finished and its transcript is still in
-flight.
-
-The log on disk holds both, interleaved in the order the events happened,
-each line exactly the bytes that went on the wire. The two kinds are told
-apart by their own shape — a report names its ``contract_version``, a span
-batch its ``resourceSpans`` — because a log line that was not what was
-sent would not be a record of what was sent.
-
-A document that will not go through is resent, same bytes, with widening
-backoff until a deadline. Past that the reporter is *abandoned*: it stops
-trying, and the log on disk is the only record of what this simulation
-saw. That is bounded rather than endless on purpose — retrying forever
-would hold a capacity slot open through an outage of any length, and a
-simulator the control plane cannot hear is exactly what its heartbeat
-sweep exists to notice.
+Send the terminal report only after earlier evidence is accepted.
+Log lines retain their wire shape: contract_version identifies reports;
+resourceSpans identifies OTLP batches.
+Stop retries at the deadline and mark the reporter abandoned so an outage
+cannot retain capacity forever. The local log remains for diagnosis.
 """
 
 from __future__ import annotations
@@ -84,15 +60,8 @@ def moment() -> str:
 
 
 def wal_filename(simulation_id: str) -> str:
-    """A log filename for one simulation that cannot leave its directory.
-
-    The contract calls ``simulation_id`` opaque — never parsed, never
-    rewritten — and the reports honor that to the byte. A filename is a
-    different thing: an id carrying a path separator or ``..`` would put
-    the log somewhere nobody configured, so the name is *derived* rather
-    than used. Sanitizing to one flat component is what confines it; the
-    digest of the whole id is what keeps two simulations whose ids sanitize
-    alike from sharing one file.
+    """Derive a confined filename without changing the reported simulation ID.
+    Digest the full ID to distinguish values that sanitize to the same name.
     """
     digest = hashlib.sha256(simulation_id.encode()).hexdigest()[:16]
     readable = _UNSAFE_IN_A_FILENAME.sub("_", simulation_id)[:_READABLE_PREFIX_LIMIT]

@@ -1,52 +1,10 @@
-"""Retell chat: the first plug against a platform egma does not own.
+"""Retell chat API adapter: create-chat, create-chat-completion, and end-chat.
+Config requires retellAgentId; baseUrl optionally selects a proxy or test server.
+Credentials contain apiKey, used only for authentication and error redaction.
 
-It speaks Retell's public chat API over outbound HTTPS — ``create-chat`` to
-open the exchange, ``create-chat-completion`` for each persona turn,
-``end-chat`` to tear it down — with the connection's own key as a bearer
-token. Everything it needs arrives in the claimed spec's connection block;
-nothing about a Retell account lives in this process.
-
-Its config keys, like every plug's, are its own:
-
-- ``retellAgentId`` (string, required) — the chat agent the exchange is
-  opened against, exactly as the control plane stores it.
-- ``baseUrl`` (string, optional) — where the API answers, defaulting to
-  Retell itself. What lets a test converse with a Retell-shaped server on
-  loopback, and a proxy stand in front of the platform for a deployment
-  that needs one.
-
-Two facts about the simulation ride the same ``create-chat`` call when the
-claimed spec carries them, and change nothing when it does not:
-
-- the **agent version** to open the chat against, named explicitly so the
-  exchange cannot land on a version somebody created since — which is how a
-  run over a mocked world reaches that world's own draft;
-- the **dynamic variables** this simulation is conducted with, handed to
-  Retell as ``retell_llm_dynamic_variables`` for its own response engine to
-  render, byte for byte.
-
-A spec carrying neither produces exactly the request this plug has always
-sent: the field is absent from the body, not present and empty, because an
-empty one is a value Retell would render.
-
-Credentials are shaped ``{"apiKey": ...}`` — the shape the control plane
-seals — and are read for the ``Authorization`` header and nothing else.
-They are never logged, never returned, and never put into an exception
-message: a refusal names the status the platform answered with and the URL
-it answered from, which is what a person needs, and neither is a secret.
-
-A refusal also quotes the platform's own words about what was wrong, and
-those are not this plug's to trust: a platform that echoes the key back in
-its error body would otherwise put it in a failure reason and in the
-traceback logged beneath it. Everything quoted from the platform is
-therefore scrubbed of the key first, here, where the key is known.
-
-**How the exchange ends.** A Retell chat agent ends its own exchange by
-invoking its end tool; the invocation comes back among the completion's
-messages, so the signal is in-band and free. The alternative — reading
-``chat_status`` after every completion — would add a round trip to every
-turn, inside the very call whose duration the simulator reports as the
-agent's response latency.
+The create request forwards the supplied agent version and dynamic variables.
+Absent values remain absent. Read end-tool invocations from completion messages
+to detect agent endings without a status request inside each measured turn.
 """
 
 from __future__ import annotations
@@ -319,19 +277,9 @@ def _ended(messages: list) -> bool:
 
 
 def _tool_calls(messages: list) -> tuple[ToolCall, ...]:
-    """The tools the agent called while producing this answer.
-
-    Retell reports its invocations inline with the agent's words, which
-    makes it one of the few platforms where a tool call is observable from
-    egma's side at all. What is kept is exactly what it said — the name,
-    and the arguments as the bytes they arrived as — and never the return,
-    which Retell reports separately and this plug does not read: the
-    conversation is what egma observes, and inventing the other half of a
-    call would poison every comparison across platforms.
-
-    The ending tool is not filtered out. It is a tool the agent called, and
-    the record of the conversation says so; that it *also* ends the
-    exchange is a separate reading of the same fact.
+    """Read tool names and raw arguments from completion messages.
+    This adapter does not read tool results. Keep the end-tool invocation
+    as evidence even though it also ends the exchange.
     """
     return tuple(
         ToolCall(name=name, arguments=_arguments(message))

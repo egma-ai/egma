@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -8,6 +7,7 @@ import path from "node:path";
 
 import {
   createPersona,
+  getGraderDefinitionVersion,
   listProjectGraders,
   readTraceGrades,
   type AuthContext,
@@ -28,49 +28,15 @@ import {
 import { NEUTRAL_PERSON } from "./support/traces.ts";
 
 /**
- * The whole wire, walked by the shipped simulator: a run started through the
- * real API, its simulation claimed from the real claim door, conducted by
- * the real Python service over a Retell-shaped counterpart on loopback,
- * streamed span by span into the real ClickHouse through the real OTLP
- * ingest, and reported back through the real report door — queued → claimed
- * → running → completed, with every lifecycle column read back and checked
- * for truth.
+ * Run the shipped Python simulator against the API, Postgres, ClickHouse,
+ * and a local Retell chat counterpart, then grade its stored evidence with
+ * the real grader service and a scripted judge. No live provider is involved.
  *
- * Nothing here is a stand-in for egma's own halves: the API listens on a
- * real port, the database is a real Postgres, the trace store is a real
- * ClickHouse, and the simulator is the same process `docker compose up`
- * starts. The one fake is the platform on the far side of the conversation —
- * a local server speaking Retell's chat wire shape — because the agent under
- * test is the customer's, and a test that needed a real Retell account would
- * prove an account rather than the wire.
- *
- * **The ordering guarantee is proved here and nowhere better.** The
- * simulator puts its span batches and its lifecycle documents through one
- * write-ahead log and one ordered sender, so a terminal report leaves only
- * after every span before it landed. What that buys is read back the way a
- * grader will read it: the pass is watched while it runs, and the moment the
- * simulation row turns terminal the conversation is already queryable in
- * ClickHouse, root span included.
- *
- * **And it runs to a grade.** The real grader service claims the work the
- * terminal landing minted, reads the conversation back out of ClickHouse the
- * way it reads a production trace, and writes one normalized score with nested
- * assertion details that cite turns. This closes the pass on the only claim
- * that matters end to end: a team's check was answered from a conversation
- * that exists as spans and as nothing else — the row has no column left to
- * hold one, and this asserts that of the schema itself.
- *
- * The judge is scripted, and it is the one seam here that is not a real
- * deployment's. A criterion written in a team's own words is answered by a
- * model, and a pass that called one would need an account and a network and
- * would still not answer the same way twice. Everything around it is real,
- * including the persisted grade and its frozen project policy.
- *
- * The failed pass rides the same session: a second connection whose key the
- * counterpart refuses, landing `failed` with the honest reason. The canceled
- * pass is deliberately absent — the cancel directive travels on heartbeat
- * answers, and the heartbeat route ships separately — so cancellation is
- * proven at the report door's own seam instead (`reports-routes.test.ts`).
+ * Hold the terminal report at the API while checking evidence visibility;
+ * ordered sender acceptance alone does not imply immediate ClickHouse visibility.
+ * Then release it and check lifecycle state, persisted grades, and queue cleanup.
+ * The refused-credential path must fail without grading an unreachable agent.
+ * Cancellation has separate heartbeat and report-route coverage.
  */
 
 const API_DIRECTORY = path.join(import.meta.dirname, "..");
@@ -781,7 +747,6 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             suiteId,
             agentId,
             connectionId: connection,
-            idempotencyKey: newId("run"),
           },
         });
         expect(started.status, JSON.stringify(started.body)).toBe(201);
@@ -837,7 +802,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           [THE_BEHAVIOR]: {
             decision: "met",
             rationale: "the agent named an afternoon back before finishing.",
-            citedTurns: [3],
+            cited_turns: [3],
           },
         },
       });
@@ -1049,6 +1014,12 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
 
       // The row names both the project policy and the shared definition version.
       const seeded = await theProjectsGrader(auth);
+      const seededCore = await getGraderDefinitionVersion(
+        auth,
+        seeded.definitionId,
+        seeded.definitionVersion,
+      );
+      expect(seededCore).toBeDefined();
       expect(grade).toMatchObject({
         projectGraderId: seeded.id,
         graderDefinitionId: seeded.definitionId,
@@ -1074,8 +1045,12 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       // The judge was shown the conversation egma assembled, not a report:
       // four turns, the ending the row records, and no tool call, because the
       // counterpart made none.
+      expect(judge.asked).toHaveLength(1);
       const [asked] = judge.asked;
-      expect(asked?.criterion).toBe(THE_BEHAVIOR);
+      expect(asked?.criterion).toBe(seededCore?.prompt);
+      expect(asked?.expectedBehaviors).toEqual([
+        { id: "behavior_1", text: THE_BEHAVIOR },
+      ]);
       expect(asked?.evidence.transcript).toHaveLength(4);
       expect(asked?.evidence.outcome).toMatchObject({
         happened: true,

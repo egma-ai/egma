@@ -1,6 +1,6 @@
 # The measure catalog
 
-**Catalog version: 8**
+**Catalog version: 9**
 
 Every metric a conversation produces, named once and defined once, so that a
 grader references a known metric instead of guessing a string — and so that the
@@ -108,20 +108,37 @@ own clock — the **persona's POV**, which arrives as the timing spans above. Th
 agent measures it off its own process — the **agent's POV**, which arrives as a
 derivation off the framework's spans or as the block the platform reported. The
 two differ by the VAD's own detection lag at the front and the playback hop at
-the back, so they are two units and never one series.
+the back — half a second to six tenths per turn on the live rig, constant
+across a call — so they are two units and never one series.
 
 `origin` on every measure says which POV took it: `timed` is the persona's,
 `derived` and `reported` are the agent's. A conversation both POVs measured
 hands back **both series** — the headline, and the other beside it. Nothing is
 averaged across them and nothing is appended.
 
-**Catalog version 8 leads with the agent's POV for `turn_response_latency` and
-`first_response_latency`**, and with the persona's for everything else. The
-version is the switch and there is no flag: a run graded under version 8 was
-graded against the agent's own account of its waits, and the release that
-returns the persona's recording to the front is a catalog version of its own.
-On a production trace the question does not arise — Egma conducted nothing, so
-there is one POV.
+**Catalog version 9 leads with the persona's POV for every measure**, and the
+agent's account rides beside it as the other POV. Version 8 led with the
+agent's for the two response latencies while Egma's own clock was being fixed;
+the fix is in: the recorder places each channel where its transport says it
+happened. The persona's stop is the pipeline's own mark for the end of its
+played audio, the mouth's trailing padding included — about a tenth of a second
+past the last audible sample, a constant per voice, and by decision not trimmed
+by any code of Egma's own. Its acceptance is the constant above: a recording
+that differs from the agent's own account by the lag the two clocks are known to
+differ by (0.5 to 0.6 s per turn on the live rig), and by nothing that grows
+across a call, is the number to lead with. Version 9 also reads the agent's own spans one way more
+carefully: a caller turn with no speech of its own that opened while the
+agent's previous turn still ran is the rest of the caller's last sentence,
+delivered late, and the reply it cut off is no answer — one sentence the
+transcriber split is one wait, not two. The rule is written out beside
+`turn_response_latency` below, together with the word-bounded trace it never
+applies to.
+
+The version is the switch and there is no flag: a run graded under version 8
+was graded against the agent's own account of its waits, and a run graded under
+version 9 is graded against Egma's own recording. On a production trace the
+question does not arise — Egma conducted nothing, so there is one POV, and it
+is the agent's at both versions.
 
 ## Derived measures: a framework's own spans, read as these numbers
 
@@ -176,7 +193,7 @@ the store gains these on the next read.
 
 | Measure | Derived from recognised turn spans as | Taken |
 | --- | --- | --- |
-| `turn_response_latency` | From the **end of each `turn:human` span's last `speaking` child** — the VAD's detected end of the caller's speech — to the first later `turn:agent` span's first `speaking` child, before another human turn begins. Where the framework recorded no speech for the caller, the human turn's own end stands in. Never the human turn's end where speech was recorded: that is the endpointing commit, about a second later, and starting there deletes a second the caller waited. A silent agent turn on the way is model or tool work, not the spoken answer. Where the entire trace carries no `speaking` spans, the first agent turn's own start stands in for a framework that records only word-bounded turns. **An agent answer belongs only to the nearest human turn before it: a human turn followed by another human turn before any agent speech was not answered, and measures nothing.** | One sample per human turn, in trace order. A human turn nobody answered, one the caller spoke over with a second turn, and one whose sample runs backwards contribute none. |
+| `turn_response_latency` | From the **end of each `turn:human` span's last `speaking` child** — the VAD's end of the caller's speech, which LiveKit closes after its silence wait (0.55 s by default), so the agent's own wait starts about that long after the caller's last audible sample — to the first later `turn:agent` span's first `speaking` child, before another human turn begins. Where the framework recorded no speech for the caller, the human turn's own end stands in. Never the human turn's end where speech was recorded: that is the endpointing commit, about a second later, and starting there deletes a second the caller waited. A silent agent turn on the way is model or tool work, not the spoken answer. Where the entire trace carries no `speaking` spans, the first agent turn's own start stands in for a framework that records only word-bounded turns. **An agent answer belongs only to the nearest human turn before it: a human turn followed by another human turn before any agent speech was not answered, and measures nothing.** **A human turn with no `speaking` child that opened while the turn immediately before it in start order — an agent turn — was still running, and that the agent turn did not outlive (it ended no later than the late turn closed), is a continuation** — the transcriber delivering the rest of the caller's last utterance after the VAD had already closed it — so it takes no sample and does not end the caller's question, and the agent turn it cut off is a false start the walk goes past rather than the answer that ends the wait. A speechless human turn straight after a continuation, with no agent turn between, is another piece of the same utterance and a continuation too. A speechless turn the agent talked on past is an ordinary turn, measured from its own end, and the answer around it stays an answer. On a trace with no `speaking` spans at all a missing child says nothing, so no turn there is read as a continuation. The false start's fragment is still a `speaking` child to `agent_speech_duration` and `first_response_latency`, which count what the agent emitted rather than what answered. | One sample per human turn, in trace order. A human turn nobody answered, one the caller spoke over with a second turn, one that is a continuation of the caller's previous utterance, and one whose sample runs backwards contribute none. |
 | `first_response_latency` | From the root span's start — the earliest parentless span — to the first `turn:agent` span's first `speaking` child's start. Where the conversation carries no `speaking` spans at all, the first agent turn's own start stands in — a word-bounded Retell turn begins at its first word; a framework that does write speech makes a speechless first turn unmeasurable. A first agent turn with neither speech nor width measures nothing. | Once. |
 | `agent_speech_duration` | The sum of a `turn:agent` span's own `speaking` children's durations — so a turn that thought for two seconds and then talked for one spoke for one. | One sample per agent turn **that spoke**. A turn with no speech in it has no speech duration; a zero would measure something that never happened. |
 | `llm_latency` | The sum of a `turn:agent` span's own `model` children's durations — LiveKit's `llm_node`/`llm_request` family, as the door files it — so a turn whose model was asked twice accounts for both askings. | One sample per agent turn that carried a model step. A turn with none has no model latency; a zero would measure something that never happened. |

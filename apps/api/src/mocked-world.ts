@@ -25,45 +25,16 @@ import {
 import { platformEvent, safeExceptionType } from "./platform-log.ts";
 
 /**
- * Where the mocked world's lifecycle is joined to a run.
+ * Coordinate Retell mock-draft creation and cleanup with run state.
+ * Eligible runs with test-owned mock tools cannot be claimed until the
+ * temporary version is recorded. Build refusal attempts to cancel the run;
+ * there is no fallback to real tools.
  *
- * The order and the guards are in `@egma/retell`, against a fake account, where
- * they can be made to fire one at a time. What is here is the joining: which
- * runs get a world at all, which key does the platform writes, where the record
- * is written, and what happens to a run whose world could not be built.
- *
- * ## The one rule this file exists for
- *
- * **A run over a mockable connection that cannot build its world is canceled
- * before a single simulation is conducted.** There is no fallback branch, and
- * there is deliberately nowhere to put one: a green run that quietly used the
- * customer's real tools is the exact outcome the whole seam exists to prevent.
- *
- * Nothing races that promise. The queue itself is gated — a mocked run's
- * simulations are unclaimable until its record names a temporary version, from
- * the instant the rows are written — so the build takes as long as it takes and
- * no simulator can get in front of it. See `mock-tools/lanes.ts` in `@egma/db`.
- *
- * ## Teardown, and the sweep that is the same act
- *
- * A run's own teardown and the next run's sweep call one function with one
- * order: delete the draft, then prove it is gone. There is nothing else to give
- * back — Egma writes to no customer's number bindings — so a world is settled
- * exactly when its temporary version is proved deleted. The sweep settles the
- * worlds of runs that have **finished**, and never one that could still be
- * conducting: two runs of one agent at once must not tear each other's world
- * down.
- *
- * **The proof is why an unsettled world is answered rather than assumed.** A
- * delete's own answer cannot say a version is gone: a request Retell has no
- * route for answers 404 exactly as an absent version does. So the versions are
- * read back, and a read that cannot say leaves the world unsettled — which the
- * build path below refuses to branch over.
- *
- * A run stuck `pending` long past any plausible build is the one exception, and
- * it is the crash case: its process died between minting a version and making
- * its simulations claimable, so nothing will ever finish it. It is canceled and
- * swept.
+ * Hold the agent lock across claim, prior cleanup, and build. Cleanup deletes
+ * the draft and verifies deletion and serving state through @egma/retell.
+ * It does not change phone-number bindings. Unfinished cleanup blocks another
+ * build. Sweep finished runs and stale pending builds that never recorded
+ * a ready version; leave active runs alone.
  */
 
 /**
@@ -113,18 +84,9 @@ function reachOf(reach: MockedWorldReach) {
 }
 
 /**
- * Build the temporary world this run will be conducted in, or refuse.
- *
- * **Whether this run is one at all is decided from the same two facts the
- * queue's own gate reads**: the connection type frozen onto this run's own
- * snapshot at start, and whether any test this run pins named a mock tool. So
- * the two can never disagree about which runs wait for a world. The connection
- * type is checked first because it costs nothing: every run over a lane that
- * never branches a copy leaves here without a read.
- *
- * On a refusal the run is canceled here rather than left for somebody to
- * notice: its simulations are unclaimable, so a run left alone would sit
- * forever looking like a queue that is merely slow.
+ * Build when the frozen connection type branches drafts and a pinned test
+ * uses mock tools, matching the queue gate. On refusal, attempt cancellation
+ * so an unclaimable run does not remain pending.
  */
 export async function buildRunMockedWorld(
   auth: AuthContext,
@@ -187,35 +149,10 @@ export async function buildRunMockedWorld(
   }
   const key = credential(apiKey);
 
-  // **The fence, held from before the claim until after the build.**
-  //
-  // Two mocked runs of one agent overlapping is a hijack rather than a queue:
-  // one run's teardown restores a `latest` binding it captured, while the
-  // other's freshly branched draft is what `latest` now resolves to, and real
-  // callers reach a mocked agent. Delete-before-restore protects a run from its
-  // own draft and cannot see another's, so the overlap itself is what is
-  // refused.
-  //
-  // A settle counts as one of the two. A finished run does not block a claim —
-  // its litter is this sweep's job — so without the fence a teardown of that
-  // run could still be waiting on its restore while this run branched the
-  // version the restore would then point real callers at. Nothing downstream
-  // can catch that: the late restore writes a `latest` binding onto a number
-  // that still points exactly where its note says it pinned it. So the claim,
-  // the sweep and the whole build happen inside one hold, and every settle of
-  // this agent waits for it.
-  //
-  // The claim writes the building marker, which is also what makes this run
-  // visible to a later sweep: a run that dies between here and the build's
-  // first record would otherwise leave a null cleanup flag no sweep ever sees,
-  // and its simulations — unclaimable until a draft exists — would sit queued
-  // forever.
-  //
-  // The fence's own wait is bounded, and a wait that runs out is answered as an
-  // in-use refusal rather than thrown: it means the agent is held by work this
-  // process cannot see — another instance still building, or a holder killed
-  // with its session still standing — and "wait for that run, then start again"
-  // is the true next move either way.
+  // Hold the agent lock across claim, previous cleanup, and build so draft
+  // lifecycles cannot overlap. The claim records cleanup owed before platform
+  // writes, making a crashed build visible to the sweep. A bounded lock wait
+  // returns an in-use refusal.
   try {
     return await owedMockCleanups(
       auth,
@@ -231,18 +168,8 @@ export async function buildRunMockedWorld(
           return await refuseInUse(auth, run, claim.byRunId, log);
         }
 
-        // The sweep, before anything new is made. Litter from a crashed or
-        // finished run is cleared while it is still only litter — and,
-        // critically, **before this run branches**: a finished run's outstanding
-        // pin is restored while no draft of this run's exists yet, so that
-        // restore can never resolve `latest` onto something this run minted.
-        //
-        // And when the sweep could not clear it, nothing new is made at all. An
-        // unsettled world still owes a restore, and the next mocked run of this
-        // agent is what retries it; a draft branched now is exactly what the
-        // agent's restored `latest` binding would then resolve to. Refusing here
-        // is what makes the retry safe: a restore only ever runs while no
-        // temporary version of this agent exists.
+        // Finish previous cleanup before creating another draft. If cleanup cannot
+        // be verified, refuse this build and leave the prior record for retry.
         const swept = await settleTheseMockCleanups(
           auth,
           run.agentId,
@@ -327,28 +254,9 @@ export type SweptMockedWorlds =
   | { readonly kind: "unsettled"; readonly reason: string };
 
 /**
- * Settle every world this agent's runs still owe the account, and answer
- * whether anything is still owed.
- *
- * The teardown and the sweep, which are the same act: a run that has finished
- * owes nothing, so whatever it recorded is given back. A run that could still
- * be conducting is left alone — two runs of one agent at once must not tear
- * each other's world down.
- *
- * The answer is load-bearing for exactly one caller: the build refuses to
- * branch over an `unsettled` agent, because an unsettled world's restore
- * retries later and must never find a draft to route `latest` onto. Anything
- * that keeps this sweep from *knowing* the agent is clean — the read failing,
- * the platform key gone — is therefore `unsettled` too, never a shrug.
- *
- * **Under this agent's mocked-world fence, from the read to the last restore.**
- * A teardown that ran beside a new run's claim would be the hijack itself: this
- * settle deletes a draft and then puts a `latest` binding back, while the new
- * run — which a *finished* run never blocks — branches the version that binding
- * would then resolve to. The fence is what makes the two take turns, and the
- * re-read inside it is what makes the loser harmless: whoever gets there second
- * finds the cleanup flag already `true`, has nothing in its list, and restores
- * nothing.
+ * Clean up finished or stale unbuilt runs under the agent lock. Active runs
+ * remain untouched. Return unsettled when cleanup is still owed or cannot
+ * be verified; callers must not build another draft in that state.
  */
 export async function settleOwedMockCleanups(
   auth: AuthContext,
@@ -553,14 +461,8 @@ async function refuseInUse(
 }
 
 /**
- * Give this run up because the agent is somebody else's, said one way.
- *
- * Two things reach here. The claim finds a named run holding the copy, which is
- * the ordinary collision. Or the fence itself would not come free inside its
- * wait — a holder in another process still building, or one killed hard enough
- * that Postgres has not yet reaped its session. The second names no run,
- * because there is no row to name: what is known is that the agent is busy,
- * which is the whole of what the caller has to act on.
+ * Cancel this run after a competing claim or lock timeout. A lock timeout
+ * may not identify the holding run, so byRunId is optional.
  */
 async function standDownInUse(
   auth: AuthContext,

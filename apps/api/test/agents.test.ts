@@ -19,20 +19,9 @@ import {
 } from "./support/traces.ts";
 
 /**
- * What a developer's `connect` can count on.
- *
- * Registering an agent is the first write anybody makes against egma, and it
- * happens from a terminal, often through a coding agent, often twice because
- * the first attempt's answer was lost. So the promises tested here are the
- * ones that make that safe: the agent and the first way of reaching it are
- * written together or not at all; registering the same vendor agent again
- * answers what is already there rather than minting a second identity; the
- * provider key is sealed on arrival and never comes back; and every refusal
- * carries a stable code and a sentence a coding agent can act on without a
- * person reading the screen.
- *
- * Every refusal sentence in this file is asserted word for word. A client
- * relays them to the terminal unchanged, so the wording is the contract.
+ * Agent registration coverage: initial agent/connection creation, duplicate
+ * requests, sealed credentials, and actionable refusal codes and messages.
+ * Provider confirmation and credential custody are separate from initial creation.
  */
 
 let api: TestApi;
@@ -516,18 +505,7 @@ describe("discovering simulation agents", () => {
     expect(connectionOf(connected).agentPlatform).toBe("retell");
   });
 
-  /**
-   * **One egma agent binds to one platform agent** (the rule the connect
-   * ticket confirmed while building). Retell gives a voice agent and a chat
-   * agent different ids, so a second connection picking a *different* Retell
-   * agent under one egma agent is asking for a second binding.
-   *
-   * Overwriting quietly is the dangerous half: monitoring would go on running
-   * under the same name while reading a different Retell agent, and one
-   * agent's production calls would accumulate against another's results
-   * history. So it is refused, in a sentence that names both and says where
-   * the second one belongs.
-   */
+  /** An Egma agent cannot bind connections to two different Retell agent IDs. */
   /** A Retell account holding one voice agent, one chat agent and one number. */
   function retellAccountAnswering(): typeof fetch {
     return vi.fn(async (input: string | URL | Request) => {
@@ -744,19 +722,9 @@ describe("discovering simulation agents", () => {
   });
 
   /**
-   * The raced second binding, and the connection it must not leave behind.
-   *
-   * **The pre-check and the rule are two different moments.** The route reads
-   * the agent and finds it unbound, then confirms the candidate with Retell,
-   * then writes the connection, and only then does custody meet the binding
-   * rule inside its own transaction. Two requests arriving together both pass
-   * the read; one of them meets the rule after it has already written.
-   *
-   * The race is seeded honestly rather than described: the agent is bound
-   * through the access layer *from inside the Retell call*, which is the exact
-   * window between the pre-check and the write. What is asserted is that the
-   * loser leaves nothing live — for a chat connection that row would carry its
-   * own sealed key, so leaving it is leaving a way in, not a stray record.
+   * Bind the agent during the Retell confirmation to reproduce the gap between
+   * the route pre-check and custody. The refused request must archive only the
+   * connection it created.
    */
   it("puts back the connection it wrote when the binding rule refuses it", async () => {
     api = await createApi("retell_raced_binding_undone");
@@ -844,22 +812,9 @@ describe("discovering simulation agents", () => {
   });
 
   /**
-   * A registration refused by custody leaves its agent alive.
-   *
-   * **The cleanup archives the connection and never the agent**, and the
-   * reason is sharper than tidiness. An agent a registration just created is
-   * unbound the instant it is written, so the binding rule can only refuse it
-   * if another writer bound it in the window between the insert and the seal —
-   * which means the agent is that writer's, and archiving it would take every
-   * live connection on it, including the one they had just attached. The one
-   * branch that destroyed somebody else's work was the only branch that could
-   * fire.
-   *
-   * The refusal used here is the other one custody can answer with — the
-   * one-switched-on-agent rule — because it is reachable without a race and it
-   * runs the same cleanup. What is asserted is the shape of that cleanup: the
-   * connection put back, the agent still alive, and the agent that already
-   * watches this platform agent untouched.
+   * A custody refusal must archive the newly created connection while keeping
+   * the agent and other writers' connections alive. This case exercises that
+   * cleanup through the duplicate-monitoring refusal.
    */
   it("leaves the agent alive when custody refuses the registration", async () => {
     api = await createApi("retell_register_cleanup_keeps_agent");
@@ -932,15 +887,8 @@ describe("discovering simulation agents", () => {
   });
 
   /**
-   * A registration that *reused* an agent leaves its way in alone.
-   *
-   * **`reused` means this request wrote no connection.** The registration
-   * rotated the credential on a connection that was already there and nothing
-   * more, so a custody refusal has nothing of its own to put back — and
-   * archiving that row would take away a working way into somebody's agent
-   * over a refusal that was only ever about the pull switch. An agent whose
-   * one connection is the reused one would have been left unreachable by a
-   * request that failed.
+   * A reused connection predates this request, so a custody refusal must not
+   * archive it. Its credential may already have been rotated.
    */
   it("archives nothing when the registration reused the connection it refused on", async () => {
     api = await createApi("retell_reused_connection_survives");
@@ -1070,17 +1018,8 @@ describe("discovering simulation agents", () => {
   });
 
   /**
-   * The mint the connect flow makes, over the API seam and with no browser in
-   * it.
-   *
-   * **This is the body that surface sends, key for key.** It mints the web-call
-   * lane for an agent that has none, so a person who wants a mocked run is
-   * never refused with a step the product cannot perform. It carries no
-   * credential and no config: the agent already holds its sealed key, the route
-   * lends that copy to the confirmation, and Retell's own answer is what the
-   * connection's config is written from. A payload that named neither the
-   * Retell agent nor a key shipped once and could only ever be refused, so the
-   * round trip is proven here rather than assumed.
+   * Exercise the web-call connection payload used by setup. The route uses the
+   * agent's stored credential and Retell confirmation to build the connection config.
    */
   it("mints the web-call lane from the connect flow's own body, with no key and no config", async () => {
     api = await createApi("retell_web_call_minted_by_consent");
@@ -1665,14 +1604,8 @@ describe("a livekit connection", () => {
   });
 
   /**
-   * The second shape through the same door: a connection that names where to
-   * ask for a token instead of carrying the key pair that would mint one.
-   *
-   * What a read shows is the whole point of the shape. The endpoint is
-   * configuration and comes back; the headers that authenticate egma to it are
-   * a credential and do not, hinted by their names — which is what a person
-   * needs to recognise the connection, and is not a secret, where the last
-   * four characters of a bearer token would be four real characters of one.
+   * Token-endpoint reads expose the endpoint and authentication header names,
+   * but never header values.
    */
   it("is registered with a token endpoint instead of a key pair", async () => {
     api = await createApi("agents_livekit_endpoint");
@@ -2011,18 +1944,8 @@ describe("a livekit connection", () => {
   });
 
   /**
-   * The secret half, followed everywhere it could surface.
-   *
-   * `apiSecret` is the one field on a livekit connection that egma can never
-   * hand back and can never write down in the clear: it signs the tokens that
-   * open rooms on the customer's own LiveKit project. So this drives a
-   * registration that works and several that are refused, all carrying the
-   * same sentinel, and then looks for that sentinel in every place a value can
-   * end up — the answers, the log, the read models and the row itself.
-   *
-   * The refused ones matter more than the one that worked. A refusal is where
-   * a value gets quoted back to explain what was wrong with it, and it is
-   * where an error carrying a payload gets written to a log.
+   * Follow a sentinel LiveKit API secret through successful and refused
+   * registrations. Check responses, logs, read models, and storage for plaintext leaks.
    */
   it("never appears in an answer, a log line, a read or a row", async () => {
     const lines: string[] = [];
@@ -2083,14 +2006,8 @@ describe("a livekit connection", () => {
   });
 
   /**
-   * The same walk for the other shape's secret.
-   *
-   * An `Authorization: Bearer …` header is a reusable credential: whoever
-   * holds it can ask the customer's endpoint for a token into any room it will
-   * mint one for. So it lives where credentials live and is followed the same
-   * way — through a registration that works, a read, a list, and every refusal
-   * carrying it — and what a read shows of it is the header's *name*, which is
-   * not a secret, rather than a tail of its value, which is.
+   * Check token-endpoint header redaction across registration, reads, lists,
+   * and refusals. Read models may expose header names, never credential values.
    */
   it("keeps an endpoint's auth header out of every answer, log, read and row", async () => {
     const HEADER_SECRET = "SENTINEL-endpoint-bearer-4c81ea";
@@ -2264,16 +2181,8 @@ describe("registering the same vendor agent again", () => {
   });
 
   /**
-   * A duplicate-request storm is what an uncertain network failure looks like:
-   * several identical registrations in flight at once, none of them
-   * knowing whether any of the others landed.
-   *
-   * Six rather than two on purpose. Two requests through the whole HTTP path
-   * tend to stay one query apart and never meet inside the write; six overlap,
-   * and without the transaction settling them they collide on the agent name.
-   * The refusals this file asserts elsewhere are exactly what a client would
-   * see then — which is why this has to be a real race rather than two calls
-   * in a row.
+   * Send six registrations concurrently to exercise duplicate requests under
+   * contention. Sequential retries would not test the transaction race.
    */
   it("resolves racing registrations to one agent, not several", async () => {
     api = await createApi("agents_race");
@@ -2628,19 +2537,8 @@ describe("reading agents", () => {
   });
 
   /**
-   * The list answers the question a list of agents is opened to ask: which
-   * agents egma can reach, and how.
-   *
-   * **Each row's connections are checked against that agent's own read, whole.**
-   * Asserting a field or two here would go green on a list that carried a
-   * smaller connection than `GET /v1/agents/{agentId}` does — two shapes
-   * behind one word, which is how a client comes to work against one of them by
-   * accident. Comparing the objects is the only assertion that cannot.
-   *
-   * And each row carries *its own*. The grouping is the part of a widened read
-   * that fails quietly: connections arrive in one answer for the whole page and
-   * are handed back out per agent, so a row wearing its neighbour's connection
-   * would look entirely plausible.
+   * Compare each list row's full connection objects with its agent detail response
+   * to catch missing fields and connections assigned to the wrong agent.
    */
   it("carries each agent's living connections, in the shape its own read answers", async () => {
     api = await createApi("agents_list_connections");

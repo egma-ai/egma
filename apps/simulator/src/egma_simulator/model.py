@@ -1,20 +1,7 @@
-"""The model-client seam: where the persona's words come from.
-
-The persona brain decides *when* to speak and what it knows; a model client
-turns the composed messages into the persona's next words.
-
-- ``ScriptedModel`` is the deterministic test implementation. The persona's turns
-  are the spec's scenario instructions, sentence by sentence, and a fixed
-  goodbye that concludes the exchange when the script runs dry. The same
-  messages always produce the same reply, so nothing in the suite can flake
-  on a model.
-- ``OpenAICompatibleModel`` is the shipped adapter. The pinned persona version
-  selects it, and the claim carries the direct provider key.
-
-Both answer one question — "given this conversation so far, what does the
-persona say next, and are they done?" — expressed as ``PersonaReply``. The
-shipped adapter learns that second fact only from the structured ``end_call``
-tool. No string in the persona's spoken text has control meaning.
+"""Model clients produce PersonaReply from composed messages.
+ScriptedModel emits scenario sentences and a fixed goodbye for deterministic tests.
+OpenAICompatibleModel uses the pinned persona selection and claim credentials.
+Only its structured end_call tool ends the exchange; spoken text has no control meaning.
 """
 
 from __future__ import annotations

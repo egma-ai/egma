@@ -1,14 +1,6 @@
-"""The client against a control plane that misbehaves.
-
-Every call the simulator makes is wrapped so that the loops above it see a
-declared failure and can decide what it means. The one that used to escape
-was the timeout: aiohttp raises a bare ``TimeoutError`` for its total
-timeout, and that is an ``OSError``, not an ``aiohttp.ClientError``. An
-untranslated timeout is not a nuisance — it ends the claim loop, the
-heartbeat, or the report sender, none of which are written to expect it.
-
-These tests use a real server that answers too slowly, because the failure
-lives in aiohttp's own machinery and a fake exception would prove nothing.
+"""Verify client failure translation against a slow local HTTP server.
+aiohttp total timeouts raise TimeoutError, outside aiohttp.ClientError;
+claim, heartbeat, and report loops must receive the declared failure type.
 """
 
 from __future__ import annotations

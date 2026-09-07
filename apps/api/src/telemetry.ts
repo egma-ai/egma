@@ -1,37 +1,12 @@
 /**
- * Platform telemetry for this process, behind one flag.
+ * Egma self-observability, separate from customer and simulation evidence.
+ * Load with node --import before application modules so instrumentation can
+ * patch their imports.
  *
- * **This is not the trace store.** What customers' agents and simulations
- * send through the OTLP door is their data, in this deployment's ClickHouse.
- * What this file emits is telemetry about egma's own process — request
- * spans, operational metrics, crash reports, and log correlation — through
- * the deployment's telemetry pipeline. Traces and metrics go to the
- * configured OTLP destination, normally a deployment telemetry collector.
- * The collector's exporter chooses the backend. Crash reports use a separate,
- * direct PostHog adapter. The two data flows must never share a pipe, which is
- * why nothing here reads `CLICKHOUSE_URL` and nothing in the OTLP door reads
- * anything here.
- *
- * It is loaded before the entry module — `node --import` in the Dockerfile —
- * because instrumentation works by patching modules as they load: registered
- * after `pg` or `fastify` have arrived, it would see nothing. That is also
- * why it reads the environment directly rather than through `loadConfig`,
- * which does not exist yet when this runs.
- *
- * **`EGMA_TELEMETRY=on` is the whole decision.** Off — the default, and
- * anything that is not `on` — means nothing below is imported and nothing is
- * sent anywhere, whatever else is set. On means all of it at once: the
- * OpenTelemetry SDK exporting spans to `EGMA_TELEMETRY_OTLP_ENDPOINT`, and
- * the current PostHog adapter reporting crashes with `EGMA_POSTHOG_KEY`.
- * There are no smaller switches inside it. A deployment that says `on`
- * without both required values is refused at boot, by name — an absent
- * setting must never be a quiet no, which is the same deal every other
- * setting in this deployment lives under.
- *
- * Past that check, a broken telemetry backend must never take the platform
- * down with it: an SDK that fails to start says so on standard error and
- * the service carries on, because this is the one capability the product
- * does not depend on.
+ * EGMA_TELEMETRY=on enables OTLP instrumentation and PostHog crash reporting.
+ * Missing required configuration stops startup; SDK startup failures are logged
+ * and allow the service to continue. Standard OTEL settings take precedence
+ * over the Egma OTLP endpoint default.
  */
 
 const environment = process.env;

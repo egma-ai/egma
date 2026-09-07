@@ -12,55 +12,16 @@ import {
 } from "./retell/normalise.ts";
 
 /**
- * **The Retell lane's simulation ingestion: a pull, not a push.**
+ * Fetch the agent POV of a completed Retell simulation using its connection
+ * credential. Reuse production normalization, then file with simulation
+ * attribution and the simulation trace ID.
  *
- * LiveKit's agent runs the egma SDK and exports its own spans while the
- * conversation happens. Retell's does not — nothing of egma's runs inside a
- * Retell agent, and there is nothing to install one into. So the agent's POV of
- * a Retell simulation is fetched by egma the moment the conversation ends, with
- * the connection's own stored credential, and filed through the same step every
- * other source goes through (ADR-0024 §2).
- *
- * **Normalised by the normaliser production ingestion already uses.** A Retell
- * call document means the same thing whether the conversation was a simulation
- * or somebody's real traffic, so reading it twice two ways would be two answers
- * to one question. What differs is only where it is filed, and that is the
- * filing step's business: under the simulation's own trace, `emitter = agent`,
- * with the run and version pins off egma's own row.
- *
- * **`call_analysis` is not waited for.** Retell writes its own post-call
- * analysis some seconds after the call ends, and the transcript and the tool
- * calls — the whole of what a transcript reads — are there the moment it does.
- * Waiting for the analysis would hold a simulation's grading open for a block
- * nothing in the product reads yet.
- *
- * ## One immediate attempt, then bounded retries — and never a second filing
- *
- * A record can be *thin*: Retell answered, and the document has no call id, no
- * usable extent, or a transcript that could not be read whole. The spec's answer
- * is one immediate attempt and then bounded retries inside the grading bound.
- *
- * **The retries are of the fetch, never of the filing**, and that is not a
- * preference. A span's identity is `(organization, project, trace, span)` and
- * the Retell normaliser derives its span ids deterministically, so filing a thin
- * document and then filing a fuller one would put *different* normalised
- * evidence under one immutable identity — which ADR-0014 names an integrity
- * error rather than an update. So the fetch is repeated until the document is
- * whole or the attempts run out, and whatever the last attempt held is filed
- * once.
- *
- * **Only the first attempt is awaited.** The caller is the report door, and a
- * simulator is on the other end of it waiting to be told its landing was
- * accepted; a record that arrives whole the first time — every ordinary call —
- * is filed inside that request, and a thin one goes to a background wait that
- * the door never sees. The timer is `unref`'d, so a deployment shutting down
- * loses at most a thin record's improvement rather than holding the process
- * open, and a POV that never landed is a state ADR-0024 §6 already defines.
- *
- * **Nothing here throws at its caller.** Retell being slow, unreachable or thin,
- * and this side being unable to make evidence durable, are all logged through
- * the platform log with the simulation and the reason, and dropped. What Retell
- * owes egma is not the landing's problem.
+ * Await the first fetch. Retry missing or incomplete documents in the
+ * background with bounded, unreferenced timers. Do not wait for call_analysis.
+ * File once per invocation, using the latest fetched document after retries;
+ * filing thin and then fuller evidence would conflict under stable span IDs.
+ * Log fetch and filing failures without failing the simulation report.
+ * Background retries are not durable across process shutdown.
  */
 
 /** Where the pull asks, and what does the asking — the deployment's own reach. */
@@ -121,20 +82,9 @@ function platformAgentOf(call: RetellCall): {
 }
 
 /**
- * Pull one ended Retell simulation's call record and file it under that
- * simulation.
- *
- * `auth` is the conducting context the report door already resolved — the row's
- * own tenancy, built by the claim — because unsealing a connection's credential
- * is a thing only egma's simulator may ask for.
- *
- * Does nothing at all, quietly, for a simulation that is not on the Retell lane
- * or never reported a call id: a lane with no pull is the ordinary case and
- * saying so would be noise on every LiveKit landing.
- *
- * Answers once the first attempt has been made and, where that attempt was
- * enough, once its record is durable. A thin record's retries continue after
- * this resolves.
+ * Pull eligible completed Retell simulations using the report's simulator
+ * context. No-op when the resolver finds no pull. Await the first attempt
+ * and any immediate filing; incomplete-document retries continue afterward.
  */
 export async function pullRetellSimulationRecord(
   auth: AuthContext,
@@ -202,7 +152,7 @@ export async function pullRetellSimulationRecord(
     // **A throw here is the transport, not Retell's answer.** A blip on the
     // first attempt is the exact thing the retries below exist for, so it is
     // said and then carried past — returning here would spend the whole
-    // bound on one bad socket, and a completion resend deliberately starts no
+    // bound on one bad socket, and a terminal report resend deliberately starts no
     // second pull, so this simulation would lose its agent POV for good.
     said(log, simulationId, "the first attempt failed", cause);
   }
@@ -263,15 +213,8 @@ export async function pullRetellSimulationRecord(
 }
 
 /**
- * One failure, said out loud and dropped.
- *
- * Every path out of the pull comes through here, because the promise this
- * module hands back is one nobody can act on: the report door has already
- * answered, or is about to, and a simulator waiting on a landing is owed
- * nothing about Retell. What an operator needs is the simulation, what was
- * being attempted, and the exception's own class — never its message, which can
- * carry a URL or a local path into a log an operator of somebody else's
- * deployment reads.
+ * Log the simulation, operation, and exception type. Do not log exception
+ * messages, which can contain provider URLs, paths, or other private data.
  */
 function said(
   log: FastifyBaseLogger,

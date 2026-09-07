@@ -1,15 +1,6 @@
 /**
- * The fixture's own controls, which are not part of the contract.
- *
- * On a real instance a person approves a terminal in a browser. A check has no
- * person and no browser, so it says the same thing over HTTP instead. These
- * paths are under `/fixture` and nothing the CLI does ever touches them — the
- * separation is the point, and it is the shape the simulator's workbench uses
- * for the same reason.
- *
- * They are reachable over HTTP rather than only in the process that started the
- * server, because the thing being checked is usually a subprocess: the built
- * `egma` command, with a stand-in browser beside it.
+ * Test-only /fixture controls for approval and other simulated user actions.
+ * HTTP access lets separate CLI and browser-stub processes drive the fixture.
  */
 
 import type { DeviceControls } from "./device.ts";

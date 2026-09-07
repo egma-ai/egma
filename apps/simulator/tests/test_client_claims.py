@@ -1,17 +1,6 @@
-"""What a claim request says on the wire.
-
-The claim is the one call whose body the control plane's hold depends on:
-``wait_seconds`` says how long this simulator is willing to hang, so the
-other end can hold the request open no longer than the client will wait.
-A claim that kept that number to itself would make the control plane
-guess — and a guess longer than the client's patience turns a quiet queue
-into a spurious client-side timeout.
-
-A real server on loopback reads the body back, because what is under test
-is what actually goes on the wire.
-
-The same body declares the one spec version this simulator validates. Without
-that handshake the control plane must refuse the worker before it takes a row.
+"""Read claim request bodies through a local HTTP server.
+Require wait_seconds and the supported spec version so the control plane
+can honor the client wait budget and reject incompatible workers.
 """
 
 from __future__ import annotations

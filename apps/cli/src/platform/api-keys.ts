@@ -1,16 +1,7 @@
 /**
- * Project keys used by monitored workers.
- *
- * Minting returns the secret once, and the only place it is written down is
- * the file the developer agreed to. The stable agent id in the key name lets
- * the CLI find its own keys through the existing key list; no monitoring-only
- * database relationship is needed. The worker never receives the terminal's
- * own login credential — that one is this machine's identity, and revoking it
- * would also sign this laptop out.
- *
- * The key is scoped by naming a project. There is no scope field to send: the
- * request names the project and the scope is derived, which is what makes a
- * project key a project key rather than a claim about one.
+ * Create project keys for monitored workers and write the secret only to the agreed file.
+ * The stable agent ID in the name lets the CLI find its keys later.
+ * Project selection determines scope; never give a worker the terminal login credential.
  */
 
 import {

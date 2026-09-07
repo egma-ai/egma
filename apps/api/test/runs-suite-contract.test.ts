@@ -106,13 +106,11 @@ async function readyToRun(
 function start(
   ready: ReadyRun,
   key = ready.key,
-  idempotencyKey = newId("run"),
 ): Promise<Answer> {
   return request(api.app, "POST", "/v1/runs", key, {
     suiteId: ready.suiteId,
     agentId: ready.agentId,
     connectionId: ready.connectionId,
-    idempotencyKey: idempotencyKey,
   });
 }
 
@@ -223,8 +221,7 @@ describe("run admission", () => {
 describe("run authorization", () => {
   it("lets a viewer read and follow, but only members of the owning organization start or cancel", async () => {
     const ready = await readyToRun("run_roles_and_tenants");
-    const memberAttempt = "member-start-before-role-check";
-    const started = await start(ready, ready.key, memberAttempt);
+    const started = await start(ready);
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
 
@@ -238,11 +235,6 @@ describe("run authorization", () => {
     const globexKey = await projectKeyFor(api.app, grace);
 
     expect((await start(ready, viewer.secret)).statusCode).toBe(403);
-    // Replaying the member's successful key is still a start operation. A
-    // later role reduction must take effect before the ledger is read.
-    expect(
-      (await start(ready, viewer.secret, memberAttempt)).statusCode,
-    ).toBe(403);
     const detail = await request(
       api.app,
       "GET",

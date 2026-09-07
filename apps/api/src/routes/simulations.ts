@@ -20,7 +20,6 @@ import {
   type TraceDetail,
   type TraceSpan,
 } from "@egma/db";
-import { everySpanIn } from "@egma/metrics";
 import { simulationOperations } from "@egma/platform-api/contract";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
@@ -64,27 +63,9 @@ function windowOf(
 }
 
 /**
- * The mock tools this simulation's pinned test version names, by name.
- *
- * **The one place a mocked mark comes from.** A mock tool is matched to a call
- * by tool name and by nothing else, and the version a simulation pins is
- * immutable — so reading the mark here, at display time, is reading exactly
- * the world this simulation ran against. egma writes no second copy onto the
- * span: a second copy is a fact that can come to disagree with the first, and
- * the version is the half that cannot move.
- *
- * **The lane is the other half of the same question, and this is the same
- * sentence the claim says.** A simulation is mocked when its own test named a
- * tool *and* the lane can serve one, which is exactly what the work order
- * decides with `LANES_SERVING_MOCK_TOOLS` before the simulator ever runs. The
- * phone lane is deliberately not mockable — the real carrier leg, the real
- * tools — so a test that pins `book_appointment` and then runs over a phone
- * number had that call answered by the customer's own backend. Reading the
- * name alone would mark that real, side-effecting booking as isolated, which
- * is the one lie this mark exists to prevent.
- *
- * Empty for a simulation whose test mocked nothing, which is most of them, and
- * then no call carries a mark at all.
+ * Derive mock tool marks from the pinned test version and connection type.
+ * Phone connections cannot serve mock tools, even if the test names them.
+ * The mark describes configured coverage; it is not a separate execution receipt.
  */
 function mockedToolNames(
   connectionType: string,
@@ -169,7 +150,6 @@ function describedPlanForSimulation(
     );
   }
   return {
-    state: plan.state,
     capturedAt: plan.capturedAt.toISOString(),
     items: group.items.map((item) => ({
       projectGraderId: item.projectGraderId,
@@ -201,41 +181,26 @@ function describedMeasures(
 }
 
 /**
- * Whether this conversation was graded without the agent's own account of it.
- *
- * **Read rather than stored**, because everything it needs is already in hand
- * here and a stored answer would be a second record to keep honest. Four facts,
- * and all four have to hold:
- *
- * - the conversation **completed** — nothing else was ever waited for;
- * - a second account was **coming**: the lane can deliver one and this landing
- *   reported the reference to deliver it under (ADR-0024 §2);
- * - **none arrived** — no span under the trace is the agent's;
- * - and the **bound has passed**, so grading has stopped waiting (§6). Inside
- *   the bound nothing is missing yet; it is simply not here yet.
- *
- * **A reader that shows the agent's POV needs this and cannot infer it.** Such
- * a reader takes the rows filed as the agent's and shows them as the
- * conversation, so a partial export — or none — would quietly become the whole
- * record with nothing saying it was a fragment. Regrade is what picks up a late
- * arrival.
+ * Report incomplete platform evidence for an ended simulation. Explicitly
+ * degraded evidence is incomplete immediately; an absent final session or call
+ * record becomes incomplete after the wait bound. Partial spans do not prove
+ * completion.
  */
 function agentPovIncomplete(
   simulation: Simulation,
   run: Run,
   transcript: TraceDetail | undefined,
 ): boolean {
-  if (simulation.status !== "completed") return false;
-  const reference = simulation.providerReference;
-  if (reference === null || reference === "") return false;
+  if (
+    simulation.status !== "completed" &&
+    simulation.status !== "failed" &&
+    simulation.status !== "canceled"
+  ) return false;
   if (!laneProducesAnAgentPov(run.connectionSnapshot.connectionType)) {
     return false;
   }
-  if (transcript !== undefined) {
-    for (const span of everySpanIn(transcript)) {
-      if (span.pov === "agent") return false;
-    }
-  }
+  if (transcript?.agentEvidenceIncomplete === true) return true;
+  if (transcript?.agentEvidenceComplete === true) return false;
   // The wait began when the conversation ended, on the earlier of the two
   // clocks that answer for that — the same reading grading itself takes, so a
   // report from a machine running ahead cannot make this say "still waiting"
@@ -352,6 +317,7 @@ export async function simulationRoutes(
         // showing the agent's POV would otherwise show whatever fragment
         // arrived as if it were the conversation. False is the ordinary answer
         // — the account landed, or the lane files none.
+        agentPovComplete: transcript?.agentEvidenceComplete === true,
         agentPovIncomplete: agentPovIncomplete(simulation, run, transcript),
         measures: describedMeasures(simulation, transcript),
         // The observed metrics, off the one shared projection the transcript

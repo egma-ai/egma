@@ -15,14 +15,9 @@ const projectQuery = parameters({ projectId: stringIdSchema });
 const agentParams = parameters({ agentId: stringIdSchema }, ["agentId"]);
 
 /**
- * One agent on the Retell account a pasted key opens, and what this project
- * already knows about it.
- *
- * The registration facts are what make the list a picker rather than a
- * catalogue: an account agent that is already an egma agent is *recognized*
- * and confirmed, and one that is not can be ticked to be registered and
- * watched in the same commit. They are read from (project, agent platform,
- * platform agent id) — the same triple the pull-uniqueness index is built on.
+ * A discovered Retell agent and its registration in this project. Match by
+ * project, agent platform, and platform agent ID, as the pull-uniqueness index
+ * does.
  */
 const retellAgent = {
   type: "object",
@@ -171,19 +166,10 @@ export const monitoringOperations = {
   }),
 
   /**
-   * Start pulling production calls, for one platform agent or several at once.
-   *
-   * One commit does the whole of it: the key is sealed onto every agent it
-   * names, each switch is flipped, and each notebook opens with the 30-day
-   * historical window. An agent row is created for a platform agent this
-   * project does not register yet, because watching one *means* registering it.
-   *
-   * **Every entry is attempted and every entry is answered.** A tick that
-   * would put two switched-on agents on one platform agent comes back in
-   * `refused` with a sentence naming the agent already watching it, and the
-   * ticks beside it still start. The refusal is the database's own
-   * uniqueness answer, caught — a check before the write would be a race
-   * with the very next request.
+   * Enable production pull for the selected platform agents, registering any
+   * missing agents and sealing their monitoring keys. Each selection receives
+   * an answer; a uniqueness refusal for one does not stop the others. Initial
+   * pull includes the 30-day historical window.
    */
   startMonitoring: defineOperation({
     operationId: "startMonitoring",
@@ -237,16 +223,9 @@ export const monitoringOperations = {
   }),
 
   /**
-   * Stop pulling one agent's production calls.
-   *
-   * Everything stored stays stored: the transcripts, the agent's binding, its
-   * sealed key, and its machine row. The switch is what makes an agent due, so
-   * turning it off is the whole of stopping.
-   *
-   * Turning it back on starts a new observation from that moment; it does not
-   * go back for what arrived while the switch was off. No cursor crosses the
-   * gap — the row survives so a later start can bump its generation and set
-   * its floor, not so it can resume a window.
+   * Disable production pull while retaining evidence, the platform binding,
+   * and the monitoring key. Restarting creates a new observation window;
+   * it does not backfill the period while pull was disabled.
    */
   stopMonitoring: defineOperation({
     operationId: "stopMonitoring",

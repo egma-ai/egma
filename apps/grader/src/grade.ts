@@ -1,6 +1,8 @@
 import {
   appendGrades,
   catalogEntry,
+  graderModelOfParameters,
+  getRun,
   getSimulation,
   getSimulationTestVersion,
   MAXIMUM_WINDOW_MILLISECONDS,
@@ -75,7 +77,7 @@ export async function gradeClaim(
     ? await options.providerCredentials.load()
     : {};
   // What every judge call consumed, gathered as the calls are made. One list
-  // for the whole claim: the records carry which grader and which assertion
+  // for the whole claim: the records carry which grader and which HTTP attempt
   // spent what, so nothing is lost by pooling them.
   const spend: NewUsageRecord[] = [];
   const judges = judgesFor(
@@ -177,14 +179,9 @@ function judgesFor(
   const judges = new Map<string, AskableJudge>();
   for (const entry of entries) {
     if (entry.definition.type === "code") continue;
-    if (entry.definition.judgeModel === null) {
-      throw new Error(
-        `model-judged definition ${entry.graderDefinitionId} version ${entry.graderDefinitionVersion} has no judge model`,
-      );
-    }
     judges.set(
       entry.projectGraderId,
-      judgeFor(entry.definition.judgeModel, credentials, makers, (usage) => {
+      judgeFor(graderModelOfParameters(entry.parameterValues), credentials, makers, (usage) => {
         spent(entry, usage);
       }),
     );
@@ -208,10 +205,7 @@ function usageRow(
   simulationId: string | undefined,
   usage: JudgeUsage,
 ): NewUsageRecord {
-  const model = entry.definition.judgeModel;
-  if (model === null) {
-    throw new Error("a judge reported usage for a grader with no judge model");
-  }
+  const model = graderModelOfParameters(entry.parameterValues);
   // The pinned catalog model. The provider's own served string never reaches
   // this shape — see `JudgeUsage` for why.
   const named = model.model;
@@ -222,7 +216,7 @@ function usageRow(
       gradingJobId: claim.id,
       attempts: claim.attempts,
       projectGraderId: entry.projectGraderId,
-      assertion: usage.assertion,
+      assertion: "request",
       httpAttempt: usage.httpAttempt,
     },
     occurredAt: usage.occurredAt,
@@ -259,6 +253,7 @@ function gradeRow(
     projectGraderId: entry.projectGraderId,
     graderDefinitionId: entry.graderDefinitionId,
     graderDefinitionVersion: entry.graderDefinitionVersion,
+    parameterValues: entry.parameterValues,
     score: result.score,
     details: result.details,
     graderPassThreshold: entry.graderPassThreshold,
@@ -292,6 +287,14 @@ async function resolveConversation(claim: GradingClaim): Promise<Resolved> {
     );
   }
 
+  // Provider spans need not carry a connection type. The frozen run decides
+  // which platform must supply the transcript, regardless of which span lands first.
+  const run = await getRun(claim.auth, claim.runId);
+  if (run === undefined) {
+    throw new NotGradable(`simulation ${simulation.id}'s frozen run is not readable`);
+  }
+  const connectionType = run.connectionSnapshot.connectionType;
+
   const trace = await traceFor(claim);
   if (trace !== undefined && trace.runId !== claim.runId) {
     throw new NotGradable(
@@ -304,7 +307,7 @@ async function resolveConversation(claim: GradingClaim): Promise<Resolved> {
   // write error grades from the missing or partial conversation instead of
   // abandoning work that can no longer improve.
   if (
-    evidenceIsStillArriving(simulation, trace) &&
+    evidenceIsStillArriving(simulation, trace, connectionType) &&
     claim.attempts < MOST_GRADING_ATTEMPTS
   ) {
     throw new NotGradable(
@@ -315,7 +318,7 @@ async function resolveConversation(claim: GradingClaim): Promise<Resolved> {
   }
 
   return {
-    conversation: conversationOfSimulation(simulation, trace),
+    conversation: conversationOfSimulation(simulation, trace, connectionType),
     simulationId: simulation.id,
   };
 }

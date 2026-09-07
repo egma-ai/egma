@@ -1,16 +1,5 @@
-"""The quarantine, enforced rather than promised.
-
-The simulator's whole licence to be Python inside a TypeScript monorepo is
-that it reaches the rest of egma through one versioned JSON contract and
-nothing else: no shared code, no database, no imports from anywhere above
-this directory. That is the sort of boundary a README claims and a codebase
-quietly loses, so it is checked here instead — the same reasoning the
-repository already applies to its data-access boundary in build-time rules
-rather than in prose.
-
-The three rules are: the dependency list stays short and known, no module
-reaches for a datastore driver, and a provider library nobody configured
-is never even imported.
+"""Enforce the simulator's versioned JSON boundary with the rest of Egma.
+Check allowed dependencies, no datastore-driver imports, and lazy provider loading.
 """
 
 from __future__ import annotations
@@ -32,15 +21,9 @@ SOURCE_ROOT = APP_ROOT / "src" / "egma_simulator"
 ALLOWED_DEPENDENCIES = {
     "aiohttp",  # the outbound HTTP client, and the workbench's server
     "jsonschema",  # holds every document to the contract, both directions
-    "rfc3339-validator",  # so the schemas' date-time format is really checked
-    # The voice pipeline: the speech legs, the recording, and the LiveKit
-    # transport a phone call rides. Pipecat's configured extras carry the two
-    # speech providers and its tracing hooks. LiveKit is pinned separately
-    # because the guarded media-drain seam is exact to that SDK release; it
-    # brings both the room client and the server API that places a SIP call — so a
-    # deployment that
-    # configures one already has what it needs and one that configures
-    # none never imports any of them: the guards below.
+    "rfc3339-validator",  # Check schema date-time formats.
+    # Pipecat supplies speech processing and LiveKit supplies room/SIP transport.
+    # Load provider libraries only when configured; the tests below check this.
     "pipecat-ai",
     "livekit",
     "loguru",  # what pipecat logs through, gathered under one filter
@@ -184,17 +167,9 @@ def test_no_module_reaches_for_a_datastore():
 
 
 def test_a_provider_library_is_never_imported_at_module_scope():
-    """Choosing a provider is what loads its library, and nothing else.
-
-    A stock client is somebody else's code running at import time — the
-    tokenizer corpus this package already disarms was exactly that — so
-    the simulator only ever imports one after configuration has asked for
-    it. Written as a rule rather than as care: an import moved to the top
-    of a file for tidiness would undo it silently.
-
-    The object store's client is held to the same rule as the speech legs
-    and the bridge, and for the same reason: naming an endpoint is what
-    selects it, so a deployment that named none must not load it.
+    """Load provider, bridge, and storage libraries only when configuration selects
+    them.
+    Top-level imports would bypass this boundary and run unused dependency setup.
     """
     deferred = (
         set(SPEECH_PROVIDER_MODULES)
@@ -236,18 +211,8 @@ def test_a_provider_library_is_never_imported_at_module_scope():
 
 
 def test_an_unconfigured_simulator_loads_no_provider_library():
-    """The same rule, proved by running rather than by reading.
-
-    A fresh process conducts two whole voice simulations with nothing
-    configured — one against the loopback counterpart and one that dials
-    a number through the scripted media backend — and then says which
-    provider, bridge and object-storage libraries it loaded. It has to be
-    a fresh one: this suite configures the providers elsewhere, so by the
-    time it asks, its own modules are already loaded.
-
-    Both simulations write their recording through the filesystem store,
-    which is what a deployment that named no endpoint gets — so a client
-    loaded here would be a client every checkout pays for.
+    """In a fresh process, run scripted loopback and phone simulations with filesystem
+    recordings. Verify that no real provider, bridge, or object-store client loaded.
     """
     proof = textwrap.dedent(
         """

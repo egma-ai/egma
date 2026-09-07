@@ -52,14 +52,12 @@ import { Problem, Refused } from "../../../../../ui/form.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import { shownScore } from "../../../../../ui/run-status.tsx";
 import {
-  ChatTranscript,
+  SimulationTranscript,
   recordingSpeakerTimeline,
   RecordingEvidence,
-  recordingOriginOf,
   SimulationEvidenceSummary,
-  simulationToolCalls,
-  TranscriptEmpty,
   useSimulationEvidenceRecording,
+  waitingForSimulationTranscript,
 } from "../../../../../ui/simulation-evidence.tsx";
 import { Actions, SearchField } from "../../../../../ui/section.tsx";
 import { useShellSession } from "../../../../../ui/shell.tsx";
@@ -571,9 +569,6 @@ function TranscriptAndAudio({
 }) {
   const active = ["queued", "claimed", "running"].includes(evidence.status);
   const recording = useSimulationEvidenceRecording(evidence, evidence.projectId);
-  const toolCalls = useMemo(() => simulationToolCalls(evidence), [evidence]);
-  const recordingStartedAt =
-    evidence.transcript === null ? null : recordingOriginOf(evidence.transcript);
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
@@ -597,31 +592,7 @@ function TranscriptAndAudio({
         <h3 className="m-0 mb-3 text-base font-medium text-foreground" id="run-evidence-conversation">
           Conversation
         </h3>
-        {evidence.transcript === null ? (
-          <TranscriptEmpty />
-        ) : (
-          <div className="flex min-w-0 flex-col gap-3">
-            {evidence.transcript.spansTruncated ? (
-              <p
-                className="m-0 border border-s-[3px] border-border border-s-brand bg-selected px-5 py-3 text-sm text-foreground max-[40rem]:px-4"
-                role="status"
-              >
-                {`This simulation filed ${String(evidence.transcript.spanCount)} steps. This view shows the first steps in order, so later tool calls or conversation turns may be absent.`}
-              </p>
-            ) : null}
-            <ChatTranscript
-              transcript={evidence.transcript}
-              toolCalls={toolCalls}
-              recordingStartedAt={recordingStartedAt}
-              {...(recording.status === "ready"
-                ? {
-                    currentTime: recording.currentTime,
-                    onSeek: recording.seek,
-                  }
-                : {})}
-            />
-          </div>
-        )}
+        <SimulationTranscript evidence={evidence} recording={recording} />
       </section>
     </div>
   );
@@ -869,7 +840,7 @@ export function RunScenarioWorkbench({
     const active = ["queued", "claimed", "running"].includes(evidence.status);
     const grading =
       evidence.gradingState === "pending" || evidence.gradingState === "running";
-    if (!active && !grading) return undefined;
+    if (!active && !grading && !waitingForSimulationTranscript(evidence)) return undefined;
     const timer = window.setTimeout(refreshEvidence, 2000);
     return () => window.clearTimeout(timer);
   }, [runId, selectedEvidence, refreshEvidence]);

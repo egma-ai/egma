@@ -1,15 +1,5 @@
-"""What the simulator refuses to start with, and what it starts without.
-
-The simulator is one more container, and a container's whole conversation
-with whoever deployed it is its environment and its first log lines. So
-the rule these tests hold is one rule: anything the simulator cannot work
-without is refused at startup **by name**, and everything else has a
-working default. Nobody should discover a mistyped variable halfway
-through their first simulation, and nobody should have to set nine
-variables to see one.
-
-Every test here is hermetic — an environment, a temporary directory, and
-no network at all.
+"""Verify named startup errors and usable defaults with an isolated environment
+and temporary directories. No network is needed.
 """
 
 from __future__ import annotations
@@ -125,16 +115,8 @@ DURATION_VARIABLES = [
 @pytest.mark.parametrize("variable", DURATION_VARIABLES)
 @pytest.mark.parametrize("written", ["nan", "inf", "-inf", "Infinity", "NaN"])
 def test_a_duration_that_is_not_finite_is_refused_by_name(env, variable, written):
-    """The numbers that read as numbers and behave as neither.
-
-    ``float()`` accepts every one of these, and the range check cannot
-    see two of them: every comparison against nan is False, and +inf is
-    greater than zero, so both would be taken for a duration. What they
-    would buy is silence rather than an error — an infinite heartbeat
-    interval never beats again, so a simulation going along fine looks
-    orphaned to the control plane, and an infinite report deadline
-    retries one report until the process ends, holding a capacity slot
-    nothing will ever free.
+    """Reject NaN and infinities even though float() accepts them.
+    Range checks alone can admit values that disable heartbeats or retry deadlines.
     """
     env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
     env.setenv(variable, written)

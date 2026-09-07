@@ -5,14 +5,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Answer } from "../lib/api.ts";
 
 /**
- * One product read, with its four answers and a way to ask again.
- *
- * **Every product request names its project**, which is the whole point of this
- * hook existing rather than each page calling `fetch`. A page cannot forget the
- * project, and a page cannot invent a second way of deciding what a 404 means.
- *
- * `null` is still loading. It is deliberately not a fifth `Answer` variant: an
- * answer is something egma said, and "nothing yet" is not.
+ * Pass project context to the supplied read and retain only answers matching
+ * the current project and request key. Callers must use that project in their
+ * request. null means pending; reload and refresh control whether old data stays visible.
  */
 export function useProjectRead<T>(
   read: (projectId: string) => Promise<Answer<T>>,

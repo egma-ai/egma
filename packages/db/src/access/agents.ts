@@ -50,33 +50,11 @@ import { stopWorkOverConnections } from "./runs.ts";
 import { within } from "./within.ts";
 
 /**
- * Reading and writing agents and their connections — what they are is the
- * schema file's story (`schema/agents.ts`); this file is how they are reached.
- *
- * The agent is the aggregate root of the factory: every connection verb takes
- * the agent's id, because a connection is how you reach an agent and there is
- * no path to one that doesn't name its agent first. A connection named through
- * the wrong agent — or the wrong customer — answers exactly what a connection
- * that doesn't exist answers.
- *
- * Project scoping works as the persona factory's does. A context acting
- * in a project writes and reads there; a context acting in none — an
- * organization-scoped credential — reaches the whole customer. It creates no
- * agent and deletes none, because an agent belongs to a project and a
- * credential for the whole customer is acting in none; the connection verbs
- * it may use, because a connection lands in the project its agent already
- * names.
- *
- * Credentials pass through here once, sealed on the way in (create and
- * whole-object rotation) and never opened on the way out: every read shape
- * omits the field entirely, so leaking a secret through a serializer is a
- * compile error rather than a review catch. The one door to the plaintext is
- * the dispatch path's `resolveSimulationConnection`, beside the claim that
- * mints the only kind of context it opens for. (This file's own role-gated
- * resolver was retired on 2026-08-08 without ever gaining a production
- * caller: the caller it imagined — something resolving credentials as a run
- * starts — is exactly what the claim's door replaced, refusing by how a
- * context came to exist rather than by what a role permits.)
+ * Read and write agents and their connections within the authorized organization
+ * and project scope. Connection operations name the owning agent; a wrong
+ * agent or organization returns the same answer as a missing connection.
+ * Public reads omit credentials. Internal execution paths resolve plaintext
+ * credentials in access/runs.ts; each resolver enforces its own permissions.
  */
 
 export type NewConnection = {
@@ -142,15 +120,8 @@ export type ArchivedConnection = {
 };
 
 /**
- * What a Restore brings for the credential, and why the third case is a choice
- * rather than an absence.
- *
- * An access variant whose credential is `optional` genuinely works either way, so a
- * Restore that simply left it out could mean two opposite things — *keep going
- * without one* and *I forgot* — and the archived envelope is still sitting
- * there for one of those readings to silently reuse. So the author says which:
- * `replace` with a new credential, or `clear`, which removes the stored
- * envelope outright. Nothing about Restore ever reuses what was sealed before.
+ * Restore requires an explicit credential decision. Optional variants use replace
+ * or clear; never reuse the archived envelope implicitly.
  */
 export type RestoreCredential =
   | { readonly choice: "replace"; readonly credentials: Readonly<Record<string, unknown>> }
@@ -220,20 +191,8 @@ export type AgentChanges = {
 };
 
 /**
- * An agent as a list of them answers it: its identity, and every living way
- * egma can reach it.
- *
- * **The connections travel with the agent because they are the question the
- * list exists to answer.** Which agents egma can reach, and how, is what
- * somebody opens a list of agents to find out. A shape that answered only the
- * names would make that one request per row, and a project of four hundred
- * agents would ask four hundred times for what one read already holds.
- *
- * They are the *active* ones, always, and the split is the one
- * `listConnections` already keeps: an archived connection is how egma used to
- * reach an agent, which is a different question and is asked separately. An
- * archived agent, whose Archive took its connections with it, therefore
- * carries none — which is the truth about it rather than a gap in the read.
+ * Agent identity with all active connections, fetched together for list rendering.
+ * Archived connections are read separately; an archived agent has no active connections.
  */
 export type AgentWithConnections = Agent & {
   readonly connections: readonly Connection[];
@@ -283,24 +242,9 @@ const notArchived: SQL = isNull(agent.archivedAt);
 const connectionNotArchived: SQL = isNull(connection.archivedAt);
 
 /**
- * The one fact an answer carries that is not on the agent's row.
- *
- * It is stamped on the machine notebook as pulled calls arrive, and it is read
- * as a scalar subquery rather than a join so that *every* path answering an
- * agent carries it — the writes that answer with `returning`, where a join
- * cannot go, as much as the reads. `monitoring_state` is unique on `agent_id`,
- * so it is one index lookup and it can never multiply a row.
- *
- * **The outer reference is spelled out because Drizzle will not spell it.** A
- * select over one table emits its columns bare, inside a nested fragment as
- * well as outside it, so `${agent.id}` here would render as `"id"` — which the
- * subquery's own scope resolves to `monitoring_state.id`. That correlates a row
- * to itself, matches nothing, and answers `null` for every agent without ever
- * failing.
- *
- * `mapWith` hands the answer back to the column's own decoder, so this reads as
- * the instant every other timestamp on an agent reads as rather than as the
- * driver's text.
+ * Read the monitoring timestamp through a scalar subquery, including RETURNING paths.
+ * Qualify the outer agent ID: a bare id would resolve inside monitoring_state.
+ * Its unique agent_id prevents row multiplication; mapWith uses the timestamp decoder.
  */
 const LAST_RECEIVED_AT = sql`(
   select ${monitoringState.lastReceivedAt} from ${monitoringState}
@@ -393,15 +337,8 @@ function validName(name: string, what: string): string {
 }
 
 /**
- * Whether this write lost to a live row already holding the name. Read from
- * the constraint's own name, walking the `cause` chain because the query layer
- * may hand the driver's error back wrapped — recognising it by message
- * substring would break silently the day the text changed.
- *
- * Exported to the module, not from the package: every factory with a
- * uniqueness rule owes the loser a sentence rather than a driver error, and one
- * of them recognising the loss differently from another is how a race comes to
- * be answered as a fault on one path and as an answer on the next.
+ * Match the named uniqueness constraint through wrapped causes, not message text.
+ * Shared internally so racing writes receive the same domain refusal.
  */
 export function lostToConstraint(error: unknown, constraint: string): boolean {
   for (
@@ -508,16 +445,9 @@ async function visibleAgent(
 }
 
 /**
- * The shape guard on every read of stored key-value data. Jsonb — and an
- * opened envelope — comes back `unknown`, and a row somebody hand-edited must
- * fail here, loudly and naming itself, rather than leak into a caller as a
- * shape it isn't. Shape only, deliberately: the registry's demands may
- * tighten later, and an old row must stay readable exactly as it was written.
- *
- * Exported for the one sibling that also reads a connection's stored shapes —
- * the simulator's connection door in `runs.ts` — so the two files cannot
- * drift into two ideas of what a well-formed row is. It is not on the
- * package's surface.
+ * Validate stored JSON or decrypted envelopes as key-value records.
+ * Check shape only so older rows remain readable after registry rules tighten.
+ * Shared with runs.ts; not exported from the package.
  */
 export function stringRecordFromRow(
   value: unknown,
@@ -760,18 +690,8 @@ function refusingHeldConnectionName(name: string): (error: unknown) => never {
  * name already.
  */
 /**
- * The platform this connection will be represented under, checked against the
- * platform the payload named.
- *
- * Where the connection type pins a platform, it decides and the agent is not
- * consulted. Where it does not — `phone_number` spans platforms — the agent
- * decides, and a payload naming a different one is refused rather than quietly
- * relabelled: accepting `livekit` and then representing the connection
- * as Retell's is wrong attribution, and the product label a person reads would
- * not be the one they chose.
- *
- * A payload that names no platform contradicts nothing. It is the ordinary way
- * to say "whatever this agent is on".
+ * Use the connection type's fixed agent platform when defined; otherwise use the
+ * parent agent's platform. Reject a conflicting explicit platform instead of relabeling it.
  */
 function representedPlatform(
   admitted: AdmittedConnection,
@@ -994,65 +914,16 @@ export type Registration = {
 };
 
 /**
- * Register an agent, and answer whether that meant creating one.
+ * Register an identity alone, or atomically register it with an inline connection.
+ * With an inline connection, reuse-family identity determines the outcome:
+ * - Same type, access variant, and modality: reuse and replace credentials whole.
+ * - Same platform agent through another family connection: add a connection.
+ * - No identity match: create both rows.
+ * Keep the existing agent name on reuse.
  *
- * `createAgent` writes what it is given and refuses a name a living agent
- * already holds. That is the right answer for somebody registering a second
- * agent by hand, and the wrong one for the path this exists for: a developer's
- * `connect`, and the coding agent that retries it after an uncertain network
- * failure. Minting a second identity for one vendor agent splits a team's
- * results history in half, which is the one thing that must not happen quietly.
- *
- * So the connection type's reuse rule decides (`connection-registry.ts`), and a
- * living connection in the project standing for the same vendor agent —
- * **through any door of the same reuse family** — decides the outcome:
- *
- * - **the same door** (same connection type, access variant and modality) →
- *   that agent and that connection answer, with the supplied credential
- *   replacing the stored one **whole**. Rotation never asks for the old secret
- *   and never merges into it, so plaintext has no reason to travel back out.
- *   `reused`.
- * - **a different door on the same vendor agent** → the same agent gains a new
- *   connection, because a chat lane and a voice lane on one vendor agent are
- *   two ways to reach one thing. This is the whole of one-agent-two-connections
- *   on **every** surface: the CLI's `connect`, and the web's fresh connect flow
- *   which has no name-clash fallback of its own. `connection_added`.
- * - **no match, or a kind whose rule finds no identity in this config** → both
- *   rows, exactly as `createAgent` writes them. `created`.
- *
- * **What "the same vendor agent" means is the rule's to say, and it is not
- * always a value sitting in a column.** Retell's is one agent id, compared as
- * it was stored. LiveKit's is the server the worker stands on and the name it
- * answers to, and the server has to be normalized before it can be compared at
- * all: `wss://acme.livekit.cloud` and `https://acme.livekit.cloud:443` are one
- * server that no SQL equality will ever match. So the query narrows on the keys
- * the rule can be narrowed by, and the rows that come back are then put through
- * the rule itself. The second pass is load-bearing rather than tidy.
- *
- * **The reuse family is the types whose rules name the same identity
- * namespace**, and today that is exactly Retell's three vendor-id lanes — the
- * chat API, text mode, and the web call, all naming one `retellAgentId`.
- * A LiveKit worker's rule names a namespace of its own, so its family is
- * itself alone. A phone number carries no rule and is in no family at all: a
- * number is where Egma dials, not who answers, and two agents may share one.
- * So the widening across doors touches only the three lanes that already mean
- * "one Retell agent = one Egma agent", and no other platform's behaviour
- * moves.
- *
- * The reused and extended paths answer the agent as it stands and leave its
- * name alone: the registration named an identity that already
- * exists, and quietly renaming somebody's agent because a second machine typed
- * it differently would be a change nobody asked for.
- *
- * **Racing registrations settle to one agent.** Two creates of the same vendor
- * agent arriving together — even through two different doors of its family —
- * would both find nothing, both insert, and one would lose to the name index,
- * an error where a retry-safe path must answer. The transaction takes an
- * advisory lock on the vendor agent under its family's namespace first, so
- * every door of one agent waits behind one lock and the second reads the
- * first's committed work. The lock is taken on the *normalized* identity, so
- * two machines spelling one server differently queue behind each other rather
- * than racing past.
+ * Apply the full normalized identity rule after SQL candidate filtering. Lock the
+ * organization/project/family/normalized identity before reading so concurrent
+ * registrations resolve to one agent, even across connection types.
  */
 export async function registerAgent(
   auth: AuthContext,
@@ -1255,19 +1126,8 @@ const DEFAULT_PAGE_SIZE = 50;
 const LARGEST_PAGE_SIZE = 200;
 
 /**
- * The living connections of every agent on one page, fetched together.
- *
- * **One query for the page, never one per row.** Asking for each agent's
- * connections as each agent is read is the shape that turns a list of fifty
- * agents into fifty-one round trips, and it degrades exactly where it hurts —
- * on the biggest projects. So the whole page's ids go down in a single `in`
- * and the answer is grouped back up here.
- *
- * The tenancy predicate is the same one every other read of a connection
- * carries. The agents were already narrowed to what this context may see, but
- * a second query is a second chance to read somebody else's row, and a filter
- * that is only implied by an earlier query is one that a later refactor drops
- * with nothing saying so.
+ * Fetch active connections for the whole agent page in one query, then group by agent.
+ * Apply organization and project scope again on this query.
  */
 async function connectionsOf(
   auth: AuthContext,
@@ -1315,19 +1175,8 @@ async function connectionsOf(
 }
 
 /**
- * One page of the agents the caller can reach — the acting project's, or the
- * whole customer's for a credential acting in none — and where the next page
- * starts.
- *
- * The ids are Crockford base32 of UUIDv7 under `COLLATE "C"`, so ordering by
- * id *is* ordering by mint time and the last id of a page is the whole cursor
- * — no second sort column, no offset to drift when rows arrive mid-scroll.
- * Newest first, because the agent somebody is looking for is usually the one
- * they just registered.
- *
- * **Every agent comes back with its living connections on it.** That costs one
- * more query for the whole page and saves one per row, and it is what lets a
- * list say which agents egma can reach without opening every one of them.
+ * List newest agents first with an ID cursor. UUIDv7-derived IDs under C collation
+ * provide time ordering. Fetch active connections in one additional page-wide query.
  */
 export async function listAgents(
   auth: AuthContext,
@@ -1400,20 +1249,8 @@ export async function listAgents(
 }
 
 /**
- * The name, in place.
- *
- * There is no content version to move — the agent is deliberately unversioned,
- * because its real content lives at the provider where egma cannot freeze it —
- * so a rename is just a rename and the run history stays the change record.
- *
- * There is no revision either: the column was dropped pre-launch (ADR-0015),
- * so two people editing one agent from two browsers is silent
- * last-writer-wins. Accepted with eyes open — it is the exact failure the
- * column existed to stop.
- *
- * A change that changes nothing is still not an edit: nothing is written, not
- * even `updated_at`. Editing what the caller cannot see returns what reading it
- * would have: `undefined`.
+ * Rename in place without a content version or revision check; concurrent edits
+ * use the last write. No-op updates preserve updated_at. Unseen agents return undefined.
  */
 export async function updateAgent(
   auth: AuthContext,
@@ -1454,24 +1291,9 @@ export async function updateAgent(
  */
 
 /**
- * The rule this family holds an organization-wide credential to, and where it
- * is held.
- *
- * **Deciding whether an agent appears in a project is an act taken from inside
- * that project**, and a credential minted for the whole customer is acting in
- * none — the stance `createAgent` takes, and the one the grader, persona and
- * mock-tool factories take for their own project-scoped writes. Archive and
- * Restore are the two halves of that one decision, so both are held to it.
- *
- * A connection is deliberately not: it lands in the project its agent already
- * names, so archiving one decides nothing about which project anything belongs
- * to. That asymmetry is the rule rather than an oversight, and it matches
- * `addConnection`, which has never asked either.
- *
- * **Nothing reaches this from HTTP.** The API resolves an acting project for
- * every write in the group before it calls, exactly as it does for graders and
- * personas, so this is the invariant stated where a direct caller — the CLI, a
- * test, a script — will meet it.
+ * Require an acting project for agent creation, archive, and restore.
+ * Connection writes inherit their agent's project. HTTP resolves this context
+ * before calling; direct access-layer callers must supply it too.
  */
 function guardProjectScoped(auth: AuthContext, what: string): void {
   if (auth.projectId === undefined) {
@@ -1483,24 +1305,9 @@ function guardProjectScoped(auth: AuthContext, what: string): void {
 }
 
 /**
- * Archive an agent, and every active way of reaching it, and every piece of
- * work that was going to use one.
- *
- * **Archive is always allowed, and it is not deletion.** Past runs name this
- * agent and stay readable. Tests belong only to suites and do not link to an
- * agent. The whole of what Archive does is stop it entering anything new — and stop what had
- * already been started over it, because a queued simulation whose connection
- * has been archived would sit in the claim queue for a target no simulator can
- * resolve a credential for and would eventually fail, putting an operational
- * failure on the record dressed up as something the agent did.
- *
- * **The children go with it, in the same transaction.** An agent whose
- * connections stayed active would be an archived thing that egma could still
- * reach, and — the reason this is not merely tidy — restoring the agent later
- * would silently bring an old provider credential back into use. So Archive
- * takes them, and Restore deliberately does not give them back: each
- * connection comes back one at a time, through the credential rule its own
- * access variant declares.
+ * Archive the agent and active connections in one transaction, stopping pending
+ * and active work while preserving past evidence. Restoring the agent does not
+ * restore connections or their old credentials.
  */
 export async function archiveAgent(
   auth: AuthContext,
@@ -1578,19 +1385,8 @@ export async function archiveAgent(
 }
 
 /**
- * Restore an agent, and only the agent.
- *
- * Its connections stay archived, every one of them, and that is the decision
- * rather than an omission: a connection carries a credential, and a Restore
- * that reactivated them in a batch would put old provider keys back into use
- * without anybody choosing to. Each comes back through its own Restore, which
- * asks for whatever its access variant's credential rule requires.
- *
- * A name another active agent has taken since is refused unless the Restore
- * brings a replacement. It cannot be silently renamed: an agent is identified
- * by its name in every list and every run builder, and a Restore that quietly
- * produced "Front desk (2)" would be egma deciding which of two agents the
- * history belongs to.
+ * Restore only the agent; connections require separate restoration with new
+ * credential decisions. Refuse a taken name unless the caller supplies a replacement.
  */
 export async function restoreAgent(
   auth: AuthContext,
@@ -1663,17 +1459,8 @@ export async function restoreAgent(
 }
 
 /**
- * The refusal a Restore gets when the name it wants is somebody else's now.
- *
- * **The name is always the one that collided**, which is the row's own whenever
- * the Restore brought no replacement — a Restore that names nothing is asking
- * for the name it had. Falling back to a phrase produced "The name this
- * resource already has is already used by an active connection", a sentence
- * that fills the template's slot without telling anybody which name to avoid.
- *
- * It names the resource rather than the row it collided with, because that row
- * may be one the reader is not entitled to see, and because the move is the
- * same either way: pick another name in the Restore.
+ * Name the requested restore name, including when it comes from the archived row.
+ * Do not identify the conflicting row, which the caller may not be allowed to see.
  */
 function nameTakenMessage(name: string, resource: "agent" | "connection"): string {
   return (
@@ -1714,27 +1501,9 @@ export async function addConnection(
 }
 
 /**
- * What kind one connection is, by its id alone — or `undefined` where this
- * caller has no such connection.
- *
- * **The one connection read that does not name an agent, and it exists for one
- * caller: the deployment gate in front of run creation.** A run's body names a
- * connection and need not name the agent it is on, and the API has to know
- * whether that connection is a phone before it will let a run over it be
- * written on a platform whose phone half was never set up. Asking through
- * `getConnection` would mean the caller first guessing an agent id it was never
- * given.
- *
- * It answers a connection type and nothing else, deliberately. A gate needs to know what
- * kind of thing this is; it has no business with the config, and a shape that
- * cannot carry a credential cannot leak one.
- *
- * Scoped exactly as `startRun` scopes the same row — alive, in the acting
- * project, under a living agent, inside the caller's tenancy — so a gate can
- * never refuse over a connection the run itself would have said it could not
- * see. Whichever way that disagreement fell it would be wrong: a refusal
- * naming somebody else's connection is a leak, and a gate that skipped
- * because it looked in the wrong project is no gate.
+ * Read only the connection type by ID for the phone-setup gate before run creation.
+ * Use startRun's active-agent, active-connection, organization, and project scope.
+ * Do not expose configuration or credentials.
  */
 export async function connectionTypeOf(
   auth: AuthContext,
@@ -1797,15 +1566,8 @@ export async function getConnection(
 }
 
 /**
- * The agent's connections, oldest first — the ids are time-sortable, so this is
- * the order they were attached in. A whole page, deliberately: an agent holds a
- * handful of connections, not thousands, and `undefined` for an unreachable
- * agent is a different answer than `[]` for an unwired one.
- *
- * `archived` asks for the other half. It is a separate list rather than a
- * column on one, because "how egma can reach this agent" and "how it used to"
- * are two questions, and a run builder that had to filter one list would sooner
- * or later forget to.
+ * List active or archived connections oldest first.
+ * Return undefined for an unseen agent and [] for one without matching connections.
  */
 export async function listConnections(
   auth: AuthContext,
@@ -1834,15 +1596,10 @@ export async function listConnections(
 }
 
 /**
- * One door for every change. Name, environment and config write in place —
- * config checked whole against the row's stored access variant — and
- * credentials replace whole or stay untouched, resealed under a fresh IV with
- * the hint moved along. Editing what the caller cannot see returns what
- * reading it would have: `undefined`, with nothing disturbed.
- *
- * **Agent platform, connection type, access variant, and modality are
- * immutable.** Changing any axis creates a new connection. Config is validated
- * against the stored access variant and never selects another one.
+ * Update name, environment, and config in place. Validate config against the stored
+ * access variant; replace credentials whole with a new IV or leave them unchanged.
+ * Agent platform, connection type, access variant, and modality are immutable.
+ * Return undefined for connections outside the caller's scope.
  */
 export async function updateConnection(
   auth: AuthContext,
@@ -1949,20 +1706,8 @@ export async function updateConnection(
 }
 
 /**
- * Archive one way of reaching an agent, and stop the work that was going over
- * it.
- *
- * **Always allowed, including for an agent's last connection.** An agent with
- * no connections is a legal thing — it is an agent nobody can reach yet, which
- * is what every agent is for the minute between registering it and wiring it —
- * so refusing the last one would be egma insisting a team keep a target they
- * have decided to stop using.
- *
- * What it does is block new claims, settle the queue, and ask whatever is
- * already talking to stop at its next heartbeat. What it deliberately does not
- * do is erase anything: transcripts, grades and run headers stay exactly as
- * they are, because evidence that was true stays true after the target is
- * retired.
+ * Archive any connection, including the last one. Block new claims, settle queued
+ * work, and request active-work cancellation at heartbeat. Preserve all past evidence.
  */
 export async function archiveConnection(
   auth: AuthContext,
@@ -2019,22 +1764,9 @@ export async function archiveConnection(
 }
 
 /**
- * Bring one connection back, on the terms its own access variant sets.
- *
- * Two rules, and neither is negotiable:
- *
- * - **The parent agent has to be active.** Restoring a connection under an
- *   archived agent would produce a reachable way into something nobody can
- *   run, and it would undo half of what agent Archive did without saying so.
- * - **The archived credential is never what comes back.** An access variant
- *   that requires one demands a new one; one that forbids it refuses to be
- *   handed one; an optional variant makes the author say `replace` or
- *   `clear`, because leaving it out cannot be told from meaning to drop it and
- *   the sealed envelope is sitting right there for the wrong reading to reuse.
- *
- * `clear` removes the envelope outright rather than leaving it unreferenced.
- * The rule is not "the old secret is unlikely to be used"; it is that it
- * cannot be.
+ * Restore only under an active agent. Required credentials must be replaced;
+ * forbidden credentials are rejected; optional credentials require replace or clear.
+ * Clear removes the archived envelope. Never reactivate the old secret.
  */
 export async function restoreConnection(
   auth: AuthContext,

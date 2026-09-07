@@ -1,22 +1,11 @@
-"""One OpenTelemetry SDK for every simulation in this process.
+"""Process-wide OpenTelemetry provider with task-local simulation context.
+Adapt only the root trace ID to the simulation contract; the SDK owns
+span IDs, parenting, and span data.
 
-The provider is process-wide because Pipecat obtains its tracer from the
-OpenTelemetry API.  A simulation is task-local: the active simulation lives in
-a context variable, so concurrent pipeline tasks inherit the right trace and
-never share a root.
-
-Only one piece of identity is adapted.  The SDK asks its ``IdGenerator`` for a
-trace id when the parentless ``simulation`` span starts, and the adapter gives
-it the trace id already defined by the simulation contract.  Span ids, child
-propagation, span data, and serialization remain SDK-owned.
-
-Completed spans wait in a processor until the conversation reaches one of its
-existing flush seams.  The official OTLP encoder then builds the export
-request.  We add the simulation id to the resource envelope required by the
-service-token ingest door. A narrow OpenTelemetry 1.44 compatibility step
-restores trace flags and link trace state that its encoder omits, then applies
-OTLP/JSON's integer-enum and hex-id rules. It does not filter or rename any
-scope, span, status, event, link, or attribute authored by Pipecat.
+Buffer completed spans until simulation flush boundaries, then use the official
+OTLP encoder. Add simulation identity to the resource for service-token ingestion.
+The OpenTelemetry 1.44 compatibility step restores omitted flags and link trace
+state, then applies OTLP JSON enum and hex-ID encoding without filtering spans.
 """
 
 from __future__ import annotations

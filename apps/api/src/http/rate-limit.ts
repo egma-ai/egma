@@ -1,20 +1,7 @@
 /**
- * How much of egma one customer may ask for at once.
- *
- * **Keyed on the resolved organization, never on the credential.** A customer
- * rotating a key — mint, deploy, revoke — must not find that their budget reset
- * itself, and a customer running ten keys across ten deployments must not get
- * ten budgets. The organization is the unit that is being served and therefore
- * the unit that is being limited, and it is resolved from the credential before
- * this is consulted, so there is nothing a client can send to be counted as
- * somebody else.
- *
- * A fixed window in this process's memory, deliberately. It is the cheapest
- * thing that answers the question, it needs no second datastore on a
- * self-hoster's machine, and its one weakness — two instances each allowing a
- * full budget — is a factor-of-two on a limit that exists to stop a runaway
- * loop rather than to meter billing. A shared counter is a change to this file
- * whenever something needs one.
+ * Fixed-window limits keyed by resolved organization, so rotating API keys
+ * does not reset a budget. Counters are local to this process: each replica
+ * has a separate allowance, and restart clears its counters.
  */
 
 export type RateLimitVerdict = {

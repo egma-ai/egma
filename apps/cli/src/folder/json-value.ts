@@ -1,15 +1,6 @@
 /**
- * JSON the way the folder compares it: by value, never by object-key order.
- *
- * Two places in a test file hold arbitrary JSON a person authored — what a mock
- * tool answers with, and the world the test is conducted in — and both are
- * compared against what the platform answered. PostgreSQL can hand back the
- * keys of a stored object in a different order from the file that wrote them,
- * so a comparison on the bytes would call an unchanged test changed and a pull
- * would keep a draft nobody had drafted.
- *
- * Object-key order is not part of a JSON value, so it is sorted away. Array
- * order *is* part of the value, so it is kept.
+ * Compare authored JSON by value: sort object keys and preserve array order.
+ * Database key reordering must not make unchanged mock answers or env look edited.
  */
 
 /** The same value with every object's keys in one order, top to bottom. */

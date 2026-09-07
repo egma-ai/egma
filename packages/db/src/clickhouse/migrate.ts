@@ -15,22 +15,10 @@ import {
 } from "../migrate.ts";
 
 /**
- * The trace store's migrations apply on boot from numbered plain SQL files, the
- * same mechanism and the same file convention as the Postgres side. There is no
- * second migration tool, no migration container, and no step for a self-hoster
- * to forget.
- *
- * Two things differ, and both come from ClickHouse rather than from taste:
- *
- * - **There is no transaction to wrap a file in.** A file that fails halfway
- *   leaves what it already did behind, so every statement in a ClickHouse
- *   migration must be written to survive being run again — `IF NOT EXISTS`, and
- *   never a bare `CREATE`. The next boot then finishes the file rather than
- *   tripping over its own first half.
- * - **There is no advisory lock either.** Two instances starting at the same
- *   moment may both apply; because every statement is idempotent and the ledger
- *   collapses a repeated record, they arrive at the same schema. What the
- *   Postgres side gets from the lock, this side gets from the statements.
+ * Apply numbered SQL migrations on boot using the shared migration ledger rules.
+ * ClickHouse files are not transactional and may run concurrently on separate
+ * instances. Every statement must tolerate replay after partial or concurrent
+ * application; record the file hash only after all statements finish.
  */
 
 export const CLICKHOUSE_MIGRATIONS_DIRECTORY = path.join(

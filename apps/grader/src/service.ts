@@ -40,23 +40,10 @@ function claimAttributes(
 }
 
 /**
- * The service: claim, grade, finish, and wait to be woken.
- *
- * **Every arrow points out.** It listens on nothing, publishes no port and has
- * no inbound surface at all — it dials Postgres and the trace store and nothing
- * dials it. Scaling it is running more copies: they claim from one queue with
- * `SKIP LOCKED` underneath and distribute between themselves with nothing in
- * front of them. That is the dispatch shape the simulator proved, on the other
- * side of the wire.
- *
- * **Nothing here waits for a polling interval.** `requestGrading` raises a
- * notification only after completion and query-visible evidence agree. The
- * interval below is only a backstop for a notification nobody heard during a
- * restart or dropped connection. The durable Postgres row is still the truth.
- *
- * Production work reaches this service only after a supported platform states
- * that the conversation ended and ingestion states that its evidence is
- * query-visible. A root span or silence never creates work here.
+ * Claim grading jobs from Postgres, grade them, and wait for notifications.
+ * SKIP LOCKED allows multiple workers; this service has no inbound port.
+ * Polling recovers missed notifications. Work is requested only after
+ * completion and query-visible evidence agree.
  */
 export type Service = {
   /** Runs until `stop` is called; resolves when the last job has landed. */
@@ -69,33 +56,19 @@ export type ServiceOptions = {
   readonly log: Log;
   /** Read fresh once when a claimed job resolves at least one model grader. */
   readonly providerCredentials: ProviderCredentialSource;
-  /**
-   * Told after each pass, so a test can watch the service work instead of
-   * sleeping. Never used in a deployment, and the service does not read it.
-   */
+  /** Test hook after each pass; not used by deployments. */
   readonly onIdle?: (() => void) | undefined;
   /**
-   * How each model-grading provider is spoken to. Absent means the real ones —
-   * which is every deployment. This is the provider seam: a test hands over a
-   * scripted implementation that answers deterministically from memory, so
-   * per-behavior fan-out, score normalization, and one failed call beside
-   * successful siblings are all asserted with no key and no network.
+   * Provider implementations. Defaults to live providers; tests supply
+   * deterministic judges without network access.
    */
   readonly makers?: JudgeMakers | undefined;
 };
 
 /**
- * How the loop paces a claim it had to decline because the conversation is not
- * all here yet.
- *
- * A still-arriving claim is held before it is claimable again, rather than
- * released at once: without the hold a run whose simulations all land together
- * would spend its whole retry budget in one hot burst — the capacity shortcut
- * re-claiming the instant every worker declines — and write durable error
- * grades during the exact cold start the retry exists to survive. The hold is
- * the sweep interval, so the retries fall on the clock the backstop already
- * runs on; the job is claimed throughout it, so no other worker takes it, and
- * it is released to the queue only once the hold is over.
+ * Keep a still-arriving job claimed during backoff, then release it.
+ * Immediate release could exhaust its retry budget through rapid claims
+ * by other workers before the evidence becomes visible.
  */
 type Pacing = {
   /** Resolve after the backoff, or at once when the service is stopping. */
@@ -113,9 +86,8 @@ export function startService(options: ServiceOptions): Service {
   const activeHolds = new Set<() => void>();
 
   /**
-   * Something may be claimable. Two things arrive here — a notification and the
-   * backstop — and neither says what: the claim is a query that sees everything
-   * outstanding, so a nudge is all either of them has to carry.
+   * Wake the claim loop after a notification or fallback poll. The next claim
+   * query decides which jobs are available.
    */
   const nudge = (): void => {
     woken = true;
@@ -141,9 +113,7 @@ export function startService(options: ServiceOptions): Service {
     });
   };
 
-  // The sweep is a positive whole number of seconds, so this is at least the
-  // second a test sets it to. A still-arriving claim waits this before it is
-  // released.
+  // Use the validated sweep interval for still-arriving evidence backoff.
   const backoffMilliseconds = config.sweepSeconds * 1000;
 
   /** Sleep for the backoff, or return at once when the service is stopping. */
@@ -204,9 +174,7 @@ export function startService(options: ServiceOptions): Service {
         await Promise.all(
           claimed.map((claim) => holdAndGrade(claim, options, pacing)),
         );
-        // A full claim means the queue may hold more, so ask again before
-        // sleeping — otherwise a burst of two hundred conversations would be
-        // drained one backstop interval at a time.
+        // A full claim may leave more queued work; claim again without waiting.
         if (claimed.length === config.capacity) woken = true;
       }
 
@@ -231,15 +199,9 @@ export function startService(options: ServiceOptions): Service {
 }
 
 /**
- * One job, held and graded.
- *
- * The heartbeat runs beside grading rather than after it, because grading will
- * one day be several model calls and a worker that only said it was alive when
- * it finished would lose every long job it started. A worker that fails
- * releases the job at once with the reason on it: the queue does not have to
- * wait out a silence that is not happening, and the attempt is already counted
- * so a conversation that breaks three workers is abandoned rather than retried
- * forever.
+ * Heartbeat while grading so long model requests retain the job lease.
+ * On failure, release the job with its reason; the counted retry budget
+ * prevents endless retries.
  */
 async function holdAndGrade(
   claim: GradingClaim,
@@ -294,12 +256,9 @@ async function gradeHeldClaim(
       providerCredentials: options.providerCredentials,
       ...(options.makers === undefined ? {} : { makers: options.makers }),
     });
-    // The grades are written before the temporary job is deleted, in that order and
-    // not the other way round. Between the two this worker could lose the job to
-    // an expired lease, and another worker could grade the same conversation
-    // again. Each retry appends history; the read path picks the latest result
-    // for each project grader. Deleting first would risk the opposite: no work
-    // row and no durable grade.
+    // Append grades before deleting the job so a crash cannot lose both.
+    // An expired lease may cause another append; reads select the latest grade
+    // per project grader.
     const finished = await finishGradingJob(
       claim.auth,
       claim.id,
@@ -320,20 +279,13 @@ async function gradeHeldClaim(
   } catch (error) {
     const stillArriving = error instanceof NotGradable;
     if (stillArriving) {
-      // Not a failure: the conversation is not all here yet, and asking again is
-      // the whole answer. The job is held before it is claimable again — for the
-      // sweep interval — so a run whose simulations all land together retries on
-      // the backstop clock instead of spending its budget the instant the trace
-      // store is cold. The attempt is already counted on the claim, so the
-      // budget still ends; the heartbeat keeps the lease while the job is held.
+      // Keep the job leased while evidence arrives. The claim has already consumed
+      // one retry; heartbeat through backoff before releasing it.
       log.info(
         platformEvent("egma.grading_job.deferred", about),
         "grading job deferred while its evidence drains",
       );
-      // Held for the sweep interval before it is released back to the queue.
-      // The next claim comes on the backstop sweep, or at once from the capacity
-      // shortcut when the batch was full — either way the retries are a sweep
-      // apart rather than a hot loop.
+
       await pacing.hold();
     } else {
       const span = trace.getActiveSpan();

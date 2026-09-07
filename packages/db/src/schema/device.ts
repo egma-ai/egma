@@ -22,25 +22,9 @@ import {
 } from "./columns.ts";
 
 /**
- * A terminal asking to be let in.
- *
- * This is the one table where the two halves of the model meet, which is why it
- * has a file of its own rather than sitting with the other four identity
- * tables. The left half is the auth provider's: the device code, the user code,
- * who claimed it and what state it is in are RFC 8628's fields, written and
- * read by the provider. The right half is egma's: which organization and which
- * project the person chose to authorize the terminal for, which the provider
- * has no field for and no opinion about.
- *
- * The choice is recorded here rather than carried in the RFC's `scope` string
- * because it is two foreign keys into egma's tenancy tables, and the pairing is
- * checked by the database the same way every other tenancy pairing is. A
- * terminal cannot be authorized for one customer's project under another
- * customer's name, even by a hand-written `UPDATE`.
- *
- * Nothing here is long-lived. The row expires, and the provider deletes it the
- * moment the terminal exchanges the code — which is why the key the terminal
- * ends up holding is minted from this row rather than stored in it.
+ * Device authorization combines provider-managed codes/state with Egma's selected
+ * organization and project. Foreign keys validate the scope pairing. The terminal
+ * reads this scope before token exchange consumes the row; its API key is minted separately.
  */
 export const deviceCode = pgTable(
   "device_code",

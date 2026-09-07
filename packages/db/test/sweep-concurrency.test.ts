@@ -22,15 +22,9 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * Two sweeps, one set of orphans — racing on a real Postgres, because replica
- * safety is the point. The API runs the sweep on an interval in every replica
- * and nothing elects a leader, so two copies will land on the same silence at
- * the same moment as a matter of course. What makes that harmless is the
- * guarded update — whichever transaction gets a row second re-reads it,
- * finds it already failed, and matches nothing — and the ordered after-work,
- * which takes rows and runs in one order so racing sweeps cannot deadlock.
- * These tests race real transactions rather than mocking, because the
- * guarantee under test is Postgres's, not egma's code.
+ * Race real PostgreSQL sweeps over the same orphaned simulations. Guarded
+ * updates and ordered run processing must prevent duplicate finalization
+ * and deadlocks in these cases.
  */
 
 let database: MigratedDatabase;
@@ -59,7 +53,6 @@ async function oneQueuedSimulation(): Promise<{
     suiteId,
     agentId,
     connectionId,
-    idempotencyKey: newId("run"),
   });
   const simulation = (await listSimulations(auth, started.id))?.items[0];
   if (simulation === undefined) throw new Error("the run has no simulation");

@@ -41,25 +41,10 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The simulator's spans, at the same door a customer's agent posts to.
- *
- * The service token opens the second path through the OTLP ingest: no customer
- * context at all, each resource naming the simulation its spans are evidence
- * of, and the door resolving the organization, the project and the run from
- * the simulation row — never from anything the payload claims. What is posted
- * here is the contract's own golden fixtures, byte for byte, because those
- * files are the meeting point with the emitter: if the door mis-files what
- * they carry, it would mis-file the simulator.
- *
- * The seeded simulations are real rows made by `startRun`, then renamed by raw
- * SQL to the ids the fixtures pin — the one edit no exported function offers,
- * made before anything references the row, so the golden bytes can post
- * unchanged against a database whose every other fact is genuine.
- *
- * The door answers on object-store durability and writes no row, so a post is
- * followed by a drain wherever the claim is about what a reader sees. The one
- * claim that is about the boundary itself — a batch naming two projects — reads
- * the pending objects before anything drains them.
+ * Post simulation-contract fixtures with the service token and derive tenancy
+ * from stored simulation rows. Seed with startRun, then assign fixture IDs
+ * through SQL before adding references. Drain before query assertions; inspect
+ * pending objects directly for multi-project acceptance boundaries.
  */
 
 const storage: ObjectStorage = await startObjectStorage("otlp-simulation");
@@ -195,7 +180,6 @@ async function seedSimulationNamed(
     suiteId,
     agentId: created.id,
     connectionId: created.connection?.id ?? "",
-    idempotencyKey: newId("run"),
   });
   const page = await listSimulations(auth, started.id, { limit: 1 });
   const simulation = page?.items[0];
@@ -377,18 +361,8 @@ describe.skipIf(!storage.available)("the contract's golden flushes, posted with 
   });
 
   /**
-   * **The metrics display, end to end, from the emitter's own bytes.**
-   *
-   * The golden flushes go in at the door and come back out of the read endpoint
-   * as numbers — computed by the one shared measure module, from exactly the
-   * spans this trace holds, with nothing stored in between. That is the whole of
-   * the claim the module exists for: the figure a page shows and the figure a
-   * future latency grader reads are one arithmetic, so the two can never
-   * disagree about how fast the agent answered.
-   *
-   * Read with an ordinary customer key, at the endpoint the dashboard reads —
-   * not through the module directly — because what is being asserted is that the
-   * numbers reach a reader, not that a function returns them.
+   * Read shared measures through the public endpoint after ingesting golden
+   * simulation exports, to verify that derived values reach API consumers.
    */
   it("read back as the conversation's measures, at the endpoint a page reads", async () => {
     const key = await mintKey(api.app, acme.cookie, "reading the measures");
@@ -581,18 +555,9 @@ describe.skipIf(!storage.available)("the same path in the other encoding", () =>
   });
 
   /**
-   * **One immutable identity holds one account of one span, and the first
-   * account is the one that stands.**
-   *
-   * Three things happen at once here, and all three matter. The door
-   * **accepts** the changed bytes, because a sender resending is ordinary and
-   * refusing at a wire boundary would be answering a storage question there.
-   * The drainer **refuses to write them**, because the stored evidence is
-   * already somebody's record of that moment, and two rows saying different
-   * things about one moment leave a reader no rule for choosing. And the object
-   * is **retained** rather than deleted, because Egma promised those bytes were
-   * safe before it ever read them back — so a defect in Egma is not a reason to
-   * throw a customer's evidence away.
+   * Accept conflicting evidence durably, then refuse the conflicting write during
+   * drain. Preserve both the original stored span and the pending object so the
+   * conflict does not silently replace or discard evidence.
    */
   it("keeps the stored account and retains the object when protobuf evidence reuses span ids", async () => {
     const before = await countOf(
@@ -762,21 +727,8 @@ describe.skipIf(!storage.available)("a resource that names no simulation, or one
   });
 
   /**
-   * A resource naming one simulation while filing its spans under another
-   * simulation's trace.
-   *
-   * **This is the check that stops a transcript playing the wrong
-   * conversation's audio.** The two identifiers are the same 128 bits written
-   * two ways, and both directions are read: a reader opening a transcript
-   * converts the trace id back into a simulation id to find that conversation's
-   * grades and its recording. So spans filed under somebody else's trace put
-   * one conversation's turns on screen beside another's audio — inside one
-   * organization, with nothing anywhere saying the two disagree.
-   *
-   * Nothing egma ships can produce it: the simulator derives the trace from the
-   * id it was handed. Which is why it is asserted rather than assumed — the
-   * emitter taking a trace id from a provider instead would be a small change
-   * over there and a wrong recording over here.
+   * Reject a resource whose valid trace ID belongs to a different simulation.
+   * The trace/simulation mapping also resolves grades and recordings.
    */
   it("is refused whole when its spans are filed under another simulation's trace", async () => {
     const body = (
@@ -885,20 +837,9 @@ describe.skipIf(!storage.available)("a batch carrying two customers' evidence", 
   }
 
   /**
-   * **A segment belongs to exactly one project, and the answer waits for all of
-   * them.**
-   *
-   * The trusted service batch is the only body that can carry two projects, and
-   * this is the one place the rule is visible: two projects may not share a
-   * durable object, so one request becomes two sealed segments — and the sender
-   * is not told the batch was accepted until every one of them is in the bucket.
-   * A per-group answer would report success while one project's evidence was
-   * still in a local log.
-   *
-   * No shipped client sends this. The simulator refuses a batch spanning more
-   * than one trace and delivers one reporter per simulation, so the body is
-   * built by hand here — the route's multi-project path is defensive, and a
-   * defence nothing exercises is a defence nobody knows is broken.
+   * A service-token export spanning projects must create separate segments and
+   * wait for all uploads before success. Build this case explicitly because the
+   * simulator normally sends one trace per reporter.
    */
   it("seals one segment for each project and answers only when both are durable", async () => {
     const response = await stage(twoTenantBatch());

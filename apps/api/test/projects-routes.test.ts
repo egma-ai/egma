@@ -5,17 +5,9 @@ import { createApi, type TestApi } from "./support/api.ts";
 import { colleagueOf, signUp } from "./support/traces.ts";
 
 /**
- * The Settings surface over HTTP: the organization a session is in, and the
- * projects it holds.
- *
- * **These are the routes a Settings page administers rather than works in**, so
- * the two things worth proving are who may and what is answered to somebody who
- * may not. Every refusal here is quoted word for word: a page shows the
- * sentence unchanged, so the wording is the contract and not decoration.
- *
- * The role is real rather than asserted. A colleague is invited, follows the
- * link and mints their own key exactly the way the product does it, because a
- * key carries no role of its own and acts at its creator's current one.
+ * Check organization and project administration permissions and refusal text.
+ * Invite a colleague and mint their key through the product flow to exercise
+ * the creator's current role.
  */
 
 let api: TestApi;
@@ -160,13 +152,9 @@ describe("creating a project", () => {
   });
 
   /**
-   * The whole factory, proven from outside: the project the route made is
-   * usable, which means it can already name a persona and holds its protected
-   * Expected behaviors project grader for the first simulation.
-   *
-   * The persona it can name is Egma's Predefined one, shared into every
-   * project rather than written for this one. Nothing points at it: the
-   * project default persona is gone, and a test that names nobody is refused.
+   * Check the complete project factory: protected Expected behaviors project
+   * grader and access to shared Egma-provided personas. Tests still must
+   * select at least one persona.
    */
   it("makes a project that can name a persona and holds its protected grader", async () => {
     api = await createApi("projects_create_whole");

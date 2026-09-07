@@ -4,30 +4,9 @@ import path from "node:path";
 import { chromium, type Browser } from "playwright-core";
 
 /**
- * A real Chrome, found rather than downloaded.
- *
- * `playwright-core` deliberately ships no browser, which is the right trade for
- * a repository whose test suite is mostly Postgres and ClickHouse: two browser
- * tests are not worth a three-hundred-megabyte install on every checkout. The
- * cost of that trade is this file — the library knows exactly one place to look
- * and names the build it was compiled against, so on a machine that has a
- * browser under a different build number it reports that nothing is installed
- * while a working Chrome sits beside it.
- *
- * So: the browser somebody already has, in the order of how likely it is to be
- * the one they meant.
- *
- * 1. **A real Chrome installed on the machine**, which is what a developer
- *    running the suite on their laptop has.
- * 2. **The build Playwright downloaded for itself**, if the version in the
- *    lockfile is the version that downloaded it.
- * 3. **Any Chromium under `PLAYWRIGHT_BROWSERS_PATH`**, which is how a CI image
- *    and a prepared container carry one: the directory is Playwright's own
- *    layout, and the only thing wrong with it is the build number in the name.
- *
- * Nothing here is a fallback to a stub. If none of the three is there, the
- * launch fails and the test says so, because a browser test that quietly did
- * not use a browser would prove nothing at all.
+ * Find Chrome without downloading it: prefer an installed Chrome, then the
+ * Playwright-managed executable, then Chromium under PLAYWRIGHT_BROWSERS_PATH.
+ * If none is available, fail browser startup instead of substituting a stub.
  */
 
 /**

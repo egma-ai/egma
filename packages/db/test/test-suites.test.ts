@@ -18,14 +18,13 @@ import {
   getTest,
   getTestSuite,
   IdentityConflictError,
-  IdempotencyConflictError,
   latestRunEventSequence,
   listRunEvents,
   listRuns,
   listSimulations,
   listTests,
   NotPermittedError,
-  RECOMMENDED_PERSONA_MODELS,
+  PERSONA_PARAMETER_CONTRACT,
   renameTestSuite,
   RunWriteRefusedError,
   startRun,
@@ -81,7 +80,6 @@ function runInput(suiteId: string, extra: Partial<NewRun> = {}): NewRun {
     suiteId,
     agentId: world.frontDesk,
     connectionId,
-    idempotencyKey: newId("run"),
     ...extra,
   };
 }
@@ -379,22 +377,25 @@ describe("permanent deletion", () => {
 });
 
 describe("complete-suite runs", () => {
-  it("replays one network idempotency key and refuses a changed request", async () => {
-    const suite = await createTestSuite(actingAsAcme(), { name: "Idempotent run" });
-    await testIn(suite.id, "Run once");
-    const input = runInput(suite.id, { idempotencyKey: "network-attempt-1" });
+  it("creates separate runs for repeated and concurrent start requests", async () => {
+    const suite = await createTestSuite(actingAsAcme(), { name: "Repeated runs" });
+    await testIn(suite.id, "Run each time");
+    const input = runInput(suite.id);
 
     const first = await startRun(actingAsAcme(), input);
-    const replay = await startRun(actingAsAcme(), input);
-    expect(replay.id).toBe(first.id);
-    const { rows } = await database.sql<{ count: string }>(
-      "select count(*)::text as count from run where id = $1",
-      [first.id],
+    const repeated = await startRun(actingAsAcme(), input);
+    const concurrent = await Promise.all([
+      startRun(actingAsAcme(), input),
+      startRun(actingAsAcme(), input),
+    ]);
+    const ids = [first.id, repeated.id, ...concurrent.map((run) => run.id)];
+    expect(new Set(ids).size).toBe(4);
+    const { rows } = await database.sql<{ id: string; count: string }>(
+      "select run_id as id, count(*)::text as count from simulation where run_id = any($1::text[]) group by run_id",
+      [ids],
     );
-    expect(rows).toEqual([{ count: "1" }]);
-    await expect(
-      startRun(actingAsAcme(), { ...input, name: "Different request" }),
-    ).rejects.toThrow(IdempotencyConflictError);
+    expect(rows).toHaveLength(4);
+    expect(rows.every((row) => row.count === "1")).toBe(true);
   });
 
   it("requires the current version for content edits and refuses stale writes", async () => {
@@ -540,7 +541,7 @@ async function seedManyPersonas(count: number): Promise<readonly string[]> {
   try {
     await connection.sql("begin");
     await connection.sql(
-      `insert into persona
+      `insert into persona_definition
          (id, organization_id, project_id, name, current_version_id)
        select seeded.persona_id, $1, $2,
          'Paged caller ' || seeded.ordinality,
@@ -555,24 +556,14 @@ async function seedManyPersonas(count: number): Promise<readonly string[]> {
       ],
     );
     await connection.sql(
-      `insert into persona_version
-         (id, persona_id, version, identity_name, personality, language,
-          llm_provider, llm_model, stt_provider, stt_model,
-          tts_provider, tts_model, tts_voice_id, tts_speed)
+      `insert into persona_definition_version
+         (id, persona_id, version, identity_name, personality, language, parameter_contract)
        select seeded.version_id, seeded.persona_id, 1,
-         'Paged Caller', 'Patient', 'en-US',
-         $1, $2, $3, $4, $5, $6, $7, $8
-       from unnest($9::text[], $10::text[])
+         'Paged Caller', 'Patient', 'en-US', $1::jsonb
+       from unnest($2::text[], $3::text[])
          as seeded(version_id, persona_id)`,
       [
-        RECOMMENDED_PERSONA_MODELS.llm.provider,
-        RECOMMENDED_PERSONA_MODELS.llm.model,
-        RECOMMENDED_PERSONA_MODELS.stt.provider,
-        RECOMMENDED_PERSONA_MODELS.stt.model,
-        RECOMMENDED_PERSONA_MODELS.tts.provider,
-        RECOMMENDED_PERSONA_MODELS.tts.model,
-        RECOMMENDED_PERSONA_MODELS.tts.voiceId,
-        RECOMMENDED_PERSONA_MODELS.tts.speed,
+        JSON.stringify(PERSONA_PARAMETER_CONTRACT),
         ids.map((row) => row.version),
         ids.map((row) => row.persona),
       ],

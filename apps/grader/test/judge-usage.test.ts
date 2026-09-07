@@ -128,11 +128,12 @@ function answered(usage: Record<string, unknown>, id: string): Response {
       choices: [
         {
           message: {
-            content: JSON.stringify({
+            content: JSON.stringify({ results: [{
+              id: "instruction_1",
               decision: "met",
               rationale: "the agent named the window.",
               cited_turns: [1],
-            }),
+            }] }),
           },
         },
       ],

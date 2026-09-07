@@ -54,31 +54,10 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The segment lifecycle, with the faults that decide whether it is correct.
- *
- * Everything before this point can be proved by a request answering. Draining
- * cannot: it is the half of ingestion where nobody is waiting, where every step
- * can stop between two others, and where the only thing standing between a
- * customer's evidence and a silent loss is that each step is safe to do again.
- * So this is the one deep-module family the design allows, and every case in it
- * is a failure rather than a feature.
- *
- * ## What is faulted, and where each fault comes from
- *
- * The object store is wrapped, so a read, a listing or a deletion can be made
- * to fail exactly once — which is what a store timing out really looks like.
- * ClickHouse is disconnected, which is what a cold start really looks like. The
- * handoffs are stopped with a constraint the upsert violates, which is the one
- * way to make Postgres refuse a specific write without making it refuse every
- * write. Nothing here reaches inside the drainer to count calls: every claim is
- * about what is in the bucket, in the store, and in the tables afterwards.
- *
- * ## The one crash point proved next door
- *
- * A crash after the local append and before the upload is proved at the
- * acceptance seam in `ingestion-accept.test.ts`, because that is where the
- * staged record lives and where the restart that recovers it happens. Repeating
- * it here would be a second stack for one claim.
+ * Exercise replay after object-store, ClickHouse, and Postgres handoff failures.
+ * Check stored evidence and work queues, not internal call counts. Storage
+ * wrappers inject individual failures; database constraints refuse selected writes.
+ * Local-log restart before upload is covered in ingestion-accept.test.ts.
  */
 
 const storage: ObjectStorage = await startObjectStorage("ingestion-drain");
@@ -763,29 +742,12 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
   });
 
   /**
-   * Two `all` instances is the ordinary hosted shape, and only one of them may
-   * walk the prefix. Two that did could each probe the trace store, each find
-   * one immutable identity absent because the other's write had not landed
-   * yet, and each then write a different account of it — which is precisely
-   * what the integrity rule exists to refuse and cannot refuse from behind.
-   *
-   * The one that does not hold the claim is not broken. It keeps its scan
-   * loop, drains nothing, and takes over the moment the holder lets go, which
-   * is what makes restarting the drainer an operation nobody has to think
-   * about.
+   * Only the holder of the deployment drain lock may process pending segments.
+   * A standby instance must take over after the holder releases it.
    */
   /**
-   * Cut the session holding the drain claim, the way a Postgres restart, a
-   * failover or an idle-socket reaper would. Postgres releases the advisory
-   * lock with the session, so what the holder has afterwards is a dead
-   * connection and no claim.
-   *
-   * Wait for the backend to finish stopping, so the next assertion observes
-   * the released lock rather than the short gap after Postgres sent the signal.
-   *
-   * Scoped to this suite's own database, because an advisory lock is, and
-   * because suites share a cluster: an unscoped kill would reach into another
-   * suite's deployment and end a claim that is nothing to do with this one.
+   * Terminate the lock-holding Postgres session and wait for its backend to exit.
+   * Scope the operation to this suite's database to avoid other test deployments.
    */
   async function killTheDrainClaim(): Promise<void> {
     await api.database.sql(
@@ -995,14 +957,8 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
 });
 
 /**
- * The two facts a production conversation hands over — its evidence being
- * readable, and the platform saying it ended — arriving in either order.
- *
- * They are separate facts on separate spans, and an exporter is free to send
- * them in separate flushes that become separate segments and drain in either
- * order. A grader that read the trace on the first of them must find evidence
- * there, and the completion that arrives second must not create a second piece
- * of work.
+ * Drain production evidence and completion markers in either order. Grading
+ * must see readable evidence, and repeated completion must not duplicate work.
  */
 describe.skipIf(!storage.available)("the end fact and the evidence, in either order", () => {
   const running = storage as Extract<ObjectStorage, { available: true }>;
@@ -1156,9 +1112,9 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
     await setup.sql(
       `insert into grader_definition_version
          (definition_id, version, type, prompt, parameter_contract,
-          modalities, judge_model)
+          modalities)
        values ($1, 1, 'code', null, '[]'::jsonb,
-               '["voice"]'::jsonb, null)`,
+               '["voice"]'::jsonb)`,
       [productionDefinitionId],
     );
     await setup.sql("commit");

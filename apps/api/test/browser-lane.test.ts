@@ -4,31 +4,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * Where each kind of proof lives, held so that the browser lane stays small.
- *
- * **The real-browser lane costs about two minutes and everything else costs
- * milliseconds**, so the pressure is always in one direction: a case is easier
- * to add to the file that already stands up Postgres, ClickHouse, the API, Next
- * and Chrome than to work out where it belongs. Ten of those and the ordered
- * journey is a suite, the lane is ten minutes, and nobody runs it.
- *
- * So the split is written down. A browser proves what only a browser can — that
- * the pages exist, that they are served from this instance's own origin, that
- * this process forwards the paths they use, that two independent tabs keep two
- * projects apart, that a real Chrome makes audio of a signed link, and that
- * clicking through in order gets somebody where they were going. **A matrix is
- * never one of those.** Every combination of role, lifecycle state, revision,
- * refusal, idempotency key and repository format is proved at
- * a seam where one case costs nothing, and the browser walks one path through
- * it.
- *
- * **What this file holds and what it does not.** It holds that each of those
- * proofs is still in the fast lane and still says something about its subject —
- * so moving one into the browser file means deleting it here, out loud, rather
- * than by drift. It does not measure the browser file, because a line count is
- * a number somebody raises rather than a rule anybody keeps. The discipline is
- * the ticket's own sentence: if you find yourself adding a permission case to
- * the browser, that is the signal it belongs here.
+ * Keep permission, lifecycle, refusal, run-start, and repository-format
+ * matrices in focused tests. Reserve browser coverage for navigation, origin
+ * rewrites, independent tabs, layout, and media behavior.
+ * This file checks that the focused test coverage remains present.
  */
 
 const ROOT = path.join(import.meta.dirname, "../../..");
@@ -77,9 +56,9 @@ const PROVED_IN_THE_FAST_LANE: readonly {
     says: /expectedRevision/u,
   },
   {
-    concern: "idempotency keys on a run",
-    file: "apps/api/test/runs-suite-contract.test.ts",
-    says: /idempotency/iu,
+    concern: "each repeated run start creates a separate run",
+    file: "packages/db/test/test-suites.test.ts",
+    says: /creates separate runs for repeated/iu,
   },
   {
     concern: "repository synchronization, atomicity, and what it refuses",
@@ -89,7 +68,7 @@ const PROVED_IN_THE_FAST_LANE: readonly {
   {
     concern: "the CLI and API suite contract for repository push and run",
     file: "apps/api/test/cli-platform-contract.test.ts",
-    says: /atomic repository change/iu,
+    says: /starts a suite through the CLI/iu,
   },
 ];
 

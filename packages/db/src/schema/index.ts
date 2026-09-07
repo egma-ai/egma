@@ -8,7 +8,6 @@ export * from "./production.ts";
 export * from "./graders.ts";
 export * from "./tests.ts";
 export * from "./runs.ts";
-export * from "./plans.ts";
 export * from "./grading.ts";
 export * from "./billing.ts";
 export * from "./cloud.ts";

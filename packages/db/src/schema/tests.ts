@@ -24,18 +24,10 @@ import {
 } from "./columns.ts";
 
 /**
- * A test suite is one named, unversioned container inside a project. A test is
- * one authored specification inside exactly one suite: the situation to put an agent in, what
- * should happen, and which personas call about it. These tables hold that and
- * nothing else — the agent under test is named by a run, and who a persona is
- * lives in their own tables.
- *
- * Two tables, the persona's shape exactly, so that two different things can be
- * pointed at. A suite names the identity row — this test, whatever it currently
- * checks. A run pins a version row — this test, frozen as it was when the
- * simulation happened, so improving a test today never rewrites what an old
- * result meant. Renames touch the identity row only; the scenario and the
- * expected behaviors live in the version.
+ * A project contains test suites; each test belongs to one suite.
+ * The identity row holds live metadata. Versions hold the scenario, expected
+ * behaviors, and other execution content that simulations pin. The agent
+ * under test is selected by the run.
  */
 
 export const testSuite = pgTable(
@@ -89,15 +81,9 @@ export const test = pgTable(
       .notNull()
       .references((): AnyPgColumn => testVersion.id),
     /**
-     * What an edit to the live half says it was written against: opaque, and
-     * new after every identity write and permanent deletion. The name, the
-     * description and the deleted state are live; the scenario and everything
-     * else a run executes is versioned, and carries a version id instead.
-     *
-     * **Two tokens because they guard two different losses.** A rename that
-     * loses a race is retyped in a second; a scenario edit that loses one may
-     * be an afternoon's work. Making one token cover both would refuse the
-     * cheap edit because somebody else made the expensive one.
+     * Optimistic concurrency token for identity edits and deletion.
+     * Execution content has a separate version ID, so a metadata edit need not
+     * conflict with an edit to the scenario.
      */
     revision: idText("revision").notNull(),
     /** Hidden from authoring after permanent product deletion. */
@@ -154,32 +140,14 @@ export const testVersion = pgTable(
      */
     content: jsonb("content").notNull(),
     /**
-     * The tools this test answers for itself, as a list of
-     * `{tool, answer}` or `{tool, error}` entries.
-     *
-     * **The test carries its own world, and there is no project half.** A mock
-     * tool used to be a project row a test could override; it is a sentence in
-     * the test now, versioned with the test exactly as an expected behavior is,
-     * because "the calendar has no free slots" is a fact about this scenario
-     * and about nothing else in the project.
-     *
-     * A column of its own rather than a key inside `content`, because the claim
-     * gate asks the database directly whether a run's tests mock anything — one
-     * `mock_tools is not null` over the join, rather than a jsonb key dug out of
-     * every version. Null means this test mocks nothing, which is what most
-     * tests do; an empty list is written as null so the two can never say the
-     * same thing in two ways.
+     * Versioned mock tools owned by this test: {tool, answer} or {tool, error}.
+     * Stored separately so claims can query mock_tools IS NOT NULL.
+     * An empty list is normalized to null.
      */
     mockTools: jsonb("mock_tools"),
     /**
-     * The world outside the conversation that this test asks for:
-     * `retell_dynamic_variables` for the platform's own template variables, and
-     * `job_dispatch_metadata` for what LiveKit hands the worker it dispatches.
-     *
-     * Beside the mock tools rather than inside them for the same reason they
-     * are beside the content: it is a different question, asked of a different
-     * lane, and a reader after one never pays for the other. Null means this
-     * test asks for nothing, and an empty object is written as null.
+     * Optional test environment: retell_dynamic_variables or
+     * job_dispatch_metadata for LiveKit workers. Empty objects become null.
      */
     env: jsonb("env"),
     createdBy: idText("created_by").references(() => user.id, {
@@ -242,26 +210,9 @@ export const testPersona = pgTable(
       table.testVersionId,
       table.position,
     ),
-    // Nothing reads this way yet; it is what answers "which tests name this
-    // persona" when deleting one has to say.
+    // Supports persona usage queries.
     index("test_persona_persona_id_idx").on(
       table.personaId,
     ),
   ],
 );
-
-/*
- * **A test names no graders, and there is no junction to name them through.**
- *
- * There was one — `test_grader`, the persona junction's shape verb for verb —
- * and it is gone. Which graders grade a simulation is answered entirely by the
- * project's project graders and their scope: every matching project grader is
- * included once in the grading plan. Attachment through test content
- * forced a scenario-specific decision through the wrong object, when "where does
- * this grader apply" is the grader's own setting.
- *
- * A version's content is therefore the scenario, the expected behaviors, the
- * mock tools and the env, and nothing else. Scenario-specific grading returns as
- * selectors on the project grader's JSON scope, over test suites and tests,
- * where the same question is asked once per grader rather than once per test.
- */

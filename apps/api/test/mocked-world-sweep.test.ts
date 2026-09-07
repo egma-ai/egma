@@ -1,3 +1,4 @@
+import { defaultPersonaParameterValues, PERSONA_PARAMETER_CONTRACT } from "@egma/db";
 import { newId } from "@egma/ids";
 import { createPersona, getRun, getSimulation } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
@@ -16,14 +17,8 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The sweep's two hard cases, both about a run that is `pending`.
- *
- * A mocked run's simulations are unclaimable until it names a temporary copy, so
- * a run whose build died leaves them queued forever — the sweep must find it
- * and cancel it (S2). But a run whose world is fully built and is merely
- * *waiting for a free simulator* is not stuck, and cancelling it for queue wait
- * would be a fate no other run in the product suffers (S3). One clock, two
- * answers, told apart by whether the draft exists.
+ * Cancel a pending run whose mock-tool setup was abandoned, but keep a fully
+ * built run waiting for a simulator. Queue wait alone is not a failed build.
  */
 
 let api: TestApi;
@@ -153,7 +148,7 @@ async function anAgentReadyToRun(label: string): Promise<Ready> {
     [String(suite.body.id)],
   );
   const personaRow = await api.database.sql<{ id: string; current_version_id: string }>(
-    `select id, current_version_id from persona limit 1`,
+    `select id, current_version_id from persona_definition limit 1`,
   );
 
   return {
@@ -190,7 +185,7 @@ async function seedRun(
         status, triggered_via, connection_snapshot,
         temp_mock_agent_version, temp_mock_agent_version_cleanup,
         mock_metadata, expected_simulation_count, created_at, started_at,
-        finished_at, completed_count, failed_count, canceled_count)
+        finished_at, completed_count, failed_count, canceled_count, grading_plan)
      values ($1,$2,$3,$4,$5,$6,$10,'manual',$7::jsonb,$8::integer,
         case when $11 = 'no' then null else false end,
         case when $11 = 'no' then null else $12::jsonb end,1,
@@ -199,7 +194,7 @@ async function seedRun(
         case when $10 = 'completed' then now() - interval '1 minute' end,
         case when $10 = 'completed' then 1 end,
         case when $10 = 'completed' then 0 end,
-        case when $10 = 'completed' then 0 end)`,
+        case when $10 = 'completed' then 0 end,$13::jsonb)`,
     [
       runId,
       organizationId,
@@ -228,14 +223,18 @@ async function seedRun(
           ...(toolPrint === undefined ? {} : { tool_print: toolPrint }),
         },
       }),
+      JSON.stringify({
+        capturedAt: new Date(Date.now() - minutesOld * 60_000).toISOString(),
+        groups: [{ tag: "test", testId: ready.testId, testVersionId: ready.testVersionId, items: [] }],
+      }),
     ],
   );
   await api.database.sql(
     `insert into simulation
        (id, run_id, organization_id, project_id, agent_id, connection_id,
         persona_id, persona_version_id, test_id, test_version_id,
-        position, modality, connection_type, status)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,'voice','retell_web_call','queued')`,
+        position, modality, connection_type, status, persona_parameter_values)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,'voice','retell_web_call','queued',$11::jsonb)`,
     [
       simulationId,
       runId,
@@ -247,6 +246,7 @@ async function seedRun(
       ready.personaVersionId,
       ready.testId,
       ready.testVersionId,
+      JSON.stringify(defaultPersonaParameterValues(PERSONA_PARAMETER_CONTRACT)),
     ],
   );
   return { runId, simulationId };
@@ -372,14 +372,8 @@ describe("what the sweep answers", () => {
 });
 
 /**
- * The promise a resumed teardown can still keep, because the note carries the
- * comparison value: the version this agent serves never moved.
- *
- * The run that built the world compared the engine it read back against a print
- * it held in memory. A run that crashed took that print with it — so without
- * one on the note, a teardown finished by anybody else could delete the copy
- * and call the account settled without ever looking at the version real callers
- * are served from.
+ * Persist the serving-configuration fingerprint so resumed teardown can
+ * compare the serving version after the original process has exited.
  */
 describe("a teardown resumed from the note alone", () => {
   const TOOLS = [
@@ -466,15 +460,8 @@ describe("a teardown resumed from the note alone", () => {
 });
 
 /**
- * Two settles of one agent, and the rule that makes the second one harmless.
- *
- * A terminal report lands the settle, and so does the next run's claim — so two
- * of them meeting is ordinary, not exotic. They take turns behind the agent's
- * mocked-world fence, and the one that arrives second re-reads the cleanup flag
- * inside it: a run somebody else has already put back is not in its list, so it
- * asks Retell for nothing. Without that re-read the second one would delete a
- * version number a moment after the first did — and Retell gives the next
- * branch the lowest free number, so by then it can be somebody else's draft.
+ * Re-read cleanup state under the agent lock. A second settle must skip a
+ * completed cleanup instead of deleting a version number another run may reuse.
  */
 describe("a settle that arrives after somebody else settled the run", () => {
   it("deletes nothing a second time, and still answers settled", async () => {

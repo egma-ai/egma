@@ -2,8 +2,8 @@ name: Release Python SDK
 
 # Publishing is one deliberate tag push. Merging does not publish.
 #
-#   git tag python-sdk-v0.1.1
-#   git push origin python-sdk-v0.1.1
+#   git tag python-sdk-v0.3.0
+#   git push origin python-sdk-v0.3.0
 #
 # PyPI must trust this repository, workflow, and `pypi` environment. GitHub
 # then supplies one short-lived OIDC credential. No long-lived PyPI token is
@@ -56,12 +56,11 @@ jobs:
           fi
           echo "Releasing egma $packaged."
 
-      - name: Test the source tree
+      - name: Lint the Python SDK
         working-directory: sdks/python
         run: |
           uv sync --frozen
           uv run --frozen ruff check src tests
-          uv run --frozen pytest
 
       - name: Test the LiveKit fixture
         working-directory: fixtures/livekit-dumb-agent
@@ -73,6 +72,12 @@ jobs:
       - name: Build the wheel and source distribution
         working-directory: sdks/python
         run: uv build --out-dir dist
+
+      - name: Verify the wheel against both LiveKit versions in parallel
+        run: |
+          wheel="$(find sdks/python/dist -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          python3 .github/livekit_compatibility.py python "$wheel"
 
       - name: Prove the built wheel in a clean environment
         working-directory: sdks/python

@@ -1,20 +1,8 @@
 /**
- * The runs on the platform, over egma's public HTTP API.
- *
- * A complete-suite Run is created with an optional exact current-set
- * precondition, or canceled by ID. Simulation pages remain available to other
- * repository contract checks, but the CLI does not follow a Run in the
- * terminal. The web product owns progress.
- *
- * One shape of answer is a value rather than an exception, because it is an
- * ordinary thing that happens: **the platform refusing to start the run**. A
- * connection type whose adapter has not shipped is the case that matters, and
- * the platform's own sentence is carried up untouched — a terminal that
- * paraphrased it would be inventing an explanation for a decision it did not
- * make.
+ * Create complete-suite runs with an optional current-set precondition, or cancel by ID.
+ * The web app shows progress. Return run-start refusals as values and preserve
+ * the platform's explanation.
  */
-
-import { randomUUID } from "node:crypto";
 
 import {
   cancelRun as cancelRunRequest,
@@ -135,17 +123,6 @@ export type NewRun = {
   }[];
   /** Optional run display name. */
   readonly name?: string;
-  /**
-   * The word this attempt is remembered by, so a retried request starts one
-   * run.
-   *
-   * Left out, one is minted for this call. A terminal that dials a real agent
-   * and loses the answer on the way back must never produce a second
-   * conversation, and the platform can only prevent that if the client names
-   * the attempt — nothing on the server can tell a repeat from a new request.
-   * A caller that retries the same start itself passes the same word twice.
-   */
-  readonly idempotencyKey?: string;
 };
 
 /** A whole number off the wire, or zero for anything that is not one. */
@@ -292,17 +269,6 @@ export async function startRun(
         testId: version.testId,
         versionId: version.versionId,
       })),
-      // Node's own, deliberately, and not `newId` from `@egma/ids`. That
-      // package is private and never published, so an import of it survives
-      // into `dist/` — which this package ships unbundled — and `egma`
-      // would fail to resolve it at the moment somebody started a run. The
-      // build caught it here only because nothing built the package first; the
-      // published crash would have had no such warning.
-      //
-      // Nothing wants an egma-shaped id anyway. A key has one job: to be
-      // different from every other invocation's, so a retry of *this* start is
-      // told apart from a new one.
-      idempotencyKey: input.idempotencyKey ?? `run_${randomUUID()}`,
       ...(input.name === undefined ? {} : { name: input.name }),
     },
     {

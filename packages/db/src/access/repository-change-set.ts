@@ -15,12 +15,8 @@ import {
 } from "./tests.ts";
 
 /**
- * The complete authored repository state for one project.
- *
- * **Two lists, not three.** There was a third — the project's own mock
- * tools — and it is gone with the project-owned mocked world: a test carries
- * the tools it answers for itself, so what a repository declares about mocking
- * arrives inside each test rather than beside them all.
+ * Authored repository state for one project: tests and test suites.
+ * Mock tools are versioned test content, not a separate project collection.
  */
 export type RepositoryChangeSet = {
   readonly suites: readonly RepositorySuite[];

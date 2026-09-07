@@ -18,18 +18,9 @@
 const HERE = "https://egma.invalid";
 
 /**
- * A return path that cannot leave this origin, or nothing.
- *
- * **The candidate is resolved, and it has to land back where it started.**
- * `//elsewhere.example/x` is a URL a browser reads as another host, and
- * `https://elsewhere.example` obviously is — but listing the shapes that leave
- * is a list somebody finds the next entry in. `/<TAB>/elsewhere.example` was
- * one: a URL parser strips tab, carriage return and newline *before* it parses,
- * so a browser reads that as `//elsewhere.example` and goes there. Asking the
- * parser instead of guessing at it cannot be enumerated around.
- *
- * The API applies the same rule before it writes a path into a reset link, and
- * the suite holds the two copies to the same answers.
+ * Resolve a root-relative candidate with the URL parser and reject a changed
+ * origin. Parsing catches host changes hidden by control characters. Keep
+ * this rule in step with the API's reset-link validation.
  */
 export function safeReturnPath(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined) return null;

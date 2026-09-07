@@ -1,130 +1,19 @@
-"""One verb for a simulation room: report to egma, or do not run.
+"""Configure reporting and mock tools before a LiveKit simulation starts.
 
-Call it once, after the agent is built and before the session starts::
+    agent = Agent(instructions=..., tools=[...])
+    session = AgentSession(...)
+    await simulation(agent, ctx, session)
+    await session.start(agent=agent, room=ctx.room)
 
-    from egma import simulation
+Production rooms are unchanged. Simulation rooms install the exporter,
+connect if needed, find Egma, and report the tool list before startup.
+Egma's hello reply selects mock tools; all other tools remain real.
+Handoffs install wrappers before the selected agent starts and report
+the cumulative tool list. Reporting failures raise ``NotReported``.
 
-    async def entrypoint(ctx: agents.JobContext) -> None:
-        agent = Agent(instructions=..., tools=[...])
-        session = AgentSession(...)
-        await simulation(agent, ctx, session)
-        await session.start(agent=agent, room=ctx.room)
-
-In a room egma did not name — every production room — it returns having
-touched nothing at all. That inertness is the whole safety story for
-production, and it is a test in this package rather than a promise in a
-document. Which room this is, and why the room's name is the only signal
-read, is :mod:`egma.room`.
-
-## What it does in a simulation, in order
-
-**It installs the export first.** The agent's spans are what egma files
-as the agent's POV of this simulation, so they are arranged for before
-anything else can go wrong. The room's name is stamped on every one of
-them, which is how egma matches them to the simulation; endpoint and key
-are ``EGMA_URL`` and ``EGMA_API_KEY``, as :func:`egma.monitor` reads
-them. :mod:`egma.export` holds all of it, and holds it once, because
-production sends the same spans to the same door.
-
-**It connects the job to its LiveKit room**, if the agent's normal
-startup has not already done so. This is the one connect this SDK forces,
-it happens only in a room whose name already said simulation, and it is a
-stated consequence rather than an implementation detail: reading a room's
-participants needs a connected room, and on two of the three dispatch
-paths the agent is in the room **before** egma is.
-
-**It finds egma among the room's remote participants, by name.** egma
-joins as ``egma-persona`` or as ``egma-persona-<simulation>``, so exactly
-those two forms are matched and nothing else is. Because the room's name
-has already established that this is a simulation, this side may **wait**
-for that participant — bounded, woken by the room's own arrival event,
-and never reached in a production room. Where two participants answer to
-that name the exchange is refused rather than guessed at: a room with two
-claimants is a room where the answer is not knowable, and the loser of
-that guess would be handed this agent's whole tool inventory.
-
-**It sends the census**: every tool the initial agent has, by name and
-schema, read off the agent object. That is the first message of the
-exchange on purpose — an egma that is not answering is discovered here,
-before a single tool call, rather than half way through a simulation with
-somebody waiting on the line. A census the far side answers with
-``UNSUPPORTED_METHOD`` is asked again until the bound runs out, because
-egma registers the exchange after it joins and this side can arrive in
-between; every other refusal is taken at its word.
-
-egma answers with the names it covers, and one **courier** is stood in
-front of each. Couriers go in through LiveKit's own ``mock_tools``, which
-writes into a side table rather than touching the agent, the class or the
-tool registry: never calling it leaves the tools byte for byte as they
-were, which is what makes production untouched by construction rather
-than by care.
-
-A courier is registered for **every name egma answers for**, not for the
-overlap with the census. The side table is consulted per call, by name,
-so a tool attached after this call is still intercepted on its first
-call, and a courier for a tool that never turns up simply never fires.
-
-LiveKit may later hand the session to another ``Agent`` or ``AgentTask``.
-The public handoff event fires after LiveKit selects that exact instance
-and before its activity starts. At that boundary this one integration
-call installs couriers for the selected class, then reports a cumulative
-census containing every tool discovered in the session so far. Returning
-to an earlier agent never removes tools from Egma's coverage record.
-
-## It fails closed, and that is the change from the old verb
-
-A simulation whose agent never reported to egma is not a simulation: its
-mocked tools would run their real implementations, which is a real
-appointment booked and a real card charged, and its record would claim
-nothing about tools that in fact ran. So every way this call can end
-without a hello egma answered — a room that would not open, a room where
-nobody by that name ever arrived, two claimants, a version neither side
-shares, a reply in a shape this SDK cannot read — raises
-:class:`NotReported`. The session does not start, and egma's own side
-ends the simulation with the same finding from the other direction.
-
-The verb this replaced fell open on all of those, and said so in the log.
-That was the right trade while the SDK was optional. It is the wrong one
-now that egma files the agent's POV: an unreported simulation that ran
-anyway is a green record of a test that isolated nothing.
-
-## Which version of the exchange either side speaks
-
-Nothing here pre-checks it. The version rides the hello in both
-directions and :func:`egma.seam.mocked_tools_in` refuses a reply in a
-version this SDK does not speak, which is the only reading that stays
-true when the two halves are deployed apart. A number carried anywhere
-else would be a second answer to the same question, and the second answer
-is the one that goes stale.
-
-## What a courier does with one call
-
-It asks egma, and hands back what egma answers. Around that:
-
-- It carries the **real tool's signature**, copied where the tool exists
-  when the courier is made. LiveKit trims a call's arguments to the
-  mock's own signature, so a bare closure would be handed nothing and the
-  record would show a call with no arguments. A tool attached after this
-  runs has no signature to copy, and that call's arguments really are
-  thin — which egma flags on the record rather than hiding.
-- It sets **both transport knobs explicitly**, every time. The values and
-  the arithmetic behind them are in :mod:`egma.seam`; what matters here
-  is that neither is ever left to a default, because the transport's own
-  default is shorter than a delay a mock tool may legally declare.
-- It **never runs the real tool**. In a simulation room every refusal is
-  the same answer: this call could not be answered by egma, so it fails,
-  as the tool's own error, and the model hears a tool that failed and can
-  say so. The five transport codes that used to mean "egma was never
-  reached, so run the real one" are not fail-open here any more — an
-  unreachable egma mid-conversation is exactly when a real backend must
-  not be touched.
-- It **raises what egma refuses**, as the tool's own error. egma's
-  refusals are honest answers — a call it has no mock for, a payload it
-  could not read — and a courier that swallowed one would leave the
-  simulation waiting on nothing.
-
-There is no branch on which a courier waits forever. That is the property
-this file is written around.
+Each wrapper copies the real tool's signature when available, uses the
+explicit RPC limits in ``egma.seam``, and raises mock or transport errors
+without falling back to the real tool. See ``simulation`` for setup errors.
 """
 
 from __future__ import annotations
@@ -165,36 +54,18 @@ VERB = "egma.simulation"
 
 
 class NotReported(RuntimeError):
-    """This agent could not report to egma, so this simulation must not run.
+    """Reporting failed in a simulation room; do not start the session.
 
-    Raised out of :func:`simulation`, in a simulation room only, whenever
-    the exchange did not end with a hello egma answered. It stops the
-    session from starting, which is the point: an agent that runs anyway
-    calls its real backends where a mock tool was meant to answer, and
-    egma's record of the simulation would claim nothing about tools that
-    in fact ran.
-
-    Never raised in a production room. There is nothing there to report
-    to, and nothing there to stop.
+    Raised by ``simulation`` when the hello exchange cannot complete.
+    Never raised for a production room.
     """
 
 
 EGMA_IDENTITY = "egma-persona"
-"""Who egma is in the room: the address every message is sent to.
+"""Egma participant identity, bare or suffixed with a simulation ID.
 
-Two forms, because egma joins under two: exactly this where egma mints
-its own token, and this with the simulation appended where a customer's
-token endpoint mints it. Both are matched, and nothing that merely begins
-with these letters is — an identity is either the name or the name with a
-``-`` and a simulation after it.
-
-Matching two forms rather than one exact string is the concession this
-side makes to egma joining under two, and it costs the guarantee LiveKit
-would otherwise give for free: one identity is unique per room, so an
-impersonator taking the exact name would be evicted by the server, while
-one taking a name merely *like* it sits quietly beside the real thing.
-That is why more than one match is refused outright below rather than
-resolved by picking the first.
+Reject an empty suffix and multiple matches rather than choosing a
+participant that could receive the agent's tool list incorrectly.
 """
 
 EGMA_CONNECT_SECONDS = 30.0
@@ -209,58 +80,21 @@ simulation whose room does not open inside it ends saying so.
 """
 
 ARRIVAL_MARGIN_SECONDS = 15.0
-"""What this side allows on top, for the part of the journey with no bound.
+"""Extra startup allowance for token acquisition and RPC registration.
 
-**Chosen, not derived, and said to be so.** The two things it covers have
-no constant on egma's side to restate, and a derivation from a number
-nobody wrote down is a number nobody can check.
-
-What it covers is the time before the bound above even starts running,
-plus the sliver at the far end of it:
-
-- On the token-endpoint access variant egma does not hold the project's
-  keys, so before it can begin connecting it must ask the customer's own
-  endpoint for a token. egma allows that request 20 seconds of its own
-  (``TOKEN_SECONDS`` in the simulator's ``media/livekit_room.py``), and
-  none of it is part of the connect above.
-- egma's participant becomes visible in the room a moment before its two
-  methods answer, because the room announces an arrival to everybody in
-  it before the joining side's own connect handler has run. egma
-  registers the methods in that handler, which is the earliest it can, so
-  the window is small — but it is not nothing, and it is the window
-  :data:`egma.seam.EGMA_NOT_LISTENING_YET` exists to sit out.
-
-It does not cover the worst case of the first bullet, and that is a trade
-rather than an oversight: a token endpoint that takes all 20, followed by
-a connect that takes all 30, is 50 seconds against the 45 below. What
-runs out here is not a failure this side has to survive intact — it is a
-fail-open, said out loud in the log — and holding a customer's agent
-silent in front of a caller for longer than the sum below is the worse of
-the two outcomes. Both numbers are here to be revised together if a real
-simulation is ever found to have run out of them.
+Egma can appear in the room before its RPC handlers are registered.
+This margin does not cover a token request and connection that both
+consume their maximum time. Failure to find or contact Egma raises
+``NotReported``; it does not start an unreported simulation.
 """
 
 STARTUP_SECONDS = EGMA_CONNECT_SECONDS + ARRIVAL_MARGIN_SECONDS
-"""How long this SDK may spend finding egma before it gives up. 30 + 15 = 45.
+"""Deadline for finding Egma and deciding whether to retry hello.
 
-Added up rather than picked, because the worst case this has to cover is
-an agent whose job starts at the very moment egma begins connecting —
-which is the ordinary case on two of the three dispatch paths. Written
-as the sum rather than as its answer so the two halves stay separately
-checkable: the 30 against egma's own constant, the 15 against the
-sentence above that says what it is for and what it deliberately leaves
-uncovered.
-
-One deadline covers both halves of the search, the wait for egma's
-participant and the retries against a participant that has not registered
-the exchange yet, so the whole of this call is bounded by this number
-however the time inside it is spent.
-
-It is a long time to hold an agent before it greets anybody, and that is
-the trade taken deliberately: the alternative to waiting is a simulation
-in which every mocked tool ran its real implementation, which is a real
-appointment booked and a real card charged. Nothing waits here unless the
-room's name says simulation, so a production room pays none of it.
+Derived from connect allowance plus arrival margin. Connection and
+individual RPC calls use their own timeout behavior, so this is not
+a strict bound on the entire simulation() call. Production rooms
+never enter this wait.
 """
 
 POLL_SECONDS = 0.25
@@ -288,36 +122,18 @@ async def simulation(
     endpoint: str | None = None,
     api_key: str | None = None,
 ) -> None:
-    """Report this simulation to egma, and let egma answer for its tools.
+    """Report simulation tools, configure mock tools, and export agent-POV spans.
 
-    Await it once, where the session is built and before it starts.
+    Await once before ``AgentSession.start``. Outside simulation rooms this
+    returns without connecting, wrapping tools, exporting, or sending RPC.
 
-    Returns having touched nothing outside a simulation room: no wrapping,
-    no side table, no exporter, not one message on the wire, and no
-    connect the agent was not already making.
+    Raises:
+        NotReported: Room connection, participant discovery, or hello failed.
+        ValueError: Export settings or tracer-provider setup are invalid.
 
-    Inside one it raises rather than carry on without egma, and **which**
-    error says where to look:
-
-    - :class:`NotReported` — the exchange itself did not happen. The room
-      would not open, no egma participant arrived, two claimed to be egma,
-      egma refused the census, or the reply was unreadable. Something
-      about this room or this deployment needs fixing.
-    - ``ValueError`` — this worker is misconfigured, and it is said before
-      a byte is sent: ``EGMA_URL`` or ``EGMA_API_KEY`` missing or
-      malformed, a tracer provider this SDK cannot safely extend, or a
-      second LiveKit job asking for a different room in this process.
-      ``endpoint`` and ``api_key`` are the arguments for the first two.
-
-    They are deliberately different types. A misconfigured worker is wrong
-    for every simulation it will ever run and is a deployment fault; an
-    unreported simulation is one conversation that must not be graded.
-
-    **One job per process.** The room this process exports under is fixed
-    when the exporter is built and cannot be rewritten, so a second job
-    asking for a different room in the same process is refused rather than
-    filed under the first one's name. Run LiveKit with one job per
-    process, which is its own default.
+    ``endpoint`` and ``api_key`` default to ``EGMA_URL`` and ``EGMA_API_KEY``.
+    Use one LiveKit job per process; exporter attribution is fixed by the
+    first job, and a job with different settings is refused.
     """
     named = simulation_in(ctx)
     if named is None:
@@ -628,18 +444,10 @@ async def _refresh_census(
 
 @dataclass(frozen=True)
 class _Seat:
-    """Where a message goes, and the terms it goes on.
+    """Send every RPC with explicit response and delivery timeouts.
 
-    Every ask in this file goes through here, and that is the point
-    rather than tidiness: the two transport knobs are the one thing this
-    SDK must never leave to a default, and a second place that built a
-    call would be a second place to forget them. One method means the
-    arithmetic in :mod:`egma.seam` is honoured by construction.
-
-    The room is held rather than the participant, because a participant
-    is something a room has once it is connected and this SDK would
-    rather read it when it is used than pin whatever was there when the
-    session was being set up.
+    Keep the room rather than a participant captured during startup;
+    resolve its local participant when sending.
     """
 
     room: Any
@@ -662,18 +470,9 @@ class _Seat:
 
 
 def _answers_to_egmas_name(identity: str) -> bool:
-    """Whether a participant in this room is egma, by the name it joined as.
+    """Match ``egma-persona`` or ``egma-persona-`` with a nonempty simulation suffix.
 
-    Two forms and no others: the bare name, which is what egma joins as
-    where it mints its own token, and the name with the simulation after
-    it, which is what a customer's token endpoint is asked to mint. A
-    plain prefix test would also match a name that merely starts with
-    these letters, and the whole of the addressing rests on this.
-
-    So the second form has to carry a simulation after the separator. A
-    bare ``egma-persona-`` names no simulation, and matching it would hand
-    this agent's whole tool inventory to a participant whose name is a
-    prefix rather than an identity.
+    A plain prefix match would accept unrelated participants.
     """
     if identity == EGMA_IDENTITY:
         return True
@@ -684,18 +483,10 @@ def _answers_to_egmas_name(identity: str) -> bool:
 
 
 def _egma_candidates(room: Any) -> list[str]:
-    """Every remote participant in this room answering to egma's name.
+    """Find matching Egma participants in any mapping-like room table.
 
-    The room's table is asked whether it can be walked rather than checked
-    against a concrete type: LiveKit declares it as a mapping, and a room
-    that hands back some other mapping is a room this side can still read.
-
-    A table that cannot be walked at all is read as a room nobody is
-    visible in, which is the fail-open every other defensive read here
-    takes. It is said at debug level because this runs on every look, and
-    the outcome a developer has to act on — a simulation room egma was
-    never found in — is already said once, at error, when the search gives
-    up.
+    Treat an unreadable table as empty and log it at debug level. The
+    startup search raises ``NotReported`` if no participant is found.
     """
     participants = getattr(room, "remote_participants", None)
     items = getattr(participants, "items", None)
@@ -751,15 +542,10 @@ def _listen_for_arrivals(room: Any, arrived: asyncio.Event) -> Callable[[], None
 async def _egma_in_the_room(
     room: Any, deadline: float, simulation: Simulation
 ) -> str:
-    """egma's identity in this room, waited for, or a simulation that fails.
+    """Wait for one Egma participant in a simulation room or raise ``NotReported``.
 
-    Only ever reached in a room whose name already said simulation, which
-    is what makes waiting legitimate at all: a production room never gets
-    here, so nothing about a production start is slower than it was.
-
-    The listener is attached before the first look, not after it, because
-    a participant who joins between a look and a subscription is a
-    participant this side would then wait the whole bound for.
+    Subscribe before reading participants so an arrival cannot be missed
+    between the initial lookup and event registration.
     """
     loop = asyncio.get_running_loop()
     arrived = asyncio.Event()
@@ -807,24 +593,11 @@ async def _egma_in_the_room(
 async def _asked_until_egma_is_listening(
     seat: _Seat, census: str, deadline: float
 ) -> str:
-    """Send the census, allowing for an egma that is in but not yet listening.
+    """Retry hello while Egma is visible but its RPC handlers are not registered.
 
-    egma's participant enters the room before it registers the two methods
-    of the exchange, and on two of the three dispatch paths this agent
-    can be asking in exactly that window. The transport answers an
-    unregistered method with ``UNSUPPORTED_METHOD``, which this side would
-    otherwise read as "there is no egma here" and fall open on for the
-    whole simulation — a mocked tool running its real implementation,
-    which is the one outcome this file exists to prevent.
-
-    Only that one code is asked again. ``RECIPIENT_NOT_FOUND`` is not,
-    even though it is the same kind of race in principle. Nothing reaches
-    this function without having seen egma in the room's own participant
-    table, so a destination that cannot be found a moment later is one
-    that left — and a participant that left is the fail-open every other
-    lost participant gets, not a participant to keep calling. Retrying it
-    would hold the agent silent for the rest of the bound, in the one
-    simulation it was waiting to serve, and end in the same place.
+    Retry ``UNSUPPORTED_METHOD`` within the startup deadline. Do not retry
+    ``RECIPIENT_NOT_FOUND`` after observing the participant; it has left.
+    Other failures propagate and become ``NotReported``.
     """
     loop = asyncio.get_running_loop()
     while True:
@@ -885,15 +658,10 @@ def _why_the_hello_was_refused(refused: RpcError, identity: str) -> str:
 
 
 def _schema_of(tool: FunctionTool | RawFunctionTool) -> dict[str, Any]:
-    """One tool's schema, for the census that seeds mock authoring.
+    """Read a tool schema directly or through the framework's schema builder.
 
-    A raw-schema tool already carries the shape an LLM API is given, so it
-    travels as it is. Anything else is asked of the framework, which is
-    the only thing that knows how a decorated function becomes a schema —
-    and asked inside a guard, because the schema is what makes authoring
-    *convenient* while the name is what makes matching *correct*. A tool
-    whose schema cannot be read still gets its name into the census, and
-    egma can still answer for it; only the authoring hint is thinner.
+    If extraction fails, still report the tool name so mock-tool matching
+    works without the optional schema hint.
     """
     if is_raw_function_tool(tool):
         return dict(tool.info.raw_schema)
@@ -949,22 +717,9 @@ def _courier(
         try:
             answered = await seat.ask(seam.TOOL_METHOD, asking)
         except RpcError as refused:
-            # Every refusal ends the call, and none of them runs the real
-            # tool. This courier only exists in a simulation room, and a
-            # real backend that runs there books a real appointment and
-            # charges a real card — so an Egma that cannot be reached
-            # mid-conversation is the one moment a real tool must not be
-            # touched, not the moment to touch it. The five transport
-            # codes that used to mean "run the real one" are read the same
-            # way as every other refusal here.
-            #
-            # Raised as the tool's own error, so the model hears a tool
-            # that failed and can say so rather than a simulation that
-            # waits on nothing.
-            #
-            # Whose complaint it was is said out loud, because the two
-            # send a developer to opposite halves of the system: a mock
-            # tool to author, or a room that could not carry a message.
+            # Never run a real tool when its mock-tool RPC fails. Raise a tool error
+            # so the model receives the refusal. Distinguish authored mock-tool
+            # errors from transport failures in the diagnostic.
             logger.warning(
                 "%s the call to %r with code %s: %s",
                 "Egma refused"
@@ -1041,16 +796,10 @@ def _arguments_of(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """One call's arguments, by name, as egma should write them down.
+    """Bind model arguments to the real tool's signature for reporting.
 
-    ``None`` where this courier has no signature to read them through: a
-    tool attached after the census really does arrive with nothing, and
-    reporting an empty object would put "this call had no arguments" on
-    the record instead.
-
-    The session's own context is dropped where a tool declares one. It is
-    the framework handing a tool its way back into the session, not
-    something the model asked for, and it belongs on no record.
+    Return None when no signature is available, rather than claim the
+    tool received no arguments. Omit framework context arguments.
     """
     if signature is None:
         return None

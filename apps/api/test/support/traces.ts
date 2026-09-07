@@ -218,29 +218,16 @@ export type SyntheticTrace = {
   readonly startedAt: Date;
   readonly humanSaid?: string;
   /**
-   * The simulation these spans are evidence of, for an export posted with the
-   * service token rather than with a customer's key.
-   *
-   * Absent is the customer path, where the door stamps `production` because a
-   * customer key cannot speak for a run. Present, the resource names the
-   * simulation and the door resolves the organization, the project, the run and
-   * the pins from egma's own row — which is what stamps `simulation`. The trace
-   * id has to be the one that simulation's id spells, because the door checks
-   * it: the two are the same 128 bits written twice.
+   * For service-token exports, name the stored simulation and use its derived
+   * trace ID. Customer exports can also identify simulations through provider
+   * references; credentials and attribution determine the ingestion path.
    */
   readonly simulationId?: string;
 };
 
 /**
- * A short exchange as OTLP/JSON, sent at the same door the real exporter
- * uses.
- *
- * Synthetic rather than captured, because the questions these bodies exist to
- * ask — does page two follow page one, do two traces of the same minute both
- * appear — need many traces at chosen instants, and the capture is deliberately
- * one trace at the instants it really happened. It goes in through the door
- * rather than around it so that what is being read back is what ingest actually
- * writes.
+ * Build synthetic OTLP traces at chosen times for pagination and ordering
+ * cases. Post through ingestion so reads exercise accepted evidence.
  */
 export function syntheticExport(trace: SyntheticTrace): string {
   const start = BigInt(trace.startedAt.getTime()) * 1_000_000n;

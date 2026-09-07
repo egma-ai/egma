@@ -5,29 +5,9 @@ import { acceptsServiceToken } from "../auth/service-token.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
 
 /**
- * The heartbeat door: `POST /v1/simulations/:id/heartbeats`, where a
- * conducting simulator says it is still here — and hears the one directive
- * that ever travels back.
- *
- * The gate and the budget arrangements are the claim door's, for the claim
- * door's reasons (`claims.ts` carries them in full): the service token is the
- * whole gate and resolves to no customer, and the group sits outside the
- * per-organization rate limit because a busy run beats every few seconds per
- * conversation from inside egma itself, and must never eat any customer's
- * request budget. Unlike the claim, nothing here watches the socket: a beat
- * is one guarded update, answered briskly, with no hold for a client to
- * abandon.
- *
- * **The answer steers, and `cancel` is its only word.** A beat lands on the
- * claimant's own live row and answers `null` — or `"cancel"` when
- * cancellation was requested, and equally for every row beyond help: an id
- * this egma never issued, another claimant's row, one already terminal. The
- * shipped simulator obeys exactly one directive, and steering it to stop
- * within one beat beats letting it conduct a closed conversation to its
- * duration limit against a customer's real agent. Which is also why there is
- * deliberately no 404 here: "that conversation is not yours to conduct" and
- * "stop conducting it" are the same instruction, and only one of them is a
- * directive the simulator acts on.
+ * Service-token heartbeat route outside organization rate limits. Return
+ * cancel for requested cancellation, unknown simulations, other claimants,
+ * or terminal rows; otherwise return null. No long polling.
  */
 
 export type HeartbeatRoutesOptions = {

@@ -1,15 +1,7 @@
 /**
- * A browser that never opens: the stand-in egma starts in place of a real one.
- *
- * egma starts whatever `BROWSER` names, handing it the address to open. A check
- * points `BROWSER` at this, so the whole of login runs with no window on the
- * screen of whoever is running the suite — and the address egma really passed
- * is written down where the check can read it.
- *
- * What it then does is what a person would have done in the window: approve,
- * deny, or nothing at all. `FIXTURE_BROWSER_DOES` says which.
- *
- * Run as: node approving-browser.ts <address>
+ * BROWSER test replacement that records the verification URL without opening a window.
+ * FIXTURE_BROWSER_DOES selects approval, denial, or no action.
+ * Usage: node approving-browser.ts <address>
  */
 
 import { appendFile } from "node:fs/promises";

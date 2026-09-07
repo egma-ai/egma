@@ -7,7 +7,7 @@ import {
   GRADER_DEFINITION_CATALOG,
   type PredefinedGraderDefinition,
 } from "../grader-library/catalog.ts";
-import type { GraderParameter } from "../grader-library/parameters.ts";
+import { defaultGraderParameterValues, validateExecutableGraderParameters, validateUnchangedParameterUnits, type GraderParameter } from "../grader-library/parameters.ts";
 import {
   snapshotGraderDefinition,
   type GraderDefinitionSnapshot,
@@ -23,7 +23,6 @@ import type { AuthContext } from "./context.ts";
 import { authorize, here } from "./permissions.ts";
 import {
   backfillExpectedBehaviorsProjectGraders,
-  moveResponseLatencySettingToItsNewKey,
   type SeededProjectGrader,
 } from "./seeded-graders.ts";
 
@@ -33,7 +32,7 @@ export type GraderLibraryEntry = {
   readonly id: string;
   readonly name: string;
   readonly description: string | null;
-  readonly owner: "egma" | "organization";
+  readonly owner: "egma" | "project";
   readonly scopeEditable: boolean;
   readonly currentDefinitionVersion: number;
   readonly definitionVersion: number;
@@ -60,6 +59,7 @@ export type ReconciledGraderCatalog = {
 const DEFINITION_COLUMNS = {
   id: graderDefinition.id,
   organizationId: graderDefinition.organizationId,
+  projectId: graderDefinition.projectId,
   name: graderDefinition.name,
   description: graderDefinition.description,
   scopeEditable: graderDefinition.scopeEditable,
@@ -75,7 +75,6 @@ const VERSION_COLUMNS = {
   prompt: graderDefinitionVersion.prompt,
   parameterContract: graderDefinitionVersion.parameterContract,
   modalities: graderDefinitionVersion.modalities,
-  judgeModel: graderDefinitionVersion.judgeModel,
 } as const;
 
 const LIBRARY_COLUMNS = {
@@ -86,8 +85,11 @@ const LIBRARY_COLUMNS = {
 
 function visibleDefinition(auth: AuthContext) {
   return or(
-    isNull(graderDefinition.organizationId),
-    eq(graderDefinition.organizationId, auth.organizationId),
+    and(isNull(graderDefinition.organizationId), isNull(graderDefinition.projectId)),
+    and(
+      eq(graderDefinition.organizationId, auth.organizationId),
+      eq(graderDefinition.projectId, auth.projectId ?? ""),
+    ),
   );
 }
 
@@ -115,7 +117,6 @@ function libraryEntryFromRow(row: {
   readonly prompt: string | null;
   readonly parameterContract: unknown;
   readonly modalities: unknown;
-  readonly judgeModel: unknown;
   readonly activeProjectGraderId: string | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -125,7 +126,7 @@ function libraryEntryFromRow(row: {
     id: row.id,
     name: row.name,
     description: row.description,
-    owner: row.organizationId === null ? "egma" : "organization",
+    owner: row.organizationId === null ? "egma" : "project",
     scopeEditable: row.scopeEditable,
     currentDefinitionVersion: row.currentDefinitionVersion,
     definitionVersion: version.definitionVersion,
@@ -212,8 +213,30 @@ function catalogVersion(entry: PredefinedGraderDefinition) {
     prompt: entry.prompt,
     parameterContract: entry.parameterContract,
     modalities: entry.modalities,
-    judgeModel: entry.judgeModel,
   };
+}
+
+/** The caller holds the definition lock before reading its project settings. */
+export async function assertGraderSettingsCompatibleOn(
+  on: Queryable,
+  definitionId: string,
+  type: string,
+  parameterContract: unknown,
+  currentParameterContract: unknown,
+): Promise<void> {
+  const saved = await on.select({ id: projectGrader.id, parameterValues: projectGrader.parameterValues })
+    .from(projectGrader)
+    .where(eq(projectGrader.graderDefinitionId, definitionId))
+    .orderBy(asc(projectGrader.id))
+    .for("share", { of: projectGrader });
+  for (const row of saved) {
+    try {
+      validateExecutableGraderParameters(type, parameterContract, row.parameterValues);
+      validateUnchangedParameterUnits(currentParameterContract, parameterContract);
+    } catch (cause) {
+      throw new Error(`grader ${definitionId} cannot publish: saved project settings ${row.id} are incompatible: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    }
+  }
 }
 
 async function reconcileDefinitions(
@@ -222,7 +245,7 @@ async function reconcileDefinitions(
 ): Promise<readonly ReconciledGraderDefinition[]> {
   const written: ReconciledGraderDefinition[] = [];
 
-  for (const entry of catalog) {
+  for (const entry of [...catalog].sort((a, b) => a.id.localeCompare(b.id))) {
     const [installed] = await on
       .select({ ...DEFINITION_COLUMNS, ...VERSION_COLUMNS })
       .from(graderDefinition)
@@ -241,6 +264,9 @@ async function reconcileDefinitions(
       .for("update", { of: graderDefinition });
 
     const wanted = catalogVersion(entry);
+    // Validate release defaults even when no project has used this definition.
+    validateExecutableGraderParameters(wanted.type, wanted.parameterContract, defaultGraderParameterValues(wanted.parameterContract));
+    snapshotGraderDefinition({ definitionId: entry.id, version: 1, ...wanted });
     if (installed === undefined) {
       await on.insert(graderDefinition).values({
         id: entry.id,
@@ -262,8 +288,8 @@ async function reconcileDefinitions(
       continue;
     }
 
-    if (installed.organizationId !== null) {
-      throw new Error(`catalog identity ${entry.id} is organization-owned`);
+    if (installed.organizationId !== null || installed.projectId !== null) {
+      throw new Error(`catalog identity ${entry.id} is customer-owned`);
     }
     if (installed.version === null) {
       throw new Error(
@@ -276,10 +302,10 @@ async function reconcileDefinitions(
       prompt: installed.prompt,
       parameterContract: installed.parameterContract,
       modalities: installed.modalities,
-      judgeModel: installed.judgeModel,
     };
     let version = installed.version;
     if (!isDeepStrictEqual(held, wanted)) {
+      await assertGraderSettingsCompatibleOn(on, entry.id, wanted.type, wanted.parameterContract, installed.parameterContract);
       version += 1;
       await on.insert(graderDefinitionVersion).values({
         definitionId: entry.id,
@@ -320,9 +346,6 @@ export async function reconcileGraderCatalog(
     );
     const definitions = await reconcileDefinitions(tx, catalog);
     const projectGraders = await backfillExpectedBehaviorsProjectGraders(tx);
-    // After the reconcile above, so no project is left holding a setting the
-    // definition version now live does not name.
-    await moveResponseLatencySettingToItsNewKey(tx);
     return { definitions, projectGraders };
   });
 }

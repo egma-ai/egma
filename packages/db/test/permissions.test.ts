@@ -32,14 +32,8 @@ import {
 } from "./support/database.ts";
 
 /**
- * What each role may do, asserted a cell at a time and in both directions,
- * because a permission table tested only where it says yes is a table nobody
- * has checked.
- *
- * The table below is written out here rather than imported from the code. A
- * test that reads the map and then asks the map whether the map is right proves
- * nothing; this one states what the product promises, and would still be the
- * question to ask if everything underneath it were rewritten.
+ * Define expected permissions independently of the implementation and test
+ * both allowed and denied operations for each role.
  */
 const THE_TABLE: Readonly<Record<string, readonly Role[]>> = {
   "read": ["viewer", "member", "admin"],
@@ -736,7 +730,12 @@ describe("an organization's settings", () => {
     const written = await updateOrganizationSettings(actingAs(ada, "admin"), {
       retentionDays: 30,
     });
-    expect(written.retentionDays).toBe(30);
+    expect(written).toEqual({
+      organizationId: ada.organizationId,
+      retentionDays: 30,
+      dataResidency: null,
+      updatedAt: expect.any(Date),
+    });
 
     // Reading them is not what the row is about: everybody in the organization
     // reads anything in it, and only an admin changes this.

@@ -11,26 +11,10 @@ import {
 } from "./support/traces.ts";
 
 /**
- * A stock LiveKit agent's real conversation, measured from its own spans.
- *
- * **The proof that the derivations are worth believing.** The captured trace
- * goes in at the real door, byte for byte as the exporter sent it, lands in real
- * ClickHouse, and comes back through the same v1 read a grader and the
- * transcript page read — and the numbers it carries are compared against
- * figures **hand-computed from the capture's own raw timestamps** and written
- * down below.
- *
- * That last part is the whole design of this file. Expectations produced by
- * running the derivation would grade the derivation against itself and pass for
- * any rule at all, including a wrong one. Every number here was worked out once
- * from the fixture's nanosecond start and end times, with the spans it came from
- * named beside it, so this file disagrees with the code the day the code
- * changes what it means.
- *
- * The unit cases — ordering, the fallback, an interruption, an unrecognised
- * emitter, precedence — are in `packages/db/test/measures-from-spans.test.ts`.
- * What is proved here is that a real conversation, through the real path,
- * arrives measured.
+ * Replay captured LiveKit evidence through ingestion and compare API measures
+ * with values hand-computed from fixture timestamps. Do not derive expected
+ * values with the implementation under test. Focused derivation cases live in
+ * packages/db/test/measures-from-spans.test.ts.
  */
 
 const storage: ObjectStorage = await startObjectStorage("otlp-measures");
@@ -58,16 +42,9 @@ const WINDOW = {
 } as const;
 
 /**
- * The numbers, hand-computed from the capture's raw span timestamps.
- *
- * Starts are held to the microsecond and durations to the nanosecond, which is
- * what the store keeps, so every latency below is the difference of two
- * microsecond-truncated instants. Each line names the spans it came from by
- * their own ids.
- *
- * The conversation, in the order its turns began: an agent turn that greets,
- * then five human turns, each with one or two agent turns after it — thirteen
- * turns in all, five of them the caller's.
+ * Expected values from the fixture, with span starts truncated to microseconds
+ * and durations retained in nanoseconds. The capture contains five human turns
+ * and eight agent turns.
  */
 const HAND_COMPUTED = {
   /**
@@ -81,78 +58,35 @@ const HAND_COMPUTED = {
   first_response_latency: [9605.774],
 
   /**
-   * One sample per human turn that reached agent speech before the next human
-   * turn. Silent agent turns on the way are the model and tool work that led to
-   * the spoken answer, not the answer itself.
-   *
-   * **Each wait starts where the caller stopped being audible** — the end of
-   * that human turn's last `user_speaking` child, which is the VAD's detected
-   * end of speech (catalog version 8, ADR-0024 §5). The turn's own end is the
-   * endpointing commit, which on this capture sits up to 1.09 s later; the two
-   * older numbers are noted beside the new ones so the size of the difference
-   * is on the record.
-   *
-   * 1. human 1e6796c0e195e424 is followed by silent agent turn
-   *    9ac4333458575745, then another human turn before any agent speech. It
-   *    was not answered and takes no sample.
-   * 2. human baac22a26a96fa9b carries **no** `user_speaking` child, so its own
-   *    end stands in: it starts 1785693902082961920 → 1785693902082961 µs and
-   *    runs 297806362 ns, ending at 1785693902380767362. Agent turn
-   *    00820fa943b873e6 does silent tool work; the next turn b2444815bd74fb3b
-   *    speaks in 1b8cc4d1064a766d at 1785693904727004928 →
-   *    1785693904727004 µs. 1785693904727004000 − 1785693902380767362 =
-   *    2346236638 ns = 2346.236638 ms — the same as before, because this turn
-   *    has no recorded speech to start from.
-   * 3. human c35b92a87f8121a1 has three `user_speaking` children, the last
-   *    b30dd00e322f2443 starting 1785693920313752320 → 1785693920313752 µs and
-   *    running 1710489600 ns, so the caller stopped being audible at
-   *    1785693922024241600. Agent turn 674743df7fe60024 does silent tool work;
-   *    the next turn 2c8883b32dbc323c speaks in 42b9d5797f17aa9d at
-   *    1785693924924691968 → 1785693924924691 µs.
-   *    1785693924924691000 − 1785693922024241600 = 2900449400 ns =
-   *    2900.4494 ms. From the turn's own end it read 1808.245039 ms.
-   * 4. human f88cf2a243a38318 is followed by silent agent turn
-   *    cfbcc2e51885f0fa, then another human turn before any agent speech. It
-   *    was not answered and takes no sample.
-   * 5. human 9839f5ef664bc919 has one `user_speaking` child 45e924b089cd919f,
-   *    starting 1785693942114222080 → 1785693942114222 µs and running
-   *    908797440 ns, so the caller stopped being audible at
-   *    1785693943023019440. The next agent turn fe4af349db1e440f spoke in
-   *    `agent_speaking` 11a1eaca219437a9, which began at 1785693946089613312 ns
-   *    → 1785693946089613 µs.
-   *    1785693946089613000 − 1785693943023019440 = 3066593560 ns =
-   *    3066.59356 ms. From the turn's own end it read 1994.917806 ms.
+   * Measure from the final user_speaking end to agent speech, skipping interrupted
+   * false starts and silent tool work. Start timestamps use stored microsecond
+   * precision; durations remain exact. Hand-computed differences in ns:
+   *   human 1e6796c0e195e424, speech 149dcf2969e36b11 to 1b8cc4d1064a766d:
+   *     1785693904727004000 - 1785693901272396528 = 3454607472
+   *   human c35b92a87f8121a1, speech b30dd00e322f2443 to 42b9d5797f17aa9d:
+   *     1785693924924691000 - 1785693922024241600 = 2900449400
+   *   human 9839f5ef664bc919, speech 45e924b089cd919f to 11a1eaca219437a9:
+   *     1785693946089613000 - 1785693943023019440 = 3066593560
+   * Human baac22a26a96fa9b has no speech child and overlaps an active agent turn,
+   * so it is treated as a continuation. Human f88cf2a243a38318 is unanswered.
+   * Neither contributes a sample.
    */
-  turn_response_latency: [2346.236638, 2900.4494, 3066.59356],
+  turn_response_latency: [3454.607472, 2900.4494, 3066.59356],
 
   /**
-   * One sample per agent turn that spoke, and four of the eight did. Each has a
-   * single `agent_speaking` child, so the sum is that child's own duration —
-   * nanoseconds exactly, since a duration is stored to the nanosecond.
-   *
-   * - turn 0701cc09e5f3d203, speech 71ac2d247c9b060d:
-   *   1785693894451407651 − 1785693889887763200 = 4563644451 ns
-   * - turn b2444815bd74fb3b, speech 1b8cc4d1064a766d:
-   *   1785693913955073014 − 1785693904727004928 = 9228068086 ns
-   * - turn 2c8883b32dbc323c, speech 42b9d5797f17aa9d:
-   *   1785693934154724323 − 1785693924924691968 = 9230032355 ns
-   * - turn fe4af349db1e440f, speech 11a1eaca219437a9:
-   *   1785693950543834480 − 1785693946089613312 = 4454221168 ns
+   * Each speaking agent turn has one agent_speaking child. Raw end minus start:
+   *   71ac2d247c9b060d: 1785693894451407651 - 1785693889887763200 = 4563644451 ns
+   *   1b8cc4d1064a766d: 1785693913955073014 - 1785693904727004928 = 9228068086 ns
+   *   42b9d5797f17aa9d: 1785693934154724323 - 1785693924924691968 = 9230032355 ns
+   *   11a1eaca219437a9: 1785693950543834480 - 1785693946089613312 = 4454221168 ns
    */
   agent_speech_duration: [
     4563.644451, 9228.068086, 9230.032355, 4454.221168,
   ],
 
   /**
-   * The platform's stage latencies, per agent turn in start order: the sum of
-   * each turn's own `llm_node` children (nothing else of the model family is a
-   * direct child of a turn in this capture, so nothing double-counts), read
-   * straight off the capture's raw span durations in nanoseconds and stated
-   * here in milliseconds. Every one of the eight agent turns carried exactly
-   * one model step.
-   *
-   * 7371512989, 727291266, 729825817, 639814725, 593974430, 645735577,
-   * 989172921, 486650077 ns.
+   * Sum direct llm_node child durations per agent turn, converted from ns to ms.
+   * This capture has exactly one such child in each of its eight agent turns.
    */
   llm_latency: [
     7371.512989, 727.291266, 729.825817, 639.814725, 593.97443, 645.735577,

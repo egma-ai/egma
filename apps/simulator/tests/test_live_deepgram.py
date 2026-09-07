@@ -1,23 +1,7 @@
-"""Real ears, proved on their own — opt-in.
-
-The listening leg has one job: turn speech into the words of the
-transcript. This test proves exactly that and nothing else, so a failure
-here names the ears. The audio is a checked-in recording of one spoken
-sentence — no synthesis, no account for the other leg, no telephony — and
-it enters the same Pipecat pipeline a live simulation uses.
-
-Silero listens for *whether* anybody is speaking, because the scripted
-detector reads the test codec and this recording is a real voice. That is
-one line of configuration and no second code path: the detector is chosen
-at assembly exactly as the ears are.
-
-It is opt-in because CI holds no Deepgram account, and it skips — visibly
-— on that one credential alone::
-
-    DEEPGRAM_API_KEY=... uv run pytest tests/test_live_deepgram.py -v
-
-``TEST_DEEPGRAM_API_KEY`` is read first, for a machine that keeps its test
-credentials apart from its working ones.
+"""Opt-in Deepgram STT test using a checked-in spoken recording and Silero VAD.
+No synthesis or phone service is needed.
+Run: DEEPGRAM_API_KEY=... uv run pytest tests/test_live_deepgram.py -v
+TEST_DEEPGRAM_API_KEY takes precedence. Skip without a key.
 """
 
 from __future__ import annotations

@@ -96,7 +96,7 @@ afterAll(async () => {
 
 async function versionIdsOf(personaId: string): Promise<readonly string[]> {
   const { rows } = await database.sql<{ id: string }>(
-    "select id from persona_version where persona_id = $1 order by version",
+    "select id from persona_definition_version where persona_id = $1 order by version",
     [personaId],
   );
   return rows.map((row) => row.id);
@@ -252,7 +252,7 @@ describe("forking a persona", () => {
     expect(fork.identityName).toBe(source.identityName);
     expect(fork.personality).toBe(source.personality);
     expect(fork.language).toBe(source.language);
-    expect(fork.models).toEqual(source.models);
+    expect(fork.settings?.models).toEqual(source.settings?.models);
 
     const fetched = await getPersona(actingIn(acme.forking), fork.id);
     expect(fetched?.identityName).toBe(source.identityName);
@@ -275,7 +275,7 @@ describe("forking a persona", () => {
     ).toBeUndefined();
 
     // Neither refused fork created anything. Both lists still contain only
-    // their earlier local rows plus the shared Predefined persona.
+    // their earlier local rows plus the shared Egma-provided persona.
     const globexPage = await listPersonas(actingAsGlobex());
     expect(globexPage.items.map((item) => item.name)).toEqual([
       "Stranger",

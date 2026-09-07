@@ -10,6 +10,9 @@ import {
   ProjectOutsideOrganizationError,
   RECOMMENDED_PERSONA_MODELS,
   type AuthContext,
+  PERSONA_PARAMETER_CONTRACT,
+  EGMA_PROVIDED_PERSONAS,
+  defaultPersonaParameterValues,
   type NewPersona,
   type PersonaChanges,
   type Role,
@@ -78,10 +81,10 @@ afterAll(async () => {
 
 async function rowCounts(): Promise<{ personas: number; versions: number }> {
   const personas = await database.sql<{ count: string }>(
-    "select count(*) as count from persona",
+    "select count(*) as count from persona_definition",
   );
   const versions = await database.sql<{ count: string }>(
-    "select count(*) as count from persona_version",
+    "select count(*) as count from persona_definition_version",
   );
   return {
     personas: Number(personas.rows[0]?.count),
@@ -104,30 +107,16 @@ describe("creating a persona", () => {
     expect(fetched?.identityName).toBe(rita.identityName);
     expect(fetched?.personality).toBe(rita.personality);
     expect(fetched?.language).toBe(rita.language);
-    expect(fetched?.models).toEqual(RECOMMENDED_PERSONA_MODELS);
+    expect(fetched?.settings?.models).toEqual(RECOMMENDED_PERSONA_MODELS);
     expect(fetched?.projectId).toBe(acme.project);
   });
 
-  it("stores the identity name and the models as plain typed columns", async () => {
+  it("stores behavior separately from complete project settings", async () => {
     const created = await createPersona(actingAsAcme(), rita);
-
-    const { rows } = await database.sql<{
-      identity_name: string;
-      personality: string;
-      language: string;
-      tts_voice_id: string;
-      tts_speed: string;
-    }>(
-      `select identity_name, personality, language, tts_voice_id, tts_speed
-         from persona_version where id = $1`,
-      [created.versionId],
-    );
-
-    expect(rows[0]?.identity_name).toBe(rita.identityName);
-    expect(rows[0]?.personality).toBe(rita.personality);
-    expect(rows[0]?.language).toBe(rita.language);
-    expect(rows[0]?.tts_voice_id).toBe(RECOMMENDED_PERSONA_MODELS.tts.voiceId);
-    expect(Number(rows[0]?.tts_speed)).toBe(RECOMMENDED_PERSONA_MODELS.tts.speed);
+    const version = await getPersonaVersion(actingAsAcme(), created.versionId);
+    expect(version).toMatchObject({ identityName: rita.identityName, personality: rita.personality, language: rita.language });
+    expect(version).not.toHaveProperty("models");
+    expect(created.settings?.models).toEqual(RECOMMENDED_PERSONA_MODELS);
   });
 
   it("is allowed to a member and refused to a viewer, per the permission table", async () => {
@@ -159,7 +148,7 @@ describe("creating a persona", () => {
       const orphan = newId("prs");
       await connection.sql("begin");
       await connection.sql(
-        `insert into persona
+        `insert into persona_definition
            (id, organization_id, project_id, name, current_version_id)
          values ($1, $2, $3, 'Halfway', $4)`,
         [orphan, acme.organization, acme.project, newId("prsv")],
@@ -170,7 +159,7 @@ describe("creating a persona", () => {
       );
 
       const { rows } = await database.sql(
-        "select 1 from persona where id = $1",
+        "select 1 from persona_definition where id = $1",
         [orphan],
       );
       expect(rows).toEqual([]);
@@ -195,6 +184,7 @@ describe("a credential for the whole organization", () => {
 
     const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
     const edited = await editPersona(wholeCustomer, created.id, {
+      expectedVersionId: created.versionId,
       personality: "Rita calls from the whole customer context.",
     });
 
@@ -212,6 +202,7 @@ describe("editing a persona's personality", () => {
 
     const calmer = "Rita, but rested.";
     const edited = await editPersona(actingAsAcme(), created.id, {
+      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
       personality: calmer,
     });
 
@@ -242,6 +233,7 @@ describe("editing a persona's personality", () => {
     let expected = 1;
     for (const personality of personalities) {
       const edited = await editPersona(actingAsAcme(), created.id, {
+      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
         personality,
       });
       expected += 1;
@@ -258,6 +250,7 @@ describe("editing a persona's personality", () => {
     const before = await rowCounts();
 
     const saved = await editPersona(actingAsAcme(), created.id, {
+      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
       identityName: rita.identityName,
       personality: rita.personality,
       language: rita.language,
@@ -274,9 +267,11 @@ describe("editing a persona's personality", () => {
   it("keeps every old version fetchable by its prsv_ id after later edits", async () => {
     const created = await createPersona(actingAsAcme(), rita);
     const second = await editPersona(actingAsAcme(), created.id, {
+      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
       personality: "Rita after the first edit.",
     });
     await editPersona(actingAsAcme(), created.id, {
+      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
       personality: "Rita after the second edit.",
     });
 
@@ -318,6 +313,7 @@ describe("editing a persona's identity name", () => {
     const created = await createPersona(actingAsAcme(), rita);
 
     const edited = await editPersona(actingAsAcme(), created.id, {
+      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
       identityName: "Margarita Alvarez",
     });
 
@@ -341,7 +337,7 @@ describe("editing a persona's identity name", () => {
 });
 
 describe("editing a persona's model selection", () => {
-  it("mints a version and leaves the previous complete selection frozen", async () => {
+  it("updates project settings without creating a core version", async () => {
     const created = await createPersona(actingAsAcme(), rita);
     const nextModels = {
       ...RECOMMENDED_PERSONA_MODELS,
@@ -349,28 +345,28 @@ describe("editing a persona's model selection", () => {
     } as const;
 
     const edited = await editPersona(actingAsAcme(), created.id, {
+      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
       models: nextModels,
     });
 
-    expect(edited?.version).toBe(2);
-    expect(edited?.models).toEqual(nextModels);
-    expect(
-      (await getPersonaVersion(actingAsAcme(), created.versionId))?.models,
-    ).toEqual(RECOMMENDED_PERSONA_MODELS);
+    expect(edited?.version).toBe(1);
+    expect(edited?.settings?.models).toEqual(nextModels);
+    expect(await getPersonaVersion(actingAsAcme(), created.versionId)).not.toHaveProperty("models");
   });
 
-  it("mints a version for a speaking speed change alone", async () => {
+  it("updates speaking speed without creating a core version", async () => {
     const created = await createPersona(actingAsAcme(), rita);
 
     const edited = await editPersona(actingAsAcme(), created.id, {
+      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
       models: {
         ...RECOMMENDED_PERSONA_MODELS,
         tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed: 1.25 },
       },
     });
 
-    expect(edited?.version).toBe(2);
-    expect(edited?.models.tts.speed).toBe(1.25);
+    expect(edited?.version).toBe(1);
+    expect(edited?.settings?.models.tts.speed).toBe(1.25);
   });
 
   it("refuses an unsupported provider/model pair before writing", async () => {
@@ -406,6 +402,7 @@ describe("renaming a persona", () => {
     const before = await rowCounts();
 
     const renamed = await editPersona(actingAsAcme(), created.id, {
+      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
       name: "Patient Rita",
       description: "Rita, after the hearing aid arrived",
     });
@@ -426,6 +423,7 @@ describe("renaming a persona", () => {
     const created = await createPersona(actingAsAcme(), rita);
 
     const renamed = await editPersona(actingAsAcme(), created.id, {
+      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
       name: "The loud one",
     });
 
@@ -437,6 +435,7 @@ describe("renaming a persona", () => {
     const created = await createPersona(actingAsAcme(), rita);
 
     const cleared = await editPersona(actingAsAcme(), created.id, {
+      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
       description: null,
     });
 
@@ -456,6 +455,7 @@ describe("renaming a persona", () => {
     const created = await createPersona(actingAsAcme(), rita);
 
     const edited = await editPersona(actingAsAcme(), created.id, {
+      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
       name: "Louder Rita",
       personality: "Rita gets louder when the agent mishears her.",
     });
@@ -611,7 +611,7 @@ describe("an immutable persona version", () => {
 
     await expect(
       database.sql(
-        `update persona_version set identity_name = 'Somebody Else' where id = $1`,
+        `update persona_definition_version set identity_name = 'Somebody Else' where id = $1`,
         [created.versionId],
       ),
     ).rejects.toMatchObject({
@@ -629,7 +629,7 @@ describe("an immutable persona version", () => {
 
     await expect(
       database.sql(
-        `update persona_version set personality = 'Rewritten' where id = $1`,
+        `update persona_definition_version set personality = 'Rewritten' where id = $1`,
         [created.versionId],
       ),
     ).rejects.toMatchObject({
@@ -647,7 +647,7 @@ describe("an immutable persona version", () => {
 
     await expect(
       database.sql(
-        `update persona_version set stt_model = 'gpt-4o-transcribe' where id = $1`,
+        `update persona_definition_version set parameter_contract = '[]'::jsonb where id = $1`,
         [created.versionId],
       ),
     ).rejects.toMatchObject({
@@ -655,51 +655,20 @@ describe("an immutable persona version", () => {
       constraint: "persona_version_semantics_immutable",
     });
 
-    expect((await getPersona(actingAsAcme(), created.id))?.models).toEqual(
+    expect((await getPersona(actingAsAcme(), created.id))?.settings?.models).toEqual(
       RECOMMENDED_PERSONA_MODELS,
     );
   });
 });
 
-describe("the columns a version is stored in", () => {
-  it("refuse a blank authored value written around the module", async () => {
+describe("stored core and project settings validation", () => {
+  it("refuses a blank core value written around the module", async () => {
     const created = await createPersona(actingAsAcme(), rita);
-
-    await expect(
-      database.sql(
-        `insert into persona_version
-           (id, persona_id, version, identity_name, personality, language,
-            llm_provider, llm_model, stt_provider, stt_model,
-            tts_provider, tts_model, tts_voice_id, tts_speed)
-         values ($1, $2, 99, '   ', 'Patient', 'en-US',
-           'openai', 'gpt-5.6-terra', 'deepgram', 'nova-3-general',
-           'cartesia', 'sonic-3.5', 'a-voice', 1.0)`,
-        [newId("prsv"), created.id],
-      ),
-    ).rejects.toMatchObject({
-      code: POSTGRES_ERROR.checkViolation,
-      constraint: "persona_version_identity_name_stated",
-    });
+    await expect(database.sql(`insert into persona_definition_version (id, persona_id, version, identity_name, personality, language, parameter_contract) values ($1, $2, 99, ' ', 'Patient', 'en-US', $3)`, [newId("prsv"), created.id, JSON.stringify(PERSONA_PARAMETER_CONTRACT)])).rejects.toMatchObject({ code: POSTGRES_ERROR.checkViolation, constraint: "persona_version_identity_name_stated" });
   });
-
-  it("refuse a speaking speed outside the release's range", async () => {
+  it("refuses invalid project values written around the module", async () => {
     const created = await createPersona(actingAsAcme(), rita);
-
-    await expect(
-      database.sql(
-        `insert into persona_version
-           (id, persona_id, version, identity_name, personality, language,
-            llm_provider, llm_model, stt_provider, stt_model,
-            tts_provider, tts_model, tts_voice_id, tts_speed)
-         values ($1, $2, 98, 'Rita Alvarez', 'Patient', 'en-US',
-           'openai', 'gpt-5.6-terra', 'deepgram', 'nova-3-general',
-           'cartesia', 'sonic-3.5', 'a-voice', 1.9)`,
-        [newId("prsv"), created.id],
-      ),
-    ).rejects.toMatchObject({
-      code: POSTGRES_ERROR.checkViolation,
-      constraint: "persona_version_tts_speed_in_range",
-    });
+    await expect(database.sql(`update project_persona set parameter_values = jsonb_set(parameter_values, '{tts_speed}', '1.9') where persona_definition_id = $1`, [created.id])).rejects.toMatchObject({ code: POSTGRES_ERROR.checkViolation });
   });
 });
 
@@ -764,13 +733,71 @@ describe("tenancy", () => {
   it("refuses the mismatched pairing even for raw SQL that bypasses the module", async () => {
     await expect(
       database.sql(
-        `insert into persona
+        `insert into persona_definition
            (id, organization_id, project_id, name, current_version_id)
          values ($1, $2, $3, 'Smuggled', $4)`,
         [newId("prs"), acme.organization, globex.project, newId("prsv")],
       ),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+});
+
+
+describe("project persona storage boundaries", () => {
+  it("refuses incomplete settings and keeps the association ownership fixed", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+    const settings = created.settings;
+    if (settings === null) throw new Error("creation saved no settings");
+    const complete = defaultPersonaParameterValues(PERSONA_PARAMETER_CONTRACT);
+    const { tts_speed: _speed, ...missing } = complete;
+    for (const values of [
+      missing,
+      { ...complete, unrecognized: 1 },
+      { ...complete, tts_speed: "1" },
+      { ...complete, tts_voice_id: " " },
+    ]) {
+      await expect(
+        database.sql(
+          "update project_persona set parameter_values = $1::jsonb where id = $2",
+          [JSON.stringify(values), settings.id],
+        ),
+      ).rejects.toSatisfy(
+        (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+      );
+    }
+    await expect(
+      database.sql(
+        "update project_persona set organization_id = $1, project_id = $2 where id = $3",
+        [globex.organization, globex.project, settings.id],
+      ),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+    expect((await getPersona(actingAsAcme(), created.id))?.settings).toEqual(
+      settings,
+    );
+  });
+
+  it("refuses a foreign custom definition, mismatched tenancy, and duplicate use", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+    const values = JSON.stringify(
+      defaultPersonaParameterValues(PERSONA_PARAMETER_CONTRACT),
+    );
+    const insert = (organizationId: string, projectId: string, definitionId = created.id) =>
+      database.sql(
+        "insert into project_persona (id, organization_id, project_id, persona_definition_id, parameter_values) values ($1, $2, $3, $4, $5::jsonb)",
+        [newId("ppr"), organizationId, projectId, definitionId, values],
+      );
+    await expect(insert(globex.organization, globex.project)).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+    await expect(insert(globex.organization, acme.project, EGMA_PROVIDED_PERSONAS.defaultPersona)).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+    await expect(insert(acme.organization, acme.project)).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.uniqueViolation,
     );
   });
 });

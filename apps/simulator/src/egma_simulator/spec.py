@@ -1,14 +1,5 @@
-"""A claimed spec, as a thing with parts rather than a bag of keys.
-
-A spec arrives as JSON and is held to the contract's schema before anything
-is done with it. Past that gate it becomes this: a small frozen record whose
-fields say what they hold, so the code that conducts a simulation asks for
-``spec.limits.max_turns`` instead of walking three dictionaries deep and
-trusting that each step is there.
-
-The gate and the type are deliberately the same step. Nothing builds one of
-these without validating first, which is what lets every reader below take
-the fields at face value.
+"""Validate claimed JSON against the shared schema, then build frozen typed records.
+Readers can use nested fields without repeating schema checks.
 """
 
 from __future__ import annotations
@@ -46,16 +37,9 @@ class MockTool:
 
 @dataclass(frozen=True)
 class AuthoredPersona:
-    """Who talks on the human side of the transcript, as the author wrote them.
-
-    Three values, and the contract requires all three, so nothing below has
-    to decide what an absent one would have meant — deciding that would be
-    deciding who the agent heard.
-
-    The name is the persona's own, the one they give the agent when asked.
-    It is not the team's label for the library row, which never crosses this
-    wire, and it is not the model's invention: the prompt states it, so the
-    same test hears the same person on every run.
+    """Authored persona identity, behavior, and language.
+    The name is what the persona gives the agent, not a library label or model
+    invention.
     """
 
     name: str
@@ -258,15 +242,8 @@ class SimulationSpec:
     """
 
     job_dispatch_metadata: dict[str, Any] | None = None
-    """The metadata this one simulation's agent dispatch carries, exactly as
-    the test wrote it.
-
-    ``None`` is the ordinary case. Nothing here reads it: it is the LiveKit
-    agent's own channel, so it is carried to the plug and written to the
-    worker byte for byte, because a value the simulator tidied would be a
-    value the agent under test never saw. LiveKit Project credentials carry it
-    on Egma's dispatch. A LiveKit token endpoint carries it in the room
-    configuration that the endpoint copies into the token.
+    """Test-owned dispatch metadata, or None. Preserve values when forwarding to
+    LiveKit dispatch or the token endpoint's room_config.
     """
 
     mock_tools: tuple[MockTool, ...] = ()

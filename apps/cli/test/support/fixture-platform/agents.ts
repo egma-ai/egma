@@ -1,42 +1,11 @@
 /**
- * The agent and connection endpoints of the fixture platform.
+ * Agent and connection fixture routes matching the public resource paths.
+ * Organization scope comes from the key; project scope comes from body or query.
+ * Return only credential metadata, never sealed values or request-only credentials.
  *
- * This is the contract the CLI is built against, written down as something that
- * runs: register an agent together with the first way of reaching it, read
- * it back, and attach another connection later.
- *
- * It answers what the real instance answers, including which refusal goes with
- * which mistake, because a fixture that is kinder than the real thing is a
- * fixture that hides bugs. Everything it refuses, the access layer behind the
- * seam refuses for the same reason: a modality the connection type does not
- * speak, a config key the access variant has no place for, a credential where
- * none belongs or none where one is required, and a name a living row already
- * holds.
- *
- * Three shapes are load-bearing and none of them is this file's to change:
- *
- * - **No resource is rooted at a project.** An agent is `/v1/agents/:agentId`
- *   and never `/v1/projects/:projectId/agents/…`. A write may *name* a project
- *   in its body; a read filters by one in the query.
- * - **The organization never appears in an address.** Which customer this is
- *   comes from the key and from nowhere else, which is what stops a copied key
- *   writing into somebody else's account by asking nicely.
- * - **A sealed secret never comes back.** A durable connection credential is
- *   stored sealed and answered as its last four characters and nothing more.
- *   A request-only platform selection credential is not stored at all.
- *
- * Two more are the public API's rather than the factory's, and both are here
- * because a client that guessed at either would fail in somebody's terminal:
- *
- * - **Registering is retry-safe by construction.** A registration carrying an
- *   inline connection goes through the per-kind reuse rule, and the reply's
- *   `result` says which of the three things happened — created, reused, or the
- *   same agent reached a new way. A `reused` registration wrote no row, so it
- *   rides a 200 where the other two ride a 201.
- * - **An unknown key is refused by name.** That is what turns a typo into an
- *   answer a coding agent can act on, and it is what makes the dropped vendor
- *   payload loud: a client still sending what was pulled from the provider
- *   hears so, instead of watching egma quietly keep nothing.
+ * Registration can create an identity alone or include a connection. Inline
+ * connections use the same validation before create or reuse. Reuse returns 200;
+ * creation returns 201. Reject unknown keys and invalid technical tuples.
  */
 
 import { isIP } from "node:net";
@@ -202,15 +171,8 @@ function credentialString(what: string, field: string, value: unknown): string {
 }
 
 /**
- * Which LiveKit server a url names, as one comparable string. The scheme is
- * dropped because the SDKs normalise between the websocket pair and the HTTP
- * pair themselves, so two spellings reach one server. `URL` already reports an
- * empty port for one that is its scheme's default, so `wss://a`, `wss://a:443`
- * and `ws://a:80` compare equal, while a self-hosted `:7880` is kept.
- *
- * Copied from the registry rather than imported, like every other gate here:
- * this fixture re-implements the rules on purpose, so it can never be kinder
- * than the real thing by borrowing from it.
+ * Normalize LiveKit server identity without scheme or default ports, preserving
+ * nondefault ports. Implement independently so fixture behavior can expose registry drift.
  */
 function livekitServerOrigin(url: string): string {
   const written = url.trim();
@@ -442,18 +404,8 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
         },
       },
     ],
-    // The simulator dials: the phone plug is in the shipped build. Whether one
-    // deployment's carrier is set up is a separate fact, answered elsewhere.
-    //
-    // **This fixture stands for a platform whose carrier is set up**, which is
-    // why it starts a phone run rather than refusing one. The real API asks a
-    // second question this fixture has no answer to — `phone_setup_required`,
-    // refused at `POST /v1/runs` before a row is written when that
-    // deployment's phone half was never configured — because the answer is a
-    // deployment's own environment and a fixture has no deployment. A client
-    // reading a refusal from a real platform therefore meets a code this
-    // fixture never sends; `startRun` in `platform/runs.ts` relays any 422 by
-    // its sentence rather than by its code, so there is nothing here to teach.
+    // This fixture represents a configured phone deployment. The real API can also
+    // return phone_setup_required before run creation; the CLI relays its 422 explanation.
     simulatorAdapter: true,
   },
   livekit_room: {
@@ -692,16 +644,7 @@ class Refusal extends Error {
   }
 }
 
-/**
- * The unknown-key gate, written once for both objects a registration carries.
- *
- * Refusing by name rather than ignoring is what turns a typo into an answer a
- * coding agent can act on. And it is what makes the dropped vendor payload
- * loud: egma no longer keeps what was pulled from the provider — the agent's
- * content stays where it lives and is read fresh through the sealed credential
- * — so a client still sending a copy of it is told, rather than left believing
- * egma holds something it does not.
- */
+/** Reject unknown keys by name on agent and connection payloads. */
 function refuseUnknownKeyIn(
   body: Record<string, unknown>,
   held: readonly string[],
@@ -1379,18 +1322,9 @@ export function agentRoutes(options: {
   };
 
   /**
-   * A connection payload the registry will take, checked whole.
-   *
-   * Pure: nothing here reads or writes anything, which is what lets it happen
-   * before the outcome is decided. **Every path runs it, and runs all of it.**
-   * A registration that turns out to be a reuse is held to exactly what a
-   * registration that turns out to be a create is held to — otherwise a body
-   * egma would refuse from a new customer would rotate a live credential for an
-   * old one, and the same client would work on one machine and fail on the
-   * next.
-   *
-   * The order is the registry's own and it is contract: the full technical
-   * tuple, then config, credentials, and name.
+   * Validate the complete connection before deciding create or reuse.
+   * Order: technical tuple, config, credentials, then name. Reuse must not bypass
+   * checks that would reject a new connection.
    */
   const admitConnection = (input: Record<string, unknown>): Admitted => {
     const agentPlatform =
@@ -1648,14 +1582,9 @@ export function agentRoutes(options: {
       },
       {
         /**
-         * Register an agent, with the first way of reaching it written in
-         * the same request: an agent nothing can reach is not worth having, so
-         * the happy path never produces one.
-         *
-         * Both rows or neither, and the reuse rule runs in the same breath:
-         * a living connection about the same vendor agent decides the outcome.
-         * A matching Retell Chat connection answers what is there with the
-         * credential rotated whole; no match writes both. `result` says which.
+         * Register an agent identity, optionally with an atomic inline connection.
+         * An inline connection can reuse an existing match and rotate its credential;
+         * result identifies the outcome.
          */
         method: "POST",
         path: "/v1/agents",

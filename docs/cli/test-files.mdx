@@ -282,3 +282,16 @@ The argument is one local Suite directory. The Agent and Connection are
 explicit stable IDs from `egma/config.yaml`. Egma pushes the complete
 repository before it starts the Run. A failed push creates no Run. On success,
 the command prints the Run ID and web results URL, then returns.
+
+## Persona settings
+
+A test file selects persona definitions by name or stable ID. Resolution uses
+its bound project. The first selection saves complete default model and voice
+settings for that project. Every test selecting the same definition shares
+those project settings.
+
+`egma pull` and `egma push` keep the definition selection in the file. They do
+not copy project model settings into test content. Model settings and current
+persona core edits apply to future runs without a new test version. A run that
+already exists keeps its selected core and settings. See
+[Personas](/concepts/personas).

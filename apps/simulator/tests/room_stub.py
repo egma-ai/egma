@@ -1,112 +1,12 @@
-"""A LiveKit, room-shaped, on this machine — what CI holds a room
-simulation against.
+"""Offline LiveKit room fixtures using the real drivers above their network methods.
+Record room, dispatch, deletion, and RPC requests. Token requests still use
+the local HTTP server in token_endpoint_stub.
 
-The room-shaped twin of the Retell stub one layer down: a whole voice
-simulation conducts against it with no LiveKit server, no project, no
-worker and no network. What it stands in for is exactly the places the
-room driver reaches a LiveKit — the requests it makes of the project,
-joining the room, and deleting it — and nothing else.
-
-Not the token request. A connection that asks a customer's own endpoint
-for its token really asks, over a socket, of the endpoint in
-:mod:`token_endpoint_stub`; nothing here stands in for that.
-
-Everything else is the real driver's own code, and deliberately so. The
-requests recorded below are the very protobuf messages that would have
-gone on the wire, built by the driver: the room's name, the agent's name,
-and the metadata the test wrote for the agent's dispatch. The room's own
-metadata is recorded too, and what it records is that egma writes none.
-So are the waits, the endings, the sentences a person
-reads and the scrubbing of the key pair. What this suite proves about a
-refusal or an ending is therefore proved about the code a customer's
-server will run.
-
-It is a subclass rather than a stand-in for exactly that reason: a fake
-written beside the driver would drift from it, and the first anybody
-would know is a live call.
-
-The room carries two channels and this one carries both. Beside the
-audio, a room is where the agent's side asks egma to answer for its
-tools — so the room here registers the methods the driver registers,
-refuses what the transport refuses, and lets a test say the two things a
-session says: hello, and one tool call. What answers them is egma's own
-code, unchanged, with no LiveKit and no network anywhere.
-
-The script it is built with:
-
-- ``greeting`` — what the agent says the moment it is in the room.
-  Absent: it joins and says nothing, and the persona speaks first.
-- ``replies`` — the agent's answers, in order, one per stretch of persona
-  speech. A spent script answers with quiet, the way a room with nobody
-  talking in it really sounds.
-- ``answer_delay_seconds`` — how long the agent is quiet before each
-  answer. Rendered into the room's own audio, where a live exchange
-  carries it and where time-to-first-word is read from.
-- ``hangs_up_after_replies`` — when true, the agent leaves the room once
-  its last reply has been carried, which is what an agent ending the
-  exchange looks like from the plug's seat.
-- ``agent_joins`` — false for the worker that never comes: the room
-  opens, the dispatch goes out, and nobody arrives.
-- ``agent_was_already_in_the_room`` — true for the worker that got there
-  first, which is what the three ways in that egma does not dispatch on
-  look like. It is in the room and publishing, and no arrival is ever
-  announced for it.
-- ``agent_publishes_audio`` — false for the worker that joins and
-  publishes nothing, which is a worker that crashed rather than an agent
-  under test.
-- ``refuses_room`` / ``refuses_dispatch`` — the platform's own words when
-  it will not make the room, or will not dispatch into it.
-- ``refuses_join`` — the platform's own words when it will not take the
-  way in at all, which is what a spent or expired token looks like from
-  egma's seat.
-- ``refuses_rpc`` — a participant that will not take the mock-tool methods
-  at all, which must cost the exchange and never the conversation.
-- ``refuses_the_offer_at_the_join`` — a participant that will not take them
-  at the join and will take them after it, which is the room the driver's
-  second offer exists for.
-
-## The same room, carrying typing
-
-A chat simulation is the same room with nobody speaking in it, so it gets
-the same treatment: :class:`ChatRoomStubBackend` is the real chat driver
-with the three requests it makes of a LiveKit answered here, and
-:class:`StubTextRoom` is the real text room with only its join stood in
-for. Everything a chat test then exercises is the driver's own — stamping
-each stream at its header, reading it to its close, skipping egma's own
-words, reading the agent's own state, deciding where a turn ends and
-waiting out whatever it has to wait out, and putting the mock-tool methods
-on egma's participant. What is scripted is only what the agent does, and
-the interesting scripts are the ones a real agent produces:
-
-- ``greeting`` / ``replies`` — as above, except that one entry may be a
-  **list** of utterances rather than one. That is a turn arriving in
-  pieces, which is what an agent that says a filler and then answers
-  really sends. Each utterance goes in as a *stream* handed to the
-  driver's header handler, never as a finished utterance on its queue.
-- ``ClosesLate(text, closes_after_seconds)`` in place of any of those
-  strings — an utterance whose stream opens with its turn and closes after
-  it. The one thing a queue of finished utterances cannot say, and the
-  shape the agent's opening words were lost in.
-- ``answer_delay_seconds`` — how long the agent is quiet before it starts
-  a turn.
-- ``pause_seconds`` — the gap *inside* a turn, between two of its
-  utterances. This is the tool-call pause, and it is the whole reason the
-  turn does not end at the first close.
-- ``agent_states`` — what the agent publishes on ``lk.agent.state``, one
-  list per turn, each published once that turn's last stream has closed.
-  ``None`` is an agent that publishes nothing at all, and a turn scripted
-  as ``["listening"]`` alone is the coalesced one where egma never saw
-  ``thinking`` or ``speaking`` go by.
-- ``agent_state_at_start`` — the state a session announces when it starts,
-  before it has greeted anybody. It means ready, not finished.
-- ``agent_publishes_audio_track`` / ``marks_speech`` — the two wire facts
-  that say an agent is speaking rather than typing, scriptable separately
-  because they reach egma by different routes and either alone is enough.
-
-The record fields are the voice fake's own — ``rooms``, ``dispatches``,
-``deleted``, ``standing_ready`` — because they are the same facts about
-the same room, and a chat test that reads like a voice one is the point of
-having one connection type answer in two modalities.
+Voice scripts control greetings, replies, audio delays, arrival order, hang-up,
+and room/dispatch/join/RPC refusals. They exercise real setup and ending logic.
+Chat scripts feed streams through registered handlers, including multi-utterance
+turns, ClosesLate readers, pauses, state changes, and accidental audio output.
+This preserves production stream ownership and turn-completion code in tests.
 """
 
 from __future__ import annotations
@@ -182,16 +82,8 @@ class Dispatch:
 
 
 class StubRoom:
-    """The room itself: who is in it, what can be heard in it, and what
-    can be called in it.
-
-    The calling half is the room's second channel, and it is as real as
-    the audio one: the methods registered below are the driver's own, the
-    refusals are the driver's own conversion of them, and the caller side
-    behaves the way the transport behaves — a method nobody registered is
-    refused, and a payload too large for one message is refused before it
-    is carried. So an agent's side of the mock-tool exchange can be
-    written against this room and is written against the real one.
+    """Stub participants, audio, and RPC transport while using the driver's handlers.
+    Refuse unregistered methods and oversized messages at the transport boundary.
     """
 
     def __init__(self, backend: RoomStubBackend) -> None:
@@ -317,15 +209,8 @@ class StubRoom:
         return await performed(self._methods, method, payload)
 
     async def _reports(self) -> None:
-        """The hello an ordinary worker's SDK sends, once egma is listening.
-
-        Waits for the offer rather than assuming it, because a room that
-        refused the methods at the join is offered them again from
-        ``dial`` and the agent's side would knock at either moment.
-
-        An empty census, because what the plug and the driver read is that
-        a hello arrived at all; every test that cares which tools were
-        reported sends its own, and a second census replaces the first.
+        """Wait for RPC registration, then send an empty hello for startup.
+        Tests of tool discovery send their own census, which replaces this one.
         """
         await self._backend.stub.standing_ready.wait()
         with contextlib.suppress(Exception):
@@ -335,15 +220,8 @@ class StubRoom:
             )
 
     def agent_arrives(self, *, announced: bool = True) -> None:
-        """The worker turns up, and — unless it is broken — is heard.
-
-        ``announced`` is false for the worker that was in the room before
-        egma was. A room announces an arrival to whoever is already
-        watching; somebody who was there first is not an arrival to
-        anyone, and the transport says so once, in its other event. So
-        the participant is in the room and its audio is on the wire with
-        no arrival to wait for — which is exactly the case the driver has
-        to find by asking.
+        """Add the worker and optional audio. With announced=False, omit the arrival
+        event to test discovery of a participant present before Egma joined.
         """
         if AGENT_IDENTITY in self.who_arrived:
             return
@@ -400,15 +278,8 @@ def _test_endpoint_socket(addr_info: tuple[object, ...]) -> socket.socket:
 
 
 class PublicNameResolver:
-    """The fake's network edge for names: every hostname stands on one
-    public address.
-
-    The token request never asks it — the fake endpoint is a literal
-    loopback address, and aiohttp connects to a literal without a lookup.
-    The server an endpoint answers with is a name, and the driver looks
-    that name up before it sends the token there; this is what says where
-    the name stands, so the production check runs and passes, and a test
-    that wants it to refuse hands the driver a resolver of its own.
+    """Resolve test hostnames to a public address so server validation runs normally.
+    The literal loopback token endpoint bypasses DNS. Refusal tests inject a resolver.
     """
 
     async def resolve(
@@ -821,17 +692,9 @@ class ScriptedStream:
 
 
 class StubTextRoom(TextRoom):
-    """The real text room, with the LiveKit under it answered here.
-
-    Only reaching a LiveKit is stood in for, and everything a chat test
-    then walks is the driver's own code: registering the handlers it reads
-    the wire through, stamping each stream at its header, reading it to
-    its close, dropping egma's own words, taking the agent's own state off
-    the attribute channel, deciding where a turn ends and waiting out
-    whatever it has to wait out, and offering the mock-tool methods on
-    egma's participant. Even the join registers through the driver, so a
-    script fires the very handlers a real room fires. What is scripted is
-    only what the agent does.
+    """Real chat-room handlers with a stubbed LiveKit connection.
+    Script agent events through those handlers to exercise stream ownership,
+    reading, state changes, and RPC registration.
     """
 
     def __init__(self, backend: ChatRoomStubBackend, **built: Any) -> None:
@@ -925,20 +788,8 @@ class StubTextRoom(TextRoom):
             self._agent_says(self.stub.greeting)
 
     def agent_publishes_state(self, state: str) -> None:
-        """One ``lk.agent.state`` change, the way LiveKit delivers one.
-
-        Into the handler the driver registered for
-        ``participant_attributes_changed``, with the changed attributes
-        first and the participant second. That order is this event's
-        alone — every other participant event in ``livekit.rtc`` puts the
-        participant first — so it is the one thing here a fake must not
-        skip past: a stub calling one method deeper would leave the whole
-        suite green with the two arguments the wrong way round.
-
-        Only a *change* goes out, because only changed attributes travel.
-        An agent setting the state it is already in publishes nothing,
-        which is the same fact that makes two fast transitions coalesce
-        into one.
+        """Emit only changed state through participant_attributes_changed.
+        Pass attributes first and participant second, matching the real event signature.
         """
         if state == self._published_state:
             return
@@ -972,19 +823,10 @@ class StubTextRoom(TextRoom):
         )
 
     async def _speaks(self, turn: list[str | ClosesLate]) -> None:
-        """One turn, in however many utterances the script gives it.
-
-        The gaps are really waited out rather than declared, because the
-        thing under test is a rule about time: a pause inside a turn that
-        the driver did not wait through would end the turn early, and a
-        script that only claimed to pause could never catch that.
-
-        Every utterance goes in as a *stream* handed to the driver's own
-        header handler, never as a finished utterance dropped on its
-        queue. That is what lets a script say the thing a queue cannot —
-        this stream is open and its words are not here yet — and it means
-        the stamping, the reading and the dropping of egma's own words are
-        all the driver's code in every test below.
+        """Send each scripted utterance through the stream-header handler, with real
+        waits
+        for pauses. This exercises open-reader tracking and turn ownership, not just a
+        queue.
         """
         # Which turn the streams are stamped with is the driver's to
         # decide, at each header, exactly as on a real wire. A reply that
@@ -1179,19 +1021,11 @@ class ChatStub:
     so they are scripted apart."""
 
     agent_states: list[list[str]] | None = None
-    """The states the agent publishes on ``lk.agent.state``, one list per
-    turn, turn nought being the greeting's. Each turn's states are
-    published once that turn's last stream has closed, which is the order a
-    real session produces them in.
-
-    ``None`` — the default — is an agent that publishes no state at all,
-    which is every agent that is not a LiveKit session and is why the
-    quiet period is still a real path. A turn scripted with
-    ``["listening"]`` alone is the coalesced case: the platform dropped the
-    intermediate publishes and egma never saw ``thinking`` or ``speaking``,
-    which is exactly why nothing may wait to see them. A state the agent
-    is already in publishes nothing, here as on the wire, so repeating one
-    from the turn before scripts silence rather than a second arrival."""
+    """State changes per turn, starting with the greeting, sent after its last stream
+    closes.
+    None publishes no states. Repeated states emit no change; ["listening"] alone
+    covers coalesced transitions without thinking or speaking events.
+    """
 
     agent_state_at_start: str | None = None
     """A state published the moment the worker arrives, before any

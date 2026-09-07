@@ -6,34 +6,9 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * The bar that explains completion.
- *
- * `DESIGN.md` gives this component one line — "Progress: explain completion —
- * transform-based fill, linear while active" — and the registry's version keeps
- * only the first half of it. What arrives from shadcn fills on `transition-all`
- * with the default easing, which is `all` (forbidden outright) decelerating
- * (which lies about the rate of the work). Both are fixed here.
- *
- * **It is dressed to meet `RunProgress`, not to copy it today.**
- * `ui/run-status.tsx` already draws this product's progress bar, and every
- * decision it made that `DESIGN.md` backs is taken here too: a neutral track,
- * an ink fill, the chip radius, 200ms linear, and no movement under reduced
- * motion.
- *
- * **One measurement differs on purpose.** `RunProgress` is `h-1.5`, which is
- * 6px and not on the 4px grid `DESIGN.md` sets; a general primitive has no
- * business starting off the grid, so this is `h-2`. The two are therefore 2px
- * apart until `RunProgress` moves onto this primitive, and adopting the 8px is
- * the change that migration should make rather than an override it should
- * carry. `run-status.tsx` is outside this ticket's fence, so it is named here
- * instead of edited.
- *
- * The fill is `--foreground` rather than the brand orange, which is the choice
- * `RunProgress` already made and worth keeping deliberately: `DESIGN.md` spends
- * Ember on "focus, icons, marks, and narrow active edges" and Deep Ember on
- * "primary filled actions with white text". A bar that is neither reads as ink,
- * and ink is also the highest contrast available in both themes for a shape
- * that carries no text of its own.
+ * Theme-styled progress with an ink fill, transform-based updates, and linear
+ * easing while active. Reduced motion removes movement. This primitive has
+ * its own height; RunProgress is a separate composition.
  */
 function Progress({
   className,
@@ -42,15 +17,8 @@ function Progress({
   ...props
 }: ComponentProps<typeof ProgressPrimitive.Root>) {
   /*
-   * `max` honoured, which the registry's version drops.
-   *
-   * Radix reads `max` — it puts it on `aria-valuemax` and decides `data-state`
-   * with it — but the indicator shadcn ships computes `100 - value`, so it only
-   * ever agrees with the label when `max` happens to be 100. A caller counting
-   * three onboarding stages says `value={1} max={3}`, is announced as "1, out of
-   * 3", and is drawn at one percent. The eye and the screen reader must not be
-   * given two different answers, so the share is computed the same way Radix
-   * computes the one it announces.
+   * Compute the fill using max as well as value so its visual fraction agrees
+   * with the accessible progress value.
    */
   const ceiling = typeof max === "number" && max > 0 ? max : 100;
   const filled =
@@ -68,17 +36,7 @@ function Progress({
     <ProgressPrimitive.Root
       data-slot="progress"
       className={cn(
-        /*
-         * "Quiet hover, read-only, progress, and supporting surfaces use a
-         * neutral Graphite-and-Paper mix." That mix is `--surface-soft`.
-         *
-         * The track is square, like every other component: the 2026-08-23
-         * ruling collapsed the radius table to one line and a progress bar is
-         * a component rather than a shape. The paragraph below about a round
-         * cap is kept because the mechanism it argues for is still the right
-         * one — a `translateX` inside a clipping track survives a cap of any
-         * radius, including none.
-         */
+        /* Use a neutral track and let it clip the moving indicator. */
         "relative h-2 w-full overflow-hidden rounded-chip bg-surface-soft",
         className,
       )}
@@ -87,35 +45,16 @@ function Progress({
       {...props}
     >
       {/*
-       * Transform-based, and the transform is a `translateX` inside a clipping
-       * track rather than the `scaleX` `RunProgress` uses.
-       *
-       * Both are "transform-based fill". This one is the registry's, so a
-       * component pasted from shadcn lands on it unedited, and it is also the
-       * better of the two here: `scaleX` on a pill squashes the leading cap
-       * horizontally, while a full-width indicator slid left keeps its cap
-       * round and lets the track clip the other end.
+       * Translate a full-width indicator inside the clipping track to represent
+       * the completed share without changing its geometry.
        */}
       <ProgressPrimitive.Indicator
         data-slot="progress-indicator"
         className={cn(
           "size-full rounded-chip bg-foreground",
           /*
-           * "Linear while active."
-           *
-           * Linear is the whole point: a fill that decelerates says the work is
-           * slowing down, and a bar that is still moving has no business
-           * claiming that. The easing turns over to `--ease-out` only on
-           * `data-state="complete"`, where a value settling into its final
-           * place is exactly what an ease-out describes.
-           *
-           * 200ms is written here rather than read from the theme, and it is
-           * the same non-token duration, for the same reason, as the one
-           * already written in `ui/run-status.tsx`: the motion tokens name
-           * interface motion — a press, a popover, a dialog — and this is a
-           * value catching up to a new value, which `DESIGN.md` gives a
-           * behaviour for and no token. It is under the 300ms ceiling. Called
-           * out in the pull request for the developer to overrule.
+           * Use a short linear transition while active, then ease into completion.
+           * This smooths reported values and does not estimate the rate of work.
            */
           "transition-transform duration-200 ease-linear",
           "data-[state=complete]:ease-out",

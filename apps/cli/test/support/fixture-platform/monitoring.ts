@@ -1,31 +1,8 @@
 /**
- * The monitoring endpoints of the fixture platform.
- *
- * Egma pulls a Retell account itself, from a key the terminal pastes once — so
- * the CLI never speaks to Retell on this path, and there is no fake Retell
- * behind this group. What stands in for the account is seeded here: a key, and
- * the voice agents it opens.
- *
- * Three shapes are the contract's rather than this file's, and each of them is
- * something the CLI would get wrong if the fixture were kinder than the real
- * platform:
- *
- * - **Discovery is the one list that carries registration facts.** It answers
- *   which of the account's agents this project already registers, and which of
- *   those already pull — which is what makes it a picker rather than a
- *   catalogue.
- * - **Start is one commit that registers, seals and switches on.** A platform
- *   agent this project does not register yet is registered by the same request
- *   that starts watching it, because watching one *means* registering it
- *   (ADR-0015).
- * - **A refusal is per tick, never per request.** A tick that loses comes back
- *   in `refused` with a sentence, and the ticks beside it still start. There is
- *   no 404 and no 409 on start: a request naming at least one platform agent is
- *   answered entry by entry.
- *
- * The sealed key never comes back. It is pushed onto `monitoringKeys` so a
- * check can prove it reached the platform without reading it off a recorded
- * request body, and the row answers its last four characters and nothing more.
+ * Monitoring fixture with seeded Retell agents; the CLI never contacts Retell directly.
+ * Discovery includes registration and monitoring state. Start can register an agent,
+ * store its key, and enable monitoring, returning per-agent success or refusal.
+ * Keep received secrets in test state and return only their last four characters.
  */
 
 import { blankAgent, type StoredAgent } from "./agents.ts";

@@ -1,18 +1,7 @@
 /**
- * The platform workspace: where a self-hoster operates their own egma.
- *
- * **Two contexts, one CLI.** An *agent repository* holds tests and a binding to
- * the platform that owns their identifiers. A *platform workspace* holds the
- * deployment itself — the compose file, the containers, the carrier
- * configuration. They are different directories with different state and
- * different secrets, and on one laptop they are often owned by the same person.
- * Keeping them apart is what stops platform credentials spreading into every
- * repository that talks to the platform.
- *
- * A platform workspace is recognised by its `docker-compose.yml`, walking up
- * from wherever the command was run — the same way a git command finds its
- * repository. Nothing is created to make a directory into one: a workspace with
- * no compose file is not an unconfigured workspace, it is somewhere else.
+ * Find a platform workspace by walking upward to docker-compose.yml.
+ * It holds deployment state and credentials; agent repositories hold tests and
+ * platform bindings. A directory without a Compose file is not a workspace.
  */
 
 import { randomBytes } from "node:crypto";
@@ -34,15 +23,8 @@ export const COMPOSE_FILE = "docker-compose.yml";
 export const PLATFORM_DIRECTORY = ".egma-platform";
 
 /**
- * The file this workspace's **bootstrap variables** are written to.
- *
- * Not `.env`: that file is the self-hoster's, hand-edited and often committed
- * to whatever holds their infrastructure, and a command that rewrote it would
- * be editing somebody's notes. This one is egma's to write and is read back on
- * every `self-host` command.
- *
- * It holds only `BOOTSTRAP_VARIABLES`. Provider keys and the optional carrier
- * route live in the operator's deployment environment.
+ * Private file for Egma-managed BOOTSTRAP_VARIABLES.
+ * Keep provider keys and carrier settings in the operator's deployment environment.
  */
 export const PLATFORM_CONFIG_FILE = "platform.env";
 
@@ -133,14 +115,8 @@ export function platformConfigPath(workspace: string): string {
 }
 
 /**
- * Every line the file holds, or an empty record where nothing has written one.
- *
- * Parsed rather than sourced: these are `NAME=value` lines egma wrote itself,
- * one per line, with no quoting and no expansion, because anything cleverer
- * would be a shell dialect to get subtly wrong.
- *
- * Callers pass the result through `bootstrapVariables` before it reaches a
- * container or a later write.
+ * Read literal NAME=value lines without shell expansion. Missing files return empty.
+ * Filter through bootstrapVariables before container use or rewriting.
  */
 export function readPlatformConfig(workspace: string): Record<string, string> {
   const file = platformConfigPath(workspace);
@@ -212,15 +188,8 @@ export function platformDirectory(workspace: string): string {
 }
 
 /**
- * Write this workspace's bootstrap variables, replacing whatever was there.
- *
- * Created private and kept private: it holds the media server's secret, and a
- * mode is set on every write rather than only at creation, so a file somebody
- * loosened is tightened again the next time `self-host up` runs. The directory it sits
- * in is held the same way.
- *
- * The writer applies the same closed bootstrap list as the reader. No carrier
- * route or provider key can enter this file through a caller.
+ * Replace only allowed bootstrap values and enforce private file and directory modes.
+ * Provider keys and carrier settings are excluded.
  */
 export function writePlatformConfig(
   workspace: string,
@@ -235,19 +204,9 @@ export function writePlatformConfig(
     ...Object.entries(bootstrap).map(([name, value]) => `${name}=${value}`),
     "",
   ].join("\n");
-  // **Written beside the file and renamed over it, never into it.**
-  //
-  // This file holds the media-server credential shared by three containers,
-  // and `writeFileSync` onto the live path truncates before it writes. A process
-  // that dies in that window leaves a half-written config — a deployment whose
-  // media components disagree about authentication, which is harder to
-  // diagnose than one that is plainly absent.
-  //
-  // A rename within a directory is atomic, so a reader sees the whole old file
-  // or the whole new one and never a partial. `wx` makes the temporary this
-  // run's own file or nothing at all, and it is removed if anything downstream
-  // of it fails, so a crash leaves no litter beside a working configuration.
-  // The same mechanism the credentials store uses, for the same reason.
+  // Write a private wx temporary and atomically rename it over the target.
+  // Readers must see a complete old or new credential file. Clean up the temporary
+  // on handled failures.
   const fresh = path.join(
     path.dirname(file),
     `.platform-${process.pid}-${randomBytes(6).toString("hex")}.env`,

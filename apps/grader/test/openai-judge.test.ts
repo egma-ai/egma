@@ -16,14 +16,8 @@ import {
 import { openaiJudge } from "../src/judge/openai.ts";
 
 /**
- * The OpenAI provider's wire, without the wire.
- *
- * The live smoke beside this file asks a real model and needs a real account;
- * this one asserts everything about the request and the answer that does not
- * need one — the endpoint, the header the key rides in, the shape of the body,
- * what a malformed answer comes to, and which refusals are worth asking again
- * about. `fetch` is replaced rather than intercepted, because what is under
- * test is the one function that calls it.
+ * Replace fetch to test request shape, authentication, parsing, and retry rules.
+ * The live smoke test separately checks compatibility with the provider.
  */
 
 const EVIDENCE: JudgeInput = {
@@ -53,8 +47,8 @@ const THE_PROMPT =
 const QUESTION: JudgeQuestion = {
   prompt: THE_PROMPT,
   criterion: "the agent confirms the new time",
-  assertion: "behavior_1",
   evidence: EVIDENCE,
+  expectedBehaviors: [],
 };
 
 const A_KEY = "sk-openai-test-NEVERLEAKME";
@@ -66,9 +60,11 @@ const A_KEY = "sk-openai-test-NEVERLEAKME";
 type Answering = () => Response;
 
 function answering(content: unknown): Answering {
+  const response = typeof content === "object" && content !== null && "decision" in content
+    ? { results: [{ id: "instruction_1", ...content }] } : content;
   return () =>
     new Response(
-      JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }),
+      JSON.stringify({ choices: [{ message: { content: JSON.stringify(response) } }] }),
       { status: 200, headers: { "content-type": "application/json" } },
     );
 }
@@ -109,12 +105,14 @@ function answeringWithUsage(
   usage: Record<string, unknown>,
   id = "chatcmpl-1",
 ): Answering {
+  const response = typeof content === "object" && content !== null && "decision" in content
+    ? { results: [{ id: "instruction_1", ...content }] } : content;
   return () =>
     new Response(
       JSON.stringify({
         id,
         model: "gpt-5.6-terra-2026-08-01",
-        choices: [{ message: { content: JSON.stringify(content) } }],
+        choices: [{ message: { content: JSON.stringify(response) } }],
         usage,
       }),
       { status: 200, headers: { "content-type": "application/json" } },
@@ -146,28 +144,13 @@ describe("one judge call", () => {
     // The same conversation and the same criterion should get the same decision
     // twice, as far as a model can promise that at all.
     expect(body["temperature"]).toBe(0);
-    expect(body["response_format"]).toEqual({
-      type: "json_schema",
-      json_schema: {
-        name: "egma_judge_answer",
-        strict: true,
-        schema: {
-          type: "object",
-          properties: {
-            decision: {
-              type: "string",
-              enum: ["met", "not_met", "cannot_determine"],
-            },
-            rationale: { type: "string" },
-            cited_turns: {
-              type: "array",
-              items: { type: "integer" },
-            },
-          },
-          required: ["decision", "rationale", "cited_turns"],
-          additionalProperties: false,
-        },
-      },
+    expect(body["response_format"]).toMatchObject({
+      type: "json_schema", json_schema: { name: "egma_judge_answer", strict: true, schema: {
+        type: "object", required: ["results"], additionalProperties: false,
+        properties: { results: { type: "array", items: {
+          type: "object", required: ["id", "decision", "rationale", "cited_turns"], additionalProperties: false,
+        } } },
+      } },
     });
   });
 
@@ -212,7 +195,7 @@ describe("one judge call", () => {
     const asked = body.messages.at(-1)?.content ?? "";
 
     expect(declared).toContain("met, not_met, or cannot_determine");
-    expect(asked).toContain("## Criterion");
+    expect(asked).toContain("## Instruction (instruction_1)");
     expect(asked).toContain("the agent confirms the new time");
     expect(asked).toContain("## Transcript");
     expect(asked).toContain("[2] persona: Move my cleaning to Thursday.");
@@ -232,9 +215,9 @@ describe("one judge call", () => {
     );
 
     expect(await judge(QUESTION)).toEqual({
-      decision: "not_met",
+      results: [{ id: "instruction_1", decision: "not_met",
       rationale: "the agent never said the day back.",
-      citedTurns: [1, 2],
+      cited_turns: [1, 2] }],
     });
   });
 
@@ -247,7 +230,7 @@ describe("one judge call", () => {
       }),
     );
 
-    expect((await judge(QUESTION)).decision).toBe("cannot_determine");
+    expect((await judge(QUESTION)).results[0]?.decision).toBe("cannot_determine");
   });
 });
 
@@ -258,7 +241,7 @@ describe("a provider that does not answer", () => {
       answering({ decision: "met", rationale: "read back.", cited_turns: [] }),
     );
 
-    expect((await judge(QUESTION)).decision).toBe("met");
+    expect((await judge(QUESTION)).results[0]?.decision).toBe("met");
     expect(calls).toHaveLength(2);
   });
 
@@ -286,7 +269,7 @@ describe("a provider that does not answer", () => {
       answering({ decision: "probably", rationale: "hmm", cited_turns: [] }),
     );
 
-    await expect(judge(QUESTION)).rejects.toThrow(/decision Egma does not know/);
+    await expect(judge(QUESTION)).rejects.toThrow(/invalid id, decision/);
   });
 
   it("never puts the request — and so never the key — in what it throws", async () => {
@@ -311,6 +294,22 @@ describe("a provider that does not answer", () => {
  * figure at the uncached rate would overcharge every repeated prompt.
  */
 describe("what one judge call consumed", () => {
+  it("records one paid request when one response grades several behaviors", async () => {
+    const results = ["behavior_1", "behavior_2"].map((id) => ({
+      id, decision: "met", rationale: "the evidence confirms it", cited_turns: [],
+    }));
+    const { judge, calls, spent } = judgeWith(answeringWithUsage(
+      { results }, { prompt_tokens: 100, completion_tokens: 10 },
+    ));
+    await expect(judge({ ...QUESTION, expectedBehaviors: [
+      { id: "behavior_1", text: "confirms the date" },
+      { id: "behavior_2", text: "confirms the time" },
+    ] })).resolves.toEqual({ results });
+    expect(calls).toHaveLength(1);
+    expect(spent).toHaveLength(1);
+    expect(spent[0]?.quantities).toEqual({ input_tokens: 100, output_tokens: 10 });
+  });
+
   it("is reported once per answered request, with the cached prompt separated", async () => {
     const { judge, spent } = judgeWith(
       answeringWithUsage(
@@ -333,9 +332,6 @@ describe("what one judge call consumed", () => {
       cached_input_tokens: 1_024,
       output_tokens: 48,
     });
-    // The assertion this call decided, so its spend is told apart from the
-    // sibling calls made in parallel about the other behaviors.
-    expect(spent[0]?.assertion).toBe("behavior_1");
     expect(spent[0]?.httpAttempt).toBe(1);
     expect(spent[0]?.providerRef).toBe("chatcmpl-1");
     // The provider's own object, whole, so a wrong reading can be re-rated
@@ -389,11 +385,12 @@ describe("what one judge call consumed", () => {
           choices: [
             {
               message: {
-                content: JSON.stringify({
+                content: JSON.stringify({ results: [{
+                  id: "instruction_1",
                   decision: "met",
                   rationale: "read back.",
                   cited_turns: [],
-                }),
+                }] }),
               },
             },
           ],
@@ -407,6 +404,6 @@ describe("what one judge call consumed", () => {
       model: "gpt-5.6-terra",
       key: A_KEY,
     });
-    await expect(judge(QUESTION)).resolves.toMatchObject({ decision: "met" });
+    await expect(judge(QUESTION)).resolves.toMatchObject({ results: [{ decision: "met" }] });
   });
 });

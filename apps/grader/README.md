@@ -13,10 +13,12 @@ Three Postgres records control which graders can run:
 
 - A `grader_definition` is the stable library identity and owner.
 - A `grader_definition_version` is immutable executable logic, such as a
-  type, grading instructions, settings contract, model, output contract, and
+  type, grading instructions, settings contract, and
   compatible modalities.
 - A `project_grader` is one project's policy for that definition. It stores the
-  scope, complete setting values, and the pass threshold.
+  scope, complete setting values (including the LLM provider and model), and the
+  pass threshold. Custom definitions are owned by the same project. Egma
+  definitions are shared across projects.
 
 The temporary grading job freezes the exact definition version, project grader,
 setting values, scope result, and pass threshold that apply to the trace. Later
@@ -93,47 +95,59 @@ compatibility is checked before a grader enters the frozen plan.
 
 Expected behaviors is the only grader that every project gets automatically. It
 grades every completed simulation, does not grade production, and customers
-cannot edit its scope. Customers can edit its pass threshold.
+cannot edit its scope. Customers can edit its model and pass threshold.
 
 Response latency is an optional Egma grader. A project chooses whether to use
 it, where it applies, its Maximum response time (p90) setting, and its pass
 threshold. It bounds the p90 of the conversation's turn response latencies,
-which is the reduction the simulation page also leads with. A customer-created LLM grader is shared in that organization and is
-active only in projects that choose it.
+which is the reduction the simulation page also leads with. A custom LLM grader
+is visible only in its owning project.
 
-## Expected behaviors
+## LLM grading
 
-The expected-behaviors grader reads the list from the simulation's frozen test
-version. It makes one model call per behavior in parallel. Each assertion result
-is stored inside the grade's `details.assertions` array. The top-level score is
-the normalized fraction of behaviors that passed.
+Every LLM grader uses the same executor. The stable Expected behaviors ID does
+not select a special execution path. The saved prompt controls what is graded.
+A custom clone of that prompt can produce the same multi-criterion result.
 
-One failed assertion does not stop its siblings. If the grader cannot produce a
-valid top-level score, it writes one error grade with a null score.
+The executor makes one model request per trace. It sends the saved instruction
+as `instruction_1`, the simulation's frozen expected behaviors as
+`behavior_1..N`, and the existing transcript, ending outcome, tool names and
+arguments, and observed metrics. Production sends no test behaviors. Tool
+return payloads are excluded.
+
+The provider response must be exactly a `results` array whose entries have
+`id`, `decision`, `rationale`, and `cited_turns`. Validation accepts either the
+single instruction result or the complete nonempty behavior set. It rejects
+extra properties, empty or partial results, mixed families, duplicate or
+unknown IDs, invalid decisions, and citations outside the supplied transcript.
+It cannot prove that a structurally complete family matches the prompt's intent.
+
+Each `met` contributes one and each `not_met` contributes zero. The top-level
+score is the fraction of criteria met, so two of three is `2/3`. Any
+`cannot_determine` makes the top-level score null while retaining all decisions,
+reasons, turn citations, and resolved span citations in `details.assertions`.
+Malformed responses and failed calls also yield an error grade with a null
+score. Sibling graders still execute independently.
 
 ## Response latency
 
 The response-latency grader reads the existing `turn_response_latency` metric
-from the trace and computes its arithmetic mean. It returns `1` when the mean is
-at or below the project's frozen maximum and `0` when it is above. A trace with
-no response-latency metric gets an error grade with a null score.
+and computes its p90. It returns `1` at or below the project's frozen maximum
+and `0` above it. Missing latency evidence produces an error grade.
 
-## Customer LLM graders
-
-A customer LLM grader makes one model call per trace. Its saved Grading
-instructions are the one criterion. The model reads only the existing text
-evidence: transcript, ending outcome, observed tool calls, and observed metrics.
-`met` becomes `1`, `not_met` becomes `0`, and `cannot_determine` becomes an
-error grade with a null score.
-
-Customers cannot run custom code in this version. Trusted Egma code executors
-live in this repository and are selected by the stable definition ID.
+Customers cannot run custom code. Trusted Egma code executors live in this
+repository and are selected by their stable definition ID.
 
 ## Judge providers
 
-A model-judged definition version owns its exact provider and model. The
-deployment owns provider credentials. A project does not store a separate model
-credential.
+A project saves its exact provider and model in `parameter_values`. A grading
+plan copies those settings before execution. Later core releases, model edits,
+removal, delayed claims, and retries cannot replace the frozen choice. Settings
+edits do not create core versions. Only edits to a current custom prompt create
+a new core; historical and Egma-owned cores are read-only.
+
+The deployment owns provider credentials. A project does not store a separate
+model credential.
 
 The selected credential is passed only to the provider adapter. It is not
 stored in a definition, job, grade row, rationale, or log.

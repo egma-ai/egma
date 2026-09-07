@@ -61,8 +61,29 @@
     {
       "idx": 8,
       "version": "7",
-      "when": 1788777867667,
-      "tag": "0008_billing",
+      "when": 1788766834112,
+      "tag": "0008_model_settings_and_versioning",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788807573269,
+      "tag": "0009_simplify_control_plane_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788813142624,
+      "tag": "0010_livekit_room_reference",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788817608530,
+      "tag": "0011_billing",
       "breakpoints": true
     }
   ]

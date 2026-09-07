@@ -60,14 +60,8 @@ const E164 = /^\+[1-9]\d{1,14}$/u;
 export type DeploymentRole = "all" | "ingest" | "drain";
 
 /**
- * Everything the durable ingestion path is told, in one place.
- *
- * **The numbers here are documented starting values, not proven capacity.**
- * Each one is set where the code that reads it can survive it and where the
- * bound it sits under is known — the segment byte bound sits under the trace
- * store's own insert bound, the flush interval sits inside the product's
- * two-second visibility target — and the release's capacity proof is what
- * turns any of them into a claim.
+ * Durable-ingestion settings. Defaults are starting values, not measured
+ * capacity or a guarantee of end-to-end visibility time.
  */
 export type IngestionSettings = {
   readonly role: DeploymentRole;
@@ -123,14 +117,8 @@ export type Config = {
    */
   readonly encryptionKey: string;
   /**
-   * One organization on this deployment, and the first person to sign up claims
-   * it. Sentry's flag, and Sentry's reason: without it anyone who can reach the
-   * URL signs up, joins the only organization, and — because everyone defaults
-   * to `admin` — administers somebody else's egma.
-   *
-   * On by default, because the default deployment is a self-hosted one. A
-   * multi-tenant deployment turns it off; nothing derives from which one this
-   * is.
+   * Close open signup after the first organization claims this deployment.
+   * Enabled by default for self-hosting; hosted deployments can disable it.
    */
   readonly singleOrganization: boolean;
   /**
@@ -150,15 +138,8 @@ export type Config = {
    */
   readonly rateLimitPerMinute: number;
   /**
-   * What the simulator shows this API to claim simulation work — `egma_st_`
-   * and then a secret, the same value both containers read. Absent means the
-   * service will not start: the claim answers carry customers' live provider
-   * credentials, port 3100 is published on the host, and a claim door that
-   * quietly served whoever asked would hand those credentials to the LAN.
-   * The compose file has no default for it, on the `EGMA_AUTH_SECRET` pattern:
-   * a token written into a public repository is a token every reader of it
-   * holds, so a deployment that states none is refused at start by name rather
-   * than started with a claim door the world already has the key to.
+   * Required deployment token for internal simulation requests, prefixed
+   * egma_st_. Claims return provider credentials, so no public default is safe.
    */
   readonly simulatorServiceToken: string;
   /**
@@ -222,20 +203,9 @@ export type Config = {
    */
   readonly carrierRoute: CarrierRoute | undefined;
   /**
-   * The object store voice simulations' recordings live in, or `undefined` on a
-   * deployment that has named none.
-   *
-   * **Naming the browser's address is what selects it**, the way naming an
-   * endpoint is what sends the simulator's recordings to object storage in the
-   * first place. Absent, the control plane can still read and report every
-   * simulation it could before; it simply cannot hand anybody a link to the
-   * audio, and it says so in a sentence naming the variable rather than
-   * answering an empty player.
-   *
-   * The address here is **the browser's**, and this process holds no other one.
-   * It never opens a connection to the store — signing is arithmetic — so there
-   * is no internal endpoint in this configuration for a future reader to sign
-   * against by mistake. See `recordings/signed-link.ts`.
+   * Recording playback configuration, enabled by EGMA_BLOB_PUBLIC_URL.
+   * Use the browser-accessible address for signed links. Signing does not
+   * connect to storage; without this configuration, audio links are unavailable.
    */
   readonly blob: BlobStore | undefined;
   /**
@@ -303,21 +273,9 @@ function bound(
 }
 
 /**
- * The ingestion bucket and the credential confined to it, or `undefined` where
- * nobody named an endpoint.
- *
- * **This address is Egma's own, and that is the difference from
- * `EGMA_BLOB_PUBLIC_URL` next door.** The control plane has never opened a
- * connection to an object store before this release — recordings are signed
- * arithmetic and fetched by a browser — so this is the first setting in the
- * file that names where *this container* reaches a store. On the bundled
- * deployment that is `http://minio:9000`, which is exactly the value the
- * recordings setting must never hold.
- *
- * All of it or none of it, refused at startup by name, on the recording store's
- * discipline: half a credential accepts evidence it cannot make durable, and a
- * request that answers `503` for a reason nobody can see is worse than a
- * process that refuses to start naming the variable.
+ * Configure the ingestion bucket using an endpoint this API can reach and
+ * a separate ingestion credential. If an endpoint is set, require both key
+ * fields. This address serves server traffic, unlike EGMA_BLOB_PUBLIC_URL.
  */
 function ingestionStore(
   environment: NodeJS.ProcessEnv,
@@ -399,16 +357,8 @@ function ingestionStore(
 }
 
 /**
- * What the ingestion client signs for.
- *
- * The recording store's rule, one bucket over and for the same two reasons:
- * MinIO ignores the region and every signature must still carry one, so a
- * deployment that named none works; and on Amazon's own S3 the default is not a
- * default but a wrong answer, refused by name rather than signed with. A bucket
- * in `eu-west-1` signed for `us-east-1` refuses every upload with
- * `SignatureDoesNotMatch`, which names neither the region nor the variable —
- * and here that is not a recording that will not play, it is acceptance
- * answering `503` for every request the deployment receives.
+ * Require an explicit ingestion region for .amazonaws.com endpoints.
+ * Other endpoints use the configured region or the MinIO-compatible default.
  */
 function ingestRegion(environment: NodeJS.ProcessEnv, address: URL): string {
   const named = environment.EGMA_INGEST_REGION?.trim() || "";
@@ -731,32 +681,10 @@ function carrierRoute(environment: NodeJS.ProcessEnv): CarrierRoute | undefined 
 }
 
 /**
- * The bucket that holds recordings and the read-only credential that reaches
- * it, or `undefined` where nobody named one.
- *
- * **The address is the browser's, and that is this whole setting's reason for
- * existing.** A signed link is bound by signature to the host it was signed for.
- * The API reaches MinIO at `minio:9000` inside the compose network and a browser
- * reaches it at whatever the deployment publishes — sign for one, fetch from the
- * other, and the store answers `SignatureDoesNotMatch`, which names neither
- * address and costs whoever meets it a day. So the browser's address is its own
- * variable from the first commit rather than after the first report, and it is
- * the only address this process holds.
- *
- * **The credential is read-only**, separate from the write credential the
- * simulator holds. A leaked read credential must not be usable to overwrite a
- * customer's call recording — the compose file's bucket job creates a MinIO user
- * that can do nothing but `s3:GetObject`.
- *
- * All of it or none of it, refused at startup by name, on the simulator's
- * discipline: half a credential resolves no recording at all and would be
- * discovered by somebody pressing play, one simulation at a time, with the
- * store's own refusal in a log they cannot see.
- *
- * **`baseUrl` is here for one reason: the two addresses have to agree about
- * scheme.** Both are addresses of *the same browser* — one to egma, one to the
- * store — and an `https:` page may not fetch `http:` audio. See the mixed
- * content refusal below.
+ * Parse recording playback settings and require a complete credential pair.
+ * The endpoint must be browser-accessible because signatures bind its host.
+ * Use a read-only credential; its permissions are enforced by storage policy.
+ * Reject HTTP storage when the Egma page uses HTTPS.
  */
 function blobStore(
   environment: NodeJS.ProcessEnv,
@@ -782,29 +710,8 @@ function blobStore(
         "recording over http: or https:",
     );
   }
-  // The two settings are one browser's two addresses, and a browser will not
-  // mix their schemes. A page served over https: may not fetch audio over
-  // http:: every browser blocks it as mixed content *before the request is
-  // made*, so the store is never asked, the signature is never checked, and
-  // the only sentence naming the reason is in a console the person pressing
-  // play is not looking at. That is this effort's own bug class arriving by a
-  // third route — a setting whose wrong value fails while naming nothing —
-  // after the address binding and the region defaulting from nothing. Both of
-  // those were closed by refusing here, by name, and so is this.
-  //
-  // Only this one pair is incoherent. An http: egma with an https: store is
-  // fine — a plaintext page may fetch encrypted bytes — and an http: egma with
-  // an http: store is the ordinary deployment this compose file ships, so
-  // `http://localhost:9000` must keep starting and does.
-  //
-  // A plaintext store on a *remote* address is allowed and not refused,
-  // deliberately: it is only reachable from an egma that is itself plaintext,
-  // where the session cookie granting access to every recording already
-  // crosses the same network in the clear. Refusing the audio while serving
-  // the cookie would be a rule egma applies to one byte stream and not the
-  // other. What it costs is said beside the example, in `.env.example`, the
-  // compose file and the README, rather than decided for a self-hoster on a
-  // private network egma cannot see.
+  // Require HTTPS recordings for an HTTPS page to avoid mixed-content playback
+  // failures. HTTP pages may use either storage scheme.
   if (baseUrl.protocol === "https:" && parsed.protocol === "http:") {
     throw new Error(
       `EGMA_BASE_URL is ${baseUrl.origin}, which is https:, and ` +
@@ -882,21 +789,8 @@ function blobStore(
 }
 
 /**
- * What to sign for.
- *
- * MinIO ignores the region entirely and every signature must still carry one,
- * so `us-east-1` is the value that lets a deployment with no region at all
- * work — the same default the simulator uses, because the two halves sign
- * against one store and a disagreement between them is every upload working and
- * every playback failing.
- *
- * **On real S3 the default is not a default, it is a wrong answer**, and it is
- * refused rather than signed with. A bucket in `eu-west-1` signed for
- * `us-east-1` answers `SignatureDoesNotMatch` on every single recording, naming
- * neither the region nor the variable — the same nameless failure the public
- * address is a separate setting to prevent, arriving by a second route. The one
- * deployment that can be *known* to be wrong is the one whose store is AWS's
- * own, where a region is never optional, so that is the one this refuses.
+ * Require an explicit recording region for .amazonaws.com endpoints.
+ * Other endpoints use the configured region or the MinIO-compatible default.
  */
 function blobRegion(environment: NodeJS.ProcessEnv, address: URL): string {
   const named = environment.EGMA_BLOB_REGION?.trim() || "";

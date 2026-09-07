@@ -6,32 +6,14 @@ import type {
 } from "@egma/platform-api/client";
 
 /**
- * The personas of one project, as `/v1/personas` answers them.
- *
- * A **persona** is the synthetic person who speaks with the agent. Egma
- * supplies a Predefined persona to every project, and a project can author a
- * Custom persona or fork the shared one.
- *
- * **A persona carries two names, and they are two different things.** `name` is
- * the team's word for them — shown in lists, pickers and the sheet's head,
- * rewritten in place, never spoken. `identityName` is the human name they give
- * the agent, versioned exactly like their personality, so the same test hears
- * the same person on every run.
- *
- * **Nothing in a persona says what that persona wants.** That is the test's
- * scenario. The whole worth of a persona is that one of them is used in forty
- * different situations, and a trait that said "asks to reschedule" would turn
- * a reusable person into a second copy of one test. The editor says so where
- * somebody is typing, and this file says so where somebody is reading.
- *
- * The shape is the API's own, field names included. Renaming its fields on the
- * way in would put a second vocabulary between the contract and the page, and
- * the two would drift the first time the API grew a field.
+ * Persona response types from the API. Projects can use Egma-provided or
+ * Custom personas. name is editable metadata; identityName is versioned
+ * behavior. The test scenario specifies what the persona wants to achieve.
  */
 
 export type Persona = GetPersonaResponse;
 
-export type PersonaModels = Persona["models"];
+export type PersonaModels = NonNullable<Persona["settings"]>["models"];
 export type ModelSelection = PersonaModels["llm"];
 export type PersonaPage = ListPersonasResponse;
 
@@ -142,16 +124,8 @@ export function sameModelsDraft(
 }
 
 /**
- * One engine choice, as one control.
- *
- * **A provider and a model are one decision, and the boards draw one control
- * for it.** The server's catalog is a list of pairs its adapters can actually
- * execute, so a single choice over those pairs cannot produce a combination
- * that does not exist — where two controls, one for the provider and one for
- * the model, have to be kept in step by hand and can disagree in between.
- *
- * The value is the pair, joined by a separator no provider or model id
- * contains, because an `<option>` carries one string.
+ * Encode a catalog provider/model pair as one select value. Both IDs must
+ * exclude the separator for decoding to recover the pair.
  */
 export const MODEL_PAIR_SEPARATOR = "::";
 
@@ -174,14 +148,8 @@ export function modelPairFrom(
 }
 
 /**
- * What a person calls a provider, as against what a persona stores.
- *
- * A persona stores `openai`; the server's catalog is where `OpenAI` is
- * written, and the boards read the sheet's models back with the catalog's own
- * label. The provider is the fallback rather than an error: the catalog is a
- * second read that may not have answered yet, and a persona can name a
- * provider the deployment has since stopped offering. Neither is a reason to
- * show nothing.
+ * Use the catalog's provider label, falling back to its ID when the catalog
+ * is unavailable or no longer offers that provider.
  */
 export function modelSaid(
   catalog: readonly PersonaModelCatalogEntry[] | undefined,
@@ -205,4 +173,15 @@ export function modelSaid(
  */
 export function ownerSaid(owner: Persona["owner"]): string {
   return owner === "egma" ? "Predefined" : "Custom";
+}
+
+/** Library preview uses its declared defaults; an applied persona uses saved settings. */
+export function modelsOfPersona(persona: Persona): PersonaModels {
+  if (persona.settings !== null) return persona.settings.models;
+  const values = Object.fromEntries(persona.parameterContract.map((field) => [field.key, field.defaultValue]));
+  return {
+    llm: { provider: String(values.llm_provider), model: String(values.llm_model) },
+    stt: { provider: String(values.stt_provider), model: String(values.stt_model) },
+    tts: { provider: String(values.tts_provider), model: String(values.tts_model), voiceId: String(values.tts_voice_id), speed: Number(values.tts_speed) },
+  };
 }

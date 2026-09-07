@@ -12,54 +12,12 @@ import { howFarIn, howLong } from "../lib/transcripts.ts";
 import { Empty } from "./page-state.tsx";
 
 /**
- * The parts one conversation's evidence page is built from.
- *
- * **Each one takes finished data and decides nothing.** A transcript is handed
- * turns; the grade block is handed a completed grade. That is what makes them
- * reusable and what makes them tunable: their appearance is the class list on
- * each element and their contract is `lib/simulations.ts`, and neither can be
- * changed by touching the other. A component that fetched, folded or filtered
- * would put a second opinion inside the page and the two would disagree the day
- * somebody changed one.
- *
- * They live in their own file, beside `run-status.tsx` and for the same
- * reason: the shared component set is deliberately held closed.
- *
- * **Speech, timing and grading stay three things.** The transcript is what was
- * said and nothing else — tool calls and system work are not interleaved into
- * it, because a transcript with machinery in the middle of it stops being
- * readable as a conversation. A page that wants speech and machinery on one
- * clock builds that view for itself; it is not one of these. And a grade is
- * never drawn inside a turn: grading is a separate act from speaking, and a
- * page that mixed them would let a reader take a grader's sentence for
- * something the agent said.
- *
- * **The appearance is Tailwind on the shadcn base**, and `evidence.module.css`
- * is gone with it. What it said about these surfaces still holds and is worth
- * keeping: a transcript stays prose, a measure stays a number, and a grade
- * stays a grade. They share the palette and the hairlines without those three
- * different facts becoming one card pattern.
- *
- * What each surface *is* moved from a module class name onto `data-slot`, and
- * the one state a class name used to carry moved onto `data-cited`. Neither is
- * styled by anything. They are there because a name like `turnCited` was
- * readable in an inspector or a test and a class list is not.
+ * Render supplied transcript and grading data without fetching it. Keep speech,
+ * timing details, and grades distinct so grader text cannot be mistaken for
+ * agent speech. Data attributes identify semantic roles for inspection and tests.
  */
 
-/**
- * The quiet hover tint on a row, and the one colour here that is written out
- * rather than named.
- *
- * The theme names the derived values that mean something on their own — a
- * status chip's edge, the dialog scrim. This is not one of those. It is
- * `--surface-soft` held back to 62% so a row lights up under the pointer
- * without becoming a surface of its own, and nothing else in the product wants
- * it. A token would be a name with one caller, so the recipe stays an arbitrary
- * value here; a second surface that ever wants the same tint earns the token
- * then. The data table's activatable rows are that second surface, so the
- * recipe is exported rather than retyped — still one string, now with two
- * callers instead of a copy.
- */
+/** Share this muted hover tint between evidence rows and activatable data-table rows. */
 export const ROW_HOVER =
   "pointer-hover:bg-[color-mix(in_srgb,var(--surface-soft)_62%,transparent)]";
 
@@ -93,17 +51,8 @@ export type TranscriptProps = {
 };
 
 /**
- * What the persona and the agent said, in the order they said it.
- *
- * Compact `human:` / `agent:` labels and normal reading density, on purpose. A
- * stack of oversized message cards puts two turns on a screen, and this is the
- * one surface where somebody is trying to hold a whole conversation in their
- * head at once.
- *
- * What happened *inside* a turn is counted here and drawn nowhere here.
- * Putting a tool call between two sentences would break the reading, and
- * dropping the count would lose it — so the count is named and the detail
- * belongs to whatever timed view a page builds for it.
+ * Render supplied turns with compact speaker labels. Count work within turns
+ * here; detailed tool and timing views are composed separately.
  */
 export function Transcript({
   transcript,

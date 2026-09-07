@@ -70,16 +70,8 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
     ],
   },
   /*
-   * **The group says OBSERVABILITY and its one row says Traces** (developer
-   * decision, 2026-08-25). Only the words moved: the section id stays
-   * `monitoring` and the address stays `/monitoring/transcripts`, because a
-   * rename that moved an address would break every saved link for a change
-   * nobody asked for.
-   *
-   * `trace` is a real word in this domain rather than a borrowed one — it is
-   * what a person's own agent emits and what the SDK reports — so the screen
-   * is named for what lands on it. The **transcript** stays the name of the
-   * artifact a person opens and reads.
+   * Keep existing monitoring/transcripts URLs for saved links. The navigation
+   * label is Traces; the readable artifact is a transcript.
    */
   {
     id: "monitoring",

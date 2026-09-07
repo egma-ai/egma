@@ -23,27 +23,12 @@ import {
 } from "./columns.ts";
 
 /**
- * The agent is the customer's voice agent — the thing egma is establishing
- * trust in, and the identity every test result accumulates against. A
- * connection is how egma reaches one: the same logical agent might be a Retell
- * chat endpoint in CI, a Retell web call in staging, and a phone number in
- * production, and its history must stay under one identity through all of
- * them.
- *
- * The agent owns its platform binding, and the connection does not. Which
- * platform a connection reaches is answered by its connection type where the
- * type pins one (`retell_chat_api` -> retell, `livekit_room` -> livekit), else
- * through the agent — `phone_number` spans platforms. The agent's own binding
- * is what production monitoring
- * needs: the platform, that platform's identity for this agent, and the
- * sealed monitoring key egma pulls its finished production conversations
- * with. See ADR-0015.
- *
- * Deliberately unversioned, both tables. egma versions what egma authors, and
- * an agent's real content — prompt, model, tools — lives on the provider's
- * side or in the customer's own repo, where egma cannot freeze it. The table
- * is shaped so an `agent_version` pair can arrive later (the persona
- * pattern) without touching anything that references `agent`.
+ * The agent under test owns its agent platform identity and result history.
+ * Connections define ways to reach it, such as Retell text mode or a web call.
+ * Platform-specific connection types imply a platform; phone connections use
+ * the agent's declared platform. The agent also holds production monitoring
+ * credentials. These rows are unversioned; agent content lives on the platform
+ * or in the customer repository (ADR-0015).
  */
 
 /** The products or frameworks that run or expose an agent. */
@@ -61,34 +46,10 @@ export const CONNECTION_TYPES = [
 export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 
 /**
- * The connection kinds whose conversations can produce an **agent's POV**.
- *
- * ADR-0024 §2: a simulation stores both POVs, and the agent's arrives one of
- * two ways — pushed by the egma SDK over OpenTelemetry from inside a LiveKit
- * room, or pulled from the platform's own API by the reference the conversation
- * ran under. Two lanes can do it, and the other three cannot:
- *
- * - `phone_number` — egma dials a number and nothing of egma's runs on the
- *   other end of the line. There is nothing to install into and nothing to ask.
- * - `retell_text_mode` — egma carries the whole exchange on its own requests
- *   and Retell hands back no reference to fetch a record by, so there is no
- *   second account to ask for.
- * - `retell_chat_api` — the conversation is a Retell *chat*, and its reference
- *   is a chat id. egma's pull asks for a call record by call id, so a chat id
- *   would fetch nothing however long anything waited.
- *
- * Naming a lane here that can never deliver is worse than leaving it out: every
- * simulation over it would wait out the whole bound and be recorded as missing
- * an account that was never coming.
- *
- * **A fact about the lane, never about the spans**, which is what makes it
- * answerable before any evidence has arrived. It is only half the question,
- * though: the row's own provider reference is the other half, and both are
- * asked together where grading decides whether to wait.
- *
- * Written against `ConnectionType` so that a lane added to the product is a
- * decision made here as well: a new kind that produces an agent POV is added by
- * hand, and a name that is not a connection type at all does not compile.
+ * Connection types that can supply an agent POV (ADR-0024 §2): LiveKit SDK push
+ * and Retell web-call record pull. Phone, text mode, and chat API connections
+ * have no supported second-POV path. Grading also requires this simulation's
+ * provider reference before waiting; capability alone is not enough.
  */
 export const LANES_WITH_AN_AGENT_POV = [
   "retell_web_call",
@@ -150,27 +111,9 @@ export const agent = pgTable(
     agentPlatform: text("agent_platform").notNull(),
     platformAgentId: text("platform_agent_id"),
     /**
-     * The agent's sealed **platform key**, in the same envelope a connection's
-     * credentials use and opened by the same one opener.
-     *
-     * **Its role is wider than its column name.** It was a monitoring-only
-     * credential — the key egma pulls this agent's finished production
-     * conversations with — and it is now also the key that does the platform
-     * writes the mock-tools tick consents to: branching a temporary version at
-     * run start, writing the mocked tools onto it, deleting it at run end, and
-     * pinning and restoring a number's binding around the run. Nothing else
-     * widened: a connection's own key keeps its own job, which is opening the
-     * calls.
-     *
-     * The column keeps its name because renaming a shipped column is an add
-     * and a remove rather than one statement, and the name is not where the
-     * rule lives. The glossary carries the widened role.
-     *
-     * A customer who chat-tests and pull-monitors one Retell account pastes the
-     * key twice, once per job, so the two custodies never entangle. Custody is
-     * per agent and duplication across agents of one account is accepted
-     * knowingly — sealing is randomized, so the copies are not even
-     * recognizable as the same key.
+     * Encrypted agent platform key for production polling and temporary Retell version
+     * build/cleanup. Connection credentials are stored separately for simulation access.
+     * Connect flows can reuse the agent key; encrypted copies are randomized.
      */
     monitoringApiKey: text("monitoring_api_key"),
     /** The last characters of the key, kept so a person can tell keys apart. */
@@ -185,9 +128,8 @@ export const agent = pgTable(
       .notNull()
       .default(false),
     /**
-     * When this agent stopped being available for new work, or null while it
-     * is. Archive rather than delete: past runs name it and stay readable, and
-     * the whole of what Archive does is stop it entering anything new.
+     * Archive timestamp, or null while active. Past runs remain readable.
+     * Archiving also retires connections and cancels unfinished work.
      */
     archivedAt: moment("archived_at"),
     createdBy: idText("created_by").references(() => user.id, {
@@ -272,16 +214,8 @@ export const connection = pgTable(
     modality: text("modality").notNull(),
     topology: text("topology").notNull(),
     /**
-     * The authority and configuration used inside this connection type,
-     * written down once at create and never changed.
-     *
-     * The access variant used to be re-derived from config on every read, by looking
-     * for the discriminating key. That works while the registry is the registry
-     * this row was written under, and stops working the moment a variant gains
-     * or loses a key — the same stored config would then answer a different
-     * access variant, and the credential rule a Restore is held to would change
-     * underneath a connection nobody edited. So the access variant is a stored fact
-     * about this row, and changing it is a new connection.
+     * Immutable access variant ID chosen at creation. Read its rules by this ID,
+     * never infer a different variant from config keys. Changing it requires a new connection.
      */
     accessVariant: text("access_variant").notNull(),
     /** A label (`staging`, `production`), never a level in the hierarchy. */
@@ -296,14 +230,7 @@ export const connection = pgTable(
     credentials: text("credentials"),
     /** The last characters of the secret, kept so a person can tell keys apart. */
     credentialsHint: text("credentials_hint"),
-    /*
-     * **There is no mock-tools switch here.** There was one, and a run over a
-     * ticked connection was conducted with Egma's answers in front of the
-     * agent's own. A test carries its own mock tools now, so what a run mocks
-     * is decided by the tests it executes and by nothing on the connection —
-     * and a switch beside them would be a second answer to one question, able
-     * to say no to a test that asked for a world.
-     */
+
     /** When this connection stopped being reachable for new work, or null. */
     archivedAt: moment("archived_at"),
     createdBy: idText("created_by").references(() => user.id, {
@@ -340,8 +267,7 @@ export const connection = pgTable(
       columns: [table.agentId, table.projectId],
       foreignColumns: [agent.id, agent.projectId],
     }).onDelete("cascade"),
-    // Inert today; the composite-FK target that lets the future run table
-    // prove its (agent_id, connection_id) actually pair.
+    // Foreign-key target that keeps runs and simulations on the connection's agent.
     unique("connection_id_agent_id_unique").on(table.id, table.agentId),
     // Partial, so an archived connection releases its name.
     uniqueIndex("connection_agent_id_name_unique")

@@ -4,21 +4,11 @@ import process from "node:process";
 import { holdWebOutputLock } from "../../tools/output-lock.ts";
 
 /**
- * One of several processes all trying to hold the same lock at once.
+ * Compete for a lock and report acquisitions and overlaps on stdout. Inside
+ * the critical section, create a separate marker with wx so overlap detection
+ * does not depend on the lock implementation.
  *
- * The lock is a claim about what happens between processes, so nothing but
- * processes can test it. This is the child: it races for the lock over and over
- * and reports, on stdout, how often it got in and how often somebody else was
- * already inside when it did.
- *
- * **The witness is a second file, not the lock.** Inside the critical section
- * this creates a marker with `wx` — the kernel's own answer to "does this path
- * already exist" — so the check does not lean on the code under test to decide
- * whether the code under test worked. A marker that is already there means two
- * processes were inside at the same moment, which is the whole thing the lock
- * exists to prevent.
- *
- *   node race-for-the-lock.ts <lock path> <marker path> <attempts>
+ * Usage: node race-for-the-lock.ts <lock path> <marker path> <attempts>
  */
 
 const [lockPath, markerPath, attempts] = process.argv.slice(2);

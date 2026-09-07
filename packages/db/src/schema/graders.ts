@@ -36,7 +36,7 @@ export type GraderDefinitionType = (typeof GRADER_DEFINITION_TYPES)[number];
 export const GRADER_MODALITIES = ["chat", "voice"] as const;
 export type GraderModality = (typeof GRADER_MODALITIES)[number];
 
-/** The non-secret provider and model selected by an immutable LLM definition. */
+/** The non-secret provider and model selected in project grader settings. */
 export type GraderJudgeModel = {
   readonly provider: string;
   readonly model: string;
@@ -71,7 +71,6 @@ export const graderDefinitionVersion = pgTable(
     modalities: jsonb("modalities")
       .$type<readonly GraderModality[]>()
       .notNull(),
-    judgeModel: jsonb("judge_model").$type<GraderJudgeModel | null>(),
     createdAt: createdAt(),
   },
   (table) => [
@@ -112,6 +111,7 @@ export const graderDefinition = pgTable(
       () => organization.id,
       { onDelete: "cascade" },
     ),
+    projectId: idText("project_id"),
     name: text("name").notNull(),
     description: text("description"),
     scopeEditable: boolean("scope_editable").notNull(),
@@ -123,6 +123,12 @@ export const graderDefinition = pgTable(
   },
   (table) => [
     prefixCheck("grader_definition_id_prefix", table.id, "grl"),
+    check("grader_definition_ownership_pair", sql`(${table.organizationId} is null) = (${table.projectId} is null)`),
+    foreignKey({
+      name: "grader_definition_project_organization_fk",
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [project.id, project.organizationId],
+    }).onDelete("cascade"),
     foreignKey({
       name: "grader_definition_current_version_fk",
       columns: [table.id, table.currentDefinitionVersion],

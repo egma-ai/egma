@@ -11,20 +11,9 @@ import { createConnectedDatabase, type MigratedDatabase } from "./database.ts";
 import { seedOrganization, seedUser } from "./tenancy.ts";
 
 /**
- * The world a test-factory test needs before it can write a test: two
- * customers, a sibling project inside the first one to be narrowed past, a
- * persona in each, and the scenario every file authors.
- *
- * It lives here rather than in whichever file needed it first, because every
- * file needs all of it and a second copy is a copy that drifts. The ids are
- * minted when this module loads, and vitest gives each test file its own module
- * registry, so two files running side by side are seeding two databases and
- * never each other's — the same thing that lets each file connect the data
- * access module to a database of its own.
- *
- * Personas arrive through their own factory, which has its own tests: they are
- * an input to these files, not a thing they are checking. Tenancy arrives by
- * raw SQL, for the reason `tenancy.ts` gives.
+ * Shared fixtures provide two organizations, a sibling project, personas,
+ * and test content. Each test file seeds its own database; personas use
+ * the public factory, while tenancy uses raw SQL.
  */
 
 export const acme = {

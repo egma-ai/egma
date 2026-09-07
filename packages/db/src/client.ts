@@ -113,16 +113,8 @@ export async function ping(): Promise<void> {
 }
 
 /**
- * A connection of this process's own, outside the pool.
- *
- * For the two things a pooled connection cannot do: hold a subscription, and
- * hold a session-scoped lock. Both belong to one session for as long as the
- * process lives, and a pooled connection would carry either back into the pool
- * and hand it to the next unrelated query.
- *
- * Not re-exported from the package entry point. Whoever needs one takes it
- * inside `packages/db/src`, so the reason for a second connection is written
- * down beside the code that opens it rather than anywhere a caller likes.
+ * Create an unpooled session for subscriptions or advisory locks. Its owner must
+ * close it; returning session state to a pool could affect an unrelated caller.
  */
 export function dedicatedConnection(): pg.Client {
   const url = databaseUrl;
@@ -144,24 +136,10 @@ export type Listening = {
 const RELISTEN_AFTER_MILLISECONDS = 1_000;
 
 /**
- * Wake `onNotification` whenever somebody raises this Postgres channel.
- *
- * **On a connection of its own, deliberately, and not one out of the pool.** A
- * `LISTEN` belongs to the session that issued it, so a pooled connection would
- * carry the subscription back into the pool and hand it to the next unrelated
- * query — and the pool would be one connection short for as long as the
- * subscription lived, which is the process's whole lifetime.
- *
- * **The wake is a hint and never a delivery.** A notification raised while
- * nothing was connected is gone, so this calls back once on every connection it
- * establishes, including the first: whoever listens is being told "ask again",
- * and asking is a query that sees everything outstanding whether or not any
- * notification survived. That is what keeps a dropped connection, a restart and
- * a service that was not running yet from being three different bugs.
- *
- * It reaches no table and carries nothing out — a channel name goes in and a
- * nudge comes back — which is why it takes no tenancy: there is nothing here to
- * scope.
+ * Listen on a dedicated connection and reconnect after failures. Notifications
+ * are wake-up hints, not durable delivery. Invoke the callback after each successful
+ * connection so it can query outstanding work, including notifications missed
+ * while disconnected.
  */
 export async function listen(
   channel: string,

@@ -7,24 +7,9 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * The menu, on Pure Paper with the shared orange-brown shadow.
- *
- * Two things here are `DESIGN.md` rather than shadcn. The highlighted item — the
- * one under the pointer or the arrow keys — uses the quiet neutral mix, because
- * that is a hover and not a selection. A *selected* item, the one that is
- * currently true, uses Ember Wash and a mark beside it, because "the active item
- * uses Ember Wash and a small Ember mark" and because state is never colour
- * alone. shadcn spends one colour on both and would have said "hovered" and
- * "chosen" the same way.
- *
- * Items are 36px, which is what the boards draw (`9AH-0`), and 44px wherever
- * the pointer is coarse — the same trade every dense control in this product
- * makes. The panel holds them on 4px of padding.
- *
- * The transitions name their properties. `transition-colors` would include
- * `outline-color`, and an item reached with the arrow keys would then fade its
- * focus ring in rather than showing it — motion on keyboard navigation, which
- * `DESIGN.md` forbids.
+ * Distinguish highlighted items from selected items: selection adds a mark.
+ * Keep coarse-pointer targets large enough and transition only background and
+ * text colors so keyboard focus outlines appear immediately.
  */
 function DropdownMenu(
   props: ComponentProps<typeof DropdownMenuPrimitive.Root>,

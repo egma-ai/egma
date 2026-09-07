@@ -231,6 +231,7 @@ function simulationEvidence(overrides: Record<string, unknown> = {}) {
         graderDefinitionId: EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID,
         graderDefinitionVersion: 2,
         graderName: "expected_behaviors",
+        parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
         score: 1,
         details: {
           rationale: "The agent found and confirmed the appointment.",
@@ -285,7 +286,6 @@ function simulationEvidence(overrides: Record<string, unknown> = {}) {
       config: {},
     },
     gradingPlan: {
-      state: "run_start",
       capturedAt: "2026-08-21T10:00:00.000Z",
       items: [
         {
@@ -1403,8 +1403,8 @@ describe("one run after suites", () => {
         "The media connection closed unexpectedly. This is an execution problem, not a failed grade.",
       ).closest('[role="alert"]'),
     ).not.toBeNull();
-    expect(dismiss).toHaveBeenCalledWith("run_1:1");
     await waitFor(() => {
+      expect(dismiss).toHaveBeenCalledWith("run_1:1");
       expect(screen.queryByText("Simulation execution failed")).toBeNull();
     });
 
@@ -1827,6 +1827,7 @@ describe("one run after suites", () => {
               graderDefinitionId: "grl_2",
               graderDefinitionVersion: 1,
               graderName: "policy_grader",
+              parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
               score: 0.4,
               details: { rationale: "The requested day was not confirmed." },
               passThreshold: 0.8,
@@ -1835,7 +1836,6 @@ describe("one run after suites", () => {
             },
           ],
           gradingPlan: {
-            state: "run_start",
             capturedAt: "2026-08-21T10:00:00.000Z",
             items: [
               {
@@ -2024,6 +2024,7 @@ describe("one run after suites", () => {
       projectGraderId: "grd_policy",
       graderDefinitionId: "grl_policy",
       graderName: "policy_grader",
+      parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
       score: 0.65,
       result: "failed",
       details: { rationale: "The agent did not confirm consent." },
@@ -2101,6 +2102,51 @@ describe("one run after suites", () => {
       within(details!).getByRole("region", { name: "lookup_appointment response" })
         .textContent,
     ).toContain('{"appointment":"Tuesday at 10"}');
+  });
+
+  it("shows a missing Retell transcript in the run while preserving its recording panel", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const read = simulationEvidence();
+    const voiceSnapshot = {
+      ...read.connectionSnapshot,
+      connectionType: "retell_web_call",
+      modality: "voice",
+    };
+    answers(detailStubs(
+      runDetail({ modality: "voice", connectionSnapshot: voiceSnapshot }),
+      {
+        status: 200,
+        body: {
+          simulations: [simulation({ status: "failed", modality: "voice" })],
+          nextPageToken: null,
+        },
+      },
+      {
+        status: 200,
+        body: {
+          ...read,
+          status: "failed",
+          modality: "voice",
+          agentPovIncomplete: true,
+          connectionSnapshot: voiceSnapshot,
+          transcript: {
+            ...read.transcript,
+            turns: read.transcript.turns.map((one) => ({
+              ...one,
+              pov: "persona",
+              spans: one.spans.map((nested) => ({ ...nested, pov: "persona" })),
+            })),
+          },
+        },
+      },
+    ));
+    render(<RunDetailPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Transcript & audio" }));
+    expect(await screen.findByText("Retell transcript unavailable")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Recording" })).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Transcript messages" })).toBeNull();
+    expect(screen.queryByLabelText("Tool call, lookup_appointment")).toBeNull();
   });
 
   it("keeps recording evidence on the voice simulation path", async () => {
