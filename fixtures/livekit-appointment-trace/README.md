@@ -22,8 +22,32 @@ passing.
 **Encoding.** OTLP/HTTP's JSON mapping: post it with
 `Content-Type: application/json`. Trace, span and parent ids are lowercase hex,
 which is what that mapping specifies; the capture arrived from a Python exporter
-that had written them as base64, and converting them is the only edit made to
-it. Nothing else was touched — not a timestamp, not an attribute, not a span.
+that had written them as base64, and converting them is one of the two edits
+made to it.
+
+**What was removed, and why.** The other edit: six attributes that carried bulk
+rather than evidence are dropped from every span they were on. Together they
+were 139 KB of a 749 KB file, and `lk.chat_ctx` alone — the whole conversation
+so far, copied again into each of sixteen LLM spans — was 116 KB of that.
+Nothing in this repository asserts against any of them.
+
+| Attribute | What it held |
+| --- | --- |
+| `lk.chat_ctx` | The running chat history, repeated per LLM span |
+| `lk.llm_metrics` | The model call's own metrics block |
+| `lk.tts_metrics` | The speech synthesis metrics block |
+| `lk.provider_request_ids` | The upstream provider's request ids |
+| `lk.function_tools` | The JSON schemas of every tool the agent was given |
+| `lk.response.function_calls` | The model's calls, repeated on the response |
+
+Everything else is the capture, unchanged: all 104 spans, every name, kind,
+parent and timestamp, the resource attributes, every `lk.function_tool.*`, the
+user transcripts and response texts, the room, job and agent identifiers, and
+every latency and delay attribute. Not a timestamp and not a span was touched.
+
+**Layout.** The file is written compact, one span per line, so that a diff reads
+span by span rather than as thousands of moved brackets. It is still one valid
+`ExportTraceServiceRequest` and is parsed, never pattern-matched.
 
 **Time window.** The spans run from `2026-09-04T17:52:51.775317Z` to
 `2026-09-04T17:54:13.633365Z` UTC. Timestamps are part of the capture, so
@@ -63,4 +87,5 @@ a fixture agent written for this test, and the provider names, appointment and
 confirmation code are all invented by that agent. There are no credentials in
 the capture: the `Authorization` header lives outside a span's payload by
 construction, and nothing in this file was redacted, because there was nothing
-to redact.
+to redact. The six attributes above were dropped for size, not for privacy —
+there was nothing sensitive in them either.
