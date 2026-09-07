@@ -392,7 +392,7 @@ jobs:
           web=false
           while IFS= read -r path; do
             case "$path" in
-              apps/api/*|apps/grader/*|apps/simulator/*|packages/*) platform=true ;;
+              apps/api/*|apps/grader/*|apps/simulator/*|packages/*|ee/*) platform=true ;;
               docker-compose.yml|docker-compose.managed.yml|.env.example) platform=true ;;
               pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) platform=true ;;
               .github/workflows/test.yml) platform=true ;;
@@ -508,7 +508,7 @@ jobs:
           deployable=false
           while IFS= read -r path; do
             case "$path" in
-              apps/api/*|apps/grader/*|apps/simulator/*|packages/*) deployable=true ;;
+              apps/api/*|apps/grader/*|apps/simulator/*|packages/*|ee/*) deployable=true ;;
               docker-compose.yml|docker-compose.managed.yml|.env.example) deployable=true ;;
               pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) deployable=true ;;
               .github/workflows/test.yml) deployable=true ;;

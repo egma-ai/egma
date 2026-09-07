@@ -36,9 +36,6 @@ importers:
       '@egma/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@egma/ee':
-        specifier: workspace:*
-        version: link:../../ee
       '@egma/ids':
         specifier: workspace:*
         version: link:../../packages/ids
@@ -97,6 +94,10 @@ importers:
       '@types/nodemailer':
         specifier: ^8.0.1
         version: 8.0.1
+    optionalDependencies:
+      '@egma/ee':
+        specifier: workspace:*
+        version: link:../../ee
 
   apps/cli:
     dependencies:
@@ -119,9 +120,6 @@ importers:
       '@egma/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@egma/ee':
-        specifier: workspace:*
-        version: link:../../ee
       '@egma/ids':
         specifier: workspace:*
         version: link:../../packages/ids
@@ -161,6 +159,10 @@ importers:
       posthog-node:
         specifier: ^5.49.1
         version: 5.49.1
+    optionalDependencies:
+      '@egma/ee':
+        specifier: workspace:*
+        version: link:../../ee
 
   apps/simulator: {}
 

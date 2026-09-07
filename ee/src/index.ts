@@ -23,6 +23,8 @@ export {
   type LoadedCloudBilling,
 } from "./load.ts";
 
+export { loadApiBilling, type ApiBillingSettings } from "./api.ts";
+
 export {
   cloudBillingPlugIn,
   cloudEntitlementSource,

@@ -12,8 +12,8 @@ import {
 } from "@egma/ee";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createApi, type TestApi } from "./support/api.ts";
-import { request as ask, signUp, type Customer } from "./support/traces.ts";
+import { createApi, type TestApi } from "../../apps/api/test/support/api.ts";
+import { request as ask, signUp, type Customer } from "../../apps/api/test/support/traces.ts";
 
 /**
  * Stripe's own door, and the four things only an admin does.

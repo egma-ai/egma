@@ -7,8 +7,8 @@ import {
 } from "@egma/ee";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { CLAIMS_PATH } from "../src/routes/claims.ts";
-import { createApi, type TestApi } from "./support/api.ts";
+import { CLAIMS_PATH } from "../../apps/api/src/routes/claims.ts";
+import { createApi, type TestApi } from "../../apps/api/test/support/api.ts";
 import {
   contextFor,
   mintKey,
@@ -17,7 +17,7 @@ import {
   request as ask,
   signUp,
   type Customer,
-} from "./support/traces.ts";
+} from "../../apps/api/test/support/traces.ts";
 
 /**
  * Egma Cloud's billing, over the API's own HTTP surface.
@@ -143,7 +143,6 @@ async function aCustomerWithARun(
     suiteId: String(suite.body.id),
     agentId,
     connectionId,
-    idempotencyKey: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -186,13 +185,14 @@ async function chatConversations(
   await api.database.sql(
     `insert into simulation
        (id, run_id, organization_id, project_id, agent_id, connection_id,
-        persona_id, persona_version_id, test_id, test_version_id,
+        persona_id, persona_version_id, persona_parameter_values, test_id, test_version_id,
         position, modality, connection_type, status, ending_reason,
         started_at, ended_at)
      select
        'sim_' || upper(substr(md5(random()::text || n::text || clock_timestamp()::text), 1, 26)),
-       $1, $2, $3, $4, $5, $6, $7, $8, $9,
-       n, 'chat', 'retell_chat_api', 'completed', 'persona_concluded',
+       $1, $2, $3, $4, $5, $6, $7,
+       (select persona_parameter_values from simulation where run_id = $1 order by position limit 1),
+       $8, $9, n, 'chat', 'retell_chat_api', 'completed', 'persona_concluded',
        $10::timestamptz, $10::timestamptz + interval '30 seconds'
      from generate_series($11::int, $11::int + $12::int - 1) as n`,
     [
@@ -344,7 +344,6 @@ describe("starting a run an organization cannot pay for", () => {
       suiteId: acme.suiteId,
       agentId: acme.agentId,
       connectionId: acme.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
     const message = String(
@@ -359,7 +358,6 @@ describe("starting a run an organization cannot pay for", () => {
       suiteId: globex.suiteId,
       agentId: globex.agentId,
       connectionId: globex.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(admitted.statusCode, JSON.stringify(admitted.body)).toBe(201);
   });
@@ -375,7 +373,6 @@ describe("starting a run an organization cannot pay for", () => {
       suiteId: acme.suiteId,
       agentId: acme.agentId,
       connectionId: acme.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
     const message = String(
@@ -515,7 +512,6 @@ describe("why a run's queued work is waiting", () => {
       suiteId: acme.suiteId,
       agentId: acme.agentId,
       connectionId: acme.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -539,10 +535,12 @@ describe("what the claim door does when a customer's month is spent", () => {
     await api.database.sql(
       `insert into simulation
          (id, run_id, organization_id, project_id, agent_id, connection_id,
-          persona_id, persona_version_id, test_id, test_version_id,
+          persona_id, persona_version_id, persona_parameter_values, test_id, test_version_id,
           position, modality, connection_type, status,
           claimed_by, claimed_at, heartbeat_at, started_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 9001, 'chat',
+       values ($1, $2, $3, $4, $5, $6, $7, $8,
+               (select persona_parameter_values from simulation where run_id = $2 order by position limit 1),
+               $9, $10, 9001, 'chat',
                'retell_chat_api', 'running', 'the-simulator', now(), now(),
                now())`,
       [
@@ -571,8 +569,8 @@ describe("what the claim door does when a customer's month is spent", () => {
       },
     });
     expect(claimed.statusCode, claimed.body).toBe(200);
-    const handed = (claimed.json() as { simulations?: unknown[] }).simulations;
-    expect(handed ?? []).toEqual([]);
+    const handed = (claimed.json() as { specs: unknown[] }).specs;
+    expect(handed).toEqual([]);
 
     // Back on the queue, not failed: nothing is wrong with it.
     const { rows } = await api.database.sql<{ status: string }>(
@@ -609,7 +607,7 @@ describe("what the claim door does when a customer's month is spent", () => {
     });
     expect(claimed.statusCode, claimed.body).toBe(200);
     expect(
-      (claimed.json() as { simulations?: unknown[] }).simulations ?? [],
+      (claimed.json() as { specs: unknown[] }).specs,
     ).toEqual([]);
 
     const { rows } = await api.database.sql<{ status: string }>(

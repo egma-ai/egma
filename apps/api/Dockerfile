@@ -16,6 +16,10 @@ COPY packages/platform-api/package.json packages/platform-api/
 COPY packages/provider-credentials/package.json packages/provider-credentials/
 COPY packages/retell/package.json packages/retell/
 COPY packages/simulation-contract/package.json packages/simulation-contract/
+RUN --mount=type=bind,target=/workspace \
+    if [ -f /workspace/ee/package.json ]; then \
+      mkdir -p ee && cp /workspace/ee/package.json ee/; \
+    fi
 RUN pnpm install --frozen-lockfile --filter "egma" --filter "@egma/api..."
 
 COPY packages/ids packages/ids
@@ -25,8 +29,11 @@ COPY packages/provider-credentials packages/provider-credentials
 COPY packages/retell packages/retell
 COPY packages/simulation-contract packages/simulation-contract
 COPY packages/db packages/db
+RUN --mount=type=bind,target=/workspace \
+    if [ -f /workspace/ee/package.json ]; then cp -R /workspace/ee/. ee/; fi
 COPY apps/api apps/api
-RUN pnpm exec tsc -b packages/ids packages/platform-api packages/provider-credentials packages/retell packages/db apps/api
+RUN pnpm --filter @egma/ee --if-present build \
+    && pnpm exec tsc -b packages/ids packages/platform-api packages/provider-credentials packages/retell packages/db apps/api
 
 ENV NODE_ENV=production
 EXPOSE 3100

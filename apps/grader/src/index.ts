@@ -1,5 +1,4 @@
 import {
-  billingIsConfigured,
   connect,
   connectClickHouse,
   disconnect,
@@ -9,6 +8,7 @@ import {
 import { providerCredentialSource } from "@egma/provider-credentials";
 
 import { loadConfig } from "./config.ts";
+import { loadCloudBilling } from "./billing.ts";
 import { makeLog, platformEvent } from "./log.ts";
 import { startService } from "./service.ts";
 
@@ -24,13 +24,8 @@ const log = makeLog(config.logLevel, config.claimant);
 connect({ databaseUrl: config.databaseUrl });
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
 
-if (billingIsConfigured(config)) {
-  // The plan rows come with the plug-in, so whichever process boots first
-  // writes them and the other finds them there. A grader that reached a
-  // customer's account before anybody had written a plan row would meet the
-  // account's own foreign key.
-  const ee = await import("@egma/ee");
-  const cloud = await ee.loadCloudBilling();
+const cloud = await loadCloudBilling(config);
+if (cloud !== undefined) {
   installBillingPlugIn(cloud.plugIn);
   log.info(
     platformEvent("egma.billing.installed", {

@@ -94,42 +94,23 @@ export type CloudBilling = {
   startMeterJob(log: BillingLog): StoppableJob;
 };
 
-export async function loadCloudBilling(settings: {
+export type CloudBillingSettings = {
   readonly stripeSecretKey: string | undefined;
   readonly stripeWebhookSecret?: string | undefined;
   readonly baseUrl: string;
-}): Promise<CloudBilling | undefined> {
+};
+
+type BillingModule = {
+  loadApiBilling(settings: CloudBillingSettings): Promise<CloudBilling>;
+};
+
+export async function loadCloudBilling(
+  settings: CloudBillingSettings,
+): Promise<CloudBilling | undefined> {
   if (!billingIsConfigured(settings)) return undefined;
 
-  const ee = await import("@egma/ee");
-  const loaded = await ee.loadCloudBilling();
-  // The one Stripe client this process holds. The secret never leaves the
-  // commercially licensed package, and nothing in the open product imports
-  // `stripe` at all. It is built here rather than inside the load above
-  // because the grader loads the same adapter and has no Stripe work to do:
-  // it asks the two ports and serves no route, reports no hour and takes no
-  // webhook.
-  const stripe = ee.stripeGateway({
-    secretKey: settings.stripeSecretKey ?? "",
-    ...(settings.stripeWebhookSecret === undefined
-      ? {}
-      : { webhookSecret: settings.stripeWebhookSecret }),
-    baseUrl: settings.baseUrl,
-  });
-
-  return {
-    plugIn: loaded.plugIn,
-    routes: (app, options) => loaded.routes(app, { ...options, stripe }),
-    // **No signing secret, no door.** A webhook's signature is its only
-    // credential, so an endpoint that could not check one would be an
-    // endpoint anybody could post a payment to. A deployment that set a
-    // Stripe key without a webhook secret still sells: the buttons work, and
-    // Stripe's answers land when the secret is set.
-    webhookRoutes: stripe.hasWebhookSecret
-      ? (app) => ee.billingWebhookRoutes(app, { stripe })
-      : undefined,
-    seededPlans: loaded.seededPlans,
-    caughtUp: loaded.caughtUp,
-    startMeterJob: (log) => ee.startOverageMeterJob({ gateway: stripe, log }),
-  };
+  // Resolve the optional package only at runtime, after billing is selected.
+  const packageName: string = "@egma/ee";
+  const billing: BillingModule = await import(packageName);
+  return billing.loadApiBilling(settings);
 }
