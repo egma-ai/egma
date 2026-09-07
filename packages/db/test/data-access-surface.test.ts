@@ -591,12 +591,22 @@ const READ_LIMITS = [
 const THE_AGENT_PLATFORMS = ["AGENT_PLATFORMS"];
 
 /**
- * Whether a conversation over this connection kind could ever produce the
- * agent's own account of itself. A pure question about a word, reaching
- * nothing — exported because the read that tells a customer their record is
- * missing that account has to ask the same list grading waits on.
+ * The POV vocabulary: pure questions about words, reaching nothing.
+ *
+ * `povOf` turns the `emitter` column into the product's own word for it, and
+ * `fromOnePov` narrows a trace's spans to one account of the conversation —
+ * both so that `emitter` stays a storage word no reader ever meets.
+ * `laneProducesAnAgentPov` answers whether a conversation over a connection
+ * kind could ever have a second account at all, and is exported because the
+ * read that tells a customer their record is missing one has to ask the same
+ * list grading waits on: two lists would one day disagree about which
+ * conversations were ever owed a second account.
  */
-const THE_AGENT_POV_LANES = ["laneProducesAnAgentPov"];
+const THE_POV_WORDS = [
+  "povOf",
+  "fromOnePov",
+  "laneProducesAnAgentPov",
+];
 const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS"];
 
 /**
@@ -691,7 +701,7 @@ describe("the data-access module's surface", () => {
         ...VALUES,
         ...READ_LIMITS,
         ...THE_AGENT_PLATFORMS,
-        ...THE_AGENT_POV_LANES,
+        ...THE_POV_WORDS,
         ...THE_GRADING_BUDGET,
         ...THE_AGENT_POV_BOUND,
         ...THE_RETELL_BUDGET,
