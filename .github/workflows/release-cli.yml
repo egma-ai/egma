@@ -1,27 +1,62 @@
 name: Release CLI
 
-# Publish CLI releases from a cli-v<version> tag matching apps/cli/package.json.
-# Update and commit the package version before pushing the tag.
-# Publishing uses npm trusted OIDC authentication configured for this workflow;
-# merging to main alone does not trigger this workflow.
+# A version increase on main creates its release tag and publishes the CLI.
+# Manual cli-v<version> tags use the same checks and npm trusted publisher.
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "cli-v*"
+
+concurrency:
+  group: release-cli
+  queue: max
 
 permissions:
   contents: read
   id-token: write
 
 jobs:
-  release:
+  prepare:
+    name: Prepare release
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      should_publish: ${{ steps.release.outputs.should_publish }}
+      version: ${{ steps.release.outputs.version }}
+      npm_tag: ${{ steps.release.outputs.npm_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Compare versions and prepare the release tag
+        id: release
+        run: python3 .github/package_release.py prepare cli
+
+  release:
+    needs: prepare
+    if: needs.prepare.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      NPM_TAG: ${{ needs.prepare.outputs.npm_tag }}
     steps:
       # Actions are pinned to a commit, not a tag. A tag can be moved; this job
       # holds npm publishing authority, so what it runs must not change under
       # it. The trailing comment is the human-readable version each SHA is.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
 
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         # Version comes from "packageManager" in the root package.json.
@@ -38,18 +73,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Check the tag matches the version
-        # Catches the classic slip: tagged cli-v0.2.0, shipped 0.1.0.
+      - name: Check the release matches the package version
         run: |
-          tagged="${GITHUB_REF_NAME#cli-v}"
           package="$(node -p "require('./apps/cli/package.json').name")"
           packaged="$(node -p "require('./apps/cli/package.json').version")"
           if [ "$package" != "egma-cli" ]; then
             echo "apps/cli/package.json names $package, expected egma-cli." >&2
             exit 1
           fi
-          if [ "$tagged" != "$packaged" ]; then
-            echo "Tag says $tagged, apps/cli/package.json says $packaged." >&2
+          if [ "$RELEASE_VERSION" != "$packaged" ]; then
+            echo "Release says $RELEASE_VERSION, apps/cli/package.json says $packaged." >&2
             exit 1
           fi
           echo "Releasing egma-cli $packaged."
@@ -113,7 +146,7 @@ jobs:
         run: |
           set -e
           status=0
-          out="$(npm publish --dry-run "${{ steps.pack.outputs.tarball }}" 2>&1)" || status=$?
+          out="$(npm publish --dry-run --tag "$NPM_TAG" "${{ steps.pack.outputs.tarball }}" 2>&1)" || status=$?
           echo "$out"
           if echo "$out" | grep -qi "auto-corrected some errors"; then
             echo "::error::npm would rewrite the packed manifest before publishing. Fix it rather than shipping the rewrite." >&2
@@ -124,4 +157,4 @@ jobs:
       - name: Publish to npm
         # npm, not pnpm: OIDC trusted publishing lives in the npm CLI.
         # No NODE_AUTH_TOKEN — the OIDC exchange is the credential.
-        run: npm publish "${{ steps.pack.outputs.tarball }}"
+        run: python3 .github/package_release.py publish-npm cli "${{ steps.pack.outputs.tarball }}"

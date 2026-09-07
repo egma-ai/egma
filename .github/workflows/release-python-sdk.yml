@@ -1,9 +1,7 @@
 name: Release Python SDK
 
-# Publishing is one deliberate tag push. Merging does not publish.
-#
-#   git tag python-sdk-v0.3.0
-#   git push origin python-sdk-v0.3.0
+# A version increase on main creates its release tag and publishes the SDK.
+# Manual python-sdk-v<version> tags use the same release checks.
 #
 # PyPI must trust this repository, workflow, and `pypi` environment. GitHub
 # then supplies one short-lived OIDC credential. No long-lived PyPI token is
@@ -11,16 +9,50 @@ name: Release Python SDK
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "python-sdk-v*"
+
+concurrency:
+  group: release-python-sdk
+  queue: max
 
 permissions:
   contents: read
 
 jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      should_publish: ${{ steps.release.outputs.should_publish }}
+      version: ${{ steps.release.outputs.version }}
+      npm_tag: ${{ steps.release.outputs.npm_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Compare versions and prepare the release tag
+        id: release
+        run: python3 .github/package_release.py prepare python
+
   release:
     name: Verify and publish
+    needs: prepare
+    if: needs.prepare.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
     environment:
       name: pypi
       url: https://pypi.org/p/egma
@@ -32,6 +64,8 @@ jobs:
       # Every action is pinned to the commit behind its release tag. This job
       # holds publication authority, so a moved tag must not change its code.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -43,15 +77,14 @@ jobs:
           # silently change build backends because the CLI moved forward.
           version: "0.11.33"
 
-      - name: Check the tag matches both package versions
+      - name: Check the release matches both package versions
         working-directory: sdks/python
         run: |
           set -e
-          tagged="${GITHUB_REF_NAME#python-sdk-v}"
           packaged="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           workspace="$(python -c 'import json; print(json.load(open("package.json"))["version"])')"
-          if [ "$tagged" != "$packaged" ] || [ "$packaged" != "$workspace" ]; then
-            echo "Tag says $tagged, pyproject.toml says $packaged, and package.json says $workspace." >&2
+          if [ "$RELEASE_VERSION" != "$packaged" ] || [ "$packaged" != "$workspace" ]; then
+            echo "Release says $RELEASE_VERSION, pyproject.toml says $packaged, and package.json says $workspace." >&2
             exit 1
           fi
           echo "Releasing egma $packaged."
@@ -110,7 +143,7 @@ jobs:
               def add_shutdown_callback(self, callback):
                   self.callbacks.append(callback)
 
-          expected = os.environ["GITHUB_REF_NAME"].removeprefix("python-sdk-v")
+          expected = os.environ["RELEASE_VERSION"]
           assert version("egma") == expected
           assert version("openai").split(".", 1)[0] == "2"
           assert agents.JobContext is not None
@@ -182,3 +215,4 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: sdks/python/dist/
+          skip-existing: true

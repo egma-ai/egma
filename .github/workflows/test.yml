@@ -79,7 +79,7 @@ jobs:
         # Builds the workspace, then the tests against it, then the web app.
         run: pnpm typecheck
 
-      - name: Check compatibility job failure handling
+      - name: Test CI and release helpers
         run: python3 -B -m unittest discover -s .github -p 'test_*.py'
 
   fast:
