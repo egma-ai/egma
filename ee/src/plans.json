@@ -1,6 +1,8 @@
 {
   "note": [
     "Money is in millionths of a US dollar. Null allowance means unlimited.",
+    "Pro overage is $0.02 per phone minute and $0.01 per web-call minute.",
+    "Voice duration is counted per second with a ten-second minimum per simulation.",
     "The inference settlement interval is in seconds."
   ],
   "welcomeCreditMicros": 5000000,

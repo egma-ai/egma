@@ -96,7 +96,6 @@ describe("the API's deployment story", () => {
       // product without them.
       "EGMA_STRIPE_SECRET_KEY",
       "EGMA_STRIPE_WEBHOOK_SECRET",
-      "EGMA_STRIPE_PUBLISHABLE_KEY",
     ]);
   });
 

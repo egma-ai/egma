@@ -18,10 +18,7 @@
  * behind.
  */
 
-export {
-  loadCloudBilling,
-  type LoadedCloudBilling,
-} from "./load.ts";
+export { loadCloudBilling, type LoadedCloudBilling } from "./load.ts";
 
 export { loadApiBilling, type ApiBillingSettings } from "./api.ts";
 
@@ -82,6 +79,8 @@ export {
   hourAround,
   isPaying,
   microsFromCents,
+  minuteValueAdded,
+  type CanonicalSubscription,
   previousHour,
   type AppliedDelivery,
   type MeteredHour,
@@ -115,10 +114,14 @@ export {
 
 export {
   METER_TIMESTAMP_WINDOW_DAYS,
+  visitMeterAccounts,
+  type MeterAccount,
+  type MeterPeriodFact,
+  type MeterProgress,
+  type PendingMeterReport,
   MOST_HOURS_CAUGHT_UP_AT_ONCE,
   accountForBillingAction,
   applyStripeEvent,
-  markOverageReported,
   activateBilling,
   createBillingAccount,
   settleInference,
@@ -128,7 +131,6 @@ export {
   type BillingLedgerPage,
   type SettledUsage,
   openBillingAccount,
-  overageOwedThrough,
   recordStripeCustomer,
   recordStripePlanObjects,
   readBillingOverview,
@@ -140,15 +142,12 @@ export {
   type CloudPlan,
   type BillingActor,
   type EntitlementFacts,
-  type OrganizationOverage,
-  type OverageMark,
   type SeededPlans,
   type StripePlanObjects,
 } from "./access/index.ts";
 
 export {
   inferenceChargeKey,
-  meterEventIdentifier,
   purchasedCreditKey,
   stripeAttemptKey,
   stripeCustomerKey,

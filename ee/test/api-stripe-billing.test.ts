@@ -8,12 +8,17 @@ import {
   billingWebhookRoutes,
   cloudBillingPlugIn,
   seedCloudPlans,
+  activateBilling,
   stripeGateway,
 } from "@egma/ee";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "../../apps/api/test/support/api.ts";
-import { request as ask, signUp, type Customer } from "../../apps/api/test/support/traces.ts";
+import {
+  request as ask,
+  signUp,
+  type Customer,
+} from "../../apps/api/test/support/traces.ts";
 
 /**
  * Stripe's own door, and the four things only an admin does.
@@ -45,10 +50,12 @@ afterEach(async () => {
  * signature check is the same cryptography whether the key was ever used or
  * not, and every route below is refused before it would call anything.
  */
-function anAdapter(): ReturnType<typeof stripeGateway> {
+function anAdapter(withSigningSecret = true): ReturnType<typeof stripeGateway> {
   return stripeGateway({
     secretKey: "sk_test_never-used-against-an-account",
-    webhookSecret: "whsec_signs-nothing-but-this-test",
+    webhookSecret: withSigningSecret
+      ? "whsec_signs-nothing-but-this-test"
+      : undefined,
     baseUrl: "https://egma.test",
   });
 }
@@ -58,7 +65,7 @@ async function aBillingDeployment(
   label: string,
   options: { readonly withWebhookDoor: boolean },
 ): Promise<void> {
-  const stripe = anAdapter();
+  const stripe = anAdapter(options.withWebhookDoor);
   api = await createApi(label, {
     billing: cloudBillingPlugIn(),
     installBilling: true,
@@ -71,6 +78,11 @@ async function aBillingDeployment(
       : {}),
   });
   await seedCloudPlans();
+  await activateBilling();
+  if (options.withWebhookDoor)
+    await api.database.sql(
+      "update cloud_plan set stripe_payments_ready = true where code = 'hobby'",
+    );
 }
 
 async function anAdmin(email: string, name: string): Promise<Customer> {
@@ -127,6 +139,19 @@ describe("Stripe's own door", () => {
     );
   });
 
+  it("does not let an unauthenticated bad signature change billing health", async () => {
+    await aBillingDeployment("stripe-untrusted-health", { withWebhookDoor: true });
+    const admin = await anAdmin("untrusted-health@example.test", "Acme");
+    const response = await api.app.inject({ method: "POST", url: BILLING_WEBHOOK_PATH,
+      headers: { "content-type": "application/json", "stripe-signature": "t=1757000000,v1=bad" },
+      payload: JSON.stringify({ id: "evt_untrusted", type: "checkout.session.completed", data: { object: { customer: "cus_untrusted" } } }) });
+    expect(response.statusCode).toBe(400);
+    const { rows } = await api.database.sql("select stripe_failed_at, stripe_failure_version from cloud_billing_account where organization_id = $1", [admin.organizationId]);
+    expect(rows[0]).toEqual({ stripe_failed_at: null, stripe_failure_version: "0" });
+    const readiness = await api.database.sql("select stripe_payments_ready from cloud_plan where code = 'hobby'");
+    expect(readiness.rows[0]?.stripe_payments_ready).toBe(true);
+  });
+
   it("takes no session cookie and no key, because the signature is the gate", async () => {
     await aBillingDeployment("stripe-no-credential", { withWebhookDoor: true });
 
@@ -157,7 +182,12 @@ describe("what the four billing actions ask before they ask Stripe anything", ()
       [admin.organizationId],
     );
 
-    for (const path of [CREDIT_PATH, UPGRADE_PATH, DOWNGRADE_PATH, PORTAL_PATH]) {
+    for (const path of [
+      CREDIT_PATH,
+      UPGRADE_PATH,
+      DOWNGRADE_PATH,
+      PORTAL_PATH,
+    ]) {
       const answer = await ask(api.app, "POST", path, key, {
         amountMicros: 25_000_000,
       });
@@ -165,6 +195,25 @@ describe("what the four billing actions ask before they ask Stripe anything", ()
         403,
       );
       expect(answer.body).toMatchObject({ error: "not_permitted" });
+    }
+  });
+
+  it("refuses paid actions until webhook signing is configured", async () => {
+    await aBillingDeployment("stripe-signing-missing", {
+      withWebhookDoor: false,
+    });
+    const admin = await anAdmin("signing-missing@example.test", "Acme");
+    for (const path of [
+      CREDIT_PATH,
+      UPGRADE_PATH,
+      DOWNGRADE_PATH,
+      PORTAL_PATH,
+    ]) {
+      const answer = await ask(api.app, "POST", path, admin.secret, {
+        amountMicros: 25000000,
+      });
+      expect(answer.statusCode).toBe(422);
+      expect(String(answer.body["message"])).toContain("webhook");
     }
   });
 
@@ -185,7 +234,7 @@ describe("what the four billing actions ask before they ask Stripe anything", ()
   });
 
   it("refuses a downgrade for an organization that is not on Pro", async () => {
-    await aBillingDeployment("stripe-not-pro", { withWebhookDoor: false });
+    await aBillingDeployment("stripe-not-pro", { withWebhookDoor: true });
     const admin = await anAdmin("hobbyist@example.test", "Acme");
     const key = admin.secret;
 
@@ -197,7 +246,7 @@ describe("what the four billing actions ask before they ask Stripe anything", ()
   });
 
   it("refuses the portal for an organization that has never paid anything", async () => {
-    await aBillingDeployment("stripe-no-customer", { withWebhookDoor: false });
+    await aBillingDeployment("stripe-no-customer", { withWebhookDoor: true });
     const admin = await anAdmin("newcomer@example.test", "Acme");
     const key = admin.secret;
 
@@ -208,7 +257,7 @@ describe("what the four billing actions ask before they ask Stripe anything", ()
   });
 
   it("refuses an upgrade while this deployment's Stripe has no Pro product", async () => {
-    await aBillingDeployment("stripe-no-product", { withWebhookDoor: false });
+    await aBillingDeployment("stripe-no-product", { withWebhookDoor: true });
     const admin = await anAdmin("upgrader@example.test", "Acme");
     const key = admin.secret;
 
@@ -229,16 +278,11 @@ describe("what the Billing section is told it may do", () => {
     const admin = await anAdmin("reader@example.test", "Acme");
     const key = admin.secret;
 
-    const answer = await ask(
-      api.app,
-      "GET",
-      "/api/organization/billing",
-      key,
-    );
+    const answer = await ask(api.app, "GET", "/api/organization/billing", key);
 
     expect(answer.statusCode).toBe(200);
     expect(answer.body["actions"]).toEqual({
-      available: true,
+      available: false,
       creditAmountsMicros: [10_000_000, 25_000_000, 50_000_000, 100_000_000],
       smallestCreditMicros: 5_000_000,
       largestCreditMicros: 1_000_000_000,

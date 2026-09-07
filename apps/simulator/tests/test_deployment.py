@@ -318,7 +318,6 @@ MAY_BE_ABSENT = {
     # never a payment door somebody could post to.
     "EGMA_STRIPE_SECRET_KEY": "optional by design: absent means no billing",
     "EGMA_STRIPE_WEBHOOK_SECRET": "optional by design: absent means no webhook route",
-    "EGMA_STRIPE_PUBLISHABLE_KEY": "optional by design: absent means no billing",
     # Telemetry about egma itself, where empty is not hollow but the promise:
     # one flag, off by default, and a deployment that sets nothing sends
     # nothing anywhere. The moment the flag says on, the two required values

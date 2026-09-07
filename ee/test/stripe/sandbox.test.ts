@@ -11,16 +11,16 @@ import {
   billingWebhookRoutes,
   cloudBillingPlugIn,
   isSandboxKey,
-  meterEventIdentifier,
   openCreditCheckout,
-  previousHour,
-  reportOverageOwed,
   scheduleDowngrade,
   setUpStripe,
   stripeGateway,
   type StripeGateway,
   openBillingAccount,
+  seedCloudPlans,
+  activateBilling,
 } from "../../src/index.ts";
+import { refreshStripePaymentsReady } from "../../src/stripe/gateway.ts";
 import { createApi, type TestApi } from "../../../apps/api/test/support/api.ts";
 import {
   contextFor,
@@ -28,36 +28,7 @@ import {
   type Customer,
 } from "../../../apps/api/test/support/traces.ts";
 
-/**
- * The Stripe lane: the real sandbox, real objects, and real events.
- *
- * **It is skipped whole when no key is present, and it is never replaced by a
- * fake.** That is the founders' rule of 2026-09-07: no in-memory Stripe exists
- * anywhere in this repository, so the alternative to running against Stripe is
- * running nothing. Everything Egma decides from Stripe's answers is proved
- * without Stripe, by seeding rows, in `ee/test/stripe-adapter.test.ts`; what is
- * proved here is the half that only Stripe can answer — that the objects Egma
- * asks for are objects Stripe makes, that the events Stripe sends are events
- * this handler reads, and that a month rolls, a plan lapses and a downgrade
- * lands where they are supposed to.
- *
- * **Nothing is ever created on a live account.** The lane refuses any key that
- * is not one Stripe issues for a sandbox, before it makes a single call.
- *
- * **Every object it makes carries `egma_test=1` and is taken away at the end.**
- * A test clock takes its customers and their subscriptions with it, which is
- * the whole reason the customers are made on one. Meters are never deleted:
- * Stripe's test-data deletion does not remove them either, which is exactly why
- * the setup finds them by event name instead of assuming.
- *
- * **One deliberate approximation, and it is the only one.** A Checkout Session
- * cannot be completed without a browser, so the purchased-credit handler is
- * driven from a real Stripe event — a real payment, a real event id, a real
- * amount and a real timestamp read back from `events.list` — shaped into the
- * `checkout.session.completed` envelope the handler reads. Every subscription
- * event below is Stripe's own, posted byte for byte.
- */
-
+/** Real sandbox objects and unmodified Stripe events; no replacement client. */
 const SECRET_KEY = process.env["EGMA_STRIPE_SECRET_KEY"]?.trim() ?? "";
 const RUNNING = SECRET_KEY !== "";
 
@@ -91,7 +62,9 @@ async function rest(milliseconds: number): Promise<void> {
 }
 
 /** Wait for a test clock to finish advancing, or say it did not. */
-async function whenReady(clockId: string): Promise<Stripe.TestHelpers.TestClock> {
+async function whenReady(
+  clockId: string,
+): Promise<Stripe.TestHelpers.TestClock> {
   const until = Date.now() + CLOCK_READY_TIMEOUT_MS;
   for (;;) {
     const clock = await stripe.testHelpers.testClocks.retrieve(clockId);
@@ -126,7 +99,10 @@ async function deliver(event: unknown): Promise<{
   const answer = await api.app.inject({
     method: "POST",
     url: BILLING_WEBHOOK_PATH,
-    headers: { "content-type": "application/json", "stripe-signature": signature },
+    headers: {
+      "content-type": "application/json",
+      "stripe-signature": signature,
+    },
     payload,
   });
   return {
@@ -179,7 +155,7 @@ async function accountRow(organizationId: string): Promise<{
   return row;
 }
 
-/** When Egma created this organization: what a Hobby month is anchored on. */
+/** The initial signup instant, used to distinguish a later downgrade boundary. */
 async function organizationCreatedAt(organizationId: string): Promise<Date> {
   const { rows } = await api.database.sql<{ created_at: Date }>(
     "select created_at from organization where id = $1",
@@ -209,7 +185,13 @@ async function aCustomerOn(
   const customer = await stripe.customers.create({
     test_clock: clock.id,
     // Stripe Tax needs somewhere to work a rate out from.
-    address: { line1: "1 Test Way", city: "Denver", state: "CO", postal_code: "80202", country: "US" },
+    address: {
+      line1: "1 Test Way",
+      city: "Denver",
+      state: "CO",
+      postal_code: "80202",
+      country: "US",
+    },
     metadata: { ...TEST_METADATA, egma_organization_id: organizationId },
   });
   // A shared test card such as `pm_card_visa` is a template, not a card: every
@@ -316,6 +298,8 @@ let payingCustomerId: string;
 let payingClockId: string;
 let payingPaymentMethodId: string;
 let subscriptionId: string;
+let creditSessionId: string;
+let creditCheckoutUrl: string;
 
 describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
   beforeAll(async () => {
@@ -332,6 +316,12 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
       baseUrl: "https://egma.test",
     });
     stripe = gateway.api;
+    const expectedAccount = process.env["EGMA_STRIPE_TEST_ACCOUNT"]?.trim();
+    if (!expectedAccount)
+      throw new Error(
+        "Name EGMA_STRIPE_TEST_ACCOUNT before running sandbox writes",
+      );
+    expect((await stripe.accounts.retrieveCurrent()).id).toBe(expectedAccount);
 
     api = await createApi("ee-stripe-lane", {
       billing: cloudBillingPlugIn(),
@@ -342,8 +332,16 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
         billingWebhookRoutes(app, { stripe: gateway }),
     });
 
+    await seedCloudPlans();
+    await activateBilling(new Date(LANE_START * 1000));
+    await refreshStripePaymentsReady(gateway);
+
     paying = await signUp(api.app, `pro-${randomUUID()}@example.test`, "Acme");
-    lapsing = await signUp(api.app, `laps-${randomUUID()}@example.test`, "Globex");
+    lapsing = await signUp(
+      api.app,
+      `laps-${randomUUID()}@example.test`,
+      "Globex",
+    );
   }, 180_000);
 
   afterAll(async () => {
@@ -391,7 +389,11 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
   }, 60_000);
 
   it("opens a real Checkout Session to buy credit, with tax on", async () => {
-    const made = await aCustomerOn("pm_card_visa", paying.organizationId, LANE_START);
+    const made = await aCustomerOn(
+      "pm_card_visa",
+      paying.organizationId,
+      LANE_START,
+    );
     payingCustomerId = made.customerId;
     payingClockId = made.clockId;
     payingPaymentMethodId = made.paymentMethodId;
@@ -413,58 +415,48 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     expect(session?.automatic_tax.enabled).toBe(true);
     expect(session?.client_reference_id).toBe(paying.organizationId);
     expect(session?.amount_subtotal).toBe(2_500);
+    if (session === undefined) throw new Error("Checkout Session is missing");
+    creditSessionId = session.id;
+    creditCheckoutUrl = page.url;
   }, 120_000);
 
-  it("credits the balance from a real payment's own event", async () => {
-    // A Checkout Session cannot be completed without a browser, so the payment
-    // is a real PaymentIntent on the same customer and the same card. What the
-    // handler is driven with below is that payment's own Stripe event — its
-    // id, its customer, its amount and its instant — in the envelope the
-    // handler reads. It is the one shaped payload in this lane and it is
-    // shaped from a real one.
-    const intent = await stripe.paymentIntents.create({
-      customer: payingCustomerId,
-      amount: 2_500,
-      currency: "usd",
-      payment_method: payingPaymentMethodId,
-      off_session: true,
-      confirm: true,
-      metadata: { ...TEST_METADATA, egma_organization_id: paying.organizationId },
-    });
-    expect(intent.status).toBe("succeeded");
-
-    const real = await eventAbout(["payment_intent.succeeded"], intent.id);
-    const delivered = await deliver({
-      ...real,
-      type: "checkout.session.completed",
-      data: {
-        object: {
-          id: `cs_from_${intent.id}`,
-          object: "checkout.session",
-          mode: "payment",
-          payment_status: "paid",
-          customer: payingCustomerId,
-          client_reference_id: paying.organizationId,
-          amount_subtotal: intent.amount,
-          amount_total: intent.amount,
-        },
-      },
-    });
-
+  it("credits only a completed real Checkout Session and deduplicates its actual event", async () => {
+    process.stdout.write(
+      `\nComplete this sandbox Checkout in the browser: ${creditCheckoutUrl}\n`,
+    );
+    const deadline = Date.now() + 600000;
+    for (;;) {
+      const session = await stripe.checkout.sessions.retrieve(creditSessionId);
+      if (session.status === "complete" && session.payment_status === "paid")
+        break;
+      if (Date.now() >= deadline)
+        throw new Error(
+          "Real Checkout was not completed in the browser; no payment event was fabricated",
+        );
+      await rest(2000);
+    }
+    const real = await eventAbout(
+      [
+        "checkout.session.completed",
+        "checkout.session.async_payment_succeeded",
+      ],
+      creditSessionId,
+    );
+    const delivered = await deliver(real);
     expect(delivered.statusCode).toBe(200);
     expect(delivered.body).toMatchObject({ applied: true, effect: "credited" });
-    const account = await accountRow(paying.organizationId);
-    // The $5 welcome credit, and $25 more.
-    expect(Number(account.balance_micros)).toBe(30_000_000);
-
-    // The same delivery again changes nothing, which is the whole point of the
-    // processed-event table.
+    expect(
+      Number((await accountRow(paying.organizationId)).balance_micros),
+    ).toBe(30000000);
     const again = await deliver(real);
-    expect(again.body).toMatchObject({ applied: false, effect: "redelivered" });
-    expect(Number((await accountRow(paying.organizationId)).balance_micros)).toBe(
-      30_000_000,
-    );
-  }, 180_000);
+    expect(again.body).toMatchObject({
+      applied: false,
+      effect: "credit_already_written",
+    });
+    expect(
+      Number((await accountRow(paying.organizationId)).balance_micros),
+    ).toBe(30000000);
+  }, 660000);
 
   it("moves to Pro, and Stripe's own event sets the plan and the month", async () => {
     const prices = await proPrices();
@@ -477,16 +469,26 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
       ],
       automatic_tax: { enabled: true },
       default_payment_method: payingPaymentMethodId,
-      metadata: { ...TEST_METADATA, egma_organization_id: paying.organizationId },
+      metadata: {
+        ...TEST_METADATA,
+        egma_plan: "pro",
+        egma_organization_id: paying.organizationId,
+      },
     });
     subscriptionId = subscription.id;
     expect(subscription.status).toBe("active");
 
-    const real = await eventAbout(["customer.subscription.created"], subscription.id);
+    const real = await eventAbout(
+      ["customer.subscription.created"],
+      subscription.id,
+    );
     const delivered = await deliver(real);
 
     expect(delivered.statusCode).toBe(200);
-    expect(delivered.body).toMatchObject({ applied: true, effect: "plan_changed" });
+    expect(delivered.body).toMatchObject({
+      applied: true,
+      effect: "plan_changed",
+    });
     const account = await accountRow(paying.organizationId);
     expect(account.plan_code).toBe("pro");
     expect(account.stripe_subscription_status).toBe("active");
@@ -497,56 +499,16 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     );
   }, 180_000);
 
-  it("reports an hour of minutes Stripe accepts, and refuses the same hour twice", async () => {
-    // The sweep itself, against a real account: this organization ran nothing,
-    // so it reports a nought for each meter — which is exactly what proves the
-    // customer mapping and the event names are the ones Stripe knows.
-    //
-    // The hour is the one that closed before the lane's clock, not before the
-    // wall clock. A customer on a test clock lives at the clock's frozen time,
-    // and Stripe refuses a meter event timestamped after it: "The event
-    // timestamp cannot be in future". The lane's clock started two hours ago,
-    // so the wall clock's previous hour is that customer's future. A real
-    // customer has no clock, so the job's own previousHour(now) is right there.
-    const hour = previousHour(new Date(LANE_START * 1_000));
-    const report = await reportOverageOwed(gateway, hour);
-    expect(report).toMatchObject({
-      organizations: 1,
-      hours: 1,
-      posted: 2,
-      alreadyReported: 0,
-      failed: 0,
-      tooOld: 0,
-    });
-
-    // The mark moved, so the same wake again has nothing left to report.
-    const settled = await reportOverageOwed(gateway, hour);
-    expect(settled.hours).toBe(0);
-
-    // And with the mark put back, the same hour is offered again and Stripe
-    // refuses each identifier — which the job counts rather than fails on.
-    await api.database.sql(
-      "update cloud_billing_account set overage_reported_through = $2 where organization_id = $1",
-      [paying.organizationId, new Date(hour.startedAt.getTime() - 3_600_000)],
-    );
-    const replay = await reportOverageOwed(gateway, hour);
-    expect(replay).toMatchObject({ alreadyReported: 2, posted: 0, failed: 0 });
-  }, 180_000);
-
   it("prices overage past the allowance at the plan row's own price", async () => {
     const plan = await proPlanRow();
     // 400 minutes past Pro's included web-call minutes. Posted directly
     // because this is about what Stripe does with a number, not about how Egma
     // counts one — and timestamped at the clock's own frozen time, because
     // that is the instant this customer's subscription is living at.
-    const overageMinutes = 400;
+    const overageMinutes = 400.5;
     await stripe.billing.meterEvents.create({
       event_name: METER_EVENT_NAMES.web_call_minutes,
-      identifier: meterEventIdentifier(
-        METER_EVENT_NAMES.web_call_minutes,
-        `${paying.organizationId}-overage`,
-        new Date(LANE_START * 1_000),
-      ),
+      identifier: randomUUID(),
       timestamp: LANE_START,
       payload: {
         stripe_customer_id: payingCustomerId,
@@ -586,6 +548,38 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     // The allowance is the first tier at nothing and the rest is the second
     // tier at the plan row's price, so the line is exactly the overage.
     expect(line?.amount).toBe(expectedCents);
+    expect(Number(String(line?.quantity_decimal))).toBe(
+      plan.webCallMinutesAllowance + overageMinutes,
+    );
+
+    const fractionalId = randomUUID();
+    await stripe.billing.meterEvents.create(
+      {
+        event_name: METER_EVENT_NAMES.phone_minutes,
+        identifier: fractionalId,
+        timestamp: LANE_START,
+        payload: {
+          stripe_customer_id: payingCustomerId,
+          value: "0.166666666667",
+        },
+      },
+      { idempotencyKey: fractionalId },
+    );
+    const untilPhone = Date.now() + METER_TIMEOUT_MS;
+    let phoneQuantity = 0;
+    while (Date.now() < untilPhone) {
+      const preview = await stripe.invoices.createPreview({
+        customer: payingCustomerId,
+        subscription: subscriptionId,
+      });
+      const phone = preview.lines.data.find(
+        (one) => priceIdOf(one) === plan.stripePhoneMeterPriceId,
+      );
+      phoneQuantity = Number(String(phone?.quantity_decimal ?? "0"));
+      if (phoneQuantity === 0.166666666667) break;
+      await rest(2000);
+    }
+    expect(phoneQuantity).toBe(0.166666666667);
   }, 240_000);
 
   it("rolls a period on the test clock and stays Pro", async () => {
@@ -595,7 +589,10 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     await whenReady(payingClockId);
 
     const rolled = await stripe.subscriptions.retrieve(subscriptionId);
-    const real = await eventAbout(["customer.subscription.updated"], subscriptionId);
+    const real = await eventAbout(
+      ["customer.subscription.updated"],
+      subscriptionId,
+    );
     await deliver(real);
 
     const account = await accountRow(paying.organizationId);
@@ -604,7 +601,10 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
   }, 300_000);
 
   it("stops at period end rather than now, and lands on Hobby when it does", async () => {
-    const stopping = await scheduleDowngrade(gateway, contextFor(paying, "admin"));
+    const stopping = await scheduleDowngrade(
+      gateway,
+      contextFor(paying, "admin"),
+    );
     expect(stopping.endsAt).not.toBeNull();
 
     // Still Pro: the customer paid for the month they are in.
@@ -615,14 +615,21 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     });
     await whenReady(payingClockId);
 
-    const real = await eventAbout(["customer.subscription.deleted"], subscriptionId);
+    const real = await eventAbout(
+      ["customer.subscription.deleted"],
+      subscriptionId,
+    );
     const delivered = await deliver(real);
-    expect(delivered.body).toMatchObject({ applied: true, effect: "plan_changed" });
+    expect(delivered.body).toMatchObject({
+      applied: true,
+      effect: "plan_changed",
+    });
 
     const account = await accountRow(paying.organizationId);
     expect(account.plan_code).toBe("hobby");
-    expect(account.period_anchor.toISOString()).toBe(
-      (await organizationCreatedAt(paying.organizationId)).toISOString(),
+    const canceled = await stripe.subscriptions.retrieve(subscriptionId);
+    expect(account.period_anchor.getTime()).toBe(
+      (canceled.ended_at ?? 0) * 1000,
     );
   }, 300_000);
 
@@ -645,7 +652,11 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
       ],
       trial_end: daysOn(30),
       automatic_tax: { enabled: true },
-      metadata: { ...TEST_METADATA, egma_organization_id: lapsing.organizationId },
+      metadata: {
+        ...TEST_METADATA,
+        egma_plan: "pro",
+        egma_organization_id: lapsing.organizationId,
+      },
     });
     await deliver(
       await eventAbout(["customer.subscription.created"], subscription.id),
@@ -668,27 +679,29 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     expect(during.plan_code).toBe("pro");
     expect(during.stripe_subscription_status).toBe("past_due");
 
-    // **And then the end of the retries, driven rather than waited for.** How
-    // long Stripe duns and whether it finishes by cancelling or by marking the
-    // subscription unpaid are settings on the Stripe account, not something a
-    // clock advance settles the same way twice. So the outcome those settings
-    // arrive at is applied directly, and what is under test stays what it
-    // always was: that Egma puts the organization back on Hobby, with its own
-    // creation date as the month's anchor again.
-    const ended = await stripe.subscriptions.cancel(subscription.id);
-    expect(ended.status).toBe("canceled");
+    await stripe.testHelpers.testClocks.advance(made.clockId, {
+      frozen_time: daysOn(70),
+    });
+    await whenReady(made.clockId);
+    const terminal = await stripe.subscriptions.retrieve(subscription.id);
+    expect(["unpaid", "canceled"]).toContain(terminal.status);
     const gone = await eventAbout(
-      ["customer.subscription.deleted"],
+      ["customer.subscription.updated", "customer.subscription.deleted"],
       subscription.id,
     );
     const delivered = await deliver(gone);
-    expect(delivered.body).toMatchObject({ applied: true, effect: "plan_changed" });
+    expect(delivered.body).toMatchObject({
+      applied: true,
+      effect: "plan_changed",
+    });
 
     const after = await accountRow(lapsing.organizationId);
     expect(after.plan_code).toBe("hobby");
-    expect(after.stripe_subscription_status).toBe("canceled");
-    expect(after.period_anchor.toISOString()).toBe(
-      (await organizationCreatedAt(lapsing.organizationId)).toISOString(),
+    expect(after.stripe_subscription_status).toBe(terminal.status);
+    expect(after.period_anchor.getTime()).toBeGreaterThan(
+      (await organizationCreatedAt(lapsing.organizationId)).getTime(),
     );
+    if (terminal.ended_at !== null)
+      expect(after.period_anchor.getTime()).toBe(terminal.ended_at * 1000);
   }, 300_000);
 });

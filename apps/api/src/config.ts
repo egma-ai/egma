@@ -159,16 +159,6 @@ export type Config = {
    */
   readonly stripeWebhookSecret: string | undefined;
   /**
-   * `EGMA_STRIPE_PUBLISHABLE_KEY`, as the deployment named it, or `undefined`.
-   *
-   * Stripe's client-side key, which is public by design. Nothing in this
-   * release reads it — every payment happens on a Stripe-hosted Checkout page
-   * that needs no key of Egma's in the browser — and it is named here so that
-   * a deployment answering all three Stripe settings answers them in one
-   * place, and so the day an embedded form arrives it is already configured.
-   */
-  readonly stripePublishableKey: string | undefined;
-  /**
    * The deployment's phone carrier route, read from the process environment.
    *
    * All four values are one credential bundle. Empty is ordinary and means
@@ -408,8 +398,6 @@ export function loadConfig(
     stripeSecretKey: environment.EGMA_STRIPE_SECRET_KEY?.trim() || undefined,
     stripeWebhookSecret:
       environment.EGMA_STRIPE_WEBHOOK_SECRET?.trim() || undefined,
-    stripePublishableKey:
-      environment.EGMA_STRIPE_PUBLISHABLE_KEY?.trim() || undefined,
     carrierRoute: carrierRoute(environment),
     blob: blobStore(environment, parsedBaseUrl),
     ingestion: loadIngestionSettings(environment),

@@ -71,18 +71,3 @@ export function stripeAttemptKey(
   return `egma_${what}:${attemptId}`;
 }
 
-/**
- * The identifier one hour's meter event is posted under, and its key.
- *
- * **The meter, the organization and the hour** — the tuple that defines the
- * billable fact, so a replayed hour is refused by Stripe rather than added to
- * the customer's usage a second time. The meter name is in it because both
- * meters are reported for the same organization and the same hour.
- */
-export function meterEventIdentifier(
-  eventName: string,
-  organizationId: string,
-  hourStart: Date,
-): string {
-  return `${eventName}:${organizationId}:${hourStart.toISOString()}`;
-}

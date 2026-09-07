@@ -6,11 +6,12 @@ import type Stripe from "stripe";
 import {
   accountForBillingAction,
   recordStripeCustomer,
+  recordStripeOperationFailure,
   type BillingActor,
 } from "../access/index.ts";
 import { stripeAttemptKey, stripeCustomerKey } from "../idempotency.ts";
 import { centsFromMicros, isPaying } from "./facts.ts";
-import type { StripeGateway } from "./gateway.ts";
+import { isEgmaStripeFailure, type StripeGateway } from "./gateway.ts";
 
 /**
  * The four things an organization admin does with Stripe: buy credit, move to
@@ -76,21 +77,7 @@ function dollars(micros: number): string {
   return `$${(micros / 1_000_000).toLocaleString("en-US")}`;
 }
 
-/**
- * Where Checkout and the Portal send a person back to.
- *
- * The organization settings page they pressed the button on, which is where
- * the plan and the balance are — so a payment that succeeded is visible in the
- * same breath as the return.
- *
- * **The project in that address is resolved, never assumed.** An
- * organization-scoped credential acts in no project at all — the context says
- * so as `undefined` on purpose — and interpolating it would send a paying
- * customer to `/projects/undefined/`. So the acting project is used where
- * there is one, and otherwise the first project of the organization the person
- * is in, which is a page they can open by definition. An organization with no
- * project at all is refused with a sentence rather than sent nowhere.
- */
+/** Return to the authorized project on the configured application origin. */
 async function returnUrl(
   gateway: StripeGateway,
   auth: AuthContext,
@@ -102,6 +89,18 @@ async function returnUrl(
         "person back to after Checkout",
     );
   }
+  const origin = new URL(base);
+  if (
+    !["http:", "https:"].includes(origin.protocol) ||
+    origin.username !== "" ||
+    origin.password !== "" ||
+    origin.search !== "" ||
+    origin.hash !== ""
+  ) {
+    throw new Error(
+      "the billing return URL must be an HTTP application URL without credentials, query, or fragment",
+    );
+  }
   const projectId = auth.projectId ?? (await listProjects(auth))[0]?.id;
   if (projectId === undefined) {
     throw new BillingStateError(
@@ -109,7 +108,7 @@ async function returnUrl(
         "come back to. Create a project and try again.",
     );
   }
-  return `${base.replace(/\/+$/, "")}/projects/${projectId}/settings/organization`;
+  return `${base.replace(/\/+$/, "")}/projects/${encodeURIComponent(projectId)}/settings/billing`;
 }
 
 /**
@@ -167,50 +166,53 @@ export async function openCreditCheckout(
   auth: AuthContext,
   amountMicros: number,
 ): Promise<HostedPage> {
-  const refusal = creditAmountRefusal(amountMicros);
-  if (refusal !== undefined) throw new CreditAmountError(refusal);
+  return protectingStripeAction(auth, async () => {
+    const refusal = creditAmountRefusal(amountMicros);
+    if (refusal !== undefined) throw new CreditAmountError(refusal);
 
-  const actor = await accountForBillingAction(auth);
-  const returnTo = await returnUrl(gateway, auth);
-  const customerId = await customerFor(gateway, auth, actor);
+    const actor = await accountForBillingAction(auth);
+    requireWebhook(gateway, actor.account.stripePaymentsReady);
+    const returnTo = await returnUrl(gateway, auth);
+    const customerId = await customerFor(gateway, auth, actor);
 
-  const session = await gateway.api.checkout.sessions.create(
-    {
-      mode: "payment",
-      customer: customerId,
-      client_reference_id: auth.organizationId,
-      automatic_tax: { enabled: true },
-      // Stripe Tax needs an address to work out a rate, and a returning
-      // customer should not retype one they have already given.
-      customer_update: { address: "auto", name: "auto" },
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency: "usd",
-            unit_amount: centsFromMicros(amountMicros),
-            // Exclusive: the amount a person chose is the credit they get, and
-            // tax is added on top rather than taken out of it.
-            tax_behavior: "exclusive",
-            product_data: {
-              name: "Egma inference credit",
-              description:
-                "Prepaid balance for model usage made with Egma's provider " +
-                "keys. It never expires.",
+    const session = await gateway.api.checkout.sessions.create(
+      {
+        mode: "payment",
+        customer: customerId,
+        client_reference_id: auth.organizationId,
+        automatic_tax: { enabled: true },
+        // Stripe Tax needs an address to work out a rate, and a returning
+        // customer should not retype one they have already given.
+        customer_update: { address: "auto", name: "auto" },
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: "usd",
+              unit_amount: centsFromMicros(amountMicros),
+              // Exclusive: the amount a person chose is the credit they get, and
+              // tax is added on top rather than taken out of it.
+              tax_behavior: "exclusive",
+              product_data: {
+                name: "Egma inference credit",
+                description:
+                  "Prepaid balance for model usage made with Egma's provider " +
+                  "keys. It never expires.",
+              },
             },
           },
+        ],
+        metadata: {
+          egma_organization_id: auth.organizationId,
+          egma_credit_micros: String(amountMicros),
         },
-      ],
-      metadata: {
-        egma_organization_id: auth.organizationId,
-        egma_credit_micros: String(amountMicros),
+        success_url: `${returnTo}?credit=bought`,
+        cancel_url: `${returnTo}?credit=cancelled`,
       },
-      success_url: `${returnTo}?credit=bought`,
-      cancel_url: `${returnTo}?credit=cancelled`,
-    },
-    { idempotencyKey: stripeAttemptKey("credit", randomUUID()) },
-  );
-  return pageOf(session.url, "Buy credit");
+      { idempotencyKey: stripeAttemptKey("credit", randomUUID()) },
+    );
+    return pageOf(session.url, "Buy credit");
+  });
 }
 
 /** An amount of credit that cannot be bought. Its sentence is shown as it is. */
@@ -241,45 +243,48 @@ export async function openUpgradeCheckout(
   gateway: StripeGateway,
   auth: AuthContext,
 ): Promise<HostedPage> {
-  const actor = await accountForBillingAction(auth);
-  if (actor.account.planCode === "pro") {
-    throw new BillingStateError(
-      "This organization is already on Pro. Use Manage payment and invoices " +
-        "to change the card or read an invoice.",
-    );
-  }
-  const prices = proPricesOf(actor);
-  const returnTo = await returnUrl(gateway, auth);
-  const customerId = await customerFor(gateway, auth, actor);
+  return protectingStripeAction(auth, async () => {
+    const actor = await accountForBillingAction(auth);
+    requireWebhook(gateway, actor.account.stripePaymentsReady);
+    if (actor.account.planCode === "pro") {
+      throw new BillingStateError(
+        "This organization is already on Pro. Use Manage payment and invoices " +
+          "to change the card or read an invoice.",
+      );
+    }
+    const prices = proPricesOf(actor);
+    const returnTo = await returnUrl(gateway, auth);
+    const customerId = await customerFor(gateway, auth, actor);
 
-  const session = await gateway.api.checkout.sessions.create(
-    {
-      mode: "subscription",
-      customer: customerId,
-      client_reference_id: auth.organizationId,
-      automatic_tax: { enabled: true },
-      customer_update: { address: "auto", name: "auto" },
-      line_items: [
-        { price: prices.fee, quantity: 1 },
-        // A metered item carries no quantity: the meter is what says how much.
-        { price: prices.webCall },
-        { price: prices.phone },
-      ],
-      subscription_data: {
-        // What the invoice and the dashboard say this subscription is for.
-        metadata: {
-          egma_organization_id: auth.organizationId,
-          egma_plan: "pro",
+    const session = await gateway.api.checkout.sessions.create(
+      {
+        mode: "subscription",
+        customer: customerId,
+        client_reference_id: auth.organizationId,
+        automatic_tax: { enabled: true },
+        customer_update: { address: "auto", name: "auto" },
+        line_items: [
+          { price: prices.fee, quantity: 1 },
+          // A metered item carries no quantity: the meter is what says how much.
+          { price: prices.webCall },
+          { price: prices.phone },
+        ],
+        subscription_data: {
+          // What the invoice and the dashboard say this subscription is for.
+          metadata: {
+            egma_organization_id: auth.organizationId,
+            egma_plan: "pro",
+          },
+          proration_behavior: "create_prorations",
         },
-        proration_behavior: "create_prorations",
+        metadata: { egma_organization_id: auth.organizationId },
+        success_url: `${returnTo}?plan=pro`,
+        cancel_url: `${returnTo}?plan=cancelled`,
       },
-      metadata: { egma_organization_id: auth.organizationId },
-      success_url: `${returnTo}?plan=pro`,
-      cancel_url: `${returnTo}?plan=cancelled`,
-    },
-    { idempotencyKey: stripeAttemptKey("upgrade", randomUUID()) },
-  );
-  return pageOf(session.url, "Upgrade to Pro");
+      { idempotencyKey: stripeAttemptKey("upgrade", randomUUID()) },
+    );
+    return pageOf(session.url, "Upgrade to Pro");
+  });
 }
 
 /** The three Stripe prices Pro is sold at, or a refusal that names the setup. */
@@ -288,8 +293,11 @@ function proPricesOf(actor: BillingActor): {
   readonly webCall: string;
   readonly phone: string;
 } {
-  const { stripeFeePriceId, stripeWebCallMeterPriceId, stripePhoneMeterPriceId } =
-    actor.pro;
+  const {
+    stripeFeePriceId,
+    stripeWebCallMeterPriceId,
+    stripePhoneMeterPriceId,
+  } = actor.pro;
   if (
     stripeFeePriceId === null ||
     stripeWebCallMeterPriceId === null ||
@@ -327,22 +335,25 @@ export async function scheduleDowngrade(
   gateway: StripeGateway,
   auth: AuthContext,
 ): Promise<ScheduledDowngrade> {
-  const actor = await accountForBillingAction(auth);
-  const subscriptionId = actor.account.stripeSubscriptionId;
-  const status = actor.account.stripeSubscriptionStatus;
-  if (subscriptionId === null || status === null || !isPaying(status)) {
-    throw new BillingStateError(
-      "This organization has no Pro subscription to stop. It is on the " +
-        "Hobby plan already.",
-    );
-  }
+  return protectingStripeAction(auth, async () => {
+    const actor = await accountForBillingAction(auth);
+    requireWebhook(gateway, actor.account.stripePaymentsReady);
+    const subscriptionId = actor.account.stripeSubscriptionId;
+    const status = actor.account.stripeSubscriptionStatus;
+    if (subscriptionId === null || status === null || !isPaying(status)) {
+      throw new BillingStateError(
+        "This organization has no Pro subscription to stop. It is on the " +
+          "Hobby plan already.",
+      );
+    }
 
-  const subscription = await gateway.api.subscriptions.update(
-    subscriptionId,
-    { cancel_at_period_end: true },
-    { idempotencyKey: stripeAttemptKey("downgrade", randomUUID()) },
-  );
-  return { endsAt: endOfPeriodOf(subscription) };
+    const subscription = await gateway.api.subscriptions.update(
+      subscriptionId,
+      { cancel_at_period_end: true },
+      { idempotencyKey: stripeAttemptKey("downgrade", randomUUID()) },
+    );
+    return { endsAt: endOfPeriodOf(subscription) };
+  });
 }
 
 /** When the subscription's current period runs out, as its items state it. */
@@ -368,20 +379,51 @@ export async function openBillingPortal(
   gateway: StripeGateway,
   auth: AuthContext,
 ): Promise<HostedPage> {
-  const actor = await accountForBillingAction(auth);
-  const customerId = actor.account.stripeCustomerId;
-  if (customerId === null) {
+  return protectingStripeAction(auth, async () => {
+    const actor = await accountForBillingAction(auth);
+    requireWebhook(gateway, actor.account.stripePaymentsReady);
+    const customerId = actor.account.stripeCustomerId;
+    if (customerId === null) {
+      throw new BillingStateError(
+        "This organization has never paid Egma anything, so it has no card and " +
+          "no invoices yet. Buy inference credit or move to Pro first.",
+      );
+    }
+    const session = await gateway.api.billingPortal.sessions.create(
+      { customer: customerId, return_url: await returnUrl(gateway, auth) },
+      // Per attempt like the three above: a portal session expires, so an admin
+      // who left one open has to be able to open another, and what this key is
+      // for is a retried HTTP attempt rather than a repeated press.
+      { idempotencyKey: stripeAttemptKey("portal", randomUUID()) },
+    );
+    return pageOf(session.url, "Manage payment and invoices");
+  });
+}
+
+/** Do not accept payments before their signed results can reach the account. */
+function requireWebhook(gateway: StripeGateway, paymentsReady: boolean): void {
+  if (!gateway.hasWebhookSecret || !paymentsReady) {
     throw new BillingStateError(
-      "This organization has never paid Egma anything, so it has no card and " +
-        "no invoices yet. Buy inference credit or move to Pro first.",
+      "Billing payments are unavailable while the webhook connection is being configured.",
     );
   }
-  const session = await gateway.api.billingPortal.sessions.create(
-    { customer: customerId, return_url: await returnUrl(gateway, auth) },
-    // Per attempt like the three above: a portal session expires, so an admin
-    // who left one open has to be able to open another, and what this key is
-    // for is a retried HTTP attempt rather than a repeated press.
-    { idempotencyKey: stripeAttemptKey("portal", randomUUID()) },
-  );
-  return pageOf(session.url, "Manage payment and invoices");
+}
+
+async function protectingStripeAction<T>(
+  auth: AuthContext,
+  act: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await act();
+  } catch (fault) {
+    if (isEgmaStripeFailure(fault)) {
+      await recordStripeOperationFailure(auth).catch((healthFault: unknown) => {
+        console.error(
+          "Stripe failure health could not be persisted",
+          healthFault,
+        );
+      });
+    }
+    throw fault;
+  }
 }

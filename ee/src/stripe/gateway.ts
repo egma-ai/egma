@@ -1,5 +1,7 @@
 import Stripe from "stripe";
 
+import { setStripePaymentsReady } from "../access/index.ts";
+
 /**
  * The Stripe adapter: the one place in Egma that holds a Stripe client.
  *
@@ -26,10 +28,7 @@ export type StripeSettings = {
   /**
    * `EGMA_STRIPE_WEBHOOK_SECRET`, or absent.
    *
-   * Absent means this deployment has Stripe but no webhook endpoint yet: the
-   * buttons work, and the door that would apply Stripe's answers refuses every
-   * delivery rather than trusting an unsigned one. A signature is the only
-   * credential a webhook carries, so there is nothing weaker to fall back to.
+   * Paid actions require this signing secret as well as the API key.
    */
   readonly webhookSecret?: string | undefined;
   /** The origin a person's browser reaches Egma on. Where Checkout returns to. */
@@ -100,10 +99,9 @@ export function stripeGateway(settings: StripeSettings): StripeGateway {
     // Named so a Stripe support conversation can find this deployment's calls,
     // and so Stripe's own dashboard says which application made a write.
     appInfo: { name: "Egma", url: "https://egma.ai" },
-    // One retry, so a request lost on the way out is not a button that did
-    // nothing. Every write below also carries an idempotency key, which is
-    // what makes a retry safe rather than merely quick.
+    // Bound network waits; mutating calls keep a stable idempotency key.
     maxNetworkRetries: 2,
+    timeout: 10_000,
   });
   const webhookSecret = settings.webhookSecret?.trim() || undefined;
 
@@ -122,4 +120,31 @@ export function stripeGateway(settings: StripeSettings): StripeGateway {
       return api.webhooks.constructEvent(payload, signature, webhookSecret);
     },
   };
+}
+
+/** Customer card refusals and unverified signatures do not mean Egma billing is broken. */
+export function isEgmaStripeFailure(fault: unknown): boolean {
+  return (
+    fault instanceof Stripe.errors.StripeError &&
+    !(fault instanceof Stripe.errors.StripeCardError) &&
+    !(fault instanceof Stripe.errors.StripeSignatureVerificationError)
+  );
+}
+
+/** Check configuration on the background job, never before the API can listen. */
+export async function refreshStripePaymentsReady(
+  gateway: StripeGateway,
+): Promise<boolean> {
+  if (!gateway.hasWebhookSecret) {
+    await setStripePaymentsReady(false);
+    return false;
+  }
+  try {
+    await gateway.api.subscriptions.list({ limit: 1, status: "all" });
+    await setStripePaymentsReady(true);
+    return true;
+  } catch (fault) {
+    await setStripePaymentsReady(false);
+    throw fault;
+  }
 }

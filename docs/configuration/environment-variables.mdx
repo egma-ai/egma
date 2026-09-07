@@ -504,13 +504,8 @@ it literal.
 
 <ParamField path="EGMA_STRIPE_WEBHOOK_SECRET" type="string">
   The signing secret of the Stripe webhook endpoint you point at
-  `/api/billing/stripe/webhook`. Leave it empty until you have created that
-  endpoint in Stripe.
-</ParamField>
-
-<ParamField path="EGMA_STRIPE_PUBLISHABLE_KEY" type="string">
-  Your Stripe publishable key. It is public by design and nothing reads it
-  today; set it if you keep all three Stripe settings together.
+  `/api/billing/stripe/webhook`. Paid billing actions become available only
+  after this signing secret is configured.
 </ParamField>
 
 Egma measures every provider request and counts every chat simulation,

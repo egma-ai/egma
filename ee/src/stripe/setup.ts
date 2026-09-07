@@ -168,28 +168,18 @@ export async function setUpStripe(
   return { taxStatus, created, ...objects };
 }
 
-/**
- * Set the head office, which is what turns Stripe Tax on.
- *
- * Stripe Tax's status is `pending` until a head office is set and `active`
- * afterwards; there is no separate switch. With no address supplied the
- * account is left as it is and the setup says so, because a made-up address
- * would be worse than no tax calculation.
- */
+/** Configure or read Stripe Tax settings; registrations remain separate. */
 async function setHeadOffice(
   gateway: StripeGateway,
   headOffice: HeadOffice | undefined,
   say: (message: string) => void,
 ): Promise<"active" | "pending" | "skipped"> {
   if (headOffice === undefined) {
-    // Read rather than assumed, and a read that fails is not a failure: an
-    // account whose Tax settings cannot be retrieved is an account with no
-    // head office, which is the case this branch is already for.
-    const held = await gateway.api.tax.settings
-      .retrieve()
-      .catch(() => undefined);
+    const held = await gateway.api.tax.settings.retrieve();
     if (held?.status === "active") {
-      say("Stripe Tax is already active; no head office was supplied.");
+      say(
+        "Stripe Tax settings are active; tax collection also depends on registrations.",
+      );
       return "active";
     }
     say(
@@ -236,7 +226,19 @@ async function findOrCreateMeter(
     status: "active",
     limit: 100,
   })) {
-    if (meter.event_name === eventName) return meter;
+    if (meter.event_name !== eventName) continue;
+    if (
+      meter.default_aggregation.formula !== "sum" ||
+      meter.event_time_window !== null ||
+      meter.customer_mapping.type !== "by_id" ||
+      meter.customer_mapping.event_payload_key !== "stripe_customer_id" ||
+      meter.value_settings.event_payload_key !== "value"
+    ) {
+      throw new Error(
+        `Meter ${meter.id} does not match Egma's additive minute contract`,
+      );
+    }
+    return meter;
   }
 
   const meter = await gateway.api.billing.meters.create({
@@ -246,7 +248,10 @@ async function findOrCreateMeter(
     // is named by Stripe's own id in the payload, which is what the hourly job
     // reads off the billing account.
     default_aggregation: { formula: "sum" },
-    customer_mapping: { type: "by_id", event_payload_key: "stripe_customer_id" },
+    customer_mapping: {
+      type: "by_id",
+      event_payload_key: "stripe_customer_id",
+    },
     value_settings: { event_payload_key: "value" },
   });
   created.push(`meter ${eventName}`);
@@ -324,9 +329,12 @@ async function findOrCreateFeePrice(
   const held = await findPrice(gateway, PRICE_LOOKUP_KEYS.fee);
   if (
     held !== undefined &&
+    priceBelongsTo(held, productId) &&
+    held.billing_scheme === "per_unit" &&
     held.unit_amount === wanted &&
     held.recurring?.interval === "month" &&
-    held.recurring.usage_type === "licensed"
+    held.recurring.usage_type === "licensed" &&
+    held.recurring.interval_count === 1
   ) {
     return held;
   }
@@ -388,7 +396,11 @@ async function findOrCreateMeteredPrice(
   }
   const centsPerMinute = wanted.overageMicrosPerMinute / 10_000;
   const held = await findPrice(gateway, wanted.lookupKey, true);
-  if (held !== undefined && meteredPriceMatches(held, wanted, centsPerMinute)) {
+  if (
+    held !== undefined &&
+    priceBelongsTo(held, productId) &&
+    meteredPriceMatches(held, wanted, centsPerMinute)
+  ) {
     return held;
   }
 
@@ -432,22 +444,50 @@ function meteredPriceMatches(
   wanted: MeteredPricePlan,
   centsPerMinute: number,
 ): boolean {
-  if (held.recurring?.usage_type !== "metered") return false;
+  if (held.billing_scheme !== "tiered" || held.tiers_mode !== "graduated")
+    return false;
+  if (
+    held.recurring?.usage_type !== "metered" ||
+    held.recurring.interval !== "month" ||
+    held.recurring.interval_count !== 1
+  )
+    return false;
   if (held.recurring.meter !== wanted.meterId) return false;
   const tiers = held.tiers;
   if (tiers === undefined || tiers.length !== 2) return false;
   const [included, beyond] = tiers;
   if (included === undefined || beyond === undefined) return false;
   if (included.up_to !== wanted.includedMinutes) return false;
-  if (included.unit_amount !== 0 && Number(String(included.unit_amount_decimal)) !== 0) {
+  if (
+    included.unit_amount !== 0 &&
+    Number(String(included.unit_amount_decimal)) !== 0
+  ) {
     return false;
   }
   if (beyond.up_to !== null) return false;
+  if (
+    Number(
+      String(included.flat_amount_decimal ?? included.flat_amount ?? 0),
+    ) !== 0 ||
+    Number(String(beyond.flat_amount_decimal ?? beyond.flat_amount ?? 0)) !== 0
+  )
+    return false;
   const beyondCents =
     beyond.unit_amount_decimal === null
       ? beyond.unit_amount
       : Number(String(beyond.unit_amount_decimal));
   return beyondCents === centsPerMinute;
+}
+
+function priceBelongsTo(price: Stripe.Price, productId: string): boolean {
+  const product =
+    typeof price.product === "string" ? price.product : price.product.id;
+  return (
+    product === productId &&
+    price.currency === "usd" &&
+    price.tax_behavior === "exclusive" &&
+    price.transform_quantity === null
+  );
 }
 
 /** The head office as Stripe's address parameter takes it: no absent keys. */

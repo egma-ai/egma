@@ -1,3 +1,4 @@
+import { setStripePaymentsReady } from "./access/index.ts";
 import { startInferenceSettlementJob } from "./settlement.ts";
 import type { FastifyInstance } from "fastify";
 
@@ -15,6 +16,12 @@ export type ApiBillingSettings = {
 /** Bind the billing routes and jobs to this API's Stripe connection. */
 export async function loadApiBilling(settings: ApiBillingSettings) {
   const loaded = await loadCloudBilling();
+  await setStripePaymentsReady(false).catch((fault: unknown) => {
+    console.error(
+      "Stripe readiness could not be persisted; customer work continues",
+      fault,
+    );
+  });
   const stripe = stripeGateway({
     secretKey: settings.stripeSecretKey ?? "",
     ...(settings.stripeWebhookSecret === undefined
@@ -28,7 +35,11 @@ export async function loadApiBilling(settings: ApiBillingSettings) {
     routes: (
       app: FastifyInstance,
       options: Pick<BillingRoutesOptions, "contextOf">,
-    ) => loaded.routes(app, { ...options, ...(stripe.hasWebhookSecret ? { stripe } : {}) }),
+    ) =>
+      loaded.routes(app, {
+        ...options,
+        ...(stripe.hasWebhookSecret ? { stripe } : {}),
+      }),
     webhookRoutes: stripe.hasWebhookSecret
       ? (app: FastifyInstance) => billingWebhookRoutes(app, { stripe })
       : undefined,
@@ -37,7 +48,12 @@ export async function loadApiBilling(settings: ApiBillingSettings) {
     startMeterJob: (log: MeterLog) => {
       const inference = startInferenceSettlementJob(log);
       const overage = startOverageMeterJob({ gateway: stripe, log });
-      return { stop() { inference.stop(); overage.stop(); } };
+      return {
+        stop() {
+          inference.stop();
+          overage.stop();
+        },
+      };
     },
   };
 }

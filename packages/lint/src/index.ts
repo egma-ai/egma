@@ -162,6 +162,7 @@ const DEPLOYMENT_CONFIGURING = [
   // name and the rule below still refuses this name the day somebody gives it
   // one. It can write nothing but the six Stripe columns of one plan row.
   "recordStripePlanObjects",
+  "setStripePaymentsReady",
 ];
 
 /** Trusted billing hooks and collectors use organization IDs resolved by the product. */
@@ -175,34 +176,10 @@ const BILLING_PORTS = [
   "markInferenceSettlementFailed",
 ];
 
-/**
- * The exports of the **second** fenced home that act on what Stripe has already
- * proved, and the sweep that tells Stripe what an hour owes.
- *
- * **Neither has a person to carry, and neither can be given a customer.** A
- * webhook arrives from Stripe with no session and no key: the signature is the
- * whole credential, and the organization is found from Egma's own account row
- * through the unique index on the Stripe customer id — never from anything the
- * payload claimed. So `applyStripeEvent` is handed a delivery and finds whose
- * money it is; a caller cannot name one, and the rule below refuses this name
- * the day somebody adds a parameter that could. The hourly meter sweep is the
- * other side of the same coin: it walks every paying Pro organization on the
- * deployment, because that is what an hourly job is, and there is no honest
- * context for "all of them".
- *
- * What keeps it safe beyond the mechanism is written where the functions live:
- * `applyStripeEvent` writes the event row first and everything it causes in
- * the same transaction, so a delivery is applied once or not at all, and a
- * customer it cannot resolve is a fault rather than a shrug; `overageForHour`
- * only reads, and only the `cloud_` accounts and the seconds of their own
- * organizations' conversations.
- *
- * A third name here is a decision somebody has to make on purpose.
- */
+/** Verified webhook facts and the timer's customer-wide Stripe sweep. */
 const STRIPE_FACTS = [
   "applyStripeEvent",
-  "overageOwedThrough",
-  "markOverageReported",
+  "visitMeterAccounts",
 ];
 
 /**
