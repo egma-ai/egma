@@ -10,6 +10,9 @@
   ],
   "references": [
     {
+      "path": "../../ee"
+    },
+    {
       "path": "../../packages/db"
     },
     {

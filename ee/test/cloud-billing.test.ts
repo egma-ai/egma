@@ -1,5 +1,6 @@
 import { newId } from "@egma/ids";
 import {
+  claimGradingJobs,
   createAgent,
   createPersona,
   createTest,
@@ -874,5 +875,87 @@ describe("the facts the adapter decides from", () => {
     expect(facts.plan.webCallMinutesAllowance).toBe(5_000);
     expect(facts.period.resetsAt).toEqual(PERIOD_RESETS);
     expect(facts.usage.used.web_call_minutes).toBe(5_000);
+  });
+});
+
+describe("the grading claim, when Egma's key pays for the judge", () => {
+  /** One pending production grading job, written where the claim will find it. */
+  async function pendingGradingJob(who: typeof acme): Promise<string> {
+    const id = newId("gjb");
+    await database.sql(
+      `insert into grading_job
+         (id, organization_id, project_id, source, simulation_id, trace_id,
+          trace_started_at, run_id, entries, status)
+       values ($1, $2, $3, 'production', null, $4, $5, null,
+               '[{"projectGraderId": "grd_x"}]'::jsonb, 'pending')`,
+      [id, who.organizationId, who.projectId, `trace-${id}`, NOW],
+    );
+    return id;
+  }
+
+  async function jobRow(id: string): Promise<{ status: string; attempts: number }> {
+    const { rows } = await database.sql<{ status: string; attempts: number }>(
+      "select status, attempts from grading_job where id = $1",
+      [id],
+    );
+    const row = rows[0];
+    if (row === undefined) throw new Error("the grading job is gone");
+    return row;
+  }
+
+  it("leaves a job unclaimed when the balance cannot fund the judge", async () => {
+    // Acme's balance is at zero by this point in the file.
+    const id = await pendingGradingJob(acme);
+    const restore = installBillingPlugIn({
+      entitlements: cloudEntitlementSource({ now: () => NOW }),
+      usage: cloudUsageSink(),
+    });
+    try {
+      const claimed = await claimGradingJobs({
+        claimant: "grader-in-this-test",
+        capacity: 50,
+      });
+      expect(claimed.map((one) => one.id)).not.toContain(id);
+      // Back on the queue, and the attempt uncounted: a job nobody could
+      // start is not a job that failed.
+      expect(await jobRow(id)).toEqual({ status: "pending", attempts: 0 });
+    } finally {
+      restore();
+      await database.sql("delete from grading_job where id = $1", [id]);
+    }
+  });
+
+  it("hands the same job out once the balance can pay", async () => {
+    const id = await pendingGradingJob(acme);
+    const restore = installBillingPlugIn({
+      entitlements: cloudEntitlementSource({ now: () => NOW }),
+      usage: cloudUsageSink(),
+    });
+    try {
+      // The credit a Checkout session would have written, seeded as the one
+      // row Egma keeps from it.
+      await database.sql(
+        `insert into cloud_ledger_entry
+           (id, organization_id, kind, amount_micros, reference_kind,
+            reference_id, idempotency_key, occurred_at)
+         values ($1, $2, 'purchased_credit', 20000000, 'checkout_session',
+                 'cs_seeded_by_this_test', 'purchased:cs_seeded_by_this_test', $3)`,
+        [newId("cle"), acme.organizationId, NOW],
+      );
+      await database.sql(
+        "update cloud_billing_account set balance_micros = balance_micros + 20000000 where organization_id = $1",
+        [acme.organizationId],
+      );
+
+      const claimed = await claimGradingJobs({
+        claimant: "grader-in-this-test",
+        capacity: 50,
+      });
+      expect(claimed.map((one) => one.id)).toContain(id);
+      expect((await jobRow(id)).status).toBe("claimed");
+    } finally {
+      restore();
+      await database.sql("delete from grading_job where id = $1", [id]);
+    }
   });
 });

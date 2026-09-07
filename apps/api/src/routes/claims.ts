@@ -11,10 +11,12 @@ import {
   getSimulationExecutionEvidence,
   LANES_SERVING_MOCK_TOOLS,
   markSimulationCanceled,
+  providersNeededBy,
   releaseSimulationClaim,
   resolveSimulationConnection,
   type EntitlementSource,
   type PersonaModels,
+  type PersonaVersion,
   type ProviderCatalogEntry,
   type Run,
   type SimulationClaim,
@@ -490,6 +492,13 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
 async function assembledSpec(
   claim: SimulationClaim,
   /**
+   * The pinned persona version, read once for the batch before the
+   * deployment was asked whether this work may go on. Handed in rather than
+   * read again: the two questions are about the same frozen row, and a second
+   * read of it inside one response could only return the same thing.
+   */
+  personaVersion: PersonaVersion | undefined,
+  /**
    * The runs already read while answering this one claim request, by id.
    *
    * A claim takes up to fifty conversations at once and they are usually a
@@ -517,10 +526,6 @@ async function assembledSpec(
   | { readonly unbuildable: string }
   | { readonly retryable: string }
 > {
-  const personaVersion = await getPersonaVersion(
-    claim.auth,
-    claim.personaVersionId,
-  );
   if (personaVersion === undefined) {
     return { unbuildable: "its pinned persona version could not be read" };
   }
@@ -766,9 +771,50 @@ export async function claimRoutes(
       // holds a lock, waits on another claimant, or changes how many
       // conversations run at once. A deployment with no billing withholds
       // nothing and this is one resolved promise per customer in the batch.
+      // The persona version each conversation is pinned to, read once for the
+      // batch and used twice: to say which providers this customer's work
+      // needs before the deployment is asked whether Egma's key may fund
+      // them, and again by the assembly below. Keyed by the version rather
+      // than by the conversation, because a run of fifty conversations
+      // usually shares two or three — so this is fewer reads than the
+      // assembly alone used to make, not more.
+      const personaVersions = new Map<
+        string,
+        Promise<PersonaVersion | undefined>
+      >();
+      const pinnedPersona = (
+        claim: SimulationClaim,
+      ): Promise<PersonaVersion | undefined> => {
+        const key = `${claim.organizationId}:${claim.personaVersionId}`;
+        let reading = personaVersions.get(key);
+        if (reading === undefined) {
+          reading = getPersonaVersion(claim.auth, claim.personaVersionId);
+          personaVersions.set(key, reading);
+        }
+        return reading;
+      };
+      const pinned = new Map(
+        await Promise.all(
+          claims.map(
+            async (claim) =>
+              [claim.id, await pinnedPersona(claim)] as const,
+          ),
+        ),
+      );
+
       const withheld = await claimsWithheldByEntitlement(
         options.entitlements,
         claims,
+        (claim) => {
+          const version = pinned.get(claim.id);
+          // A conversation whose pinned version cannot be read is not
+          // withheld here: it is unbuildable, and the assembly below says so
+          // in the sentence a person reads. Naming no provider leaves this
+          // question about the ones that can be read.
+          return version === undefined
+            ? []
+            : providersNeededBy(version.models, claim.modality);
+        },
       );
 
       const specs: Record<string, unknown>[] = [];
@@ -791,6 +837,7 @@ export async function claimRoutes(
             ? Promise.resolve({ withheld: true } as const)
             : assembledSpec(
                 claim,
+                pinned.get(claim.id),
                 runs,
                 retellTargets,
                 options.providerCredentials,
@@ -821,8 +868,9 @@ export async function claimRoutes(
         if ("withheld" in spec) {
           // **Back on the queue, and never failed.** Nothing is wrong with
           // this conversation: the customer's allowance for its kind of work
-          // is spent, and it runs when the month resets, the plan changes or
-          // credit arrives. The lease goes back the same way a provider
+          // is spent, or Egma's key has no balance left to fund the providers
+          // it needs. It runs when the month resets, the plan changes, credit
+          // arrives or a key is added. The lease goes back the same way a provider
           // outage's does — and, exactly as there, a cancel that landed while
           // the question was in flight is honored here rather than left for
           // the orphan sweep to misname.
@@ -834,7 +882,11 @@ export async function claimRoutes(
               {
                 "egma.simulation_id": claim.id,
                 "egma.run_id": claim.runId,
-                "egma.allowance": kept?.allowance ?? "",
+                "egma.withheld_by": kept?.held ?? "",
+                "egma.allowance":
+                  kept?.held === "allowance" ? kept.allowance : "",
+                "egma.providers":
+                  kept?.held === "funding" ? kept.providers.join(",") : "",
               },
             ),
           );

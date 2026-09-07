@@ -17,12 +17,20 @@ import {
  * rather than failing, because nothing about it is wrong.
  *
  * **Once per organization per batch, and never once per simulation.** A batch
- * of fifty conversations spanning three customers asks three questions, each
- * naming every kind of work that customer has in the batch. That is the whole
- * of the rule the spec sets for this path, and the shape here is what enforces
- * it: the batch is grouped first and the source is handed a set of allowance
- * kinds, so there is no arrangement of this code in which a per-simulation ask
- * is the easy thing to write.
+ * of fifty conversations spanning three customers asks three customers' worth
+ * of questions — two each, and both at once — naming every kind of work and
+ * every provider that customer has in the batch. That is the whole of the rule
+ * the spec sets for this path, and the shape here is what enforces it: the
+ * batch is grouped first and the source is handed a set of allowance kinds and
+ * a set of providers, so there is no arrangement of this code in which a
+ * per-simulation ask is the easy thing to write.
+ *
+ * **Two questions, because a customer can be stopped two ways.** An allowance
+ * is spent, or Egma's key has no balance left to fund the providers this work
+ * needs. Both keep the conversation queued with a named reason and neither
+ * makes a network call: the providers are read off persona versions the
+ * caller already holds, and the answer is one indexed read of the customer's
+ * own rows.
  *
  * **The source is handed in rather than fetched.** The process that booted
  * chose the adapter and holds it; a route that could reach into the package
@@ -42,15 +50,33 @@ import {
 /** What a batch may not go on with, by simulation id. */
 export type WithheldClaims = ReadonlyMap<string, WithheldClaim>;
 
-export type WithheldClaim = {
-  readonly allowance: AllowanceKind;
-  /** The adapter's own sentence, for the log and for a queued conversation. */
-  readonly reason: string;
-};
+/**
+ * Why one conversation is going back on the queue.
+ *
+ * A union rather than two optional fields, so whoever logs or shows it cannot
+ * read the wrong half: an allowance that is spent names an allowance, and work
+ * Egma's key cannot pay for names the providers without funding.
+ */
+export type WithheldClaim =
+  | {
+      readonly held: "allowance";
+      readonly allowance: AllowanceKind;
+      /** The adapter's own sentence, for the log and for a queued conversation. */
+      readonly reason: string;
+    }
+  | {
+      readonly held: "funding";
+      readonly providers: readonly string[];
+      readonly reason: string;
+    };
+
+/** Which providers one claimed conversation needs a key for. */
+export type ProvidersOfClaim = (claim: SimulationClaim) => readonly string[];
 
 export async function claimsWithheldByEntitlement(
   entitlements: EntitlementSource,
   claims: readonly SimulationClaim[],
+  providersOf: ProvidersOfClaim = () => [],
 ): Promise<WithheldClaims> {
   if (claims.length === 0) return new Map();
 
@@ -61,32 +87,60 @@ export async function claimsWithheldByEntitlement(
     else held.push(claim);
   }
 
-  // Together, not in turn. One question per customer, all in flight at once.
+  // Together, not in turn. Two questions per customer, all in flight at once.
   const answers = await Promise.all(
-    [...byOrganization.entries()].map(async ([organizationId, theirs]) => ({
-      theirs,
-      decision: await entitlements.mayStart({
-        organizationId,
-        allowances: allowanceKindsAmong(theirs),
-      }),
-    })),
+    [...byOrganization.entries()].map(async ([organizationId, theirs]) => {
+      const providers = [
+        ...new Set(theirs.flatMap((claim) => providersOf(claim))),
+      ];
+      const [start, funding] = await Promise.all([
+        entitlements.mayStart({
+          organizationId,
+          allowances: allowanceKindsAmong(theirs),
+        }),
+        providers.length === 0
+          ? Promise.resolve({ funded: true as const })
+          : entitlements.mayPlatformKeyFund({ organizationId, providers }),
+      ]);
+      return { theirs, start, funding };
+    }),
   );
 
   const withheld = new Map<string, WithheldClaim>();
-  for (const { theirs, decision } of answers) {
-    if (decision.allowed) continue;
-    const refusedKinds = new Map(
-      decision.refusals.map((refusal) => [refusal.allowance, refusal] as const),
-    );
+  for (const { theirs, start, funding } of answers) {
+    const refusedKinds = start.allowed
+      ? new Map()
+      : new Map(
+          start.refusals.map((refusal) => [refusal.allowance, refusal] as const),
+        );
+    const unfunded = funding.funded ? new Set<string>() : new Set(funding.providers);
+
     for (const claim of theirs) {
       const refusal = refusedKinds.get(allowanceKindOf(claim));
-      if (refusal === undefined) continue;
-      // A refusal of one kind withholds that kind's conversations and leaves
-      // the rest of the customer's batch alone: a spent phone allowance does
-      // not stop a chat.
+      if (refusal !== undefined) {
+        // A refusal of one kind withholds that kind's conversations and leaves
+        // the rest of the customer's batch alone: a spent phone allowance does
+        // not stop a chat.
+        withheld.set(claim.id, {
+          held: "allowance",
+          allowance: refusal.allowance,
+          reason: refusal.message,
+        });
+        continue;
+      }
+      if (funding.funded) continue;
+      // And a refusal of funding withholds only the conversations that
+      // actually need one of the providers without it: a customer whose own
+      // Deepgram key pays for their speech-to-text still runs the chat
+      // simulations that need nothing else.
+      const needed = providersOf(claim).filter((provider) =>
+        unfunded.has(provider),
+      );
+      if (needed.length === 0) continue;
       withheld.set(claim.id, {
-        allowance: refusal.allowance,
-        reason: refusal.message,
+        held: "funding",
+        providers: needed,
+        reason: funding.message,
       });
     }
   }

@@ -1,5 +1,6 @@
 import { UnprocessableInputError } from "../access/errors.ts";
 import {
+  PROVIDER_CATALOG,
   PROVIDERS_BY_JOB,
   RECOMMENDED_ENTRY,
   catalogEntry,
@@ -215,3 +216,55 @@ function recommendedGraderModel(): GraderModel {
 
 export const RECOMMENDED_GRADER_MODEL: GraderModel =
   recommendedGraderModel();
+
+/**
+ * The providers one conversation needs a key for, in catalog words.
+ *
+ * **The same rule the claim's model block already follows, said once.** A
+ * voice conversation runs three legs — the persona's LLM, the speech-to-text
+ * that hears the agent (the realtime transcription among them) and the
+ * text-to-speech that speaks — and a chat conversation runs only the LLM, so
+ * only the LLM's key crosses the claim door for one. Whoever asks whether
+ * Egma's key may fund this work has to ask about exactly the providers whose
+ * keys it is about to hand over, and a second list of them would be a second
+ * answer.
+ *
+ * De-duplicated and in one order, so two callers asking the same question ask
+ * it with the same list — one provider serving two legs is one provider.
+ */
+export function providersNeededBy(
+  models: PersonaModels,
+  modality: "chat" | "voice",
+): readonly string[] {
+  const needed =
+    modality === "chat"
+      ? [models.llm.provider]
+      : [models.llm.provider, models.stt.provider, models.tts.provider];
+  return [...new Set(needed)];
+}
+
+/**
+ * The providers a judge can run on in this release.
+ *
+ * **Read off the catalog rather than listed, so it cannot go stale.** A grader
+ * runs on an LLM the catalog marks grader-eligible, and the judge adapter
+ * refuses anything else out loud; the grading claim asks whether Egma's key
+ * may fund those providers before it hands a job out, and asking with a
+ * hand-written list would be a second answer to which providers a judge can
+ * even use.
+ *
+ * It is the release's answer and not one customer's: which of these a
+ * particular job will actually reach depends on its frozen graders, and a
+ * balance at zero funds none of them either way.
+ */
+export function graderJudgeProviders(): readonly string[] {
+  return [
+    ...new Set(
+      PROVIDER_CATALOG.filter(
+        (entry) =>
+          entry.job === "llm" &&
+          (entry as { readonly graderEligible?: boolean }).graderEligible === true,
+      ).map((entry) => entry.provider),
+    ),
+  ];
+}

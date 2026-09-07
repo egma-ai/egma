@@ -1,8 +1,10 @@
 import {
+  billingIsConfigured,
   connect,
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  installBillingPlugIn,
 } from "@egma/db";
 import { providerCredentialSource } from "@egma/provider-credentials";
 
@@ -23,12 +25,28 @@ import { startService } from "./service.ts";
  * job resolves its frozen grader versions, the service reads the current bundle
  * once only when at least one of them calls a model. Nothing is unsealed from
  * Postgres, and code-only work does not depend on a credential store.
+ *
+ * **Billing is selected here the same way the API selects it**, from the same
+ * setting and through the same dynamic import: a grading job's only spend is
+ * the judge's model usage, and the claim asks the deployment whether Egma's
+ * key may fund it before it hands one out. With no Stripe secret named,
+ * nothing is imported and every claim is funded, which is the deployment every
+ * self-hoster runs.
  */
 const config = loadConfig();
 const log = makeLog(config.logLevel, config.claimant);
 
 connect({ databaseUrl: config.databaseUrl });
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
+
+if (billingIsConfigured({ stripeSecretKey: process.env["EGMA_STRIPE_SECRET_KEY"] })) {
+  const ee = await import("@egma/ee");
+  installBillingPlugIn(ee.cloudBillingPlugIn());
+  log.info(
+    platformEvent("egma.billing.installed", {}),
+    "the cloud billing adapter is installed",
+  );
+}
 
 const service = startService({
   config,

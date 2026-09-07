@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@egma/db": "workspace:*",
+    "@egma/ee": "workspace:*",
     "@egma/ids": "workspace:*",
     "@egma/metrics": "workspace:*",
     "@egma/provider-credentials": "workspace:*",
