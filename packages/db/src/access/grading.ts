@@ -30,6 +30,7 @@ import {
 } from "../schema/grading.ts";
 import { run, simulation } from "../schema/runs.ts";
 import { validClaimant } from "./claimants.ts";
+import { AGENT_EVIDENCE_COMPLETE_SQL } from "./agent-evidence.ts";
 import type { AuthContext } from "./context.ts";
 import {
   readCurrentSimulationGradeFacts,
@@ -502,6 +503,8 @@ export async function traceEvidenceStartedAt(
      * for the agent POV; omit to search all evidence for the trace.
      */
     readonly emitter?: "egma-runtime" | "agent" | undefined;
+    /** Require the platform's final record, rather than its first exported span. */
+    readonly requireAgentCompletion?: boolean | undefined;
   },
 ): Promise<Date | undefined> {
   authorize(auth, "read", here(auth));
@@ -531,6 +534,7 @@ export async function traceEvidenceStartedAt(
                and started_at < {to:DateTime64(6, 'UTC')}
                and (${input.runId === undefined ? "1" : "run_id = {run_id:String}"})
                and (${input.emitter === undefined ? "1" : "emitter = {emitter:String}"})
+               and (${input.requireAgentCompletion === true ? AGENT_EVIDENCE_COMPLETE_SQL : "1"})
              order by started_at
              limit 1`,
     query_params: {
@@ -597,7 +601,7 @@ export async function simulationEvidenceReadiness(
       traceId: input.traceId,
       runId: input.runId,
       window: input.window,
-      ...(emitter === undefined ? {} : { emitter }),
+      ...(emitter === undefined ? {} : { emitter, requireAgentCompletion: true }),
     });
 
   if (!input.producesAnAgentPov) {

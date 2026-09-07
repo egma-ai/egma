@@ -152,7 +152,7 @@ export async function pullRetellSimulationRecord(
     // **A throw here is the transport, not Retell's answer.** A blip on the
     // first attempt is the exact thing the retries below exist for, so it is
     // said and then carried past — returning here would spend the whole
-    // bound on one bad socket, and a completion resend deliberately starts no
+    // bound on one bad socket, and a terminal report resend deliberately starts no
     // second pull, so this simulation would lose its agent POV for good.
     said(log, simulationId, "the first attempt failed", cause);
   }

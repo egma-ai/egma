@@ -20,7 +20,6 @@ import {
   type TraceDetail,
   type TraceSpan,
 } from "@egma/db";
-import { everySpanIn } from "@egma/metrics";
 import { simulationOperations } from "@egma/platform-api/contract";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
@@ -182,26 +181,26 @@ function describedMeasures(
 }
 
 /**
- * Report a missing agent POV after the wait bound for a completed simulation
- * whose connection type and provider reference indicate that one was expected.
- * Any agent span clears this flag; it does not detect partial exports.
+ * Report incomplete platform evidence for an ended simulation. Explicitly
+ * degraded evidence is incomplete immediately; an absent final session or call
+ * record becomes incomplete after the wait bound. Partial spans do not prove
+ * completion.
  */
 function agentPovIncomplete(
   simulation: Simulation,
   run: Run,
   transcript: TraceDetail | undefined,
 ): boolean {
-  if (simulation.status !== "completed") return false;
-  const reference = simulation.providerReference;
-  if (reference === null || reference === "") return false;
+  if (
+    simulation.status !== "completed" &&
+    simulation.status !== "failed" &&
+    simulation.status !== "canceled"
+  ) return false;
   if (!laneProducesAnAgentPov(run.connectionSnapshot.connectionType)) {
     return false;
   }
-  if (transcript !== undefined) {
-    for (const span of everySpanIn(transcript)) {
-      if (span.pov === "agent") return false;
-    }
-  }
+  if (transcript?.agentEvidenceIncomplete === true) return true;
+  if (transcript?.agentEvidenceComplete === true) return false;
   // The wait began when the conversation ended, on the earlier of the two
   // clocks that answer for that — the same reading grading itself takes, so a
   // report from a machine running ahead cannot make this say "still waiting"
@@ -318,6 +317,7 @@ export async function simulationRoutes(
         // showing the agent's POV would otherwise show whatever fragment
         // arrived as if it were the conversation. False is the ordinary answer
         // — the account landed, or the lane files none.
+        agentPovComplete: transcript?.agentEvidenceComplete === true,
         agentPovIncomplete: agentPovIncomplete(simulation, run, transcript),
         measures: describedMeasures(simulation, transcript),
         // The observed metrics, off the one shared projection the transcript

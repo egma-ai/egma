@@ -71,6 +71,13 @@
       "when": 1788807573269,
       "tag": "0009_simplify_control_plane_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788813142624,
+      "tag": "0010_livekit_room_reference",
+      "breakpoints": true
     }
   ]
 }

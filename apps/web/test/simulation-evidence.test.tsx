@@ -173,6 +173,8 @@ function evidence(overrides: Record<string, unknown> = {}) {
     startedAt: "2026-08-15T10:00:00.000Z",
     endedAt: "2026-08-15T10:00:40.000Z",
     providerReference: "call_abc123",
+    agentPovComplete: false,
+    agentPovIncomplete: false,
     hasRecording: false,
     measures: { durationMs: 40_000, turnCount: 2, toolCallCount: 0 },
     metrics: [
@@ -380,7 +382,7 @@ describe("one simulation's grades", () => {
     const transcript = await screen.findByRole("dialog", { name: "Transcript" });
     expect(within(transcript).queryByRole("heading", { name: "Recording" })).toBeNull();
     expect(
-      within(transcript).getByText(/no conversation turns for this simulation/iu),
+      within(transcript).getByText("Waiting for LiveKit transcript"),
     ).toBeTruthy();
     expect(within(transcript).queryByText(/speech/iu)).toBeNull();
   });
@@ -1207,6 +1209,147 @@ describe("the agent's POV is what a reader is shown", () => {
     };
   }
 
+  it("shows a failed Retell web call's missing transcript without simulator speech or mock rows", async () => {
+    const read = evidence();
+    page({
+      read: evidence({
+        status: "failed",
+        gradingState: "not_requested",
+        agentPovIncomplete: true,
+        connectionSnapshot: {
+          ...read.connectionSnapshot,
+          connectionType: "retell_web_call",
+        },
+        transcript: {
+          ...read.transcript,
+          turns: read.transcript.turns.map((one) => ({ ...one, pov: "persona" })),
+          spans: [toolCall({ toolName: "book_appointment", pov: "persona", toolProvenance: "mocked" })],
+        },
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText("Retell transcript unavailable")).toBeTruthy();
+    expect(screen.queryByText("Move Thursday's clean.")).toBeNull();
+    expect(screen.queryByText("You are all set for Tuesday.")).toBeNull();
+    expect(screen.queryByLabelText("Tool call, book_appointment")).toBeNull();
+  });
+
+  it("refreshes a failed LiveKit simulation while its platform transcript is still pending", async () => {
+    const read = evidence({
+      status: "failed",
+      gradingState: "not_requested",
+      agentPovIncomplete: false,
+      transcript: null,
+      connectionSnapshot: { ...evidence().connectionSnapshot, connectionType: "livekit_room" },
+    });
+    page({ read });
+    render(<SimulationEvidencePage />);
+    expect(await screen.findByText("Waiting for LiveKit transcript")).toBeTruthy();
+
+    page({ read: { ...read, agentPovIncomplete: true } });
+    expect(await screen.findByText("LiveKit transcript unavailable", {}, { timeout: 4000 })).toBeTruthy();
+  });
+
+  it("keeps reading a partial LiveKit transcript until its final record arrives", async () => {
+    const read = evidence({
+      agentPovComplete: false,
+      connectionSnapshot: {
+        ...evidence().connectionSnapshot,
+        connectionType: "livekit_room",
+      },
+      transcript: bothPovs([]),
+    });
+    page({ read });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText("Tuesday is fully booked.")).toBeTruthy();
+    expect(screen.getByText(/Waiting for LiveKit transcript/u)).toBeTruthy();
+    page({
+      read: {
+        ...read,
+        agentPovComplete: true,
+        transcript: bothPovs([toolCall({ toolName: "get_availability" })]),
+      },
+    });
+
+    expect(await screen.findByLabelText("Tool call, get_availability", {}, { timeout: 4000 })).toBeTruthy();
+    expect(screen.queryByText(/Waiting for LiveKit transcript/u)).toBeNull();
+    expect(screen.queryByText("You are all set for Tuesday.")).toBeNull();
+  });
+
+  it.each(["retell_web_call", "livekit_room"])("shows only platform evidence on the %s simulation page", async (connectionType) => {
+    page({
+      read: evidence({
+        agentPovComplete: true,
+        agentPovIncomplete: false,
+        connectionSnapshot: { ...evidence().connectionSnapshot, connectionType },
+        transcript: bothPovs([
+          toolCall({ toolName: "get_availability" }),
+          toolCall({ spanId: "mock_booking", toolName: "book_appointment", pov: "persona" }),
+        ]),
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText("Tuesday is fully booked.")).toBeTruthy();
+    expect(screen.getByLabelText("Tool call, get_availability")).toBeTruthy();
+    expect(screen.queryByText("You are all set for Tuesday.")).toBeNull();
+    expect(screen.queryByLabelText("Tool call, book_appointment")).toBeNull();
+  });
+
+  it.each(["retell_web_call", "livekit_room"])("keeps zero platform tools empty on the %s simulation page", async (connectionType) => {
+    page({
+      read: evidence({
+        agentPovComplete: true,
+        agentPovIncomplete: false,
+        connectionSnapshot: { ...evidence().connectionSnapshot, connectionType },
+        transcript: bothPovs([
+          toolCall({ toolName: "book_appointment", pov: "persona" }),
+        ]),
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText("Tuesday is fully booked.")).toBeTruthy();
+    expect(screen.queryByLabelText(/^Tool call, /u)).toBeNull();
+  });
+
+  it("marks a failed simulation's partial Retell transcript without filling its missing tools", async () => {
+    page({
+      read: evidence({
+        status: "failed",
+        agentPovIncomplete: true,
+        connectionSnapshot: { ...evidence().connectionSnapshot, connectionType: "retell_web_call" },
+        transcript: bothPovs([toolCall({ toolName: "book_appointment", pov: "persona" })]),
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText(/Retell transcript incomplete/u)).toBeTruthy();
+    expect(screen.getByText("Tuesday is fully booked.")).toBeTruthy();
+    expect(screen.queryByLabelText("Tool call, book_appointment")).toBeNull();
+  });
+
+  it.each(["retell_text_mode", "retell_chat_api", "phone_number"])("keeps the directly collected transcript on %s", async (connectionType) => {
+    const read = evidence();
+    page({
+      read: evidence({
+        connectionSnapshot: { ...read.connectionSnapshot, connectionType },
+        transcript: {
+          ...read.transcript,
+          turns: read.transcript.turns.map((one) => ({ ...one, pov: "persona" })),
+          spans: [toolCall({ pov: "persona" })],
+        },
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText("You are all set for Tuesday.")).toBeTruthy();
+    expect(screen.getByLabelText("Tool call, check_availability")).toBeTruthy();
+    expect(screen.queryByText(/transcript unavailable|Waiting for .* transcript/u)).toBeNull();
+  });
+
   it("lists the agent's turns and tool calls, and none of the persona's", () => {
     const withBoth = bothPovs([
       toolCall({ spanId: "lk_tool_1", toolName: "list_providers" }),
@@ -1239,6 +1382,21 @@ describe("the agent's POV is what a reader is shown", () => {
     // not drawn beside it.
     expect(screen.getAllByLabelText(/^Tool call, /u)).toHaveLength(1);
     expect(screen.getByLabelText("Tool call, list_providers")).toBeTruthy();
+  });
+
+  it("never fills an agent transcript's empty tool list with simulator tools", () => {
+    const withBoth = bothPovs([]);
+    render(
+      <ChatTranscript
+        transcript={withBoth as never}
+        requiredPov="agent"
+        toolCalls={[toolCall({ pov: "persona", toolName: "book_appointment" }) as never]}
+      />,
+    );
+
+    expect(screen.getByText("Tuesday is fully booked.")).toBeTruthy();
+    expect(screen.queryByLabelText("Tool call, book_appointment")).toBeNull();
+    expect(screen.queryByText("You are all set for Tuesday.")).toBeNull();
   });
 
   it("keeps egma's own tool rows when the agent reported none", () => {

@@ -1403,8 +1403,8 @@ describe("one run after suites", () => {
         "The media connection closed unexpectedly. This is an execution problem, not a failed grade.",
       ).closest('[role="alert"]'),
     ).not.toBeNull();
-    expect(dismiss).toHaveBeenCalledWith("run_1:1");
     await waitFor(() => {
+      expect(dismiss).toHaveBeenCalledWith("run_1:1");
       expect(screen.queryByText("Simulation execution failed")).toBeNull();
     });
 
@@ -2102,6 +2102,51 @@ describe("one run after suites", () => {
       within(details!).getByRole("region", { name: "lookup_appointment response" })
         .textContent,
     ).toContain('{"appointment":"Tuesday at 10"}');
+  });
+
+  it("shows a missing Retell transcript in the run while preserving its recording panel", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const read = simulationEvidence();
+    const voiceSnapshot = {
+      ...read.connectionSnapshot,
+      connectionType: "retell_web_call",
+      modality: "voice",
+    };
+    answers(detailStubs(
+      runDetail({ modality: "voice", connectionSnapshot: voiceSnapshot }),
+      {
+        status: 200,
+        body: {
+          simulations: [simulation({ status: "failed", modality: "voice" })],
+          nextPageToken: null,
+        },
+      },
+      {
+        status: 200,
+        body: {
+          ...read,
+          status: "failed",
+          modality: "voice",
+          agentPovIncomplete: true,
+          connectionSnapshot: voiceSnapshot,
+          transcript: {
+            ...read.transcript,
+            turns: read.transcript.turns.map((one) => ({
+              ...one,
+              pov: "persona",
+              spans: one.spans.map((nested) => ({ ...nested, pov: "persona" })),
+            })),
+          },
+        },
+      },
+    ));
+    render(<RunDetailPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Transcript & audio" }));
+    expect(await screen.findByText("Retell transcript unavailable")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Recording" })).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Transcript messages" })).toBeNull();
+    expect(screen.queryByLabelText("Tool call, lookup_appointment")).toBeNull();
   });
 
   it("keeps recording evidence on the voice simulation path", async () => {

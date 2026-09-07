@@ -34,7 +34,7 @@ import ipaddress
 import json
 import logging
 import socket
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from operator import attrgetter
 from typing import Any
@@ -46,6 +46,7 @@ from ..mock_tools import (
     TOOL_METHOD,
     MockToolSeam,
 )
+from ..platform_logging import log_event
 from ..redaction import SecretRegistry
 from . import MediaBackendError, VoiceMedia
 from .room import (
@@ -56,12 +57,14 @@ from .room import (
     answering,
     chat_room_name_for,
     delete_room,
+    disconnect_reason_name,
     first_of,
     fresh_chat_room_name,
     fresh_room_name,
     persona_name_for,
     room_name_for,
     room_token,
+    room_was_deleted,
 )
 
 logger = logging.getLogger(__name__)
@@ -652,10 +655,14 @@ class RoomLifecycle:
         mock_tools: MockToolSeam | None = None,
         job_dispatch_metadata: dict[str, Any] | None = None,
         endpoint_resolver: Any = None,
+        confirm_remote_end: Callable[[], Awaitable[bool]] | None = None,
+        on_provider_reference: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._settings = settings
         self._mock_tools = mock_tools
         self._endpoint_resolver = endpoint_resolver
+        self._confirm_remote_end = confirm_remote_end
+        self._on_provider_reference = on_provider_reference
         # Written out once, here, rather than at the dispatch: the string
         # is what goes on the wire, and one serialisation means there is
         # no second spelling of the test's object to disagree with the
@@ -742,6 +749,10 @@ class RoomLifecycle:
         platform opened itself — and everything after this is the same
         whichever it was.
         """
+        if self._on_provider_reference is not None:
+            # The token endpoint may dispatch immediately. Persist the room
+            # association before either it or CreateRoom can start a worker.
+            await self._on_provider_reference(self._room_name)
         if self._settings.given_token:
             # Nothing is reached for here: the room is already open and the
             # way in was part of whatever opened it. One token, one join —
@@ -1215,6 +1226,7 @@ class LiveKitRoomBackend(RoomLifecycle):
             token=way_in.token,
             room_name=self._room_name,
             quotable=self._quotable,
+            confirm_remote_end=self._confirm_remote_end,
         )
 
 
@@ -1413,11 +1425,27 @@ class TextRoom:
                 self.audio_published.set()
 
         @room.on("disconnected")
-        def _dropped(*_why: Any) -> None:
-            # Egma losing the room is a fault, and it is not the agent
-            # ending the exchange. Told apart here so the record cannot
-            # read one as the other.
-            if not self._leaving:
+        def _dropped(reason: object = None) -> None:
+            log_event(
+                logger,
+                logging.INFO,
+                "egma.media.disconnected",
+                "livekit chat room disconnected",
+                attributes={
+                    "livekit.disconnect_reason": disconnect_reason_name(reason)
+                },
+            )
+            if self._leaving or self.failed.is_set() or self.ended.is_set():
+                return
+            if (
+                self._room is not None
+                and self.arrivals.is_set()
+                and room_was_deleted(reason)
+            ):
+                # DeleteRoom is LiveKit's supported way to end a session.
+                # next_utterance still settles text already on its way in.
+                self.ended.set()
+            else:
                 self.failed.set()
 
     async def wait_connected(self) -> None:

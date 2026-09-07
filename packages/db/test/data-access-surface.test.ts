@@ -295,6 +295,7 @@ const CONTEXT_REQUIRING = [
   // simulation claim, because conducting is the only thing egma does with a
   // connection's credentials at this seam.
   "resolveSimulationConnection",
+  "registerSimulationProviderReference",
   // The same door one moment later, for the platform that exports nothing of
   // its own: a Retell simulation's record is pulled by egma when the
   // conversation ends, so this unseals the same key to collect the record of

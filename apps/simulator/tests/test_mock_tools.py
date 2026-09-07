@@ -106,6 +106,12 @@ class RecordingControlPlane:
 
     def __init__(self) -> None:
         self.filed: list[dict] = []
+        self.registered: list[tuple[str, str, str]] = []
+
+    async def register_provider_reference(
+        self, simulation_id: str, claimant: str, provider_reference: str
+    ) -> None:
+        self.registered.append((simulation_id, claimant, provider_reference))
 
     async def report(self, simulation_id: str, serialized: bytes) -> None:
         del simulation_id
@@ -176,6 +182,9 @@ async def conducted_record(
         # for, which is exactly what the far side would find on a live one.
         if stub.refuses_rpc is None:
             await stub.standing_ready.wait()
+            assert client.registered == [
+                (document["simulation_id"], "sim-under-test", stub.rooms[0].name)
+            ]
         await session(stub)
 
     await asyncio.gather(simulation.run(), agent_side())

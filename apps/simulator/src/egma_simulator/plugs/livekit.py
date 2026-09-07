@@ -14,6 +14,7 @@ startup completes. The room name is the provider reference for agent POV spans.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ..contract import AGENT_NEVER_JOINED
@@ -49,6 +50,7 @@ class LiveKitRoom:
         mock_tools: MockToolSeam | None = None,
         media: object = None,
         driver: Any = None,
+        on_provider_reference: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         # A room is reached with this connection's URL and authority. It does
         # not use the deployment's phone media bridge or the platform carrier
@@ -78,6 +80,7 @@ class LiveKitRoom:
             simulation_id=simulation_id,
             mock_tools=mock_tools,
             job_dispatch_metadata=job_dispatch_metadata,
+            on_provider_reference=on_provider_reference,
         )
         self._media: VoiceMedia | None = None
         self._reference: str | None = None

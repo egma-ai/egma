@@ -1,6 +1,7 @@
 """Retell voice connection through create-web-call and the shared LiveKit driver.
 Config requires retellAgentId; baseUrl and roomHost are optional overrides.
 Forward the supplied agent version and dynamic variables when creating the call.
+Check the final call status if the room closes before participant departure.
 
 Credentials contain apiKey. The returned room access token is also a secret;
 register both for redaction before reporting platform errors.
@@ -13,8 +14,11 @@ Mock-tool calls use the configured HTTP endpoint, not RPC on this participant.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
@@ -22,8 +26,11 @@ from ..client import UNREACHABLE
 from ..contract import AGENT_NEVER_JOINED
 from ..media import MediaBackendError, VoiceMedia
 from ..media.livekit_room import URL_SCHEMES, LiveKitRoomBackend, RoomSettings
+from ..platform_logging import log_event
 from . import PlugError, named_version, quotable, rendered_variables
 from .retell import CREDENTIAL_KEYS, DEFAULT_BASE_URL
+
+logger = logging.getLogger(__name__)
 
 RETELL_ROOM_HOST = "wss://retell-ai-4ihahnq7.livekit.cloud"
 """Default room host copied from retell-client-js-sdk 2.0.8, src/index.ts,
@@ -38,6 +45,9 @@ CREATE_PATH = "/v2/create-web-call"
 TIMEOUT_SECONDS = 30.0
 """The most creating one call may take. Retell registers a call and
 answers; anything past this is a platform that has stopped answering."""
+
+FINAL_STATUS_SECONDS = 3.0
+"""A room can disappear just before Retell publishes its final call status."""
 
 AGENT_JOIN_SECONDS = 30.0
 """How long the room may stand empty before nobody coming is the answer.
@@ -209,6 +219,7 @@ class RetellWebCall:
             # path, so nothing is offered in the room and the record makes
             # no claim about tools it never saw.
             mock_tools=None,
+            confirm_remote_end=self._confirm_remote_end,
         )
         try:
             self._media = await self._room.create_transport()
@@ -247,7 +258,67 @@ class RetellWebCall:
         if room is not None:
             await room.teardown()
 
-    # -- The one place this plug reaches Retell ------------------------------
+    async def _confirm_remote_end(self) -> bool:
+        """Only this call's final status can confirm a Retell room ending.
+
+        The disconnect reason explains the ending; it does not replace the
+        provider's status. A network failure or an unfinished call remains
+        unconfirmed, and no media failure is cleared by this check.
+        """
+        call_id = self._call_id
+        if call_id is None:
+            return False
+        url = f"{self._base_url}/v2/get-call/{quote(call_id, safe='')}"
+        try:
+            async with (
+                asyncio.timeout(FINAL_STATUS_SECONDS),
+                aiohttp.ClientSession(
+                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    timeout=aiohttp.ClientTimeout(total=1.0),
+                ) as session,
+            ):
+                while True:
+                    try:
+                        async with session.get(url) as response:
+                            if response.status == 200:
+                                document = await response.json()
+                                if not isinstance(document, dict):
+                                    return False
+                                if document.get("call_id") != call_id:
+                                    return False
+                                status = document.get("call_status")
+                                if status in {"ended", "error"}:
+                                    reason = document.get("disconnection_reason")
+                                    log_event(
+                                        logger,
+                                        logging.INFO,
+                                        "egma.retell.call_final_status",
+                                        "retell reported its final call status",
+                                        attributes={
+                                            "retell.call_id": call_id,
+                                            "retell.call_status": status,
+                                            "retell.disconnection_reason": (
+                                                quotable(reason, self._api_key)[:80]
+                                                if isinstance(reason, str)
+                                                else "unknown"
+                                            ),
+                                        },
+                                    )
+                                    return status == "ended"
+                            elif (
+                                response.status not in {404, 408, 429}
+                                and response.status < 500
+                            ):
+                                return False
+                    except UNREACHABLE:
+                        pass
+                    except ValueError:
+                        return False
+                    await asyncio.sleep(0.25)
+        except TimeoutError:
+            return False
+
+    # -- Creating the Retell call -------------------------------------------
 
     async def _create_call(self) -> str:
         """Create the call and come back with the way into its room.
@@ -353,4 +424,3 @@ class RetellWebCall:
             f"so a token already used, or created and left, is refused and a "
             f"new call has to be created"
         )
-

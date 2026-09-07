@@ -108,12 +108,9 @@ const simulationSchema = {
     endedAt: nullable(dateTimeSchema),
     providerReference: nullable(stringSchema),
     hasRecording: booleanSchema,
-    /**
-     * True when grading proceeded after the agent-POV wait expired. That POV may
-     * be absent or partial; transcript readers must not present it as complete.
-     * Regrade can use evidence that arrives later. False when the POV arrived
-     * or the connection type does not provide one.
-     */
+    /** The platform's final agent session or call record is present. */
+    agentPovComplete: booleanSchema,
+    /** Provider evidence is explicitly degraded, or absent/partial after the bounded wait. */
     agentPovIncomplete: booleanSchema,
     measures: {
       type: "object",
@@ -237,6 +234,7 @@ const simulationSchema = {
     "endedAt",
     "providerReference",
     "hasRecording",
+    "agentPovComplete",
     "agentPovIncomplete",
     "measures",
     "metrics",

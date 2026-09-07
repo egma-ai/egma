@@ -21,8 +21,10 @@ export function povOf(emitter: string): SpanPov {
 }
 
 /**
- * Select the requested POV when present; otherwise return all rows. This keeps
- * single-POV transcripts readable while avoiding duplicate views of a simulation.
+ * Select the requested POV when present; otherwise return all rows. Use this
+ * for recordings and directly collected conversations. Retell web-call and
+ * LiveKit simulation transcript readers must select agent rows explicitly,
+ * including when no agent evidence is available.
  */
 export function fromOnePov<Span extends { readonly pov: SpanPov }>(
   spans: readonly Span[],

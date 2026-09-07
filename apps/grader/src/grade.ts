@@ -1,6 +1,7 @@
 import {
   appendGrades,
   graderModelOfParameters,
+  getRun,
   getSimulation,
   getSimulationTestVersion,
   MAXIMUM_WINDOW_MILLISECONDS,
@@ -213,6 +214,14 @@ async function resolveConversation(claim: GradingClaim): Promise<Resolved> {
     );
   }
 
+  // Provider spans need not carry a connection type. The frozen run decides
+  // which platform must supply the transcript, regardless of which span lands first.
+  const run = await getRun(claim.auth, claim.runId);
+  if (run === undefined) {
+    throw new NotGradable(`simulation ${simulation.id}'s frozen run is not readable`);
+  }
+  const connectionType = run.connectionSnapshot.connectionType;
+
   const trace = await traceFor(claim);
   if (trace !== undefined && trace.runId !== claim.runId) {
     throw new NotGradable(
@@ -225,7 +234,7 @@ async function resolveConversation(claim: GradingClaim): Promise<Resolved> {
   // write error grades from the missing or partial conversation instead of
   // abandoning work that can no longer improve.
   if (
-    evidenceIsStillArriving(simulation, trace) &&
+    evidenceIsStillArriving(simulation, trace, connectionType) &&
     claim.attempts < MOST_GRADING_ATTEMPTS
   ) {
     throw new NotGradable(
@@ -236,7 +245,7 @@ async function resolveConversation(claim: GradingClaim): Promise<Resolved> {
   }
 
   return {
-    conversation: conversationOfSimulation(simulation, trace),
+    conversation: conversationOfSimulation(simulation, trace, connectionType),
     simulationId: simulation.id,
   };
 }

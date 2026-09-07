@@ -390,6 +390,7 @@ export {
   runCarriesMockTools,
   resolveRetellSimulationPull,
   resolveSimulationByProviderReference,
+  registerSimulationProviderReference,
   resolveSimulationStanding,
   simulationProviderReferencesIn,
   simulationStatusCountsOfRuns,

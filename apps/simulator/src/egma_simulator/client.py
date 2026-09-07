@@ -1,10 +1,11 @@
-"""Outbound control-plane client for claims, heartbeats, reports, and OTLP evidence.
+"""Outbound client for claims, heartbeats, room registration, reports, and OTLP.
 Claims can wait for work; heartbeat replies carry directives. All endpoints
 derive from one deployment URL. The simulator needs no inbound listener.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -28,6 +29,11 @@ CLAIM_TIMEOUT_MARGIN_SECONDS = 15.0
 
 # Everything else answers promptly or is broken.
 BRISK_TIMEOUT_SECONDS = 10.0
+
+# Room registration is idempotent and must finish before a worker starts.
+# Keep transient retries short and finite, within the simulation watchdog.
+REGISTRATION_ATTEMPTS = 3
+REGISTRATION_RETRY_SECONDS = 0.25
 
 
 class ClaimFailure(Exception):
@@ -128,6 +134,23 @@ class ControlPlaneClient:
             raise ClaimFailure(f"claim answer has no specs list: {body!r}")
         return specs
 
+    async def register_provider_reference(
+        self, simulation_id: str, claimant: str, provider_reference: str
+    ) -> None:
+        """Acknowledge the room association before the agent can export into it."""
+        url = f"{self._base_url}/v1/simulations/{simulation_id}/provider-reference"
+        serialized = json.dumps(
+            {"claimant": claimant, "provider_reference": provider_reference}
+        ).encode()
+        for attempt in range(REGISTRATION_ATTEMPTS):
+            try:
+                await self._post_document(url, serialized, accepted_statuses=(200,))
+                return
+            except TransientDeliveryFailure:
+                if attempt == REGISTRATION_ATTEMPTS - 1:
+                    raise
+                await asyncio.sleep(REGISTRATION_RETRY_SECONDS * 2**attempt)
+
     async def heartbeat(self, simulation_id: str, claimant: str) -> str | None:
         """One beat for one running simulation; the answer may carry a directive."""
         try:
@@ -138,8 +161,7 @@ class ControlPlaneClient:
             ) as response:
                 if response.status != 200:
                     raise HeartbeatFailure(
-                        f"heartbeat answered {response.status}: "
-                        f"{await response.text()}"
+                        f"heartbeat answered {response.status}: {await response.text()}"
                     )
                 body = await response.json()
         except UNREACHABLE as error:

@@ -178,14 +178,16 @@ async function completeWithEvidence(auth: AuthContext, runId: string, simulation
   const at = BigInt(started!.startedAt!.getTime()) * 1_000n;
   const traceId = traceIdOfSimulation(simulationId)!;
   const span: NewSpan = {
-    traceId, spanId: "1111111111111111", parentSpanId: "", source: "simulation", emitter: "egma-runtime", environment: "simulation",
-    startedAtMicroseconds: at, durationNanoseconds: 1_000_000n, name: "turn:agent", kind: "turn:agent", status: "ok", text: "I can help.",
-    audioUrl: "", toolName: "", toolArguments: "", toolResult: "", providerCallId: "", agentPlatform: "livekit", platformAgentId: "", platformAgentName: "", platformAgentVersion: "",
-    connectionType: "livekit_room", runId, agentId: project.agentId, agentVersionId: "", testVersionId: project.testVersionId, personaVersionId: started!.personaVersionId, payload: "{}", endsTrace: true,
+    traceId, spanId: "1111111111111111", parentSpanId: "", source: "simulation", emitter: "agent", environment: "simulation",
+    startedAtMicroseconds: at, durationNanoseconds: 1_000_000n, name: "agent_turn", kind: "turn:agent", status: "ok", text: "I can help.",
+    audioUrl: "", toolName: "", toolArguments: "", toolResult: "", providerCallId: `egma-sim-${simulationId}`, agentPlatform: "livekit", platformAgentId: "", platformAgentName: "", platformAgentVersion: "",
+    connectionType: "livekit_room", runId, agentId: project.agentId, agentVersionId: "", testVersionId: project.testVersionId, personaVersionId: started!.personaVersionId, payload: "{}", endsTrace: false,
   };
+  // This LiveKit run is graded from the platform's final session record.
+  // Simulation lifecycle remains the terminal report's responsibility.
   await appendSpans(auth, [
-    { ...span, spanId: "2222222222222222", name: "simulation", kind: "root", text: "" },
+    { ...span, spanId: "2222222222222222", name: "agent_session", kind: "root", text: "" },
     { ...span, parentSpanId: "2222222222222222", endsTrace: false },
   ]);
-  await completeSimulation(auth, simulationId, claimant, { endingReason: "persona_concluded", turnCount: 1 });
+  await completeSimulation(auth, simulationId, claimant, { endingReason: "persona_concluded", turnCount: 1, providerReference: `egma-sim-${simulationId}` });
 }

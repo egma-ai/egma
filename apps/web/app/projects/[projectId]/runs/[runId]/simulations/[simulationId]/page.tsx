@@ -41,6 +41,7 @@ import {
 import {
   SimulationEvidenceReview,
   useSimulationEvidenceRecording,
+  waitingForSimulationTranscript,
 } from "../../../../../../../ui/simulation-evidence.tsx";
 import {
   AppShell,
@@ -129,12 +130,13 @@ function EvidenceView({
     evidence !== null &&
     (evidence.gradingState === "pending" ||
       evidence.gradingState === "running");
+  const transcriptPending = evidence !== null && waitingForSimulationTranscript(evidence);
 
   useEffect(() => {
-    if (!stillGrading) return undefined;
+    if (!stillGrading && !transcriptPending) return undefined;
     const timer = setTimeout(() => reload(), AGAIN_MS);
     return () => clearTimeout(timer);
-  }, [stillGrading, reload, evidence]);
+  }, [stillGrading, transcriptPending, reload, evidence]);
 
   async function regrade(): Promise<void> {
     if (!mayRevisit || working) return;

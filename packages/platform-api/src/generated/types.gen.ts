@@ -4760,6 +4760,7 @@ export type GetSimulationResponses = {
         endedAt: string | null;
         providerReference: string | null;
         hasRecording: boolean;
+        agentPovComplete: boolean;
         agentPovIncomplete: boolean;
         measures: {
             durationMs?: number;

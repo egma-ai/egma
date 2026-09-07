@@ -1186,6 +1186,21 @@ describe("the block a platform reported on the root span", () => {
     ]);
   });
 
+  it.each([
+    { label: "degraded provider document", emitter: "agent", degraded: true, status: "error", expected: true },
+    { label: "complete provider error", emitter: "agent", degraded: false, status: "error", expected: undefined },
+    { label: "complete provider document", emitter: "agent", degraded: false, status: "ok", expected: undefined },
+    { label: "persona diagnostic", emitter: "egma-runtime", degraded: true, status: "error", expected: undefined },
+  ] as const)("reports evidence completeness for $label", async ({ label, emitter, degraded, status, expected }) => {
+    const traceId = createHash("sha256").update(label).digest("hex").slice(0, 32);
+    await appendSpans(at(acme, SUPPORT), [{
+      ...aReportedRoot(traceId, { degraded }), emitter, status,
+    }]);
+    const detail = await readTrace(at(acme, SUPPORT), traceId, { window: WINDOW });
+    expect(detail?.agentEvidenceIncomplete).toBe(expected);
+    expect(detail?.spans[0]?.status).toBe(status);
+  });
+
   it("is read back with the root span it rode in on", async () => {
     const detail = await readTrace(at(acme, SUPPORT), REPORTED, {
       window: WINDOW,

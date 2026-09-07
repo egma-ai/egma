@@ -556,6 +556,7 @@ async def test_a_mocked_chat_simulation_puts_no_tool_row_of_egmas_on_the_record(
         classmethod(lambda _cls, _models, *, vad: SCRIPTED_PAIR),
     )
     filed: list[dict] = []
+    control_plane = _FilingControlPlane(filed)
     simulation = RunningSimulation(
         SimulationSpec.from_document(
             chat_spec(
@@ -568,7 +569,7 @@ async def test_a_mocked_chat_simulation_puts_no_tool_row_of_egmas_on_the_record(
                 ],
             )
         ),
-        client=_FilingControlPlane(filed),
+        client=control_plane,
         config=SimulatorConfig(
             control_plane_url="http://127.0.0.1:1",
             claimant="sim-under-test",
@@ -588,6 +589,9 @@ async def test_a_mocked_chat_simulation_puts_no_tool_row_of_egmas_on_the_record(
         # A room where the exchange was never offered has nothing to wait
         # for, which is what the far side would find on a live one.
         await stub.standing_ready.wait()
+        assert control_plane.registered == [
+            (A_SIMULATION, "sim-under-test", stub.rooms[0].name)
+        ]
         await stub.says_hello("check_availability", "opening_hours")
         await stub.calls("check_availability", {"day": "Tuesday"})
 
@@ -625,6 +629,12 @@ class _FilingControlPlane:
 
     def __init__(self, filed: list[dict]) -> None:
         self.filed = filed
+        self.registered: list[tuple[str, str, str]] = []
+
+    async def register_provider_reference(
+        self, simulation_id: str, claimant: str, provider_reference: str
+    ) -> None:
+        self.registered.append((simulation_id, claimant, provider_reference))
 
     async def report(self, simulation_id: str, serialized: bytes) -> None:
         del simulation_id

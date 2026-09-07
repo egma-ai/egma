@@ -10,6 +10,7 @@ from text streams.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ..contract import AGENT_NEVER_JOINED
@@ -74,6 +75,7 @@ class LiveKitChat:
         mock_tools: MockToolSeam | None = None,
         media: object = None,
         driver: Any = None,
+        on_provider_reference: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         # LiveKit forwards test dispatch metadata but has no platform agent version
         # or rendered-variable interface. This chat connection uses no phone media.
@@ -92,6 +94,7 @@ class LiveKitChat:
             simulation_id=simulation_id,
             mock_tools=mock_tools,
             job_dispatch_metadata=job_dispatch_metadata,
+            on_provider_reference=on_provider_reference,
         )
         self._reference: str | None = None
         # Retain the seam to verify hello after the agent joins.

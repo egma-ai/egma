@@ -1352,6 +1352,7 @@ export function RecordingEvidence({
  * Select the requested POV when present; otherwise retain all supplied steps.
  * Keep this behavior aligned with @egma/db fromOnePov. The browser cannot
  * import the database package directly.
+ * Platform simulation transcripts bypass this fallback by requiring their POV.
  */
 function fromOnePov<Step extends { readonly pov: EvidenceStep["pov"] }>(
   steps: readonly Step[],
@@ -1361,16 +1362,19 @@ function fromOnePov<Step extends { readonly pov: EvidenceStep["pov"] }>(
   return own.length === 0 ? steps : own;
 }
 
-/**
- * Every tool call a reader is shown, once, in the order it happened.
- *
- * The agent's own, where the record holds them. egma files a tool row of its
- * own on the lanes where a platform serves egma's answers, and those are shown
- * only where the agent reported none — so a call is on the transcript once,
- * never twice, and never paired or deduplicated by guesswork.
- */
+function transcriptSteps<Step extends { readonly pov: EvidenceStep["pov"] }>(
+  steps: readonly Step[],
+  requiredPov?: EvidenceStep["pov"],
+): readonly Step[] {
+  return requiredPov === undefined
+    ? fromOnePov(steps, "agent")
+    : steps.filter((step) => step.pov === requiredPov);
+}
+
+/** A required source never borrows tools from another account of the call. */
 export function transcriptToolCalls(
   transcript: EvidenceTranscript,
+  requiredPov?: EvidenceStep["pov"],
 ): readonly EvidenceStep[] {
   const found = new Map<string, EvidenceStep>();
   const visit = (step: EvidenceStep): void => {
@@ -1379,9 +1383,34 @@ export function transcriptToolCalls(
   };
   for (const turn of transcript.turns) visit(turn);
   for (const step of transcript.spans) visit(step);
-  return fromOnePov([...found.values()], "agent").toSorted(
+  return transcriptSteps([...found.values()], requiredPov).toSorted(
     (left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt),
   );
+}
+
+/** These lanes receive their transcript separately from simulator evidence. */
+function platformTranscriptSource(
+  evidence: SimulationEvidence,
+): "Retell" | "LiveKit" | null {
+  const lane = evidence.connectionSnapshot.connectionType;
+  if (lane === "retell_web_call") return "Retell";
+  if (lane === "livekit_room") return "LiveKit";
+  return null;
+}
+
+/** Keep reading a pending platform export after execution itself has ended. */
+export function waitingForSimulationTranscript(
+  evidence: SimulationEvidence,
+): boolean {
+  if (
+    platformTranscriptSource(evidence) === null ||
+    evidence.agentPovIncomplete ||
+    evidence.agentPovComplete
+  ) {
+    return false;
+  }
+  return ["queued", "claimed", "running"].includes(evidence.status) ||
+    Boolean(evidence.providerReference);
 }
 
 /** Every recorded tool call in one simulation, using the shared transcript walk. */
@@ -1390,7 +1419,10 @@ export function simulationToolCalls(
 ): readonly EvidenceStep[] {
   return evidence.transcript === null
     ? []
-    : transcriptToolCalls(evidence.transcript);
+    : transcriptToolCalls(
+        evidence.transcript,
+        platformTranscriptSource(evidence) === null ? undefined : "agent",
+      );
 }
 
 type TurnConversationEvent = {
@@ -1924,6 +1956,7 @@ export function ChatTranscript({
   onSeek,
   speakerLabels = DEFAULT_TRANSCRIPT_SPEAKERS,
   emptyState = DEFAULT_TRANSCRIPT_EMPTY_STATE,
+  requiredPov,
 }: {
   readonly transcript: EvidenceTranscript;
   readonly toolCalls?: readonly EvidenceStep[];
@@ -1932,22 +1965,29 @@ export function ChatTranscript({
   readonly onSeek?: (seconds: number) => void;
   readonly speakerLabels?: TranscriptSpeakerLabels;
   readonly emptyState?: TranscriptEmptyState;
+  readonly requiredPov?: EvidenceStep["pov"];
 }) {
   const timelineStartedAt = recordingStartedAt ?? transcript.startedAt;
-  // The turns the agent's own process reported, where it reported any. The
-  // persona's POV still supplies the recording underneath and the origin these
-  // rows seek against; it is not a second transcript beside this one.
   const shown = useMemo(
-    () => ({ ...transcript, turns: [...fromOnePov(transcript.turns, "agent")] }),
-    [transcript],
+    () => ({
+      ...transcript,
+      turns: [...transcriptSteps(transcript.turns, requiredPov)],
+    }),
+    [transcript, requiredPov],
+  );
+  const shownTools = useMemo(
+    () => requiredPov === undefined
+      ? toolCalls
+      : toolCalls.filter((step) => step.pov === requiredPov),
+    [toolCalls, requiredPov],
   );
   const events = useMemo(
-    () => timedConversationEvents(shown, toolCalls, timelineStartedAt),
-    [timelineStartedAt, toolCalls, shown],
+    () => timedConversationEvents(shown, shownTools, timelineStartedAt),
+    [timelineStartedAt, shownTools, shown],
   );
   const groups = useMemo(
-    () => conversationGroups(shown, toolCalls, events),
-    [events, toolCalls, shown],
+    () => conversationGroups(shown, shownTools, events),
+    [events, shownTools, shown],
   );
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
   const selectAndSeek = useCallback<TranscriptSeek>(
@@ -2126,6 +2166,73 @@ const NOTICE_LINE =
 const SHEET_BLOCK = "flex min-w-0 flex-col gap-3";
 const SHEET_BLOCK_TITLE = "m-0 text-base font-medium text-foreground";
 
+/** The same transcript source and availability state on both simulation views. */
+export function SimulationTranscript({
+  evidence,
+  recording,
+}: {
+  readonly evidence: SimulationEvidence;
+  readonly recording: SimulationEvidenceRecording;
+}) {
+  const source = platformTranscriptSource(evidence);
+  const requiredPov = source === null ? undefined : "agent";
+  const transcript = evidence.transcript;
+  const toolCalls = useMemo(() => simulationToolCalls(evidence), [evidence]);
+  const hasConversation = transcript !== null && (
+    transcriptSteps(transcript.turns, requiredPov).length > 0 ||
+    toolCalls.length > 0
+  );
+  if (
+    source !== null &&
+    !hasConversation &&
+    !evidence.agentPovComplete
+  ) {
+    const unavailable = !waitingForSimulationTranscript(evidence);
+    return (
+      <div className="border border-border bg-surface-soft p-5 text-sm" role="status">
+        <p className="m-0 font-medium text-foreground">
+          {unavailable
+            ? `${source} transcript unavailable`
+            : `Waiting for ${source} transcript`}
+        </p>
+        <p className="m-0 mt-1 text-muted-foreground">
+          {unavailable
+            ? `Egma did not receive the ${source} conversation and tool calls for this simulation.`
+            : `Conversation and tool calls will appear when ${source} sends them.`}
+        </p>
+      </div>
+    );
+  }
+  if (transcript === null) return <TranscriptEmpty />;
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      {source !== null && evidence.agentPovIncomplete ? (
+        <p className={NOTICE_LINE} role="status">
+          {`${source} transcript incomplete. Only the conversation and tool calls Egma received are shown.`}
+        </p>
+      ) : source !== null && waitingForSimulationTranscript(evidence) ? (
+        <p className={NOTICE_LINE} role="status">
+          {`Waiting for ${source} transcript. The conversation and tool calls received so far are shown below.`}
+        </p>
+      ) : null}
+      {transcript.spansTruncated ? (
+        <p className={NOTICE_LINE} role="status">
+          {`This simulation filed ${String(transcript.spanCount)} steps. This view shows the first steps in order, so later tool calls or conversation turns may be absent.`}
+        </p>
+      ) : null}
+      <ChatTranscript
+        transcript={transcript}
+        toolCalls={toolCalls}
+        {...(requiredPov === undefined ? {} : { requiredPov })}
+        recordingStartedAt={recordingOriginOf(transcript)}
+        {...(recording.status === "ready"
+          ? { currentTime: recording.currentTime, onSeek: recording.seek }
+          : {})}
+      />
+    </div>
+  );
+}
+
 /** The immutable grader plan captured at run start. */
 export function SimulationGradingPlan({
   evidence,
@@ -2181,7 +2288,6 @@ function SimulationEvidencePanel({
     evidence.status,
   );
   const voice = evidence.modality === "voice";
-  const toolCalls = useMemo(() => simulationToolCalls(evidence), [evidence]);
   const pendingTurn = useRef<number | null>(null);
 
   function revealTurn(turn: number): void {
@@ -2331,36 +2437,7 @@ function SimulationEvidencePanel({
               <h3 className={SHEET_BLOCK_TITLE} id="evidence-transcript">
                 Transcript
               </h3>
-              {evidence.transcript === null ? (
-                <div className={EMPTY_STATE}>
-                  <strong className={EMPTY_STATE_TITLE}>
-                    No transcript was filed
-                  </strong>
-                  <p className={EMPTY_STATE_LEAD}>
-                    Egma has no conversation turns for this simulation. It may not
-                    have started, or it may have stopped before the first turn.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  {evidence.transcript.spansTruncated ? (
-                    <p className={NOTICE_LINE}>
-                      {`This simulation filed ${String(evidence.transcript.spanCount)} steps. This view shows the first steps in order.`}
-                    </p>
-                  ) : null}
-                  <ChatTranscript
-                    transcript={evidence.transcript}
-                    toolCalls={toolCalls}
-                    recordingStartedAt={recordingOriginOf(evidence.transcript)}
-                    {...(recording.status === "ready"
-                      ? {
-                          currentTime: recording.currentTime,
-                          onSeek: recording.seek,
-                        }
-                      : {})}
-                  />
-                </>
-              )}
+              <SimulationTranscript evidence={evidence} recording={recording} />
             </section>
           </div>
         </Dialog>

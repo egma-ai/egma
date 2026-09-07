@@ -1,5 +1,6 @@
 import {
   fromOnePov,
+  laneProducesAnAgentPov,
   type Simulation,
   type TraceDetail,
   type TraceSpan,
@@ -46,6 +47,7 @@ export type Conversation = {
 export function conversationOfSimulation(
   simulation: Simulation,
   trace: TraceDetail | undefined,
+  connectionType: string,
 ): Conversation {
   // Use the persistent simulation status to decide grading eligibility.
   const neverHappened =
@@ -69,12 +71,18 @@ export function conversationOfSimulation(
   };
 
   if (trace !== undefined && !trace.truncated) {
+    const requiresAgentPov = laneProducesAnAgentPov(connectionType);
+    const agentEvidenceMissing = requiresAgentPov &&
+      trace.agentEvidenceComplete !== true;
     return {
       ...filedUnderTheSimulation,
-      transcript: transcriptOf(trace),
-      // Read tool arguments and results from the same span projection as production.
-      events: toolCallsIn(trace),
-
+      nothingToJudgeBecause: neverHappened ?? (
+        agentEvidenceMissing || (requiresAgentPov && trace.agentEvidenceIncomplete === true)
+          ? "The platform transcript is unavailable or incomplete. Egma's recording cannot replace it for grading."
+          : null
+      ),
+      transcript: transcriptOf(trace, requiresAgentPov),
+      events: toolCallsIn(trace, requiresAgentPov),
       measures: measuresFromSpans(trace),
     };
   }
@@ -104,15 +112,20 @@ function rootArrivedIn(trace: TraceDetail): boolean {
 export function evidenceIsStillArriving(
   simulation: Simulation,
   trace: TraceDetail | undefined,
+  connectionType: string,
 ): boolean {
   if (simulation.status !== "completed") return false;
   if (trace === undefined) return true;
+  if (laneProducesAnAgentPov(connectionType)) {
+    return !trace.truncated && trace.agentEvidenceIncomplete !== true &&
+      trace.agentEvidenceComplete !== true;
+  }
   return !trace.truncated && !rootArrivedIn(trace);
 }
 
 /** A simulation that produced no conversation, in the simulator's own words. */
 function neverRan(simulation: Simulation): string {
-  return `this simulation ended ${simulation.endingReason ?? "without running"}, so there was no conversation to grade.`;
+  return `this simulation ended ${simulation.endingReason ?? "without completing"}, so its execution cannot be graded.`;
 }
 
 /** Explain missing or truncated evidence as a grading error. */
@@ -178,8 +191,11 @@ export function conversationOfTrace(trace: TraceDetail): Conversation {
  * Project ordered turn spans into transcript entries with evidence span IDs.
  * Use the normalized text column and retain empty agent turns.
  */
-function transcriptOf(trace: TraceDetail): readonly TranscriptTurn[] {
-  return fromOnePov(trace.turns, "agent").map((turn) => ({
+function transcriptOf(trace: TraceDetail, requiresAgentPov = false): readonly TranscriptTurn[] {
+  const turns = requiresAgentPov
+    ? trace.turns.filter((turn) => turn.pov === "agent")
+    : fromOnePov(trace.turns, "agent");
+  return turns.map((turn) => ({
     span_id: turn.spanId,
     speaker: speakerOf(turn.kind),
     text: turn.text,
@@ -208,11 +224,14 @@ function speakerOf(kind: string): string {
  * Project nested and top-level tool spans into tool calls with arguments and
  * results. Sort by start time so graders can judge their order.
  */
-function toolCallsIn(trace: TraceDetail): readonly ToolCall[] {
-  // Select one POV to avoid duplicate tool calls. Prefer the agent's POV
-  // where available, using the shared fromOnePov rule.
+function toolCallsIn(trace: TraceDetail, requiresAgentPov = false): readonly ToolCall[] {
+  // Platform simulations must not turn a mock server observation into a
+  // platform tool call, including when the platform reported no tools.
   const tools = [...everySpanIn(trace)].filter((span) => span.toolName !== "");
-  const called = fromOnePov(tools, "agent").map(
+  const selected = requiresAgentPov
+    ? tools.filter((span) => span.pov === "agent")
+    : fromOnePov(tools, "agent");
+  const called = selected.map(
     (span): ToolCall & { readonly at: string } => ({
       kind: "tool_call",
       at: span.startedAt,

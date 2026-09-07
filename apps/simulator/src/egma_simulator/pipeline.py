@@ -7,6 +7,7 @@ the persona logic; constructors validate before any connection starts.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from .blob import BlobStore
@@ -65,6 +66,7 @@ def assemble(
     speech: SpeechProviders,
     media: MediaSettings | None = None,
     parameters: ConductParameters | None = None,
+    on_provider_reference: Callable[[str], Awaitable[None]] | None = None,
 ) -> Assembled:
     """Validate and assemble one simulation without dialing or starting its pipeline.
     speech contains the pinned persona STT/TTS selection, required even for chat.
@@ -81,6 +83,11 @@ def assemble(
     # not a list kept here of the ones that can. A plug that cannot takes
     # it and drops it, and the seam then says there is nothing to claim.
     mock_tools = MockToolSeam(spec.mock_tools)
+    registration = (
+        {"on_provider_reference": on_provider_reference}
+        if spec.connection_type == "livekit_room"
+        else {}
+    )
     plug = factory(
         modality=spec.modality,
         access_variant=spec.access_variant,
@@ -97,6 +104,7 @@ def assemble(
         job_dispatch_metadata=spec.job_dispatch_metadata,
         mock_tools=mock_tools,
         media=media,
+        **registration,
     )
     if spec.modality != "voice":
         return Assembled(plug=plug, mock_tools=mock_tools)
