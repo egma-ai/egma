@@ -253,6 +253,156 @@ export function simulationNamedBy(resourceSpans: OtlpResourceSpans): string {
   return attribute(resourceSpans.resource?.attributes, SIMULATION_ID_ATTRIBUTE);
 }
 
+/**
+ * How a resource on the **project-key** path names the simulation its spans are
+ * the agent's POV of: the **provider reference** — the identifier the agent
+ * platform gave that one conversation, a LiveKit room name or a Retell call id.
+ *
+ * **A different attribute from `egma.simulation_id`, because a different thing
+ * knows the answer.** The simulator is handed a simulation id and echoes it
+ * back; the customer's own agent has never heard of one. What the agent's
+ * process does hold is the room it is running in, and that is the one key on
+ * which the agent's POV is matched to its simulation — for every platform and
+ * framework (ADR-0024 §2). The egma SDK stamps it on the resource of every span
+ * it exports from a simulation room.
+ *
+ * **A reference is not a tenancy claim and is never read as one.** The
+ * organization and the project come from the credential, exactly as they do for
+ * production traffic; the reference is looked up *inside* that project, so an
+ * export naming a room another customer owns resolves to nothing and is
+ * refused. Absent, the resource is production traffic and takes the path it
+ * always took.
+ *
+ * In the `egma.` namespace, like every attribute this product owns, so it can
+ * never collide with a semantic convention or a framework's own key.
+ */
+export const PROVIDER_REFERENCE_ATTRIBUTE = "egma.provider_reference";
+
+/**
+ * What one resource says its provider reference is — and, where its spans say
+ * it instead, whether they agree.
+ *
+ * **Two places, because a resource cannot always carry it.** A resource is
+ * fixed when a tracer provider is built, and the SDK does not always build one:
+ * a worker that already runs its own OpenTelemetry hands the SDK a provider
+ * that exists, and taking that away to add ours is not an option. So the SDK
+ * stamps the reference on the resource where it builds the provider, and on
+ * every span it starts thereafter, through the framework's own metadata seam,
+ * where it does not. This door reads the resource first and falls back to the
+ * spans.
+ *
+ * **An unstamped span rides along; two stamped spans that disagree do not.**
+ * The framework's metadata processor stamps a span when the span *starts*, and
+ * the SDK installs it partway through a job that has already begun — so a
+ * reused provider always exports a few spans that opened before the stamp
+ * existed, the job's own entrypoint span among them. Refusing those would
+ * refuse the whole export, and every customer who already runs their own
+ * OpenTelemetry would lose the agent's POV of every simulation, silently.
+ * They are not ambiguous: nothing else in the resource names another
+ * conversation, so the one value the stamped spans agree on is the answer for
+ * all of them.
+ *
+ * Two *stamped* spans naming different conversations are the real ambiguity,
+ * and they are refused. One export from one agent process is one conversation,
+ * so this is a sender the door cannot file for, and guessing is exactly the
+ * mistake that puts one customer's turns on another's record.
+ *
+ * A key present with nothing in it is kept apart from a key that is absent, on
+ * the resource and on a span alike: carrying the key is the sender saying *this
+ * is a simulation's*, and an empty value is that sentence with the name left
+ * out — a malformed export rather than a silent reclassification into
+ * production.
+ */
+export type ProviderReferenceClaim =
+  /** No resource attribute and no span carrying the key: production traffic. */
+  | { readonly kind: "none" }
+  /**
+   * One conversation: named on the resource, or the one value every stamped
+   * span agrees on. Spans in this resource that carry no reference are filed
+   * under it too.
+   */
+  | { readonly kind: "named"; readonly reference: string }
+  /** Stamped spans name more than one conversation, so this names none. */
+  | { readonly kind: "disagreeing"; readonly references: readonly string[] };
+
+export function providerReferenceClaimedBy(
+  resourceSpans: OtlpResourceSpans,
+): ProviderReferenceClaim {
+  if (namesAProviderReference(resourceSpans)) {
+    return { kind: "named", reference: providerReferenceNamedBy(resourceSpans) };
+  }
+
+  const spans = (resourceSpans.scopeSpans ?? []).flatMap(
+    (scopeSpans) => scopeSpans.spans ?? [],
+  );
+  const claimed = new Set<string>();
+  for (const span of spans) {
+    if (
+      (span.attributes ?? []).some(
+        (entry) => entry.key === PROVIDER_REFERENCE_ATTRIBUTE,
+      )
+    ) {
+      claimed.add(attribute(span.attributes, PROVIDER_REFERENCE_ATTRIBUTE));
+    }
+  }
+
+  if (claimed.size === 0) return { kind: "none" };
+  const [only] = [...claimed];
+  if (claimed.size === 1 && only !== undefined) {
+    return { kind: "named", reference: only };
+  }
+  return { kind: "disagreeing", references: [...claimed].sort() };
+}
+
+/** Which conversation this **resource** is the agent's POV of, or `""`. */
+export function providerReferenceNamedBy(
+  resourceSpans: OtlpResourceSpans,
+): string {
+  return attribute(
+    resourceSpans.resource?.attributes,
+    PROVIDER_REFERENCE_ATTRIBUTE,
+  );
+}
+
+/**
+ * Whether this **resource** carries the attribute at all, whatever it holds.
+ *
+ * Separate from reading it, because the two questions have different answers
+ * for a resource that carries the key with nothing in it — and the difference
+ * decides where its spans are filed. Reading gives `""` for a key that is absent
+ * *and* for one that is present and empty, so a door that branched on the value
+ * alone would file a misconfigured SDK's simulation spans under Monitoring as
+ * somebody's production traffic.
+ */
+export function namesAProviderReference(
+  resourceSpans: OtlpResourceSpans,
+): boolean {
+  return (resourceSpans.resource?.attributes ?? []).some(
+    (entry) => entry.key === PROVIDER_REFERENCE_ATTRIBUTE,
+  );
+}
+
+/**
+ * Where the framework's own trace id is kept once egma files the spans under
+ * the simulation's trace instead.
+ *
+ * **One conversation is one trace, so one of the two ids has to move.** A
+ * simulation's trace id is the 128 bits its simulation id spells, and every
+ * reader in the product turns one into the other; the agent's exporter knows
+ * nothing of that and files under whatever id its framework minted. Filing the
+ * agent's POV under the simulation is what puts both POVs in front of one
+ * reader — and it would throw away LiveKit's own id if the id were simply
+ * overwritten. So it is kept, byte for byte, at the top of the span's payload,
+ * and a developer can still paste it into their framework's own tooling.
+ *
+ * Named in the `egma.` namespace and written by egma, never by an emitter — a
+ * payload that arrived carrying this key had it added by the sender, and the
+ * filing step overwrites nothing it did not put there itself: the key is
+ * prepended, and the first occurrence is the one every JSON reader answers
+ * with.
+ */
+export const WIRE_TRACE_ID_PAYLOAD_KEY = "egma.wire_trace_id";
+
 /** A scope proves the framework, not how the caller reached the agent. */
 const AGENT_PLATFORM_BY_SCOPE: Readonly<Record<string, string>> = {
   [LIVEKIT_SCOPE]: "livekit",
@@ -297,6 +447,26 @@ export type NormalisedExport = {
   readonly spans: readonly NewSpan[];
   readonly rejected: readonly RejectedSpan[];
 };
+
+/**
+ * How much of the two caps one request has already spent.
+ *
+ * A door that normalises an export in more than one call — the simulation
+ * branches do, because each simulation is filed on its own and must never be
+ * blended with another's — would otherwise get a fresh budget per call, and a
+ * request naming N simulations would buy N times the bound. The caps exist to
+ * bound the memory *one request* can ask this side for, so the count is carried
+ * across the calls of one request and spent once.
+ */
+export type NormalisationBudget = {
+  spans: number;
+  bytes: number;
+};
+
+/** A request's budget, untouched. */
+export function budgetForOneRequest(): NormalisationBudget {
+  return { spans: 0, bytes: 0 };
+}
 
 function textOf(value: OtlpValue | undefined): string {
   if (value === undefined) return "";
@@ -526,10 +696,15 @@ const TOO_MANY_BYTES =
  * stamp its spans carry. It is asked once per resource, because attribution is
  * a fact about where the spans came from and every span of a resource came
  * from the same place.
+ *
+ * `budget` is the caps this request has already spent, for a door that
+ * normalises one request in more than one call. Absent, the call is the whole
+ * request and gets the whole budget.
  */
 export function normaliseOtlpExport(
   request: OtlpExport,
   attributionFor?: (resourceSpans: OtlpResourceSpans) => SpanAttribution,
+  budget: NormalisationBudget = budgetForOneRequest(),
 ): NormalisedExport {
   const spans: NewSpan[] = [];
   const rejected: RejectedSpan[] = [];
@@ -538,7 +713,6 @@ export function normaliseOtlpExport(
   // reference: a client that sent a hundred thousand spans is owed a count of
   // what was refused, not a hundred thousand copies of one sentence.
   let excess: RejectedSpan | undefined;
-  let normalisedBytes = 0;
 
   for (const resourceSpans of request.resourceSpans ?? []) {
     const environment = environmentOf(resourceSpans);
@@ -553,12 +727,12 @@ export function normaliseOtlpExport(
         // Asked before anything is built, because building the row is the cost
         // the caps exist to bound.
         if (
-          spans.length >= MAXIMUM_SPANS_PER_REQUEST ||
-          normalisedBytes >= MAXIMUM_NORMALISED_BYTES
+          budget.spans >= MAXIMUM_SPANS_PER_REQUEST ||
+          budget.bytes >= MAXIMUM_NORMALISED_BYTES
         ) {
           excess ??= {
             reason:
-              spans.length >= MAXIMUM_SPANS_PER_REQUEST
+              budget.spans >= MAXIMUM_SPANS_PER_REQUEST
                 ? TOO_MANY_SPANS
                 : TOO_MANY_BYTES,
           };
@@ -612,7 +786,8 @@ export function normaliseOtlpExport(
         const payload = `${payloadPrefix}${JSON.stringify(span)}}`;
         // Bytes rather than code units, because bytes are what the store holds
         // and what the memory this bounds is made of.
-        normalisedBytes += Buffer.byteLength(payload);
+        budget.bytes += Buffer.byteLength(payload);
+        budget.spans += 1;
 
         spans.push({
           traceId,

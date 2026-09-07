@@ -33,6 +33,48 @@ export const FIXTURE_TRACE = {
   erroredSpans: 3,
 } as const;
 
+/**
+ * The other capture: a LiveKit agent taking a booking, with three tool calls.
+ *
+ * The run this one came from is what opened the agent-POV effort — two of its
+ * three tool calls were missing from Egma's own record of it, because an
+ * unmocked call ran unobserved. It is here so that the fix keeps being proved
+ * against the conversation that found the hole rather than against one written
+ * to fit it.
+ *
+ * One OTLP/JSON body rather than fourteen protobuf ones, which is the encoding
+ * it arrived in. `fixtures/livekit-appointment-trace/README.md` has the rest.
+ */
+export const APPOINTMENT_FIXTURE_FILE = path.join(
+  import.meta.dirname,
+  "../../../../fixtures/livekit-appointment-trace/export.json",
+);
+
+/** The room the booking happened in, on the resource as `room_id`. */
+export const APPOINTMENT_ROOM = "RM_7gxYsTDmP9ZY";
+
+export const APPOINTMENT_TRACE = {
+  /** The id every one of its spans arrived filed under. */
+  wireTraceId: "4126ef5a2cfb0c71da235771e1be4ec4",
+  spans: 104,
+  humanTurns: 5,
+  agentTurns: 11,
+  toolSpans: 3,
+  /** The three calls, in the order the conversation made them. */
+  tools: ["list_providers", "check_availability", "book_appointment"],
+} as const;
+
+/** A window containing the booking, as the read endpoints take one. */
+export const APPOINTMENT_WINDOW = {
+  from: "2026-09-04 17:52:00",
+  to: "2026-09-04 17:55:00",
+} as const;
+
+/** The captured booking, as the one request body an exporter would send. */
+export async function appointmentExport(): Promise<string> {
+  return readFile(APPOINTMENT_FIXTURE_FILE, "utf8");
+}
+
 type ManifestEntry = {
   readonly file: string;
   readonly path: string;

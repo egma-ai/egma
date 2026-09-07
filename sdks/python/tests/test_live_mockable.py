@@ -18,7 +18,7 @@ test is what says the mechanism is still there before the pin is raised.
 The room, the session, the wire, and the interception. A room is made in
 a real LiveKit project; a participant joins it under egma's name and
 registers the two methods of the exchange; the agent joins it, is made
-mockable, and is started with a real ``session.start(room=…)``; a real
+the simulation verb, and is started with a real ``session.start(room=…)``; a real
 model is asked a question and calls the tool.
 
 What is asserted is exactly what cannot be asserted offline:
@@ -67,7 +67,7 @@ from livekit.agents import (
 )
 from livekit.plugins import openai
 
-from egma import mockable, seam
+from egma import seam, simulation
 
 
 def credential(*names: str) -> str:
@@ -206,6 +206,12 @@ class LiveContext:
             (),
             {"room": type("JobRoom", (), {"name": room_name})(), "metadata": ""},
         )()
+        self._shutdown_callbacks: list[object] = []
+
+    def add_shutdown_callback(self, callback: object) -> None:
+        """Where the export puts its last flush. Never run here: these
+        tests end the room, not the job."""
+        self._shutdown_callbacks.append(callback)
 
 
 def _token(room_name: str, identity: str) -> str:
@@ -232,7 +238,9 @@ async def _each(*teardowns: Coroutine) -> None:
 
 
 @pytest.mark.timeout(WITHIN_SECONDS + 30)
-async def test_livekit_still_honours_the_couriers_this_sdk_registers():
+async def test_livekit_still_honours_the_couriers_this_sdk_registers(
+    egma_export,
+):
     global really_ran
     really_ran = False
 
@@ -263,7 +271,7 @@ async def test_livekit_still_honours_the_couriers_this_sdk_registers():
         await agent_room.connect(LIVEKIT_URL, _token(room_name, AGENT_IDENTITY))
 
         agent = ReceptionAgent()
-        await mockable(agent, LiveContext(agent_room, room_name), session)
+        await simulation(agent, LiveContext(agent_room, room_name), session)
 
         # The census really travelled a wire and really came back.
         census = egma.asked_for(seam.HELLO_METHOD)

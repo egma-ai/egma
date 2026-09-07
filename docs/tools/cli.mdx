@@ -82,7 +82,7 @@ An agent identifies your Retell agent or LiveKit worker in Egma. A connection te
       --livekit-agent-name receptionist
     ```
 
-    The worker must be running and registered with that name. See [LiveKit](/guides/livekit) for chat connections, token endpoints, and worker setup.
+    The worker must be running and registered with that name. Install the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk), set the worker's `EGMA_URL` and project-scoped `EGMA_API_KEY`, and call `await simulation(agent, ctx, session)` before its session starts. This is required for every LiveKit simulation, including tests without mocks. See [LiveKit](/guides/livekit) for connection and worker setup.
   </Tab>
 </Tabs>
 
@@ -129,7 +129,9 @@ You can also come on Tuesday if Monday is full.
 ```
 ````
 
-Use a persona name from `egma persona list`. Match each mock name and response shape to your agent's real tool. This example assumes `check_availability` returns an object with a `slots` array. LiveKit mocks require the [Python](/tools/livekit-python-sdk) or [JavaScript](/tools/livekit-javascript-sdk) hook.
+Use a persona name from `egma persona list`. Match each mock name and response shape to your agent's real tool. This example assumes `check_availability` returns an object with a `slots` array. LiveKit simulations require the [Python](/tools/livekit-python-sdk) or [JavaScript](/tools/livekit-javascript-sdk) hook.
+
+Tools without a matching mock run their real implementations. Their calls are still recorded from the agent's point of view. A call answered by a test mock is marked `mocked` in the transcript.
 
 ### Test file fields
 

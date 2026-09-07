@@ -1,6 +1,6 @@
 """What egma would be told this agent has, and when.
 
-The census is read off the agent object at the moment ``mockable`` runs,
+The census is read off the agent object at the moment ``simulation`` runs,
 so two things have to be true of this file and neither is obvious from
 reading it: the tools must be **attached before** that line, and there
 must be **two of them** — one for a mock tool to answer for, one for
@@ -19,7 +19,7 @@ import asyncio
 import inspect
 
 from conftest import inside_egma, tools_on
-from egma import mockable, monitoring
+from egma import export, simulation
 
 from agent import FrontDesk
 
@@ -34,7 +34,9 @@ def test_the_agent_carries_both_tools_before_anything_is_wrapped():
     assert set(tools_on(FrontDesk())) == {MOCKABLE_TOOL, UNMOCKED_TOOL}
 
 
-async def test_this_agent_reports_its_tools_when_egma_walks_in_second(session):
+async def test_this_agent_reports_its_tools_when_egma_walks_in_second(
+    session, egma_export
+):
     """The dispatch path this fixture is silent on unless the SDK waits.
 
     This worker registers unnamed by default, so nothing dispatches it on
@@ -52,7 +54,7 @@ async def test_this_agent_reports_its_tools_when_egma_walks_in_second(session):
         context.room.arrive("egma-persona")
 
     joining = asyncio.create_task(egma_walks_in())
-    await mockable(agent, context, session)
+    await simulation(agent, context, session)
     await joining
 
     assert context.room.asked == ["egma.hello"]
@@ -63,14 +65,14 @@ def test_the_booking_shaped_tool_takes_the_day_it_is_asked_about():
 
     egma copies this signature onto the stand-in it registers, because
     LiveKit trims a call to the parameters the stand-in declares. So the
-    name here is what lands on the record as the call's arguments — rename
-    it and a live record's ``egma.tool.arguments`` changes shape with it.
+    name here is what the agent's own span reports as the call's
+    arguments — rename it and a live record changes shape with it.
     """
     parameters = inspect.signature(FrontDesk.check_availability).parameters
     assert [name for name in parameters if name != "self"] == ["day"]
 
 
-def test_mockable_is_called_after_both_objects_exist_and_before_the_session_starts():
+def test_the_verb_is_called_after_both_objects_exist_and_before_the_session_starts():
     """The call site, read off the source of the entrypoint itself.
 
     Order is the whole of the integration contract: earlier than the
@@ -91,7 +93,7 @@ def test_mockable_is_called_after_both_objects_exist_and_before_the_session_star
         assert found, f"no line of entrypoint() carries {said!r}: {lines}"
         return found[0]
 
-    said = line_of("await mockable(")
+    said = line_of("await simulation(")
     built_agent = line_of("agent = FrontDesk()")
     built_session = line_of("session = AgentSession(")
     started = line_of("await session.start(")
@@ -107,7 +109,7 @@ def test_monitoring_is_configured_before_livekit_opens_the_room():
     from agent import entrypoint
 
     body = inspect.getsource(entrypoint)
-    configured = body.index("monitor_livekit(ctx)")
+    configured = body.index("monitor(ctx)")
     connected = body.index("await ctx.connect()")
     started = body.index("await session.start(")
 
@@ -117,7 +119,7 @@ def test_monitoring_is_configured_before_livekit_opens_the_room():
 def test_the_supported_livekit_version_exposes_its_current_provider():
     """The SDK reuses this provider so it cannot erase Cloud observability."""
 
-    assert monitoring._livekit_provider() is not None
+    assert export._livekit_provider() is not None
 def test_the_six_lines_key_on_the_marked_room_name_before_the_session_starts():
     """The chat decision, read off the source of the entrypoint itself.
 

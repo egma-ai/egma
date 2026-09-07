@@ -5,10 +5,10 @@ description: "Send production traces to Egma and use mock tool responses in Live
 
 The `egma` package adds two functions to your LiveKit worker:
 
-- `monitor_livekit` sends production traces to **Monitoring**.
-- `mockable` lets Egma answer the tools named in a simulation's test.
+- `monitor` sends production traces to **Monitoring**.
+- `simulation` reports the agent's tools, installs the test's mock responses, and sends the agent's trace to the simulation record.
 
-Use either function on its own or both together. To connect the worker for simulations, first follow [LiveKit](/guides/livekit).
+Use `simulation` for every LiveKit simulation, including tests without mocks. Use `monitor` for production monitoring. You can call both in the same worker; each acts only in its own kind of room. First connect the worker through [LiveKit](/guides/livekit).
 
 ## Install
 
@@ -28,9 +28,22 @@ pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/py
 
 Keep the resolved source revision in your dependency lock file. The SDK also requires `openai>=2,<3`; let your package manager resolve that range with your LiveKit dependencies.
 
+## Configure Egma
+
+Both functions need an Egma URL and a project-scoped API key. Create a key in **Settings → API keys**, or run `egma project api-key create --name "LiveKit worker"` from an initialized agent repository.
+
+Set these values where the worker runs:
+
+| Variable | Value |
+| --- | --- |
+| `EGMA_URL` | `https://app.egma.ai`, or the public URL of your own Egma instance. |
+| `EGMA_API_KEY` | The project API key you created. Use the same project as the simulation connection. |
+
+Keep the key in your deployment's secret store. The worker must be able to reach the URL. In a container or on another machine, `localhost` refers to that worker, not your Egma server. These settings are required for simulations as well as monitoring.
+
 ## Add the SDK to your worker
 
-Call `monitor_livekit(ctx)` at the start of your job entrypoint, before connecting or starting the session. Call `await mockable(agent, ctx, session)` after creating the agent and session, before `session.start`.
+Call `monitor(ctx)` at the start of your job entrypoint, before connecting or starting the session. Call `await simulation(agent, ctx, session)` after creating the agent and session, before `session.start`.
 
 The following worker uses OpenAI for speech and responses. Install its model plugins alongside the SDK:
 
@@ -38,10 +51,10 @@ The following worker uses OpenAI for speech and responses. Install its model plu
 uv add 'livekit-agents[openai,silero]>=1.6.7,<1.7'
 ```
 
-Set your usual `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and `OPENAI_API_KEY` in the worker environment. Set the Egma monitoring variables described [below](#monitor-production), then save this as `agent.py`:
+Set your usual `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and `OPENAI_API_KEY` in the worker environment. Set the [Egma variables](#configure-egma), then save this as `agent.py`:
 
 ```python
-from egma import mockable, monitor_livekit
+from egma import simulation, monitor
 from livekit import agents
 from livekit.agents import Agent, AgentSession, function_tool, room_io
 from livekit.plugins import openai, silero
@@ -63,7 +76,7 @@ class Receptionist(Agent):
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:
-    monitor_livekit(ctx)
+    monitor(ctx)
     await ctx.connect()
 
     agent = Receptionist()
@@ -73,7 +86,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         llm=openai.LLM(model="gpt-4o-mini"),
         tts=openai.TTS(model="gpt-4o-mini-tts", voice="ash"),
     )
-    await mockable(agent, ctx, session)
+    await simulation(agent, ctx, session)
 
     chat = ctx.job.room.name.startswith("egma-sim-chat-")
     options = (
@@ -109,22 +122,11 @@ Use `receptionist` as the worker dispatch name in your Egma LiveKit connection. 
 
 ## Monitor production
 
-Create a project-scoped API key in **Settings → API keys**, or run `egma project api-key create --name "LiveKit monitoring"` from an initialized agent repository.
-
-Set these values in the environment where the worker runs:
-
-| Variable | Value |
-| --- | --- |
-| `EGMA_URL` | `https://app.egma.ai`, or the public URL of your own Egma instance. |
-| `EGMA_API_KEY` | The project API key you created. |
-
-The worker must be able to reach the URL. If it runs in a container or on another machine, `localhost` refers to that worker, not your Egma server. Use your deployment's secret store for the key.
-
-Deploy the worker and make a production call. Open **Monitoring** in the key's project to see the conversation. There is no additional monitoring switch to enable for LiveKit.
+Use the [configured Egma URL and project key](#configure-egma), deploy the worker, and make a production call. Open **Monitoring** in the key's project to see the conversation. There is no additional monitoring switch to enable for LiveKit.
 
 The helper adds an OTLP/HTTP protobuf exporter to `/v1/traces`. It keeps compatible existing OpenTelemetry exporters, including LiveKit Cloud observability. It sends batches and flushes the last batch when the job stops.
 
-Rooms whose names start with `egma-sim-` are reserved for Egma simulations. Their traces stay with the simulation and are not sent to **Monitoring** through this helper. Use another prefix for production rooms.
+Rooms whose names start with `egma-sim-` are reserved for Egma simulations. `monitor` skips them; `simulation` sends their traces to the simulation record. Use another prefix for production rooms.
 
 ### If no conversation appears
 
@@ -148,21 +150,28 @@ Add a mock to a [test](/guides/write-a-test) using the exact registered tool nam
 ```
 ````
 
-Each mock has one fixed `answer` or `error` for that tool in that test. `mockable` connects to the simulation room if necessary, finds Egma's participant, and installs only the selected mocks. It follows agent handoffs and agent tasks in the same session. Call it once for the initial agent.
+Each mock has one fixed `answer` or `error` for that tool in that test. `simulation` connects to the simulation room if necessary, finds Egma's participant, and installs only the selected mocks. It follows agent handoffs and agent tasks in the same session. Call it once for the initial agent.
+
+The function also exports the agent's own conversation trace over OTLP, even when the test has no mocks. The simulation transcript includes the agent's turns and tool calls, including real tools. Calls answered by a mock are marked `mocked`.
+
+Simulation spans are batched every second and flushed when the session closes and when the job stops. Keep one LiveKit job per process: the exporter is bound to that job's room, and a second job in the same process is refused.
 
 | Situation | Behavior |
 | --- | --- |
-| Production room | The function returns without connecting, sending messages, or wrapping tools. |
+| Production room | The function returns without connecting, exporting, sending messages, or wrapping tools. |
 | A simulation tool named in the test | Egma supplies the authored response. |
 | A tool with no matching mock | The real tool runs. |
-| Egma cannot be reached during setup or a tool call | The SDK logs the problem and the real tool can run. |
+| Egma does not answer the initial tool report | `simulation` raises `egma.NotReported`; the session does not start. |
+| Egma cannot be reached during a mocked tool call | The call raises `ToolError`; the real tool does not run. |
 | Egma receives a tool call and refuses it | The call raises `ToolError`; the real tool does not run. |
 
 <Warning>
-  Mocking does not isolate your backend. Unmocked tools and transport failures can reach real implementations. Use a test account or sandbox for tools that can make real changes.
+  Tools without a matching mock still run their real implementations. Use a test account or sandbox for tools that can make real changes, and confirm the mock names match your registered tools.
 </Warning>
 
-The helper can wait up to 45 seconds for Egma's participant during simulation startup. A misspelled mock name will not replace any tool. Check the simulation's tool calls to confirm the response used. See [Mock tool responses](/guides/mock-tool-responses).
+The helper can wait up to 45 seconds for Egma's participant during simulation startup. Do not catch `NotReported` and start the session anyway. Check the room connection, Egma's participant, and the SDK version when this error occurs. Missing settings or an incompatible tracing setup raise `ValueError` instead.
+
+Without the SDK report, Egma fails the LiveKit simulation. Check the simulation's tool calls to confirm the response used. See [Mock tool responses](/guides/mock-tool-responses).
 
 ## Test in chat mode
 
@@ -201,7 +210,8 @@ Egma sends the value as a compact JSON string. It adds no Egma fields to that da
 
 | Function | Parameters and result |
 | --- | --- |
-| `monitor_livekit(ctx, *, endpoint=None, api_key=None)` | Takes a LiveKit `JobContext`. Optional `endpoint` and `api_key` override `EGMA_URL` and `EGMA_API_KEY`. Returns `None`. |
-| `await mockable(agent, ctx, session)` | Takes the initial LiveKit `Agent`, `JobContext`, and `AgentSession`. Returns `None`. |
+| `monitor(ctx, *, endpoint=None, api_key=None)` | Takes a LiveKit `JobContext`. Optional `endpoint` and `api_key` override `EGMA_URL` and `EGMA_API_KEY`. Returns `None`. |
+| `await simulation(agent, ctx, session, *, endpoint=None, api_key=None)` | Takes the initial LiveKit `Agent`, `JobContext`, and `AgentSession`. Optional settings override `EGMA_URL` and `EGMA_API_KEY`. Returns `None`. |
+| `NotReported` | Exported error raised when the simulation cannot complete its initial report to Egma. |
 
-Both monitoring settings must be present for production rooms. The simulation check happens before those settings are read, so simulation-only workers can use the monitoring call without an Egma API key.
+Each function returns before reading settings in the room type it does not handle. The active function still needs `EGMA_URL` and `EGMA_API_KEY`, so a worker used only for simulations needs both settings too.

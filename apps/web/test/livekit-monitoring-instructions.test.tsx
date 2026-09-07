@@ -61,14 +61,14 @@ describe("LiveKit monitoring instructions", () => {
       "pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'",
     );
     expect(copy).not.toContain("egma>=");
-    expect(copy).toContain("from egma import monitor_livekit");
-    expect(copy.indexOf("monitor_livekit(ctx)")).toBeLessThan(
+    expect(copy).toContain("from egma import monitor");
+    expect(copy.indexOf("monitor(ctx)")).toBeLessThan(
       copy.indexOf("await ctx.connect()"),
     );
     expect(copy.indexOf("await ctx.connect()")).toBeLessThan(
       copy.indexOf("await session.start(...)"),
     );
-    expect(copy.indexOf("monitor_livekit(ctx)")).toBeLessThan(
+    expect(copy.indexOf("monitor(ctx)")).toBeLessThan(
       copy.indexOf("await session.start(...)"),
     );
     expect(copy).toContain("EGMA_URL=<your-public-egma-url>");
@@ -83,6 +83,7 @@ describe("LiveKit monitoring instructions", () => {
     expect(copy).not.toContain("Not verified yet");
     expect(copy).not.toContain("Egma creates or matches the agent");
     expect(copy).not.toContain("mockable");
+    expect(copy).not.toContain("monitor_livekit");
     expect(copy).not.toMatch(/monitoring (ready|configured|on)/i);
   });
 
@@ -103,21 +104,22 @@ describe("LiveKit monitoring instructions", () => {
       "LiveKit Agents 1.5.5 or newer in the 1.x line",
     );
     expect(copy).toContain(
-      'import { monitorLiveKit } from "@egma/livekit"',
+      'import { monitor } from "@egma/livekit"',
     );
-    expect(copy.indexOf("monitorLiveKit(ctx)")).toBeLessThan(
+    expect(copy.indexOf("monitor(ctx)")).toBeLessThan(
       copy.indexOf("await ctx.connect()"),
     );
     expect(copy.indexOf("await ctx.connect()")).toBeLessThan(
       copy.indexOf("await session.start(...)"),
     );
-    expect(copy.indexOf("monitorLiveKit(ctx)")).toBeLessThan(
+    expect(copy.indexOf("monitor(ctx)")).toBeLessThan(
       copy.indexOf("await session.start(...)"),
     );
     expect(copy).toContain("EGMA_URL=<your-public-egma-url>");
     expect(copy).toContain("EGMA_API_KEY=<your-project-api-key>");
     expect(copy).not.toContain("pip install");
-    expect(copy).not.toContain("monitor_livekit");
+    expect(copy).not.toContain("from egma import");
+    expect(copy).not.toContain("monitorLiveKit");
     expect(copy).not.toContain("is available on npm");
   });
 });

@@ -79,6 +79,10 @@ When creating a run, choose one `idempotencyKey` for that request. If you lose t
 
 Other write endpoints do not all support idempotency. After an uncertain response, read the resource state before repeating a write.
 
+## Send traces
+
+For LiveKit, use the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk). Call `simulation(agent, ctx, session)` for simulation evidence and `monitor(ctx)` for production monitoring. Both use Egma’s OTLP endpoint, `POST /v1/traces`, with a project-scoped API key. Retell monitoring reads conversations through the Retell API.
+
 ## OpenAPI
 
 These endpoint pages are generated from the same contract as the platform API and its internal client. Request fields, response fields, and status codes come from that contract.

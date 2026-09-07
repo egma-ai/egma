@@ -19,7 +19,7 @@ Docker Compose resolves `.env` values and any environment variables exported by 
 | `.egma-platform/platform.env` | Internal credentials generated and preserved by `egma self-host up`. |
 | `docker-compose.yml` | Default service wiring, ports, volumes, and process settings. |
 | Agent repository `egma/config.yaml` | The Egma instance URL, project, agent, and connection IDs. No credentials. |
-| Your LiveKit worker's environment | `EGMA_URL` and the project-scoped `EGMA_API_KEY` used to send production traces. |
+| Your LiveKit worker's environment | `EGMA_URL` and the project-scoped `EGMA_API_KEY` used to send simulation and production traces. |
 
 Retell and LiveKit connection credentials are supplied when you connect an agent. They are stored encrypted in Egma. They are separate from the model credentials that let your instance run personas and graders.
 
@@ -84,7 +84,9 @@ Load the Caddy configuration and run `egma self-host up`. The recording proxy mu
 
 Keep direct application ports `3100` and `3101` private through your server's network controls. Leave the database and MinIO binds on loopback when the proxy runs on the same host. Enable `EGMA_TRUST_PROXY` only behind a proxy you control, with direct access to the API restricted.
 
-From another machine, verify that you can sign in at the public instance URL, run a test, and play its recording. Retell must be able to reach the instance URL for mock-tool callbacks. LiveKit workers must be able to reach it to send monitoring traces.
+From another machine, verify that you can sign in at the public instance URL, run a test, and play its recording. Retell must be able to reach the instance URL for mock-tool callbacks. LiveKit workers must be able to reach it to send simulation and monitoring traces.
+
+Install the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk) in each LiveKit worker. Call `monitor(ctx)` first in its job entrypoint for production monitoring, and `await simulation(agent, ctx, session)` before starting a simulation session. The simulation call is required even when a test has no mocks. Keep the worker's source dependency current when updating the platform.
 
 ### Ports
 

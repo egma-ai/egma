@@ -109,14 +109,14 @@ own machine or container, so use a reachable address for a remote deployment.
     Add this import to the file that defines your job entrypoint:
 
     ```python
-    from egma import monitor_livekit
+    from egma import monitor
     ```
 
     Make this the first statement inside the entrypoint, before `ctx.connect`
     or `AgentSession.start`:
 
     ```python
-    monitor_livekit(ctx)
+    monitor(ctx)
     ```
 
     This requires Python 3.11 or newer and `livekit-agents>=1.6.7,<1.7`.
@@ -131,14 +131,14 @@ own machine or container, so use a reachable address for a remote deployment.
     Add this import to your worker:
 
     ```typescript
-    import { monitorLiveKit } from "@egma/livekit";
+    import { monitor } from "@egma/livekit";
     ```
 
     Call the hook at the start of the job entrypoint, before starting the
     `AgentSession`:
 
     ```typescript
-    monitorLiveKit(ctx);
+    monitor(ctx);
     ```
 
     Monitoring requires Node.js 22 or newer and `@livekit/agents>=1.5.5 <2`.
@@ -152,8 +152,10 @@ observability. It sends spans in batches and flushes the final batch when the
 job ends.
 
 The hook ignores rooms whose names start with `egma-sim-`, so your tests do not
-also appear as production conversations. It works independently of `mockable`;
-adding mock tools does not enable monitoring.
+also appear as production conversations. The separate `simulation` hook sends
+those rooms' evidence to their simulation records. Use both hooks when the
+same worker handles testing and production; both use the same Egma settings.
+Keep the `egma-sim-` prefix reserved when naming your own production rooms.
 
 ### Verify a conversation
 
@@ -165,9 +167,9 @@ There is no LiveKit monitoring switch to enable in Egma. The first received
 trace confirms the export path. If no conversation appears, check the worker's
 OpenTelemetry logs, the project key, and network access to `EGMA_URL`.
 
-To stop this worker from sending new evidence, remove its `monitor_livekit`
-or `monitorLiveKit` call and restart the worker. Existing conversations stay
-in Egma.
+To stop this worker from sending new production evidence, remove its `monitor`
+call and restart the worker. Existing conversations stay in Egma. Keep
+`simulation` if the worker still handles Egma tests.
 
 ## Read transcripts and grades
 

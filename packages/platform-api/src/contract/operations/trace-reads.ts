@@ -1,4 +1,5 @@
 import { defineOperation } from "../definition.ts";
+import { traceSpanReference, traceSpanSchema } from "./trace-span.ts";
 import {
   arrayOf,
   dateTimeSchema,
@@ -39,7 +40,13 @@ const traceFactsSchema = {
     toolSpanCount: integerSchema,
     erroredSpanCount: integerSchema,
     source: { type: "string", enum: ["simulation", "production"] },
-    emitter: stringSchema,
+    /**
+     * Whose account of the conversation this is: the persona's or the agent's.
+     *
+     * The product's own word, and the only one on the wire. `emitter` is the
+     * storage column the same fact lives in and stays inside egma.
+     */
+    pov: { type: "string", enum: ["persona", "agent"] },
     environment: stringSchema,
     connectionType: stringSchema,
     providerCallId: stringSchema,
@@ -60,7 +67,7 @@ const traceFactsSchema = {
     "toolSpanCount",
     "erroredSpanCount",
     "source",
-    "emitter",
+    "pov",
     "environment",
     "connectionType",
     "providerCallId",
@@ -90,50 +97,6 @@ const traceSummarySchema = {
   ],
 } as const;
 
-const traceSpanReference = { $ref: "#/$defs/traceSpan" } as const;
-const traceSpanSchema = {
-  type: "object",
-  properties: {
-    spanId: stringSchema,
-    parentSpanId: stringSchema,
-    name: stringSchema,
-    kind: stringSchema,
-    status: stringSchema,
-    startedAt: dateTimeSchema,
-    durationNs: stringSchema,
-    text: stringSchema,
-    audioUrl: stringSchema,
-    toolName: stringSchema,
-    toolArguments: stringSchema,
-    toolResult: stringSchema,
-    /**
-     * That egma itself answered this tool call, when it did.
-     *
-     * The one value is `mocked`, and the key is absent on every other span. A
-     * real call is the ordinary case and says nothing extra; a mocked one is
-     * the fact a reader of a transcript needs, because the answer they are
-     * looking at came from the test rather than from their own backend.
-     */
-    toolProvenance: { type: "string", enum: ["mocked"] },
-    spans: arrayOf(traceSpanReference),
-  },
-  required: [
-    "spanId",
-    "parentSpanId",
-    "name",
-    "kind",
-    "status",
-    "startedAt",
-    "durationNs",
-    "text",
-    "audioUrl",
-    "toolName",
-    "toolArguments",
-    "toolResult",
-    "spans",
-  ],
-  additionalProperties: false,
-} as const;
 
 const traceDetailSchema = {
   $defs: { traceSpan: traceSpanSchema },

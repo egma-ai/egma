@@ -247,12 +247,42 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
       (metric) => metric.measure === "turn_response_latency",
     );
 
-    // This production capture has no Egma timing span. Its three spoken
-    // answers waited 2346.236638, 1808.245039, and 1994.917806 ms. Both
-    // endpoints derive that series from the same recognised framework spans,
-    // then use the shared nearest-rank percentile.
+    /*
+     * This production capture has no Egma timing span, so both endpoints derive
+     * the series from the same recognised framework spans and then use the
+     * shared nearest-rank percentile.
+     *
+     * Three spoken answers, each measured from the caller's last audible
+     * sample — the end of that `user_turn`'s last `user_speaking` child, which
+     * is the VAD's own detected end (catalog version 8) — and hand-computed
+     * from the capture's raw timestamps, held as the store keeps them: starts
+     * truncated to the microsecond, durations exact.
+     *
+     * 1. human `baac22a26a96fa9b` carries no `user_speaking` child, so its own
+     *    end stands in: it starts 1785693902082961920 → 1785693902082961 µs and
+     *    runs 297806362 ns, ending 1785693902380767362. Agent speech
+     *    `1b8cc4d1064a766d` begins 1785693904727004928 → 1785693904727004 µs.
+     *    1785693904727004000 − 1785693902380767362 = 2346236638 ns.
+     * 2. human `c35b92a87f8121a1`'s last `user_speaking` `b30dd00e322f2443`
+     *    starts 1785693920313752320 → 1785693920313752 µs and runs
+     *    1710489600 ns, so the caller stops being audible at
+     *    1785693922024241600. Agent speech `42b9d5797f17aa9d` begins
+     *    1785693924924691968 → 1785693924924691 µs.
+     *    1785693924924691000 − 1785693922024241600 = 2900449400 ns.
+     * 3. human `9839f5ef664bc919`'s `user_speaking` `45e924b089cd919f` starts
+     *    1785693942114222080 → 1785693942114222 µs and runs 908797440 ns, so
+     *    the caller stops being audible at 1785693943023019440. Agent speech
+     *    `11a1eaca219437a9` begins 1785693946089613312 →
+     *    1785693946089613 µs.
+     *    1785693946089613000 − 1785693943023019440 = 3066593560 ns.
+     *
+     * So the series is 2346.236638, 2900.4494 and 3066.59356 ms, and the
+     * nearest-rank p90 of three samples is the third of them sorted — a
+     * measurement that actually happened, and the slowest answer the caller
+     * waited through.
+     */
     expect(turnLatency?.derived).toBe(true);
-    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(2346.236638);
+    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(3066.59356);
     expect(trace?.turnResponseLatencyP90Milliseconds).toBe(turnLatency?.p90);
     expect(trace?.turnResponseLatencyP90Partial).toBe(false);
   });
@@ -260,7 +290,10 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
   it("says which platform produced it without inventing a connection type", async () => {
     const [trace] = (await listed()).traces;
     expect(trace?.source).toBe("production");
-    expect(trace?.emitter).toBe("agent");
+    // Whose account this is, in the product's own word. `emitter` is the
+    // storage column the same fact lives in and never reaches the wire.
+    expect(trace?.pov).toBe("agent");
+    expect("emitter" in (trace ?? {})).toBe(false);
     expect(trace?.environment).toBe("default");
     expect(trace?.connectionType).toBe("");
     expect(trace?.providerCallId).toBe(FIXTURE_PROVIDER_CALL_ID);
@@ -587,6 +620,7 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
         "kind",
         "name",
         "parentSpanId",
+        "pov",
         "spanId",
         "spans",
         "startedAt",
@@ -828,11 +862,17 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
       "p50",
       "p90",
       "partial",
+      "pov",
       "samples",
       "spanIds",
       "unit",
     ]);
     expect(only.derived).toBe(false);
+    // Whose account this number is. egma timed it off its own recording, so
+    // it is the persona's — and `otherPov` is absent, because the agent's
+    // process said nothing about this conversation.
+    expect(only.pov).toBe("persona");
+    expect("otherPov" in only).toBe(false);
     // Absent, not empty and not null — there is nothing on the wire to have to
     // interpret.
     expect("reportedBy" in only).toBe(false);
@@ -848,11 +888,15 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
       "p50",
       "p90",
       "partial",
+      "pov",
       "reportedBy",
       "samples",
       "spanIds",
       "unit",
     ]);
+    // The platform's account of its own agent is the agent's POV, however it
+    // reached egma.
+    expect(only.pov).toBe("agent");
     // `derived` says what it has always said — egma did not time this — and the
     // new field says which of the two untimed sources it was.
     expect(only.derived).toBe(true);
@@ -878,16 +922,19 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
 });
 
 /**
- * **Who answered a tool call, on the wire.**
+ * **Who answered a tool call is not this read's question.**
  *
- * Egma writes `egma.tool.provenance` on the span it files for a call it served
- * itself — the mock endpoint on the Retell lanes, the simulator on LiveKit —
- * and writes nothing at all for a call that reached the customer's own
- * backend. The read projects that one word and nothing around it, so a
- * transcript can say "mocked" beside the answer a test supplied without
- * claiming anything about the call beside it.
+ * Whether a mock tool answered a call is read by name from the pinned test
+ * version of the simulation that made it — the authored world itself, which
+ * cannot change under a result. This read is production's: it is given a trace
+ * id and has no simulation to ask, so it says nothing about who answered and
+ * never guesses from a stamp somebody left on a payload. The simulation read
+ * is where the mark belongs, and where it is proved.
+ *
+ * What this holds is that the tool facts themselves still come back whole, and
+ * that no mark comes back with them.
  */
-describe.skipIf(!storage.available)("who answered each tool call", () => {
+describe.skipIf(!storage.available)("what a tool call brings back", () => {
   const MIXED = "1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d";
   const WHEN = {
     from: "2026-08-05T00:00:00Z",
@@ -934,8 +981,9 @@ describe.skipIf(!storage.available)("who answered each tool call", () => {
   beforeAll(async () => {
     await appendSpans(contextFor(acme, "admin"), [
       span({ spanId: "5400000000000001" }),
-      // The one egma stood in front of, written exactly as the mock endpoint
-      // writes it.
+      // One written exactly as the mock endpoint writes it, stamp and all —
+      // rows like this exist in the store and the read must simply pass over
+      // the stamp rather than promote it into an answer.
       span({
         spanId: "5400000000000002",
         parentSpanId: "5400000000000001",
@@ -967,7 +1015,7 @@ describe.skipIf(!storage.available)("who answered each tool call", () => {
     ]);
   });
 
-  it("marks the call egma answered, and says nothing about the one it did not", async () => {
+  it("returns both calls whole, and marks neither", async () => {
     const response = await readTraceOverHttp(api.app, acme.secret, MIXED, WHEN);
     expect(response.statusCode, response.body).toBe(200);
     const detail = response.json() as TraceDetailBody;
@@ -978,10 +1026,23 @@ describe.skipIf(!storage.available)("who answered each tool call", () => {
     ].filter((one) => one.kind === "tool");
     const byName = new Map(tools.map((one) => [one.toolName, one]));
 
-    expect(byName.get("get_availability")?.toolProvenance).toBe("mocked");
-    // Absent, not empty and not null: a real call carries no key to interpret.
-    const real = byName.get("send_receipt");
-    if (real === undefined) throw new Error("the real tool call is missing");
-    expect("toolProvenance" in real).toBe(false);
+    // What the calls were and what they were given, on both of them.
+    expect(byName.get("get_availability")?.toolArguments).toBe(
+      '{"day":"Tuesday"}',
+    );
+    expect(byName.get("get_availability")?.toolResult).toBe('{"slots":[]}');
+    expect(byName.get("send_receipt")?.toolResult).toBe("ok");
+
+    // And no mark on either, including the one carrying the old payload
+    // stamp. A production read has no pinned test version to read a mocked
+    // mark from, so it makes no claim about who answered.
+    for (const tool of tools) {
+      expect("toolProvenance" in tool, tool.toolName).toBe(false);
+    }
+
+    // What the read does say is whose POV each row is — the storage column,
+    // read as the product word. These rows were filed by egma's own simulator,
+    // so they read as the persona's.
+    for (const tool of tools) expect(tool.pov, tool.toolName).toBe("persona");
   });
 });

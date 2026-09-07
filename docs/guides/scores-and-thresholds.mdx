@@ -48,10 +48,16 @@ Grading state describes whether work has finished:
 | `complete` | All requested graders returned scores, including scores that fail their thresholds. |
 | `error` | A grader or the grading work ended with an error. |
 
+`complete` does not guarantee that all agent evidence arrived. Grading can
+proceed after its bounded wait with the evidence available at that time.
+Check the simulation's `agentPovIncomplete` field and
+[review the evidence source](/guides/start-and-follow-a-run#check-which-evidence-arrived)
+when a result appears to omit something the agent did.
+
 A simulation that fails or is canceled before producing a completed trace has
 no grading work to wait for. Its API `gradingState` is `null`.
 
 For release automation, define your own policy. The
 [CI example](/guides/automate-tests-in-ci) requires every simulation to complete
-and every selected grader to pass. It also fails on missing grades, grading
-errors, and timeouts.
+and every selected grader to pass. It also fails on flagged missing agent
+evidence, missing grades, grading errors, and timeouts.

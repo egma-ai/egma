@@ -25,18 +25,39 @@ running while the tests execute. A local worker can join simulations if it
 connects to the configured LiveKit project. See LiveKit's
 [agent dispatch guide](https://docs.livekit.io/agents/server/agent-dispatch/).
 
-If your tests need mock tools, install the SDK for your language and add
-`await mockable(agent, ctx, session)` after you create the agent and before
-`session.start`. The SDK leaves tools unchanged in production rooms.
+Install the SDK for your language and add
+`await simulation(agent, ctx, session)` after you create the agent and session,
+before `session.start`. This is required for every LiveKit simulation, including
+tests without mock tools. It reports your agent's tools, applies the test's
+mocks, and sends the agent's conversation evidence to Egma. It does nothing in
+production rooms.
 
 <CardGroup cols={2}>
   <Card title="LiveKit Python SDK" icon="python" href="/tools/livekit-python-sdk">
-    Install the package and add mock tools to your Python worker.
+    Install the package and add the simulation hook to your Python worker.
   </Card>
   <Card title="LiveKit JavaScript SDK" icon="js" href="/tools/livekit-javascript-sdk">
-    Install the package and add mock tools to your JavaScript or TypeScript worker.
+    Install the package and add the simulation hook to your JavaScript or TypeScript worker.
   </Card>
 </CardGroup>
+
+Create a project API key from your initialized agent repository:
+
+```bash
+egma project api-key create --name "LiveKit worker"
+```
+
+Copy the key when the CLI prints it; it is shown only once. Add these settings
+to the worker through your secret store:
+
+| Variable | Value |
+| --- | --- |
+| `EGMA_URL` | `https://app.egma.ai`, or a URL for your self-hosted Egma instance that the worker can reach. |
+| `EGMA_API_KEY` | The project API key you just created. |
+
+These settings send the agent's evidence to the same Egma project that runs
+the test. They are separate from the LiveKit project credentials used below.
+Restart or redeploy the worker after adding the hook and settings.
 
 ## 2. Register the agent in Egma
 
@@ -274,9 +295,21 @@ empty-room timeout in your LiveKit configuration.
 - Check the worker's registered name against `LIVEKIT_AGENT_NAME` and confirm
   it is connected to the same project as the connection credentials.
 - Check the worker logs for missing dispatch metadata or startup errors.
+- Confirm that the worker calls `simulation` before `session.start`, has a
+  project API key, and can reach `EGMA_URL`. A `NotReported` error means the
+  worker could not complete its startup exchange with Egma; the session does
+  not start.
 - For voice, confirm that the worker publishes audio. For text, check its text
   input and transcription output rather than waiting for an audio track.
 - For a token endpoint, check the HTTP status, public DNS, returned server URL,
   and room configuration. An issued token alone does not prove dispatch worked.
 
-To capture real conversations, follow [Set up monitoring](/guides/set-up-monitoring#livekit).
+The simulation transcript uses the agent's own turns and tool calls. Calls
+answered by a test mock are marked **mocked**; other tools run their real
+implementation and their calls are also recorded. The voice recording keeps
+what the simulated caller heard.
+
+To capture real conversations, add `monitor(ctx)` as described in
+[Set up monitoring](/guides/set-up-monitoring#livekit). Both hooks can stay in
+one worker: `simulation` acts only in simulation rooms, and `monitor` acts
+only in production rooms.

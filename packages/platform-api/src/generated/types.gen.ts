@@ -25,6 +25,13 @@ export type TraceSpan = {
     toolName: string;
     toolArguments: string;
     toolResult: string;
+    /**
+     * Whose account this span records: agent for the agent’s own turns and tools, or persona for Egma’s caller. Read the agent spans for one transcript; combining both repeats the conversation.
+     */
+    pov: 'persona' | 'agent';
+    /**
+     * Present when a mock with this toolName answered the call. Read from the simulation’s pinned test version. Absent on ordinary tool calls and production traces.
+     */
     toolProvenance?: 'mocked';
     spans: Array<TraceSpan>;
 };
@@ -4835,6 +4842,10 @@ export type GetSimulationResponses = {
         endedAt: string | null;
         providerReference: string | null;
         hasRecording: boolean;
+        /**
+         * True when the bounded wait ended and agent evidence is still missing. False does not guarantee a complete export or that existing grades used late evidence. Regrade after late evidence arrives.
+         */
+        agentPovIncomplete: boolean;
         measures: {
             durationMs?: number;
             turnCount?: number;
@@ -4850,6 +4861,7 @@ export type GetSimulationResponses = {
             measure: string;
             unit: string;
             derived: boolean;
+            pov: 'persona' | 'agent';
             reportedBy?: string;
             samples: Array<number>;
             spanIds: Array<string>;
@@ -4857,6 +4869,17 @@ export type GetSimulationResponses = {
             p50: number;
             p90: number;
             partial: boolean;
+            /**
+             * The same metric measured from the other side of a simulation. Keep its samples separate from the primary series. Absent when only one side measured the conversation, including production traces.
+             */
+            otherPov?: {
+                pov: 'persona' | 'agent';
+                derived: boolean;
+                reportedBy?: string;
+                samples: Array<number>;
+                spanIds: Array<string>;
+                partial: boolean;
+            };
         }>;
         test: {
             id: string;
@@ -6087,7 +6110,7 @@ export type ListTracesResponses = {
             toolSpanCount: number;
             erroredSpanCount: number;
             source: 'simulation' | 'production';
-            emitter: string;
+            pov: 'persona' | 'agent';
             environment: string;
             connectionType: string;
             providerCallId: string;
@@ -6167,7 +6190,7 @@ export type GetTraceResponses = {
             toolSpanCount: number;
             erroredSpanCount: number;
             source: 'simulation' | 'production';
-            emitter: string;
+            pov: 'persona' | 'agent';
             environment: string;
             connectionType: string;
             providerCallId: string;
@@ -6185,6 +6208,7 @@ export type GetTraceResponses = {
             measure: string;
             unit: string;
             derived: boolean;
+            pov: 'persona' | 'agent';
             reportedBy?: string;
             samples: Array<number>;
             spanIds: Array<string>;
@@ -6192,6 +6216,17 @@ export type GetTraceResponses = {
             p50: number;
             p90: number;
             partial: boolean;
+            /**
+             * The same metric measured from the other side of a simulation. Keep its samples separate from the primary series. Absent when only one side measured the conversation, including production traces.
+             */
+            otherPov?: {
+                pov: 'persona' | 'agent';
+                derived: boolean;
+                reportedBy?: string;
+                samples: Array<number>;
+                spanIds: Array<string>;
+                partial: boolean;
+            };
         }>;
         simulationId: string | null;
         gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error';

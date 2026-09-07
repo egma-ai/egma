@@ -33,6 +33,7 @@ Create `egma/tests/appointment-booking/book-consultation.md`.
 This example assumes a Retell agent with `check_availability` and
 `book_appointment` tools. Match the tool names and answers to your agent before
 running it. Both tools are mocked, so these calls use the test's answers.
+Use a Retell text mode or web call connection for this example.
 
 ````markdown
 ---
@@ -109,7 +110,7 @@ variable names must match those used by your agent. Names starting with `egma_`
 are reserved.
 
 For LiveKit, replace the example's `Env` block with the metadata your worker
-reads from `ctx.job.metadata`:
+reads from `ctx.job.metadata`. Parse that value as JSON in the worker:
 
 ````markdown
 ## Env
@@ -147,6 +148,7 @@ or the agent.
 
 <Note>
   Tools not named in a test's mock section run normally. Use a supported
-  connection and instrument LiveKit tools before relying on mocks. See
+  connection. Every LiveKit simulation requires the SDK's `simulation`
+  helper before the agent session starts, including tests without mocks. See
   [Mock tool responses](/guides/mock-tool-responses).
 </Note>

@@ -79,12 +79,34 @@ export function parameters<
  * operations answer it — a trace's transcript and one simulation's evidence —
  * and a projection written out at each door is two chances to disagree.
  */
+const povSeriesSchema = {
+  type: "object",
+  properties: {
+    pov: { type: "string", enum: ["persona", "agent"] },
+    derived: { type: "boolean" },
+    reportedBy: { type: "string" },
+    samples: { type: "array", items: { type: "number" } },
+    spanIds: { type: "array", items: { type: "string" } },
+    partial: { type: "boolean" },
+  },
+  required: ["pov", "derived", "samples", "spanIds", "partial"],
+  additionalProperties: false,
+} as const satisfies JsonSchema;
+
 export const metricSchema = {
   type: "object",
   properties: {
     measure: { type: "string" },
     unit: { type: "string" },
     derived: { type: "boolean" },
+    /**
+     * Whose account of the conversation this number is — the persona's,
+     * measured off egma's own recording, or the agent's, off its own process
+     * (ADR-0024 §5). `derived` says which machinery produced it; this says
+     * whose conversation it describes, which is the fact that decides whether
+     * two numbers may be compared at all.
+     */
+    pov: { type: "string", enum: ["persona", "agent"] },
     reportedBy: { type: "string" },
     samples: { type: "array", items: { type: "number" } },
     spanIds: { type: "array", items: { type: "string" } },
@@ -92,11 +114,22 @@ export const metricSchema = {
     p50: { type: "number" },
     p90: { type: "number" },
     partial: { type: "boolean" },
+    /**
+     * The same measure as the other POV measured it, where both measured it —
+     * a simulation only. Never averaged into the headline and never appended
+     * to it: two units, each saying which POV took it. Absent on every
+     * conversation only one POV measured, which is every production trace.
+     */
+    otherPov: {
+      ...povSeriesSchema,
+      description: "The same metric measured from the other side of a simulation. Keep its samples separate from the primary series. Absent when only one side measured the conversation, including production traces.",
+    },
   },
   required: [
     "measure",
     "unit",
     "derived",
+    "pov",
     "samples",
     "spanIds",
     "mean",

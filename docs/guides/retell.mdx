@@ -161,6 +161,21 @@ For self-hosted Egma, configure the Retell phone prerequisites in
 [Self-hosting configuration](/self-hosting/configuration) before starting a
 phone run.
 
+## Read the simulation's evidence
+
+After a web or phone call ends, Egma reads its call record from Retell and
+adds it to the simulation. The transcript includes the tool calls Retell
+recorded, including calls to your real backend. Calls answered by a test mock
+are marked **mocked**. The voice recording captures what the simulated caller
+heard.
+
+Retell text mode has no stored call record for Egma to import. Its transcript
+comes from the simulated conversation itself.
+
+If the agent's record is incomplete, check that the ended call is available
+in Retell. Once missing evidence arrives in Egma, you can
+[regrade the simulation](/guides/configure-graders#regrade-a-simulation).
+
 ## Enable production monitoring
 
 For an agent you connected above, reuse its stored Retell credentials:

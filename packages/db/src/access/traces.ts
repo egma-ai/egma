@@ -17,6 +17,7 @@ import {
   withRetellToolTimeline,
   type RetellToolTimelineSlice,
 } from "./retell-tool-timeline.ts";
+import { fromOnePov, povOf, type SpanPov } from "../models/pov.ts";
 
 /**
  * Reading traces, and the only way anything ever does.
@@ -88,8 +89,16 @@ const DEFAULT_LIST_LIMIT = 50;
  * whole trace inside the window, taken from an aggregate rather than from the
  * rows that fitted, so `spanCount` is the number a caller compares against to
  * learn how much of the trace they are holding.
+ *
+ * **Doubled when a simulation began holding both POVs under one trace.** The
+ * rows are read before either POV is chosen between — the read returns both,
+ * and the surface above picks — so a cap sized for one POV would have bitten
+ * at half a conversation as soon as the second arrived. Doubling it rather than
+ * applying it per POV keeps the cap one number over one read: a per-POV cap
+ * would need two ordered reads, and the prefix it produced would no longer be
+ * the trace's own time order.
  */
-export const MAXIMUM_SPANS_PER_TRACE = 10_000;
+export const MAXIMUM_SPANS_PER_TRACE = 20_000;
 
 const SPANS_TABLE = "spans";
 const TURNS_TABLE = "turns";
@@ -126,6 +135,41 @@ const LIVEKIT_LIFECYCLE_SPAN_NAMES = [
  * asserted away.
  */
 const [NORMALISED_KEY = ""] = REPORTED_MEASUREMENTS_PAYLOAD_PATH.split(".");
+
+/**
+ * How the parentless rows of one trace are ordered when the reader has to pick
+ * the one carrying the report block.
+ *
+ * **Two parentless rows are normal now, and this is the rule that makes them
+ * safe.** A simulation holds both POVs under one trace (ADR-0024 §1): egma's
+ * own root and the agent's session root sit side by side, and before this a
+ * reader took whichever opened first — so an agent whose exporter started a
+ * millisecond earlier would have moved the block out from under the reader and
+ * a measured trace would have read as one that measured nothing.
+ *
+ * Three keys, in the order the questions actually matter:
+ *
+ * 1. **A row that carries the block beats one that does not.** The block only
+ *    ever rides the row a normalizer wrote it on, so a parentless row holding
+ *    one is the answer to this question by construction — nothing is guessed
+ *    and no kind is named. On a Retell simulation this is what keeps the
+ *    platform's own reported latencies reachable: they ride the agent's root,
+ *    because Retell measured them.
+ * 2. **Then egma's own root.** Where no parentless row carries a block — a
+ *    LiveKit simulation, where neither POV reports aggregates — the persona's
+ *    root is the row this reader has always answered with, and it stays so
+ *    whatever order the two arrived in.
+ * 3. **Then earliest, then the span id.** The tie-breakers the query already
+ *    had, so two readings of one trace answer with one row.
+ *
+ * Production is untouched by all three: a production trace has no
+ * `egma-runtime` row at all, and at most one of its parentless rows was written
+ * by a normalizer.
+ */
+const PARENTLESS_ROW_ORDER =
+  `JSONExtractRaw(payload, '${NORMALISED_KEY}') != '' desc, ` +
+  `emitter = 'egma-runtime' desc, ` +
+  `started_at asc, span_id asc`;
 
 /**
  * A window of time, closed at the start and open at the end, counted in
@@ -213,7 +257,23 @@ export type TraceFacts = {
   readonly toolSpanCount: number;
   readonly erroredSpanCount: number;
   readonly source: string;
+  /**
+   * The storage column these facts were counted over, verbatim:
+   * `egma-runtime` or `agent`. Kept beside `pov`, which is the same fact in
+   * the product's own word.
+   */
   readonly emitter: string;
+  /**
+   * **Whose POV these facts count** — the product word for the `emitter`
+   * column, which never reaches a screen.
+   *
+   * `agent` where the trace holds the agent's own POV of the conversation, and
+   * `persona` where the only POV is egma's own simulator's. It is not a
+   * property of the trace so much as of the reading: a simulation holds both
+   * POVs, and every count beside this one is the POV named here, so nothing
+   * ever counts one conversation twice.
+   */
+  readonly pov: SpanPov;
   readonly environment: string;
   readonly connectionType: string;
   readonly providerCallId: string;
@@ -279,15 +339,19 @@ export type TraceSpan = {
   readonly toolArguments: string;
   readonly toolResult: string;
   /**
-   * That egma answered this tool call itself, when it did.
+   * **Whose POV this row is** — the product word for the `emitter` column,
+   * which never reaches a screen.
    *
-   * The only value is `"mocked"`, and it is absent everywhere else. A tool that
-   * ran for real is the ordinary case and carries nothing, so a reader who sees
-   * this word knows the answer came from the test rather than from the
-   * customer's own backend. Written by the mock endpoint and by the simulator,
-   * both on the span's own payload.
+   * `persona` is what egma's own simulator said, heard, measured and recorded.
+   * `agent` is what the agent's own process reported about its turns, its tool
+   * calls and its timings. A simulation holds both under one trace, and a
+   * production conversation holds only the agent's.
+   *
+   * Returned on every span because the read returns both POVs and the surface
+   * above chooses: a run view shows the agent's, and mixing the two into one
+   * transcript would be one conversation told twice.
    */
-  readonly toolProvenance?: "mocked";
+  readonly pov: SpanPov;
   /** This span's own children, in time order. A turn is never nested here. */
   readonly spans: readonly TraceSpan[];
 };
@@ -610,6 +674,36 @@ function counted(value: string | number | undefined): number {
  */
 const TRACE_POSITION = "min(toUnixTimestamp64Micro(started_at))";
 
+/** The storage value that says a row is the agent's own POV. */
+const AGENT_POV = "agent";
+
+/**
+ * One count, over one POV — the same rule the surfaces above read by.
+ *
+ * A simulation holds both POVs of one conversation under one trace: the
+ * persona's, which is what egma's own simulator said, heard and recorded, and
+ * the agent's, which is what the agent's own process reported. They describe
+ * the same turns and the same calls, so counting the rows would say a
+ * thirteen-turn conversation had twenty-six. **The agent's POV is counted
+ * wherever the trace holds one**, exactly as the run view renders it; a trace
+ * with one POV is counted whole, because there is nothing to choose between.
+ *
+ * Written as one conditional over the aggregate rather than as a filtered
+ * subquery so the whole fact block stays one pass over rows the sort key has
+ * already pruned.
+ */
+function counting(rows: string): string {
+  // The column, qualified. This block aliases one expression `as emitter`, and
+  // an unqualified `emitter` here would resolve to that alias rather than to
+  // the column — which is one aggregate inside another, and a query ClickHouse
+  // refuses outright. The same trap the `started_at` note above describes.
+  const agent = `${SPANS_TABLE}.emitter = '${AGENT_POV}'`;
+  return (
+    `if(countIf(${agent}) > 0, ` +
+    `countIf(${agent} and (${rows})), countIf(${rows}))`
+  );
+}
+
 /**
  * Every trace-level fact, as one pass of `countIf`s over the spans a window
  * holds for a trace.
@@ -632,14 +726,14 @@ const TRACE_FACTS = `toString(${TRACE_POSITION}) as started_at_micros,
          toUnixTimestamp64Micro(started_at) * 1000
            + greatest(toInt64(duration_ns), 0)
        )) as ended_at_nanos,
-       count() as span_count,
-       countIf(kind = 'turn:human') as human_turn_count,
-       countIf(kind = 'turn:agent') as agent_turn_count,
-       countIf(kind = 'tool') as tool_span_count,
-       countIf(status = 'error') as errored_span_count,
+       ${counting("1")} as span_count,
+       ${counting("kind = 'turn:human'")} as human_turn_count,
+       ${counting("kind = 'turn:agent'")} as agent_turn_count,
+       ${counting("kind = 'tool'")} as tool_span_count,
+       ${counting("status = 'error'")} as errored_span_count,
        any(project_id) as trace_project_id,
        any(source) as source,
-       any(emitter) as emitter,
+       if(countIf(${SPANS_TABLE}.emitter = '${AGENT_POV}') > 0, '${AGENT_POV}', any(${SPANS_TABLE}.emitter)) as emitter,
        any(environment) as environment,
        any(connection_type) as connection_type,
        argMinIf(provider_call_id, tuple(parent_span_id != '', started_at), provider_call_id != '') as provider_call_id,
@@ -865,6 +959,8 @@ type PageMeasureSpanRow = {
   readonly kind: string;
   readonly started_at_micros: string;
   readonly duration_ns: string;
+  /** Whose account each row is, so the projection derives from one of them. */
+  readonly emitter: string;
 };
 
 type PageRootSliceRow = RootSliceRow & {
@@ -912,7 +1008,8 @@ async function turnResponseLatencyP90sFor(
        name,
        kind,
        started_at_micros,
-       duration_ns
+       duration_ns,
+       emitter
      from (
        select
          trace_id,
@@ -920,6 +1017,7 @@ async function turnResponseLatencyP90sFor(
          parent_span_id,
          name,
          kind,
+         emitter,
          toString(toUnixTimestamp64Micro(started_at)) as started_at_micros,
          toString(duration_ns) as duration_ns,
          row_number() over (
@@ -944,7 +1042,7 @@ async function turnResponseLatencyP90sFor(
          span_id,
          JSONExtractRaw(payload, '${NORMALISED_KEY}') as normalised,
          row_number() over (
-           partition by trace_id order by started_at asc, span_id asc
+           partition by trace_id order by ${PARENTLESS_ROW_ORDER}
          ) as root_position
        from ${SPANS_TABLE} final
        where ${where}
@@ -995,7 +1093,12 @@ function measureSpanRowAsSpanRow(row: PageMeasureSpanRow): SpanRow {
     tool_arguments: "",
     tool_result: "",
     provider_tool_id: "",
-    tool_provenance: "",
+    // The emitter rides through from the row above, and is the one display
+    // field here that is not blank: the metric arithmetic derives from the
+    // agent's own turns alone, so a simulation's two accounts of one
+    // conversation have to arrive still telling each other apart. Blanking it
+    // would hand the derivation two accounts as one and measure every wait
+    // twice over.
   };
 }
 
@@ -1025,6 +1128,7 @@ function factsOf(traceId: string, row: SummaryRow): TraceFacts {
     erroredSpanCount: counted(row.errored_span_count),
     source: row.source,
     emitter: row.emitter,
+    pov: povOf(row.emitter),
     environment: row.environment,
     connectionType: row.connection_type,
     providerCallId: row.provider_call_id,
@@ -1089,8 +1193,8 @@ type SpanRow = {
   readonly tool_result: string;
   /** Retell's structural correlation id, extracted without the tool payload. */
   readonly provider_tool_id: string;
-  /** `mocked` when egma answered this call, and `''` on every other span. */
-  readonly tool_provenance: string;
+  /** `egma-runtime` or `agent` — whose POV of the conversation this row is. */
+  readonly emitter: string;
 };
 
 /** A turn is a span whose kind says somebody was speaking. */
@@ -1193,16 +1297,16 @@ export async function readTrace(
          JSONExtractString(payload, 'id'),
          ''
        ) as provider_tool_id,
-       -- Who answered this tool call. Egma writes the word on the span it
-       -- files for a call it served — the mock endpoint on the Retell lanes,
-       -- the simulator on LiveKit — and writes nothing at all for a real one,
-       -- so an empty string here honestly means "not mocked" rather than
-       -- "unknown".
-       if(
-         kind = 'tool',
-         JSONExtractString(payload, 'egma.tool.provenance'),
-         ''
-       ) as tool_provenance
+       -- Whose POV of the conversation each row is. A simulation holds
+       -- both POVs under one trace, so the surface above has to be able to
+       -- tell them apart; nothing here chooses between them.
+       --
+       -- Deliberately **not** a payload stamp saying who answered a tool
+       -- call. Whether a mock tool answered is read by name from the
+       -- simulation's pinned test version, where the authored world actually
+       -- lives — a second copy on the span could only come to disagree with
+       -- it, and this read has no simulation to ask.
+       emitter
      from ${SPANS_TABLE} final
      where ${where}
      order by started_at asc, span_id asc
@@ -1222,16 +1326,15 @@ export async function readTrace(
       //
       // The same predicate also catches a span whose unusable parent id
       // normalised away at the door — the orphan `transcriptOf` files at the
-      // top, below — so this is honestly *the first parentless row* and not
-      // "the root" by any stronger claim. **That is a read concern and never a
+      // top, below — so this is honestly *one parentless row* and not "the
+      // root" by any stronger claim. **That is a read concern and never a
       // completion authority**: whether a trace has ended is a fact its platform
-      // states, and no query here may be read as answering it. Nothing is lost
-      // by it: a block only
-      // ever rides the row a normalizer wrote it on, and a trace holding
-      // several parentless rows is a flush whose parent never came, which
-      // began at the earliest of them. The span id breaks a tie exactly as the
-      // row order above does, so two readings of one trace answer with one span
-      // rather than with whichever row came back first.
+      // states, and no query here may be read as answering it.
+      //
+      // Which of several it is, is `PARENTLESS_ROW_ORDER`'s decision and is
+      // explained there: a simulation now holds both POVs under one trace, so a
+      // second parentless row is ordinary rather than the sign of a lost flush
+      // it once was.
       `select
        span_id,
        span_id as root_span_id,
@@ -1255,7 +1358,7 @@ export async function readTrace(
      from ${SPANS_TABLE} final
      where ${where}
        and parent_span_id = ''
-     order by started_at asc, span_id asc
+     order by ${PARENTLESS_ROW_ORDER}
      limit 1`,
       parameters,
     ),
@@ -1446,11 +1549,10 @@ function spanOf(row: SpanRow): Omit<TraceSpan, "spans"> {
     toolName: row.tool_name,
     toolArguments: row.tool_arguments,
     toolResult: row.tool_result,
-    // Present only when egma answered the call. The key is left off entirely
-    // otherwise, so nothing downstream has to tell "not mocked" from "the
-    // reader forgot to ask".
-    ...(row.tool_provenance === "mocked"
-      ? { toolProvenance: "mocked" as const }
-      : {}),
+    // The storage word, passed through. `agent` is anything a customer's own
+    // process reported; every other value is egma's own simulator, and a row
+    // written before the column had a second value reads as the persona's POV
+    // because that is the only POV those rows could hold.
+    pov: povOf(row.emitter),
   };
 }

@@ -41,7 +41,7 @@ Follow the guide for your agent, then return here:
     Register the agent and add a text or web-call connection.
   </Card>
   <Card title="LiveKit" icon="tower-broadcast" href="/guides/livekit">
-    Register your worker and add a connection with project credentials.
+    Add the SDK to your worker, then connect it with project credentials.
   </Card>
 </CardGroup>
 
@@ -124,14 +124,21 @@ grading to finish.
 Wait for the simulation and its grading to finish, then open the simulation:
 
 1. Read the transcript. Find the repeat request and the agent's next response.
+   Egma uses the agent's own record when it is available. Retell text tests
+   use the simulated caller's record.
 2. Open the **Expected behaviors** grade. Check the result for each behavior
    against the transcript.
-3. Inspect any tool calls. Confirm that the test exercised the path you meant
-   to test. For voice simulations, listen to the recording when it is available.
+3. Inspect any tool calls. Calls answered by a test mock are marked **mocked**.
+   Confirm that the test exercised the path you meant to test. For voice
+   simulations, listen to the recording when it is available to hear what the
+   simulated caller heard.
 
 A low grade means the observed behavior missed the grader's threshold. An
 execution or grading error means that step did not finish; read the error
 before drawing a conclusion about your agent.
+
+If turns or tool calls are missing, check the LiveKit worker's export logs or
+the Retell call record before relying on the result.
 
 ## 6. Change one thing and run again
 

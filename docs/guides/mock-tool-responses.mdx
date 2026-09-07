@@ -68,10 +68,17 @@ delay, status, or matching rules to the envelope.
 | --- | --- |
 | Retell text mode | Egma sends the test's mock answers with the conversation. |
 | Retell web call | Egma prepares a temporary agent version for the run. Your Egma instance must be reachable by Retell. |
-| LiveKit | Instrument the agent's tools with the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk). |
+| LiveKit | Call `await simulation(agent, ctx, session)` from the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk) before `session.start`. |
 
 Retell's chat API and phone calls do not apply these mock answers. Use text mode
 or a web call when your Retell test depends on mocks.
+
+For LiveKit, the `simulation` helper is required even when a test has no mocks.
+It sends the agent's spans, reports its tools, and applies the running test's
+mock answers. Set `EGMA_URL` and `EGMA_API_KEY` in the worker environment.
+If the setup exchange fails, the helper raises `NotReported` and the agent
+session does not start. The `monitor` helper is for production conversations;
+it does not enable simulations.
 
 <Warning>
   Only the tools named in the test are mocked. Every other tool runs normally.
@@ -83,9 +90,13 @@ or a web call when your Retell test depends on mocks.
 
 Run `egma push`, then [start a run](/guides/start-and-follow-a-run). Open the
 simulation's transcript and inspect the tool call, its arguments, and its
-result. Mocked tool evidence is marked as mocked where the integration reports
-that information.
+result. The agent's trace records both real and mocked tool calls. Calls
+answered by the test's mocks are marked **mocked**. The transcript prefers the
+agent's tool evidence when it is available.
+
+A misspelled mock name does not match a tool. It creates no tool call or warning,
+and the correctly named tool can still run its real implementation.
 
 If a real backend was called, check the exact tool name, connection type, and
-LiveKit instrumentation. If the agent reacts incorrectly to the answer, compare
+LiveKit setup. If the agent reacts incorrectly to the answer, compare
 the mock's response shape with the tool's actual contract.

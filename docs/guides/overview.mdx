@@ -34,8 +34,9 @@ against the behavior you expect.
    behaviors the agent must show. Keep related tests in a test suite.
 2. **Start a run.** Select a suite, an agent, and one of its connections. Egma
    runs a simulation for each test and persona pair.
-3. **Read the evidence.** Inspect the conversation, tool calls, and grades.
-   Change your agent or test, then run the suite again.
+3. **Read the evidence.** Inspect the agent's conversation, tool calls, and
+   grades. For voice tests, listen to what the simulated caller heard. Change
+   your agent or test, then run the suite again.
 
 Use [built-in graders](/guides/built-in-graders) to check expected behaviors and
 other supported criteria. Add [custom graders](/guides/custom-graders) for
@@ -46,7 +47,7 @@ requirements specific to your product.
 Start with [Skills](/tools/skills) to let your coding agent set up integrations
 and write tests. Use the [CLI](/tools/cli) to manage test files and start runs
 directly. The [LiveKit Python SDK](/tools/livekit-python-sdk) and
-[LiveKit JavaScript SDK](/tools/livekit-javascript-sdk) add mock tools and
-production monitoring to your worker.
+[LiveKit JavaScript SDK](/tools/livekit-javascript-sdk) connect your worker to
+simulation testing and production monitoring.
 
 To run Egma on your own infrastructure, follow [Self-hosting](/self-hosting/get-started).

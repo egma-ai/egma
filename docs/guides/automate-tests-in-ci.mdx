@@ -8,9 +8,10 @@ Use the CLI to push test files and the API to start and inspect a run.
 test result.
 
 This recipe uses one explicit policy: **every simulation must complete, and
-every grader selected for it must pass**. Missing grades, grading errors,
-cancellation, execution failures, and timeouts fail the CI job. This is the
-policy in the example, not an overall verdict assigned by Egma.
+every grader selected for it must pass**. Flagged missing agent evidence,
+missing grades, grading errors, cancellation, execution failures, and timeouts
+fail the CI job. This is the policy in the example, not an overall verdict
+assigned by Egma.
 
 ## Prepare the CI job
 
@@ -116,6 +117,9 @@ function checkSimulation(simulation) {
   if (simulation.status !== "completed" || simulation.gradingState !== "complete") {
     throw new Error(`${simulation.id}: execution or grading did not complete.`);
   }
+  if (simulation.agentPovIncomplete !== false) {
+    throw new Error(`${simulation.id}: agent evidence is missing or unknown.`);
+  }
   const plan = simulation.gradingPlan?.items;
   if (!plan?.length) throw new Error(`${simulation.id}: no selected graders.`);
   for (const item of plan) {
@@ -214,6 +218,12 @@ The API creates the run from the saved suite. `expectedTestVersions` makes run
 creation fail if that suite changes between the snapshot and creation. A run
 keeps its grader plan and thresholds, so the script checks those frozen values
 against the latest grades.
+
+The runner also requires `agentPovIncomplete` to be `false`. This rejects the
+API's missing-agent-evidence flag; it does not prove a complete export or that
+the current grades used late evidence. If evidence arrives after grading,
+[regrade the simulation](/guides/configure-graders#regrade-a-simulation) before
+using its grades to make a release decision.
 
 ## Handle a failed job
 

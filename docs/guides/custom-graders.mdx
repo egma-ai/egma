@@ -7,6 +7,10 @@ A custom grader uses an LLM to decide one rule from conversation evidence. It
 returns `1` when the rule is met and `0` when it is not met. If the evidence is
 insufficient, it returns a grading error with no score.
 
+The grader reads the agent's transcript and tool calls when available. If your
+rule depends on a tool result, make sure that evidence reached Egma before you
+interpret the grade. See [Check which evidence arrived](/guides/start-and-follow-a-run#check-which-evidence-arrived).
+
 ## Create a grader
 
 Open **Graders** in your project and select **Create custom grader**. Define a

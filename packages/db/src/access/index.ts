@@ -397,8 +397,11 @@ export {
   recordMockState,
   resolveMockToolCall,
   runCarriesMockTools,
+  resolveRetellSimulationPull,
+  resolveSimulationByProviderReference,
   resolveSimulationStanding,
   runAlreadyStartedFor,
+  simulationProviderReferencesIn,
   simulationStatusCountsOfRuns,
   startRun,
   startSimulation,
@@ -419,6 +422,7 @@ export {
   type RunStartReach,
   type RunEventPage,
   type RunPage,
+  type RetellSimulationPull,
   type Simulation,
   type SimulationClaim,
   type SimulationClaimRequest,
@@ -466,6 +470,7 @@ export {
 export type { GradingPlanState } from "../schema/plans.ts";
 
 export {
+  AGENT_POV_BOUND_SECONDS,
   GRADING_WORK_CHANNEL,
   claimGradingJobs,
   finishGradingJob,
@@ -482,8 +487,10 @@ export {
   regradeTrace,
   requestGrading,
   releaseGradingJob,
+  settleSimulationsPastTheAgentPovBound,
   traceEvidenceStartedAt,
   watchGradingWork,
+  type SimulationPastTheAgentPovBound,
   type GradingClaim,
   type GradingClaimRequest,
   type GradingJob,

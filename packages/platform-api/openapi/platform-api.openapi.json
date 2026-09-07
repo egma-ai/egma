@@ -16454,6 +16454,10 @@
                     "hasRecording": {
                       "type": "boolean"
                     },
+                    "agentPovIncomplete": {
+                      "type": "boolean",
+                      "description": "True when the bounded wait ended and agent evidence is still missing. False does not guarantee a complete export or that existing grades used late evidence. Regrade after late evidence arrives."
+                    },
                     "measures": {
                       "type": "object",
                       "properties": {
@@ -16492,6 +16496,13 @@
                           "derived": {
                             "type": "boolean"
                           },
+                          "pov": {
+                            "type": "string",
+                            "enum": [
+                              "persona",
+                              "agent"
+                            ]
+                          },
                           "reportedBy": {
                             "type": "string"
                           },
@@ -16518,12 +16529,55 @@
                           },
                           "partial": {
                             "type": "boolean"
+                          },
+                          "otherPov": {
+                            "type": "object",
+                            "properties": {
+                              "pov": {
+                                "type": "string",
+                                "enum": [
+                                  "persona",
+                                  "agent"
+                                ]
+                              },
+                              "derived": {
+                                "type": "boolean"
+                              },
+                              "reportedBy": {
+                                "type": "string"
+                              },
+                              "samples": {
+                                "type": "array",
+                                "items": {
+                                  "type": "number"
+                                }
+                              },
+                              "spanIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "partial": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "pov",
+                              "derived",
+                              "samples",
+                              "spanIds",
+                              "partial"
+                            ],
+                            "additionalProperties": false,
+                            "description": "The same metric measured from the other side of a simulation. Keep its samples separate from the primary series. Absent when only one side measured the conversation, including production traces."
                           }
                         },
                         "required": [
                           "measure",
                           "unit",
                           "derived",
+                          "pov",
                           "samples",
                           "spanIds",
                           "mean",
@@ -16940,6 +16994,7 @@
                     "endedAt",
                     "providerReference",
                     "hasRecording",
+                    "agentPovIncomplete",
                     "measures",
                     "metrics",
                     "test",
@@ -20435,8 +20490,12 @@
                               "production"
                             ]
                           },
-                          "emitter": {
-                            "type": "string"
+                          "pov": {
+                            "type": "string",
+                            "enum": [
+                              "persona",
+                              "agent"
+                            ]
                           },
                           "environment": {
                             "type": "string"
@@ -20492,7 +20551,7 @@
                           "toolSpanCount",
                           "erroredSpanCount",
                           "source",
-                          "emitter",
+                          "pov",
                           "environment",
                           "connectionType",
                           "providerCallId",
@@ -20709,8 +20768,12 @@
                             "production"
                           ]
                         },
-                        "emitter": {
-                          "type": "string"
+                        "pov": {
+                          "type": "string",
+                          "enum": [
+                            "persona",
+                            "agent"
+                          ]
                         },
                         "environment": {
                           "type": "string"
@@ -20750,7 +20813,7 @@
                         "toolSpanCount",
                         "erroredSpanCount",
                         "source",
-                        "emitter",
+                        "pov",
                         "environment",
                         "connectionType",
                         "providerCallId",
@@ -20792,6 +20855,13 @@
                           "derived": {
                             "type": "boolean"
                           },
+                          "pov": {
+                            "type": "string",
+                            "enum": [
+                              "persona",
+                              "agent"
+                            ]
+                          },
                           "reportedBy": {
                             "type": "string"
                           },
@@ -20818,12 +20888,55 @@
                           },
                           "partial": {
                             "type": "boolean"
+                          },
+                          "otherPov": {
+                            "type": "object",
+                            "properties": {
+                              "pov": {
+                                "type": "string",
+                                "enum": [
+                                  "persona",
+                                  "agent"
+                                ]
+                              },
+                              "derived": {
+                                "type": "boolean"
+                              },
+                              "reportedBy": {
+                                "type": "string"
+                              },
+                              "samples": {
+                                "type": "array",
+                                "items": {
+                                  "type": "number"
+                                }
+                              },
+                              "spanIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "partial": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "pov",
+                              "derived",
+                              "samples",
+                              "spanIds",
+                              "partial"
+                            ],
+                            "additionalProperties": false,
+                            "description": "The same metric measured from the other side of a simulation. Keep its samples separate from the primary series. Absent when only one side measured the conversation, including production traces."
                           }
                         },
                         "required": [
                           "measure",
                           "unit",
                           "derived",
+                          "pov",
                           "samples",
                           "spanIds",
                           "mean",
@@ -21242,11 +21355,20 @@
           "toolResult": {
             "type": "string"
           },
+          "pov": {
+            "type": "string",
+            "enum": [
+              "persona",
+              "agent"
+            ],
+            "description": "Whose account this span records: agent for the agent’s own turns and tools, or persona for Egma’s caller. Read the agent spans for one transcript; combining both repeats the conversation."
+          },
           "toolProvenance": {
             "type": "string",
             "enum": [
               "mocked"
-            ]
+            ],
+            "description": "Present when a mock with this toolName answered the call. Read from the simulation’s pinned test version. Absent on ordinary tool calls and production traces."
           },
           "spans": {
             "type": "array",
@@ -21268,6 +21390,7 @@
           "toolName",
           "toolArguments",
           "toolResult",
+          "pov",
           "spans"
         ],
         "additionalProperties": false

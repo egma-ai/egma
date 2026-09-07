@@ -85,33 +85,45 @@ const HAND_COMPUTED = {
    * turn. Silent agent turns on the way are the model and tool work that led to
    * the spoken answer, not the answer itself.
    *
+   * **Each wait starts where the caller stopped being audible** — the end of
+   * that human turn's last `user_speaking` child, which is the VAD's detected
+   * end of speech (catalog version 8, ADR-0024 §5). The turn's own end is the
+   * endpointing commit, which on this capture sits up to 1.09 s later; the two
+   * older numbers are noted beside the new ones so the size of the difference
+   * is on the record.
+   *
    * 1. human 1e6796c0e195e424 is followed by silent agent turn
    *    9ac4333458575745, then another human turn before any agent speech. It
    *    was not answered and takes no sample.
-   * 2. human baac22a26a96fa9b starts 1785693902082961920 → 1785693902082961 µs,
-   *    runs 297806362 ns, so it ends at 1785693902380767362. Agent turn
+   * 2. human baac22a26a96fa9b carries **no** `user_speaking` child, so its own
+   *    end stands in: it starts 1785693902082961920 → 1785693902082961 µs and
+   *    runs 297806362 ns, ending at 1785693902380767362. Agent turn
    *    00820fa943b873e6 does silent tool work; the next turn b2444815bd74fb3b
    *    speaks in 1b8cc4d1064a766d at 1785693904727004928 →
    *    1785693904727004 µs. 1785693904727004000 − 1785693902380767362 =
-   *    2346236638 ns = 2346.236638 ms.
-   * 3. human c35b92a87f8121a1 starts 1785693917865489664 →
-   *    1785693917865489 µs and runs 5250956961 ns, so it ends at
-   *    1785693923116445961. Agent turn 674743df7fe60024 does silent tool work;
+   *    2346236638 ns = 2346.236638 ms — the same as before, because this turn
+   *    has no recorded speech to start from.
+   * 3. human c35b92a87f8121a1 has three `user_speaking` children, the last
+   *    b30dd00e322f2443 starting 1785693920313752320 → 1785693920313752 µs and
+   *    running 1710489600 ns, so the caller stopped being audible at
+   *    1785693922024241600. Agent turn 674743df7fe60024 does silent tool work;
    *    the next turn 2c8883b32dbc323c speaks in 42b9d5797f17aa9d at
    *    1785693924924691968 → 1785693924924691 µs.
-   *    1785693924924691000 − 1785693923116445961 = 1808245039 ns =
-   *    1808.245039 ms.
+   *    1785693924924691000 − 1785693922024241600 = 2900449400 ns =
+   *    2900.4494 ms. From the turn's own end it read 1808.245039 ms.
    * 4. human f88cf2a243a38318 is followed by silent agent turn
    *    cfbcc2e51885f0fa, then another human turn before any agent speech. It
    *    was not answered and takes no sample.
-   * 5. human 9839f5ef664bc919 starts 1785693942114222080 → 1785693942114222 µs,
-   *    runs 1980473194 ns, so it ends at 1785693944094695194. The next agent
-   *    turn fe4af349db1e440f spoke in `agent_speaking` 11a1eaca219437a9, which
-   *    began at 1785693946089613312 ns → 1785693946089613 µs.
-   *    1785693946089613000 − 1785693944094695194 = 1994917806 ns =
-   *    1994.917806 ms.
+   * 5. human 9839f5ef664bc919 has one `user_speaking` child 45e924b089cd919f,
+   *    starting 1785693942114222080 → 1785693942114222 µs and running
+   *    908797440 ns, so the caller stopped being audible at
+   *    1785693943023019440. The next agent turn fe4af349db1e440f spoke in
+   *    `agent_speaking` 11a1eaca219437a9, which began at 1785693946089613312 ns
+   *    → 1785693946089613 µs.
+   *    1785693946089613000 − 1785693943023019440 = 3066593560 ns =
+   *    3066.59356 ms. From the turn's own end it read 1994.917806 ms.
    */
-  turn_response_latency: [2346.236638, 1808.245039, 1994.917806],
+  turn_response_latency: [2346.236638, 2900.4494, 3066.59356],
 
   /**
    * One sample per agent turn that spoke, and four of the eight did. Each has a
@@ -319,16 +331,37 @@ describe.skipIf(!storage.available)("the captured LiveKit conversation, read bac
   });
 
   /**
-   * The two the spec leaves out deliberately. `time_to_first_word` is defined
-   * out of audio egma does not hold for production traffic, and
-   * `persona_speech_duration` is about egma's synthetic caller, who is not in a
-   * production conversation at all. A grader naming either is honestly
-   * `skipped`, which is better than a number that means something else.
+   * The two catalog version 8 dropped. `time_to_first_word` was defined out of
+   * audio egma does not hold outside a simulation, and `persona_speech_duration`
+   * measured egma's own synthetic caller rather than anything the agent did.
+   * They are not measures any more, so no conversation carries either.
    */
-  it("derives neither of the two measures the catalog excludes", async () => {
+  it("carries neither of the two measures version 8 dropped", async () => {
     const measures = await measuresOfTheCapture();
 
     expect(measure(measures, "time_to_first_word")).toBeUndefined();
     expect(measure(measures, "persona_speech_duration")).toBeUndefined();
+  });
+
+  /**
+   * **One POV, said out loud.** Nobody conducted this conversation — it is a
+   * real caller talking to a stock LiveKit agent — so the agent's own spans are
+   * the only account of it there is, and there is no second series beside the
+   * headline for a reader to mistake for one.
+   */
+  it("says every number is the agent's own POV, with no second POV beside it", async () => {
+    const measures = (await measuresOfTheCapture()) as readonly (ReadMeasure & {
+      readonly pov?: string;
+      readonly otherPov?: unknown;
+    })[];
+
+    expect(measures.map((one) => one.pov)).toEqual([
+      "agent",
+      "agent",
+      "agent",
+      "agent",
+      "agent",
+    ]);
+    for (const one of measures) expect(one.otherPov).toBeUndefined();
   });
 });

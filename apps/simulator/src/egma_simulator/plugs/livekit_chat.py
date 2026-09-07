@@ -110,6 +110,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..contract import AGENT_NEVER_JOINED
 from ..media import MediaBackendError
 from ..media.livekit_room import AgentTurn, LiveKitChatRoomBackend
 from ..mock_tools import MockToolSeam
@@ -312,6 +313,9 @@ class LiveKitChat:
             job_dispatch_metadata=job_dispatch_metadata,
         )
         self._reference: str | None = None
+        # Kept as well as handed over, for the voice plug's reason: this
+        # plug has to ask one question of it once the agent is in the room.
+        self._mock_tools = mock_tools
 
     @property
     def provider_reference(self) -> str | None:
@@ -334,11 +338,21 @@ class LiveKitChat:
 
         ``None`` where it does not, which is an ordinary answer rather
         than a fault: the conversation loop then has the persona open.
+
+        An agent that turned up and never reported to Egma fails the
+        simulation, exactly as it does in the voice lane. A chat room is a
+        LiveKit simulation too: the same SDK verb runs in it, the same
+        mocked tools are answered in it, and a chat simulation that ran
+        without a hello isolated nothing just as surely.
         """
         try:
             await self._backend.open_room()
             await self._backend.dial()
             self._reference = await self._backend.wait_arrived(AGENT_JOIN_SECONDS)
+            if self._mock_tools is not None and not self._mock_tools.agent_reported:
+                raise PlugError(
+                    self._mock_tools.why_unreported, ending=AGENT_NEVER_JOINED
+                )
             greeting = await self._backend.wait_greeting(
                 GREETING_SECONDS,
                 quiet_seconds=TURN_QUIET_SECONDS,

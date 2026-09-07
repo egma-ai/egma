@@ -46,6 +46,26 @@ Execution and grading finish separately. A completed run can still have
 grading in progress, and completed execution can include simulations that
 failed to execute. Check individual simulation and grader results.
 
+### Check which evidence arrived
+
+A simulation can contain Egma's record of the caller and the agent's own
+record of the same conversation. Retell supplies its record through the
+platform; LiveKit sends it through the SDK's `simulation` helper.
+
+The transcript and graders prefer the agent's turns and tool calls when those
+are available. Otherwise, they use the available conversation evidence. The
+recording follows what Egma's caller heard, so its timing can differ from the
+agent's reported timing.
+
+Grading waits up to 30 seconds after completion for expected agent evidence.
+If it does not arrive, grading can proceed with the available evidence.
+[Get a simulation](/api/get-simulation) returns `agentPovIncomplete: true`
+when that wait has ended and agent evidence is still missing. A `false` value
+does not prove that the export is complete or that existing grades used evidence
+that arrived later. Check the worker or provider export, then
+[regrade](/guides/configure-graders#regrade-a-simulation) after late evidence
+arrives.
+
 The combined score is a comparison value. Egma does not assign an overall
 pass/fail result to a run. See [Scores and thresholds](/guides/scores-and-thresholds).
 

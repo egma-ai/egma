@@ -11,6 +11,11 @@ that project. **Grader library** contains the graders you can add.
 Egma adds **Expected behaviors** to every project. It checks the behavior
 statements from the exact test version used by each simulation.
 
+It reads the conversation's transcript and tool calls. When agent evidence is
+available, it uses the agent's account of those turns and calls. See
+[Check which evidence arrived](/guides/start-and-follow-a-run#check-which-evidence-arrived)
+if a tool call is missing or the transcript is incomplete.
+
 Each statement gets a binary result and supporting evidence. The grader's
 score is:
 
@@ -53,6 +58,11 @@ the resulting score, `0` or `1`.
 The p90 uses nearest rank. With fewer than ten measured turns, it is the
 slowest measured turn. A conversation without valid response latency
 measurements produces a grading error, not a passing score.
+
+Response latency prefers the agent's response latency series
+when available and uses Egma's caller timing otherwise. When both exist, they
+remain separate series; Egma does not combine their samples. The grader uses
+the same primary series shown in the simulation's metrics.
 
 Response latency supports chat and voice when the required measurements are
 present. You can change its scope and settings or remove it from a project.

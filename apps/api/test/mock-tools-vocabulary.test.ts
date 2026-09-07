@@ -25,7 +25,7 @@ import { describe, expect, it } from "vitest";
  * test's own world is stored in, the factory and its refusals, the route groups
  * that carry mock tools across the wire, both directions of the simulation
  * contract, the simulator's own side of the exchange, the test file a
- * developer's repository is written by — and the SDK a customer installs in
+ * developer's repository is written by — and both SDKs a customer installs in
  * their own agent, which is the surface with the least chance of anyone at egma
  * rereading it.
  */
@@ -65,10 +65,22 @@ const SURFACE = [
   // The half a customer installs and reads in their own repository, and the
   // half they author mock tools with. Nothing else in this list is opened as
   // often by somebody who does not work here.
+  //
+  // **Both SDKs, because the product ships both.** Python and Node are one
+  // release and one contract, and a word that slipped into the Node half
+  // would be read by exactly the same person as the Python half. Each SDK's
+  // entry point, its room test, its simulation verb, its side of the
+  // mock-tool exchange and its README — the whole of what a customer opens.
   "sdks/python/src/egma/__init__.py",
   "sdks/python/src/egma/seam.py",
-  "sdks/python/src/egma/mockable.py",
+  "sdks/python/src/egma/room.py",
+  "sdks/python/src/egma/simulation_room.py",
   "sdks/python/README.md",
+  "sdks/livekit-js/src/index.ts",
+  "sdks/livekit-js/src/room.ts",
+  "sdks/livekit-js/src/mock-tool-seam.ts",
+  "sdks/livekit-js/src/simulation-room.ts",
+  "sdks/livekit-js/README.md",
   "apps/cli/src/folder/test-file.ts",
 ];
 

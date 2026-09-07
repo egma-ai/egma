@@ -88,6 +88,10 @@ type StoreRecord = {
   rows: Map<string, RetryRow>;
   sweeps: number;
   deletes: string[];
+  /** Every batched "which of these did a simulation carry" the poller asked. */
+  simulationLookups: string[][];
+  /** The call ids a simulation in this project carries as its reference. */
+  simulated: Set<string>;
 };
 
 function record(rows: Map<string, RetryRow> = new Map()): StoreRecord {
@@ -102,6 +106,8 @@ function record(rows: Map<string, RetryRow> = new Map()): StoreRecord {
     releases: [],
     rows,
     sweeps: 0,
+    simulationLookups: [],
+    simulated: new Set<string>(),
     deletes: [],
   };
 }
@@ -173,6 +179,12 @@ function store(
         found.set(providerCallId, transientOf(providerCallId, row));
       }
       return found;
+    },
+    async simulationProviderReferencesIn(_auth, providerReferences) {
+      recorded.simulationLookups.push([...providerReferences]);
+      return new Set(
+        [...providerReferences].filter((one) => recorded.simulated.has(one)),
+      );
     },
     async dueRetellCallRetries(_auth, input) {
       const now = input.now ?? BASE;
@@ -546,6 +558,60 @@ describe("Retell production ingestion", () => {
       lags: [1_000, 1_000],
       providerFailures: [],
     });
+  });
+
+  it("skips a call a simulation in this project carries, so a simulation is never production too", async () => {
+    const recorded = record();
+    recorded.simulated.add("call_that_was_a_simulation");
+    const hydratedIds: string[] = [];
+    const asked: LookupRecord = { windows: [], asked: [] };
+    const taken = acceptance();
+    const retell = provider({
+      async listTerminalCalls() {
+        return {
+          kind: "calls",
+          calls: [
+            summary("call_that_was_a_simulation"),
+            summary("call_that_was_real_traffic"),
+          ],
+          hasMore: false,
+          paginationKey: null,
+        };
+      },
+      async hydrateRetellCall(_key, listed) {
+        hydratedIds.push(String(listed["call_id"]));
+        return { kind: "call", call: hydrated(String(listed["call_id"])) };
+      },
+    });
+    const { log } = logger();
+    const observed = metricRecorder();
+
+    const result = await runRetellProductionIngestion({
+      log,
+      metrics: observed.metrics,
+      store: store(recorded),
+      provider: retell,
+      lookup: lookup(asked),
+      acceptance: taken.acceptance,
+      clock: () => BASE,
+    });
+
+    // One batched question for the page, beside the two the poller already
+    // asks — never one lookup per listed call.
+    expect(recorded.simulationLookups).toEqual([
+      ["call_that_was_a_simulation", "call_that_was_real_traffic"],
+    ]);
+    // The simulation's own record is filed under its simulation by simulation
+    // ingestion. Monitoring shows production, so it is never fetched, never
+    // accepted, and never given a production trace of its own here.
+    expect(hydratedIds).toEqual(["call_that_was_real_traffic"]);
+    expect(taken.recorded.traceIds).toEqual([
+      traceIdFor(AUTH.projectId, "call_that_was_real_traffic"),
+    ]);
+    // Settled rather than dropped: the page owes it nothing, which is what
+    // lets the scan move past it instead of retrying it forever.
+    expect(result).toMatchObject({ accepted: 1, settled: 1, dropped: 0 });
+    expect(recorded.finishes).toHaveLength(1);
   });
 
   it("asks one batched committed lookup and one batched transient lookup for each page", async () => {

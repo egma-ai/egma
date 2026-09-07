@@ -70,7 +70,7 @@ egma init --url http://localhost:3101
 
 Approve the login in your browser. Then follow the [quickstart](/guides/quickstart) to connect Retell or LiveKit, write a test, and run it.
 
-For LiveKit monitoring, set the worker's `EGMA_URL` to an address it can reach. A worker deployed elsewhere cannot send traces to this machine through `localhost`.
+For LiveKit, install the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk) in the worker. Call `await simulation(agent, ctx, session)` before the session starts for every simulation. Set `EGMA_URL` to an address the worker can reach and `EGMA_API_KEY` to a key for the simulation's project. Both simulation traces and production monitoring need these settings. A worker deployed elsewhere cannot reach this machine through `localhost`.
 
 ## Check the installation
 
@@ -86,6 +86,7 @@ If startup fails, use the error printed by `egma self-host up`:
 | A port is already in use | Set the relevant port in [Configuration](/self-hosting/configuration#ports), update the matching public URL, and run the command again. |
 | The private platform file is missing but PostgreSQL data exists | Restore the original `.egma-platform/platform.env`. Do not generate a new encryption key for existing data. |
 | A simulation or grader cannot access a model | Add the key for the selected provider, verify that the account can use that model, and run `egma self-host up` again. |
+| A LiveKit simulation says the agent did not report to Egma | Update the worker's SDK, check its Egma URL and project key, and call `simulation` before the session starts. Check the worker's error and that Egma's participant joins the room. |
 | The page opens but audio does not play | Check `EGMA_BLOB_PUBLIC_URL` from the browser that is trying to play the recording. |
 
 Use [Configuration](/self-hosting/configuration) to set model credentials, public access, authentication, and storage.

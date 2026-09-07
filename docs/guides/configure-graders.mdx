@@ -43,8 +43,9 @@ Changes apply to future work.
 
 ## Regrade a simulation
 
-Use regrading to run the original grading work again on the same completed
-simulation evidence, such as after a temporary grading failure.
+Use regrading to run the original grading work again for the same completed
+simulation. This can recover from a temporary grading failure or include agent
+evidence that arrived after the first grading attempt.
 
 1. Open a completed simulation from **Runs**.
 2. Select **Regrade**.
@@ -54,6 +55,10 @@ Regrading uses the whole original grader selection, with its frozen definitions,
 settings, and thresholds. It does not call the agent again and does not apply
 your latest project policy. Start a new run to test a changed agent, test,
 persona, or grading policy.
+
+Regrading reads the evidence currently stored for that conversation. If agent
+spans arrived late, the new attempt can use them. Existing grades do not change
+when those spans arrive.
 
 Earlier grades remain in the history. The API returns the latest grade from
 each project grader in `grades`, and all attempts in `gradeHistory`.
