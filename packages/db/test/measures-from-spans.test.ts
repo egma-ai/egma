@@ -884,12 +884,12 @@ describe("measures derived from a recognised framework's own spans", () => {
    * **Both POVs, and neither blended into the other.** The conversation below
    * carries both — turns a derivation reads, which is the agent's own account,
    * and a timing span egma measured off its own recording, which is the
-   * persona's. Version 8 headlines the agent's for the two response latencies
-   * while ticket 08's recorder fix is open; the persona's series is still
+   * persona's. Version 9 headlines the persona's again, the recorder's clock
+   * having been proved against the agent's own; the agent's series is still
    * computed and handed back beside it. Nothing is averaged and nothing is
    * appended: two series, each saying which POV measured it.
    */
-  it("hands back both POVs, the agent's first, for a simulation's response latency", async () => {
+  it("hands back both POVs, the persona's first, for a simulation's response latency", async () => {
     const turns: readonly Turn[] = [
       { who: "human", from: 0, to: 1_000 },
       { who: "agent", from: 1_100, to: 3_000, spoke: [[1_400, 3_000]] },
@@ -897,21 +897,22 @@ describe("measures derived from a recognised framework's own spans", () => {
     const both = await aLiveKitCall(turns, { turn_response_latency: [862.5] });
 
     const measured = measureIn(both, "turn_response_latency");
-    expect(measured?.origin).toBe("derived");
-    // The agent's own account of the wait: 1400 − 1000.
-    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([400]);
-    // And the persona's, beside it rather than mixed into it.
-    expect(measured?.otherPov?.origin).toBe("timed");
-    expect(measured?.otherPov?.samples.map((one) => one.value)).toEqual([862.5]);
+    expect(measured?.origin).toBe("timed");
+    // What egma measured off its own recording of the wait.
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([862.5]);
+    // And the agent's own account of it — 1400 − 1000 — beside rather than
+    // mixed into it.
+    expect(measured?.otherPov?.origin).toBe("derived");
+    expect(measured?.otherPov?.samples.map((one) => one.value)).toEqual([400]);
   });
 
   /**
-   * **The flip is per measure, and the version is the switch.** Everything but
-   * the two response latencies still leads with what egma timed itself, so a
-   * measure egma's own vocabulary took is the headline and the derivation sits
-   * beside it.
+   * **One rule for every measure at version 9.** A measure egma's own
+   * vocabulary took is the headline and the derivation sits beside it — the
+   * two response latencies included now, which is what version 9 changed and
+   * what this case has always shown for everything else.
    */
-  it("still headlines egma's own timing for every other measure", async () => {
+  it("headlines egma's own timing for a measure beside the two that flipped", async () => {
     const both = await aLiveKitCall(
       [
         { who: "human", from: 0, to: 1_000 },
@@ -1208,26 +1209,28 @@ describe("measures an agent platform reported about its own conversation", () =>
   /**
    * **Two POVs, and the version says which one leads.** The platform's block is
    * the agent's own account of itself; egma's timing span is the persona's,
-   * measured off the recording. Version 8 leads with the agent's for the two
-   * response latencies, and the persona's rides beside it — never appended to
-   * it, which would file one turn's wait twice and move every percentile.
+   * measured off the recording. Version 9 leads with the persona's for the two
+   * response latencies as it does for everything else, and the platform's
+   * rides beside it — never appended to it, which would file one turn's wait
+   * twice and move every percentile.
    */
-  it("leads with the platform's own account of a response latency, keeping egma's beside it", async () => {
+  it("leads with egma's own recording of a response latency, keeping the platform's beside it", async () => {
     const trace = await aReportedTrace(AS_RETELL_MEASURED, {
       turn_response_latency: [862.5],
     });
 
     const measured = measureIn(trace, "turn_response_latency");
-    expect(measured?.origin).toBe("reported");
-    expect(measured?.reportedBy).toBe("retell");
-    expect(measured?.otherPov?.origin).toBe("timed");
-    expect(measured?.otherPov?.samples.map((one) => one.value)).toEqual([862.5]);
+    expect(measured?.origin).toBe("timed");
+    expect(measured?.reportedBy).toBe("");
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([862.5]);
+    expect(measured?.otherPov?.origin).toBe("reported");
+    expect(measured?.otherPov?.reportedBy).toBe("retell");
   });
 
   /**
-   * **egma's own observation still outranks the platform's for every measure
-   * version 8 did not flip.** One entry, the timed one, and the platform's
-   * account of the same measure is what sits beside it.
+   * **egma's own observation outranks the platform's, and at version 9 that is
+   * every measure.** One entry, the timed one, and the platform's account of
+   * the same measure is what sits beside it.
    */
   it("lets a measure egma timed itself win over the one the platform reported", async () => {
     const trace = await aReportedTrace(
