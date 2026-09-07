@@ -1,9 +1,9 @@
 "use client";
 
 import type { Answer } from "../lib/api.ts";
+import { asListInstant } from "../lib/instants.ts";
 import {
   allowanceLabel,
-  periodDateLabel,
   usedLabel,
   type PeriodUsage,
 } from "../lib/organization-usage.ts";
@@ -63,14 +63,19 @@ export function OrganizationUsage({
       lead={USAGE_IS}
       action={
         <p className="m-0 text-sm tabular-nums text-muted-foreground">
-          {`${periodDateLabel(read.periodStartedAt)} — resets ${periodDateLabel(
+          {`${asListInstant(read.periodStartedAt)} — resets ${asListInstant(
             read.resetsAt,
           )}`}
         </p>
       }
     >
+      {/*
+        * The grid, not the panel: the panel's shape is two short facts and one
+        * full-width prose fact under them, which is a name, a number and a
+        * description. These are three equal numbers, so the last of them would
+        * have run the width of the page for no reason.
+        */}
       <Facts
-        layout="panel"
         facts={read.allowances.map((allowance) => ({
           label: allowanceLabel(allowance.kind),
           value: (

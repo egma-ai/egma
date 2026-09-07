@@ -67,18 +67,3 @@ export function usedLabel(usage: AllowanceUsage): string {
     maximumFractionDigits: whole ? 0 : 1,
   })} ${usage.unit}`;
 }
-
-/**
- * A date as this product writes one: the absolute short date, never an age.
- * A relative reset — "in 12 days" — cannot be put in a calendar, and this is a
- * date somebody plans around.
- */
-export function periodDateLabel(iso: string): string {
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return iso;
-  return at.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
