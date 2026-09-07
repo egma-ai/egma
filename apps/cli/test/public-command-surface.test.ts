@@ -163,7 +163,6 @@ describe("the skills-first public command surface", () => {
 
   it.each([
     { option: "--json", tail: [] },
-    { option: "--idempotency-key", tail: ["must-not-be-repeated"] },
     { option: "--no-follow", tail: [] },
     { option: "--allow-phone-call", tail: [] },
     { option: "--worker-entrypoint", tail: ["must-not-be-repeated"] },

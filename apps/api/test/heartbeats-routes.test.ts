@@ -150,7 +150,6 @@ async function aQueuedRun(
     suiteId: String(version.body.suiteId),
     agentId: agent.id,
     connectionId,
-    idempotencyKey: newId("run"),
     expectedTestVersions: [{
       testId: String(version.body.testId),
       versionId,

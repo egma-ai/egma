@@ -159,7 +159,6 @@ export function runRoutes(options: {
   const runs: StoredRun[] = [];
   const simulations: StoredSimulation[] = [];
   const events: StoredEvent[] = [];
-  const idempotent = new Map<string, { readonly digest: string; readonly run: StoredRun }>();
   const withoutAdapter = new Set<string>();
   const conductable = (): readonly string[] =>
     CONDUCTABLE_KINDS.filter((kind) => !withoutAdapter.has(kind));
@@ -338,9 +337,8 @@ export function runRoutes(options: {
     }
     const suiteId = text(said.suiteId);
     const connectionId = text(said.connectionId);
-    const idempotencyKey = text(said.idempotencyKey);
-    if (suiteId === "" || connectionId === "" || idempotencyKey === "") {
-      return refuse(422, "unprocessable", "suiteId, connectionId, and idempotencyKey are required");
+    if (suiteId === "" || connectionId === "") {
+      return refuse(422, "unprocessable", "suiteId and connectionId are required");
     }
     const connection = options.connectionById(connectionId);
     if (connection === null || (text(said.agentId) !== "" && text(said.agentId) !== connection.agentId)) {
@@ -361,19 +359,6 @@ export function runRoutes(options: {
       if (new Set(asked).size !== asked.length || JSON.stringify(actual) !== JSON.stringify(asked)) {
         return refuse(409, "suite_changed", "the suite changed after the repository checked it");
       }
-    }
-    const digest = JSON.stringify({
-      suiteId,
-      agentId: connection.agentId,
-      connectionId,
-      name: text(said.name),
-      expected,
-    });
-    const replay = idempotent.get(idempotencyKey);
-    if (replay !== undefined) {
-      return replay.digest === digest
-        ? { status: 200, body: runOut(replay.run) }
-        : refuse(409, "idempotency_conflict", "this idempotency key already names another request");
     }
     const run: StoredRun = {
       id: newId("run"),
@@ -412,7 +397,6 @@ export function runRoutes(options: {
       }
     }
     runs.push(run);
-    idempotent.set(idempotencyKey, { digest, run });
     return { status: 201, body: runOut(run) };
   };
   const settle = (run: StoredRun): void => {

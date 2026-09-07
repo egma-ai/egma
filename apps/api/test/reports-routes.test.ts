@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import { createPersona, getSimulation } from "@egma/db";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
@@ -258,7 +257,6 @@ async function aClaimedSimulation(
     suiteId: String(version.body.suiteId),
     agentId: agent.id,
     connectionId,
-    idempotencyKey: newId("run"),
     expectedTestVersions: [{
       testId: String(version.body.testId),
       versionId,

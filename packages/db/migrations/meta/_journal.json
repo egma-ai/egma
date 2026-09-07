@@ -64,6 +64,13 @@
       "when": 1788766834112,
       "tag": "0008_model_settings_and_versioning",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788807573269,
+      "tag": "0009_simplify_control_plane_tables",
+      "breakpoints": true
     }
   ]
 }

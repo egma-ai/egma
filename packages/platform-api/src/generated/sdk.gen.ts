@@ -1669,7 +1669,6 @@ export const createRun = <ThrowOnError extends boolean = false>(parameters: {
     suiteId: string;
     agentId: string;
     connectionId: string;
-    idempotencyKey: string;
     name?: string;
     expectedTestVersions?: Array<{
         testId: string;
@@ -1681,7 +1680,6 @@ export const createRun = <ThrowOnError extends boolean = false>(parameters: {
                 { in: 'body', key: 'suiteId' },
                 { in: 'body', key: 'agentId' },
                 { in: 'body', key: 'connectionId' },
-                { in: 'body', key: 'idempotencyKey' },
                 { in: 'body', key: 'name' },
                 { in: 'body', key: 'expectedTestVersions' }
             ] }]);

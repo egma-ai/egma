@@ -622,27 +622,3 @@ export type ConnectionRestoreRefusal =
   | "credential_forbidden"
   | "credential_choice_required"
   | "parent_agent_archived";
-
-/**
- * A start action reused an idempotency key over a different request.
- *
- * **The whole value of remembering a key is that it can refuse this.** Answering
- * the original run would tell somebody their new selection had started when it
- * had not; starting a second run would make the key mean nothing. So the third
- * answer is the only honest one, and it says which of the two moves to make:
- * send the original request again, or send a new key for the new one.
- */
-export class IdempotencyConflictError extends Error {
-  readonly idempotencyKey: string;
-  /** What the key already produced, so a caller can go and read it. */
-  readonly resultId: string;
-
-  constructor(idempotencyKey: string, resultId: string) {
-    super(
-      `idempotency key ${idempotencyKey} already started run ${resultId}, and this request is not the one it started`,
-    );
-    this.name = "IdempotencyConflictError";
-    this.idempotencyKey = idempotencyKey;
-    this.resultId = resultId;
-  }
-}

@@ -736,7 +736,12 @@ describe("an organization's settings", () => {
     const written = await updateOrganizationSettings(actingAs(ada, "admin"), {
       retentionDays: 30,
     });
-    expect(written.retentionDays).toBe(30);
+    expect(written).toEqual({
+      organizationId: ada.organizationId,
+      retentionDays: 30,
+      dataResidency: null,
+      updatedAt: expect.any(Date),
+    });
 
     // Reading them is not what the row is about: everybody in the organization
     // reads anything in it, and only an admin changes this.

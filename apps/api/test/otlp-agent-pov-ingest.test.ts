@@ -13,7 +13,6 @@ import {
   startRun,
   startSimulation,
 } from "@egma/db";
-import { newId } from "@egma/ids";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -392,7 +391,6 @@ async function aLandedSimulation(
     suiteId,
     agentId: created.id,
     connectionId: created.connection?.id ?? "",
-    idempotencyKey: newId("run"),
   });
   const page = await listSimulations(auth, started.id, { limit: 1 });
   const simulation = page?.items[0];
@@ -1618,7 +1616,6 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
       suiteId,
       agentId: created.id,
       connectionId: created.connection?.id ?? "",
-      idempotencyKey: newId("run"),
     });
     const page = await listSimulations(auth, started.id, { limit: 1 });
     const simulation = page?.items[0];
@@ -1877,7 +1874,6 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
       suiteId,
       agentId: created.id,
       connectionId: created.connection?.id ?? "",
-      idempotencyKey: newId("run"),
     });
     const page = await listSimulations(auth, started.id, { limit: 1 });
     const simulation = page?.items[0];
@@ -2015,7 +2011,6 @@ describe.skipIf(!storage.available)("a tool call on a lane that mocks nothing", 
       suiteId,
       agentId: created.id,
       connectionId: created.connection?.id ?? "",
-      idempotencyKey: newId("run"),
     });
     const page = await listSimulations(auth, started.id, { limit: 1 });
     const simulation = page?.items[0];

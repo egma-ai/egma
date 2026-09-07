@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import { createPersona, type AuthContext } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -106,7 +105,6 @@ async function aQueuedRun(): Promise<void> {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
       expectedTestVersions: [{ testId, versionId }],
     },
   );

@@ -2625,7 +2625,7 @@ describe("recovering when a page cannot load", () => {
  * A fake feed would have proved that a page can render invented rows.
  *
  * **And it resists growing, the way the flows above it do.** Permissions,
- * archive matrices, refusals, revisions, Retry, idempotency and
+ * archive matrices, refusals, revisions, run starts and
  * repository synchronization are all proved in the fast lane, where each costs
  * milliseconds. If a case here starts being about one of those, it belongs
  * there instead.
