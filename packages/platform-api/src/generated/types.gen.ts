@@ -4702,6 +4702,9 @@ export type GetSimulationResponses = {
             projectGraderId: string;
             graderDefinitionId: string;
             graderDefinitionVersion: number;
+            parameterValues: {
+                [key: string]: unknown;
+            };
             graderName: string;
             score: number | null;
             details: {
@@ -4726,6 +4729,9 @@ export type GetSimulationResponses = {
             projectGraderId: string;
             graderDefinitionId: string;
             graderDefinitionVersion: number;
+            parameterValues: {
+                [key: string]: unknown;
+            };
             graderName: string;
             score: number | null;
             details: {
@@ -4820,7 +4826,6 @@ export type GetSimulationResponses = {
             config: unknown;
         };
         gradingPlan: {
-            state: 'run_start';
             capturedAt: string;
             items: Array<{
                 projectGraderId: string;
@@ -6003,6 +6008,9 @@ export type GetTraceResponses = {
             projectGraderId: string;
             graderDefinitionId: string;
             graderDefinitionVersion: number;
+            parameterValues: {
+                [key: string]: unknown;
+            };
             graderName: string;
             score: number | null;
             details: {
@@ -6027,6 +6035,9 @@ export type GetTraceResponses = {
             projectGraderId: string;
             graderDefinitionId: string;
             graderDefinitionVersion: number;
+            parameterValues: {
+                [key: string]: unknown;
+            };
             graderName: string;
             score: number | null;
             details: {

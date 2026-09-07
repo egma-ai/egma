@@ -31,6 +31,7 @@ import type { AuthContext } from "./context.ts";
 import { IdentityConflictError, UnprocessableInputError } from "./errors.ts";
 import {
   getGraderLibraryEntry,
+  assertGraderSettingsCompatibleOn,
   type GraderLibraryEntry,
 } from "./grader-library.ts";
 import { authorize, here } from "./permissions.ts";
@@ -494,6 +495,15 @@ export async function archiveProjectGrader(
 ): Promise<boolean> {
   authorize(auth, "author_definitions", here(auth));
   return db().transaction(async (tx) => {
+    const [association] = await tx.select({ definitionId: projectGrader.graderDefinitionId })
+      .from(projectGrader).where(within(auth, projectGrader, and(
+        eq(projectGrader.id, id), isNull(projectGrader.archivedAt), inActingProject(auth, projectGrader),
+      )));
+    if (association === undefined) return false;
+    const [definition] = await tx.select({ id: graderDefinition.id }).from(graderDefinition)
+      .where(and(eq(graderDefinition.id, association.definitionId), visibleDefinition(auth)))
+      .for("share", { of: graderDefinition });
+    if (definition === undefined) return false;
     const [held] = await tx
       .select({ definitionId: projectGrader.graderDefinitionId })
       .from(projectGrader)
@@ -707,6 +717,7 @@ export async function editGraderDefinition(
     if (name === "" || !prompt) throw new UnprocessableInputError("a grader needs a name and grading instructions");
     let version = held.currentDefinitionVersion;
     if (prompt !== core.prompt) {
+      await assertGraderSettingsCompatibleOn(tx, definitionId, core.type, core.parameterContract, core.parameterContract);
       version += 1;
       await tx.insert(graderDefinitionVersion).values({
         definitionId, version, type: core.type, prompt,

@@ -52,18 +52,6 @@ export const PREDEFINED_GRADERS = {
 
 export const MAXIMUM_RESPONSE_TIME_PARAMETER = "maximum_response_time_ms";
 
-/**
- * What this setting was called while Response latency graded the mean.
- *
- * Kept because it is stored data, not a name: every project that turned the
- * grader on holds its answer under this key, and the boot door moves those
- * answers to the key above rather than leaving a project with a setting the
- * current contract does not name. Delete it only once no project grader row
- * carries it.
- */
-export const MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER =
-  "maximum_average_response_time_ms";
-
 const SHIPPED = new Date("2026-08-14T00:00:00.000Z");
 const RESPONSE_LATENCY_SHIPPED = new Date("2026-08-24T00:00:00.000Z");
 

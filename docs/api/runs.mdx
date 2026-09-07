@@ -223,11 +223,24 @@ grading fields:
   ever waited for.
 </ResponseField>
 
+<ResponseField name="gradingPlan" type="object | null">
+  The selected test's grading plan from the run. It contains `capturedAt` and
+  `items`. Each item names its project grader, definition and version, grader
+  name, and frozen pass threshold. The complete plan is captured when the run
+  and its simulations are created. Its selection does not change with later
+  core, settings, or scope edits. The plan has no lifecycle state; use
+  `gradingState` for execution progress.
+</ResponseField>
+
 <ResponseField name="grades" type="array">
   The current grade from each selected project grader. Each grade includes
   `projectGraderId`, `graderDefinitionId`, `graderDefinitionVersion`,
-  `graderName`, a normalized `score` or `null`, `details`, the frozen
-  `passThreshold`, its individual `result`, and `gradedAt`.
+  `graderName`, the executed `parameterValues`, a normalized `score` or `null`,
+  `details`, the frozen `passThreshold`, its individual `result`, and `gradedAt`.
+  Successful and
+  errored grades retain these parameters after temporary grading jobs are
+  removed. They describe the executed settings, including numeric grader
+  settings, and contain no credentials.
 </ResponseField>
 
 <ResponseField name="gradeHistory" type="array">
@@ -250,8 +263,8 @@ the trace, test, test suite, or run.
 `POST /v1/simulations/:simulationId/regrade`
 
 Send no request body. Egma reruns the whole grader selection frozen when the
-run started, including its definition versions and pass thresholds. You cannot
-target one grader or apply current policy to the old trace. New grades append
+run started, including its definition versions, parameter values, and pass
+thresholds. You cannot target one grader or apply current policy to the old trace. New grades append
 to `gradeHistory`; the latest grade from each project grader becomes current.
 
 The response names the `simulationId` and reports whether Egma reopened

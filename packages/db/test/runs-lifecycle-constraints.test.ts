@@ -170,6 +170,10 @@ async function insertRun(overrides: RunOverrides = {}): Promise<string> {
       environment: null,
       config: {},
     }),
+    grading_plan: JSON.stringify({
+      capturedAt: new Date().toISOString(),
+      groups: [{ tag: "test", testId, testVersionId, items: [] }],
+    }),
     expected_simulation_count: 1,
     ...overrides,
   };

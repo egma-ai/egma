@@ -2769,6 +2769,7 @@ describe("the complete product, walked in order in a second project", () => {
         projectGraderId: entry.projectGraderId,
         graderDefinitionId: entry.graderDefinitionId,
         graderDefinitionVersion: entry.graderDefinitionVersion,
+        parameterValues: entry.parameterValues,
         score,
         details: {
           rationale: "Six of seven expected behaviors were present.",
@@ -5610,6 +5611,7 @@ describe("project grader model settings", () => {
         traceStartedAtMicroseconds: BigInt(claim.traceStartedAt.getTime()) * 1_000n,
         runId: run.runId, projectGraderId: entry.projectGraderId,
         graderDefinitionId: entry.graderDefinitionId, graderDefinitionVersion: entry.graderDefinitionVersion,
+        parameterValues: entry.parameterValues,
         score: at === 1 ? null : 2 / 3,
         details: at === 1 ? { error: "The grader could not determine whether the criterion was met." } : {
           rationale: "Two of three criteria passed.", assertions: [0, 1, 2].map((at) => ({

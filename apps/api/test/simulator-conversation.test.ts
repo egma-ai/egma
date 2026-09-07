@@ -837,7 +837,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           [THE_BEHAVIOR]: {
             decision: "met",
             rationale: "the agent named an afternoon back before finishing.",
-            citedTurns: [3],
+            cited_turns: [3],
           },
         },
       });

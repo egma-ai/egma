@@ -187,6 +187,22 @@ export function validateGraderParameterValues(
   return answer;
 }
 
+/** A saved number keeps its unit when a compatible core becomes current. */
+export function validateUnchangedParameterUnits(
+  currentContract: unknown,
+  proposedContract: unknown,
+): void {
+  const current = new Map(validateGraderParameterContract(currentContract).map((field) => [field.key, field]));
+  for (const proposed of validateGraderParameterContract(proposedContract)) {
+    const previous = current.get(proposed.key);
+    if (previous !== undefined && previous.unit !== proposed.unit) {
+      throw new UnprocessableInputError(
+        `the unit for ${proposed.key} cannot change from ${previous.unit ?? "unitless"} to ${proposed.unit ?? "unitless"} while project settings are saved`,
+      );
+    }
+  }
+}
+
 /** Defaults are materialized only on creation or first use. */
 export function defaultGraderParameterValues(contractValue: unknown): GraderParameterValues {
   const contract = validateGraderParameterContract(contractValue);

@@ -28,7 +28,6 @@ import {
   type GradingJobStatus,
   type GradingSource,
 } from "../schema/grading.ts";
-import { gradingPlan } from "../schema/plans.ts";
 import { run, simulation } from "../schema/runs.ts";
 import { validClaimant } from "./claimants.ts";
 import type { AuthContext } from "./context.ts";
@@ -1482,14 +1481,14 @@ async function simulationPlanRows(
   // Read each run's plan once. Joining the JSON plan onto every simulation
   // would repeat the same potentially large value for every row on the page.
   const plans = await on
-    .select({ runId: gradingPlan.runId, groups: gradingPlan.groups })
-    .from(gradingPlan)
+    .select({ runId: run.id, gradingPlan: run.gradingPlan })
+    .from(run)
     .where(within(
       auth,
-      gradingPlan,
-      inArray(gradingPlan.runId, [...new Set(rows.map((row) => row.runId))]),
+      run,
+      inArray(run.id, [...new Set(rows.map((row) => row.runId))]),
     ));
-  const byRun = new Map(plans.map((plan) => [plan.runId, plan.groups] as const));
+  const byRun = new Map(plans.map((plan) => [plan.runId, plan.gradingPlan.groups] as const));
   return rows.map((row) => {
     const groups = byRun.get(row.runId);
     if (groups === undefined) throw new Error(`run ${row.runId} has no grading plan`);

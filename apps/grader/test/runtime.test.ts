@@ -16,6 +16,7 @@ import {
   MAXIMUM_RESPONSE_TIME_PARAMETER,
   PREDEFINED_GRADERS,
   readTraceGrades,
+  readProductionGradingPlan,
   readTraceGrading,
   reconcileGraderCatalog,
   regradeTrace,
@@ -211,7 +212,10 @@ describe("the worker consumes one frozen trace plan", () => {
       .resolves.toMatchObject({
         state: "complete",
         combinedScore: 1,
-        current: [{ graderName: "Response latency", result: "passed" }],
+        current: [{
+          graderName: "Response latency", result: "passed",
+          parameterValues: { maximum_response_time_ms: 3_000 },
+        }],
       });
 
     await expect(regradeTrace(auth, { source: "production", traceId }))
@@ -288,7 +292,10 @@ describe("a frozen LLM model and core", () => {
     expect(scripted.asked).toHaveLength(2);
     expect(scripted.asked.every((question) => question.criterion === custom.definition.gradingInstructions && question.expectedBehaviors.length === 0)).toBe(true);
     expect((await readTraceGrades(auth, { source: "production", traceId: firstTrace })).current).toEqual(expect.arrayContaining([
-      expect.objectContaining({ projectGraderId: custom.projectGrader.id, score: 1, graderDefinitionVersion: 1, graderPassThreshold: 0.8 }),
+      expect.objectContaining({ projectGraderId: custom.projectGrader.id, score: 1, graderDefinitionVersion: 1, graderPassThreshold: 0.8, parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" } }),
+    ]));
+    expect((await readProductionGradingPlan(auth, firstTrace))?.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ projectGraderId: custom.projectGrader.id, parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" }, graderDefinitionVersion: 1, graderPassThreshold: 0.8 }),
     ]));
     await select(laterTrace);
     await archiveProjectGrader(auth, custom.projectGrader.id);
@@ -299,11 +306,12 @@ describe("a frozen LLM model and core", () => {
       parameterValues: { llm_provider: "openai", llm_model: "gpt-5.6-terra" },
       definition: { prompt: "The agent is calm and clear." },
     });
-    await gradeClaim(later, options);
+    const failedProvider = scriptedJudge({ answers: {}, otherwise: new Error("the selected provider failed") });
+    await gradeClaim(later, { ...options, makers: failedProvider.makers });
     await finishGradingJob(later.auth, later.id, later.claimedBy);
-    expect(scripted.configured.at(-1)?.model).toBe("gpt-5.6-terra");
+    expect(failedProvider.configured.at(-1)?.model).toBe("gpt-5.6-terra");
     expect((await readTraceGrades(auth, { source: "production", traceId: laterTrace })).current).toEqual(expect.arrayContaining([
-      expect.objectContaining({ projectGraderId: custom.projectGrader.id, score: 1, graderDefinitionVersion: 2, graderPassThreshold: 0.9 }),
+      expect.objectContaining({ projectGraderId: custom.projectGrader.id, score: null, graderDefinitionVersion: 2, graderPassThreshold: 0.9, parameterValues: { llm_provider: "openai", llm_model: "gpt-5.6-terra" }, details: { error: expect.stringContaining("the selected provider failed") } }),
     ]));
   });
 });

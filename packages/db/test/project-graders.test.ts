@@ -23,7 +23,6 @@ import { createProject } from "../src/access/projects.ts";
 import { provisionOrganization } from "../src/access/provisioning.ts";
 import {
   GRADER_DEFINITION_CATALOG,
-  MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
   MAXIMUM_RESPONSE_TIME_PARAMETER,
   PREDEFINED_GRADERS,
 } from "../src/grader-library/catalog.ts";
@@ -206,7 +205,7 @@ describe("shared definitions and project grader policy", () => {
     )).rejects.toThrow("grader definition is not available in this project");
     await expect(database.sql(
       `update project_grader set project_id = $2 where id = $1`, [created.projectGrader.id, second.id],
-    )).rejects.toThrow("grader definition is not available in this project");
+    )).rejects.toThrow("project grader ownership is immutable");
     const foreignOrganizationId = newId("org");
     await database.sql(`insert into organization (id, name, slug) values ($1, 'Foreign', $1)`, [foreignOrganizationId]);
     await expect(database.sql(
@@ -334,48 +333,24 @@ describe("shared definitions and project grader policy", () => {
     )).rejects.toThrow("may not author_definitions");
   });
 
-  it("carries a Response latency setting across the key's rename", async () => {
-    /*
-     * The grader bounded the mean and its setting was called
-     * `maximum_average_response_time_ms`. It bounds the p90 now, so the key
-     * was renamed — and a project that had already turned the grader on holds
-     * its answer under the old name. Left there, the current contract does not
-     * name that project's only setting: the grader errors instead of grading
-     * and the project cannot be edited. The boot door moves the answer, and
-     * never changes it.
-     */
-    const used = await useGraderInProject(
-      auth,
-      PREDEFINED_GRADERS.responseLatency,
-      {
-        scope: { simulations: [{ kind: "all" }], production: null },
-        parameterValues: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500 },
-        passThreshold: 1,
-      },
-    );
+  it("preserves a saved Response latency setting when the catalog is reapplied", async () => {
+    const used = await useGraderInProject(auth, PREDEFINED_GRADERS.responseLatency, {
+      scope: { simulations: [{ kind: "all" }], production: null },
+      parameterValues: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500 },
+      passThreshold: 1,
+    });
     if (used === undefined) throw new Error("the grader was not turned on");
-
-    // Put the row back the way the old contract wrote it.
-    await database.sql(
-      `update project_grader set parameter_values = $2 where id = $1`,
-      [used.id, JSON.stringify({
-        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_500,
-      })],
-    );
-
-    await reconcileGraderCatalog();
-
-    const after = await getProjectGrader(auth, used.id);
-    expect(after?.parameterValues).toEqual({
-      [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500,
+    await editProjectGrader(auth, used.id, {
+      parameterValues: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500 },
+      passThreshold: 0.75,
     });
 
-    // Idempotent: a second boot finds nothing to move and changes nothing.
+    await reconcileGraderCatalog();
     await reconcileGraderCatalog();
     await expect(getProjectGrader(auth, used.id)).resolves.toMatchObject({
       parameterValues: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500 },
+      passThreshold: 0.75,
     });
-
     await archiveProjectGrader(auth, used.id);
   });
 

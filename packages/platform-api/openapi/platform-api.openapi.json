@@ -17791,6 +17791,10 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "parameterValues": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
                           "graderName": {
                             "type": "string"
                           },
@@ -17887,6 +17891,7 @@
                           "projectGraderId",
                           "graderDefinitionId",
                           "graderDefinitionVersion",
+                          "parameterValues",
                           "graderName",
                           "score",
                           "details",
@@ -17914,6 +17919,10 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "parameterValues": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
                           "graderName": {
                             "type": "string"
                           },
@@ -18010,6 +18019,7 @@
                           "projectGraderId",
                           "graderDefinitionId",
                           "graderDefinitionVersion",
+                          "parameterValues",
                           "graderName",
                           "score",
                           "details",
@@ -18473,12 +18483,6 @@
                         {
                           "type": "object",
                           "properties": {
-                            "state": {
-                              "type": "string",
-                              "enum": [
-                                "run_start"
-                              ]
-                            },
                             "capturedAt": {
                               "type": "string",
                               "format": "date-time"
@@ -18521,7 +18525,6 @@
                             }
                           },
                           "required": [
-                            "state",
                             "capturedAt",
                             "items"
                           ],
@@ -22524,6 +22527,10 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "parameterValues": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
                           "graderName": {
                             "type": "string"
                           },
@@ -22620,6 +22627,7 @@
                           "projectGraderId",
                           "graderDefinitionId",
                           "graderDefinitionVersion",
+                          "parameterValues",
                           "graderName",
                           "score",
                           "details",
@@ -22647,6 +22655,10 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "parameterValues": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
                           "graderName": {
                             "type": "string"
                           },
@@ -22743,6 +22755,7 @@
                           "projectGraderId",
                           "graderDefinitionId",
                           "graderDefinitionVersion",
+                          "parameterValues",
                           "graderName",
                           "score",
                           "details",

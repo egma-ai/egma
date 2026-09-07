@@ -8,6 +8,8 @@ import {
   connectClickHouse,
   disconnectClickHouse,
   finishGradingJob,
+  editProjectGrader,
+  getProjectGrader,
   getGradingJob,
   getGradingJobForTrace,
   readProductionGradingPlan,
@@ -127,6 +129,7 @@ async function appendOne(
     projectGraderId: entry.projectGraderId,
     graderDefinitionId: entry.graderDefinitionId,
     graderDefinitionVersion: entry.graderDefinitionVersion,
+    parameterValues: entry.parameterValues,
     score,
     details: score === null
       ? { error: "the grader could not score" }
@@ -244,27 +247,21 @@ describe("one frozen production job", () => {
     });
   });
 
-  /*
-   * A job frozen before the output contract was dropped still carries the key
-   * inside its own `entries` JSON, because a frozen entry is a copy and not a
-   * pointer. The reader names the fields it wants, so the extra key is read
-   * past rather than refused, and in-flight work keeps grading.
-   */
-  it("claims and grades a job frozen with the legacy output contract", async () => {
+  it("refuses a changed frozen selection and grades the original entry", async () => {
     const traceId = "1414141414141414141414141414eeee";
     await request(traceId);
-    await database.sql(
+    await expect(database.sql(
       `update grading_job
           set entries = jsonb_set(
                 entries,
-                '{0,definition,outputContract}',
-                '{"score":{"type":"number | null","minimum":0,"maximum":1}}'::jsonb,
+                '{0,graderPassThreshold}',
+                '0.1'::jsonb,
                 true)
         where project_id = $1 and trace_id = $2`,
       [projectId, traceId],
-    );
+    )).rejects.toThrow("a grading job selection is immutable");
 
-    const claim = await claimTrace(traceId, "grader-legacy-frozen-entry");
+    const claim = await claimTrace(traceId, "grader-frozen-entry");
     expect(entryOf(claim)).toMatchObject({
       projectGraderId,
       graderDefinitionId: definitionId,
@@ -272,10 +269,6 @@ describe("one frozen production job", () => {
       graderPassThreshold: 0.7,
       definition: { definitionVersion: 1, type: "code" },
     });
-    // The legacy key really is in the claimed snapshot: this proves the shape
-    // under test is the old one, and that nothing strips or refuses it.
-    expect(entryOf(claim).definition).toHaveProperty("outputContract");
-
     await appendOne(claim, 1, 1_777_000_004_000_000n);
     await expect(
       finishGradingJob(claim.auth, claim.id, claim.claimedBy),
@@ -830,7 +823,7 @@ describe("regrading uses frozen history", () => {
     }]);
   });
 
-  it("stores an empty selection as not requested and creates no job", async () => {
+  it("keeps an empty selection after later activation and preserves new selected values after job cleanup", async () => {
     await database.sql(
       `update project_grader
           set scope = '{"simulations":[],"production":null}'::jsonb
@@ -848,5 +841,40 @@ describe("regrading uses frozen history", () => {
         current: [],
         combinedScore: null,
       });
+    const empty = await readProductionGradingPlan(auth, traceId);
+    expect(empty?.entries).toEqual([]);
+    const before = await getProjectGrader(auth, projectGraderId);
+    await editProjectGrader(auth, projectGraderId, {
+      scope: { simulations: [], production: { sample_percent: 100 } },
+      parameterValues: { maximum: 9 }, passThreshold: 0.95,
+    });
+    await reconcileGraderCatalog([{
+      id: definitionId, name: "Policy quality", description: "A later compatible core", type: "code", scopeEditable: true,
+      prompt: null, parameterContract: [{ key: "maximum", label: "Maximum after release", valueType: "integer", defaultValue: 8, unit: null, minimum: 1, maximum: null }],
+      modalities: ["chat", "voice"], createdAt: TRACE_START,
+    }]);
+    await expect(request(traceId)).resolves.toEqual({ kind: "not_requested" });
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toEqual(empty);
+    await expect(getGradingJobForTrace(auth, traceId)).resolves.toBeUndefined();
+
+    const laterTrace = "4444444444444444444444444444ddde";
+    await expect(request(laterTrace)).resolves.toMatchObject({ kind: "queued", created: true });
+    const selected = await claimTrace(laterTrace, "after-later-activation");
+    expect(selected.entries).toMatchObject([{
+      graderDefinitionVersion: before!.currentDefinitionVersion + 1,
+      graderPassThreshold: 0.95, parameterValues: { maximum: 9 },
+    }]);
+    await appendOne(selected, 1, 1_777_100_100_000_000n);
+    await finishGradingJob(selected.auth, selected.id, selected.claimedBy);
+    await expect(getGradingJobForTrace(auth, laterTrace)).resolves.toBeUndefined();
+    const retained = await readProductionGradingPlan(auth, laterTrace);
+    expect(retained?.entries).toMatchObject([{ parameterValues: { maximum: 9 }, graderPassThreshold: 0.95 }]);
+    await editProjectGrader(auth, projectGraderId, {
+      scope: { simulations: [], production: null }, parameterValues: { maximum: 11 }, passThreshold: 1,
+    });
+    await expect(request(laterTrace)).resolves.toEqual({ kind: "terminal", outcome: "complete" });
+    await expect(readProductionGradingPlan(auth, laterTrace)).resolves.toEqual(retained);
+    const completed = await readTraceGrades(auth, { source: "production", traceId: laterTrace });
+    expect(completed.current).toMatchObject([{ parameterValues: { maximum: 9 }, graderPassThreshold: 0.95, score: 1 }]);
   });
 });

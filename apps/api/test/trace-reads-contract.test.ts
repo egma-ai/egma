@@ -1286,6 +1286,7 @@ describe.skipIf(!storage.available)("a production conversation selected by a fix
       projectGraderId: entry.projectGraderId,
       graderDefinitionId: entry.graderDefinitionId,
       graderDefinitionVersion: entry.graderDefinitionVersion,
+      parameterValues: entry.parameterValues,
       score: 0.25,
       details: {
         rationale: "The production response missed the policy.",
