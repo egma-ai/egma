@@ -37,6 +37,52 @@ export {
   type UpsertedRateCard,
 } from "./rate-card/seed.ts";
 /**
+ * What a month of platform usage is, and the seam billing plugs into.
+ *
+ * Neither reaches a store. The first is arithmetic over a simulation row's own
+ * frozen facts, and it crosses the boundary because the page that shows a
+ * month, the read that sums it and any adapter that limits it have to be
+ * counting the same thing. The second is two interfaces and the answers a
+ * deployment with no billing gives; the process that boots chooses the adapter
+ * once, from its settings, and every seam that asks reaches it from inside
+ * this package.
+ */
+export {
+  ALLOWANCE_KINDS,
+  ALLOWANCE_UNITS,
+  SHORTEST_BILLABLE_SECONDS,
+  allowanceKindOf,
+  allowancePeriodAt,
+  allowanceUsedBy,
+  billableSecondsOf,
+  minutesFromSeconds,
+  type AllowanceKind,
+  type AllowancePeriod,
+} from "./billing/allowance.ts";
+export {
+  billingPlugInFor,
+  discardingUsageSink,
+  installBillingPlugIn,
+  openBillingPlugIn,
+  openEntitlementSource,
+  type AllowanceRefusal,
+  type BillingPlugIn,
+  type BillingSettings,
+  type EntitlementSource,
+  type FundingDecision,
+  type FundingRequest,
+  type StartDecision,
+  type StartRequest,
+  type StoredUsageRecord,
+  type UsageSink,
+} from "./billing/ports.ts";
+export {
+  entitlementSourceContract,
+  usageSinkContract,
+  type AdapterFactory,
+  type PortCheck,
+} from "./billing/contract.ts";
+/**
  * The rate card's vocabulary and its coverage rule. No store is reached: a
  * catalog and a parsed file go in, and the usage types Egma measures, the unit
  * each is counted in, and the models with no price come out. It crosses the

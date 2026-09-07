@@ -1,0 +1,249 @@
+import type { UsagePaymentSource } from "../schema/billing.ts";
+import type { AllowanceKind } from "./allowance.ts";
+
+/**
+ * The two ports billing plugs into, and the answers a deployment with no
+ * billing gives.
+ *
+ * **The open product asks; only the cloud answers differently.** Egma measures
+ * every provider request and counts every allowance on every deployment,
+ * because that is the product. Whether a customer may start more work, and
+ * whether a request costs somebody money, is a question about a plan and a
+ * balance — and a self-hoster has neither. So the product calls two small
+ * interfaces at the two seams it already has, and the adapters that ship with
+ * it answer "yes, unlimited" and throw the numbers away.
+ *
+ * **Each port is one method's worth of vocabulary and everything else is
+ * behind it.** A caller learns "may this organization start this kind of work"
+ * and "here is what was spent"; plans, periods, balances, Stripe and the whole
+ * of `ee/` sit on the other side. That is what makes the seam worth having:
+ * the day billing arrives, no call site moves.
+ *
+ * **Nothing here asks whether this deployment is the cloud.** The adapter is
+ * chosen from the presence of a setting, once, at boot. See
+ * `billingPlugInFor` at the foot of this file, and ADR-0024.
+ */
+
+/** One allowance an organization has spent, and when it comes back. */
+export type AllowanceRefusal = {
+  readonly allowance: AllowanceKind;
+  /** When this allowance resets, so the refusal can name a date. */
+  readonly resetsAt: Date;
+  /**
+   * The sentence a person is shown, whole.
+   *
+   * Written where the refusal is decided rather than assembled by the caller,
+   * for the reason a run refusal's is: the layer that shows it would have to
+   * read the parts to rebuild the sentence, and the prose is the part
+   * deliberately left free to improve.
+   */
+  readonly message: string;
+};
+
+/**
+ * What is about to begin, asked once for a whole batch of it.
+ *
+ * The allowances are a set rather than one kind because the two seams that ask
+ * are both batch-shaped: a run start knows the one lane its whole suite will
+ * run over, and a claim batch can hold several organizations' work across
+ * several lanes. Asking per simulation is the thing this shape exists to
+ * prevent — see the claim path, where it would be a round trip per
+ * conversation on the hot path of the queue.
+ */
+export type StartRequest = {
+  readonly organizationId: string;
+  readonly allowances: readonly AllowanceKind[];
+};
+
+/**
+ * Yes, or which of the asked allowances is spent.
+ *
+ * A union rather than a possibly-empty list, so a caller cannot forget to look
+ * at the length of an array and admit work an adapter refused.
+ */
+export type StartDecision =
+  | { readonly allowed: true }
+  | {
+      readonly allowed: false;
+      /** One entry per refused allowance, in the order they were asked. */
+      readonly refusals: readonly AllowanceRefusal[];
+    };
+
+/**
+ * Whether Egma's own provider key may fund this work.
+ *
+ * The providers are named by the catalog's own words, and asked together for
+ * the reason above: one simulation needs an LLM, a speech-to-text and a
+ * text-to-speech provider, and the refusal a person is shown names all of the
+ * ones without funding rather than the first.
+ */
+export type FundingRequest = {
+  readonly organizationId: string;
+  readonly providers: readonly string[];
+};
+
+export type FundingDecision =
+  | { readonly funded: true }
+  | {
+      readonly funded: false;
+      /** Which of the asked providers Egma's key may not fund. */
+      readonly providers: readonly string[];
+      readonly message: string;
+    };
+
+/**
+ * Whether an organization may start a kind of work, and whether Egma's key may
+ * pay for it.
+ *
+ * Two questions and not one, because they are asked at different moments about
+ * different things: the first is about a plan's allowance and is asked before
+ * any conversation begins, the second is about a balance and is asked about
+ * the providers one piece of work needs.
+ */
+export type EntitlementSource = {
+  mayStart(request: StartRequest): Promise<StartDecision>;
+  mayPlatformKeyFund(request: FundingRequest): Promise<FundingDecision>;
+};
+
+/**
+ * One stored, priced provider request, as the usage sink receives it.
+ *
+ * **Stored, and that word is load-bearing.** The sink receives what the write
+ * actually put in the table — a resend that collapsed onto an existing row
+ * hands over nothing — so an adapter that charges a balance for what it
+ * receives cannot charge twice for one request however many times the
+ * measurement arrives.
+ *
+ * The record's own id travels with it because it is the stable name of this
+ * piece of spend: a ledger row keyed on it can be written once and only once.
+ */
+export type StoredUsageRecord = {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly projectId: string;
+  /** When the provider answered, off the evidence rather than off the write. */
+  readonly occurredAt: Date;
+  readonly provider: string;
+  readonly model: string;
+  /** Whose key paid. Only `platform` is anybody's bill but the customer's own. */
+  readonly paymentSource: UsagePaymentSource;
+  /** What it cost, in millionths of a US dollar, at the rate card. */
+  readonly amountMicros: number;
+};
+
+/**
+ * Where priced usage records go after they are stored.
+ *
+ * **It must not throw, and the caller guards anyway.** A record is a durable
+ * row before the sink sees it, so a sink that failed has lost a delivery and
+ * not a fact — everything it would have done can be rebuilt from the rows. A
+ * sink that could fail a write, on the other hand, would turn a billing outage
+ * into a simulator that cannot record what it spent.
+ */
+export type UsageSink = {
+  receive(records: readonly StoredUsageRecord[]): Promise<void>;
+};
+
+/** Both ports, as one deployment holds them. */
+export type BillingPlugIn = {
+  readonly entitlements: EntitlementSource;
+  readonly usage: UsageSink;
+};
+
+/**
+ * The entitlement source of a deployment that does not bill: everything is
+ * allowed and Egma's key funds everything.
+ *
+ * It is a real adapter and not a stub. A self-hoster runs on it forever, and
+ * ADR-0024 requires that the open build resolve to a plan whose every limit is
+ * unlimited rather than to a special case in the product.
+ */
+export function openEntitlementSource(): EntitlementSource {
+  return {
+    mayStart: () => Promise.resolve({ allowed: true }),
+    mayPlatformKeyFund: () => Promise.resolve({ funded: true }),
+  };
+}
+
+/**
+ * The usage sink of a deployment that does not bill: the records are already
+ * stored, and there is nothing else to do with them.
+ */
+export function discardingUsageSink(): UsageSink {
+  return { receive: () => Promise.resolve() };
+}
+
+/** The plug-in a deployment with no billing runs on. */
+export function openBillingPlugIn(): BillingPlugIn {
+  return { entitlements: openEntitlementSource(), usage: discardingUsageSink() };
+}
+
+/**
+ * What selects a billing adapter. Settings, and never a mode.
+ *
+ * One optional value today. No field here may ever be derived from whether
+ * this deployment is Egma Cloud: a self-hoster who sets the same secret gets
+ * the same billing, which is what makes billing a hosted service rather than a
+ * cloud-only feature. See ADR-0024, and Langfuse's own code comments on the
+ * region variable that leaked into client-safe code.
+ */
+export type BillingSettings = {
+  readonly stripeSecretKey?: string | undefined;
+};
+
+/**
+ * Which plug-in this deployment's settings select. A plain function of the
+ * settings, called once at boot.
+ *
+ * Naming a Stripe secret selects the cloud adapter, which lives in the
+ * commercially licensed `ee/` package and is not in this release. Until it
+ * lands, naming one is refused out loud at boot rather than quietly answered
+ * "unlimited": an operator who set a Stripe key expects to be charging, and a
+ * deployment that took the key and billed nobody would be the worse of the two
+ * failures by a long way.
+ */
+export function billingPlugInFor(settings: BillingSettings): BillingPlugIn {
+  const stripeSecretKey = settings.stripeSecretKey?.trim() ?? "";
+  if (stripeSecretKey === "") return openBillingPlugIn();
+  throw new Error(
+    "a Stripe secret key selects the cloud billing adapter, which ships in " +
+      "the ee/ package and is not in this release; unset it to run without " +
+      "billing",
+  );
+}
+
+/**
+ * The plug-in this process runs on.
+ *
+ * A module-level holder, like the Postgres pool one file over, and for the
+ * same reason: it is chosen once at boot, every caller wants the same one, and
+ * threading it through `startRun` and the record write from the process that
+ * booted would mean a billing argument on every function between here and
+ * there. It starts as the open plug-in, so a process that installs nothing —
+ * a test, a self-hoster, a script — behaves exactly as it did before billing
+ * existed.
+ */
+let installed: BillingPlugIn = openBillingPlugIn();
+
+/**
+ * Put a plug-in in place, and take back the way to undo it.
+ *
+ * The undo is what a test uses to put the deployment back the way it found it.
+ * Boot calls this once and never calls what it returns.
+ */
+export function installBillingPlugIn(plugIn: BillingPlugIn): () => void {
+  const previous = installed;
+  installed = plugIn;
+  return () => {
+    installed = previous;
+  };
+}
+
+/**
+ * The installed plug-in. Internal: the product reaches billing through the two
+ * seams that ask it something, and a caller that could fetch the plug-in could
+ * ask it anything from anywhere.
+ */
+export function billing(): BillingPlugIn {
+  return installed;
+}

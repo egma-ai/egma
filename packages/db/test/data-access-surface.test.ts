@@ -437,6 +437,48 @@ const THE_RATE_CARD = [
   "upsertRateCard",
 ];
 
+/**
+ * What a month of platform usage is: the three allowances, which one a
+ * conversation is counted against, how many seconds it counts and when the
+ * month turns over.
+ *
+ * It reaches no store and names no customer — a simulation row's own frozen
+ * facts go in and a quantity comes out — and it crosses the boundary because
+ * the page that shows a month, the read that sums it and any adapter that
+ * limits it have to be counting the same thing.
+ */
+const THE_ALLOWANCES = [
+  "ALLOWANCE_KINDS",
+  "ALLOWANCE_UNITS",
+  "SHORTEST_BILLABLE_SECONDS",
+  "allowanceKindOf",
+  "allowancePeriodAt",
+  "allowanceUsedBy",
+  "billableSecondsOf",
+  "minutesFromSeconds",
+];
+
+/**
+ * The two ports billing plugs into, the adapters a deployment with no billing
+ * runs on, the plain function of settings that selects between them, and the
+ * contract every adapter of either port is held to.
+ *
+ * None of them takes an `AuthContext` and none of them reaches a store: they
+ * are interfaces and the answers "yes, unlimited" and "discard". What does
+ * reach a store — a run start, a claim, a usage write — asks them from inside
+ * this package, so `billing()` itself is deliberately not on this list: a
+ * caller who could fetch the plug-in could ask it anything from anywhere.
+ */
+const THE_BILLING_SEAM = [
+  "billingPlugInFor",
+  "discardingUsageSink",
+  "entitlementSourceContract",
+  "installBillingPlugIn",
+  "openBillingPlugIn",
+  "openEntitlementSource",
+  "usageSinkContract",
+];
+
 const THE_PERSONA_LIBRARY = [
   "PERSONA_LIBRARY_CATALOG",
   "EGMA_PROVIDED_PERSONAS",
@@ -691,6 +733,8 @@ describe("the data-access module's surface", () => {
         ...THE_GRADER_LIBRARY,
         ...THE_PERSONA_LIBRARY,
         ...THE_RATE_CARD,
+        ...THE_ALLOWANCES,
+        ...THE_BILLING_SEAM,
         ...THE_MODELS,
       ].sort(),
     );
