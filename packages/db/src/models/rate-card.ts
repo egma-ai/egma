@@ -191,8 +191,13 @@ export type RateCardEntry = {
  * `import.meta.dirname` is `src/models` when this module is run as TypeScript
  * and `dist/models` when it is run as the build's JavaScript. Two levels up is
  * the package root either way, and the file is read from the sources from
- * there — the trick `MIGRATIONS_DIRECTORY` uses for the same reason, and the
- * reason the deployment image copies this package whole.
+ * there — the trick `MIGRATIONS_DIRECTORY` uses for the same reason.
+ *
+ * **The package's `files` list names this one path inside `src`**, so a packed
+ * install carries it exactly as it carries the migrations. It has to: the file
+ * is applied on boot like a migration is, and a deployment that shipped
+ * without it would boot with an empty rate card and price every provider
+ * request at nothing.
  */
 export function rateCardFile(): string {
   return path.join(

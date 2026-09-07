@@ -477,6 +477,19 @@ async function simulatorExport(
    * like every other span, so the evidence and the bill agree by construction.
    */
   const billing: { auth: AuthContext; records: readonly NewUsageRecord[] }[] = [];
+  /**
+   * Bills this side could not read, for this side's log.
+   *
+   * **Deliberately not counted as rejected spans.** OTLP's partial-success
+   * field means *this data was not stored, do not send it again*, and an
+   * exporter is entitled to act on it — the simulator's own does: a non-zero
+   * count raises out of the sender, and the reporter then abandons the
+   * simulation and never files its terminal report. The span itself did land,
+   * whole, payload and all; what could not be read is the cost beside it. So
+   * an unreadable bill is an emitter defect this deployment tells its own
+   * operator about, and never a reason to lose a conversation.
+   */
+  const unreadableBills: string[] = [];
   for (const group of groups.values()) {
     // Normalised per gathering, so the row caps guard each customer's append
     // rather than the request: a bound loosened only by naming more
@@ -513,11 +526,7 @@ async function simulatorExport(
         runId: target.runId,
       };
     });
-    // A bill this side cannot read is reported the way a refused span is, and
-    // the conversation is still kept: the evidence is worth having whether or
-    // not the cost beside it could be worked out.
-    rejected.count += usage.skipped.length;
-    rejected.firstReason ||= usage.skipped[0] ?? "";
+    unreadableBills.push(...usage.skipped);
     if (usage.records.length > 0) {
       billing.push({ auth: group.auth, records: usage.records });
     }
@@ -544,6 +553,16 @@ async function simulatorExport(
   // carry new ids, is correctly new spend.
   for (const { auth, records } of billing) {
     await recordProviderUsage(auth, records);
+  }
+
+  if (unreadableBills.length > 0) {
+    // Whoever reads this deployment's log is who can fix an emitter. The
+    // sender is told nothing: every span in this flush is stored, and telling
+    // an exporter otherwise would cost it the conversation.
+    request.log.warn(
+      { unreadableBills },
+      "spans landed whole, but Egma could not read what they say they cost",
+    );
   }
 
   // One truthful answer: the normaliser's rejects plus the records acceptance

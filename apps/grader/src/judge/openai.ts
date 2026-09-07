@@ -204,14 +204,10 @@ function report(
   if (Object.keys(quantities).length === 0) return;
 
   const id = body["id"];
-  const model = body["model"];
   sink({
     occurredAt: new Date(),
     assertion: question.assertion,
     httpAttempt,
-    // The model the provider says it served, which can be more exact than the
-    // one that was asked for — and it is what the bill will name.
-    model: typeof model === "string" && model !== "" ? model : "",
     providerRef: typeof id === "string" && id !== "" ? id : undefined,
     quantities,
     rawUsage: counted,

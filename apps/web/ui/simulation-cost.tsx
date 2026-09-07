@@ -77,7 +77,12 @@ export function SimulationCost({
       title="Cost"
       lead={COST_IS}
       action={
-        <p className="m-0 text-sm font-medium tabular-nums">
+        /*
+         * The same face as the amounts in the table below it. A total drawn one
+         * way and its own rows drawn another reads as two different kinds of
+         * number, and these are one number and its parts.
+         */
+        <p className="m-0 font-mono text-sm tabular-nums">
           {`${costLabel(read.amountMicros)} · ${countLabel(read.requests)}`}
         </p>
       }

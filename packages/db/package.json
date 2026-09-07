@@ -12,7 +12,8 @@
   "files": [
     "dist",
     "migrations",
-    "clickhouse-migrations"
+    "clickhouse-migrations",
+    "src/models/rate-card.json"
   ],
   "scripts": {
     "build": "tsc -b",
