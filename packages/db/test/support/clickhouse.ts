@@ -9,15 +9,8 @@ import {
 } from "./store-urls.ts";
 
 /**
- * Every guarantee under test is a ClickHouse-specific behaviour — the sort key,
- * the partition key, what a materialised view does with a block, whether a
- * repeated insert lands twice — so tests run against a real ClickHouse and never
- * a substitute. A mocked one would confirm the strings egma sends and nothing
- * about what they do.
- *
- * Each test file owns a database of its own, created here and dropped
- * afterwards, so a file can migrate from empty without disturbing another. This
- * is the Postgres support file's arrangement, on the store beside it.
+ * Use real ClickHouse to test engine behavior. Each test file gets a
+ * separate database, migrated from empty and dropped during teardown.
  */
 
 export const MAINTENANCE_CLICKHOUSE_URL = MAINTENANCE_URL;

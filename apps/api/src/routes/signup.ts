@@ -10,25 +10,9 @@ import {
 } from "../http/provider-refusal.ts";
 
 /**
- * Signing up, and whether anybody still may.
- *
- * The provider owns creating the identity — email, password, the hash, the
- * session cookie — and this route owns the one thing the provider has no field
- * for: which organization and which project the person is naming. It relays the
- * request to the provider's own endpoint with those names travelling beside it,
- * and the hook that fires on the identity being written provisions both in one
- * transaction.
- *
- * Relaying rather than calling a provider method is the point. What egma
- * depends on stays the provider's HTTP surface plus four seam calls, so a
- * different provider is a different implementation of the seam rather than an
- * audit of every route.
- *
- * **The same route serves an invited person**, carrying a token instead of an
- * organization name. It is one route rather than two because the provider half
- * is identical — an identity, a password hash, a session cookie — and only where
- * the person lands differs. Splitting it would mean two relays to keep in step,
- * and a second place for the refusals to be forgotten.
+ * Relay identity creation with request-local provisioning intent. Hooks
+ * create an organization/project or accept an invitation. Provider identity
+ * creation and Egma provisioning use separate transactions.
  */
 
 export type SignupRoutesOptions = {
@@ -39,14 +23,8 @@ export type SignupRoutesOptions = {
   readonly baseUrl: string;
   readonly singleOrganization: boolean;
   /**
-   * Whether a new identity has to confirm its address before it can sign in.
-   *
-   * It is the mail transport's `delivers` and nothing else, exactly as the
-   * provider's own `requireEmailVerification` is, so there is one setting and
-   * not two. Signup is where it changes what a person must do next: with mail
-   * configured the provider deliberately issues no session, and a page that did
-   * not know would send somebody into a product they cannot open yet and leave
-   * them back at the sign-in door with no reason given.
+   * Mirror EmailSender.delivers and provider verification configuration so
+   * the signup response tells the web app whether email confirmation is required.
    */
   readonly emailVerificationRequired: boolean;
 };
@@ -148,18 +126,7 @@ export async function signupRoutes(
     const response = relayed.result;
 
     if (!response.ok) {
-      // Refusals arrive as answers rather than faults, whoever decided them: a
-      // password too short and an organization name already taken come back
-      // the same shape. No cookie is forwarded, because nothing was created to
-      // hold a session for.
-      //
-      // The translation is shared with the other route that relays to the
-      // provider, so the same refusal cannot be spelled two ways by two doors.
-      //
-      // This sentence is what a caller reads whenever the provider refused the
-      // body itself, because the provider's own words for that name a field in
-      // its parser. So it says what to look at rather than only that something
-      // went wrong.
+      // Use the shared provider-refusal mapping and omit session cookies on failure.
       return sendProviderRefusal(
         reply,
         await providerRefusal(response, {

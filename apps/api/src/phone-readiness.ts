@@ -4,21 +4,9 @@ import {
 } from "./config.ts";
 
 /**
- * Whether this platform can place a phone call, and what is missing when it
- * cannot.
- *
- * **Phone readiness is not platform readiness.** A deployment that has never
- * been given a carrier still runs chat simulations. This says only whether it
- * can place a phone call.
- *
- * The API reads the deployment environment once at startup. The complete route
- * stays in process configuration, never enters Postgres, and is handed only to
- * a simulator which claimed phone work.
- *
- * This is an internal run-start precondition, not a public readiness response.
- * Everything returned here is non-secret: the carrier hostname and the number
- * a call appears to come from. Speech configuration comes from the pinned
- * persona version plus the deployment credential source.
+ * Check carrier configuration before starting phone simulations. Missing
+ * carrier settings do not disable chat. Public facts contain only hostname
+ * and source number; credentials stay in process configuration until dispatch.
  */
 
 /** What a platform's phone half can be. */

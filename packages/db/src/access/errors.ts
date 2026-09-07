@@ -43,17 +43,8 @@ export class ActiveApiKeyNameConflictError extends Error {
 }
 
 /**
- * The agent factory turned a write away, and which rule turned it away is
- * carried beside the sentence rather than hidden inside it.
- *
- * Three rules refuse a write here and they are three different answers to
- * whoever asked: a connection payload the type's own registry entry will not
- * take, something the factory needs a name for and did not get one for, and a
- * name a living row already holds. An HTTP layer has to tell them apart, and
- * reading the sentence to do it would make the prose load-bearing — while the
- * sentence is the part deliberately left free to improve. So the reason
- * travels as a value and the sentence travels untouched, to be relayed word
- * for word to whoever asked.
+ * An agent write refusal with a stable reason for HTTP handling.
+ * Callers must inspect reason instead of parsing the message.
  */
 export class AgentWriteRefusedError extends Error {
   readonly reason: AgentWriteRefusal;
@@ -66,14 +57,9 @@ export class AgentWriteRefusedError extends Error {
 }
 
 /**
- * Which rule refused.
- *
- * - `not_admitted` — the connection registry's per-kind gate: an unknown kind,
- *   a modality the type does not speak, a config key it has no place for, a
- *   credential where none belongs or none where one is required.
- * - `needs_a_name` — an agent or a connection arrived without a usable name.
- * - `name_taken` — a living agent in the project, or a living connection on
- *   the agent, already holds the name.
+ * not_admitted: invalid connection data. needs_a_name: a required name is missing.
+ * name_taken: an active row already uses the name in its project or agent.
+ * platform_contradicts_agent: the supplied platform differs from the agent's.
  */
 export type AgentWriteRefusal =
   | "not_admitted"
@@ -105,22 +91,11 @@ export class RunWriteRefusedError extends Error {
 }
 
 /**
- * Which rule refused.
- *
- * - `no_such_connection` — nothing this credential can see has that id.
- *   Answered as "there is no such thing", because to this caller that is what
- *   it is: confirming somebody else's row exists is itself a leak.
- * - `connection_not_on_agent` — both were named, both are there, and they are
- *   not each other's. Its own answer rather than the one above, because the
- *   caller asked for exactly that check and the two mistakes have different
- *   fixes.
- * - `no_adapter` — the connection's type has no shipped simulator adapter, so
- *   the run could never be conducted. Refused at creation rather than left
- *   queued forever for a conductor that does not exist.
- * - `not_admitted` — the suite is empty, an expected test/version set is stale
- *   or malformed, or a persona a current version names is unavailable.
- * - `already_finished` — a cancel arrived after the run had finished, so there
- *   was nothing left to cancel and the caller missed.
+ * no_such_connection: absent or outside the caller's scope.
+ * connection_not_on_agent: the visible connection belongs to another agent.
+ * no_adapter: no shipped simulator supports the connection.
+ * not_admitted: invalid suite, expected versions, or persona selection.
+ * already_finished: the run finished before cancellation.
  */
 export type RunWriteRefusal =
   | "no_such_connection"
@@ -154,16 +129,7 @@ export class AlreadyBelongsToAnOrganizationError extends Error {
     this.here = here;
   }
 }
-/**
- * The write would have left the organization with no admin.
- *
- * Nobody else can invite, change a role or remove anybody, so an organization
- * with no admin is one nobody can ever administer again — and on a self-hosted
- * instance its admin *is* the instance administrator, with no role above the
- * organization to appeal to. Refused rather than allowed and regretted: making
- * somebody else an admin first is one extra click, and undoing this is not
- * possible from inside the product at all.
- */
+/** Prevent removing or demoting the organization's last admin. */
 export class LastAdminError extends Error {
   readonly organizationId: string;
   readonly userId: string;
@@ -185,19 +151,9 @@ export type TestNamingPersona = {
 };
 
 /**
- * An edit named the revision it was written against, and the resource has
- * moved since.
- *
- * **The counterpart to `TestMovedOnError`, one level up.** That one guards
- * *content*: two people writing different versions of one test. This one
- * guards *identity*: two people renaming, archiving or restoring one row. They
- * are separate because they are separately recoverable — a rename that lost
- * a race is retyped in a second, and a content edit that lost one may be an
- * afternoon's work somebody has to be given the chance to reapply.
- *
- * It carries what a caller has to be told to recover: which resource, which
- * one, and what the revision is now — because the next move is to read it
- * again and send the edit naming the revision it names then.
+ * An identity edit used a stale revision. Return the resource and both revisions
+ * so the caller can reload before retrying. TestMovedOnError separately handles
+ * test content version conflicts.
  */
 export class IdentityConflictError extends Error {
   /** The kind of thing, as a refusal names it: "persona", "agent", "test". */
@@ -224,20 +180,8 @@ export class IdentityConflictError extends Error {
 }
 
 /**
- * Postgres rolled the write back rather than let it wait forever, and it can
- * be sent again unchanged.
- *
- * **Its own class because it is the one refusal that is about nothing the
- * caller did.** A deadlock or a serialization failure is the store noticing
- * two correct transactions have got in each other's way; the request that
- * loses was valid on the way in and will be valid on the way back. Letting the
- * driver's error escape would answer it as an internal failure, which tells
- * whoever pressed the control that egma is broken rather than that they should
- * press it again.
- *
- * Nothing here promises this is rare. It is what a store is entitled to do,
- * and a surface that only worked while it never happened would be a surface
- * with a fault nobody could reproduce.
+ * A deadlock or serialization failure rolled back the write. The caller may retry
+ * the same request; normal validation still applies to the new attempt.
  */
 export class WriteAbortedError extends Error {
   /** What was being written, as a refusal names it: "persona", "test". */
@@ -254,11 +198,8 @@ export class WriteAbortedError extends Error {
 }
 
 /**
- * A project tried to change or delete a Predefined persona — one of Egma's own.
- *
- * The class keeps the storage word and the sentence uses the product one, which
- * is the split the persona tables record: null tenancy is how a shelf persona
- * is encoded, **Predefined** is what anybody using egma calls it.
+ * An Egma-provided persona cannot be edited or deleted by a project.
+ * Fork it to create an editable Custom persona.
  */
 export class EgmaProvidedPersonaError extends Error {
   readonly personaId: string;
@@ -275,19 +216,8 @@ export class EgmaProvidedPersonaError extends Error {
 }
 
 /**
- * A write refused for what it says, rather than for who asked or for what is
- * there.
- *
- * Three refusals answer three different questions and each wants its own words:
- * who you are, what is there, and what you wrote. This is the third, and it is
- * the only one about the body — so it is the only one whose sentence a writer
- * can act on without knowing anything about egma's tables.
- *
- * It exists so that a layer above can tell a factory's validation apart from a
- * fault. Both were plain errors before, and neither answer available then was
- * right: treating every error as the caller's mistake dresses a bug up as one,
- * and treating none as theirs throws away the sentence they needed. The sentence
- * is the factory's own and travels word for word.
+ * Invalid request content, distinct from permission failures and internal faults.
+ * The API may relay this validation message to the caller.
  */
 export class UnprocessableInputError extends Error {
   constructor(message: string) {
@@ -297,19 +227,8 @@ export class UnprocessableInputError extends Error {
 }
 
 /**
- * A save asked one egma agent to bind to a second platform agent.
- *
- * **A subclass, because the sentence is the whole of the answer** — every
- * layer that relays an `UnprocessableInputError` word for word is right about
- * this one too. What the subclass buys is the two ids, so a caller that wants
- * to say something else can, and so a test can assert the binding rather than
- * the prose.
- *
- * **The sentence names both agents and gives the way out.** Retell gives a
- * voice agent and a chat agent different ids; one egma agent holds one
- * binding, so the second platform agent belongs to a second egma agent. Saying
- * only "already bound" would leave somebody guessing which of the two ids
- * Egma is keeping.
+ * An Egma agent is already bound to another agent platform identity.
+ * Include both IDs so the caller can register the second identity separately.
  */
 export class AgentAlreadyBoundError extends UnprocessableInputError {
   readonly boundTo: string;
@@ -326,20 +245,8 @@ export class AgentAlreadyBoundError extends UnprocessableInputError {
 }
 
 /**
- * A write named a persona by a name that more than one active persona in the
- * project answers to.
- *
- * **A subclass rather than a sibling**: it is the caller's
- * body, and every layer that relays an `UnprocessableInputError` word for word
- * is right about this one too. What the subclass buys is the code, and the code
- * matters here because the reader is usually a repository file rather than a
- * form: a version-1 test file carries persona *names* and nothing else, and the
- * fix is to put the stable identifier in the file — which is a different
- * instruction from anything a browser would be told.
- *
- * **Never resolved by picking one.** There is no uniqueness rule on a persona's
- * name, so choosing by list order would silently put somebody in a test nobody
- * chose, and the run would be about a caller the author never named.
+ * A persona name matches more than one active persona. Require a stable ID
+ * instead of choosing by list order.
  */
 export class PersonaNameAmbiguousError extends UnprocessableInputError {
   /** The name as the writer wrote it, which is what the sentence names. */
@@ -353,18 +260,8 @@ export class PersonaNameAmbiguousError extends UnprocessableInputError {
 }
 
 /**
- * An edit named the version it was written against, and the test has moved.
- *
- * A test is edited by two people who both start from what they last read: a
- * developer with the file in their repository, and a teammate in the dashboard.
- * Nothing here merges them, because there is no merge that could be right — two
- * people saying different things about one test have to settle it between
- * themselves, and a heuristic that picked one would be egma deciding which of
- * them was wrong.
- *
- * It carries both versions and the test's identity, because the caller's next
- * move is to go and read the test as it now stands, and a refusal that only said
- * "somebody else got there first" would send them hunting for which test.
+ * A test content edit used a stale version. Return both versions and the test
+ * identity so the caller can reload and resolve the conflict.
  */
 export class TestMovedOnError extends Error {
   readonly testId: string;
@@ -390,18 +287,8 @@ export class TestMovedOnError extends Error {
 }
 
 /**
- * A project could not take the slug it was asked for, because a living project
- * of the same organization already holds it.
- *
- * **Its own class rather than a general validation refusal, because the slug is
- * the one project field a person chooses and can be told is taken.** A name is
- * free — two projects may both be called Outbound — and the slug is what has to
- * be unique inside the organization, so this is the only collision the product
- * can meet here and the sentence names the one field to change.
- *
- * It carries the slug because the refusal quotes it back: somebody who typed
- * `outbound` has to be told that `outbound` is the word that is taken, rather
- * than that "the project" is.
+ * Another active project in the organization already uses this slug.
+ * Project names do not have the same uniqueness rule.
  */
 export class ProjectSlugTakenError extends Error {
   readonly slug: string;
@@ -416,21 +303,9 @@ export class ProjectSlugTakenError extends Error {
 }
 
 /**
- * The trace store read a batch of spans and refused it, and would refuse the
- * identical bytes again.
- *
- * The distinction this exists to make is between *these rows* and *right now*.
- * A store that cannot be reached, or that is out of memory, or that is behind on
- * its merges, will take the same batch happily in a minute — and a door that
- * told an exporter "rejected" for one of those would have thrown a customer's
- * telemetry away, because OTLP is explicit that rejected data must not be
- * retried. So only a refusal that is about the data itself is turned into this;
- * everything else stays an error and is answered as one, and an exporter
- * retries.
- *
- * It carries the store's own code and name rather than a rewritten message,
- * because the person who has to fix a batch the store will not take needs the
- * words the store used.
+ * The trace store permanently rejected these span rows. Preserve its code and
+ * message. Temporary store failures must remain retryable errors so ingestion
+ * does not discard valid evidence.
  */
 export class TraceStoreRefusedError extends Error {
   /** ClickHouse's numeric error code, as it reported it. */
@@ -452,19 +327,8 @@ export class TraceStoreRefusedError extends Error {
 }
 
 /**
- * A record naming a field longer than the column it would be filed in.
- *
- * Its own class because it is the one refusal about the evidence rather than
- * about the store: nothing failed, nothing was reached, and the answer is not
- * "try again" but "this record cannot be stored as what it claims to be". The
- * alternative — cutting the field to fit — is what this replaces, and it was
- * worse than a refusal in the way that matters most: a shortened transcript is
- * stored looking exactly like a whole one, so the customer whose evidence egma
- * edited is the last person who could ever find out.
- *
- * It carries the field, the bound and the size rather than a sentence about
- * them, because the caller has to report all three to whoever sent the record
- * and the sentence is the part deliberately left free to improve.
+ * Reject an evidence field that exceeds its storage limit; never truncate it.
+ * Return the field, bound, and byte count so the sender can correct the record.
  */
 export class OversizeRecordError extends Error {
   /** The `NewSpan` field, by the name the sender knows it as. */
@@ -489,19 +353,8 @@ export class OversizeRecordError extends Error {
 }
 
 /**
- * A record whose span begins at an instant the trace store cannot hold.
- *
- * Its own class beside `OversizeRecordError` because it is the other refusal
- * about the evidence rather than about the store: the store is not reached and
- * nothing failed, and the answer is not "try again" but "this instant is not one
- * a `DateTime64` row and a partitioned read can be built around". A start time
- * outside the store's range seals into a valid segment and then stops the read
- * probe that guards every replay, so it is refused at the door instead, exactly
- * as an oversize field is.
- *
- * It carries the instant and the bound it crossed rather than a sentence about
- * them, because the caller reports both to whoever sent the record and the
- * sentence is the part left free to improve.
+ * Reject a span start outside the trace store's supported time range before
+ * sealing it into a segment that replay cannot read.
  */
 export class UnstorableInstantError extends Error {
   /** The offending start instant, in microseconds since the epoch. */
@@ -526,19 +379,8 @@ export class UnstorableInstantError extends Error {
 }
 
 /**
- * A trace query egma will not run, because of how it was asked rather than
- * because of who asked it.
- *
- * There are exactly two ways to get one, and both are refusals the read surface
- * exists to make: a window that is missing, backwards, or wider than one request
- * may name; and a page token that is not one egma issued. Neither is a fault and
- * neither is a permission problem — they are a caller being told what a bounded
- * read requires, which is why they carry a sentence a person can act on rather
- * than a code they have to look up.
- *
- * It is one error with a `reason` rather than two classes, because the two are
- * answered identically at every layer above: a 400, and the message. Splitting
- * them would multiply the handling without changing any of it.
+ * A trace query has an invalid time window or cursor.
+ * Expose the reason and message as a request error.
  */
 export class UnreadableTraceQueryError extends Error {
   readonly reason: "time_window" | "cursor";
@@ -583,14 +425,8 @@ export class NotPermittedError extends Error {
 }
 
 /**
- * A connection could not be brought back on the terms its own shape sets.
- *
- * Four rules refuse a Restore and they are four different answers to whoever
- * asked — bring a credential, do not bring one, say which of the two you mean,
- * and restore the agent first. The reason travels beside the sentence rather
- * than inside it, as the agent factory's refusals do and for the same reason:
- * an HTTP layer answers each of them with its own code, and reading the prose
- * to tell them apart would make the prose load-bearing.
+ * Connection restore failed a credential rule or requires restoring its agent first.
+ * Use reason for HTTP handling instead of parsing the message.
  */
 export class ConnectionRestoreRefusedError extends Error {
   readonly reason: ConnectionRestoreRefusal;

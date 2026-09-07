@@ -1,16 +1,6 @@
-"""The Retell chat plug against a Retell-shaped server.
-
-The plug is the one component that speaks a platform's wire protocol, so
-what is pinned here is the wire: the chat opened once, a turn delivered
-per persona turn with the agent's own words coming back, the agent's ending
-read from its end-tool invocation, and the chat ended at the platform
-afterwards. The counterpart is a real HTTP server shaped like Retell's chat
-API, on loopback — no account, no key, no network.
-
-The failure paths get the same treatment, because they are where a
-credential leaks if it ever does: a key the platform refuses and an
-endpoint nothing answers on both end in a refusal a person can act on, and
-neither says the key.
+"""Verify Retell chat requests and lifecycle against a local HTTP stub.
+Include end-tool handling, termination, unreachable endpoints, and secret
+redaction in platform refusals. No external account is used.
 """
 
 from __future__ import annotations

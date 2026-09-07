@@ -1,21 +1,7 @@
 /**
- * The small piece of YAML egma's own two files are written in, read and written
- * here and nowhere else.
- *
- * Two files need it: the folder's `config.yaml`, which is a mapping of mappings
- * two levels deep, and the frontmatter of a test file, which is a mapping of
- * scalars, one flow list, and one block sequence of small mappings — the
- * personas, which carry a stable identifier and the display name a reviewer
- * reads beside it. That is the whole language — no anchors, no multi-line
- * scalars, nothing nested inside a sequence item — and this reads exactly that
- * and refuses the rest by name and line number.
- *
- * It is written rather than depended on for two reasons. The first is that
- * `egma` is the first thing a developer runs, so every dependency is
- * download time before anything happens. The second matters more: `pull`
- * immediately after `push` has to change zero bytes, and that is a promise about
- * output, not about a parse tree. Writing the bytes here is what lets it be
- * kept, because nothing between the value and the file is free to reformat.
+ * Read and write the YAML subset used by repository config and test frontmatter.
+ * Support scalars, lists, and nested mappings used by personas and connections.
+ * Reject unsupported syntax with line context. Control serialization for stable sync output.
  */
 
 /**
@@ -182,22 +168,8 @@ function opensAnItem(text: string): boolean {
 }
 
 /**
- * A block of `- ` items under a key that named nothing on its own line.
- *
- * Each item is either one scalar — `- impatient-caller`, which is what somebody
- * types by hand — or a small mapping written on the `- ` line and continued on
- * the lines indented under it:
- *
- * ```yaml
- * personas:
- *   - id: prs_01EXAMPLE
- *     name: Impatient customer
- * ```
- *
- * A mapping item may itself contain another mapping or sequence. The config
- * file uses that one extra level for an agent's connections. Scalar items stay
- * scalar, and every nested value is still read through the same small YAML
- * grammar as the rest of the folder.
+ * Read block-sequence items as scalars or mappings with indented continuations.
+ * Mapping items can contain nested mappings or sequences, including agent connections.
  */
 function blockSequenceAt(
   lines: readonly Line[],

@@ -5,35 +5,9 @@ import type {
 } from "fastify";
 
 /**
- * Mounting a `Request → Response` handler on Fastify.
- *
- * The auth provider ships its HTTP surface as one web-standard function and no
- * Fastify module, so egma writes and tests this. The snippet in the provider's
- * documentation is not usable as written and each of its faults is a real
- * failure rather than a style point, so each is answered here by name:
- *
- * **It routes GET and POST only.** The provider serves `DELETE /revoke-session`
- * today and its plugins add more; a `PUT` or a `DELETE` would 404 with nothing
- * to suggest why.
- *
- * **It re-serializes the body as JSON while forwarding the original content
- * type.** A form-encoded request — which is what RFC 8628's token endpoint
- * sends, so this is the CLI login path — arrives as `grant_type=…` and leaves
- * as `"grant_type=…"` still labelled `application/x-www-form-urlencoded`. The
- * provider then parses the JSON string as a form and finds nothing. The body
- * here is never parsed and never re-encoded: it is read as bytes and passed
- * through unchanged.
- *
- * **It copies response headers with `forEach`, which merges every `Set-Cookie`
- * into one comma-joined line.** A sign-in that sets a session cookie and a
- * `__Secure-` counterpart sends one malformed header instead of two, and the
- * browser stores neither. `getSetCookie()` is the only way to read them apart.
- *
- * **It builds the request URL from the `Host` header.** Behind a TLS-terminating
- * proxy the provider then believes it is on plain HTTP and drops the `Secure`
- * attribute from the cookie it is about to set. The URL here is built from what
- * Fastify resolved, which honours the forwarded headers when — and only when —
- * the server was told to trust its proxy.
+ * Adapt a web Request/Response handler to Fastify. Forward supported methods
+ * and raw request bytes, preserve separate Set-Cookie headers, and build URLs
+ * from Fastify's resolved host/protocol. Forwarded headers depend on trustProxy.
  */
 
 /** The web-standard shape the provider hands over: bytes in, bytes out. */
@@ -117,17 +91,8 @@ export function toWebRequest(request: FastifyRequest): Request {
 }
 
 /**
- * The same request with no body on it, for asking who is calling.
- *
- * Resolving an identity reads the URL and the headers — a bearer token or a
- * session cookie — and nothing else, so the body is not withheld from the
- * provider here so much as never relevant to the question. Copying it would be:
- * the identity hook runs on every credentialed route including the ingest door,
- * where the body is an export of telemetry, and building a `Request` out of it
- * copies those bytes twice over for something that will never read them.
- *
- * Kept a separate function rather than a flag on the one above, so that a route
- * which does forward a body cannot lose it by passing the wrong argument.
+ * Build a bodyless request for identity resolution. Authentication needs
+ * headers and URL, so copying an ingestion payload would waste memory.
  */
 export function toIdentityRequest(request: FastifyRequest): Request {
   return new Request(new URL(request.url, originOf(request)), {

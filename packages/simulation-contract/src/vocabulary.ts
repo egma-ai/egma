@@ -1,28 +1,7 @@
 /**
- * The words the mocked world is not described in, and the one exemption.
- *
- * One entity, one word: a **mock tool**. The inverted form and the two
- * near-synonyms each read as a different thing to somebody arriving from
- * another tool, and a schema property, a wire field or a refusal sentence
- * carrying one of them is the version that sticks — a column is renamed by a
- * migration, and a refusal sentence a client branches on is renamed by nobody
- * at all.
- *
- * **Here rather than in either suite that scans with it.** Two guards were
- * written independently, one over this package's own documents and one over
- * the platform's mock-tool surface, and they had already drifted into two word
- * lists — so a word banned by one was a word the other let through, which is
- * the failure a vocabulary guard exists to prevent happening to itself. The
- * list lives beside the contract because that is where a word becomes
- * permanent: a schema property outlives the prose that explained it.
- *
- * **What this deliberately cannot catch.** Only the words with no legitimate
- * use anywhere are here. The rest of the settled vocabulary is about which
- * *meaning* a word may carry — `session` is wrong for a conversation and right
- * for a signed-in one, `call` is wrong for a simulation and right in
- * `tool_call` — and a scanner that flagged those would cry wolf on every page
- * until somebody turned it off. Those stay a reading job. This is the floor,
- * not the ceiling.
+ * Shared forbidden names for mock tools, used by the contract and platform
+ * vocabulary tests. Context-dependent words still require manual review;
+ * for example, session is valid for browser authentication.
  */
 
 /** One word that must appear nowhere, and what to say in its place. */
@@ -51,14 +30,8 @@ export const BANNED_MOCK_TOOL_WORDS: readonly BannedWord[] = [
 ];
 
 /**
- * The one carve-out, and it is the glossary's rather than this scanner's.
- *
- * `stub` and `fake` are banned **as names for a mock tool**. The room-shaped
- * test double that both Python suites hold this seam against is not one: it
- * stands in for a LiveKit room, not for one of the agent's tools, and it keeps
- * the name it has always had. So the exemption is written down here and
- * applied before the scan, rather than by leaving the files that mention it
- * out — a file skipped for one word is a file unguarded for all of them.
+ * Allow names for LiveKit test doubles without exempting their entire files
+ * from the vocabulary scan. They do not name mock tools.
  */
 const EXEMPT = [
   /\bRoom_?Stubs?\b/gu,

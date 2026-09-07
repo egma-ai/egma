@@ -8,19 +8,7 @@ import {
 import { asJudgeReads } from "./input.ts";
 import { validateJudgeAnswer } from "./response.ts";
 
-/**
- * The OpenAI judge: one criterion, one chat completion, one answer.
- *
- * The only provider v1 ships, and it is deliberately the smallest surface that
- * can ask a model a question — one POST, one JSON body, one JSON answer. There
- * is no SDK behind it: the whole request is four fields, an SDK would be a
- * dependency that moves under the product, and the day a second provider
- * arrives it is a second file of this size rather than a second dependency.
- *
- * **Version-pinned in the URL.** `/v1/chat/completions` is the endpoint every
- * OpenAI-compatible provider implements, which is what makes the next provider
- * a base URL rather than a rewrite.
- */
+/** Call OpenAI Chat Completions and validate the structured LLM-judge response. */
 
 const OPENAI_CHAT_COMPLETIONS = "https://api.openai.com/v1/chat/completions";
 
@@ -54,14 +42,7 @@ const JUDGE_RESPONSE_FORMAT = {
   },
 } as const;
 
-/**
- * How many times a call is made before the assertion is `errored`.
- *
- * Three, for the reason the grading job's own attempt count is three: the
- * failures worth retrying are the transient ones — a rate limit, a gateway that
- * dropped the connection — and a fourth attempt at a request the provider keeps
- * refusing is spending the customer's money to learn the same thing again.
- */
+/** Maximum model requests, including retries for transient failures. */
 const MOST_ATTEMPTS = 3;
 
 /** How long a judge is given to answer before the attempt is abandoned. */
@@ -77,17 +58,11 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       ...(judge.reasoningEffort === undefined
         ? {}
         : { reasoning_effort: judge.reasoningEffort }),
-      // The lowest the API allows, because the same conversation and the same
-      // criterion should get the same answer twice. It is not a guarantee —
-      // no model offers one — and it is the difference between a judgment that
-      // usually reproduces and one that never does.
+      // Reduce output variation across repeated judgments.
       temperature: 0,
       response_format: JUDGE_RESPONSE_FORMAT,
       messages: [
-        // The library entry's own words, handed down with the question. This
-        // file holds no prompt of its own: what a judge is told it is is
-        // product behaviour a release ships and a developer can read on the
-        // Library screen, not something the provider adapter decides.
+        // Use the grading instructions from the resolved grader definition version.
         { role: "system", content: question.prompt },
         { role: "user", content: asked(question) },
       ],
@@ -97,8 +72,7 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       const response = await fetch(OPENAI_CHAT_COMPLETIONS, {
         method: "POST",
         headers: {
-          // The one place the key is ever written down, and it is written into
-          // a header on the way out. Nothing logs this object.
+          // Send the provider key only in the authorization header; do not log it.
           authorization: `Bearer ${judge.key}`,
           "content-type": "application/json",
         },
@@ -107,8 +81,7 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       });
 
       if (!response.ok) {
-        // The provider's own words, trimmed to a line — never the request, so
-        // there is no path by which the header above reaches a log.
+        // Include up to 200 characters of the provider's error response.
         throw new JudgeRefused(
           `the judge model answered ${response.status}: ${(await response.text()).slice(0, 200)}`,
           retryable(response.status),
@@ -132,12 +105,7 @@ export class JudgeRefused extends Error {
   }
 }
 
-/**
- * Which refusals are worth a second ask. A rate limit and a gateway error pass;
- * a rejected key and a model name that does not exist do not — asking again
- * would spend the same seconds to be told the same thing, and the assertion is
- * `errored` either way with the provider's own words on it.
- */
+/** Retry transient rate-limit and server failures, not authentication or model errors. */
 function retryable(status: number): boolean {
   return status === 408 || status === 409 || status === 429 || status >= 500;
 }
@@ -174,14 +142,8 @@ function asked(question: JudgeQuestion): string {
 }
 
 /**
- * The model's answer, read strictly.
- *
- * A judge that answered something this cannot read is a judge that did not
- * answer, and it is `errored` rather than quietly `cannot_determine`: the two
- * are different facts — one is a model saying the evidence does not settle the
- * question, the other is egma not knowing what the model said — and collapsing
- * them would hide a broken integration behind a word that means "fine, not
- * applicable".
+ * Reject malformed model responses as grading errors. Do not treat a parse
+ * failure as the model deciding that evidence is insufficient.
  */
 function answerOf(said: unknown, question: JudgeQuestion): JudgeAnswer {
   const content = contentOf(said);

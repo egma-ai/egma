@@ -3,24 +3,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Landing, ProvisioningIntent } from "./seam.ts";
 
 /**
- * The names a person chose on egma's signup page, travelling beside the request
- * that creates their identity.
- *
- * The provider owns the signup endpoint and its body is the provider's shape,
- * so there is nowhere in it to put an organization name — and widening what
- * egma asks the provider for, to squeeze one in, is exactly the cost this
- * architecture exists to avoid. So the names travel out of band: egma's signup
- * route enters this scope, the provider does its own work, and the hook that
- * fires when the identity is written reads what is here.
- *
- * An identity created any other way finds nothing here and is provisioned from
- * defaults derived from its email address, which is what makes *every* person
- * land in an organization however they arrived.
- *
- * The same scope carries the answer back. Where the person landed is decided
- * inside the hook, three layers down inside the provider's own call stack, and
- * this is how the route learns it without reading the provider's response body
- * and taking a dependency on its shape.
+ * Request-local signup intent carries names and invitation data into provider
+ * hooks without changing the provider request body. Hooks return provisioning
+ * results through the same scope; absent intent uses email-derived defaults.
  */
 
 type Scope = {

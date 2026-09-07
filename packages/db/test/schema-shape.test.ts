@@ -161,10 +161,7 @@ describe("every identifier column", () => {
   });
 
   it("has no database default at all, now that the persona pointer is gone", () => {
-    // The project's default-persona pointer was the one exception, and it was
-    // one because the column was required and had to be fillable by a direct
-    // internal insert. It is gone, so an identifier column is somebody's own
-    // choice again, every time, with nothing filled in on their behalf.
+    // Identifier columns require explicit values; no default-persona pointer is generated.
     for (const { table, column } of declaredIdentifierColumns) {
       const live = columns.find(
         (candidate) =>
@@ -203,14 +200,8 @@ describe("every table", () => {
   });
 
   /**
-   * A prefixed column that is **not** the row's identity.
-   *
-   * An opaque live revision is minted in egma's own identifier format and
-   * pinned the same way, so a hand-written row cannot carry a revision nothing
-   * would ever have issued. It is named here rather than folded into
-   * `TABLE_PREFIX` because that map answers "what is this table's identity",
-   * and a revision is not one — it says which *state* was read, and a row goes
-   * through many.
+   * Revision tokens use prefixed IDs but identify row state, not the row.
+   * Keep their checks separate from TABLE_PREFIX.
    */
   const REVISION_COLUMNS: Readonly<Record<string, number>> = {
     // A project grader has no live revision column. Settings and removal change
@@ -382,16 +373,8 @@ describe("test suite ownership", () => {
 });
 
 /**
- * The schema's deliberate exceptions to hard-required tenancy.
- *
- * Every other table below the tenancy tables carries a `not null`
- * `organization_id`, because a row belonging to nobody is a row no permission
- * can describe. On the grader definition and persona shelves, belonging to nobody
- * is a real state: **null tenancy means egma owns the definition**, which is
- * where the Owner label is derived from. It is asserted here
- * rather than only in that table's own tests because it is a structural claim
- * about the whole schema — and because an exception nothing watches is an
- * exception that spreads.
+ * Predefined grader definitions and Egma-provided personas use null
+ * organization ownership. Keep this catalog exception explicit.
  */
 describe("the grader definition's nullable tenancy", () => {
   const tenancy = (name: string): ColumnRow | undefined =>
@@ -410,14 +393,8 @@ describe("the grader definition's nullable tenancy", () => {
   });
 
   /**
-   * Three tables leave the customer null, with two meanings.
-   *
-   * A device code's null is **not yet**: a terminal that has not been aimed at
-   * anything, filled in the moment somebody approves it. The library's is
-   * **never**, and permanently — the grader or persona belongs to egma, and
-   * that is the state the Owner column reads. Another table appearing here is
-   * somebody choosing one of those two meanings, which is a decision worth
-   * making on purpose rather than by leaving a `notNull` off.
+   * Device-code scope is null until approval. Predefined grader definitions
+   * and Egma-provided personas use null organization ownership.
    */
   it("joins the persona shelf and the one pending-authorization table", () => {
     const nullable = columns.filter(

@@ -1,19 +1,6 @@
-"""egma's half of the mock-tool exchange, held to the contract's bytes.
-
-The exchange has two halves written twice on purpose: this service's, and
-the SDK a customer installs in their own agent. Neither imports the
-other — a package inside somebody else's process must not drag egma's
-dependencies in with it — so nothing but a test can keep the two speaking
-the same language.
-
-``packages/simulation-contract/fixtures/seam/mock-tool-exchange.v1.json``
-is that language written down: the version, the two method names, the
-four refusal codes, both caps, and a canonical message for every shape
-either side sends. This suite asserts egma's constants against it and
-drives egma's own handlers with its exact bytes. The SDK's suite reads
-the same file and asserts its own. A number or a shape that moves on one
-side now fails a hermetic test on that side, with the file naming what it
-was supposed to be.
+"""Validate simulator constants and RPC handlers against the shared wire fixture.
+The published SDK reads the same fixture independently, without importing service code.
+See packages/simulation-contract/fixtures/seam/mock-tool-exchange.v1.json.
 """
 
 from __future__ import annotations

@@ -1,24 +1,8 @@
 /**
- * `egma self-host`: the platform operator's half of the CLI.
- *
- * One CLI, two contexts. The repository commands under `agent`, plus `pull`,
- * `push`, and `run`, operate an *agent repository* — tests, and the address of the platform
- * that owns their identifiers. Everything under `self-host` operates a
- * *platform workspace* — the deployment itself and its containers. On one
- * laptop that is often the same person, and the product still keeps the two apart, because
- * one platform serves many repositories and platform secrets must not spread
- * into any of them.
- *
- * **`up`** starts the whole platform and prints the address an agent
- *   repository points at. Everything: the API, the web application, both
- *   stores, the simulator, the grader, LiveKit, its SIP gateway and their
- *   Redis. There is no phone overlay to ask for by name any more. It also
- *   prepares the workspace: credentials used only between Egma containers are
- *   generated once and written to the private platform file. External model
- *   keys and the optional carrier route stay in the operator's `.env` file.
- *
- * `up` sets `EGMA_BASE_URL` to the same URL it prints. Agent repositories use
- * that URL directly; there is no second platform-identity response to compare.
+ * Platform workspace commands, separate from agent-repository commands.
+ * self-host up prepares private inter-service credentials and starts the platform
+ * and phone media services. External model keys and optional carrier settings
+ * come from the operator's .env. Set EGMA_BASE_URL to the printed repository URL.
  */
 
 import { UnusableUrlError } from "../platform/credentials.ts";
@@ -117,15 +101,8 @@ function composeEnvironmentControlProblem(
 }
 
 /**
- * Every service `self-host up` starts, in the order somebody would look for
- * them. Named in full rather than summarised: five of these — the object
- * store, the simulator, the grader, the SIP gateway and its Redis — publish
- * nothing and have no page to visit, so a line naming them is the only sign a
- * person gets that they are running at all.
- *
- * The one-shot job that creates the object store's bucket is deliberately not
- * here. It runs and exits, so a person who went looking for it would find
- * nothing running and read that as something broken.
+ * Long-running services shown by self-host up. Omit bucket initialization jobs
+ * because successful one-shot containers exit.
  */
 const STARTED = [
   "postgres",
@@ -155,21 +132,7 @@ export function isSelfHostInvocation(argv: readonly string[]): boolean {
   return argv[0] === "self-host";
 }
 
-/**
- * What a self-host command was asked to do.
- *
- * Parsed here rather than by filtering out anything beginning with a dash,
- * which is what this used to do and which was wrong in a way that took the one
- * escape hatch away from the person who needed it most: the *value* of
- * `--cwd /tmp/ws` does not begin with a dash, so it was read as part of the
- * verb and `egma self-host up --cwd /tmp/ws` answered "does not know
- * 'up /tmp/ws'" — while the refusal for not being in a platform workspace was
- * telling people to use `--cwd`.
- *
- * Both spellings, because both are ordinary: `--cwd X` is what a person types
- * and `--cwd=X` is what a script generates, and an option that silently does
- * nothing in one of them is worse than one that does not exist.
- */
+/** Parse the verb separately from --cwd values. Accept both --cwd X and --cwd=X. */
 export type SelfHostInvocation = {
   readonly verb: string;
   readonly cwd: string | null;

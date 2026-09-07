@@ -56,15 +56,7 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
   {
     id: EGMA_PROVIDED_PERSONAS.defaultPersona,
     /**
-     * The team's word for the persona every project starts with.
-     *
-     * It was "Default Persona" until the default-persona pointer was deleted,
-     * and the name then claimed a role the product no longer has: nothing is a
-     * default any more, so a row saying so would be the last surface still
-     * advertising it. "Everyday caller" is what this persona is — the ordinary
-     * one, for the scenario that needs a person rather than a particular
-     * person. Catalog content, so a later change is a change of copy and not a
-     * change of behavior.
+     * Display label for this Egma-provided persona. Tests must select personas explicitly.
      */
     name: "Everyday caller",
     description: "Regular conversationalist persona",

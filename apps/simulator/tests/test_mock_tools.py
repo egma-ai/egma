@@ -1,24 +1,7 @@
-"""egma answering for the agent's tools, whole, with no LiveKit anywhere.
-
-The exchange is two methods on egma's participant, and everything below
-is proved against the room-shaped LiveKit in :mod:`room_stub`, whose
-rooms now carry calls as well as audio. What answers those calls is
-egma's own code, unchanged — so what is proved here about a census, an
-answer, a late-attached call or a refusal is proved about the code a
-customer's server runs.
-
-The first test is the whole claim, black box: a spec naming mocked tools
-goes in at the top, every call the agent makes is answered from that spec
-on the wire, and the record comes out with no tool row of egma's on it.
-Everything after it takes one part of that story apart.
-
-**A call this exchange conducts is written down nowhere.** The agent's
-own process reports every call it made, and that report is the tool
-record — one call, one row. So what this suite proves about a call that
-came through the room is what came back **on the wire**, which is the
-whole of what this side does with one. The other lane, where a platform
-serves egma's answers itself and reports the calls afterwards, is proved
-in `test_plug_retell_text_mode.py`.
+"""Verify mock-tool hello, answers, and refusals using the real handlers and room stub.
+Assert returned RPC bytes and no duplicate simulator tool spans; the agent SDK
+owns LiveKit tool evidence. Platform-served mocks are covered in
+test_plug_retell_text_mode.py.
 """
 
 from __future__ import annotations
@@ -375,15 +358,8 @@ async def opened(
     seam: MockToolSeam | None = None,
     wait_for_the_agent: bool = True,
 ) -> object:
-    """One room, joined, with egma standing ready to answer in it.
-
-    ``seam`` is for the one test that has to ask what the seam claims
-    afterwards; everything else only cares what comes back on the wire.
-
-    ``wait_for_the_agent`` is false where the room this test wants is one
-    the agent could never have reported in — waiting for a report that
-    cannot come would fail the simulation before the test got to look at
-    the exchange, which is the plug's job and is proved where the plug is.
+    """Join a room with mock RPC. Expose seam only for tests that inspect its state.
+    Disable wait_for_the_agent when testing a room where hello cannot succeed.
     """
     spec = SimulationSpec.from_document(mocked_spec())
     plug = livekit_plug.LiveKitRoom(
@@ -504,16 +480,8 @@ async def test_hello_answers_a_test_that_mocks_nothing_with_an_empty_list():
 async def test_a_second_hello_replaces_the_census_rather_than_adding_to_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """A census is a snapshot of the agent's tools, so an agent that
-    announces itself again is announcing what it has now.
-
-    What both replies say is the same thing, because what egma answers for
-    is the test's business and never the census's: the second hello drops
-    ``check_calendar`` from the agent's own list and egma still names it,
-    and still answers a call to it. Answers stand ready for every name
-    this simulation covers whether or not the census mentioned it — the
-    safe way round, because the other way lets a tool the agent gained
-    afterwards reach a real backend.
+    """A new hello replaces the tool census but cannot change test-owned mock answers.
+    A covered name stays callable even when absent from the latest census.
     """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
     said: list[dict] = []
@@ -843,19 +811,8 @@ async def test_a_hello_egma_refused_leaves_the_agent_wrapping_nothing(
 async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
-    """A room with no exchange in it is a simulation that cannot report.
-
-    This used to be the other way round: a participant that would not take
-    the methods cost the exchange and nothing else, because a room where
-    egma answered for nothing was exactly the room every simulation was
-    before mock tools existed.
-
-    It is not that room any more. The agent's own SDK reports through this
-    same exchange, so a room that cannot offer it is a room the agent
-    cannot report in — and a simulation whose mocked tools all called
-    their real backends must not be filed as a green result. The refusal
-    is still said loudly, and now it also ends the simulation with the
-    sentence that names what to check.
+    """Failed RPC registration prevents hello and must fail simulation startup.
+    Log the registration fault and report the setup error instead of completing.
     """
     caplog.set_level("ERROR")
     stub = RoomStub(

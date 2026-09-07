@@ -1,37 +1,10 @@
 /**
- * Text mode: one text exchange with a Retell **voice** agent, with no
- * call, no audio and nothing stored on Retell's side.
+ * Retell voice-agent testing through text completion, with full history per request.
+ * Require an explicit agent version and carry mock answers in the request;
+ * this module creates no temporary agent version.
  *
- * Retell's own dashboard tests a voice agent in text through this API, and it
- * is what lets egma conduct a chat simulation against an agent whose only other
- * door is a telephone. The exchange is stateless and egma-owned: every request
- * carries the whole history, and the reply carries only what is new — the
- * agent's messages, the variables as they now stand, where in its flow or its
- * state machine it now is, and whether it ended the exchange.
- *
- * **Nothing here lets Retell choose the version.** The version is a required
- * argument and always goes in the body. Retell's own default is the newest
- * version, and the newest version is exactly the one a concurrent edit has just
- * created — so a suite that leaned on the default could change what it is
- * testing between one simulation and the next.
- *
- * **Nothing here writes.** A text-mode request carries its mocked answers with
- * it, so this lane creates no draft, pins nothing, and has nothing to sweep.
- *
- * ## The wire names live in one place, deliberately
- *
- * `WIRE` below is the whole of what this module claims about Retell's field
- * names, and **every one of them is the simulator plug's**
- * (`egma_simulator.plugs.retell_text_mode`). That plug is the code that
- * actually conducts against Retell, so two modules in this repository
- * describing one third-party API differently would be a defect waiting for a
- * live run to expose: whichever of them the developer's run corrected, the
- * other would stay wrong. The plug names the same guesses in the same words,
- * and a correction is one edit here and one there.
- *
- * Egma's agents test against fakes and never touch the developer's live Retell
- * account, so what is still a guess stays a guess until the live suite of this
- * effort's ticket 03 runs.
+ * Keep WIRE aligned with egma_simulator.plugs.retell_text_mode. Its documented
+ * wire assumptions need live validation; local stubs cannot establish API behavior.
  */
 
 import {
@@ -113,16 +86,8 @@ export type TextModeTurn = {
 };
 
 /**
- * One answer this exchange carries with it, matched by tool name.
- *
- * The match-anything rule: one answer per tool, and the arguments the agent
- * sent are never read. A tool the run has no answer for is simply absent, and
- * Retell runs the customer's real implementation for it.
- *
- * The answer arrives in **the shape it was authored in** — `{ answer }` or
- * `{ error }` — and is untagged on the way out, because Retell is the one
- * serving it and says which branch happened in its own words. One shape all
- * the way here means nothing in between re-tags it.
+ * One authored answer or error per tool, matched regardless of arguments.
+ * Convert the tag to Retell's result format. Omitted tools use their real implementation.
  */
 export type TextModeMockTool = {
   readonly toolName: string;

@@ -1,37 +1,10 @@
 /**
- * The mock tools a test carries, in the one shape a file writes them.
+ * Parse test-owned mock tools from a Mock tools section. Each tool-name heading
+ * has one JSON fence containing exactly answer or error; answer can be any JSON value.
+ * Only named tools are mocked. The platform validates serialized size.
  *
- * A mock tool answers for one of the agent's tools while a simulation runs, so
- * a simulation never reaches the real backend and a test can ask for the branch
- * it needs. **A mock tool belongs to the test that writes it.** There is no
- * project-wide list to override and nothing to scope to some agents and not
- * others: the test says what its world answers, and that answer versions with
- * the test exactly as an expected behavior does.
- *
- * ````markdown
- * ## Mock tools
- * ### get_availability
- * ```json
- * { "answer": { "slots": [] } }
- * ```
- * ### book
- * ```json
- * { "error": "calendar down" }
- * ```
- * ````
- *
- * **The heading is the tool's name and the block is what it answers with.** The
- * block says exactly one of `answer` and `error`, and nothing else. An answer is
- * whatever shape that tool's own contract has — an object, a list, a number,
- * `null` — so it is written as JSON rather than squeezed into the little YAML
- * the rest of the folder uses, and what the block says travels to egma's door
- * unchanged. How large an answer may be is egma's to say, and is said there.
- *
- * **Reading is forgiving and writing is exact**, the rule the test file format
- * already lives by. Any heading depth, any capitalisation of the section
- * heading, and a fence with or without `json` after it are all read. Everything
- * egma writes goes out through the one serializer below, which is what makes a
- * `pull` immediately after a `push` change zero bytes.
+ * Accept heading-depth and section-case variations, with optional json fence labels.
+ * Use one serializer for stable pull/push round trips.
  */
 
 import { FolderProblem } from "./problem.ts";

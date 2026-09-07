@@ -1,39 +1,7 @@
 /**
- * The env a test is conducted in: the world outside the conversation.
- *
- * A mock tool says what the agent's own tools answer. The env says what the
- * agent was *started* with — the values the provider substitutes into a prompt
- * before a word is spoken, and the blob a worker is handed when the job is
- * dispatched. Both are the test's own content and version with it, so both live
- * in the test's own file, under one heading and one JSON fence:
- *
- * ````markdown
- * ## Env
- * ```json
- * {
- *   "retell_dynamic_variables": { "caller_name": "Margaret" },
- *   "job_dispatch_metadata": { "tenant": "acme" }
- * }
- * ```
- * ````
- *
- * **The two inner keys stay in the platforms' own spelling.**
- * `retell_dynamic_variables` is what Retell calls the values it substitutes into
- * an agent's prompt; `job_dispatch_metadata` is what LiveKit calls the blob it
- * hands the job. A reader who knows either platform reads this without a
- * translation table, so the file keeps their words.
- *
- * **A variable whose name begins `egma_` is refused.** Those are egma's own
- * words to the simulator, and a test that overwrote one would be changing what
- * egma said about itself rather than what the caller's world holds.
- *
- * **How large the dispatch metadata may be is egma's to say, and is said
- * there.** The ceiling is measured on the one compact JSON string that travels,
- * and the platform writes that string itself — once when the test is saved and
- * again when the job is dispatched. A second serialization here would count its
- * own bytes and could turn away a blob the dispatch would have carried, so this
- * end judges the shape of a world and leaves its size alone. The mock tool
- * answer ceiling is left to the platform for the same reason.
+ * Parse test-owned Env JSON: retell_dynamic_variables and job_dispatch_metadata.
+ * Both version with the test. Reject reserved egma_ variable names.
+ * Validate shape here; the platform measures compact JSON size when saving.
  */
 
 import { FolderProblem } from "./problem.ts";

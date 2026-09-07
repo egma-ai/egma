@@ -18,21 +18,9 @@ import {
 } from "./support/traces.ts";
 
 /**
- * Which project a **browser** request works in.
- *
- * A browser names its project in the request, every request, because the
- * project a tab is looking at lives in that tab's address and nowhere else.
- * Two tabs on two projects are an ordinary thing for one person to have open,
- * and neither can be right if the server keeps one chosen project per session.
- *
- * So a session's project is a **default, not a scope**: every member of an
- * organization holds their organization role on every project in it, and
- * naming a sibling is what the selector does. An API key is the opposite — one
- * minted for a project is bounded by it — and the two are proved apart here.
- *
- * The refusal is quoted word for word. It is the sentence a page shows
- * somebody who followed a link into a project that is not theirs, so the
- * wording is the contract.
+ * Sessions may select another accessible project per request; their default
+ * project is not a restriction. Project API keys remain scoped to one project.
+ * Check both access and the refusal messages clients display.
  */
 
 let api: TestApi;
@@ -195,22 +183,8 @@ describe("a browser naming a project", () => {
 });
 
 /**
- * The rest of the product, from a browser standing in a project that is not the
- * organization's first.
- *
- * **This is the case every other test in this repository misses, and the misses
- * are not accidents.** An API test authenticates with a key, and a key minted
- * for a project *is* that project — so the acting project and the named project
- * are the same value, and a door that reads neither still answers correctly. A
- * component test stubs `fetch` and never meets a door at all. Only a session
- * has an acting project that can differ from the one named, and only in a
- * second project does the difference have a value.
- *
- * A real browser found four of these at once: an agent registered in the second
- * project landed in the first, and a run in the second project could not be
- * read, followed or cancelled at all. Each was a route reading the project from
- * somewhere the browser was not saying it, or from nowhere. Each is held below,
- * at the seam where it costs milliseconds.
+ * Use a session defaulting to the first project while operating in a second.
+ * This exposes routes that ignore explicit project selection.
  */
 describe("a browser working in a project that is not the first", () => {
   /** The two projects, and a key for building things in the second one. */
@@ -227,11 +201,8 @@ describe("a browser working in a project that is not the first", () => {
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    // Made the way the New project page makes one, rather than by calling the
-    // factory: what that page creates is the whole thing — the project and its
-    // protected Expected behaviors project grader. Egma's Predefined persona is
-    // shared into it rather than written for it, so a project made through this
-    // door is ready for its first run.
+    // Create through the API to include the protected Expected behaviors project
+    // grader. The project can also use shared Egma-provided personas.
     const made = await api.app.inject({
       method: "POST",
       url: "/v1/projects",
@@ -285,18 +256,8 @@ describe("a browser working in a project that is not the first", () => {
   });
 
   /**
-   * **The same door, with the project named in the query instead.**
-   *
-   * The case above proves the caller that exists today. This one proves the
-   * *door*, and it is the half that was missing: the first fix moved the
-   * register form to the body and left `POST /v1/agents` reading nothing else,
-   * so a request naming the project the way every other write in this group
-   * names it — `?projectId=` — was still answered from the session's own project,
-   * with a 201 and an agent in the wrong place. The next caller written to the
-   * group's own pattern would have reproduced the fault exactly.
-   *
-   * Both spellings mean the same thing here, as they already do for a
-   * simulation's regrade, and a caller using either is right.
+   * Agent registration accepts projectId in either the query or body.
+   * Check the query form independently so it cannot fall back to the session default.
    */
   it("registers an agent into the project its query named, too", async () => {
     const { ada, outbound } = await twoProjects("browser_registers_by_query");
@@ -431,18 +392,8 @@ describe("a browser working in a project that is not the first", () => {
   });
 
   /**
-   * The audio on a conversation's evidence page.
-   *
-   * **The evidence page reads its project and the recording beside it did
-   * not**, which is the hardest shape of this fault to notice: the page loads,
-   * the transcript is there, the grades are there, and the player is simply
-   * absent — which is exactly what an honest *this conversation recorded
-   * nothing* looks like.
-   *
-   * No object store is needed to hold it. The store is consulted after the
-   * conversation has been found, so the two answers are already different by
-   * then: named, the route gets past the lookup and says this deployment has no
-   * store; unnamed, it says there is no such conversation at all.
+   * Check recording lookup in a non-default project before storage signing.
+   * No configured store should yield the storage refusal, not a missing simulation.
    */
   it("resolves a recording for a conversation in the project it named", async () => {
     const { ada, outbound, keyForOutbound } = await twoProjects(
@@ -522,20 +473,8 @@ describe("a browser working in a project that is not the first", () => {
   });
 
   /**
-   * **What an unnamed API read still means, pinned rather than fixed.**
-   *
-   * `GET /v1/runs/{runId}` permits a caller to leave out `projectId`. For a
-   * signed-in session, that unnamed request acts in the session's own project
-   * and `getRun` narrows by it. A run in another project is therefore answered
-   * as an absence. Browser result addresses are project-scoped and do not use
-   * this path without project context; this is the public API rule itself.
-   *
-   * It is pinned here rather than changed because widening it is a decision
-   * about what an unnamed read means for **every** caller of that route. An API
-   * key minted for one project must not gain a sibling by it — that asymmetry
-   * is this file's own first promise — and separating a session from a key on
-   * one route is a rule with reach. The developer's call; this test is here so
-   * that it is made deliberately, and it fails the moment somebody makes it.
+   * A session read without projectId uses its default project and cannot find a
+   * run in a sibling project. Browser run URLs supply their project explicitly.
    */
   it("answers an unnamed read from the session's own project, not the organization", async () => {
     const { ada, outbound, keyForOutbound } = await twoProjects(
@@ -591,22 +530,9 @@ describe("a browser working in a project that is not the first", () => {
   });
 
   /**
-   * **Every other write a page makes, with the project named only in the
-   * address.**
-   *
-   * The ticket wrote down that "every page in the product now names its project
-   * the one way `writeJson` documents, in the address". It did not: six pages
-   * were still sending it in the body through a second helper one keystroke
-   * away, because six doors read only a body key. A page moved to the address
-   * against one of those doors is not refused — it is **ignored**, and the
-   * write lands in the session's own project, which is the organization's
-   * first, with a confident 201.
-   *
-   * So the doors are proved here rather than the pages: one session standing in
-   * the first project, authoring in the second, naming it **only** in the
-   * address, every time. Each half is asserted twice — the thing is in Outbound
-   * *and* the first project is still empty — because a door that ignored the
-   * address would answer exactly the same status code.
+   * Send writes with projectId only in the query, using a session whose default
+   * is another project. Check the selected project receives the record and the
+   * default project stays empty.
    */
   it("authors a suite and test, updates a project grader, and starts a run in the project its address names", async () => {
     const { ada, outbound } = await twoProjects("browser_writes_by_address");
@@ -767,29 +693,9 @@ describe("a browser working in a project that is not the first", () => {
 });
 
 /**
- * The other half of the same rule, and the half nothing in this repository
- * could see.
- *
- * A key minted for the **whole organization** names no project, and reading
- * across a whole customer is what such a key is for — the agents group says so
- * in as many words: *"Nothing, unless it named a project — reading across a
- * whole customer is the first-class case."* `inActingProject` is where that
- * lives: a context with no project narrows by nothing, and the organization
- * predicate still holds.
- *
- * **Every other API test in this repository signs up one organization holding
- * one project.** In such an organization a route that resolves an absent
- * project to "the organization's single project" answers exactly as a route
- * that narrows by nothing does, so the two are indistinguishable and the wrong
- * one is invisible. It takes a *second* project for them to differ — and then
- * the difference is not a narrowing at all. It is `NAME_THE_PROJECT`, an
- * outright 400, on four routes addressed by an id a terminal already holds.
- *
- * The four are here together because they are one journey a terminal makes:
- * read the run, follow it, stop it, and fetch the audio of a conversation in
- * it. None of them needs a project to answer — the id is unique in the
- * organization and the project is only a filter — which is exactly why the
- * credential's own reach is the right answer for all four.
+ * Use an organization API key with no project filter to read, follow, cancel,
+ * and resolve recordings across two projects. Organization predicates still
+ * apply; routes must not require a project merely because multiple projects exist.
  */
 describe("a key for the whole organization, where the organization holds two projects", () => {
   /** A run in the organization's *second* project, and a key for the whole customer. */
@@ -804,9 +710,8 @@ describe("a key for the whole organization, where the organization holds two pro
     api = await createApi(label, { traceStore: modality === "voice" });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    // Through the product's own door, so the second project is the whole thing
-    // — protected project grader included, and Egma's Predefined persona
-    // reachable from it — rather than a bare row.
+    // Create the second project through the API, including its protected grader
+    // and access to shared Egma-provided personas.
     const made = await api.app.inject({
       method: "POST",
       url: "/v1/projects",
@@ -955,15 +860,9 @@ describe("a key for the whole organization, where the organization holds two pro
     expect((asked.json() as { error: string }).error).toBe("no_object_store");
 
     /*
-      The conversation itself, which is the other door the same page opens.
-
-      This is the one the recording's own fix walked past: the evidence page
-      asks for the transcript and the audio together, so a key that could fetch
-      the audio and not the transcript made one page answer one question two
-      ways. Asserted here rather than in a case of its own, because "the same
-      page, both doors, one credential" is the claim — and two cases could drift
-      until only one of them was moved, which is exactly what happened.
-    */
+     * Use the same organization key for simulation evidence and its recording,
+     * so the two requests made by one page have consistent access.
+     */
     const conversationRead = await api.app.inject({
       method: "GET",
       url: `/v1/simulations/${conversation}`,

@@ -577,18 +577,8 @@ describe("starting monitoring", () => {
   });
 
   /**
-   * **A refused start leaves nothing behind.**
-   *
-   * Registering an unregistered platform agent and flipping its switch are one
-   * transaction, so a refused switch takes the agent row with it. Split in
-   * two — create, then enable — the loser of the race writes its agent row,
-   * loses the uniqueness-enforced switch, and leaves that row in the roster
-   * bound to nothing, belonging to a request that was told it had failed.
-   *
-   * Two requests ticking the same unregistered platform agent at once is how
-   * that happens. Whichever way the two interleave, the invariant is the same
-   * and it is what this asserts: one agent row for one Retell agent, and no
-   * live agent left unbound.
+   * Race two monitoring starts for the same unregistered platform agent.
+   * A refused start must leave no extra live unbound agent.
    */
   it("writes no orphan agent when two starts race for one platform agent", async () => {
     const retell = provider();

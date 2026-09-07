@@ -1,68 +1,15 @@
-"""The calendar is full, on a real voice call — opt-in.
+"""Opt-in voice simulation with a calendar-is-full mock and test-owned dispatch
+metadata.
+Start fixtures/livekit-dumb-agent with the Egma SDK first. The transcript must
+follow the mocked calendar branch. Simulator tool rows stay empty because
+LiveKit tool evidence belongs to the agent SDK. When its log is supplied,
+check that the worker received the test's dispatch metadata.
 
-The seam is proved offline against a room-shaped fake, which says the
-exchange is right and nothing at all about whether a real agent's tool
-call really reaches egma across a real room. This file is the other half:
-a spec carrying one mocked tool goes in at the control plane, egma makes a
-room in a real LiveKit project, the dumb-agent worker is dispatched into
-it with the egma SDK wired in, a persona asks about Tuesday out loud —
-and the agent is told, by egma, that Tuesday is full.
-
-Nothing about that answer exists anywhere but in this file. There is no
-calendar behind the fixture and no calendar behind egma; the branch the
-agent takes is a branch a test ordered up, which is the whole promise mock
-tools make.
-
-## What only a live run can say
-
-Four things, and every one of them is on the record rather than in this
-process's memory:
-
-- **the answer this spec carried is the answer the agent got**, byte for
-  byte, with the provenance stamp and the mock tool that served it;
-- **the tool the test did not name has no span at all**, because egma was
-  never in its path — which is the honest other half of the rule, and the
-  thing no offline suite can show against a real worker;
-- **the test's own env reached the worker**: the spec carries
-  ``job_dispatch_metadata``, egma writes it onto the agent dispatch, and
-  the fixture worker reads it back out of ``ctx.job.metadata`` and logs
-  it, so the bytes are proved to have crossed a real LiveKit.
-
-A spec carries its mock tools and its env **from the test that wrote
-them**: the pinned test version names the tools egma answers for and the
-world the agent starts in, and there is nothing to merge and nothing to
-resolve. So what this file carries is one test's calendar-is-full answer
-and one test's dispatch metadata, and what it proves is that both reach a
-real agent unchanged.
-
-And the transcript reads the way the test intends: the agent says Tuesday
-is full and offers the day the mock named instead, and never once offers
-the two times the fixture's own implementation would have invented.
-
-## Running it
-
-The counterpart worker must be running: ``fixtures/livekit-dumb-agent``,
-started with the same environment. A room with no worker registered for
-it is the ``agent_never_joined`` refusal, correctly, and the wrong test.
-The one command in that fixture's README starts the worker, runs this,
-and hands back the transcript; by hand it is::
-
-    TEST_LIVEKIT_URL=wss://... \\
-    TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \\
-    TEST_LIVEKIT_AGENT_NAME=front-desk \\
-    [TEST_DEEPGRAM_API_KEY=...] [TEST_CARTESIA_API_KEY=...] \\
-    TEST_MODEL_API_KEY=... \\
-    uv run pytest tests/test_live_mock_tools.py -v -s
-
-The agent's name is required, not optional: egma dispatches explicitly,
-so this test conducts against the one worker it names rather than
-whichever worker was listening — and the SDK on the far side finds egma
-by the room's name and the persona's identity, which is this test's
-whole subject crossing a real room.
-
-Each name falls back to the plain one the tool's own CLI reads, so one
-environment starts the worker and runs this. It skips — visibly, never
-failing, never waiting on anybody — when any of them is missing.
+Run: uv run pytest tests/test_live_mock_tools.py -v -s
+Set TEST_LIVEKIT_URL, TEST_LIVEKIT_API_KEY, TEST_LIVEKIT_API_SECRET,
+TEST_LIVEKIT_AGENT_NAME, and TEST_MODEL_API_KEY. Standard variables are fallbacks.
+Optional TEST_DEEPGRAM_API_KEY and TEST_CARTESIA_API_KEY select those speech
+providers; otherwise use OpenAI. Missing required settings produce a skip.
 """
 
 from __future__ import annotations
@@ -363,16 +310,8 @@ def tool_calls_in(records: list[dict]) -> list[dict]:
 
 
 def hand_back(spoken: list[tuple[str, str]]) -> None:
-    """Print the transcript the mocked world produced.
-
-    On stdout rather than in an assertion message, because the point of
-    the one command this test backs is watching it work rather than
-    reading what failed. pytest keeps this to itself unless the run asks
-    for it with ``-s``, which is what that command does.
-
-    The mocked call itself is not printed here and cannot be: egma writes
-    no tool row. What the answer did is in the words below, and the call
-    is on the agent's own POV of the simulation.
+    """Print the transcript when pytest uses -s. Tool-call evidence belongs to the
+    agent POV and is not printed from the simulator's reports.
     """
     print("\n--- the transcript ---")
     for speaker, text in spoken:

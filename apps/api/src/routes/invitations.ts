@@ -7,27 +7,9 @@ import { resolveSession } from "../auth/session.ts";
 import { toIdentityRequest } from "../http/web-handler.ts";
 
 /**
- * The invited person's side of an invitation, and the one part of egma that
- * cannot ask for a credential first.
- *
- * These are deliberately outside the credentialed scope every other route with
- * a customer's data in it lives inside. Somebody following a link has no
- * membership — that is the entire point of the link — so resolving them into an
- * `AuthContext` would fail, and the rate limit keyed on their organization has
- * no organization to key on. **The token is the credential here.** It is 256
- * bits of randomness, it names exactly one invitation, and it cannot be asked
- * about a second: there is no argument to widen.
- *
- * **These two therefore carry no request budget**, which is stated rather than
- * left to be discovered. What a budget would protect against is guessing, and
- * guessing one of 2^256 tokens is not a thing a machine does — the same
- * reasoning that makes a single SHA-256 the right hash for one. What is left is
- * ordinary flooding, which is a job for whatever sits in front of the instance,
- * and is not made better by a limiter with nothing to key on.
- *
- * The token travels in a body rather than a query string. It is in the browser's
- * address bar either way — a link has to be pasteable — but there is no reason
- * to put it in the API's access log as well.
+ * Invitation lookup uses the token rather than requiring organization
+ * membership. These routes are outside organization rate limits. Accept tokens
+ * in request bodies to keep them out of API query-string logs.
  */
 
 export type InvitationRoutesOptions = {
@@ -69,17 +51,8 @@ export async function invitationRoutes(
   });
 
   /**
-   * Accepting, for somebody who already has an egma account.
-   *
-   * Everybody else accepts by signing up with the token beside their password,
-   * which is one page and one submit. This is the other case, and it is real:
-   * somebody removed from an organization and then invited back has an account
-   * and belongs nowhere, and would otherwise be told their email address is
-   * taken by an account they cannot use.
-   *
-   * It needs a session and nothing more — no membership, because they have
-   * none, and no permission, because accepting an invitation addressed to you
-   * is not an action anybody's role decides.
+   * Existing accounts accept with a valid session, without requiring current
+   * organization membership. New accounts accept through signup.
    */
   app.post("/api/invitations/accept", async (request, reply) => {
     const token = text((request.body as Body | undefined)?.token);

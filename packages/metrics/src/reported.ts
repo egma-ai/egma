@@ -1,33 +1,9 @@
 /**
- * The reported-measurements block: what an agent platform measured about its
- * own production trace, translated into egma's vocabulary at the ingest door
- * and carried on the root span's payload under
- * `egma_normalised.reported_measurements`.
- *
- * **Why the shape is neutral, and why that is the whole design.** A managed
- * platform — Retell today, the next one when it is wanted — publishes its own
- * numbers in its own shape, and exactly one place in egma knows that shape:
- * the platform's normalizer. The normalizer translates into this block, so the
- * shared measure module reads one shape forever and a new platform is one
- * mapping table in its own module, never a second parser in the shared metric
- * arithmetic.
- *
- * **Raw samples, never the platform's percentiles.** A measurement here is the
- * platform's own raw series (`values`), so "every measurement holds the bound,
- * the worst turn decides" stays truthful and percentile math stays egma's own
- * — one implementation, whoever measured. A platform that reports only
- * aggregates gets a second arm of this block on the day it exists, versioned;
- * dressing a p50 up as a sample would let one summarised turn pass a bound a
- * real turn failed.
- *
- * **Same meaning, same name.** A measurement whose meaning matches the measure
- * catalog carries the catalog's own name, so every metric reader uses the same
- * value for platform traffic. A platform stage with no
- * catalog counterpart keeps a platform-prefixed name (`retell/llm_latency`)
- * rather than a forced fit — captured now, surfaced when a display asks.
- *
- * The block is data from a payload, so reading it never throws: anything
- * malformed is `undefined`, exactly as a payload nobody wrote is.
+ * Agent-platform measurements normalized into the root span payload under
+ * egma_normalised.reported_measurements. Store raw samples, not vendor
+ * percentiles, so @egma/metrics computes reductions consistently.
+ * Use catalog names only for equivalent measures; retain platform-prefixed
+ * names for other measurements. Parsing malformed input does not throw.
  */
 
 /**
@@ -99,14 +75,9 @@ export function reportedMeasurementsPayload(
 }
 
 /**
- * The block as a reader holds it, or `undefined` for anything that is not one.
- *
- * Lenient on purpose and item by item: a payload is vendor territory plus one
- * egma-owned corner, and a reader that threw on a malformed corner would turn
- * one bad write into an unreadable trace. A measurement with a missing name, a
- * missing unit, or a value that is not a finite number is dropped alone; a
- * block with a wrong version or nothing left standing is `undefined`, exactly
- * as a block nobody wrote.
+ * Parse a supported measurement block without throwing. Skip malformed
+ * entries and nonfinite values; preserve other valid samples. Return undefined
+ * for an invalid block or one with no usable measurements.
  */
 export function reportedMeasurementsOf(
   held: unknown,

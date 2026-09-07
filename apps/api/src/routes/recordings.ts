@@ -22,64 +22,11 @@ import {
 } from "../recordings/signed-link.ts";
 
 /**
- * `GET /v1/simulations/:simulationId/recording` — the one route that turns a
- * recording's reference into something a browser can play.
- *
- * The contract has promised this for as long as the reference has existed:
- * *resolved by the control plane; never a URL, never carries how to fetch it*.
- * A voice simulation writes one dual-channel recording — the person calling on
- * one channel, the agent under test on the other, so each can be heard alone
- * when a transcript looks wrong — and reports an opaque reference to it. This is
- * where that reference becomes audible.
- *
- * **Only the decision passes through here.** The answer is a short-lived signed
- * link and the bytes go from the store straight to the browser, which is what
- * makes seeking free: dragging the scrubber is a byte range the store serves,
- * not megabytes of audio re-proxied through a control plane. What egma does is
- * decide whether this reader may hear this recording, and then sign.
- *
- * **One route, two surfaces.** A run's results reach it by simulation id; a
- * transcript reaches it by converting the trace identifier it already holds,
- * because a trace identifier and a simulation identifier are the same number in
- * two forms and the contract carries the conversion. So the transcript surface
- * needs no second endpoint, no new join and no new read.
- *
- * ## Refusal before success
- *
- * The boundary is the **organization** — the only boundary in the product — and
- * it is honoured by the same machinery every other read uses rather than by
- * anything of this route's own: `getSimulation` stamps the caller's own tenancy
- * into the query, so a simulation in somebody else's organization is not a
- * refusal at all, it is simply not there. Four refusals, in this order, and the
- * order is the point:
- *
- * 1. **Not this reader's.** A simulation outside the caller's organization, one
- *    in a project their key does not reach, and an id nobody ever minted all
- *    answer the same sentence. Existence is never confirmed to somebody who
- *    could not have seen the thing anyway.
- * 2. **A chat carries no audio.** The database already forbids a chat row from
- *    holding a recording, so this could be left to fall through to "no
- *    recording" — and it is answered on its own terms instead, because agreeing
- *    with the rule out loud tells a reader that no amount of waiting or
- *    re-running will produce audio here, where "no recording" would suggest it
- *    might.
- * 3. **No recording.** A voice simulation whose call never connected wrote
- *    nothing. So did one whose upload the store refused — the two are
- *    indistinguishable from here, and the spec's Further Notes record that gap
- *    rather than hiding it.
- * 4. **No store configured**, last of the four on purpose. It is the one
- *    refusal that is about the deployment rather than about the request, and
- *    answering it before the three above would let a stranger learn whether a
- *    simulation exists by watching which sentence comes back.
- *
- * **Two of those are settled facts about the conversation and one is a defect,
- * and the codes say which.** `not_found` and `unprocessable` mean there is
- * nothing to hear and there never was — a surface that asks about every
- * conversation it shows may answer them by offering nothing at all. A reference
- * egma will not sign is not that: it answers `unsignable_reference`, because a
- * row carrying something no simulator could have written is a fault, the audio
- * it points at may well exist, and a fault that shares a code with an honest
- * absence goes invisible on exactly the surface that would meet it most.
+ * Authorize a simulation recording and return a short-lived signed link.
+ * Audio bytes and range requests go directly from storage to the browser.
+ * Check scoped simulation existence, voice modality, and recording reference
+ * before reporting missing storage configuration. Invalid reference shapes
+ * use unsignable_reference, distinct from expected audio absence.
  */
 
 export type RecordingRoutesOptions = {
@@ -122,25 +69,9 @@ export async function recordingRoutes(
     const query = (request.query ?? {}) as Record<string, unknown>;
 
     /**
-     * **The project the caller named, where it named one.**
-     *
-     * `getSimulation` narrows by the acting project, and a session's acting
-     * project is the organization's first — so this route read the recording of
-     * a conversation in the first project and answered *no such conversation*
-     * about every other one. The evidence page beside it reads its project and
-     * loaded perfectly; only the audio on it went missing, which is the shape
-     * that is hardest to notice.
-     *
-     * **Optional, because one of the two surfaces has no project to name.** A
-     * run's evidence page is inside one and says so; a transcript may be a
-     * production exchange nobody simulated, on an organization-wide page, and
-     * naming none there is the same absent case every other route answers.
-     *
-     * **`reachingIn`, so that "optional" stays optional.** A simulation id is
-     * unique inside the organization; the project narrows the lookup and never
-     * chooses it. `actingIn` would turn a naming-none request from a key for
-     * the whole organization into *name the project* — a 400 in place of the
-     * audio, on the one surface whose whole point is that it need not know.
+     * Treat project as an optional resource filter through reachingIn.
+     * An explicit browser selection replaces its default project; organization-wide
+     * keys can look up a simulation ID without first choosing a project.
      */
     const acting = await reachingIn(auth, given(text(query.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);

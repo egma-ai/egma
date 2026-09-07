@@ -109,20 +109,10 @@ const simulationSchema = {
     providerReference: nullable(stringSchema),
     hasRecording: booleanSchema,
     /**
-     * That this conversation was graded without the agent's own POV of it.
-     *
-     * A simulation stores two accounts of one conversation and grading waits
-     * for the agent's — the SDK's export from inside the room, or the pull from
-     * the platform — for thirty seconds and no longer (ADR-0024 §6). True says
-     * the wait ran out: what is stored is egma's account, and the agent's is
-     * missing or partial. **A reader that shows the agent's POV has to ask**,
-     * because "the rows filed as the agent's" is a fragment here rather than
-     * the conversation, and a fragment shown as the whole is worse than a gap
-     * that says it is one. Regrade picks up a late arrival.
-     *
-     * False on every conversation whose agent POV landed, and on every lane
-     * that files none — a phone number reaches nothing of egma's, so nothing
-     * was ever waited for.
+     * True when grading proceeded after the agent-POV wait expired. That POV may
+     * be absent or partial; transcript readers must not present it as complete.
+     * Regrade can use evidence that arrives later. False when the POV arrived
+     * or the connection type does not provide one.
      */
     agentPovIncomplete: booleanSchema,
     measures: {

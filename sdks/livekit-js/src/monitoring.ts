@@ -8,22 +8,12 @@ export const MONITOR_VERB = "egma.monitor";
 export type MonitorOptions = ExportOptions;
 
 /**
- * Send this LiveKit worker's production spans to Egma.
+ * Export production spans to Egma. Call first in the job entrypoint, before
+ * AgentSession.start. Repeated calls reuse the exporter; each job gets a final flush.
  *
- * Call this as the first statement of the job entrypoint, before
- * `AgentSession.start`. Repeated calls for the same job reuse one process-wide
- * exporter. Each job gets one final flush callback.
- *
- * It throws a plain `Error`, and only for a worker that is misconfigured:
- * `EGMA_URL` or `EGMA_API_KEY` missing or malformed, a `@livekit/agents` too
- * old to expose the telemetry seam, a tracer provider this SDK cannot safely
- * extend, or a second LiveKit job in this process asking for different
- * settings. There is no per-conversation failure here — a production
- * conversation is never stopped over telemetry.
- *
- * In a simulation room this returns having done nothing: `simulation()`
- * exports that conversation instead, and files it under the simulation it
- * belongs to rather than as a second production call.
+ * Throws Error for invalid settings, unsupported LiveKit telemetry APIs, an unsafe
+ * tracer provider, or different settings in a second job. Export failures do not
+ * stop the agent. In simulation rooms, simulation() handles export instead.
  */
 export function monitor(ctx: JobContext, options: MonitorOptions = {}): void {
   const roomName = ctx?.job?.room?.name;

@@ -7,84 +7,23 @@ import {
 import type { ReportedOnTrace, TraceSpan } from "./spans.ts";
 
 /**
- * The shared measure module: a conversation in, the measure catalog's numbers
- * out.
- *
- * **Two POVs, one series each, and the catalog version says which leads.** A
- * measure egma timed itself is the persona's POV; a measure worked out from a
- * recognised framework's own spans, or read out of the block the platform
- * reported, is the agent's. Inside the agent's POV the derivation wins over the
- * block absolutely — they are one account told two ways. Across the two POVs
- * nothing is averaged and nothing is appended: a conversation both measured
- * answers with both series, the second beside the first, and every number says
- * which POV took it, because a developer reading a grade is entitled to know
- * whether egma watched it happen or was told about it.
- *
- * **One computation, and that is the whole reason this file exists.** The
- * metrics display reads through it and so does the grader that bounds a
- * measure, for a simulation and for a production trace alike. So the number a
- * developer sees on a page and the number a metric-based grader receives are the
- * same arithmetic over the same rows — not two readers that agree today and
- * drift the week somebody fixes one of them. A second implementation anywhere
- * would be a second answer about one conversation, with no stored number to
- * settle the disagreement against, which is precisely the false trust this
- * product exists to kill.
- *
- * **The source is not an input, and cannot become one.** What goes in is a
- * conversation's spans, and what a platform reported about it; what comes out is
- * what those carry. A simulation's telemetry and a real caller's arrive at the
- * same OTLP door and land in the same table, so "identical input, identical
- * numbers" is a property of this function's signature rather than a promise
- * somebody has to keep — there is nowhere here for `source` to be read even by a
- * caller who wanted to. The reported block is not a way in for it: it is what a
- * platform said about one conversation, read on its own terms and last of the
- * three, and a simulation carrying one would be read exactly the same way.
- *
- * **The POV is an input, and it is not the source wearing another name.**
- * `source` says who *conducted* the conversation and is deliberately unreadable
- * here; a span's POV says whose *account* it is, which is a property of the
- * evidence itself. A simulation's trace holds two accounts of one conversation
- * under one id, so a reader that could not tell them apart would fold both into
- * one series — which is the exact blending every rule below exists to prevent.
- *
- * **The catalog decides what is computed and how.** Every measure carries its
- * span-level definition beside its name
- * (`packages/metrics/measure-catalog.md`), the rule is one of a
- * closed list, and the switch below is exhaustive — so a measure whose rule
- * nothing implements stops the TypeScript build rather than shipping as a
- * metric that silently disappears forever.
- *
- * It reaches nothing: rows a caller already fetched go in, arithmetic comes
- * out. So it takes no `AuthContext` and is exported from the package's entry
- * point rather than from the data-access surface because it is pure and needs
- * no tenancy boundary.
+ * Compute metrics from spans and reported measurements without store access.
+ * Keep persona and agent POVs in separate series. Within the agent's POV,
+ * derived samples take precedence over reported samples. The measure catalog
+ * selects the primary POV; otherPov carries the second series when available.
+ * Simulation and production use the same computation over the same inputs.
  */
 
 /**
- * The part of a trace this reads: its spans, however they were arranged for a
- * transcript, and what its platform reported about it.
- *
- * Structural rather than `TraceDetail` itself, so a caller holding a trace hands
- * it straight over and a test can hand over the lists — and so that adding a
- * fact to a trace read is not a change to this arithmetic. A trace read hands
- * back the turns lifted out for the transcript and everything filed beside them,
- * with children hanging beneath both; every span is under one of the two, once.
+ * Minimal trace input: transcript turns, other spans, their children, and
+ * reported measurements. Each span occurs once across the two trees.
  */
 export type SpannedConversation = {
   readonly turns: readonly TraceSpan[];
   readonly spans: readonly TraceSpan[];
   /**
-   * What the platform measured about this conversation itself, when the trace
-   * read found a block on its root span.
-   *
-   * **Not spans, and that is the honest shape.** These numbers were never
-   * events egma watched happen; they are what somebody else says happened, and
-   * dressing them as spans would fabricate a granularity the platform never
-   * gave. So they arrive beside the spans rather than among them, they are read
-   * last, and every number worked out from them says so.
-   *
-   * Optional, because a conversation is a conversation without one — every
-   * simulation, and every platform egma reads no numbers from.
+   * Optional measurements reported by the agent platform on the root span.
+   * Use them as the agent-POV fallback, not as fabricated timing spans.
    */
   readonly reported?: ReportedOnTrace | undefined;
 };
@@ -104,20 +43,9 @@ export type Sample = {
 };
 
 /**
- * Whose account of the conversation a **series** is: the persona's or the
- * agent's.
- *
- * Named for the origin it reads rather than plainly, because the trace store
- * answers the same question about a **span** from its `emitter` column and the
- * two must not be mistaken for one another: this one is about who measured a
- * number, that one about who wrote a row.
- *
- * **Two POVs and three origins, because one POV can be told two ways.** egma's
- * own timing spans are the persona's POV — what egma said, heard and measured
- * off its own recording. A derivation off the framework's spans and the block
- * the platform reported are both the *agent's* account of itself, differing
- * only in granularity, so they rank against each other rather than sitting
- * side by side.
+ * Metric-series POV: timed samples belong to the persona; derived and
+ * reported samples belong to the agent. This classifies a series origin,
+ * whereas the span emitter column identifies who wrote a span.
  */
 export function povOfOrigin(
   origin: MeasuredByOnePov["origin"],
@@ -135,24 +63,9 @@ export function povOfOrigin(
  */
 export type MeasuredByOnePov = {
   /**
-   * Which of the three sources this number came from: a timing span egma's own
-   * vocabulary names, a derivation off a recognised framework's own spans, or
-   * the platform's own reported block.
-   *
-   * **The POV qualifier, since catalog version 8** — `timed` is the persona's
-   * POV and the other two the agent's (`povOfOrigin` above). A fact about *this*
-   * conversation and not about the measure, which is why it rides the answer
-   * instead of sitting in the catalog: the same measure is timed on a
-   * simulation, derived on a stock LiveKit call, and reported on a Retell one.
-   * A page saying where a number came from is the difference between a grade a
-   * developer trusts and one they have to go and check — and `reported` is the
-   * value that most needs saying out loud, because a platform's measurement of
-   * its own agent is a different kind of evidence from egma's observation of
-   * it.
-   *
-   * Not the catalog's own `origin`, which says where a measure arrives from in
-   * general — a timing span or a terminal fact. This says who measured this
-   * one, on this conversation.
+   * Origin of this series: timed by the simulator, derived from framework spans,
+   * or reported by the agent platform. Distinct from the catalog origin, which
+   * describes how the measure can arrive in general.
    */
   readonly origin: "timed" | "derived" | "reported";
   /**
@@ -165,14 +78,8 @@ export type MeasuredByOnePov = {
    */
   readonly reportedBy: string;
   /**
-   * One measurement, or the whole series for a measure taken once a turn, in
-   * the order they were taken.
-   *
-   * Never empty: a measure this conversation did not take is **absent** from
-   * the answer rather than present with nothing in it. That is what lets a
-   * grader tell "measured, and here it is" from "not measured here". A grader
-   * that requires the absent metric can then return an error, never a false
-   * score.
+   * Samples in measurement order. Never empty: omit an unmeasured metric so
+   * a grader can distinguish missing evidence from a measured zero.
    */
   readonly samples: readonly Sample[];
 };
@@ -183,70 +90,31 @@ export type MeasuredFromSpans = MeasuredByOnePov & {
   /** The catalog's own unit, so nothing downstream has to look it up again. */
   readonly unit: CatalogedMeasure["unit"];
   /**
-   * The same measure as the **other** POV measured it, where both measured it.
-   *
-   * **Additive, and never blended into the headline.** A simulation has two
-   * accounts of a wait — egma's, off its own recording, and the agent's, off
-   * its own spans — and they differ by the VAD's detection lag and the
-   * playback hop. Averaging them would invent a number nobody measured, and
-   * appending them would file one turn's wait twice and move every percentile.
-   * So the headline stays one series and this is where the second one lives,
-   * saying which POV took it.
-   *
-   * Absent for every conversation only one POV measured, which is every
-   * production trace and every simulation whose agent POV never arrived.
+   * The other POV's series, when available. Never merge or average it with
+   * the primary series; doing so would count a turn twice.
    */
   readonly otherPov?: MeasuredByOnePov | undefined;
 };
 
 /**
- * The kind the ingest door files a timing span under.
- *
- * Selecting on the **kind as well as the name** is deliberate. The door
- * recognises egma's vocabulary by the emitting scope and files those spans as
- * `timing`; a provider's own span that happens to be called
- * `turn_response_latency` is filed as whatever it is. Reading the name alone
- * would let another framework's bookkeeping become a measurement Egma grades an
- * agent against.
+ * Match both timing kind and measure name. Ingestion validates instrumentation
+ * scope before assigning this kind, so a lookalike name alone cannot qualify.
  */
 const TIMING = "timing";
 
 /**
- * The kinds a derivation reads, and the whole of why reading them is safe.
- *
- * **The vetting lives at the door.** `apps/api/src/otlp/normalise.ts` assigns
- * every one of these from a table keyed by the emitting instrumentation scope;
- * a scope that table does not know is filed as `other`, whatever its spans are
- * called. So a span carrying one of these kinds is a span egma recognised the
- * emitter of, and nothing here has to re-check a name a lookalike framework
- * could have chosen. `speaking` is LiveKit's alone today; the two turn kinds
- * are LiveKit's, egma's own simulator's, and the Retell normalizer's — whose
- * turns carry real word-bound timings, so the derivations below read them
- * exactly as they read LiveKit's. A simulation carries timing spans, which win
- * outright below.
- *
- * **The root is not a kind.** A root wears whatever word its platform uses —
- * `root` on egma's own traces and on LiveKit's, `conversation` on a Retell one
- * — so the derivations recognise it the way the trace read itself does: by the
- * empty parent, the one fact about a root no platform spells differently. A
- * reader that named kinds would have to learn a new word per platform, and
- * forgetting one costs a measure silently (Retell's `first_response_latency`
- * was never derived for exactly that reason).
+ * Ingestion assigns recognized span kinds by instrumentation scope; unknown
+ * scopes remain other. Derivations use these vetted kinds. Identify roots
+ * by an empty parent ID, since platforms use different root kind names.
  */
 const HUMAN_TURN = "turn:human";
 const AGENT_TURN = "turn:agent";
 const SPEAKING = "speaking";
 
 /**
- * The conservative span-kind projection needed to compute turn-response
- * latency through this module.
- *
- * A store may use this to avoid returning unrelated framework steps, but it
- * does not get to restate which rows count. Timed rows are deliberately kept
- * by kind rather than narrowed by name here: `measuresFromSpans` remains the
- * only reader that decides whether a timing span is this measure. The root's
- * reported-measurements block is not a span kind and must be fetched beside
- * this projection when a caller wants the reported fallback.
+ * Span kinds needed for turn response latency. Keep all timing spans here;
+ * measuresFromSpans selects the measure by name. Fetch the root's reported
+ * measurements separately when the reported fallback is needed.
  */
 export function turnResponseLatencySpanKinds(): readonly string[] {
   return [TIMING, HUMAN_TURN, AGENT_TURN, SPEAKING];
@@ -262,16 +130,7 @@ const NANOSECONDS_PER_MILLISECOND = 1_000_000;
 const NANOSECONDS_PER_MICROSECOND = 1_000n;
 const MICROSECONDS_PER_SECOND = 1_000_000n;
 
-/**
- * Every measure this conversation's spans carry, in the catalog's own order.
- *
- * **Catalog order rather than the order they were measured in**, so a display
- * lists the same measures in the same places for every conversation, and two
- * readings of one trace are the same answer however the flushes arrived. The
- * *samples* inside a measure are in the order they were taken, which is the
- * order that means something: a per-turn series read forwards is the
- * conversation read forwards.
- */
+/** Return measured metrics in catalog order, with samples in measurement order. */
 export function measuresFromSpans(
   conversation: SpannedConversation,
 ): readonly MeasuredFromSpans[] {
@@ -320,18 +179,8 @@ function personaPovOf(
 }
 
 /**
- * The agent's POV of one measure: the agent's own account of itself, told the
- * better of the two ways it can be told.
- *
- * **Derived beats reported, absolutely, and this is where the old three-source
- * chain still lives.** Both are the agent's account — one worked out from the
- * framework's own spans, one handed over as a block — so a conversation
- * carrying both has one agent-POV series, never two averaged or two appended.
- * The block is not least for being last: on a Retell trace it is the only
- * account there is, and the whole difference between a production conversation
- * with this metric and one with a polite silence.
- *
- * `undefined` where the agent's process told egma nothing about this measure.
+ * Choose derived samples for the agent's POV, falling back to reported ones.
+ * Never blend the two. Return undefined when neither provides this measure.
  */
 function agentPovOf(
   cataloged: CatalogedMeasure,
@@ -349,25 +198,8 @@ function agentPovOf(
 }
 
 /**
- * The worst sample a measure produced, and the span it happened in.
- *
- * **The worst rather than the mean, and the reason is the catalog's own**: a
- * mean hides the one turn that took nine seconds, which is the turn the caller
- * hung up on. A bound is "the most this measure may be", so a conversation
- * holds it only if every measurement held it — one bad turn out of twenty is a
- * conversation that was bad once, and a check that says otherwise is a check
- * nobody should believe.
- *
- * The metric display uses this strict reduction today. A future grader can pin
- * another reduction in its own immutable definition instead of changing this
- * observed metric after old grades were recorded.
- *
- * Ties keep the earliest sample, so two readings of one trace cite one span.
- *
- * `undefined` for a measure with no samples, which nothing this module builds
- * ever has — a measure with none is absent instead. It is answered rather than
- * assumed because the alternative is a fallback number, and a fallback number
- * here is a bound quietly passed by a conversation nobody measured.
+ * Return the largest sample and its evidence span, retaining the first tie.
+ * Return undefined for an empty series; do not substitute zero.
  */
 export function worstSampleOf(measured: MeasuredFromSpans): Sample | undefined {
   let worst: Sample | undefined;
@@ -378,26 +210,9 @@ export function worstSampleOf(measured: MeasuredFromSpans): Sample | undefined {
 }
 
 /**
- * One of the catalog's eight reductions, computed over a measure's samples.
- *
- * **The whole list, implemented in one place.** The catalog declares which
- * reductions a threshold may ask of a measure; this switch is that list made
- * runnable, exhaustively — a name joining `MEASURE_AGGREGATIONS` without a
- * case here stops the build instead of shipping as a reduction that answers
- * nothing. The surfaces choose what to show and the wire carries what a page
- * needs; the arithmetic never lives anywhere else.
- *
- * **Percentiles are nearest-rank**, exactly as the catalog states them: the
- * p90 of ten measurements is the ninth of them, not an interpolation — a
- * measurement that actually happened, findable in the transcript. The mean is
- * rounded to the nearest whole unit here, once, so two surfaces printing one
- * conversation can never disagree in the last digit; every other reduction
- * answers a sample (or a sum of samples) verbatim.
- *
- * A reduction cites no single span — the samples beside it carry the
- * citations — so it is a number rather than a `Sample`. `undefined` for a
- * measure with no samples, which nothing this module builds ever has,
- * answered rather than assumed for `worstSampleOf`'s exact reason.
+ * Reduce samples using the catalog's aggregation. Percentiles use nearest
+ * rank; the mean rounds to a whole unit. Return undefined for an empty
+ * series. Evidence span IDs remain on the samples, not on the aggregate.
  */
 export function aggregateOf(
   measured: MeasuredFromSpans,
@@ -434,24 +249,9 @@ function nearestRank(values: readonly number[], percentile: number): number {
 }
 
 /**
- * The p90 of a measure's samples, for a grader to hold a bound against.
- *
- * **The tail is what a caller feels.** A mean hides the one turn that took
- * nine seconds; the p90 is the number that turn moves. Response latency
- * bounds this, and the page that leads with a conversation's latency shows
- * the same reduction — so a developer reading a figure and a grader judging
- * one are reading one number, which the mean-against-p90 split they had
- * before made impossible.
- *
- * Nearest-rank, exactly as `aggregateOf` computes it and the catalog states
- * it: the answer is a measurement that actually happened, findable in the
- * transcript. Below ten samples that is the slowest turn, and deliberately
- * so — nearest-rank never interpolates a number nothing measured.
- *
- * Separate from `aggregateOf` only for the validation: a grader must refuse a
- * series it cannot trust rather than score it. `undefined` means the series is
- * empty or holds a value that cannot be a measurement, and a grader reports
- * that as an error, never as zero.
+ * Nearest-rank p90 for grading. Unlike aggregateOf, reject empty series
+ * and any nonfinite or negative sample. Missing evidence is a grading error,
+ * not a zero. Below ten samples, p90 is the slowest sample.
  */
 export function p90Of(measured: MeasuredFromSpans): number | undefined {
   const values: number[] = [];
@@ -545,50 +345,10 @@ function samplesOf(
  * ------------------------------------------------------------------- */
 
 /**
- * One cataloged measure's samples out of the platform's reported block, or
- * nothing where the block does not hold that measure.
- *
- * **The name and the unit both have to match, and the unit is not a
- * formality.** A platform that reports its end-to-end latency in seconds under
- * the catalog's own name is reporting something real; reading `2.145` as
- * milliseconds would hand a grader a conversation that answered in two
- * milliseconds, and a two-second bound would pass what it exists to fail. A
- * number in the wrong unit is worse than no number, so such a measurement is
- * omitted and the measure comes back absent. A grader that requires it returns
- * an error rather than a false pass. Converting it instead would be Egma inventing a fact about a unit
- * nobody in this repository declared.
- *
- * **A platform-prefixed name never matches**, because no catalog measure is
- * called `retell/llm_latency`. Those entries stay in the block for the day a
- * display asks for them, and are deliberately not folded into the catalog
- * answer beside a stage that means something else.
- *
- * **Every sample cites the root span the block rode in on.** These numbers
- * describe the whole conversation and happened at no single moment inside it,
- * so the root is the only span that can honestly be pointed at — and a grade
- * citing it opens the trace the measurement is about rather than a turn picked
- * to look precise.
- *
- * **A measurement that runs backwards is not kept, and the rule is the
- * derivation's own.** A real conversation on a real Retell account reports an
- * end-to-end sample of −2103 ms; the derivation above already refuses a
- * negative for the reason that applies here word for word — a wait that ran
- * backwards is not a fast answer, and a number that is wrong is worse than a
- * measurement that is missing. It is worse than harmless in this arm: the worst
- * sample decides a bound, so a negative can never fail one and would sit in the
- * series holding it trivially, then drag every mean and percentile down the day
- * a grader can ask for one. A reported **zero** stays, and the difference is
- * real — zero is what the platform says it measured, not the placeholder pair a
- * zero-width turn would have produced. The block on the payload is untouched by
- * any of this: the writer keeps everything the platform said, and the fold
- * refuses what cannot be true.
- *
- * A measurement whose every value runs backwards contributes nothing, so the
- * measure is absent exactly as it is for one the platform never took.
- *
- * The order is the platform's own, exactly as a timed series is the order it
- * was taken in: the block carries raw measurements rather than a summary, so
- * read forwards it is the conversation read forwards.
+ * Read reported samples only when both the measure name and unit match.
+ * Do not convert unknown units or platform-prefixed names. Keep sample order,
+ * discard negative values, and retain reported zeroes. Cite the root span
+ * that carried the block; omit a measure with no usable samples.
  */
 function reportedSamplesOf(
   cataloged: CatalogedMeasure,
@@ -617,28 +377,9 @@ function reportedSamplesOf(
  * ------------------------------------------------------------------- */
 
 /**
- * The measures egma works out from the shapes a recognised framework emits,
- * for a conversation that timed none of them itself.
- *
- * **Why derive at all.** A team points a stock LiveKit agent at egma and
- * watches real conversations arrive, and the one question monitoring exists to
- * answer — how fast is my agent answering — was absent on every one of
- * them, because the framework times its turns in its own vocabulary and egma
- * only read its own. The durations were there the whole time. Reading them is
- * what turns a polite silence into an observed metric.
- *
- * **Read time, not write time.** Nothing new is stored and the door still
- * writes exactly what arrived, so every conversation already in the store gains
- * its measures on the next read rather than on the next ingest.
- *
- * **Recognition rides the door's scope vetting** — see the kinds above. A
- * framework egma does not know files everything as `other`, matches none of
- * this, and derives nothing, which is the honest answer for a conversation egma
- * cannot read.
- *
- * Every rule below is written out beside its measure's name in
- * `packages/metrics/measure-catalog.md`, plainly enough that two
- * readers compute the same number from the same spans.
+ * Derive metrics at read time from recognized framework span kinds.
+ * Unknown scopes produce no derived metrics. Definitions live in
+ * measure-catalog.md; no derived values are written back to the store.
  */
 function derivedFromFrameworkSpans(
   conversation: SpannedConversation,
@@ -689,15 +430,9 @@ function derivedFromFrameworkSpans(
 }
 
 /**
- * How long one of the platform's stages ran inside each of the agent's turns —
- * the sum of the turn's own step children of that stage, so a turn whose model
- * was asked twice (a retry, a fallback) accounts for both askings.
- *
- * One sample per agent turn **that carried the stage at all**. A turn with no
- * step of this kind did not spend zero milliseconds on it; it has no such
- * measurement, and a zero would measure something that never happened. The
- * sample cites the turn, because the number is the turn's and no single child
- * holds it.
+ * Sum stage-step durations within each agent turn, including retries.
+ * Emit one sample per turn that contains the stage and cite that turn.
+ * A missing stage produces no sample, not zero.
  */
 function stageLatency(
   turns: readonly TimedSpan[],
@@ -723,76 +458,15 @@ function put(
 }
 
 /**
- * How long the agent took to answer, once for every turn the human took.
+ * Measure each human turn's wait for the next answering speech. The starting
+ * line is the last speaking child's end, falling back to the turn end when
+ * speech timing is unavailable. The finish line is selected by answeringSpeech.
+ * VAD detection lag remains in the agent's clock; endpointing commit is later
+ * and must not replace an available speaking boundary.
  *
- * From the **caller's last audible sample** to the first later agent speech
- * before another human turn. LiveKit can open one agent turn for model and tool
- * work, then a second agent turn for the spoken answer, so a silent turn on the
- * way is part of the wait rather than its endpoint. Where the trace carries no
- * `speaking` spans at all, the first agent turn's own start stands in for a
- * framework whose turns begin at their first word.
- *
- * **The start is the VAD's end of speech, never the endpointing commit**
- * (ADR-0024 §5, catalog version 8). In the agent's own spans the nearest thing
- * to the caller's last audible sample is the end of the human turn's last
- * `speaking` child. It is not that sample: LiveKit closes the child once its
- * VAD has waited its silence hangover (0.55 s by default) past the last
- * speech it heard, so this start sits about half a second after the caller
- * went quiet, and the agent's own account of its wait is that much short of
- * the definition — which is one reason the persona's clock, not this one,
- * leads on a simulation. The turn's own end is worse: the moment the
- * endpointer *decided* the caller had finished, which the framework's own
- * defaults put about a second later still — a minimum delay on top of the
- * hangover. Measuring from the commit would delete a second the caller
- * actually waited and make a slow agent look fast. Where
- * the framework recorded no speech for the caller — Retell's word-bounded
- * turns, egma's own chat lane — the turn's end is the only instant the trace
- * holds and stands in for it.
- *
- * **One utterance the transcriber delivered in two pieces is one wait, not
- * two.** A human turn carrying no `speaking` child of its own that opened while
- * the preceding agent turn was still running is a **continuation**: the caller
- * was not audible then — their speech had already been closed by the VAD — so
- * what arrived was the rest of the same utterance, late, and the agent cut off
- * the reply it had begun on the first half. A continuation takes no sample and
- * does not end the caller's question. The wait it belongs to is the one the
- * earlier human turn opened, and it closes at the first agent speech after the
- * reply that was cut off. Reading it as a turn of its own answered a live call
- * with two numbers where the caller had spoken once and waited once: two
- * seconds to a forty-millisecond fragment nobody heard, then 2840 ms measured
- * from a commit instant nobody waited from. The one wait the caller took was
- * 5178 ms, and egma's own recording of the same wait read 5720 ms.
- *
- * **A measurement that runs backwards is not a slow answer and is not kept.**
- * Turn spans overlap on a real captured call — five neighbouring pairs out of
- * twelve — and the overlap is the framework's turn bookkeeping, not audible
- * talk-over: the same call's speaking spans carry zero seconds of simultaneous
- * audio (`research/voice-agent-interruption-metrics.md`, planning root). A
- * negative latency would drag a mean below zero and make a bound pass that
- * should have failed — a number that is wrong is worse than a measurement that
- * is missing, so the overlapping pair contributes nothing and the turns around
- * it still count.
- *
- * **A zero read off a turn that had no width is two placeholders agreeing, and
- * is not kept either.** Retell reports per-word timings on every spoken turn,
- * and its normalizer has written real turn timestamps from them since commit
- * `cc7b8c9` — but a turn whose words are missing, and every turn stored before
- * that commit, keeps the prior honest fallback: opened at the trace's own
- * start and closed in the same instant, said plainly in
- * `apps/api/src/retell/normalise.ts`. Subtract one such placeholder from the
- * next and the answer is zero, every time, for the arithmetic's own reasons
- * and not the agent's: a series a bound cannot fail, so a trace whose worst
- * wait was really 2145 ms holds a two-second bound with a zero as its
- * rationale, which is the false pass this product exists to kill. A
- * conversation of placeholders therefore derives nothing here and answers
- * from the platform's reported block instead — which is exactly what those
- * stored rows carry.
- *
- * **It is the pair that says so, and never the width alone.** A chat simulation
- * writes turns of no width too — a typed message is one instant and there is
- * nothing to measure a duration of — but at real, distinct instants, so the gap
- * it answers across is observed and every sample of it stands. Only a zero
- * whose own turn also had no width has nothing behind it on either side.
+ * Skip continuations and interrupted replies as defined by continuationTurns.
+ * Discard negative waits and zero waits from zero-width placeholder turns.
+ * Distinct zero-width chat messages still produce valid positive waits.
  */
 function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
   const samples: Sample[] = [];
@@ -820,25 +494,9 @@ function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
 }
 
 /**
- * How long the agent took to say anything at all, from the moment the
- * conversation began.
- *
- * The root span is where a conversation begins — the earliest parentless span,
- * the one the whole thing happened inside — and the agent's first word is its
- * first turn's first `speaking` child.
- *
- * **Where the framework wrote no `speaking` spans at all**, the first agent
- * turn's own start stands in: a word-bounded Retell turn begins at its first
- * word, which is the same fact spelled the other way. The fallback is about
- * granularity the emitter lacks, never about the turn — a framework that does
- * write speech makes a speechless first turn honestly unmeasurable, because
- * there a turn with no speech is a turn that never said anything, not a turn
- * whose words went unrecorded.
- *
- * A first agent turn with **neither speech nor width** has nothing measured —
- * a zero-width turn is the Retell normalizer's placeholder, opened at the
- * trace's own start, and reading it would answer a zero nobody waited. This
- * measure is taken once, and one wrong number is the whole of it.
+ * Measure from the earliest parentless span to the first agent turn's speech.
+ * Fall back to that turn's start only if the trace has no speaking spans.
+ * A speechless, zero-width turn is a placeholder and produces no sample.
  */
 function firstResponseLatency(
   root: TimedSpan | undefined,
@@ -861,17 +519,8 @@ function firstResponseLatency(
 }
 
 /**
- * How long the agent spoke for in each of its turns, silence inside the answer
- * excluded — which is what summing the turn's `speaking` children rather than
- * taking the turn's own duration gets: a turn that thought for two seconds and
- * then talked for one spoke for one.
- *
- * One sample per agent turn **that spoke**. A turn with no speech in it did not
- * speak for zero milliseconds; it has no speech duration at all, and a zero
- * would be a measurement of something that never happened.
- *
- * The sample cites the turn rather than one of the children, because the number
- * is the turn's and no single child holds it.
+ * Sum speaking-child durations per agent turn, excluding silence. Cite the
+ * turn and omit speechless turns rather than returning a zero duration.
  */
 function agentSpeechDuration(turns: readonly TimedSpan[]): readonly Sample[] {
   const samples: Sample[] = [];
@@ -885,35 +534,11 @@ function agentSpeechDuration(turns: readonly TimedSpan[]): readonly Sample[] {
 }
 
 /**
- * Where the agent's answer to the human turn at `at` began.
- *
- * The first agent speech before the next human turn. Silent agent turns on the
- * way can be model or tool work, so they do not become the response when a
- * later agent turn speaks. When no agent turn speaks at all, the first silent
- * agent turn's own start remains the fallback for frameworks that do not emit
- * speaking spans. `undefined` when nobody answered — the human had the last
- * word, or said something else first.
- *
- * **An agent turn answers only the nearest human turn before it, so the walk
- * stops at the next human turn rather than reading past it.** A caller who says
- * "hello" and then "are you there" before the agent replies has taken two turns
- * and been answered once, and letting the one reply count for both would file
- * the same wait twice — the same number in the series twice over, a worse worst
- * on a page, and, in the limit, a bound failed by a duplicate. The unanswered
- * first turn measures nothing, which is what actually happened: the wait it
- * would have measured ended when the caller spoke again, not when the agent did.
- *
- * **A false start is not an answer, and the walk goes straight past it.** An
- * agent turn immediately followed by a continuation human turn is a reply the
- * framework began on half an utterance and cut off the moment the rest of it
- * arrived — a fragment of a few dozen milliseconds the caller never heard as an
- * answer, so stopping there would report a wait that ended in silence. The turn
- * is skipped whole, its speech included, and the walk carries on to the speech
- * that did answer. The continuation itself is not a human turn the walk stops
- * at either: the caller had not spoken again, so their question is still open.
- * What makes the turn a false start is the continuation's own test — the
- * reply ended no later than the late turn closed — so an answer the agent
- * carried on with past a speechless turn is never mistaken for one.
+ * Find answering speech before the next independent human turn. Skip silent
+ * model/tool turns, interrupted replies, and continuation turns. When the
+ * trace has no speaking spans, use the first agent turn's start instead.
+ * Return undefined if no reply qualifies; one reply cannot answer two
+ * independent human turns.
  */
 function answeringSpeech(
   turns: readonly TimedSpan[],
@@ -943,41 +568,12 @@ function answeringSpeech(
 }
 
 /**
- * Which human turns are the rest of the caller's previous utterance rather
- * than turns of the caller's own — one flag per turn, in the turns' order.
- *
- * **The caller was not audible when it opened.** A human turn with no
- * `speaking` child of its own that began while the agent's preceding turn was
- * still running is the transcriber delivering more words of an utterance whose
- * speech the VAD had already closed: the framework files those late words as a
- * new turn and interrupts the reply it had begun on the first half of the
- * sentence. Nobody spoke, nobody waited, and nobody was answered — so the turn
- * measures nothing and ends nothing.
- *
- * **It is the pair that says so, and never the missing speech alone.** A
- * speechless human turn that opened after the agent's turn had ended is an
- * ordinary turn of a framework that records no speech for the caller — Retell's
- * word-bounded turns, egma's own chat lane — and is measured as one. The agent
- * turn is the one immediately before it in start order, because that is the
- * turn the late words cut off — and cut off is the second half of the test:
- * the agent turn ended no later than the late turn closed. A reply the agent
- * carried on with past the late turn's end was not cut off by it, so a
- * speechless turn that opens inside an answer the agent finished — a typed
- * line, a backchannel the transcriber wrote down and the VAD never gated —
- * is an ordinary turn, and the answer around it stays the answer it was.
- *
- * **Another flush is the same utterance again.** A speechless human turn
- * straight after a continuation, with no agent turn between, is the
- * transcriber delivering a third piece before the agent replied to any of
- * it: a continuation too, and the walk reads the run of them as one. Where a
- * human turn with speech sits before it instead, the caller genuinely spoke
- * twice and the second turn is their own.
- *
- * **A trace that records no speech for anyone says nothing by one turn's
- * missing speech.** On Retell's word-bounded turns every human turn is
- * speechless, so a human turn that opens inside the agent's turn there is the
- * caller talking over the agent — their own turn, measured as one — and no
- * continuation is ever read on such a trace.
+ * Mark human turns that continue an earlier utterance instead of opening
+ * another measured wait. A continuation has no speaking child, starts inside
+ * the preceding agent turn, and closes at or after that interrupted reply.
+ * Further speechless human turns immediately after a continuation also qualify.
+ * A reply that outlives the human turn is not interrupted. Disable this rule
+ * when the trace has no speaking spans; missing speech then proves nothing.
  */
 function continuationsIn(
   turns: readonly TimedSpan[],
@@ -1136,22 +732,8 @@ function byWhenItBegan(left: TimedSpan, right: TimedSpan): number {
 }
 
 /**
- * Every span the conversation holds, exactly once: the turns, whatever hangs
- * inside them, and everything filed beside them.
- *
- * Which list a span lands in depends on what its parent was — the simulator
- * hangs its measurements off the root, so they arrive inside it, while a trace
- * whose root never came holds those same spans at the top. Walking both lists is
- * what makes the reading the same either way, and it is what makes a measurement
- * countable on a conversation egma holds only part of.
- *
- * **Exported because the grading engine walks the same tree** for the tool calls
- * and for the span that closes a trace — generic over the span shape, because
- * the walk cares only about the tree and a caller's spans carry more fields
- * than this arithmetic reads. It used to hold a copy of this,
- * docstring and all, which is two implementations of "every span, once" — and
- * the day one of them learned about a third list, the other would quietly stop
- * seeing part of every conversation.
+ * Visit transcript turns, other spans, and all descendants exactly once.
+ * Shared with grading; generic over the span shape so it needs only the tree.
  */
 export function* everySpanIn<Span extends { readonly spans: readonly Span[] }>(
   conversation: {

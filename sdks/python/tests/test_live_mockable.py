@@ -1,51 +1,12 @@
-"""One real interception, in a real room — opt-in.
+"""Opt-in test of real LiveKit tool interception before changing the dependency pin.
 
-Everything else about this SDK is proved against a room-shaped stand-in,
-which says the SDK's own reasoning is right and nothing at all about
-whether the substitution still *works*. This file is the other half, and
-it is the reason the dependency is pinned.
+Creates a room, completes hello, and forces a model tool call through
+AgentSession. Assert that egma.tool receives it and the real tool never runs.
 
-The mechanism is LiveKit's own ``mock_tools``, which sits in the
-framework's testing namespace with no stability promise. A minor release
-could move it, rename it, or change where the tool executor looks — and
-every one of those failures is silent from the outside: the agent would
-simply run its real tool during a simulation, book the real appointment,
-and nothing would say so. So the pin holds the version still, and this
-test is what says the mechanism is still there before the pin is raised.
-
-## What is real here
-
-The room, the session, the wire, and the interception. A room is made in
-a real LiveKit project; a participant joins it under egma's name and
-registers the two methods of the exchange; the agent joins it, is made
-the simulation verb, and is started with a real ``session.start(room=…)``; a real
-model is asked a question and calls the tool.
-
-What is asserted is exactly what cannot be asserted offline:
-
-- the census really travelled the wire and was answered,
-- a real tool call reached the courier and went out as ``egma.tool``,
-- and **the real implementation never ran**. That last one is the whole
-  test: it is the assertion that fails, loudly, the day the framework
-  stops honouring the side table.
-
-It is opt-in because CI holds no LiveKit project, and it skips —
-visibly, never failing, never waiting on anybody::
-
-    TEST_LIVEKIT_URL=wss://... \\
-    TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \\
-    TEST_MODEL_API_KEY=... \\
-    uv run pytest tests/test_live_mockable.py -v
-
-Each name falls back to the plain one LiveKit's and OpenAI's own tooling
-reads — ``LIVEKIT_URL``, ``LIVEKIT_API_KEY``, ``LIVEKIT_API_SECRET``,
-``OPENAI_API_KEY`` — so one environment serves this and the agent it is
-run beside, and nobody keeps two copies of a project's coordinates.
-
-The model is asked with tool calling forced, because what is under test
-is the interception rather than a model's willingness to reach for a
-tool. A run that failed because a model chose to chat would say nothing
-about the pin, which is the only question this file asks.
+Run: uv run pytest tests/test_live_mockable.py -v
+Set TEST_LIVEKIT_URL, TEST_LIVEKIT_API_KEY, TEST_LIVEKIT_API_SECRET, and
+TEST_MODEL_API_KEY. They fall back to LIVEKIT_URL, LIVEKIT_API_KEY,
+LIVEKIT_API_SECRET, and OPENAI_API_KEY. Skip if settings are absent.
 """
 
 from __future__ import annotations

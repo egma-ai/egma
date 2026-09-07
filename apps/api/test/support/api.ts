@@ -91,15 +91,8 @@ export type TestApiOptions = {
   /** Whether the transport claims a message actually reaches anybody. */
   readonly emailDelivers?: boolean;
   /**
-   * Something the fake transport waits on before its `send` finishes — for the
-   * one test whose claim is that **nothing waits for it**. A real transport
-   * takes a quarter of a second to reach an SMTP server, and a fake one that
-   * returns the instant it is called cannot tell a flow that waits for delivery
-   * from one that does not.
-   *
-   * The message is recorded the moment it is handed over, before the wait, so
-   * every other test reads `mail` exactly as it did before. It is asked for
-   * once per message, so a test can arm it after the messages it is not about.
+   * Optional delivery gate for tests that verify responses do not wait for mail.
+   * Record each message before waiting, and request a fresh gate per message.
    */
   readonly emailSendCompletesOn?: () => Promise<void> | undefined;
   /** Use the server's no-SMTP sender instead of this helper's captured sender. */

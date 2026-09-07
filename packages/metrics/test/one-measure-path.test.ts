@@ -4,31 +4,9 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * The drift alarm: **one place computes a measure, and one place reduces it.**
- *
- * The suite beside this one proves the module computes the right numbers. What
- * that cannot prove is that nothing *else* computes them, and a second computer
- * is the failure the module exists to prevent — two answers about one
- * conversation, with no stored number to settle the disagreement, so a page and
- * a metric-based grader quietly disagree about how fast an agent responded.
- *
- * **Its own file, and it touches no store.** These are filesystem scans, and a
- * developer with no containers running should still have the alarm go off: in
- * the behavioural file it sat behind a `beforeAll` that opens ClickHouse, so
- * without one it reported *skipped* — an alarm that stays quiet when nobody is
- * listening is not an alarm.
- *
- * Three things are guarded, and they are three different ways to build a second
- * reader:
- *
- * 1. **Reading the measurements.** Only the module may select on the span kind
- *    the ingest door files a timing span under.
- * 2. **Turning them into milliseconds.** Only the module may divide by a
- *    million to make one.
- * 3. **Reducing them to the one number a bound is held against.** Only the
- *    module may reduce the series — which is the subtlest of the three, because
- *    a browser taking the maximum looks harmless and is right up to the day a
- *    grader reduces by p90 instead.
+ * Filesystem guards against duplicate metric computation outside @egma/metrics:
+ * timing-span selection, conversion to milliseconds, and series reduction.
+ * Run without stores so missing containers cannot skip these guards.
  */
 
 const REPOSITORY = path.resolve(import.meta.dirname, "..", "..", "..");
@@ -80,16 +58,8 @@ async function everySourceFile(): Promise<readonly string[]> {
 }
 
 /**
- * A file's code, with its prose taken out.
- *
- * Every rule here is about what egma *runs*. A docstring explaining that the
- * ingest door files a span as `timing`, or that a provider reports latency as a
- * bag of samples, is the opposite of a second reader — it is somebody writing
- * down why there is only one — and a scan that flagged it would push authors
- * towards explaining less, which is the last thing these rules should buy.
- *
- * Block comments go whole; line comments only where the `//` opens the line, so
- * that a `https://` inside a string is never mistaken for one.
+ * Strip block comments and standalone line comments before scanning code.
+ * Keep inline // text so URLs inside strings remain intact.
  */
 function theCodeIn(source: string): string {
   return source
@@ -168,14 +138,8 @@ describe("turning a measurement into milliseconds", () => {
   const A_PLAIN_MILLION = /1_?000_?000(?!n)/u;
 
   /**
-   * The one exclusion, named rather than skipped.
-   *
-   * `apps/web/lib/transcripts.ts` converts **a span's own duration** for
-   * display — how long a step took, shown beside it on a timeline. That is not
-   * a measure: it is a fact the trace read already sent as nanoseconds, it is
-   * never compared with a bound, and no grader uses it. It is written down
-   * here so that a reader can tell the two apart, and so that a third site has
-   * to be argued for rather than added.
+   * Allow transcripts.ts to format individual span durations. These timeline
+   * values are not metric reductions and are not used by graders.
    */
   const A_SPAN_DURATION_FOR_DISPLAY = "apps/web/lib/transcripts.ts";
 
@@ -238,14 +202,8 @@ describe("reducing the measurements to one number", () => {
     /\bsamples\s*\.\s*(reduce|sort|toSorted)\b|\bsamples\s*\[|Math\.(max|min)\s*\(\s*\.\.\.[\w.]*samples/u;
 
   /**
-   * **Nobody, and the module least of all.** The shared reducers walk the series
-   * once, so they match none of these idioms either — which is why the answer is
-   * an empty list rather than the module's name. The positive half is the case
-   * below: every allowed reduction is an exported function in the one module.
-   *
-   * The module is filtered out rather than asserted absent, so that rewriting
-   * a shared reducer as a `reduce` one day is an ordinary refactor and not a
-   * failing build.
+   * Exclude the shared measure module so its reducers can be refactored.
+   * No other scanned file may reduce metric series.
    */
   it("happens nowhere by hand", async () => {
     const byHand = (await filesMatching(REDUCES_THE_SERIES)).filter(

@@ -11,18 +11,9 @@ import { makeLog, platformEvent } from "./log.ts";
 import { startService } from "./service.ts";
 
 /**
- * The grader service, started.
- *
- * **No migrations here, unlike the API.** The API applies the schema to both
- * stores on boot and this container waits for it to be healthy, so a grader that
- * migrated too would be a second writer racing the first over the same files for
- * no benefit. It reads a schema somebody else applied, which is the whole reason
- * it can be one more copy rather than one more decision.
- *
- * Provider keys come from the deployment credential source. After a claimed
- * job resolves its frozen grader versions, the service reads the current bundle
- * once only when at least one of them calls a model. Nothing is unsealed from
- * Postgres, and code-only work does not depend on a credential store.
+ * Start after the API has applied migrations; this service does not migrate.
+ * Resolve deployment provider keys once per claimed job only if a frozen
+ * grader definition needs a model. Code-only grading needs no provider key.
  */
 const config = loadConfig();
 const log = makeLog(config.logLevel, config.claimant);
@@ -42,10 +33,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       platformEvent("egma.service.stop_requested", { signal }),
       "grader service stop requested",
     );
-    // Asked to stop rather than killed: the job in hand is finished and its
-    // grades are written before anything closes. A copy that was killed
-    // mid-judgment would cost one lease and no data — but there is no reason to
-    // spend either when the container is being replaced on purpose.
+    // Finish active jobs and persist their grades before closing stores.
     service.stop();
   });
 }

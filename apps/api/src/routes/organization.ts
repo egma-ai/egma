@@ -23,19 +23,8 @@ import {
 } from "../http/refusals.ts";
 
 /**
- * The customer itself: what it is called, and the one field an admin may
- * change.
- *
- * **It names no project and takes none, which is the whole reason it is its own
- * route group.** Membership, invitations, retention, API keys and this row all
- * belong to the organization; a Settings page that reached them through a
- * project-scoped door would be saying they belong to whichever project happened
- * to be selected, and somebody would eventually believe it.
- *
- * **The name and not the slug.** Renaming the customer breaks nothing: the slug
- * is what invitation links and the deployment's own uniqueness were written
- * against, and letting it move is a different decision with a different blast
- * radius. So the read answers both and the write takes one.
+ * Organization-scoped settings, independent of project selection.
+ * Read name and slug; edits change only the name.
  */
 
 export type OrganizationRoutesOptions = {

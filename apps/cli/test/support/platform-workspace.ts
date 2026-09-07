@@ -1,15 +1,6 @@
 /**
- * The two stand-ins every `egma self-host` check needs, in one place.
- *
- * A self-host command talks to exactly two things it cannot have in a test: a
- * running platform, and a container runtime. Everything above those is the real
- * CLI process and the real command modules, which is the point — a suite that
- * started Docker would take minutes and a suite that mocked the command would
- * prove nothing.
- *
- * These lived twice, copied between the files that drive `up`. Two copies of a
- * harness drift, and a drifted harness is two tests that believe they check the
- * same command and do not, so there is one copy and it lives here.
+ * Shared platform and Docker stubs for real self-host CLI processes.
+ * Keep command execution intact while replacing external services.
  */
 
 import { spawn } from "node:child_process";
@@ -64,16 +55,7 @@ export async function startPlatform(): Promise<FakePlatform> {
   };
 }
 
-/**
- * The variables the `docker` stand-in writes down beside the arguments it was
- * given.
- *
- * The environment matters more than the arguments for most of what these
- * commands promise: what a self-host command really has to get right is what
- * compose is *told*, not what the command printed about it. A variable a
- * compose invocation does not carry never reaches a container however it is
- * set.
- */
+/** Environment values recorded by the Docker stub to verify what Compose receives. */
 const RECORDED_VARIABLES = [
   ...BOOTSTRAP_VARIABLES,
   // Recorded so checks can prove the carrier route reaches Compose literally

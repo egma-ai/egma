@@ -28,16 +28,8 @@ import {
 import { seedUser } from "./support/tenancy.ts";
 
 /**
- * Provisioning a project, and the shelf of personas Egma provides.
- *
- * **A project is now complete without naming a persona at all.** It used to be
- * born pointing at Egma's shared persona, which made creating one depend on the
- * catalog having been seeded first. That pointer is gone, so the first
- * assertion here is the one that would have been impossible before: an
- * organization provisioned against an empty catalog is a usable organization.
- *
- * The rest is the shelf itself — read-only, undeletable, forkable, and fixed
- * version by fixed version.
+ * Provisioning works without a seeded persona catalog. Egma-provided
+ * personas are read-only and can be forked into Custom personas.
  */
 
 let database: MigratedDatabase;

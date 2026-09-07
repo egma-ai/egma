@@ -220,13 +220,7 @@ describe("the Test Suites cutover", () => {
     const suite = await createSuite(key, "Northside Ford");
     const suiteId = String(suite.body.id);
 
-    /*
-     * **The write-time rule, at the seam a caller meets it.** Until 2026-08-24
-     * the server put the project's default persona on a test whose author had
-     * named none — on a create and on an edit alike — so a test could read as
-     * though somebody had said who calls when nobody had. Both shapes of
-     * saying nothing are refused now, in one sentence.
-     */
+    /* Reject both an absent persona list and an empty one; no default is substituted. */
     for (const body of [
       { suiteId, name: "No caller at all", scenario: "The caller asks for Tuesday.", expectedBehaviors: ["Offers Tuesday"] },
       { suiteId, name: "An empty list", scenario: "The caller asks for Tuesday.", expectedBehaviors: ["Offers Tuesday"], personas: [] },

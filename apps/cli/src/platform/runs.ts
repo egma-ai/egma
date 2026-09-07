@@ -1,17 +1,7 @@
 /**
- * The runs on the platform, over egma's public HTTP API.
- *
- * A complete-suite Run is created with an optional exact current-set
- * precondition, or canceled by ID. Simulation pages remain available to other
- * repository contract checks, but the CLI does not follow a Run in the
- * terminal. The web product owns progress.
- *
- * One shape of answer is a value rather than an exception, because it is an
- * ordinary thing that happens: **the platform refusing to start the run**. A
- * connection type whose adapter has not shipped is the case that matters, and
- * the platform's own sentence is carried up untouched — a terminal that
- * paraphrased it would be inventing an explanation for a decision it did not
- * make.
+ * Create complete-suite runs with an optional current-set precondition, or cancel by ID.
+ * The web app shows progress. Return run-start refusals as values and preserve
+ * the platform's explanation.
  */
 
 import {

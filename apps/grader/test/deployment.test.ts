@@ -5,26 +5,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * The deployment story, checked against the code that reads it.
- *
- * The full environment reference tells an operator about every advanced
- * variable, while `.env.example` stays limited to normal operator inputs.
- * Compose and this app's README must agree with that reference. Each names
- * variables, and every one of them can fall behind the module that reads them,
- * silently, because nothing fails when a variable is documented and unread or
- * read and undocumented. The second is the expensive kind: a self-hoster cannot
- * set a variable nobody told them about, and the failure is a feature that
- * quietly never turns on.
- *
- * So this file compares them, and it is deliberately about **names and shapes**
- * rather than about Docker. It parses no YAML and starts no container: what it
- * asserts is true of the text, which is what somebody reads. The simulator's own
- * deployment test does exactly this, and this is that test for the service on
- * the other side of the wire.
- *
- * The other half is the invariant the whole arrangement rests on — **the grader
- * publishes nothing** — which is a claim about every compose file in the
- * repository at once, and so cannot be tested from inside any one of them.
+ * Check environment names against the operator reference, Compose, and README.
+ * These are text-contract tests, not container tests. Also check every
+ * Compose file for the grader's no-inbound-port rule.
  */
 
 const ROOT = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));

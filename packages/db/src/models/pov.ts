@@ -21,22 +21,8 @@ export function povOf(emitter: string): SpanPov {
 }
 
 /**
- * **One conversation, told once**: the rows of one POV where the record holds
- * any, and every row where it holds none.
- *
- * A simulation stores both POVs of the same conversation under one trace — the
- * persona's and the agent's — and they describe the same turns and the same
- * calls. So every reader that shows, counts or judges them has to choose one,
- * and they all have to choose the same way or one surface will say a
- * thirteen-turn conversation had twenty-six while another says thirteen. This
- * is that rule, in one place: the run view, the grader, the recording's speaker
- * bands and the trace facts all read through it.
- *
- * **Falling back to every row is the whole of what makes it safe.** A chat
- * simulation, a production transcript, a platform that reports nothing of its
- * own and a conversation whose agent never reached egma each hold one POV, and
- * it is the one to show — asking for a POV that is not there must never empty a
- * transcript.
+ * Select the requested POV when present; otherwise return all rows. This keeps
+ * single-POV transcripts readable while avoiding duplicate views of a simulation.
  */
 export function fromOnePov<Span extends { readonly pov: SpanPov }>(
   spans: readonly Span[],

@@ -47,17 +47,8 @@ class AudioFacts:
 def dual_channel_wav(
     persona_audio: bytes, agent_audio: bytes, sample_rate_hz: int
 ) -> bytes:
-    """Both sides of one exchange, one speaker to a channel.
-
-    The persona on channel 0 and the agent on channel 1, in the order the
-    transcript labels them, so each side can be heard alone when a
-    transcript looks wrong. The shorter track is padded with quiet so a
-    file never runs out halfway through the exchange.
-
-    The recorder has already placed both tracks on one timeline by the
-    clock, so two speakers talking over each other remain audible as
-    exactly that, and the distance between them is the distance the
-    caller lived through.
+    """Encode aligned audio with persona on channel 0 and agent on channel 1.
+    Pad the shorter channel with silence, preserving overlap and recorder timing.
     """
     frames = max(len(persona_audio), len(agent_audio)) // SAMPLE_WIDTH_BYTES
     interleaved = array("h", bytes(frames * 2 * SAMPLE_WIDTH_BYTES))

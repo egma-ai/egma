@@ -403,15 +403,8 @@ describe("the mocked draft's transform", () => {
   });
 
   /**
-   * The knowing trade of ADR-0022, asserted so nobody "fixes" it back.
-   *
-   * The transform used to empty every intercepted tool's headers and query
-   * params. It may not any more: one temporary version now serves every test
-   * of a run, and a test that does not mock a tool reaches the customer's real
-   * backend from that same version — which it cannot do with its credentials
-   * emptied. What keeps those credentials out of egma is the endpoint, which
-   * drops every header and query param that arrives and reads only the
-   * platform's signature.
+   * Preserve headers and query parameters because the shared draft also serves
+   * unmocked tools that need backend credentials. The mock endpoint ignores them.
    */
   it("carries the customer's own headers and query params through, unchanged", () => {
     const { tools } = mocked(flow);

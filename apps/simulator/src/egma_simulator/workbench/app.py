@@ -1,27 +1,8 @@
-"""The workbench: a fake control plane that speaks the contract from fixtures.
-
-Dev and test only. It serves the four endpoints the simulator dials —
-claim, heartbeat, report, and the OTLP ingest the conversation's spans go
-to — from spec documents loaded off disk, validates everything both ways
-against the contract schemas, and records every observation in order. The
-records are the whole point: the acceptance suite asserts against nothing
-else, and a person watching the log watches a simulation go queued →
-claimed → running → completed with its turns arriving as spans in between.
-
-The two doors carry two different records and the contract is what keeps
-them apart: a report says only where the simulation's lifecycle stands, so
-the report schema accepts status transitions and refuses anything claiming
-to carry a conversation, and the conversation arrives at the span sink.
-
-The span sink is deliberately the smallest thing that can be called one: it
-checks a batch parses and names a simulation this workbench knows, records
-each span, and answers what the OTLP specification says to. It stores
-nothing, indexes nothing and joins nothing — the real ingest does all of
-that, and a second implementation of it here would be a second thing to
-keep true.
-
-The production claim API is the only real control path. This workbench stays a
-local rig for simulator development and contract tests.
+"""Local control-plane fixture for simulator development and contract tests.
+Serve claims, heartbeats, reports, and OTLP ingestion while recording observations.
+Validate lifecycle documents against schemas. The span sink checks JSON and
+simulation identity; production storage, indexing, and joins remain API
+responsibilities.
 """
 
 from __future__ import annotations

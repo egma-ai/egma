@@ -1,20 +1,9 @@
 import { EXPORT_TRACE_SERVICE_REQUEST } from "./schema.ts";
 
 /**
- * Turning an export request into something egma can read, whichever of the two
- * encodings it arrived in.
- *
- * OTLP/HTTP defines protobuf and JSON over the same message, and the JSON
- * mapping is protobuf's own: `lowerCamelCase` field names, 64-bit numbers as
- * decimal strings because a JSON number cannot hold one, and — the one place
- * the mapping departs from protobuf's defaults — trace and span ids as
- * lowercase hex rather than base64. Both encodings therefore land on the same
- * shape below, and everything downstream is written once.
- *
- * **Parsing is strict and refuses rather than guesses.** A body that is not the
- * message it claims to be is a client defect an exporter will otherwise repeat
- * forever, and answering "fine" to it is how a customer discovers weeks later
- * that nothing was ever stored.
+ * Decode OTLP/HTTP protobuf and JSON into one shape. Preserve 64-bit values
+ * as decimal strings and normalize trace/span IDs to hex. Reject malformed
+ * messages before normalization.
  */
 
 export class NotOtlpError extends Error {
@@ -148,15 +137,8 @@ function hex(base64: string | undefined): string {
 }
 
 /**
- * The decoded protobuf as the JSON mapping's shape.
- *
- * `longs: String` because a 64-bit nanosecond timestamp is larger than a JS
- * number can hold exactly, and losing its low digits would move a span's
- * recorded start time — the one value the trace store requires be replayed
- * byte-identically. `bytes: String` because that is what the JSON mapping does
- * with a `bytes` field, so an attribute carrying binary reads the same in both
- * encodings; span and link identity fields are the mapping's own exception and
- * are hexed below.
+ * Convert protobuf longs to strings to preserve precision and bytes to
+ * base64 for JSON mapping. Convert trace/span identity bytes to hex separately.
  */
 function fromProtobuf(body: Uint8Array): OtlpExport {
   let decoded: unknown;

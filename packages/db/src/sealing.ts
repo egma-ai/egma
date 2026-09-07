@@ -5,26 +5,11 @@ import {
 } from "node:crypto";
 
 /**
- * How a customer's provider credential is sealed before it touches a row, and
- * the one place it is ever unsealed.
- *
- * A connection's credential cannot be hashed — egma must replay it to the
- * provider every time a simulation starts — so it is encrypted in this process
- * under a master key that lives beside the process and never in the database.
- * A stolen backup, a misconfigured replica, anyone who can run a query: all of
- * them see ciphertext and hold no key.
- *
- * The stored value is a versioned envelope, `v1.<iv>.<ciphertext>.<tag>`, with
- * a fresh random IV per write. The version stamp is what makes a future
- * algorithm change — or a KMS-wrapped `v2` — a data migration rather than a
- * format guess.
- *
- * The key arrives through `connect()`, the same door the database URL does,
- * and is held privately here. It is 32 random bytes written as 64 hex
- * characters (`openssl rand -hex 32`), and the check below enforces length
- * *and* alphabet rather than presence: a 32-character passphrase has the right
- * byte count and a fraction of the entropy, and must be refused, not accepted
- * quietly.
+ * Encrypt provider credentials with AES-256-GCM before storage.
+ * connect() supplies the master key, which is not stored in the database.
+ * Each write uses a fresh random IV and a v1.<iv>.<ciphertext>.<tag> envelope.
+ * The key must be 64 hex characters; generate it with openssl rand -hex 32.
+ * Format validation cannot establish that the key was randomly generated.
  */
 
 /** AES-256-GCM: the key is 32 bytes, written as 64 hex characters. */

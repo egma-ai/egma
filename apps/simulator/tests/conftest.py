@@ -108,16 +108,7 @@ async def _serve_workbench(state: WorkbenchState) -> AsyncIterator[Workbench]:
 
 @pytest.fixture
 def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """A clean environment, and somewhere harmless for the two directories.
-
-    Whatever this machine has set is cleared first, so a developer with
-    their own ``EGMA_SIMULATOR_*`` exported cannot make these pass or fail
-    differently from anybody else's.
-
-    Here rather than in one suite because two of them configure a simulator
-    in process now: the one about reading the environment, and the one
-    about the platform's settings replacing what it read.
-    """
+    """Clear inherited simulator settings and use temporary writable directories."""
     for name in list(os.environ):
         if name.startswith("EGMA_SIMULATOR_"):
             monkeypatch.delenv(name, raising=False)
@@ -158,16 +149,8 @@ class SimulatorProcess:
     its recordings went."""
 
     def blob(self, reference: str) -> bytes:
-        """What a reported reference actually resolves to, read out of
-        whichever store this simulator was configured with.
-
-        A reference is opaque: it carries no bucket, no directory and no
-        address, so nothing about it says where to look. What says it is
-        the configuration the simulator was given, which is why this
-        reads that rather than opening a directory it assumed. Every
-        assertion about a recording in this suite goes through here, so
-        moving the store from a directory to a bucket costs this helper
-        and not one test.
+        """Resolve a recording reference through the simulator's configured store.
+        The reference itself contains no bucket, directory, or endpoint.
         """
         endpoint = self.env.get("EGMA_SIMULATOR_S3_ENDPOINT", "").strip()
         if not endpoint:
@@ -254,17 +237,9 @@ def start_simulator(
                 "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS": "2",
                 "EGMA_SIMULATOR_WAL_DIR": str(wal_dir),
                 "EGMA_SIMULATOR_BLOB_DIR": str(blob_dir),
-                # Blanked rather than left alone, for the same reason the two
-                # directories above are pinned: this suite inherits the
-                # environment it was run in, and a developer who did
-                # `set -a; source .env` to drive compose has a real endpoint
-                # and a real write credential exported. Left through, every
-                # voice test here would need their container running and
-                # would write its recordings into their store. Blank counts
-                # as unset in `config.py`, so this is the filesystem store,
-                # which is what a suite that costs no infrastructure means.
-                # A test that wants a real store puts it back through
-                # `extra_env` below.
+                # Clear inherited storage settings so ordinary tests use their local
+                # directory.
+                # Tests needing a real store can opt in through extra_env.
                 "EGMA_SIMULATOR_S3_ENDPOINT": "",
                 "EGMA_SIMULATOR_S3_BUCKET": "",
                 "EGMA_SIMULATOR_S3_REGION": "",
@@ -308,19 +283,8 @@ def start_simulator(
         simulator.stop()
 
 
-# -- A real object store, or a visible skip ----------------------------------
-#
-# The store the deployment runs is MinIO, and what is proved against it
-# here is proved against the real thing: a real bucket, a real signature,
-# a real HTTP round trip. There is no fake, on purpose — an in-memory
-# stand-in would agree with whatever this code believed about signatures,
-# addressing and keys, which is the entire set of things that go wrong.
-#
-# It is the pattern the live speech and live phone suites already use, one
-# notch cheaper: those need somebody's provider account, and this needs a
-# container anybody can start. Where docker cannot start one the tests say
-# so and skip — never silently pass, and never fail somebody's checkout for
-# infrastructure they were promised they would not need.
+# Real MinIO fixture for bucket, signature, addressing, and upload checks.
+# Skip with a reason if Docker cannot provide the store.
 
 MINIO_IMAGE = "minio/minio:RELEASE.2025-09-07T16-13-09Z"
 """The release `docker-compose.yml` runs, named again here.
@@ -333,16 +297,8 @@ the two drifted.
 
 OBJECT_STORAGE_ACCESS_KEY_ID = "SENTINEL-object-storage-key-id-6d19"
 OBJECT_STORAGE_SECRET_ACCESS_KEY = "SENTINEL-object-storage-secret-3f8c1a9d47b2"
-"""The credential the test store is stood up with.
-
-Both halves are sentinels, like every other planted credential in this
-suite and for the same reason: a simulator configured to write to object
-storage is really holding them while it conducts, which is what makes
-scanning its output prove anything. Both, rather than the secret alone,
-because the simulator treats a key id as half of one credential and keeps
-it out of its logs too — a claim that is worth exactly as much as the scan
-behind it. MinIO refuses a root password under eight characters, so the
-second is also the shortest thing that would work.
+"""Sentinel storage credentials for output-redaction checks. Test both key ID
+and secret; MinIO requires a password of at least eight characters.
 """
 
 WRONG_OBJECT_STORAGE_SECRET_ACCESS_KEY = "SENTINEL-object-storage-wrong-91ae7c30"
@@ -356,19 +312,8 @@ turns on when recordings are not arriving."""
 
 OBJECT_STORAGE_START_SECONDS = 300.0
 OBJECT_STORAGE_READY_SECONDS = 60.0
-"""How long the store is given to arrive, and then to answer.
-
-The first is generous because the first run on a machine fetches the
-image, which is 175 MB and is not this suite's to be fast at. The second
-is the container itself, which takes about a second.
-
-These two are a budget rather than a limit, and what makes them safe is
-`OBJECT_STORAGE_TIMEOUT_SECONDS` in `test_object_storage.py`: pytest's own
-timeout covers a fixture as well as a test, so a suite whose fixture
-budget outran it would turn a slow image pull into a red failure instead
-of the visible skip this fixture promises. The module's marker is set
-above the sum of these, which is what keeps the fixture's own refusal the
-one that fires.
+"""Budgets for image pull and store startup. Keep the module's pytest timeout
+above their sum so slow setup reaches a visible skip before test timeout.
 """
 
 OBJECT_STORAGE_BUCKET = DEFAULT_S3_BUCKET
@@ -454,23 +399,8 @@ def _answering(url: str, *, within_seconds: float) -> bool:
 
 @pytest.fixture(scope="session")
 def object_storage() -> Iterator[ObjectStorage]:
-    """A MinIO of this session's own, on a port nothing else has.
-
-    Session-scoped because starting one costs a second or two and every
-    test that wants one wants the same one; published on loopback and on
-    an ephemeral port so two checkouts building at once cannot collide.
-
-    The bucket is made here rather than assumed, which is the same thing
-    `docker-compose.yml` does with a one-shot job: a fresh volume arrives
-    empty, and a store with no bucket in it refuses every write with an
-    error about a bucket nobody was told to create.
-
-    Every way this can fail ends in a skip that says what happened —
-    docker missing, docker refusing, an image that would not come, a
-    container that never answered. Never a failure: a contributor was
-    promised the suite costs them no infrastructure, and a red line here
-    would be this suite breaking that promise rather than the code
-    breaking anything. See the two budgets above.
+    """Session-local MinIO on an ephemeral loopback port, with a fresh bucket.
+    Skip with a reason if Docker, image pull, or store startup is unavailable.
     """
     port = _free_port()
     name = f"egma-test-minio-{os.getpid()}-{port}"
@@ -828,16 +758,8 @@ def text_mode_spec(
     dynamic_variables: dict[str, str] | None = None,
     mock_tools: list[dict] | None = None,
 ) -> dict:
-    """One spec against a Retell text mode connection, pointed wherever asked.
-
-    The connection block is exactly what the control plane stores for a
-    ``retell_text_mode`` connection — the voice agent's id in the config,
-    the key in the credentials — plus the base URL, which is what lets the
-    exchange land on a text-mode-shaped stub instead of the platform
-    itself. The version and the run's resolved answers ride the spec the
-    way a real run over this lane carries them: the version because it is
-    resolved once and named on every request, the answers because this is
-    the lane whose mock tools ride the request natively.
+    """Retell text-mode spec with agent ID, credentials, optional stub base URL,
+    pinned agent version, and resolved test-owned mock tools.
     """
     return a_spec(
         simulation_id,
@@ -963,16 +885,8 @@ def phone_spec(
     platform: dict | None = None,
     models: dict | None = None,
 ) -> dict:
-    """One voice spec that dials a number.
-
-    Deliberately the same shape as :func:`loopback_spec`: a phone
-    simulation differs from every other voice one by its connection block
-    and by nothing else. ``backend`` here only decides whether the
-    scripted backend's script is written into the spec — what the far end
-    says, whether it hangs up, what the carrier answers — which only that
-    backend reads. Which bridge really places the call is the deployment's:
-    this container's own configuration with the platform's carrier, which
-    ``platform`` is how a test supplies.
+    """Phone simulation spec. backend selects optional scripted responses;
+    platform supplies the carrier route combined with the deployment bridge.
     """
     config: dict = {"phoneNumber": number}
     if caller_id is not None:
@@ -1231,22 +1145,9 @@ def all_terminal(simulation_ids: list[str]) -> Callable[[list[dict]], bool]:
     return check
 
 
-# -- A real LiveKit for the opt-in live suite -------------------------------
-#
-# The live room test used to need a LiveKit project before it would run at
-# all, which put a cloud account between a developer and the one test that
-# proves a real room. It does not need a *project*; it needs a server, and
-# this repository already deploys one.
-#
-# So the coordinates come from the environment where a machine names them,
-# and otherwise from the server below, started for the length of one
-# session. The address is fixed rather than free-chosen on purpose: the
-# counterpart worker is started by hand before the test runs, so the place
-# it is told to register has to be knowable in advance.
-#
-# Its twin lives in `sdks/python/tests/conftest.py`. The two packages ship
-# as separate wheels and share no test code, so this is duplicated
-# deliberately, the way the seam's own constants are.
+# Use configured LiveKit settings or a session-local dev server.
+# Keep a fixed address so the separately started fixture worker can register.
+# The Python SDK has its own fixture because the packages share no test code.
 
 LIVEKIT_DEV_URL = "ws://127.0.0.1:7880"
 LIVEKIT_DEV_KEY = "devkey"
@@ -1395,18 +1296,8 @@ def live_livekit() -> Iterator[LiveKitServer]:
     name = f"egma-livekit-live-{os.getpid()}"
     try:
         started = subprocess.run(
-            # Host networking because a room's media negotiates addresses of
-            # its own, and a published port would advertise one the container
-            # cannot reach from inside its own view of this machine.
-            #
-            # Bound to loopback, and that is the security boundary rather than
-            # a preference. Host networking puts this server in this machine's
-            # own network namespace, so a bind of 0.0.0.0 would offer it on
-            # every interface the machine has — under the key pair `--dev`
-            # prints, which everybody knows. Anybody who could reach the host
-            # could then mint a token, join a room whose name is predictable,
-            # and answer to egma's name in it. Loopback is the whole of what
-            # these tests need.
+            # Use host networking for media addresses. Bind to loopback because
+            # the dev server uses public test credentials.
             [
                 "docker",
                 "run",
@@ -1457,17 +1348,8 @@ def live_livekit() -> Iterator[LiveKitServer]:
             time.sleep(0.2)
         yield LiveKitServer(LIVEKIT_DEV_URL, LIVEKIT_DEV_KEY, LIVEKIT_DEV_SECRET)
     finally:
-        # Never raises, whatever docker does: a teardown exception here
-        # would replace every result this session earned with an error
-        # about the cleanup of a container that is thrown away regardless.
-        #
-        # A stop that did not succeed is followed by `rm -f`, and the test
-        # is on the exit status rather than on whether the call returned.
-        # A `docker stop` that answers non-zero has left the container
-        # running just as surely as one that never answered at all — and
-        # this container holds the host's own port 7880, so surviving this
-        # teardown means every later session finds the port taken and
-        # skips. Two ways to fail, one cleanup.
+        # Do not let teardown errors mask results. If docker stop raises or returns
+        # nonzero, force removal so the container does not retain port 7880.
         stopped = _docker("stop", "-t", f"{LIVEKIT_STOP_SECONDS:.0f}", name)
         if stopped is None or stopped.returncode != 0:
             _docker("rm", "-f", name)

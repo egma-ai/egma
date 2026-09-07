@@ -1,20 +1,10 @@
 /**
- * The data-access boundary.
- *
- * Customer reads and writes take an `AuthContext`. This module builds tenancy
- * predicates from that context. The Postgres pool and ClickHouse driver stay
- * private, and lint rules prevent other packages from importing either driver.
- *
- * A small set of context-establishing calls resolves credentials or membership.
- * A second small set dispatches platform work across all tenants. Those worker
- * calls return an `AuthContext` narrowed to the row they claimed, so every later
- * read and write uses the normal tenant boundary.
- *
- * ClickHouse has two product records behind the same boundary. Spans are the
- * trace evidence. Grades are append-only results tied to one trace and one
- * project grader. Trace reads require a bounded time window. Grade reads require
- * the exact trace and frozen plan. Regrading reopens whole-trace work; it never
- * edits or removes prior grade rows.
+ * Customer data access uses AuthContext to apply organization and project scope.
+ * Keep Postgres and ClickHouse drivers private; lint enforces the import boundary.
+ * Credential resolvers establish contexts. Deployment workers claim stored work
+ * and build a context scoped to that row.
+ * Spans and append-only grades share this boundary. Trace reads require a bounded
+ * time window; grade reads require an exact trace and frozen grading plan.
  */
 
 export type { AuthContext, Role, Via } from "./context.ts";

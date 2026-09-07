@@ -790,19 +790,9 @@ describe("a run over a Retell text mode connection", () => {
 });
 
 /**
- * The stamp, driven through `startRun`'s own seam.
- *
- * The lane's own proof above goes the whole way over HTTP and is the one that
- * says the product works. These sit beside it to say two things that door
- * cannot: what the write does when handed a world **directly**, so the record
- * shape is pinned independently of whatever the run-start read happened to
- * resolve; and what it does when handed **none**, which is the case no caller
- * should ever produce and every caller would produce silently if the write did
- * not refuse it.
- *
- * A connection that reads no platform at run start carries the first of those,
- * because a lane that pins nothing is exactly where a stray stamp would be
- * hardest to notice.
+ * Exercise startRun directly with supplied and missing version metadata.
+ * Check that required pins are enforced and connections that need no pin
+ * do not receive one accidentally.
  */
 
 describe("the sentinel Retell key", () => {

@@ -1,153 +1,23 @@
-"""Retell text mode: a Retell **voice** agent, conducted in text.
+"""Retell voice-agent testing through the text playground API, without audio.
+Config requires retellAgentId; baseUrl optionally selects a proxy or test server.
+Credentials contain apiKey; redact it from platform errors.
 
-The fourth plug that reaches an agent where it lives, and the one that
-gives a Retell voice agent a chat door at all. It speaks Retell's
-agent-playground-completion API over outbound HTTPS: egma sends the whole
-conversation so far and Retell answers with the agent's new messages. No
-call is created, no number is dialled, no speech is synthesised, and no
-audio exists anywhere on this lane — which is the whole point. The same
-test run here and over a voice connection is the diagnostic that separates
-a broken prompt from a broken speech stack.
+Each request carries the full history, supplied agent version, current variables,
+resume state, and test-owned mock tools. Preserve platform messages, excluding
+duplicate persona echoes. Merge returned variables and carry resume state forward.
+There is no platform call ID, so provider_reference is None.
 
-**The exchange is stateless, and egma owns it.** Retell keeps nothing
-between requests, so every request carries the whole history, the version
-to conduct, this simulation's dynamic variables, the native tool mocks,
-and where the engine had got to. Every reply carries only what is new. Egma
-threads the rest forward turn by turn:
+Retell serves the submitted tool mocks. Uncovered tools run their real
+implementations. Match observed calls to mock answers by tool name; this adapter
+does not compare returned values to the submitted answer. Keep non-speech
+platform messages in platform_notes, outside the persona's transcript.
 
-- **the history** — the platform's own message objects, kept **verbatim**,
-  with the persona's turns added as they are spoken. Verbatim because a
-  stateless engine reconstructs its own context from what it wrote, and a
-  message egma tidied is a message the agent never wrote. The one thing
-  not kept is the platform's echo of the persona's own turn, where it
-  makes one: egma wrote that turn and it is in the history already;
-- **the resume state** — the current node (and the component where a flow
-  names one) for a conversation flow, the current state for a Retell LLM.
-  Carried under the platform's own names, never read and never invented;
-- **the dynamic variables** — as the last reply left them, so a variable
-  the agent set in turn three is set in turn four.
-
-Its config keys, like every plug's, are its own:
-
-- ``retellAgentId`` (string, required) — the voice agent conducted, exactly
-  as the control plane stores it.
-- ``baseUrl`` (string, optional) — where the API answers, defaulting to
-  Retell itself. What lets a test converse with a text-mode-shaped server
-  on loopback, and a proxy stand in front of the platform for a deployment
-  that needs one.
-
-**The version is named on every request.** Retell's own default is the
-newest version, which is a moving target: a concurrent edit between one
-turn and the next would move the agent under test mid-conversation. A
-chat result has to speak for the agent real traffic reaches, so the run
-resolves the version once and this plug asks for it by name, every time.
-
-**Mock tools ride the request — and this plug is the one that uses them.**
-Retell matches them by tool name and serves them itself, so egma never
-stands between the agent and its backend here and there is no draft, no
-platform write and nothing to sweep. What egma does have is the answers,
-and it hands them over: one per tool, matched by name with the
-match-anything rule, arguments never read. A tool the run's snapshot does
-not cover runs its real implementation — and on this lane it is observed,
-because Retell reports every call it made.
-
-**Mock-tool delays are deliberately not applied here.** The answer is
-served inside Retell's own execution, and a declared delay is speech-world
-fidelity — the layer chat deliberately excludes. Delays keep their whole
-meaning on the voice lanes.
-
-**Which tools may be answered at all is decided before this plug runs**,
-and that is why nothing here names a tool type. The run reads the agent's
-configuration once, classes each tool, and resolves an answer only for the
-ones it means to cover; this plug hands over exactly what it is given and
-marks a call ``mocked`` on exactly that basis. So the safe default for a
-kind nobody has proved yet — an MCP tool today, which Retell's own mocks
-do not match — is simply an answer that never arrives here, and the call
-lands on the record as the real one it was. A plug that guessed instead
-would be the one place the record could start claiming an isolation
-nobody had.
-
-**No provider reference exists, and the record says so.** Text mode
-stores nothing: there is no chat, no call and no id for either side to
-look this exchange up by. The report carries ``null`` rather than a
-synthetic id egma invented, because an id nobody else holds is not a join.
-
-**Roles the record does not know are preserved, never dropped — and never
-spoken.** Egma reads four: the agent's words, the persona's own turns
-echoed back, a tool being called, and what that call was given. Anything
-else — a node transition Retell announces, an SMS leg, whatever a newer
-platform grows — is kept **verbatim as agent-side content** on the turn it
-arrived in, as that turn's ``platform_notes``: beside the words, never
-among them. That is also how a transition lands on the record.
-
-Beside rather than among, because the words are not just the record: they
-are handed back to the persona as the transcript it answers, and they are
-what a voice record of the same scenario is compared against. A transition
-in the turn text would have the persona replying to "moved to
-lookup_caller", and would make this lane's transcripts differ from the
-voice lane's by construction — which is the one comparison the whole
-modality exists for.
-
-**A call is stamped `mocked` when the run's snapshot covers its name**,
-and on no other basis. That Retell honours the tool-mock field is a guess
-(below), and the gate that proves it is the env-gated live text-mode chat
-e2e beside this plug — a run against a real agent, by hand, before this
-lane serves anybody. A runtime comparison of what the platform reported
-the tool being given against what egma sent was tried and removed
-(founder ruling, 2026-08-28): it made every simulation carry a check the
-live suite already answers once, and it turned a platform that reports a
-tool result in a shape egma did not predict into a failed simulation
-rather than a recorded one.
-
-Credentials are shaped ``{"apiKey": ...}`` — the shape the control plane
-seals — and are read for the ``Authorization`` header and nothing else.
-They are never logged, never returned, and never put into an exception
-message: a refusal names the status the platform answered with and the URL
-it answered from, which is what a person needs, and neither is a secret.
-Everything quoted from the platform is scrubbed of the key first, here,
-where the key is known.
-
-## The wire, and which parts of it are still a guess
-
-Every name below marked **(guess)** was designed from the effort's
-description of this API rather than read off a request that really
-happened, because no agent may probe the live platform. One live run by
-the developer corrects any of them, and the stub in
-``tests/text_mode_stub.py`` is wrong in exactly the same places — so a
-correction is one edit here and one there, with the whole suite still
-proving the behaviour.
-
-Out, to ``POST {base}/agent-playground-completion/{agent_id}`` (guess: the
-path, named in the planning record's earlier onboarding spec):
-
-- ``agent_version`` — the version to conduct. Retell's own name for it on
-  every other endpoint, so this one is not much of a guess.
-- ``messages`` (guess) — the whole history, oldest first.
-- ``retell_llm_dynamic_variables`` — Retell's own name on every other
-  endpoint.
-- ``tool_mocks`` (guess: that this endpoint takes them at all) — the same
-  shape Retell's test-case definitions take: ``tool_name``,
-  ``input_match_rule`` of ``"any"``, ``output`` as a string, and ``result``
-  saying whether the call succeeded.
-- ``current_node_id`` / ``current_component_id`` (guess) / ``current_state``
-  — the resume state. The first and last are Retell's own names on
-  ``create-web-call``; the component is the guess of the three.
-
-Back:
-
-- ``messages`` (guess) — the agent's **new** messages only.
-- ``agent_ended`` (guess) — the flag that ends the exchange from the
-  agent's side. An end-tool invocation among the messages is honoured too,
-  which is the same fact said the other way.
-- ``retell_llm_dynamic_variables`` or ``dynamic_variables`` (guess) — the
-  variables as they now stand. **Whether a reply names all of them or only
-  the ones that changed is itself a guess**, so they are laid *over* what
-  egma holds rather than replacing it: a delta-shaped reply then loses
-  nothing, and a whole-set reply behaves identically.
-- the same three resume keys.
-
-A ``Retry-After`` on a throttled reply is honoured where it is a number of
-seconds, capped at :data:`LONGEST_BACKOFF_SECONDS`.
+Wire assumptions require live validation; the local stub cannot prove them:
+- POST /agent-playground-completion/{agent_id} and its messages field.
+- Acceptance of tool_mocks and current_component_id.
+- New-messages-only replies and agent_ended.
+- Returned variable names and whether they contain a delta or the full set.
+See the opt-in live text-mode tests before relying on these assumptions.
 """
 
 from __future__ import annotations
@@ -363,17 +233,8 @@ class RetellTextMode:
         return None
 
     async def open(self) -> AgentReply:
-        """Ask for the agent's opening line, with nothing said yet.
-
-        One bounded exchange against an empty history. An agent configured
-        to speak first has spoken by the time this answers; one that waits
-        for the caller answers with nothing, and the persona opens instead.
-
-        The whole answer rather than its words alone, because a flow can
-        move node while it greets and that has to land on the opening turn
-        rather than on the next one — and because an agent can end the
-        exchange with its greeting, which the walk reads here and reports
-        as the agent's own doing without ever asking the persona to speak.
+        """Request an optional greeting with empty history. Return the full AgentReply
+        so opening platform notes and an immediate agent ending are preserved.
         """
         self._session = aiohttp.ClientSession()
         return self._read(await self._exchange())
@@ -410,15 +271,9 @@ class RetellTextMode:
     # -- The one request this plug makes, and how it is read ------------------
 
     def _asked(self) -> dict[str, Any]:
-        """What one exchange is asked for.
-
-        Everything the agent needs to answer this turn, because Retell
-        keeps none of it: the whole history, the version by name, this
-        simulation's variables as they now stand, the answers egma wants
-        served, and where the engine had got to. Absent stays absent — a
-        version Retell was not asked for is a version it chooses itself,
-        and an empty variable block is not the same as none, because
-        Retell renders what it is given.
+        """Build a request with history, supplied version, current variables, mock
+        tools,
+        and resume state. Omit absent values rather than sending empty placeholders.
         """
         asked: dict[str, Any] = {"messages": list(self._history)}
         if self._agent_version is not None:
@@ -495,16 +350,9 @@ class RetellTextMode:
         )
 
     def _observed(self, message: dict) -> None:
-        """One tool call Retell reported, handed to the seam that keeps it.
-
-        **This lane's whole tool record.** Nothing of egma's runs inside a
-        Retell agent and this lane offers no provider reference, so no
-        report of the agent's own ever arrives: without this, the call
-        would land nowhere at all. What goes on the record is egma's own
-        rendering for a name the pinned version covers — the seam holds the
-        copy that says which branch the answer was — and an uncovered call
-        lands as the observation it is, because its return value is the
-        customer's backend's and nothing egma can vouch for.
+        """Record a reported tool call through MockToolSeam. Covered names use the
+                authored answer; uncovered calls retain the name and arguments without
+                an answer.
         """
         name = message.get("name")
         if not isinstance(name, str) or not name.strip():
@@ -534,23 +382,9 @@ class RetellTextMode:
                 self._resume[key] = moved
 
     def _variables_from(self, answered: dict) -> None:
-        """The variables as the reply left them, laid **over** the held set.
-
-        Merged rather than swapped, and that is the fail-safe reading of
-        an unmarked guess: whether a reply names every variable or only
-        the ones that changed is not documented anywhere egma could read,
-        and a plug that swapped would drop every variable a delta-shaped
-        reply left out. Egma's own attribution variable is among those, so
-        swapping would quietly stop this simulation being identifiable to
-        the agent's tools from the turn after the first change. A reply
-        wins for every name it does mention, which is right under both
-        readings.
-
-        The values are not held to the contract's rule about what a
-        rendered variable may be. That rule guards the values *egma*
-        sends, and is the last place a mistake in a claimed spec can be
-        named; these are the platform's own values coming back, and a plug
-        that refused one would be refusing the agent's own state.
+        """Merge returned variables because the reply may contain only changed values.
+        Preserve platform values without applying the input contract's string
+        validation.
         """
         for key in VARIABLE_KEYS:
             carried = answered.get(key)
@@ -655,15 +489,8 @@ class RetellTextMode:
 
 
 def _waiting(asked_for: str | None, backing_off: float) -> float:
-    """How long to wait before trying a throttled request again.
-
-    The platform's own ``Retry-After`` where it sent a number egma can
-    read, and egma's own doubling backoff otherwise. Capped either way:
-    a header asking for ten minutes is a platform describing its own day,
-    and a simulation that slept through it would report a shorter exchange
-    than the test asked for — which is the whole thing the bounded retry
-    exists to prevent. Whichever wait is longer is the one taken, so the
-    platform is never asked again sooner than it said.
+    """Use the longer of numeric Retry-After and local backoff, capped at
+    LONGEST_BACKOFF_SECONDS. Missing or invalid headers use local backoff.
     """
     if asked_for is None:
         return backing_off

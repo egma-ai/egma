@@ -1,20 +1,7 @@
 /**
- * The device-flow endpoints of the fixture platform.
- *
- * This is the contract the CLI is built against, written down as something that
- * runs: the three requests a terminal makes to sign a machine in, and the one
- * it makes afterwards to prove the key works. It answers exactly what the real
- * instance answers, including which refusal goes with which state, because a
- * fixture that is kinder than the real thing is a fixture that hides bugs.
- *
- * Every answer here is pinned to `apps/api/test/device-flow.test.ts`, which is
- * the same contract asserted against the real API: an eight-character code, an
- * address of the shape `/device?user_code=…`, and `expired_token` — not
- * `invalid_grant` — for a device code that was spent or never issued.
- *
- * Approving is a control, not a contract. On a real instance a person approves
- * in a browser; here a test says so directly, which is what lets the whole of
- * login run in CI with no browser and no platform.
+ * Device authorization fixture matching apps/api/test/device-flow.test.ts.
+ * Use eight-character codes, /device?user_code=… URLs, and expired_token for
+ * spent or unknown codes. Tests approve through separate fixture controls.
  */
 
 import { randomBytes } from "node:crypto";

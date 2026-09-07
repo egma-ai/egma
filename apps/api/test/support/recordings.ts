@@ -33,21 +33,9 @@ function doorOf(egma: RunningEgma): FastifyInstance {
 import { mintKey, NEUTRAL_PERSON, request as ask } from "./traces.ts";
 
 /**
- * A run somebody can hear: a real run, over a real voice connection, with a
- * recording reference on one of its conversations and nothing on the other.
- *
- * It is here rather than in one test file because three seams want the same
- * arrangement and none of them is about building it — the route suite proves
- * the refusals against it, the object-storage suite fetches from a real store
- * with it, and the browser suite opens the results page on it. Building it three
- * ways would be three chances for the three to be proving something slightly
- * different.
- *
- * **Every step of it goes through the product.** The agent is registered, the
- * suite is created, the test is written inside it and the complete suite is run
- * over HTTP; only the simulations' movement uses the data-access functions a
- * simulator would call, because no simulator exists in these suites and a fake
- * feed would prove nothing. What lands on the row is what a real report lands.
+ * Create an agent, suite, tests, and run through HTTP. Move simulations through
+ * data-access calls and attach a recording reference to one, leaving the other
+ * without audio. No simulator or live voice agent runs in this fixture.
  */
 
 /**
@@ -113,20 +101,9 @@ export type FiledTranscript = {
 };
 
 /**
- * One conversation's own telemetry, filed the way its simulator files it.
- *
- * The transcript surface reads spans, and a run's results read rows — so a
- * conversation that has been conducted but never emitted anything has results
- * to show and no transcript to open. This is the other half: two turns and the
- * span they happened inside, posted at the real door with the service token and
- * a resource naming the simulation, which is the only way spans are ever filed
- * as egma's own rather than as a customer's production telemetry.
- *
- * **The trace id is derived and never chosen.** A simulation id and the trace
- * its spans are filed under are the same 128 bits written two ways, and the
- * contract's own function is what writes them here — the same one the emitter
- * uses. Picking an id would prove that a page can read spans; deriving it is
- * what proves a transcript and a run's results are looking at one conversation.
+ * Post synthetic simulation spans through OTLP with the service token. Derive
+ * the trace ID from the simulation ID so transcript and recording lookups refer
+ * to the same simulation.
  */
 export async function fileTranscriptOf(
   egma: RunningEgma,
@@ -282,40 +259,12 @@ export async function standingOf(
 }
 
 /**
- * One conversation of a run somebody already started, moved the way a simulator
- * moves it: claimed, started, landed.
+ * Advance one simulation for a run the caller has already started and return
+ * its ID. This uses data-access operations without running a simulator.
  *
- * `aConductedRun` below builds the whole arrangement — agent, test, run — for a
- * caller who only wants the finished state. This is the other half of that, for
- * a caller who started the run *itself* and now needs it to have happened: the
- * browser journey plans and starts a run through the product's own screens, and
- * then has to land a conversation to have any evidence to open.
- *
- * **Only the movement is at this seam, and deliberately.** No simulator runs in
- * these suites, so the alternative is not a real conversation — it is a fake
- * feed, which would prove that a page can render invented rows. What lands here
- * is what a real report lands, through the same data-access functions the
- * simulator calls.
- *
- * Answers the conversation it conducted, which is the address a caller then
- * opens the evidence at.
- *
- * **One conversation is claimed, and only one.** `claimSimulations` is the
- * simulator's own drain: it takes the oldest queued conversations *across the
- * whole instance*, with no way to ask for one run's — deliberately, because a
- * simulator has no business caring whose work it picks up. This helper used to
- * ask for fifty of them and then filter by run, which claimed every other
- * pending run's conversations and never completed one of them. Nothing noticed,
- * because no suite here has ever had two runs in flight at once; the first one
- * to try would have found its own conversations already claimed by a claimant
- * that had walked away, and would have had to work out why from a page that
- * simply never moved.
- *
- * So the capacity is one, which is all this helper ever needed. What it still
- * cannot do is *choose* — if some other run left a conversation queued and
- * older, that is the one that comes back. It is asserted rather than filtered,
- * so the arrangement fails at this line, naming the run it got instead, rather
- * than at whatever the caller went on to assert.
+ * Claim capacity is one because claims read the deployment-wide queue. The
+ * helper cannot select a run: assert the claimed run matches instead of silently
+ * claiming and abandoning another run's work.
  */
 export async function landOneConversationOf(
   auth: AuthContext,

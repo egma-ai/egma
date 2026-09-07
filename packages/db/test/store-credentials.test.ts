@@ -1,25 +1,6 @@
 /**
- * The two addresses the whole suite reaches its stores at, held against the
- * deployment description that creates them.
- *
- * **A password is not copy.** `docker-compose.yml` creates Postgres and
- * ClickHouse with `POSTGRES_PASSWORD` and `CLICKHOUSE_PASSWORD` defaulted in
- * that file, and a store answers to the value it was created with and to
- * nothing else. `store-urls.ts` restates those values because it is read
- * before anything in this repository has been built and so may import nothing.
- * Two copies of one fact, and until now nothing held them together.
- *
- * The branding change on `main` (`a3ab932`) rewrote both passwords to `Egma`
- * along with the product's copy. Nothing named a file: every test in the suite
- * failed at connection time with *"password is incorrect, or there is no user
- * with such name"*, which reads like a machine that needs its containers
- * recreated rather than like a line somebody edited. That is the cost this
- * file removes.
- *
- * It asks the question the other way round from a spelling rule: it does not
- * say *never capitalize this word*, it says *these two files must agree*. A
- * deployment that genuinely changes its store password changes it here too,
- * and this passes.
+ * Default store credentials in store-urls.ts must match docker-compose.yml.
+ * They are authentication values, so product-copy changes must not alter them.
  */
 
 import { readFileSync } from "node:fs";

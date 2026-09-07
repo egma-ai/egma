@@ -17,26 +17,9 @@ import { aConductedRun, standingOf } from "./support/recordings.ts";
 import { request as ask, signUp } from "./support/traces.ts";
 
 /**
- * The signature, against a store that judges it.
- *
- * `recordings-routes.test.ts` proves who is refused and what the answer says.
- * None of that can prove the one thing a reader actually needs, which is that
- * the link *works* — a signature is only worth what the store makes of it, and
- * every way this can be got wrong is invisible from inside the process that got
- * it wrong. So this file signs against a real MinIO and fetches:
- *
- * - the recording comes back, as audio, byte for byte;
- * - a **range** of it comes back, which is what seeking is;
- * - a link signed for a different address is refused, which is the failure the
- *   browser-address setting exists to prevent and the reason it exists at all;
- * - a link whose moment has passed is refused, so "the link expires" is the
- *   store's promise rather than egma's claim about it;
- * - and the control plane's credential **cannot write**, which is why it is a
- *   separate credential from the simulator's in the first place.
- *
- * It skips, visibly and with a sentence, where no store can be started. That is
- * ticket 01's pattern and its promise: contributing costs no new infrastructure,
- * and a suite that quietly passed instead would be worth nothing.
+ * Test signed recording reads against MinIO: audio bytes, range requests,
+ * wrong-host signatures, expiry, and rejection of writes with the read
+ * credential. Skip visibly when the required store cannot start.
  */
 
 const storage: ObjectStorage = await startObjectStorage("api-recordings");

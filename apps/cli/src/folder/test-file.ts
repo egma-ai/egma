@@ -1,59 +1,13 @@
 /**
- * One test, as one markdown file in the developer's repository.
+ * Parse and serialize format 5 test Markdown.
+ * Frontmatter holds identity, persona references, version, and identity_revision.
+ * The body contains Scenario, Expected behaviors, and optional Mock tools and Env.
+ * Mock tools and env are test-owned versioned content. Reject other format versions.
  *
- * The format is the whole point of the folder: a test somebody reviews in a
- * pull request has to read like something a person wrote. So the frontmatter
- * carries only what a machine needs — what the test is called, who calls, and
- * the two tokens this file was last synced at — and the body is the four things
- * a test says, under the four headings it says them under.
- *
- * ```markdown
- * ---
- * format: 5
- * name: missed-appointment-reschedule
- * description: The caller missed Thursday and wants any afternoon next week.
- * version: tstv_01K…
- * identity_revision: rev_01K…
- * personas:
- *   - id: prs_01K…
- *     name: Impatient customer
- * ---
- * ## Scenario
- * …prose…
- * ## Expected behaviors
- * 1. …ordered statements, each one a plain sentence…
- * ## Mock tools
- * …what this test's own tools answer with…
- * ## Env
- * …the world this test is conducted in…
- * ```
- *
- * **Format 5 is the test-owned world.** A test carries its own mock tools and
- * its own env; there is no project-wide list to override and no project file to
- * read. The product is pre-production and supports one repository contract, so
- * a file that claims an older or newer format is refused. It is never guessed
- * at or rewritten through a compatibility reader.
- *
- * The last two headings are there only when the test says something under them.
- * Both are test content — they version with the test exactly as an expected
- * behavior does — which is why they live in the test's own file.
- *
- * **Two tokens rather than one, because a test has two halves that move
- * independently.** `version:` is the content a run is judged by; `identity_
- * revision:` is the live half — the name and the description. Editing either in
- * the browser makes this copy stale, and each is refused on its own door, so a
- * colleague sharpening a scenario cannot refuse a one-word rename. Both are
- * absent on a file nothing has synced yet, and it is their presence that makes
- * the refusal rule checkable: without a pin there is nothing on the platform
- * this file claims to be a newer draft of.
- *
- * **A persona is named by identity, and the display name beside it is for the
- * reader.** The id is what a pulled file resolves. Format 5 also permits a new
- * authored file to name a persona before the file has a stable persona ID;
- * the platform resolves that current name when the repository is pushed.
- *
- * Everything egma writes goes through the one serializer below, which is what
- * makes `pull` immediately after `push` change zero bytes.
+ * version tracks content independently of identity_revision for name and description.
+ * Unsynced files omit both tokens. Persona IDs are authoritative when present;
+ * new files may name personas for platform resolution during push.
+ * One serializer produces stable pull/push output.
  */
 
 import { FolderProblem } from "./problem.ts";
@@ -176,25 +130,10 @@ function lastHeadingIn(
 }
 
 /**
- * The body's four parts.
- *
- * The three headings after the scenario are the boundaries, so a scenario that
- * has headings of its own inside it keeps them. Anything before a scenario
- * heading — or a body with no heading at all — is read as the scenario, because
- * a file a person started typing is still a file egma should be able to push.
- *
- * Each boundary is the *last* heading of its kind and the scenario opens at the
- * *first* one, so a scenario whose prose quotes any of them keeps it. egma
- * writes each heading once, which makes first and last the same line in every
- * file egma has written.
- *
- * The last two headings are the ones egma does not always write, so "the last
- * one" is not enough on its own: a test that mocks nothing and whose prose
- * quotes the heading has exactly one, and it is the prose's. What settles it is
- * **the order egma writes the sections in** — scenario, expected behaviors,
- * mock tools, env. Each heading is read as the section's only inside the window
- * its own place in that order leaves it, and anywhere above that window it is
- * prose the section before it keeps.
+ * Split Scenario, Expected behaviors, Mock tools, and Env in their serialized order.
+ * The first Scenario heading opens scenario content; use the last valid later
+ * boundary inside each section's order window. This preserves headings quoted
+ * inside scenario prose. Content before Scenario, or without headings, is scenario text.
  */
 function partsOf(body: string): {
   readonly scenario: string;
@@ -346,21 +285,9 @@ function oneLine(behavior: string): string {
 }
 
 /**
- * Write one file, in the one shape egma ever writes.
- *
- * Every byte here is decided by the value handed in, and nothing is carried over
- * from whatever the file held before. That is what makes the round trip stable:
- * `push` rewrites each file from what the platform stored, and a `pull` straight
- * afterwards computes the same bytes and finds nothing to do.
- *
- * The shape is the format's, not the value's, so what goes out is what reading
- * it gives back: no persona with nothing in it, no space wrapped around the
- * prose, and one statement per line. A value that cannot be written in that
- * shape is written in the nearest shape that can, rather than written in a way
- * that would read as something else.
- *
- * **No priority marker is written, on any line.** Every expected behavior in
- * format 5 is one blocking statement. Older formats are refused by the parser.
+ * Serialize from normalized values, without retaining old file formatting.
+ * This makes push followed by pull stable. Expected behaviors are one blocking
+ * statement per line, with no priority marker in format 5.
  */
 export function serializeTestFile(file: TestFile): string {
   const personas = file.personas.filter(

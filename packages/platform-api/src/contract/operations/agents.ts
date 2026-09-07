@@ -138,14 +138,8 @@ const listedAgent = {
 } as const;
 
 /**
- * The external agent chosen through `agents:discover`, in the older envelope.
- *
- * **Superseded by `platformAgentId` beside `credentials`** (the founder's
- * ruling of 2026-08-24): a connect request names the picked agent directly,
- * and Egma confirms it with the key it was given or with the key already
- * sealed on the agent. The envelope stays accepted so existing API and CLI
- * callers keep working; it is read as exactly those two fields and nothing
- * else, so there is one path underneath and not two.
+ * Compatibility envelope for platformAgentId and credentials. New requests
+ * provide those fields directly; both forms use the same validation path.
  */
 const agentPlatformSelection = {
   type: "object",

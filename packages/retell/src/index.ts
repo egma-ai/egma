@@ -78,18 +78,9 @@ export type RetellConfig = {
 };
 
 /**
- * One telephone number on the account, and which agents answer it.
- *
- * `answeredBy` is read from `inbound_agents` and from nothing else. Retell's
- * older single-agent field is not read at all: it is absent from this account's
- * answers and was observed reporting nothing for a number that is in fact
- * assigned, so a wizard that trusted it would tell a developer their agent has
- * no numbers while their customers are dialling one.
- *
- * A number may be answered by several agents under weighted routing, so this is
- * a list. Which of them wins a given call is Retell's business and is
- * deliberately not modelled — what egma needs to know is whether the agent the
- * developer picked is among them.
+ * Phone number and its inbound_agents assignments. Read the multi-agent field
+ * because weighted routing can associate several agents with one number.
+ * The legacy single-agent field can be empty for an assigned number.
  */
 export type RetellNumber = {
   /** E.164, exactly as Retell holds it. */
@@ -308,15 +299,8 @@ export async function listNumbers(
 }
 
 /**
- * One number's own document, which is where an assignment is settled.
- *
- * The listing is how the candidates are found; this is how the one the
- * developer picked is confirmed, immediately before egma writes a connection
- * that will be dialled for real. Both answers come from `inbound_agents`, so
- * the two cannot disagree about *what* is read — what this buys is that the
- * number egma is about to register still answers the agent under test at the
- * moment it registers it, read at that number's own address rather than out of
- * a list that was fetched a screen ago.
+ * Re-read a selected number's inbound_agents immediately before registering
+ * the connection so setup does not rely on an earlier listing.
  */
 export async function confirmNumber(
   key: RetellCredential,

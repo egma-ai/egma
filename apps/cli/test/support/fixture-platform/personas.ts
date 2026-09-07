@@ -16,20 +16,9 @@ export type PersonaControls = {
 };
 
 /**
- * Every project can name Egma's own Predefined persona.
- *
- * This is the tenancy rule rather than a convenience for the fixture: a
- * Predefined persona belongs to no organization and no project, so it is
- * readable from every one of them. A fixture project that answered with none
- * would be a project the real platform cannot produce — which is exactly the
- * shape a test must not teach. `clear()` exists so a test can ask for the
- * impossible on purpose and prove validation stops rather than writes a folder
- * that cannot be pushed.
- *
- * **Nothing here says which persona is the project's default.** There is no
- * default persona: the pointer and everything that guarded it were removed with
- * the persona rework, and a test naming no persona is refused rather than given
- * one.
+ * Expose the Egma-provided persona across organizations and projects.
+ * clear() creates an empty-list case for refusal tests. No default persona is
+ * selected implicitly; tests must name their personas.
  */
 const EGMA_PREDEFINED = "Everyday caller";
 

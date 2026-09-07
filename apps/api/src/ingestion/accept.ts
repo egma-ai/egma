@@ -52,53 +52,16 @@ const acknowledgementLatency = meter.createHistogram(
 );
 
 /**
- * Acceptance: the one place evidence becomes Egma's problem.
+ * Accept normalized production or simulation spans under trusted caller scope.
+ * A successful response requires every accepted record to be durable in the
+ * object store; local staging alone is insufficient.
  *
- * Every path that takes production or simulation evidence ends here — the two
- * branches of the OTLP door and, in-process, the Retell poller. There is one
- * seam because there is one promise, and a promise made twice is a promise two
- * pieces of code can disagree about: **nothing is answered as accepted until it
- * is durable in the object store.** Not when it is normalized, not when it
- * reaches the local log, not when a row is written somewhere.
+ * Validate records, append them to the bounded local log, and group by project.
+ * Seal on size or time limits. Record the segment identity before uploading
+ * so retries use the same object key and bytes.
  *
- * ## What a caller hands over, and what it may not
- *
- * Normalized spans, plus the organization and project **the credential resolved
- * to**. Tenancy is a parameter here and is never read out of evidence: a record
- * has no field that could name a tenant, and a segment is sealed for the scope
- * this module was told, so an attribute claiming an organization decides
- * nothing even in principle.
- *
- * ## The order, and why every step is where it is
- *
- * 1. **Refuse what will not fit.** A record over a documented field bound is
- *    refused by name before anything is staged, and reported back so the door
- *    can put it in OTLP partial success. Refusing after acceptance would mean
- *    telling a sender their evidence landed and then dropping it.
- * 2. **Append to the local log.** Length-framed and checksummed, so a crash
- *    leaves complete records recoverable and a torn tail recognisable. The log
- *    is bounded; over the bound it refuses, and a refusal is retryable rather
- *    than a silent discard of something older.
- * 3. **Group by project and wait for company.** One segment belongs to exactly
- *    one project. A group seals when it reaches a size bound or when the flush
- *    timer expires, whichever comes first — the timer is what a low-volume
- *    deployment lives on, and the size bound is what stops one segment growing
- *    without one.
- * 4. **Seal, then record the identity, then upload.** The segment id is minted
- *    and written into the log *before* the upload starts, so an upload whose
- *    answer was lost is retried against the same key with the same bytes. That
- *    is the whole idempotency story, and it only works in that order.
- * 5. **Answer.** The call resolves when every segment carrying its records is
- *    durable, and refuses retryably otherwise. Records stay staged either way:
- *    a refusal is *not yet*, never *gone*.
- *
- * ## A refusal is retryable, and staging survives it
- *
- * `IngestionUnavailableError` means the object store did not confirm durability
- * inside the request's bound, or the local log will take no more. Both are
- * conditions that pass. The route answers `503`, the exporter retries, and the
- * staged copy is uploaded by whichever attempt gets there first — span identity
- * is stable, so the two meeting is a replay rather than a duplicate.
+ * Timeout or backpressure is retryable. Keep staged records for later upload;
+ * exporter retries are reconciled by span identity during draining.
  */
 
 /**
@@ -130,14 +93,8 @@ export type Acceptance = {
 };
 
 /**
- * Evidence could not be made durable **yet**.
- *
- * The one refusal this module raises, and it is deliberately one: an object
- * store that did not answer in time and a local log that is full are the same
- * news to a sender — *not now, send it again* — and answering them differently
- * would give an exporter two behaviours to implement for one situation. It is
- * never raised for anything a sender did; bad input is refused as a rejected
- * record and reported in the response body.
+ * Retryable acceptance failure, such as unavailable object storage or a full
+ * local log. Invalid records are reported separately in the acceptance result.
  */
 export class IngestionUnavailableError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -214,14 +171,8 @@ type Standing = {
 };
 
 /**
- * The one standing acceptance loop, or nothing on a process that never opened
- * one.
- *
- * Module-level for the same reason the trace store's client is: acceptance owns
- * a local log directory and a bucket connection, and two of them in one process
- * would be two logs staging the same evidence with neither knowing about the
- * other. A caller asks for acceptance rather than being handed one, so no route
- * can be given the wrong one.
+ * Process-wide acceptance state. A single loop owns the local staging log
+ * and object-store connection.
  */
 let standing: Standing | undefined;
 
@@ -293,22 +244,9 @@ function stagedFor(
 }
 
 /**
- * How long a group whose upload just failed waits before it is offered again.
- *
- * **A sealed segment whose upload failed stays sealed**, which is what keeps
- * the evidence — and it also leaves the group permanently due. Without a wait
- * the loop would fail, wake and fail again with nothing in between: capacity
- * spent here, and a flood landing on the store at the moment it is least able
- * to take one. What paces that today is whichever retry policy the store
- * client happens to apply inside one call, which is a dependency's property and
- * not a promise this module can make.
- *
- * It doubles from the flush interval up to the request bound, and it borrows
- * both rather than introducing a third number nobody has tuned. The floor is
- * the interval a low-volume deployment already waits to seal, so the first
- * retry costs no more than one ordinary flush; the ceiling is the longest a
- * request is ever held open for this store, which is this path's own statement
- * about how long the store is worth waiting on.
+ * Back off failed uploads to avoid retrying a still-due sealed group in a
+ * tight loop. Double from the flush interval, capped at the larger of that
+ * interval and the request timeout.
  */
 function nextAttemptAfter(held: Standing, failedAttempts: number): number {
   const longest = Math.max(
@@ -321,15 +259,8 @@ function nextAttemptAfter(held: Standing, failedAttempts: number): number {
 }
 
 /**
- * How much of a group goes into the next segment.
- *
- * Everything waiting, unless a bound is reached partway — in which case the
- * record that reached it goes in and the rest wait for the next one. Crossing a
- * bound by one record is deliberate and is why the bound sits under the trace
- * store's own insert bound: holding that record back instead would make a
- * segment's bytes depend on what arrived after it, and a retry that re-grouped
- * the same records would then seal different bytes under an identity that has
- * already been recorded.
+ * Take an ordered prefix through the record that reaches a bound.
+ * The byte limit may be exceeded by that final record.
  */
 function takeForSegment(
   waiting: readonly Staged[],
@@ -611,20 +542,10 @@ export function openAcceptance(options: AcceptanceOptions): void {
 }
 
 /**
- * Everything the previous process staged and did not finish, back in the
- * groups it was staged in.
- *
- * Everything found here is due immediately — see the stamp below — so the first
- * pass seals it and sends it rather than making it wait out another window.
- *
- * Records first, then the seals that claimed them. A seal frame names a count
- * rather than a list of identities, and it does not need to name one: records
- * are appended in arrival order and a segment always takes the oldest of its
- * project, so the first unclaimed `record_count` of that project *are* the ones
- * it sealed. The checksum recorded beside the count is what proves that pairing
- * — where it does not match, the identity is abandoned rather than reused,
- * because an identity uploaded with bytes other than the ones already under it
- * is exactly the integrity defect this whole path exists to rule out.
+ * Recover records by project in log order, then apply recorded seals to
+ * each project's oldest unclaimed records. Verify the count and checksum
+ * before reusing a segment ID; mismatches discard only the seal identity.
+ * Recovered groups are immediately due for upload.
  */
 function recover(held: Standing): void {
   // What is in the log has been waiting since before this process started, so
@@ -755,15 +676,9 @@ export function acceptEvidence(
 }
 
 /**
- * Stage several projects' evidence in one call and answer when **every** one of
- * them is durable.
- *
- * The trusted simulator service batch, which may carry resources belonging to
- * more than one project. Each project gets a segment of its own — evidence from
- * two projects may not share a durable object — and the call succeeds only when
- * all of them have landed. A partial answer would tell the sender the whole
- * batch was accepted while one project's evidence sat in a log; the groups that
- * did land are replayed by the retry, which stable span identity makes a no-op.
+ * Accept trusted multi-project batches using separate segments per project.
+ * Resolve only after all non-rejected records are durable. A failed request
+ * can have partial durable progress; retries retain stable span identities.
  */
 export async function acceptEvidenceForProjects(
   groups: readonly EvidenceGroup[],
@@ -849,14 +764,8 @@ export async function acceptEvidenceForProjects(
 }
 
 /**
- * Wait for every staged record of one call, and no longer than the request is
- * allowed to be held open.
- *
- * The bound is the whole reason this is not a plain `Promise.all`: a store that
- * has stopped answering would otherwise hold a request open for as long as the
- * client's own timeout, and the sender would learn nothing it could act on. On
- * the bound the records stay staged and the sender is told to retry, which is
- * the one answer that is true whichever way the upload in flight ends.
+ * Bound the wait for all staged records to become durable. A timeout leaves
+ * them staged for retry and does not cancel an upload already in progress.
  */
 async function durableWithin(
   held: Standing,
@@ -893,32 +802,16 @@ export type StagedLoad = {
   /** Frames staged and not yet released. */
   readonly records: number;
   /**
-   * There is no longer room for the next record, so staging one is refused.
-   *
-   * **Room for one more, not merely under the bound.** A bound is on frames
-   * and a frame is a record plus the log's own header, so a log a few hundred
-   * bytes under its byte bound refuses every request that arrives — and a
-   * readiness check comparing usage against the bound would call that instance
-   * ready and keep it in front of traffic it cannot take.
-   *
-   * Both bounds bind, and they bind on different things: half a gigabyte of
-   * transcripts and two hundred thousand tiny records are the same answer,
-   * *not now*.
+   * True when the log cannot fit the readiness reserve or another frame.
+   * The reserve covers bounded fields and escaping, not unlimited payloads;
+   * a green check does not guarantee that every possible record fits.
    */
   readonly full: boolean;
 };
 
 /**
- * What the local log is holding, asked of the log itself.
- *
- * `undefined` on a process that opened no acceptance loop, which is a different
- * fact from an empty log and has to stay distinguishable: one is a deployment
- * with nowhere to stage evidence, the other is one with nothing staged.
- *
- * **The question is the log's to answer, and it is asked rather than
- * reconstructed.** The refusal rule lives in one place — `append` and this
- * share it — because two copies of it are two chances for readiness and the
- * door to disagree about whether this instance can take a request.
+ * Read log usage and capacity through the log's own admission rule.
+ * Undefined means no acceptance loop is open, distinct from an empty log.
  */
 export function stagedLoad(): StagedLoad | undefined {
   const held = standing;
@@ -937,14 +830,8 @@ export function stagedLoad(): StagedLoad | undefined {
 }
 
 /**
- * Every record this process has staged and not yet made durable, oldest first,
- * each with the trusted scope it was accepted under.
- *
- * **A test seam, not a product read.** It answers one question — *what is still
- * in hand* — across every tenant at once and behind no context, so nothing that
- * serves a request reaches it: the suites that prove staging survives a refusal
- * import this module directly, and no route, no barrel and no handler does. A
- * process that opened no acceptance loop is holding nothing and answers so.
+ * Test-only view of staged records and their trusted scope across projects.
+ * Order is per group, not global arrival order. Do not expose through routes.
  */
 export function stagedEvidence(): readonly {
   readonly scope: SegmentScope;

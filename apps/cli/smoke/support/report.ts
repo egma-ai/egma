@@ -1,19 +1,6 @@
 /**
- * What a smoke check says while it runs, and the words it must never say.
- *
- * Every check in this folder prints the same way — one `ok`/`FAILED` line per
- * thing it looked at, a rule between sections, and a verdict at the end — and
- * each of them used to carry its own copy of that. Copies of a printer are
- * cheap right up until one of them learns something the others do not: the day
- * one grew redaction was the day the others were quietly printing whatever the
- * first one had decided was worth hiding.
- *
- * So there is one printer, and **redaction is inside it rather than beside
- * it**. A check adds what must never appear — a key, a customer's agent name,
- * the path of somebody's repository — to `secrets` as it learns it, and every
- * line printed after that is clean whether or not whoever wrote the line
- * remembered. A passing run of these gets pasted into reviews, and clean by
- * luck is not clean.
+ * Shared smoke output with redaction applied to every printed line.
+ * Register keys and other private values in secrets as they become known.
  */
 
 /** The line between sections, one width for every check in this folder. */
@@ -32,18 +19,9 @@ export const secrets: string[] = [];
 export const problems: string[] = [];
 
 /**
- * The text with everything in `secrets` taken out of it.
- *
- * **Neither side is trusted to be a string, and that is not defensive tidying.**
- * This runs while a check is printing why it failed. A secret that arrived as
- * `undefined` — a field that moved, an answer that was not the shape it used to
- * be — used to crash the reduce; text that arrived as `undefined` crashes the
- * same reduce from the other side. Either way the crash lands *inside* the
- * error report and takes the real reason down with it, which is the one failure
- * that costs a whole run of a check that takes twenty minutes.
- *
- * A value that is not text is described rather than dropped, because "the thing
- * being printed was not a string" is itself the news at that moment.
+ * Redact registered string values without throwing on non-string input.
+ * Failure reporting must preserve the original diagnostic even when a response
+ * shape or secret value is unexpected.
  */
 export function redact(text: string): string {
   const held = typeof text === "string" ? text : String(text);

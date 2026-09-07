@@ -1,23 +1,7 @@
-"""Pipeline assembly: what one simulation is conducted through.
-
-One pipeline is built from one claimed spec and torn down when the
-exchange is over, so nothing from one simulation can reach the next. What
-the spec selects is only which legs are in it: a chat simulation is the
-plug and the persona brain, and a voice simulation is the same plug and
-the same brain with speech legs between them. The brain is one component
-for every modality, forever — it never learns which of these it is in.
-
-**Who conducts is what a spec selects here, and there are two answers.**
-A chat simulation is looped a turn at a time by :mod:`egma_simulator.conversation`.
-A voice simulation is conducted by :mod:`egma_simulator.conductor` — a
-real Pipecat pipeline on a full-duplex transport, with the voice activity
-detector and the turn model deciding where turns fall instead of a loop.
-There is no third answer and no byte adapter between them: every voice
-connection gives the conductor one Pipecat transport, whether it is a
-local fixture, a phone call, or a room.
-
-Constructing is validation and nothing else, which is what makes a spec
-that cannot be conducted an honest failure before anything is dialled.
+"""Build one pipeline per simulation without opening its connection.
+Chat uses the conversation loop, ConnectionPlug, and persona. Voice uses
+VoiceConductor with a Pipecat transport and speech services. Both share
+the persona logic; constructors validate before any connection starts.
 """
 
 from __future__ import annotations
@@ -82,21 +66,10 @@ def assemble(
     media: MediaSettings | None = None,
     parameters: ConductParameters | None = None,
 ) -> Assembled:
-    """Build one simulation's pipeline from its spec.
-
-    Constructing is validation and nothing else — no platform is dialled
-    and no pipeline is started until the exchange opens — so a spec that
-    cannot be conducted fails here, honestly, before anything happens.
-
-    ``speech`` is the pinned persona version's direct STT and TTS selection.
-    It is required even for chat, where no speech legs are built, so callers
-    cannot grow a second fallback assembly path.
-
-    ``media`` is the same for the telephone network — this container's
-    bridge with the platform's own carrier already laid over it, resolved
-    once by whoever built these arguments and handed whole to the plug.
-    ``None`` is a deployment that places no calls, and a spec that then
-    names a phone number is refused by the plug with a sentence saying so.
+    """Validate and assemble one simulation without dialing or starting its pipeline.
+    speech contains the pinned persona STT/TTS selection, required even for chat.
+    media contains the resolved deployment bridge and carrier; a phone adapter
+    rejects None, while non-phone simulations do not need it.
     """
     factory = plug_for(spec.connection_type)
     if factory is None:

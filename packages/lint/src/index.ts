@@ -47,29 +47,9 @@ const ACCESS_SURFACE = "packages/db/src/access/index.ts";
 const AUTH_CONTEXT = "AuthContext";
 
 /**
- * The exports that cannot take an `AuthContext`, because between them they are
- * what produces one: which organization a person is in, which projects are in
- * it, bringing a new organization into existence, and turning a credential into
- * the context a request carrying it acts in. None of them can reach a row
- * belonging to anybody else — each takes the thing the credential already names
- * and can return nothing outside it. Another name in this list is a decision
- * somebody has to make on purpose.
- *
- * `resolveApiKey` and `resolveDeviceAuthorization` were added on 2026-08-01
- * with the device flow, deliberately and after the rule stopped the build.
- * Each takes a high-entropy secret that egma issued to exactly one holder and
- * answers what it resolves to — a whole `AuthContext` for the first, an
- * organization and a project for the second. Neither can be asked about
- * somebody else's, because there is no argument other than the secret itself.
- *
- * `readInvitation` and `acceptInvitation` were added on 2026-08-01 with
- * invitations, on the same terms and after the rule stopped the build again.
- * The person following an invitation link has no account at the moment they
- * read it and no membership at the moment they accept it, so there is no context
- * for either to take; the token's hash is the only argument, and an invitation
- * nobody was given cannot be named. `acceptInvitation` takes a second argument
- * naming the person accepting, which is the same shape as `membershipsOf` —
- * whoever calls it has already resolved that identity from a credential.
+ * Exports that establish an AuthContext from an authenticated identity or secret.
+ * They cannot require an existing context. Each must restrict access to the
+ * identity or secret supplied; additions require review.
  */
 const CONTEXT_ESTABLISHING = [
   "membershipsOf",
@@ -82,73 +62,19 @@ const CONTEXT_ESTABLISHING = [
 ];
 
 /**
- * The exports that answer a question about the deployment rather than about a
- * customer. `instanceIsClaimed` is asked by somebody looking at a signup form,
- * who has no credential to build a context from and never will until they have
- * signed up.
- *
- * This category is narrower than the one above and the rule enforces both parts
- * of each named exception: no function here takes an argument, and each returns
- * only the platform fact written beside it. `instanceIsClaimed` returns a
- * boolean. A parameter or a wider return would make it an ordinary read
- * wearing an exemption, so the rule refuses both changes.
+ * Unauthenticated deployment facts. Enforce zero arguments and the declared
+ * return type so an exemption cannot become a customer-data read.
  */
 const INSTANCE_SCOPED: ReadonlyMap<string, string> = new Map([
   ["instanceIsClaimed", "Promise<boolean>"],
 ]);
 
 /**
- * The exports that dispatch egma's own work across the whole deployment, and
- * the ones that keep a dispatch honest afterwards.
- *
- * The grader and the simulator each stand behind every organization at once
- * and hold no credential, because there is no honest one to give them: an API
- * key minted inside one customer would either see too little to do the job or
- * be shared between customers to do it. So each is handed work instead of
- * asked for a credential — the claims hand it out, and the simulator's
- * heartbeat, orphan sweep and standing resolver stand on the same ground for
- * the same reason: a beat arrives bearing the service token, which resolves
- * to nobody, silence is noticed by nobody in particular, and a report about
- * a held row arrives from the same nobody the row must answer for.
- *
- * `claimSimulations` was added on 2026-08-08 with the simulator's claim door,
- * deliberately and after the rule stopped the build: the tenancy-scoped claim
- * it replaced had no production caller, and the real one reaches every
- * customer's queue on the grading claim's exact terms.
- * `recordSimulationHeartbeat` and `sweepOrphanedSimulations` followed the
- * same day on the same replaced-function terms: a heartbeat can only stamp a
- * row already claimed under the caller's own name and answers one boolean
- * egma itself wrote, and the sweep moves only rows the claim machinery
- * stamped, filing each orphan's grading work under the tenancy the row
- * itself carries.
- *
- * `resolveSimulationStanding` was added the same day with the report door, on
- * the same terms one step later in the same lifecycle: a simulator calling
- * back about a row it already holds still has no credential, so the row is
- * looked up by the id the claim itself handed out, and the answer carries the
- * lifecycle stamps and the same narrowed context the claim built — which is
- * what every write about the row then goes through. The ingest door's
- * service path asks it the same way for arriving telemetry, added the same
- * day: the answer's pins are what a simulation's spans are filed under, read
- * off egma's own row rather than off anything the payload claimed.
- *
- * This category is narrower than it looks, and the rule enforces the property
- * that makes it safe: **nothing here may take an argument by which a caller
- * could name a customer.** A claimant's name, a capacity, a simulation id, a
- * staleness window — each says which piece of egma's own bookkeeping is
- * meant; none says whose data to bring back. A function here that grew an
- * `organizationId` or a `projectId` would be an ordinary cross-tenant read
- * wearing an exemption, and the rule refuses it.
- *
- * The rest of what makes it safe is not mechanical and is written out where
- * the functions live: the only rows any of them reaches are egma's own queues
- * — grading jobs, and the simulations egma itself wrote and claimed — a claim
- * carries identifiers and tenancy rather than anything a customer wrote, and
- * every claim arrives with the `AuthContext` narrowed to that row's own
- * organization and project — which is what the work itself goes through.
- *
- * Another name here is a decision somebody has to make on purpose, and every
- * one of them below was made after this rule stopped the build.
+ * Deployment-wide work cannot use a customer-scoped AuthContext. These exports
+ * may select Egma work by claim or simulation ID, but may not accept an
+ * organizationId or projectId. Subsequent reads and writes must use the
+ * AuthContext narrowed to the selected row. Review each exemption for these
+ * constraints; the argument rule alone does not prove isolation.
  */
 const WORK_DISPATCHING = [
   "claimGradingJobs",
@@ -170,58 +96,21 @@ const WORK_DISPATCHING = [
   // narrower claim that would be honest. It takes nothing and answers a lock,
   // reaching no table at all.
   "openDrainOwnership",
-  // The mock endpoint's own resolver, added on 2026-08-28 with that endpoint
-  // and after the rule stopped the build. It is the standing resolver's shape
-  // turned one step further out again: the caller is the **customer's agent
-  // platform**, which holds no credential of egma's at all and could not be
-  // given one — the tool calls arrive from Retell's infrastructure. So the row
-  // is looked up by the two unguessable identifiers egma itself wrote into the
-  // tool URL, and the answer carries the same narrowed `AuthContext` a claim
-  // builds, which is what the record write then goes through.
-  //
-  // It names no customer and cannot be made to: a run id and a simulation id
-  // say which piece of egma's own bookkeeping is meant, and the rule below
-  // still refuses this name the day somebody gives it an organization or a
-  // project. What it may answer is bounded on purpose — whether that run is
-  // live, whether the simulation is its, and the answers that simulation was
-  // already frozen with.
+  // Resolve the run and simulation IDs supplied by the agent platform, which
+  // has no Egma credential. Return only the live-run association, pinned mock
+  // tools, and narrowed AuthContext; accept no customer selector.
   "resolveMockToolCall",
-  // The agent-POV bound, added on 2026-09-06 with the grading wait and after
-  // the rule stopped the build. It is the orphan sweep's exact shape and stands
-  // on the orphan sweep's exact ground: a simulation's second account of itself
-  // — the agent's own — arrives by a push or a pull, and one that never arrives
-  // sends nothing at all. Silence has no sender, so nobody in particular reads
-  // it, and a bound is read by egma standing behind every organization at once
-  // for the same reason a dead simulator's silence is.
-  //
-  // It names no customer and cannot be made to: a bound in seconds and a window
-  // in seconds say how patient this tick is, and neither says whose data to
-  // bring back. The only rows it reads are completed simulations egma's own
-  // claim machinery stamped, each one's grading requested under the
-  // `AuthContext` that row's own organization and project build, and the answer
-  // is identifiers and no content.
+  // Bound the wait for the agent's POV across completed simulations. Each
+  // grading request uses that simulation's narrowed AuthContext. Inputs are
+  // time limits, not customer selectors; outputs contain IDs, not content.
   "settleSimulationsPastTheAgentPovBound",
 ];
 
 /**
- * The exports through which the deployment configures *itself*, before it has
- * served a request and while there is no session anything could be done under.
- *
- * `reconcileGraderCatalog` writes predefined grader definitions from the
- * product catalog and adds the fixed Expected behaviors project policy where
- * an older project is missing it. It takes no customer identifier. New project
- * creation writes that policy inside its own transaction.
- *
- * `seedPersonaLibrary` does the same for the fixed Egma-provided persona
- * catalog. It can create only the catalog's null-tenancy identities and
- * immutable versions; it accepts no customer identifier or authored value.
- *
- * The rule enforces the second half of that the same way it does for work
- * dispatch: nothing here may be handed an `organizationId` or a `projectId`. A
- * function here that grew one would be an ordinary cross-tenant *write* wearing
- * an exemption, which is worse than the read work dispatch guards against.
- *
- * Another name here is a decision somebody has to make on purpose.
+ * Deployment startup reconciles predefined graders, required project policy,
+ * and Egma-provided personas before a browser session exists. These exports
+ * accept no customer selector or customer-authored content. New projects
+ * receive their policy in the project-creation transaction.
  */
 const DEPLOYMENT_CONFIGURING = [
   "reconcileGraderCatalog",
@@ -246,20 +135,9 @@ const NAMES_A_CUSTOMER = /\b(organizationId|projectId)\b/;
 const AUTH_PROVIDER_PACKAGES = ["better-auth", "@better-auth/core"];
 
 /**
- * The packages this repository publishes, by the source they ship.
- *
- * **A published package's `src` may not import a workspace package that is
- * never published.** `apps/cli` ships `dist/` unbundled, so an import written
- * in `src` is still an import in the file `egma` runs — and a
- * `private: true` workspace package is not on npm for it to resolve. The
- * command installs, starts, and then fails at the first line that needs it, on
- * somebody else's machine.
- *
- * This shipped once, as `import { newId } from "@egma/ids"` in the CLI's run
- * client. TypeScript caught it, but only by luck: nothing built that package
- * first, so the module was missing at build time too. **The natural repair for
- * that build error is to add a project reference — which makes the build pass
- * and ships the crash.** That is what this rule is for.
+ * Published source must not import private workspace packages unless they are
+ * bundled in the installed package. Local project references can make a build
+ * pass while leaving such imports unresolvable after installation.
  */
 const PUBLISHED_PACKAGES = ["apps/cli/src/", "sdks/livekit-js/src/"];
 
@@ -291,14 +169,8 @@ async function bundledWorkspacePackagesIn(root: string): Promise<Set<string>> {
 }
 
 /**
- * The only files that may name the auth provider.
- *
- * One binds it to the five identity tables, because the pool is private and
- * something has to hand it a way in. One implements the seam — resolve an
- * identity, the two device-flow calls, revoke a session — and everything else
- * in the codebase talks to that. A third file here is porting cost: it is the
- * vendor spreading past the seam, which is the failure this whole arrangement
- * exists to prevent.
+ * Only the identity-store binding and auth-provider implementation may import
+ * the provider. All other modules use the provider interface.
  */
 const AUTH_PROVIDER_SEAM = [
   "packages/db/src/identity-store.ts",
@@ -531,18 +403,9 @@ function workspaceNameOf(specifier: string): string | undefined {
  * forgotten about is whether a package is safe to ship.
  */
 /**
- * The directories the workspace keeps its packages in, read from
- * `pnpm-workspace.yaml`.
- *
- * Read rather than listed, for the same reason the manifests are. The first
- * version of this rule named `packages` and `apps` and missed `fixtures` and
- * `sdks` — where two private packages live — so a rule written against a list
- * was already wrong on the day it was written. The workspace file is the one
- * place that decides, so it is the one place to ask.
- *
- * Only the leading directory of each entry is taken: `apps/*` and any deeper
- * glob both mean "look under `apps`", and a manifest is either directly in
- * there or it is not a workspace package this rule can judge.
+ * Read workspace roots from pnpm-workspace.yaml so added package groups are
+ * covered. Use each glob's leading directory and inspect its direct package
+ * manifests.
  */
 async function workspaceRootsIn(root: string): Promise<string[]> {
   let file: string;

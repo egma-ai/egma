@@ -1,16 +1,6 @@
-"""What the simulator promises, proved black-box at the contract seam.
-
-The workbench offers specs; a real simulator process claims, conducts,
-heartbeats and reports; the assertions below read what the workbench
-recorded — and, where a platform stands on the other side of the exchange,
-what that platform saw on its own wire. Nothing reaches inside the
-simulator — that is the point: what the records show is all the control
-plane will ever know.
-
-Every exchange here is a real conversation: the persona on the scripted
-model client, the agent played by the scripted counterpart plug. Nothing
-in this suite reaches a network beyond loopback or a model beyond the
-scripted one, which is why none of it can flake.
+"""Black-box simulator checks against the workbench and scripted agent adapter.
+Assert reports and platform requests without inspecting simulator internals.
+All model responses are scripted; network access stays on loopback.
 """
 
 from __future__ import annotations
@@ -1265,18 +1255,9 @@ async def test_one_scenario_over_chat_and_over_voice_is_one_transcript(
 async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     workbench, start_simulator
 ):
-    """A spec whose connection names a phone number becomes a call, and
-    what comes back is what every other voice simulation owes — a
-    transcript, a distinct ending, per-turn timings that never run
-    backwards and a dual-channel recording that resolves.
-
-    The media backend is the scripted one, so there is no LiveKit server,
-    no trunk, no carrier and no network in this — and nothing above the
-    plug knows that, which is the whole extensibility claim.
-
-    The work order carries a sentinel carrier password. This proves the
-    simulator protects it after the claim even though scripted media does
-    not use it.
+    """A scripted phone simulation must produce transcript, ending, nonnegative timing,
+    and a resolvable stereo recording. Scan output for the sentinel carrier password
+    even though the scripted backend does not use it.
     """
     spec = phone_spec(
         "sim-phone-001",
@@ -1760,18 +1741,9 @@ async def test_a_voice_simulation_ends_on_its_turn_limit_like_a_chat_one(
 async def test_an_answer_that_only_called_a_tool_puts_no_row_on_egmas_record(
     workbench, start_simulator
 ):
-    """A tool call is the agent's row, and Egma writes none of its own.
-
-    The scripted agent answers one turn by calling a tool and saying
-    nothing at all. Egma serves nothing here and observes only that the
-    platform reported it, so the whole of that answer is absent from
-    Egma's record — the call belongs on the agent's own POV of the
-    simulation, filed under it by simulation ingestion, where it arrives
-    once with the arguments the model emitted and the result it received.
-
-    What still holds is everything around it: the transcript is the words
-    that were spoken, a flush still closes an answer, and the spoken
-    answer's measurement still rides the flush its words do.
+    """Do not emit simulator tool spans for AgentReply.tool_calls.
+    A wordless answer still completes a flush; later spoken words and their latency
+    must share a flush. Agent SDK evidence is a separate ingestion path.
     """
     spec = scripted_spec(
         "sim-spans-tool-only",

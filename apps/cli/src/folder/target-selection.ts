@@ -58,8 +58,8 @@ function matching<T extends { readonly id: string; readonly name: string }>(
 }
 
 /**
- * Resolve one agent by exact name or id, without applying command-specific
- * eligibility rules or writing command-specific refusal copy.
+ * Resolve an explicit selector by exact agent ID. Without a selector, select
+ * the sole agent. Command-specific eligibility and errors belong to the caller.
  */
 export function selectFolderAgent(
   agents: readonly FolderAgent[],
