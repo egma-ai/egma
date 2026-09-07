@@ -13,19 +13,19 @@ import { CopyBlock } from "./copy-block.tsx";
 export const PYTHON_TESTING_SETUP_INSTALL =
   "pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'";
 
-export const PYTHON_VOICE_SETUP_SNIPPET = `from egma import mockable
+export const PYTHON_VOICE_SETUP_SNIPPET = `from egma import simulation
 
 agent = ...
 session = AgentSession(...)
-await mockable(agent, ctx, session)
+await simulation(agent, ctx, session)
 await session.start(...)`;
 
 export const PYTHON_CHAT_SETUP_SNIPPET = `from livekit.agents import room_io
-from egma import mockable
+from egma import simulation
 
 agent = ...
 session = AgentSession(...)
-await mockable(agent, ctx, session)
+await simulation(agent, ctx, session)
 
 chat = ctx.job.room.name.startswith("egma-sim-chat-")
 options = (
@@ -43,7 +43,9 @@ const PYTHON_PROMPT_START = `Set up Egma simulation testing for this repository'
 
 Use the repository's existing dependency file and package manager to install the latest Egma Python SDK from \`egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python\`. Do not pin a version, tag, or commit.
 
-In the job entrypoint, import mockable from egma. After the initial agent and AgentSession exist, and before AgentSession.start, call await mockable(agent, ctx, session).`;
+In the job entrypoint, import simulation from egma. After the initial agent and AgentSession exist, and before AgentSession.start, call await simulation(agent, ctx, session).
+
+This call is required for a LiveKit simulation and it fails closed: it raises egma.NotReported when the agent cannot report to Egma. Let that error stop the session. Do not catch it, and do not start the session without it.`;
 
 const PYTHON_PROMPT_END = `Register the worker under one exact name, with agent_name in its WorkerOptions, and tell me the name it registers under.
 
@@ -63,7 +65,7 @@ ${PYTHON_PROMPT_END}`;
 
 export const JAVASCRIPT_TESTING_SETUP_INSTALL = "npm install @egma/livekit";
 
-export const JAVASCRIPT_VOICE_SETUP_SNIPPET = `import { mockable } from "@egma/livekit";
+export const JAVASCRIPT_VOICE_SETUP_SNIPPET = `import { simulation } from "@egma/livekit";
 
 const agent = voice.Agent.create({
   instructions: "Help the caller.",
@@ -71,10 +73,10 @@ const agent = voice.Agent.create({
 });
 const session = new voice.AgentSession({ stt, llm, tts });
 
-await mockable(agent, ctx, session);
+await simulation(agent, ctx, session);
 await session.start({ agent, room: ctx.room });`;
 
-export const JAVASCRIPT_CHAT_SETUP_SNIPPET = `import { mockable } from "@egma/livekit";
+export const JAVASCRIPT_CHAT_SETUP_SNIPPET = `import { simulation } from "@egma/livekit";
 
 const isEgmaChat =
   ctx.job.room?.name?.startsWith("egma-sim-chat-") ?? false;
@@ -84,7 +86,7 @@ const agent = voice.Agent.create({
 });
 const session = new voice.AgentSession({ stt, llm, tts });
 
-await mockable(agent, ctx, session);
+await simulation(agent, ctx, session);
 await session.start({
   agent,
   room: ctx.room,
@@ -103,7 +105,9 @@ const JAVASCRIPT_PROMPT_START = `Set up Egma simulation testing for this reposit
 
 Use the repository's existing dependency file and package manager to install the latest \`@egma/livekit\` package. Do not pin a version, tag, or commit.
 
-In the job entrypoint, import { mockable } from "@egma/livekit". After the initial agent and AgentSession exist, and before AgentSession.start, call await mockable(agent, ctx, session).`;
+In the job entrypoint, import { simulation } from "@egma/livekit". After the initial agent and AgentSession exist, and before AgentSession.start, call await simulation(agent, ctx, session).
+
+This call is required for a LiveKit simulation and it fails closed: it throws NotReported when the agent cannot report to Egma. Let that error stop the session. Do not catch it, and do not start the session without it.`;
 
 const JAVASCRIPT_PROMPT_END = `Register the worker under one exact name, with agentName in its WorkerOptions, and tell me the name it registers under.
 
@@ -211,6 +215,19 @@ export function LiveKitTestingInstructions({
         </TabsContent>
       </Tabs>
       <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
+        Egma answers exactly the tools the running test names. Every other tool
+        runs for real, and every call is on the simulation transcript, from the
+        agent&apos;s point of view. A call a mock tool answered is marked with
+        that mock tool&apos;s name.
+      </p>
+      <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
+        The Egma SDK is required for a LiveKit simulation, and it fails closed.
+        An agent that cannot report to Egma raises NotReported, so the session
+        does not start, and Egma fails that simulation with the same finding. If
+        Egma cannot be reached during a mocked call, that call gets an error and
+        your real tool does not run.
+      </p>
+      <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
         Production rooms keep the worker&apos;s existing behavior. Egma cannot see
         this change from here. The first simulation confirms it.
       </p>
@@ -251,7 +268,7 @@ function TestingSteps({
           ? `A ${contract.languageLabel} worker needs the Egma testing hook, silent chat-room options, and a registered dispatch name.`
           : `A ${contract.languageLabel} worker needs the Egma testing hook and a registered dispatch name.`}
         {language === "javascript"
-          ? " This needs LiveKit Agents 1.5.0 or newer in the 1.x line."
+          ? " This needs LiveKit Agents 1.5.5 or newer in the 1.x line."
           : null}
       </p>
       <ol className="m-0 flex list-none flex-col gap-5 p-0">
