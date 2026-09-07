@@ -20,11 +20,16 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 
 /**
  * Discover agents on an agent platform
+ *
+ * List the Retell agents visible to a provider API key and the connection candidates available for each. Supply either credentials.apiKey or an existing Egma agentId whose saved Retell key should be used, never both. This request does not register an agent or save a new credential. Choose a returned candidate, then use Register an agent or Add an agent connection with its fields and platformAgentId. LiveKit uses List supported connection options instead of provider discovery.
  */
 export const discoverAgents = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
     agentPlatform: 'retell';
     credentials?: {
+        /**
+         * Retell API key with access to the agents you want to list.
+         */
         apiKey: string;
     };
     agentId?: string;
@@ -54,6 +59,8 @@ export const discoverAgents = <ThrowOnError extends boolean = false>(parameters:
 
 /**
  * List supported connection options
+ *
+ * Read the connection catalog used by this Egma server. Each item is one supported platform, connection type, access variant, and modality. Use fields to construct config and credentialFields to construct credentials for Register an agent or Add an agent connection. The catalog does not check a provider account; use Discover agents to obtain Retell identities and confirmed candidates. simulatorAdapter describes implementation support, not whether this deployment's provider or carrier credentials are ready.
  */
 export const listConnectionOptions = <ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>): RequestResult<ListConnectionOptionsResponses, ListConnectionOptionsErrors, ThrowOnError> => (options?.client ?? client).get<ListConnectionOptionsResponses, ListConnectionOptionsErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }, {
@@ -96,26 +103,49 @@ export const listAgents = <ThrowOnError extends boolean = false>(parameters?: {
 
 /**
  * Register an agent
+ *
+ * Create an Egma agent identity in the selected project. Send name and agentPlatform for an agent without connections, or include connection to configure its first simulation connection in the same request. Registration with a connection can reuse the existing agent for the same provider identity and can add a new connection to that agent. Inspect result: created, connection_added, or reused. Keep the returned agent.id and connection.id for run creation.
  */
 export const registerAgent = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
     name: string;
     agentPlatform: 'retell' | 'livekit';
     connection?: {
+        /**
+         * Optional connection display name. If omitted, Egma chooses the next available numbered name.
+         */
         name?: string;
         agentPlatform: 'retell' | 'livekit' | null;
+        /**
+         * Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.
+         */
         connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+        /**
+         * Credential method for the connection type, copied from the same catalog entry.
+         */
         accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+        /**
+         * How simulations communicate with the agent. Use a modality offered by the selected catalog entry.
+         */
         modality: 'voice' | 'chat';
+        /**
+         * Optional label identifying the environment this connection reaches.
+         */
         environment?: string;
+        /**
+         * Non-secret settings for the selected access variant. Use only its catalog fields. Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.
+         */
         config?: {
             [key: string]: unknown;
         };
+        /**
+         * Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. Responses return credential presence and hints, never the secret values.
+         */
         credentials?: {
             [key: string]: unknown;
         };
         /**
-         * The platform's own id for the agent this connection reaches, as agents:discover listed it. Required for a Retell phone connection. Egma confirms it against Retell with the key in credentials, or with the key already sealed on the agent, immediately before the connection is written, so a number that has stopped answering for that agent is refused rather than stored. One Egma agent binds to one platform agent: a second, different one is refused by name.
+         * Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. Do not send this together with the older agentPlatformSelection field.
          */
         platformAgentId?: string;
         /**
@@ -213,6 +243,8 @@ export const updateAgent = <ThrowOnError extends boolean = false>(parameters: {
 
 /**
  * Add an agent connection
+ *
+ * Add a simulation connection to an existing Egma agent. Select its platform, connection type, access variant, and modality from List supported connection options, then supply that option's config and credentials. For Retell, include platformAgentId from discovery; Egma confirms the selection with the supplied or stored Retell key before saving. For LiveKit, supply the exact worker dispatch name as config.agentName. Use the returned connection.id with this agent's ID when creating a run.
  */
 export const addConnection = <ThrowOnError extends boolean = false>(parameters: {
     agentId: string;
@@ -542,6 +574,8 @@ export const revokeApiKey = <ThrowOnError extends boolean = false>(parameters: {
 
 /**
  * List the grader library for a project
+ *
+ * Includes Egma's built-in graders and custom graders from your organization. activeProjectGraderId identifies a definition already in use by this project; null means it can be added.
  */
 export const listGraderLibrary = <ThrowOnError extends boolean = false>(parameters?: {
     projectId?: string;
@@ -562,6 +596,8 @@ export const listGraderLibrary = <ThrowOnError extends boolean = false>(paramete
 
 /**
  * Get one grader library entry
+ *
+ * Read the current definition or request an exact definitionVersion from historical grade evidence. Setting definitions describe the values needed when adding the grader to a project.
  */
 export const getGraderLibraryEntry = <ThrowOnError extends boolean = false>(parameters: {
     graderDefinitionId: string;
@@ -587,6 +623,8 @@ export const getGraderLibraryEntry = <ThrowOnError extends boolean = false>(para
 
 /**
  * Use a grader in the current project
+ *
+ * Adds an available definition with this project's scope, settings, and pass threshold. These settings apply to future work; adding a grader does not change earlier simulation plans. A definition can be active only once per project. The example settings are for Response latency.
  */
 export const useGraderInProject = <ThrowOnError extends boolean = false>(parameters: {
     graderDefinitionId: string;
@@ -637,7 +675,7 @@ export const useGraderInProject = <ThrowOnError extends boolean = false>(paramet
 /**
  * Create and use a custom LLM grader
  *
- * Creates one organization-owned LLM judge and its current-project policy. The judge is binary, so the body draws its boundary in three parts: what to decide, what answers met, and what answers not_met. The server compiles them into the definition version's one immutable prompt and fixes its type, model, compatible modalities, and empty settings contract.
+ * Creates a custom LLM grader in your organization's library and activates it in this project. The grader returns 1 when the rule is met, 0 when it is not met, or no score when the evidence is insufficient. Its type and model are supplied by Egma.
  */
 export const createCustomGrader = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
@@ -691,6 +729,8 @@ export const createCustomGrader = <ThrowOnError extends boolean = false>(paramet
 
 /**
  * List project graders
+ *
+ * Returns active project policies, including scope, settings, and individual pass thresholds. Use /v1/grader-library to find definitions that are not yet active in this project.
  */
 export const listGraders = <ThrowOnError extends boolean = false>(parameters?: {
     projectId?: string;
@@ -711,6 +751,8 @@ export const listGraders = <ThrowOnError extends boolean = false>(parameters?: {
 
 /**
  * Remove an optional grader from a project
+ *
+ * Stops selecting this grader for future project work. Existing grades and frozen simulation plans remain readable. Expected behaviors cannot be removed.
  */
 export const removeGrader = <ThrowOnError extends boolean = false>(parameters: {
     graderId: string;
@@ -731,6 +773,8 @@ export const removeGrader = <ThrowOnError extends boolean = false>(parameters: {
 
 /**
  * Update a project grader's policy
+ *
+ * Changes policy for future work. Existing simulation grading plans keep their selected definition, settings, and threshold, including when regraded. Expected behaviors has fixed scope; its pass threshold remains editable.
  */
 export const updateGrader = <ThrowOnError extends boolean = false>(parameters: {
     graderId: string;
@@ -1049,6 +1093,8 @@ export const listPersonas = <ThrowOnError extends boolean = false>(parameters?: 
 
 /**
  * Create a persona
+ *
+ * Creates a custom persona and its first immutable behavior version. Add its ID or unambiguous name to a test's personas to use it in future runs.
  */
 export const createPersona = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
@@ -1069,7 +1115,13 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
         tts: {
             provider: string;
             model: string;
+            /**
+             * A voice identifier supported by the selected text-to-speech provider.
+             */
             voiceId: string;
+            /**
+             * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+             */
             speed: number;
         };
     };
@@ -1102,6 +1154,8 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
 
 /**
  * Get persona authoring choices
+ *
+ * Use this response to choose supported models, a recommended voice, and a valid speech rate before creating or updating a persona.
  */
 export const getPersonaForm = <ThrowOnError extends boolean = false>(parameters?: {
     projectId?: string;
@@ -1163,6 +1217,8 @@ export const getPersona = <ThrowOnError extends boolean = false>(parameters: {
 
 /**
  * Update a persona
+ *
+ * Omitted fields keep their current values. Changing identityName, personality, language, or models creates a new immutable version; name and description are live metadata. Existing simulations keep their pinned version. Provided personas are read-only.
  */
 export const updatePersona = <ThrowOnError extends boolean = false>(parameters: {
     personaId: string;
@@ -1184,7 +1240,13 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
         tts: {
             provider: string;
             model: string;
+            /**
+             * A voice identifier supported by the selected text-to-speech provider.
+             */
             voiceId: string;
+            /**
+             * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+             */
             speed: number;
         };
     };
@@ -1283,6 +1345,8 @@ export const getPersonaVersion = <ThrowOnError extends boolean = false>(paramete
 
 /**
  * Fork a persona
+ *
+ * Creates an editable custom copy of the persona's current behavior and model settings. The original persona and tests that select it stay unchanged.
  */
 export const forkPersona = <ThrowOnError extends boolean = false>(parameters: {
     personaId: string;
@@ -1441,6 +1505,9 @@ export const applyRepositoryChangeSet = <ThrowOnError extends boolean = false>(p
         scenario: string;
         expectedBehaviors: Array<string>;
         personas: Array<string>;
+        /**
+         * One named tool's fixed response for this test. Supply exactly one of answer or error. Tools without a mock run normally.
+         */
         mockTools: Array<{
             tool: string;
             answer: unknown;
@@ -1451,9 +1518,15 @@ export const applyRepositoryChangeSet = <ThrowOnError extends boolean = false>(p
             error: string;
         }>;
         env: {
+            /**
+             * String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.
+             */
             retell_dynamic_variables?: {
                 [key: string]: string;
             };
+            /**
+             * Context delivered to the LiveKit worker in ctx.job.metadata.
+             */
             job_dispatch_metadata?: {
                 [key: string]: unknown;
             };
@@ -1525,6 +1598,8 @@ export const listRuns = <ThrowOnError extends boolean = false>(parameters?: {
 
 /**
  * Run one complete test suite
+ *
+ * Start one run of every active test in a non-empty suite against one agent connection. Egma captures the test versions, personas, connection settings, and grader selection for the run. The response confirms creation; execution and grading continue asynchronously. Keep the returned id, poll List run events until done is true, then inspect the simulations and their grades. Retry the same request with the same idempotencyKey to recover the existing run without creating another.
  */
 export const createRun = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
@@ -1534,7 +1609,13 @@ export const createRun = <ThrowOnError extends boolean = false>(parameters: {
     idempotencyKey: string;
     name?: string;
     expectedTestVersions?: Array<{
+        /**
+         * The test identity to check.
+         */
         testId: string;
+        /**
+         * The current test version expected at run creation.
+         */
         versionId: string;
     }>;
 }, options?: Options<never, ThrowOnError>): RequestResult<CreateRunResponses, CreateRunErrors, ThrowOnError> => {
@@ -1613,6 +1694,8 @@ export const listRunSimulations = <ThrowOnError extends boolean = false>(paramet
 
 /**
  * List run events
+ *
+ * Read execution events in sequence order. Start with after=0, then pass each response's next value as after. While caughtUp is false, continue reading the backlog. When caughtUp is true but done is false, wait briefly before polling again. done becomes true only after execution has finished, the event backlog is consumed, and all gradable simulations have completed or errored grading. It does not indicate that the grades passed. Apply each event sequence at most once when resuming a saved cursor.
  */
 export const listRunEvents = <ThrowOnError extends boolean = false>(parameters: {
     runId: string;
@@ -1658,6 +1741,8 @@ export const cancelRun = <ThrowOnError extends boolean = false>(parameters: {
 
 /**
  * Get a simulation
+ *
+ * Read one test-and-persona execution, its pinned test and persona, connection snapshot, metrics, transcript, and grades. Execution status and gradingState are separate: a completed simulation may still be grading. Inspect each grade's result and details for the verdict and evidence. The combinedScore is a display value, not an overall pass/fail decision.
  */
 export const getSimulation = <ThrowOnError extends boolean = false>(parameters: {
     simulationId: string;
@@ -1678,6 +1763,8 @@ export const getSimulation = <ThrowOnError extends boolean = false>(parameters: 
 
 /**
  * Regrade a simulation
+ *
+ * Queue grading again for a completed simulation that has a recorded trace and a non-empty frozen grader selection. Send no request body. Egma runs the complete grader selection captured at run start against the same evidence; it does not rerun the conversation or apply later grader configuration changes. Previous grades remain in gradeHistory. If grading is already pending or claimed, no duplicate job is queued. Read Get a simulation to follow gradingState and retrieve the new grades. Requires write access.
  */
 export const regradeSimulation = <ThrowOnError extends boolean = false>(parameters: {
     simulationId: string;
@@ -1723,6 +1810,8 @@ export const listTestSuites = <ThrowOnError extends boolean = false>(parameters?
 
 /**
  * Create a test suite
+ *
+ * Creates an empty suite in the current project. Add tests before starting a run. A suite stores no agent or connection; each run selects those and executes every active test in the suite.
  */
 export const createTestSuite = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
@@ -1790,6 +1879,8 @@ export const getTestSuite = <ThrowOnError extends boolean = false>(parameters: {
 
 /**
  * Rename a test suite
+ *
+ * Changes the display name without changing the suite's ID or membership. Earlier runs display the current suite name.
  */
 export const updateTestSuite = <ThrowOnError extends boolean = false>(parameters: {
     suiteId: string;
@@ -1847,6 +1938,8 @@ export const listTests = <ThrowOnError extends boolean = false>(parameters: {
 
 /**
  * Create a test in a test suite
+ *
+ * Creates the test and its first content version in an existing suite. Choose at least one persona. The agent and connection are selected when starting a run, not when creating the test.
  */
 export const createTest = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
@@ -1866,9 +1959,15 @@ export const createTest = <ThrowOnError extends boolean = false>(parameters: {
         error: string;
     }>;
     env?: {
+        /**
+         * String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.
+         */
         retell_dynamic_variables?: {
             [key: string]: string;
         };
+        /**
+         * Context delivered to the LiveKit worker in ctx.job.metadata.
+         */
         job_dispatch_metadata?: {
             [key: string]: unknown;
         };
@@ -1904,6 +2003,8 @@ export const createTest = <ThrowOnError extends boolean = false>(parameters: {
 
 /**
  * Get a test version
+ *
+ * Read the frozen scenario, expected behaviors, persona selections, mocks, and context used by a simulation. Later test edits do not change this version.
  */
 export const getTestVersion = <ThrowOnError extends boolean = false>(parameters: {
     versionId: string;
@@ -1973,6 +2074,8 @@ export const getTest = <ThrowOnError extends boolean = false>(parameters: {
 
 /**
  * Update a test
+ *
+ * Omitted fields keep their current values. Content changes create an immutable version and require expectedVersionId from the last read. Name and description changes keep the content version. Existing simulations retain their original evidence.
  */
 export const updateTest = <ThrowOnError extends boolean = false>(parameters: {
     testId: string;
@@ -1992,9 +2095,15 @@ export const updateTest = <ThrowOnError extends boolean = false>(parameters: {
         error: string;
     }>;
     env?: {
+        /**
+         * String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.
+         */
         retell_dynamic_variables?: {
             [key: string]: string;
         };
+        /**
+         * Context delivered to the LiveKit worker in ctx.job.metadata.
+         */
         job_dispatch_metadata?: {
             [key: string]: unknown;
         };

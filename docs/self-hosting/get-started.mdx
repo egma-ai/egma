@@ -1,0 +1,91 @@
+---
+title: "Get started"
+description: "Run Egma on your own machine with Docker Compose."
+---
+
+Use `egma self-host up` to build and start the Egma platform from its source repository. This guide sets up a local instance. For a server used by other people or a remote agent, also configure its [public URL and storage URL](/self-hosting/configuration#public-urls-and-networking).
+
+## Before you start
+
+Install:
+
+- Git.
+- Node.js 22 or newer and npm.
+- Docker Desktop, or Docker Engine with the Docker Compose plugin. Start the Docker daemon.
+- OpenAI and Cartesia API keys for the model choices used by the built-in persona. Add a Deepgram key if you select Deepgram speech-to-text.
+
+You supply model access for your instance. Egma stores agent provider credentials separately when you connect a Retell agent or LiveKit project.
+
+## Download Egma
+
+```bash
+git clone https://github.com/egma-ai/egma.git
+cd egma
+npm install --global egma-cli
+```
+
+Keep this platform checkout separate from the repositories that contain your voice agents. Run deployment commands here; run test-authoring commands in the agent repository.
+
+## Add model credentials
+
+```bash
+cp .env.example .env
+chmod 600 .env
+```
+
+Open `.env` in your editor. Set `EGMA_OPENAI_API_KEY` and `EGMA_CARTESIA_API_KEY` to your provider keys.
+
+For this local setup, **remove all four `EGMA_PHONE_*` lines** copied from the example. Add a carrier route later only if you need [Retell phone simulations](/self-hosting/configuration#retell-phone-simulations).
+
+Leave `EGMA_DEEPGRAM_API_KEY` empty unless a selected persona uses Deepgram. Keep `.env` out of Git. Put values that contain `$` in single quotes so Docker Compose keeps them literal.
+
+## Start the platform
+
+```bash
+egma self-host up
+```
+
+The command builds the application images, generates internal credentials once, and starts the services. The first build can take several minutes. It waits for the API and web application to be ready, then prints the instance URL.
+
+Open [http://localhost:3101](http://localhost:3101). The stack includes the web app, API, simulator, grader, PostgreSQL, ClickHouse, MinIO, and the bundled LiveKit services.
+
+Internal credentials are kept in `.egma-platform/platform.env`. Keep this file private and preserve it with the installation's data. Its encryption key is needed to read the provider credentials stored in PostgreSQL. Later starts reuse it.
+
+Use `egma self-host up` when you start the instance again or change its `.env`. A direct `docker compose up` does not automatically load the generated credential file.
+
+## Create your account
+
+Sign up in the web app. With the default `EGMA_SINGLE_ORGANIZATION=true`, the first account becomes the instance's admin. Later users join by invitation from **Settings → People**.
+
+SMTP is optional for local signup. Without SMTP, the admin receives an invitation link to share. Configure [email](/self-hosting/configuration#authentication-and-email) if users need verification emails or password-reset emails.
+
+## Connect an agent repository
+
+Open a terminal in the repository that contains your voice agent:
+
+```bash
+egma login --url http://localhost:3101
+egma init --url http://localhost:3101
+```
+
+Approve the login in your browser. Then follow the [quickstart](/guides/quickstart) to connect Retell or LiveKit, write a test, and run it.
+
+For LiveKit monitoring, set the worker's `EGMA_URL` to an address it can reach. A worker deployed elsewhere cannot send traces to this machine through `localhost`.
+
+## Check the installation
+
+You should be able to sign in, open your project, and complete a test run. For a voice run, open its recording and verify playback too.
+
+If startup fails, use the error printed by `egma self-host up`:
+
+| Message or symptom | Action |
+| --- | --- |
+| Docker is unavailable | Start the Docker daemon and verify `docker compose version` works. |
+| No platform workspace | Run the command from the Egma checkout that contains `docker-compose.yml`. |
+| Incomplete or invalid phone settings | Remove all four `EGMA_PHONE_*` values, or configure the complete Retell carrier route. |
+| A port is already in use | Set the relevant port in [Configuration](/self-hosting/configuration#ports), update the matching public URL, and run the command again. |
+| The private platform file is missing but PostgreSQL data exists | Restore the original `.egma-platform/platform.env`. Do not generate a new encryption key for existing data. |
+| A simulation or grader cannot access a model | Add the key for the selected provider, verify that the account can use that model, and run `egma self-host up` again. |
+| The page opens but audio does not play | Check `EGMA_BLOB_PUBLIC_URL` from the browser that is trying to play the recording. |
+
+Use [Configuration](/self-hosting/configuration) to set model credentials, public access, authentication, and storage.

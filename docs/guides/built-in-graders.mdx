@@ -1,0 +1,64 @@
+---
+title: "Built-in graders"
+description: "Check expected behavior and response latency with graders maintained by Egma."
+---
+
+Open **Graders** in your project. **Active graders** shows the graders used by
+that project. **Grader library** contains the graders you can add.
+
+## Expected behaviors
+
+Egma adds **Expected behaviors** to every project. It checks the behavior
+statements from the exact test version used by each simulation.
+
+Each statement gets a binary result and supporting evidence. The grader's
+score is:
+
+```text
+passed statements / total statements
+```
+
+For example, three passing statements out of four give a score of `0.75`. The
+default pass threshold is `1`, so all statements must pass for this grader's
+individual result to pass.
+
+Expected behaviors grades chat and voice simulations. Its scope always covers
+all simulations and excludes production conversations. You can change the pass
+threshold, but you cannot remove it or change its scope.
+
+If the evidence does not let the grader decide a statement, the grade has an
+error and no overall score. An unknown result is not counted as a failed
+statement.
+
+## Response latency
+
+**Response latency** checks the p90 response time across measured conversation
+turns. It returns `1` when the observed p90 is at or below your maximum, or `0`
+when it exceeds the maximum.
+
+To add it:
+
+1. Open **Grader library** and find **Response latency**.
+2. Open its menu and select **Use in project**.
+3. Choose the simulations or production sample it should grade.
+4. Set **Maximum response time (p90)** in milliseconds. The supplied value is
+   `3000`.
+5. Keep **Pass threshold** at `1` to require the latency check to pass, then
+   select **Use in project**.
+
+The maximum response time and the pass threshold are different settings. The
+maximum checks an observed time in milliseconds. The pass threshold compares
+the resulting score, `0` or `1`.
+
+The p90 uses nearest rank. With fewer than ten measured turns, it is the
+slowest measured turn. A conversation without valid response latency
+measurements produces a grading error, not a passing score.
+
+Response latency supports chat and voice when the required measurements are
+present. You can change its scope and settings or remove it from a project.
+
+## Add your own checks
+
+Use [custom graders](/guides/custom-graders) for a rule that should apply across
+multiple tests or production conversations. Keep scenario-specific requirements
+in the test's expected behaviors.

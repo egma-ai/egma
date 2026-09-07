@@ -16,14 +16,18 @@
     "db:down": "node packages/db/test/support/stop-stores.ts",
     "db:generate": "pnpm --filter @egma/db generate",
     "test": "{ pnpm test:fast; fast=$?; pnpm test:browser; browser=$?; pnpm test:simulator; sim=$?; pnpm test:sdk; sdk=$?; pnpm test:fixture; fix=$?; exit $(( fast || browser || sim || sdk || fix )); }",
-    "test:fast": "pnpm db:up && echo \"\\nlane: fast — every test except the real-browser proof\\n\" && vitest run --project fast",
-    "test:browser": "pnpm --filter @egma/platform-api build && pnpm db:up && echo \"\\nlane: browser — the real-browser proof, and nothing else\\n\" && vitest run --project browser",
+    "test:fast": "pnpm db:up && echo \"\\nlane: fast \u2014 every test except the real-browser proof\\n\" && vitest run --project fast",
+    "test:browser": "pnpm --filter @egma/platform-api build && pnpm db:up && echo \"\\nlane: browser \u2014 the real-browser proof, and nothing else\\n\" && vitest run --project browser",
     "test:simulator": "pnpm --filter @egma/simulator test",
     "test:sdk": "{ pnpm test:sdk:python; python=$?; pnpm test:sdk:javascript; javascript=$?; exit $(( python || javascript )); }",
     "test:sdk:python": "pnpm --filter @egma/sdk-python test",
     "test:sdk:javascript": "pnpm --filter @egma/livekit test",
     "test:fixture": "pnpm --filter @egma/livekit-dumb-agent test",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "docs:generate": "pnpm --filter @egma/platform-api generate && node scripts/docs/generate.mjs",
+    "docs:check": "pnpm --filter @egma/platform-api generate:check && node scripts/docs/generate.mjs --check && node scripts/docs/check.mjs",
+    "docs:dev": "node scripts/docs/dev.mjs",
+    "docs:build": "node scripts/docs/dev.mjs validate"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

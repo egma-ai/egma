@@ -166,14 +166,23 @@ const agentPlatformSelection = {
 
 const connectionInput = {
   type: "object",
+  description:
+    "Choose one supported agentPlatform, connectionType, accessVariant, and modality from List supported connection options. " +
+    "Its fields describe config and its credentialFields describe credentials. Egma validates the complete combination before saving it.",
   properties: {
-    name: { type: "string" },
+    name: {
+      type: "string",
+      description: "Optional connection display name. If omitted, Egma chooses the next available numbered name.",
+      examples: ["Staging voice"],
+    },
     agentPlatform: nullable({
       type: "string",
       enum: ["retell", "livekit"],
+      description: "The platform that runs the agent. It must be compatible with the selected connection type and agent.",
     }),
     connectionType: {
       type: "string",
+      description: "Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.",
       enum: [
         "retell_chat_api",
         "retell_text_mode",
@@ -184,6 +193,7 @@ const connectionInput = {
     },
     accessVariant: {
       type: "string",
+      description: "Credential method for the connection type, copied from the same catalog entry.",
       enum: [
         "retell_chat_api.api_key",
         "retell_text_mode.api_key",
@@ -193,20 +203,54 @@ const connectionInput = {
         "livekit_room.customer_token_endpoint",
       ],
     },
-    modality: { type: "string", enum: ["voice", "chat"] },
-    environment: { type: "string" },
-    config: { type: "object", additionalProperties: true },
-    credentials: { type: "object", additionalProperties: true },
+    modality: {
+      type: "string",
+      enum: ["voice", "chat"],
+      description: "How simulations communicate with the agent. Use a modality offered by the selected catalog entry.",
+    },
+    environment: {
+      type: "string",
+      description: "Optional label identifying the environment this connection reaches.",
+      examples: ["staging"],
+    },
+    config: {
+      type: "object",
+      additionalProperties: true,
+      description:
+        "Non-secret settings for the selected access variant. Use only its catalog fields. " +
+        "Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. " +
+        "LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; " +
+        "tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. " +
+        "When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.",
+      examples: [
+        { retellAgentId: "agent_receptionist" },
+        { url: "wss://example.livekit.cloud", agentName: "receptionist" },
+        { tokenEndpoint: "https://voice.example.com/egma/token", agentName: "receptionist" },
+      ],
+    },
+    credentials: {
+      type: "object",
+      additionalProperties: true,
+      description:
+        "Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. " +
+        "A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. " +
+        "For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. " +
+        "For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. " +
+        "Responses return credential presence and hints, never the secret values.",
+      examples: [
+        { apiKey: "YOUR_RETELL_API_KEY" },
+        { apiKey: "YOUR_LIVEKIT_API_KEY", apiSecret: "YOUR_LIVEKIT_API_SECRET" },
+        { headers: '{"Authorization":"Bearer YOUR_ENDPOINT_TOKEN"}' },
+      ],
+    },
     platformAgentId: {
       type: "string",
       description:
-        "The platform's own id for the agent this connection reaches, as " +
-        "agents:discover listed it. Required for a Retell phone connection. " +
-        "Egma confirms it against Retell with the key in credentials, or with " +
-        "the key already sealed on the agent, immediately before the " +
-        "connection is written, so a number that has stopped answering for " +
-        "that agent is refused rather than stored. One Egma agent binds to " +
-        "one platform agent: a second, different one is refused by name.",
+        "Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm " +
+        "the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses " +
+        "credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. " +
+        "Do not send this together with the older agentPlatformSelection field.",
+      examples: ["agent_receptionist"],
     },
     pullProductionCalls: {
       type: "boolean",
@@ -219,14 +263,51 @@ const connectionInput = {
   },
   required: ["agentPlatform", "connectionType", "accessVariant", "modality"],
   additionalProperties: false,
+  examples: [
+    {
+      name: "Retell chat",
+      agentPlatform: "retell",
+      connectionType: "retell_text_mode",
+      accessVariant: "retell_text_mode.api_key",
+      modality: "chat",
+      platformAgentId: "agent_receptionist",
+      config: { retellAgentId: "agent_receptionist" },
+      credentials: { apiKey: "YOUR_RETELL_API_KEY" },
+    },
+    {
+      name: "LiveKit voice",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
+      modality: "voice",
+      config: { url: "wss://example.livekit.cloud", agentName: "receptionist" },
+      credentials: { apiKey: "YOUR_LIVEKIT_API_KEY", apiSecret: "YOUR_LIVEKIT_API_SECRET" },
+    },
+    {
+      name: "LiveKit token endpoint",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.customer_token_endpoint",
+      modality: "voice",
+      config: { tokenEndpoint: "https://voice.example.com/egma/token", agentName: "receptionist" },
+      credentials: { headers: '{"Authorization":"Bearer YOUR_ENDPOINT_TOKEN"}' },
+    },
+  ],
 } as const;
 
-const agentParams = parameters({ agentId: stringIdSchema }, ["agentId"]);
+const agentParams = parameters({ agentId: {
+  ...stringIdSchema,
+  description: "The Egma agent ID returned by Register an agent or List agents.",
+  examples: ["agt_01M0E4J0BBE1FVDVTZ1BSS5C97"],
+} }, ["agentId"]);
 const connectionParams = parameters(
   { agentId: stringIdSchema, connectionId: stringIdSchema },
   ["agentId", "connectionId"],
 );
-const projectQuery = parameters({ projectId: stringIdSchema });
+const projectQuery = parameters({ projectId: {
+  ...stringIdSchema,
+  description: "Project to act in. A project-scoped API key already identifies its project.",
+} });
 const agentReadQuery = parameters({
   projectId: stringIdSchema,
   archived: { type: "boolean" },
@@ -270,6 +351,11 @@ export const agentOperations = {
     method: "POST",
     path: "/v1/agents:discover",
     summary: "Discover agents on an agent platform",
+    description:
+      "List the Retell agents visible to a provider API key and the connection candidates available for each. " +
+      "Supply either credentials.apiKey or an existing Egma agentId whose saved Retell key should be used, never both. " +
+      "This request does not register an agent or save a new credential. Choose a returned candidate, then use Register an agent " +
+      "or Add an agent connection with its fields and platformAgentId. LiveKit uses List supported connection options instead of provider discovery.",
     tag: "Agents",
     security: "credentialed",
     request: {
@@ -277,10 +363,19 @@ export const agentOperations = {
       body: {
         type: "object",
         properties: {
-          agentPlatform: { type: "string", enum: ["retell"] },
+          agentPlatform: {
+            type: "string",
+            enum: ["retell"],
+            description: "Provider to query. Agent discovery currently supports Retell.",
+          },
           credentials: {
             type: "object",
-            properties: { apiKey: { type: "string" } },
+            description: "Retell account credential for this discovery request. Omit it when using agentId to reuse a saved key.",
+            properties: { apiKey: {
+              type: "string",
+              description: "Retell API key with access to the agents you want to list.",
+              examples: ["YOUR_RETELL_API_KEY"],
+            } },
             required: ["apiKey"],
             additionalProperties: false,
           },
@@ -290,10 +385,18 @@ export const agentOperations = {
            * ever, so every later listing for the same agent spends the copy
            * Egma holds — plaintext that never leaves the server.
            */
-          agentId: stringIdSchema,
+          agentId: {
+            ...stringIdSchema,
+            description: "Existing Egma agent whose stored Retell key should be used. Omit credentials when supplying this field.",
+            examples: ["agt_01M0E4J0BBE1FVDVTZ1BSS5C97"],
+          },
         },
         required: ["agentPlatform"],
         additionalProperties: false,
+        examples: [
+          { agentPlatform: "retell", credentials: { apiKey: "YOUR_RETELL_API_KEY" } },
+          { agentPlatform: "retell", agentId: "agt_01M0E4J0BBE1FVDVTZ1BSS5C97" },
+        ],
       },
     },
     responses: {
@@ -340,6 +443,7 @@ export const agentOperations = {
                     config: {
                       type: "object",
                       additionalProperties: { type: "string" },
+                      description: "Confirmed non-secret settings for this candidate. Copy these with its connection type, access variant, and modality when creating the connection.",
                     },
                   },
                   required: [
@@ -380,6 +484,12 @@ export const agentOperations = {
     method: "GET",
     path: "/v1/connection-options",
     summary: "List supported connection options",
+    description:
+      "Read the connection catalog used by this Egma server. Each item is one supported platform, connection type, " +
+      "access variant, and modality. Use fields to construct config and credentialFields to construct credentials " +
+      "for Register an agent or Add an agent connection. The catalog does not check a provider account; use Discover agents " +
+      "to obtain Retell identities and confirmed candidates. simulatorAdapter describes implementation support, " +
+      "not whether this deployment's provider or carrier credentials are ready.",
     tag: "Connections",
     security: "credentialed",
     responses: {
@@ -428,12 +538,12 @@ export const agentOperations = {
                 fields: arrayOf({
                   type: "object",
                   properties: {
-                    key: { type: "string" },
+                    key: { type: "string", description: "Property name to include in the connection request's config object." },
                     label: { type: "string" },
                     kind: { type: "string", enum: ["text", "url", "e164", "json"] },
-                    required: { type: "boolean" },
+                    required: { type: "boolean", description: "Whether this config field must be supplied for the selected option." },
                     help: { type: "string" },
-                    afterCredentials: { type: "boolean" },
+                    afterCredentials: { type: "boolean", description: "Whether provider credentials are needed before the setup flow can resolve choices for this field." },
                   },
                   required: ["key", "label", "kind", "required", "help", "afterCredentials"],
                   additionalProperties: false,
@@ -441,15 +551,16 @@ export const agentOperations = {
                 credentialRule: {
                   type: "string",
                   enum: ["required", "forbidden", "optional"],
+                  description: "Whether the connection stores credentials for this access variant. Retell phone setup can still need an agent-level provider key to confirm the phone route.",
                 },
                 credentialHelp: { type: "string" },
                 credentialFields: arrayOf({
                   type: "object",
                   properties: {
-                    field: { type: "string" },
+                    field: { type: "string", description: "Property name in the connection request's credentials object." },
                     label: { type: "string" },
-                    kind: { type: "string", enum: ["secret", "json"] },
-                    required: { type: "boolean" },
+                    kind: { type: "string", enum: ["secret", "json"], description: "Input type. JSON credential values such as headers are encoded as strings containing JSON." },
+                    required: { type: "boolean", description: "Whether this credential field is required for the selected option." },
                     help: { type: "string" },
                   },
                   required: ["field", "label", "kind", "required", "help"],
@@ -488,6 +599,11 @@ export const agentOperations = {
     method: "POST",
     path: "/v1/agents",
     summary: "Register an agent",
+    description:
+      "Create an Egma agent identity in the selected project. Send name and agentPlatform for an agent without connections, " +
+      "or include connection to configure its first simulation connection in the same request. " +
+      "Registration with a connection can reuse the existing agent for the same provider identity and can add a new connection " +
+      "to that agent. Inspect result: created, connection_added, or reused. Keep the returned agent.id and connection.id for run creation.",
     tag: "Agents",
     security: "credentialed",
     request: {
@@ -495,15 +611,31 @@ export const agentOperations = {
       body: {
         type: "object",
         properties: {
-          name: { type: "string" },
+          name: { type: "string", description: "Display name for the agent in Egma.", examples: ["Receptionist"] },
           agentPlatform: {
             type: "string",
             enum: ["retell", "livekit"],
+            description: "The product or framework that runs your agent.",
           },
           connection: connectionInput,
         },
         required: ["name", "agentPlatform"],
         additionalProperties: false,
+        examples: [
+          { name: "Receptionist", agentPlatform: "retell" },
+          {
+            name: "Receptionist",
+            agentPlatform: "livekit",
+            connection: {
+              agentPlatform: "livekit",
+              connectionType: "livekit_room",
+              accessVariant: "livekit_room.project_credentials",
+              modality: "voice",
+              config: { url: "wss://example.livekit.cloud", agentName: "receptionist" },
+              credentials: { apiKey: "YOUR_LIVEKIT_API_KEY", apiSecret: "YOUR_LIVEKIT_API_SECRET" },
+            },
+          },
+        ],
       },
     },
     responses: {
@@ -603,6 +735,12 @@ export const agentOperations = {
     method: "POST",
     path: "/v1/agents/{agentId}/connections",
     summary: "Add an agent connection",
+    description:
+      "Add a simulation connection to an existing Egma agent. Select its platform, connection type, access variant, " +
+      "and modality from List supported connection options, then supply that option's config and credentials. " +
+      "For Retell, include platformAgentId from discovery; Egma confirms the selection with the supplied or stored " +
+      "Retell key before saving. For LiveKit, supply the exact worker dispatch name as config.agentName. " +
+      "Use the returned connection.id with this agent's ID when creating a run.",
     tag: "Connections",
     security: "credentialed",
     request: { params: agentParams, query: projectQuery, body: connectionInput },

@@ -18,6 +18,8 @@ const pageSizeSchema = { type: "integer", minimum: 1, maximum: 200 } as const;
 const runStatusSchema = {
   type: "string",
   enum: ["pending", "running", "completed", "canceled"],
+  description:
+    "Simulation execution status. A completed run can contain failed simulations, and grading may still be in progress.",
 } as const;
 
 export const simulationStatusSchema = {
@@ -146,15 +148,30 @@ const runHeaderSchema = {
     productLabel: stringSchema,
     environment: nullable(stringSchema),
     agentVersion: nullable(integerSchema),
-    expectedSimulationCount: integerSchema,
+    expectedSimulationCount: {
+      ...integerSchema,
+      description: "Number of test-and-persona combinations captured when the run started.",
+    },
     completedCount: nullable(integerSchema),
     failedCount: nullable(integerSchema),
     canceledCount: nullable(integerSchema),
     simulationCounts: simulationCountsSchema,
-    finishedCount: integerSchema,
-    gradableCount: integerSchema,
-    gradedCount: integerSchema,
-    resultsUrl: stringSchema,
+    finishedCount: {
+      ...integerSchema,
+      description: "Simulations whose execution completed, failed, or was canceled.",
+    },
+    gradableCount: {
+      ...integerSchema,
+      description: "Simulations eligible for grading under the run's frozen grader selection.",
+    },
+    gradedCount: {
+      ...integerSchema,
+      description: "Gradable simulations whose grading is complete or errored. This is not a count of passed simulations.",
+    },
+    resultsUrl: {
+      ...stringSchema,
+      description: "Open this URL in a browser to follow the run and inspect its results.",
+    },
     createdAt: dateTimeSchema,
     startedAt: nullable(dateTimeSchema),
     finishedAt: nullable(dateTimeSchema),
@@ -320,15 +337,26 @@ const runEventSchema = {
 const expectedTestVersionSchema = {
   type: "object",
   properties: {
-    testId: stringIdSchema,
-    versionId: stringIdSchema,
+    testId: { ...stringIdSchema, description: "The test identity to check." },
+    versionId: { ...stringIdSchema, description: "The current test version expected at run creation." },
   },
   required: ["testId", "versionId"],
   additionalProperties: false,
 } as const;
 
-const projectQuery = parameters({ projectId: stringIdSchema });
-const runParams = parameters({ runId: stringIdSchema }, ["runId"]);
+const projectQuery = parameters({
+  projectId: {
+    ...stringIdSchema,
+    description: "Project to act in. A project-scoped API key already identifies its project.",
+  },
+});
+const runParams = parameters({
+  runId: {
+    ...stringIdSchema,
+    description: "Run ID returned by Create a run or List runs.",
+    examples: ["run_01M0E4J0BBE1FVDVTZ1BSS5C97"],
+  },
+}, ["runId"]);
 const pageQuery = {
   pageSize: pageSizeSchema,
   pageToken: stringIdSchema,
@@ -354,6 +382,12 @@ export const runOperations = {
     method: "POST",
     path: "/v1/runs",
     summary: "Run one complete test suite",
+    description:
+      "Start one run of every active test in a non-empty suite against one agent connection. " +
+      "Egma captures the test versions, personas, connection settings, and grader selection for the run. " +
+      "The response confirms creation; execution and grading continue asynchronously. " +
+      "Keep the returned id, poll List run events until done is true, then inspect the simulations and their grades. " +
+      "Retry the same request with the same idempotencyKey to recover the existing run without creating another.",
     tag: "Runs",
     security: "credentialed",
     request: {
@@ -361,20 +395,50 @@ export const runOperations = {
       body: {
         type: "object",
         properties: {
-          suiteId: stringIdSchema,
-          agentId: stringIdSchema,
-          connectionId: stringIdSchema,
-          idempotencyKey: stringSchema,
-          name: stringSchema,
-          expectedTestVersions: arrayOf(expectedTestVersionSchema),
+          suiteId: {
+            ...stringIdSchema,
+            description: "The active, non-empty test suite to execute in full. It must belong to the selected project.",
+            examples: ["ste_01M0E4J0BBE1FVDVTZ1BSS5C97"],
+          },
+          agentId: {
+            ...stringIdSchema,
+            description: "The Egma agent to test, not its Retell provider ID or LiveKit dispatch name.",
+            examples: ["agt_01M0E4J0BBE1FVDVTZ1BSS5C97"],
+          },
+          connectionId: {
+            ...stringIdSchema,
+            description: "An active connection on that agent in the same project. Its modality determines whether simulations use voice or chat.",
+            examples: ["con_01M0E4J0BBE1FVDVTZ1BSS5C97"],
+          },
+          idempotencyKey: {
+            ...stringSchema,
+            description: "A non-empty key for this logical run request. Reusing it with the same request returns the existing run; reusing it with different run inputs returns a conflict. Use a new key for a new run.",
+            examples: ["release-check-2026-09-06-001"],
+          },
+          name: {
+            ...stringSchema,
+            description: "Optional display name for the run.",
+            examples: ["Appointment booking release check"],
+          },
+          expectedTestVersions: {
+            ...arrayOf(expectedTestVersionSchema),
+            description: "Optional exact list of the suite's test IDs and current version IDs. Each test and version must appear once. The request is refused if the suite membership or any version changed. Omit this field to use the current suite.",
+          },
         },
         required: ["suiteId", "agentId", "connectionId", "idempotencyKey"],
         additionalProperties: false,
+        examples: [{
+          suiteId: "ste_01M0E4J0BBE1FVDVTZ1BSS5C97",
+          agentId: "agt_01M0E4J0BBE1FVDVTZ1BSS5C97",
+          connectionId: "con_01M0E4J0BBE1FVDVTZ1BSS5C97",
+          idempotencyKey: "release-check-2026-09-06-001",
+          name: "Appointment booking release check",
+        }],
       },
       bodyRequired: true,
     },
     responses: {
-      201: { description: "The bounded header for the new run.", schema: runHeaderSchema },
+      201: { description: "The run header for a new request or an idempotent replay. The run may still be executing or grading.", schema: runHeaderSchema },
       ...commonWriteRefusals,
       // A run over a lane that pins a version reads the agent's own platform
       // before anything is written. A platform that would not answer is not
@@ -468,11 +532,24 @@ export const runOperations = {
     method: "GET",
     path: "/v1/runs/{runId}/events",
     summary: "List run events",
+    description:
+      "Read execution events in sequence order. Start with after=0, then pass each response's next value as after. " +
+      "While caughtUp is false, continue reading the backlog. When caughtUp is true but done is false, " +
+      "wait briefly before polling again. done becomes true only after execution has finished, the event backlog " +
+      "is consumed, and all gradable simulations have completed or errored grading. It does not indicate that " +
+      "the grades passed. Apply each event sequence at most once when resuming a saved cursor.",
     tag: "Runs",
     security: "credentialed",
     request: {
       params: runParams,
-      query: parameters({ projectId: stringIdSchema, after: integerSchema }),
+      query: parameters({
+        projectId: projectQuery.properties.projectId,
+        after: {
+          ...integerSchema,
+          description: "Return events with a sequence greater than this value. Use zero or omit it for the first page; use the previous response's next value to continue.",
+          examples: [0],
+        },
+      }),
     },
     responses: {
       200: {
@@ -481,12 +558,22 @@ export const runOperations = {
           type: "object",
           properties: {
             events: arrayOf(runEventSchema),
-            next: integerSchema,
-            caughtUp: booleanSchema,
-            done: booleanSchema,
+            next: {
+              ...integerSchema,
+              description: "Cursor to send as after on the next request. An empty page returns the same cursor.",
+            },
+            caughtUp: {
+              ...booleanSchema,
+              description: "This page includes all execution events available when it was read. More events or grades may arrive later.",
+            },
+            done: {
+              ...booleanSchema,
+              description: "Execution finished, no execution events remain in the backlog, and every gradable simulation has complete or errored grading. Inspect individual grades to decide whether the run meets your requirements.",
+            },
           },
           required: ["events", "next", "caughtUp", "done"],
           additionalProperties: false,
+          examples: [{ events: [], next: 12, caughtUp: true, done: false }],
         },
       },
       ...commonReadRefusals,

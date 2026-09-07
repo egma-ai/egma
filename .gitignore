@@ -28,3 +28,6 @@ docker-compose.override.yml
 # Screenshots and throwaway scripts an agent leaves behind while proving a
 # visual change. They belong to the review, not to the repository.
 .proofs/
+
+# Isolated local Mintlify CLI, installed by pnpm docs:dev.
+.cache/mintlify/

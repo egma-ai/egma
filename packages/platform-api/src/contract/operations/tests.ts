@@ -27,7 +27,10 @@ const deleteTestQuery = parameters(
 const testListQuery = parameters(
   {
     projectId: stringIdSchema,
-    suiteId: stringIdSchema,
+    suiteId: {
+      ...stringIdSchema,
+      description: "The test suite to read. Tests are listed one suite at a time.",
+    },
     pageToken: stringIdSchema,
     pageSize: pageSizeSchema,
   },
@@ -63,6 +66,8 @@ const testPersonaSchema = {
  * can send it, and a made-up wait told nobody anything true about the agent.
  */
 export const testMockToolSchema = {
+  description:
+    "One named tool's fixed response for this test. Supply exactly one of answer or error. Tools without a mock run normally.",
   oneOf: [
     {
       type: "object",
@@ -105,9 +110,15 @@ export const testEnvSchema = {
   properties: {
     retell_dynamic_variables: {
       type: "object",
+      description:
+        "String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.",
       additionalProperties: stringSchema,
     },
-    job_dispatch_metadata: { type: "object", additionalProperties: true },
+    job_dispatch_metadata: {
+      type: "object",
+      description: "Context delivered to the LiveKit worker in ctx.job.metadata.",
+      additionalProperties: true,
+    },
   },
   additionalProperties: false,
 } as const;
@@ -171,17 +182,39 @@ const testVersionSchema = {
  * field leaves the field alone and `env: null` clears it.
  */
 const testContentInput = {
-  scenario: stringSchema,
-  expectedBehaviors: arrayOf(stringSchema),
-  personas: arrayOf(stringSchema),
-  mockTools: arrayOf(testMockToolSchema),
-  env: nullable(testEnvSchema),
+  scenario: {
+    ...stringSchema,
+    description: "The situation and goal the synthetic caller acts out.",
+  },
+  expectedBehaviors: {
+    ...arrayOf(stringSchema),
+    description:
+      "Statements checked independently against the completed conversation. Include at least one non-empty statement.",
+  },
+  personas: {
+    ...arrayOf(stringSchema),
+    description:
+      "At least one available persona ID or unambiguous current name. Each selected persona creates one simulation for this test in a run.",
+  },
+  mockTools: {
+    ...arrayOf(testMockToolSchema),
+    description:
+      "Test-owned tool answers. Use an empty array to remove existing mocks on update. Applying mocks requires a supported connection and, for LiveKit, tool instrumentation.",
+  },
+  env: {
+    ...nullable(testEnvSchema),
+    description:
+      "Non-secret startup context for the agent's provider. Omit to keep existing context on update, or send null to clear it.",
+  },
 } as const;
 
 const createTestBody = {
   type: "object",
   properties: {
-    suiteId: stringIdSchema,
+    suiteId: {
+      ...stringIdSchema,
+      description: "An existing active test suite in the current project.",
+    },
     name: stringSchema,
     description: nullable(stringSchema),
     ...testContentInput,
@@ -195,6 +228,20 @@ const createTestBody = {
    */
   required: ["suiteId", "name", "scenario", "expectedBehaviors", "personas"],
   additionalProperties: false,
+  examples: [{
+    suiteId: "ste_01M0E4EVJ6ECGVJEA4NSBTC0CC",
+    name: "No available appointments",
+    description: "The caller asks for an appointment when the calendar is full.",
+    scenario:
+      "Ask Harbor Clinic for an afternoon appointment. If none is available, ask how to arrange a callback.",
+    expectedBehaviors: [
+      "The agent checks availability before offering an appointment.",
+      "The agent does not invent an available time when the tool returns no slots.",
+    ],
+    personas: ["Everyday caller"],
+    mockTools: [{ tool: "check_availability", answer: { slots: [] } }],
+    env: { retell_dynamic_variables: { clinic_name: "Harbor Clinic" } },
+  }],
 } as const;
 
 const updateTestBody = {
@@ -203,8 +250,16 @@ const updateTestBody = {
     name: stringSchema,
     description: nullable(stringSchema),
     ...testContentInput,
-    expectedVersionId: stringIdSchema,
-    expectedRevision: stringIdSchema,
+    expectedVersionId: {
+      ...stringIdSchema,
+      description:
+        "The versionId returned by the test read. Required when changing scenario, expectedBehaviors, personas, mockTools, or env; a stale value returns 409.",
+    },
+    expectedRevision: {
+      ...stringIdSchema,
+      description:
+        "The revision returned by the test read. Supply it to reject an update if the test's live identity changed since that read.",
+    },
   },
   additionalProperties: false,
 } as const;
@@ -278,6 +333,8 @@ export const testOperations = {
     method: "GET",
     path: "/v1/test-versions/{versionId}",
     summary: "Get a test version",
+    description:
+      "Read the frozen scenario, expected behaviors, persona selections, mocks, and context used by a simulation. Later test edits do not change this version.",
     tag: "Tests",
     security: "credentialed",
     request: { params: versionParams, query: projectQuery },
@@ -308,6 +365,8 @@ export const testOperations = {
     method: "POST",
     path: "/v1/tests",
     summary: "Create a test in a test suite",
+    description:
+      "Creates the test and its first content version in an existing suite. Choose at least one persona. The agent and connection are selected when starting a run, not when creating the test.",
     tag: "Tests",
     security: "credentialed",
     request: { query: projectQuery, body: createTestBody },
@@ -318,6 +377,8 @@ export const testOperations = {
     method: "PATCH",
     path: "/v1/tests/{testId}",
     summary: "Update a test",
+    description:
+      "Omitted fields keep their current values. Content changes create an immutable version and require expectedVersionId from the last read. Name and description changes keep the content version. Existing simulations retain their original evidence.",
     tag: "Tests",
     security: "credentialed",
     request: { params: testParams, query: projectQuery, body: updateTestBody },

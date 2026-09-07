@@ -1,0 +1,197 @@
+---
+title: "LiveKit JavaScript SDK"
+description: "Add production monitoring and simulation mock tools to LiveKit Agents JS workers."
+---
+
+The `@egma/livekit` package works with JavaScript and TypeScript workers. It exports `monitorLiveKit` for production traces and `mockable` for simulation tool responses. You can use either function or both.
+
+To connect the worker for simulations, first follow [LiveKit](/guides/livekit).
+
+## Install
+
+Use Node.js 22 or newer:
+
+```bash
+npm install @egma/livekit
+```
+
+| Function | Supported `@livekit/agents` versions |
+| --- | --- |
+| `mockable` | `>=1.5.0 <2` |
+| `monitorLiveKit` | `>=1.5.5 <2` |
+
+Use at least `1.5.5` if you want both functions. Monitoring needs LiveKit's public OpenTelemetry support added in that version. Keep the resolved versions in your lock file.
+
+## Add the SDK to your worker
+
+Call `monitorLiveKit(ctx)` first in the job entrypoint. Call `await mockable(agent, ctx, session)` after creating the agent and session, before `session.start`.
+
+This example defines the complete entrypoint for a small receptionist. It uses LiveKit's model inference settings and Zod for the tool schema:
+
+```bash
+npm install zod
+```
+
+```typescript
+import { mockable, monitorLiveKit } from "@egma/livekit";
+import { type JobContext, llm, voice } from "@livekit/agents";
+import { z } from "zod";
+
+export async function entrypoint(ctx: JobContext) {
+  monitorLiveKit(ctx);
+
+  const openingHours = llm.tool({
+    name: "opening_hours",
+    description: "Get the practice's opening hours.",
+    parameters: z.object({}),
+    execute: async () => "Monday to Friday, 9 AM to 5 PM.",
+  });
+  const agent = new voice.Agent({
+    instructions:
+      "You are a dental receptionist. Use opening_hours when asked " +
+      "when the practice is open. Keep your answers brief.",
+    tools: [openingHours],
+  });
+  const session = new voice.AgentSession({
+    stt: "deepgram/nova-3:en",
+    llm: "openai/gpt-4.1-mini",
+    tts: "cartesia/sonic-3",
+  });
+
+  await mockable(agent, ctx, session);
+
+  const chat = ctx.job.room?.name?.startsWith("egma-sim-chat-") ?? false;
+  await session.start({
+    agent,
+    room: ctx.room,
+    ...(chat
+      ? {
+          inputOptions: { audioEnabled: false },
+          outputOptions: {
+            audioEnabled: false,
+            syncTranscription: false,
+          },
+        }
+      : {}),
+  });
+}
+```
+
+Use this entrypoint in your existing LiveKit worker registration. Keep the worker's dispatch name equal to the name in your Egma connection. For an existing agent, preserve its models and tools and add the two SDK calls at the same points.
+
+## Monitor production
+
+Create a project-scoped API key in **Settings → API keys**, or run `egma project api-key create --name "LiveKit monitoring"` from an initialized agent repository.
+
+Set these values in the worker's deployment environment:
+
+| Variable | Value |
+| --- | --- |
+| `EGMA_URL` | `https://app.egma.ai`, or the public URL of your own Egma instance. |
+| `EGMA_API_KEY` | The project API key you created. |
+
+Keep the key in your deployment's secret store. The URL must be reachable from the worker. For a remote or containerized worker, use your server's reachable address instead of `localhost`.
+
+Deploy the worker and make a production call. Open **Monitoring** in the key's project. LiveKit sends its own traces; you do not need to turn on a second monitoring setting in Egma.
+
+The helper exports OTLP/HTTP protobuf batches to `/v1/traces` and flushes the last batch when the job stops. It keeps LiveKit Cloud observability enabled.
+
+The `egma-sim-` room prefix is reserved for simulations. Monitoring skips those rooms so a simulation does not also appear in the production list. Use another prefix when your system creates production rooms.
+
+### Existing OpenTelemetry setup
+
+Call `monitorLiveKit` before you install custom tracing when possible. The helper adds to a compatible existing provider. It does not replace an incompatible provider.
+
+If another integration already owns the provider, pass `existingTelemetry` with that provider and a `registerSpanProcessor` callback. The callback must add the Egma processor to a mutable processor group inside that same provider, such as LiveKit's `telemetry.FanoutSpanProcessor`.
+
+OpenTelemetry JS 2.x cannot add a processor directly to an already-created provider. If your existing provider has no way to add one, change its setup to include that processor group before registering it.
+
+### If no conversation appears
+
+Check the worker's deployment and OpenTelemetry logs. Confirm that its key is scoped to the correct project, has write access, and can reach `EGMA_URL`. An organization-wide key cannot ingest traces.
+
+Missing settings, invalid settings, an unsupported LiveKit version, or a conflicting tracer provider cause a direct setup error. Network failures happen in the worker; Egma can show a conversation only after its trace arrives. Restart the worker after changing the Egma settings or tracing setup.
+
+## Mock tool responses
+
+Use the exact registered tool name in the test. For the example above:
+
+````markdown
+## Mock tools
+
+### opening_hours
+
+```json
+{
+  "answer": "The practice is closed on Monday. It opens Tuesday at 9 AM."
+}
+```
+````
+
+Each mock contains one `answer` or `error`. In a simulation room, `mockable` connects if needed, sends the agent's tool names and schemas to Egma, and installs the mocks selected by the test. It follows agent handoffs in the same session.
+
+| Situation | Behavior |
+| --- | --- |
+| Production room | No connection, messages, or tool wrappers are added. |
+| A simulation tool named in the test | Egma supplies the authored response. |
+| A tool with no matching mock | The real tool runs. |
+| Egma cannot be reached during setup or a tool call | The SDK logs the problem and the real tool can run. |
+| Egma receives a tool call and refuses it | The tool raises `ToolError`; the real implementation does not run. |
+
+<Warning>
+  Mocking does not isolate your backend. Unmocked tools and transport failures can reach real implementations. Use a test account or sandbox for tools that can make real changes.
+</Warning>
+
+Call `mockable` once for the initial agent. LiveKit keeps its JavaScript mock-tool state at process level. Egma permits one active mockable session per process and rejects a second overlapping session. The normal LiveKit worker runs jobs in separate child processes. Cleanup runs when the session closes or the job stops.
+
+Check the simulation's tool calls to confirm the mock matched. See [Mock tool responses](/guides/mock-tool-responses).
+
+## Test in chat mode
+
+For a chat connection, keep the `egma-sim-chat-` branch shown in the example. It disables audio input and output and turns off speech-synchronized transcription. Also keep independent audio publishers off in that branch.
+
+Other room names use your normal voice settings. Egma stops a chat simulation if the worker publishes audio.
+
+## Read test startup data
+
+Add the values your agent needs at startup to a test:
+
+````markdown
+## Env
+
+```json
+{
+  "job_dispatch_metadata": {
+    "clinic_name": "Maple Street Dental"
+  }
+}
+```
+````
+
+Read them in your entrypoint:
+
+```typescript
+const world = JSON.parse(ctx.job.metadata || "{}");
+const clinicName = world.clinic_name ?? "Maple Street Dental";
+```
+
+Egma sends `job_dispatch_metadata` as a compact JSON string. It adds no Egma keys and leaves room metadata empty. The SDK detects simulations from the room name.
+
+## Function reference
+
+| Function | Parameters and result |
+| --- | --- |
+| `monitorLiveKit(ctx, options?)` | Takes a LiveKit `JobContext` and optional `MonitorLiveKitOptions`. Returns `void`. |
+| `await mockable(agent, ctx, session)` | Takes the initial `voice.Agent`, `JobContext`, and `voice.AgentSession`. Returns `Promise<void>`. |
+
+`MonitorLiveKitOptions` accepts:
+
+| Option | Use |
+| --- | --- |
+| `endpoint` | Override `EGMA_URL`. Use an HTTP or HTTPS Egma URL. |
+| `apiKey` | Override `EGMA_API_KEY` with a project API key. |
+| `existingTelemetry` | An `ExistingTelemetry` object for an existing tracer provider. |
+
+`ExistingTelemetry` contains `provider` and `registerSpanProcessor`. It can also supply `createCloudSpanProcessor` to customize how the LiveKit Cloud processor is created. The package exports both option types.
+
+Monitoring checks for simulation rooms before reading its settings. Simulation-only workers can therefore keep the call without an Egma API key. Use a separate worker process for each LiveKit job.

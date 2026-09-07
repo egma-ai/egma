@@ -1,0 +1,91 @@
+---
+title: "Mock tool responses"
+description: "Give a test controlled tool answers without calling those tools' real backends."
+---
+
+Use a mock to control backend state or replace a write during a simulation.
+For example, return no appointment slots or make a booking call fail.
+
+Each mock belongs to one test and is saved with that test's version. Other
+tests can use different answers for the same tool.
+
+## Add an answer
+
+After `## Expected behaviors`, add `## Mock tools`. Use the exact tool name as
+the subheading and put the tool's normal result inside `answer`:
+
+````markdown
+## Mock tools
+
+### check_availability
+
+```json
+{
+  "answer": {
+    "slots": []
+  }
+}
+```
+````
+
+`answer` can contain any JSON value that matches the tool's real response
+shape. The mock returns the same configured result each time that named tool
+is called in the simulation.
+
+The mock does not check the tool's arguments. Add an expected behavior if you
+need to check that the agent used the right caller, provider, date, or other
+arguments.
+
+## Test a failure
+
+Use `error` with a string to make the tool fail:
+
+````markdown
+## Mock tools
+
+### book_appointment
+
+```json
+{
+  "error": "The booking service is unavailable."
+}
+```
+````
+
+Write the expected behavior for the agent's response to that failure, such as:
+
+```text
+The agent explains that the appointment could not be booked and does not
+claim that the booking was confirmed.
+```
+
+Each JSON block must contain exactly one of `answer` or `error`. Do not add
+delay, status, or matching rules to the envelope.
+
+## Use a connection that supports mocks
+
+| Connection | Setup |
+| --- | --- |
+| Retell text mode | Egma sends the test's mock answers with the conversation. |
+| Retell web call | Egma prepares a temporary agent version for the run. Your Egma instance must be reachable by Retell. |
+| LiveKit | Instrument the agent's tools with the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk). |
+
+Retell's chat API and phone calls do not apply these mock answers. Use text mode
+or a web call when your Retell test depends on mocks.
+
+<Warning>
+  Only the tools named in the test are mocked. Every other tool runs normally.
+  Include each write you need to replace, and verify the supported connection
+  before running a test against a production backend.
+</Warning>
+
+## Check the result
+
+Run `egma push`, then [start a run](/guides/start-and-follow-a-run). Open the
+simulation's transcript and inspect the tool call, its arguments, and its
+result. Mocked tool evidence is marked as mocked where the integration reports
+that information.
+
+If a real backend was called, check the exact tool name, connection type, and
+LiveKit instrumentation. If the agent reacts incorrectly to the answer, compare
+the mock's response shape with the tool's actual contract.

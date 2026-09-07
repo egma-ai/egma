@@ -33,9 +33,18 @@ const versionListQuery = parameters({
  * authored behavior and live only under `models.tts`.
  */
 const behavior = {
-  identityName: { type: "string" },
-  personality: { type: "string" },
-  language: { type: "string" },
+  identityName: {
+    type: "string",
+    description: "The human name the caller gives the agent, separate from the library name.",
+  },
+  personality: {
+    type: "string",
+    description: "How the caller behaves and speaks. Put the situation and goal in the test scenario.",
+  },
+  language: {
+    type: "string",
+    description: "The caller's language, such as en-US.",
+  },
 } as const;
 
 const behaviorRequired = ["identityName", "personality", "language"] as const;
@@ -54,14 +63,22 @@ const speechSelection = {
   ...modelSelection,
   properties: {
     ...modelSelection.properties,
-    voiceId: { type: "string" },
-    speed: { type: "number" },
+    voiceId: {
+      type: "string",
+      description: "A voice identifier supported by the selected text-to-speech provider.",
+    },
+    speed: {
+      type: "number",
+      description: "Speech rate from 0.6 through 1.5. Use 1 for the normal rate.",
+    },
   },
   required: [...modelSelection.required, "voiceId", "speed"],
 } as const;
 
 const personaModels = {
   type: "object",
+  description:
+    "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
   properties: {
     llm: modelSelection,
     stt: modelSelection,
@@ -199,13 +216,29 @@ const createPersonaBody = {
   type: "object",
   properties: {
     projectId: stringIdSchema,
-    name: { type: "string" },
+    name: {
+      type: "string",
+      description: "Your team's label in the persona library. The caller does not speak this label.",
+    },
     description: { type: "string" },
     ...behavior,
     models: personaModels,
   },
   required: ["name", ...behaviorRequired, "models"],
   additionalProperties: false,
+  examples: [{
+    name: "Caller in a hurry",
+    description: "A caller who wants a brief appointment booking conversation.",
+    identityName: "Morgan Chen",
+    personality:
+      "Answers briefly, asks for the earliest appointment, and stays polite when asking the agent to get to the point.",
+    language: "en-US",
+    models: {
+      llm: { provider: "openai", model: "gpt-4o-mini" },
+      stt: { provider: "openai", model: "gpt-4o-mini-transcribe" },
+      tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 1 },
+    },
+  }],
 } as const;
 
 /**
@@ -266,6 +299,8 @@ export const personaOperations = {
     method: "GET",
     path: "/v1/persona-form",
     summary: "Get persona authoring choices",
+    description:
+      "Use this response to choose supported models, a recommended voice, and a valid speech rate before creating or updating a persona.",
     tag: "Personas",
     security: "credentialed",
     request: { query: projectQuery },
@@ -336,6 +371,8 @@ export const personaOperations = {
     method: "POST",
     path: "/v1/personas",
     summary: "Create a persona",
+    description:
+      "Creates a custom persona and its first immutable behavior version. Add its ID or unambiguous name to a test's personas to use it in future runs.",
     tag: "Personas",
     security: "credentialed",
     request: { body: createPersonaBody },
@@ -350,6 +387,8 @@ export const personaOperations = {
     method: "PATCH",
     path: "/v1/personas/{personaId}",
     summary: "Update a persona",
+    description:
+      "Omitted fields keep their current values. Changing identityName, personality, language, or models creates a new immutable version; name and description are live metadata. Existing simulations keep their pinned version. Provided personas are read-only.",
     tag: "Personas",
     security: "credentialed",
     request: { params: personaParams, body: updatePersonaBody },
@@ -364,6 +403,8 @@ export const personaOperations = {
     method: "POST",
     path: "/v1/personas/{personaId}/fork",
     summary: "Fork a persona",
+    description:
+      "Creates an editable custom copy of the persona's current behavior and model settings. The original persona and tests that select it stay unchanged.",
     tag: "Personas",
     security: "credentialed",
     request: { params: personaParams, body: projectBody, bodyRequired: false },

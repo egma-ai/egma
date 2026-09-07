@@ -1,0 +1,52 @@
+---
+title: "Build trust in your voice agent"
+sidebarTitle: "Overview"
+description: "Test conversations before release. Review what happens in production."
+---
+
+Egma is an open-source platform for testing and monitoring voice agents. Write
+tests beside your agent code, run simulated conversations, and check the results
+against the behavior you expect.
+
+<CardGroup cols={2}>
+  <Card title="Run your first test" icon="play" href="/guides/quickstart">
+    Connect an agent, run a scenario, and inspect the result.
+  </Card>
+  <Card title="Set up monitoring" icon="chart-line" href="/guides/set-up-monitoring">
+    Capture conversations and review their transcripts, metrics, and grades.
+  </Card>
+</CardGroup>
+
+## Connect your agent
+
+<CardGroup cols={2}>
+  <Card title="Retell" icon="phone" href="/guides/retell">
+    Connect a Retell agent for testing and monitoring.
+  </Card>
+  <Card title="LiveKit" icon="tower-broadcast" href="/guides/livekit">
+    Connect your LiveKit worker and add the SDK for your language.
+  </Card>
+</CardGroup>
+
+## From a test to a result
+
+1. **Write a test.** Describe one situation, choose a persona, and list the
+   behaviors the agent must show. Keep related tests in a test suite.
+2. **Start a run.** Select a suite, an agent, and one of its connections. Egma
+   runs a simulation for each test and persona pair.
+3. **Read the evidence.** Inspect the conversation, tool calls, and grades.
+   Change your agent or test, then run the suite again.
+
+Use [built-in graders](/guides/built-in-graders) to check expected behaviors and
+other supported criteria. Add [custom graders](/guides/custom-graders) for
+requirements specific to your product.
+
+## Work from your repository
+
+Start with [Skills](/tools/skills) to let your coding agent set up integrations
+and write tests. Use the [CLI](/tools/cli) to manage test files and start runs
+directly. The [LiveKit Python SDK](/tools/livekit-python-sdk) and
+[LiveKit JavaScript SDK](/tools/livekit-javascript-sdk) add mock tools and
+production monitoring to your worker.
+
+To run Egma on your own infrastructure, follow [Self-hosting](/self-hosting/get-started).

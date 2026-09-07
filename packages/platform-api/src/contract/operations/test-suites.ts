@@ -33,9 +33,15 @@ const testSuiteSchema = {
 
 const nameBody = {
   type: "object",
-  properties: { name: stringSchema },
+  properties: {
+    name: {
+      ...stringSchema,
+      description: "The suite's display name. Its stable ID identifies it across renames.",
+    },
+  },
   required: ["name"],
   additionalProperties: false,
+  examples: [{ name: "Appointment booking" }],
 } as const;
 
 const readRefusals = {
@@ -78,6 +84,8 @@ export const testSuiteOperations = {
     method: "POST",
     path: "/v1/test-suites",
     summary: "Create a test suite",
+    description:
+      "Creates an empty suite in the current project. Add tests before starting a run. A suite stores no agent or connection; each run selects those and executes every active test in the suite.",
     tag: "Test Suites",
     security: "credentialed",
     request: { query: projectQuery, body: nameBody },
@@ -98,6 +106,8 @@ export const testSuiteOperations = {
     method: "PATCH",
     path: "/v1/test-suites/{suiteId}",
     summary: "Rename a test suite",
+    description:
+      "Changes the display name without changing the suite's ID or membership. Earlier runs display the current suite name.",
     tag: "Test Suites",
     security: "credentialed",
     request: { params: suiteParams, query: projectQuery, body: nameBody },

@@ -1,0 +1,65 @@
+---
+title: "Configure graders"
+description: "Choose which conversations a grader checks and what score it must reach."
+---
+
+Open **Graders**, select **Active graders**, and open the grader's menu. Select
+**Edit** to change its project settings.
+
+## Choose the scope
+
+For a grader with editable scope, enable either or both sources:
+
+- **Grades simulations**: choose **All simulations**, or **Selected test
+  suites and tests**. A suite selection includes its tests in future runs.
+- **Grades production**: set **Production sample** from `1` through `100`
+  percent. Use `100` to select every eligible production conversation.
+
+Production sampling selects a stable percentage of eligible traces. It is not
+a promise that each small group of conversations contains exactly that
+percentage.
+
+Overlapping simulation selections do not run the same project grader twice.
+A grader also needs to support the conversation's modality. A trace outside
+its scope or modality gets no grade from that grader.
+
+**Expected behaviors** has fixed scope: all simulations and no production
+conversations.
+
+## Set the threshold and settings
+
+Set **Pass threshold** between `0` and `1`. The grader passes when its score is
+at least that threshold. Keep the threshold at `1` for a binary rule when you
+want a failed check to fail the grader.
+
+Some graders have extra settings. For example, **Response latency** has a
+maximum response time in milliseconds. These settings control how it computes
+the score; the pass threshold controls how that score becomes an individual
+result.
+
+Save the policy, then start a new run. A simulation keeps the grader selection,
+definition versions, settings, and pass thresholds captured for its run.
+Changes apply to future work.
+
+## Regrade a simulation
+
+Use regrading to run the original grading work again on the same completed
+simulation evidence, such as after a temporary grading failure.
+
+1. Open a completed simulation from **Runs**.
+2. Select **Regrade**.
+3. Confirm **Regrade simulation** and wait for grading to finish.
+
+Regrading uses the whole original grader selection, with its frozen definitions,
+settings, and thresholds. It does not call the agent again and does not apply
+your latest project policy. Start a new run to test a changed agent, test,
+persona, or grading policy.
+
+Earlier grades remain in the history. The API returns the latest grade from
+each project grader in `grades`, and all attempts in `gradeHistory`.
+
+## Remove an optional grader
+
+Open the grader's menu in **Active graders** and select **Remove grader**.
+This stops selecting it for future project work. It does not remove the grades
+or frozen plans from earlier simulations. Expected behaviors cannot be removed.

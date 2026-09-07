@@ -73,9 +73,18 @@ export const gradeSchema = {
 } as const;
 
 export const gradeProjectionProperties = {
-  grades: arrayOf(gradeSchema),
-  gradeHistory: arrayOf(gradeSchema),
-  combinedScore: nullable(normalizedScoreSchema),
+  grades: {
+    ...arrayOf(gradeSchema),
+    description: "The current result for each selected grader. Each grade has its own score, frozen threshold, result, and supporting details.",
+  },
+  gradeHistory: {
+    ...arrayOf(gradeSchema),
+    description: "Recorded grade results, including previous grading attempts. Regrading preserves this history.",
+  },
+  combinedScore: {
+    ...nullable(normalizedScoreSchema),
+    description: "Display-only arithmetic mean when every selected grader has a current score. Null while a required score is missing or errored. This is not an overall pass/fail result.",
+  },
 } as const;
 
 export const gradeProjectionRequired = [

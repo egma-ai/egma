@@ -1,0 +1,152 @@
+---
+title: "Write a test"
+description: "Describe one situation, choose who calls, and state what the agent should do."
+---
+
+Keep your tests beside your agent code. Each Markdown file describes one
+situation and the behaviors you expect from the agent.
+
+Before you write, read your agent's prompt, tools, and startup code. Use the
+same tool names, response shapes, and context that the agent uses in production.
+The [Egma skills](/tools/skills) can help you do this from your coding agent.
+
+## Choose a test suite
+
+If this repository is new to Egma, follow the [quickstart](/guides/quickstart)
+first. Otherwise, pull the current project and list its personas:
+
+```bash
+egma pull
+egma persona list
+```
+
+Use an existing directory under `egma/tests/`, or create a suite:
+
+```bash
+egma suite create appointment-booking --name "Appointment booking"
+```
+
+## Write one situation
+
+Create `egma/tests/appointment-booking/book-consultation.md`.
+
+This example assumes a Retell agent with `check_availability` and
+`book_appointment` tools. Match the tool names and answers to your agent before
+running it. Both tools are mocked, so these calls use the test's answers.
+
+````markdown
+---
+format: 5
+name: book-consultation
+description: A caller books one of the available consultation slots.
+personas:
+  - name: Everyday caller
+---
+
+## Scenario
+
+You want to book a consultation at Harbor Clinic. Ask for an afternoon
+appointment. Choose the 15:00 slot when the receptionist offers it. Give your
+name when asked and confirm that you want the appointment.
+
+## Expected behaviors
+
+1. The agent checks availability before offering an appointment time.
+2. The agent offers only a time returned by check_availability.
+3. The agent gets the caller's confirmation before calling book_appointment.
+4. The agent confirms the appointment only after book_appointment succeeds.
+
+## Mock tools
+
+### check_availability
+
+```json
+{
+  "answer": {
+    "date": "2026-10-14",
+    "slots": ["15:00", "16:30"],
+    "timezone": "America/Los_Angeles"
+  }
+}
+```
+
+### book_appointment
+
+```json
+{
+  "answer": {
+    "appointment_id": "demo-booking-001",
+    "status": "confirmed",
+    "date": "2026-10-14",
+    "time": "15:00"
+  }
+}
+```
+
+## Env
+
+```json
+{
+  "retell_dynamic_variables": {
+    "clinic_name": "Harbor Clinic",
+    "current_date": "2026-10-12"
+  }
+}
+```
+````
+
+Use one clear claim per expected behavior. The grader checks each statement
+against the completed conversation. Three or four concrete checks are usually
+enough for one situation. Put an unrelated failure case in another test.
+
+## Set the agent's startup context
+
+`Env` supplies context before the conversation starts. It does not set shell
+environment variables or store provider credentials.
+
+For Retell, use `retell_dynamic_variables`. Every value must be a string, and
+variable names must match those used by your agent. Names starting with `egma_`
+are reserved.
+
+For LiveKit, replace the example's `Env` block with the metadata your worker
+reads from `ctx.job.metadata`:
+
+````markdown
+## Env
+
+```json
+{
+  "job_dispatch_metadata": {
+    "clinic_name": "Harbor Clinic",
+    "tenant_id": "demo-clinic",
+    "current_date": "2026-10-12"
+  }
+}
+```
+````
+
+Use realistic test data and keep secrets out of the file. Include only the
+provider field your agent needs. Omit `## Env` when no startup context is needed.
+Omit `## Mock tools` when no tools are mocked. Keep the remaining sections in
+the order shown above.
+
+## Push and run
+
+```bash
+egma push
+```
+
+Push checks the complete repository before it applies the changes. It writes
+the resolved persona IDs and synchronization fields back into your test files.
+Keep those fields when you edit an existing test. Do not invent `version` or
+`identity_revision` values for a new test.
+
+Start a [run](/guides/start-and-follow-a-run), read the individual behavior
+results, and inspect the cited conversation evidence before changing the test
+or the agent.
+
+<Note>
+  Tools not named in a test's mock section run normally. Use a supported
+  connection and instrument LiveKit tools before relying on mocks. See
+  [Mock tool responses](/guides/mock-tool-responses).
+</Note>

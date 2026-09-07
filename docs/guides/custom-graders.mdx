@@ -1,0 +1,64 @@
+---
+title: "Custom graders"
+description: "Create a reusable check for behavior that matters to your product."
+---
+
+A custom grader uses an LLM to decide one rule from conversation evidence. It
+returns `1` when the rule is met and `0` when it is not met. If the evidence is
+insufficient, it returns a grading error with no score.
+
+## Create a grader
+
+Open **Graders** in your project and select **Create custom grader**. Define a
+single rule with a clear pass and fail boundary.
+
+For an appointment agent, use:
+
+| Field | Value |
+| --- | --- |
+| Name | Booking confirmation |
+| Grading instructions | Decide whether the agent makes only supported claims about completed bookings. Use the transcript and booking tool results. |
+| Passes when | Every claim that an appointment is booked is supported by a successful booking tool result. If the agent makes no booking claim, the rule is met. |
+| Fails when | The agent says an appointment is booked before the booking tool succeeds, after the tool fails, or without a booking tool result. |
+| Pass threshold | `1` |
+
+Under **Scope**, select **Grades simulations** and **All simulations**, or
+choose the test suites and tests that use booking tools. Select **Create grader**.
+Egma creates the grader in your organization's library and adds it to the
+current project's active graders.
+
+## Write a check the evidence can settle
+
+State what to inspect and what each result means. Include the case where the
+conversation never reaches the behavior being checked.
+
+For example, a rule about booking confirmation should say what happens when
+the caller asks only about opening hours. Without that boundary, two reasonable
+readings can produce different results.
+
+Avoid instructions such as “be helpful” without a concrete test. Split
+independent concerns into separate graders so the result tells you what failed.
+
+## Check the grader
+
+1. Run a test where the agent follows the rule and one where it breaks the rule.
+2. Read the grader's rationale and cited evidence in each simulation's
+   **Results**.
+3. Check cases where the relevant action does not occur, a tool fails, or
+   evidence is missing.
+4. Set the [scope and pass threshold](/guides/configure-graders) for future
+   conversations once the boundary is useful.
+
+The current custom grader form creates an LLM check. It does not accept custom
+code, a model selection, or a free-form numeric scoring scale.
+
+## Reuse or replace a grader
+
+Other projects in your organization can select the definition from
+**Grader library** and choose **Use in project**. Each project sets its own
+scope and pass threshold.
+
+The current editor changes project policy. To change a custom grader's
+instructions, create a new grader with the revised rule and remove the old
+grader from future project use. Start a new run to test the new rule. Earlier
+run evidence retains the original grader definition and threshold.

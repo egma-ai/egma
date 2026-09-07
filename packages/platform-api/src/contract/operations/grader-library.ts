@@ -44,6 +44,8 @@ export const graderLibraryOperations = {
     method: "GET",
     path: "/v1/grader-library",
     summary: "List the grader library for a project",
+    description:
+      "Includes Egma's built-in graders and custom graders from your organization. activeProjectGraderId identifies a definition already in use by this project; null means it can be added.",
     tag: "Graders",
     security: "credentialed",
     request: {
@@ -75,6 +77,8 @@ export const graderLibraryOperations = {
     method: "GET",
     path: "/v1/grader-library/{graderDefinitionId}",
     summary: "Get one grader library entry",
+    description:
+      "Read the current definition or request an exact definitionVersion from historical grade evidence. Setting definitions describe the values needed when adding the grader to a project.",
     tag: "Graders",
     security: "credentialed",
     request: { params: definitionParams, query: definitionReadQuery },
@@ -92,6 +96,8 @@ export const graderLibraryOperations = {
     method: "POST",
     path: "/v1/grader-library/{graderDefinitionId}/use",
     summary: "Use a grader in the current project",
+    description:
+      "Adds an available definition with this project's scope, settings, and pass threshold. These settings apply to future work; adding a grader does not change earlier simulation plans. A definition can be active only once per project. The example settings are for Response latency.",
     tag: "Graders",
     security: "credentialed",
     request: {
@@ -99,9 +105,29 @@ export const graderLibraryOperations = {
       query: projectQuery,
       body: {
         type: "object",
-        properties: projectGraderPolicyInputProperties,
+        properties: {
+          scope: {
+            ...projectGraderPolicyInputProperties.scope,
+            description:
+              "Select all simulations, particular test suites or tests, and/or a production sample from 1 through 100 percent. production: null disables production grading.",
+          },
+          settings: {
+            ...projectGraderPolicyInputProperties.settings,
+            description:
+              "Values required by the definition's settingDefinitions. Use an empty object for a grader with no settings.",
+          },
+          passThreshold: {
+            ...projectGraderPolicyInputProperties.passThreshold,
+            description: "The minimum score for this grader's individual result to pass.",
+          },
+        },
         required: ["scope", "settings", "passThreshold"],
         additionalProperties: false,
+        examples: [{
+          scope: { simulations: [{ kind: "all" }], production: null },
+          settings: { maximum_response_time_ms: 3000 },
+          passThreshold: 1,
+        }],
       },
       bodyRequired: true,
     },
@@ -120,11 +146,7 @@ export const graderLibraryOperations = {
     path: "/v1/grader-library/custom",
     summary: "Create and use a custom LLM grader",
     description:
-      "Creates one organization-owned LLM judge and its current-project policy. " +
-      "The judge is binary, so the body draws its boundary in three parts: what " +
-      "to decide, what answers met, and what answers not_met. The server " +
-      "compiles them into the definition version's one immutable prompt and " +
-      "fixes its type, model, compatible modalities, and empty settings contract.",
+      "Creates a custom LLM grader in your organization's library and activates it in this project. The grader returns 1 when the rule is met, 0 when it is not met, or no score when the evidence is insufficient. Its type and model are supplied by Egma.",
     tag: "Graders",
     security: "credentialed",
     request: {
@@ -134,11 +156,28 @@ export const graderLibraryOperations = {
         properties: {
           name: stringSchema,
           description: nullable(stringSchema),
-          gradingInstructions: stringSchema,
-          passesWhen: stringSchema,
-          failsWhen: stringSchema,
-          scope: projectGraderPolicyInputProperties.scope,
-          passThreshold: projectGraderPolicyInputProperties.passThreshold,
+          gradingInstructions: {
+            ...stringSchema,
+            description: "One rule to decide and the conversation evidence to inspect.",
+          },
+          passesWhen: {
+            ...stringSchema,
+            description:
+              "The evidence that makes the rule pass. Include how to handle a conversation where the checked action never occurs.",
+          },
+          failsWhen: {
+            ...stringSchema,
+            description: "The evidence that makes the rule fail.",
+          },
+          scope: {
+            ...projectGraderPolicyInputProperties.scope,
+            description:
+              "The future simulations and/or production sample this project should grade.",
+          },
+          passThreshold: {
+            ...projectGraderPolicyInputProperties.passThreshold,
+            description: "Use 1 to require this binary check to pass.",
+          },
         },
         required: [
           "name",
@@ -149,6 +188,17 @@ export const graderLibraryOperations = {
           "passThreshold",
         ],
         additionalProperties: false,
+        examples: [{
+          name: "Booking confirmation",
+          gradingInstructions:
+            "Decide whether the agent makes only supported claims about completed bookings. Use the transcript and booking tool results.",
+          passesWhen:
+            "Every booking claim follows a successful booking tool result. If the agent makes no booking claim, the rule is met.",
+          failsWhen:
+            "The agent claims a booking before the tool succeeds, after it fails, or without a booking tool result.",
+          scope: { simulations: [{ kind: "all" }], production: null },
+          passThreshold: 1,
+        }],
       },
       bodyRequired: true,
     },

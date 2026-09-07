@@ -118,7 +118,7 @@ describe("the platform API operation registry", () => {
       expect(shape.required).toContain("env");
     }
 
-    expect(test.properties.mockTools.items).toEqual({
+    expect(test.properties.mockTools.items).toMatchObject({
       oneOf: [
         {
           type: "object",
@@ -142,7 +142,7 @@ describe("the platform API operation registry", () => {
         },
       ],
     });
-    expect(test.properties.env).toEqual({
+    expect(test.properties.env).toMatchObject({
       anyOf: [
         {
           type: "object",
@@ -203,7 +203,7 @@ describe("the platform API operation registry", () => {
   });
 
   it("lets a customer change one project grader's policy", () => {
-    expect(platformOperations.updateGrader.request.body).toEqual({
+    expect(platformOperations.updateGrader.request.body).toMatchObject({
       type: "object",
       properties: {
         scope:
@@ -408,7 +408,7 @@ describe("the platform API operation registry", () => {
     for (const field of ["grades", "gradeHistory", "combinedScore"] as const) {
       expect(simulation.properties[field]).toEqual(trace.properties[field]);
     }
-    expect(simulation.properties.gradingState).toEqual({
+    expect(simulation.properties.gradingState).toMatchObject({
       anyOf: [
         {
           type: "string",
@@ -421,7 +421,7 @@ describe("the platform API operation registry", () => {
       type: "string",
       enum: ["not_requested", "pending", "running", "complete", "error"],
     });
-    expect(simulation.properties.combinedScore).toEqual({
+    expect(simulation.properties.combinedScore).toMatchObject({
       anyOf: [
         { type: "number", minimum: 0, maximum: 1 },
         { type: "null" },
@@ -525,7 +525,7 @@ describe("the platform API operation registry", () => {
     for (const field of ["grading", "verdict", "score", "counts"] as const) {
       expect(simulation.properties).not.toHaveProperty(field);
     }
-    expect(simulation.properties.gradingState).toEqual({
+    expect(simulation.properties.gradingState).toMatchObject({
       anyOf: [
         {
           type: "string",
@@ -534,7 +534,7 @@ describe("the platform API operation registry", () => {
         { type: "null" },
       ],
     });
-    expect(simulation.properties.combinedScore).toEqual({
+    expect(simulation.properties.combinedScore).toMatchObject({
       anyOf: [
         { type: "number", minimum: 0, maximum: 1 },
         { type: "null" },

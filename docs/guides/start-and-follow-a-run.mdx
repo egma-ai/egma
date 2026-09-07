@@ -1,0 +1,67 @@
+---
+title: "Start and follow a run"
+description: "Run a complete test suite and inspect each simulation's evidence and grades."
+---
+
+Before starting, connect a [Retell](/guides/retell) or
+[LiveKit](/guides/livekit) agent and add at least one test to your suite.
+
+## Start from your repository
+
+Run `egma pull` to refresh the agent and connection IDs in `egma/config.yaml`.
+Use the IDs for the agent and connection you want to test:
+
+```bash
+egma run create appointment-booking \
+  --agent "$EGMA_AGENT_ID" \
+  --connection "$EGMA_CONNECTION_ID" \
+  --name "Appointment booking check"
+```
+
+`appointment-booking` names a direct directory under `egma/tests/`.
+`EGMA_AGENT_ID` and `EGMA_CONNECTION_ID` are shell variables you set to the IDs
+from your configuration.
+
+The command pushes your local Egma project changes, starts the run, prints its
+ID and results URL, and returns. A zero exit code means the run started. It does not
+mean that simulation execution or grading passed.
+
+If the pre-run push is refused, no run starts. Resolve the reported test change
+or invalid content first.
+
+## Read the result
+
+Open the printed URL, or open **Runs** in your project and select the run.
+
+1. Check execution progress. Each test and persona combination is one
+   simulation. A simulation can complete, fail to execute, or be canceled.
+2. Select a simulation and open **Results**. Wait for its selected graders to
+   finish, then read each grader's score and individual result.
+3. For **Expected behaviors**, read the statement results. Follow the evidence
+   into **Transcript** to see what the caller, agent, and tools actually did.
+4. Use the transcript and recording, when available, to decide whether to
+   change the agent or the test. Save the change and start another run.
+
+Execution and grading finish separately. A completed run can still have
+grading in progress, and completed execution can include simulations that
+failed to execute. Check individual simulation and grader results.
+
+The combined score is a comparison value. Egma does not assign an overall
+pass/fail result to a run. See [Scores and thresholds](/guides/scores-and-thresholds).
+
+## Cancel a run
+
+Use the run ID printed by the create command:
+
+```bash
+egma run cancel "$EGMA_RUN_ID"
+```
+
+Cancellation does not remove evidence already collected. Inspect the run to
+see which simulations finished and which were canceled.
+
+If the create command is interrupted before it receives an answer, check
+**Runs** before starting another run. The original request may have succeeded.
+
+For an automated wait and release decision, use the API recipe in
+[Automate tests in CI](/guides/automate-tests-in-ci).

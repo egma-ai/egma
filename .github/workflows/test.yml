@@ -110,6 +110,11 @@ jobs:
         # Builds the workspace, then the tests against it, then the web app.
         run: pnpm typecheck
 
+      - name: Check documentation and generated API reference
+        run: |
+          pnpm docs:check
+          pnpm docs:build
+
   fast:
     name: Fast lane
     # Four CPUs guarantee the two Vitest workers below while leaving Postgres,

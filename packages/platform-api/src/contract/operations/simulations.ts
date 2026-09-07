@@ -84,7 +84,10 @@ const transcriptSchema = {
     erroredSpanCount: integerSchema,
     turns: arrayOf(traceSpanReference),
     spans: arrayOf(traceSpanReference),
-    spansTruncated: booleanSchema,
+    spansTruncated: {
+      ...booleanSchema,
+      description: "True when the response's span limit prevented the complete trace tree from being returned.",
+    },
   },
   required: [
     "traceId",
@@ -123,6 +126,7 @@ const planItemSchema = {
 
 const gradingPlanSchema = {
   type: "object",
+  description: "The grader definitions, versions, and pass thresholds frozen when the run started. Regrading uses this selection.",
   properties: {
     state: { type: "string", enum: ["run_start"] },
     capturedAt: dateTimeSchema,
@@ -142,7 +146,10 @@ const simulationSchema = {
     runName: nullable(stringSchema),
     position: integerSchema,
     status: simulationStatusSchema,
-    gradingState: nullable(gradingStateSchema),
+    gradingState: {
+      ...nullable(gradingStateSchema),
+      description: "Grading progress, separate from simulation execution status. Read grades for each grader's result.",
+    },
     ...gradeProjectionProperties,
     reason: nullable(stringSchema),
     executionFailure: nullable(stringSchema),
@@ -164,7 +171,10 @@ const simulationSchema = {
       },
       additionalProperties: false,
     },
-    metrics: arrayOf(metricSchema),
+    metrics: {
+      ...arrayOf(metricSchema),
+      description: "Observed facts about the conversation, such as latency and duration. Metrics are separate from grader results.",
+    },
     test: {
       type: "object",
       properties: {
@@ -255,7 +265,10 @@ const simulationSchema = {
       additionalProperties: false,
     },
     gradingPlan: nullable(gradingPlanSchema),
-    transcript: nullable(transcriptSchema),
+    transcript: {
+      ...nullable(transcriptSchema),
+      description: "The conversation and tool evidence available for this simulation. Null when no trace is available.",
+    },
   },
   required: [
     "id",
@@ -287,7 +300,11 @@ const simulationSchema = {
   additionalProperties: false,
 } as const;
 
-const simulationParams = parameters({ simulationId: stringIdSchema }, [
+const simulationParams = parameters({ simulationId: {
+  ...stringIdSchema,
+  description: "Simulation ID returned by List simulations in a run.",
+  examples: ["sim_01M0E4J0BBE1FVDVTZ1BSS5C97"],
+} }, [
   "simulationId",
 ]);
 const projectQuery = parameters({ projectId: stringIdSchema });
@@ -298,12 +315,17 @@ export const simulationOperations = {
     method: "GET",
     path: "/v1/simulations/{simulationId}",
     summary: "Get a simulation",
+    description:
+      "Read one test-and-persona execution, its pinned test and persona, connection snapshot, metrics, " +
+      "transcript, and grades. Execution status and gradingState are separate: a completed simulation may " +
+      "still be grading. Inspect each grade's result and details for the verdict and evidence. " +
+      "The combinedScore is a display value, not an overall pass/fail decision.",
     tag: "Simulations",
     security: "credentialed",
     request: { params: simulationParams, query: projectQuery },
     responses: {
       200: {
-        description: "The simulation and all of its evidence.",
+        description: "The simulation and its available evidence. Check spansTruncated before treating the returned span tree as complete.",
         schema: simulationSchema,
       },
       400: refusalResponse,
@@ -319,6 +341,12 @@ export const simulationOperations = {
     method: "POST",
     path: "/v1/simulations/{simulationId}/regrade",
     summary: "Regrade a simulation",
+    description:
+      "Queue grading again for a completed simulation that has a recorded trace and a non-empty frozen " +
+      "grader selection. Send no request body. Egma runs the complete grader selection captured at run start " +
+      "against the same evidence; it does not rerun the conversation or apply later grader configuration changes. " +
+      "Previous grades remain in gradeHistory. If grading is already pending or claimed, no duplicate job is queued. " +
+      "Read Get a simulation to follow gradingState and retrieve the new grades. Requires write access.",
     tag: "Simulations",
     security: "credentialed",
     request: {
@@ -327,16 +355,27 @@ export const simulationOperations = {
     },
     responses: {
       200: {
-        description: "The grading work that was requested.",
+        description: "The grading request was accepted. The response does not wait for new grades.",
         schema: {
           type: "object",
           properties: {
-            simulationId: stringIdSchema,
-            reopened: integerSchema,
-            alreadyWaiting: integerSchema,
+            simulationId: { ...stringIdSchema, description: "The simulation whose existing trace will be graded." },
+            reopened: {
+              ...integerSchema,
+              description: "1 if an existing finished grading job was reopened; 0 otherwise. A newly created job can also return 0.",
+            },
+            alreadyWaiting: {
+              ...integerSchema,
+              description: "1 if grading was already pending or claimed, so no duplicate job was created; 0 otherwise.",
+            },
           },
           required: ["simulationId", "reopened", "alreadyWaiting"],
           additionalProperties: false,
+          examples: [{
+            simulationId: "sim_01M0E4J0BBE1FVDVTZ1BSS5C97",
+            reopened: 1,
+            alreadyWaiting: 0,
+          }],
         },
       },
       400: refusalResponse,

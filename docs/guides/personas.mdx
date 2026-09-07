@@ -1,0 +1,65 @@
+---
+title: "Personas"
+description: "Choose the person who acts out each test scenario."
+---
+
+A persona supplies the caller's identity, personality, language, and speech
+settings. The test supplies the situation. Reuse a persona across tests when
+you want the same kind of caller in different situations.
+
+## Use an existing persona
+
+List the personas available to the repository's project:
+
+```bash
+egma persona list
+```
+
+Egma includes **Everyday caller**, a patient, cooperative caller. Add the name
+to your test's front matter:
+
+```yaml
+personas:
+  - name: Everyday caller
+```
+
+Every test must name at least one persona. Adding a second persona creates a
+second simulation for that test in each run.
+
+On push, Egma resolves a name to its persona ID. Pulled files include that ID.
+Keep it when you edit the test. If two personas have the same name, use the ID
+from `egma persona list` to select the one you mean.
+
+## Create a persona
+
+Open **Personas** in your project and select **New persona**.
+
+1. Enter a **Name** that your team can recognize, such as `Caller in a hurry`.
+2. Set **Identity name** to the name the caller gives the agent, such as
+   `Morgan Chen`.
+3. Write a **Personality** that describes how the caller acts. For example:
+   `Answers briefly, asks for the earliest appointment, and asks the agent to
+   get to the point if it repeats a question. Remains polite.`
+4. Choose the **Language** and review the language, speech-to-text, and
+   text-to-speech models. Use the supplied choices, then set the voice and
+   speech rate if the test needs them.
+5. Select **Create persona**, run `egma persona list`, and add the persona to
+   your test.
+
+Keep the caller's goal in the scenario. Keep lasting traits in the persona.
+The library **Name** is for your team; **Identity name** is what the agent hears.
+
+To start from an existing persona, open its menu and select **Fork**. This
+creates a custom persona you can edit. Egma's provided personas are read-only.
+
+## Understand changes and versions
+
+Changing a persona's identity, personality, language, or model settings creates
+a new immutable version. Renaming the library entry or changing its description
+does not change its behavior version.
+
+Tests select persona identities. A new run uses each selected persona's current
+version and stores that version with the simulation. Earlier simulations keep
+the original identity, behavior, and model settings that they ran with.
+
+After changing a persona, start a new run to test the new behavior.
