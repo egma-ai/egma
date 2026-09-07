@@ -291,11 +291,18 @@ describe("the Retell lanes migration over a populated database", () => {
     expect(String(refused)).toMatch(/connection_type_allowed/u);
   });
 
-  it("is a clean cut: nothing but the connection row's own check gates the value", async () => {
+  it("is a clean cut: only rows that record the lane carry a check on it", async () => {
     // The ticket's claim, checked against the live catalog rather than taken on
-    // trust. A second gate anywhere — a check on the evidence side, a column of
-    // its own, an enum, a domain — would refuse the new kinds at the first
-    // write on a customer's database and nowhere earlier.
+    // trust. An enum or a domain would refuse the new kinds at the first write
+    // on a customer's database and nowhere earlier, and neither exists.
+    //
+    // **Two checks now, and the second one arrived on purpose.** A simulation
+    // records the lane it ran over, frozen at execution, so a month's usage is
+    // answerable from the row alone — see migration 0009. It is a second copy
+    // of the value list in the database and not a second source of it: both
+    // checks are generated from `CONNECTION_TYPES` in `schema/agents.ts`, so
+    // adding a lane still changes one declaration and one migration writes
+    // both. What this test refuses is a gate nobody declared.
     const { rows: checks } = await store.sql<{
       on_table: string;
       conname: string;
@@ -311,13 +318,19 @@ describe("the Retell lanes migration over a populated database", () => {
       // gate on the connection type.
       "connection.connection_access_variant_allowed",
       "connection.connection_type_allowed",
+      // And the conversation's own frozen copy of the lane it ran over.
+      "simulation.simulation_connection_type_allowed",
     ]);
 
     const { rows: columns } = await store.sql<{ table_name: string }>(
       `select table_name from information_schema.columns
-        where column_name = 'connection_type'`,
+        where column_name = 'connection_type'
+        order by table_name`,
     );
-    expect(columns.map((row) => row.table_name)).toEqual(["connection"]);
+    expect(columns.map((row) => row.table_name)).toEqual([
+      "connection",
+      "simulation",
+    ]);
 
     const { rows: enums } = await store.sql(
       "select 1 from pg_type t join pg_enum e on e.enumtypid = t.oid",

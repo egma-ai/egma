@@ -27,6 +27,8 @@ import {
   type Queryable,
   type Transaction,
 } from "../client.ts";
+import { allowanceKindOf } from "../billing/allowance.ts";
+import { billing } from "../billing/ports.ts";
 import { planGroupsFor } from "../grading/plan.ts";
 import {
   agent,
@@ -616,6 +618,36 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
       if (reached === undefined) refuseRun("no_such_connection", `there is no active connection ${input.connectionId} on agent ${input.agentId}`);
       if (!connectionIsConductable(reached.connectionType, reached.accessVariant, reached.modality)) {
         refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionType, reached.modality));
+      }
+      // **The deployment is asked once whether this may begin, and this is the
+      // moment.** The connection is now known, so the kind of work the whole
+      // suite is about to do is known — every conversation in a run goes over
+      // one connection — and nothing has been written yet, so a refusal leaves
+      // no run behind to explain. It sits beside `no_adapter` because it is
+      // the same shape of answer one step further on: that one is *this build
+      // cannot*, this one is *not now*.
+      //
+      // A deployment with no billing answers yes without reaching anything, so
+      // this costs a promise and nothing else. The claim path asks again, per
+      // organization per batch, because a run admitted an hour ago can outlive
+      // the allowance that admitted it.
+      const decision = await billing().entitlements.mayStart({
+        organizationId: auth.organizationId,
+        allowances: [
+          allowanceKindOf({
+            modality: reached.modality as Modality,
+            connectionType: reached.connectionType as ConnectionType,
+          }),
+        ],
+      });
+      if (!decision.allowed) {
+        // The refusal's own sentence, whole and relayed word for word: it was
+        // written to be shown and it names the next move, which is a thing
+        // this module has no way to word.
+        refuseRun(
+          "allowance_spent",
+          decision.refusals.map((refusal) => refusal.message).join(" "),
+        );
       }
       // A kind whose run start reads the agent's platform carries two demands
       // that a kind reading nothing does not, and both live here so they are

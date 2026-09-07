@@ -15,14 +15,23 @@
 -- column and not a `cloud_` one on purpose: which lane a conversation ran over
 -- is a product fact every deployment records.
 --
+-- The lifecycle guard is stood down for the backfill and put straight back.
+-- It refuses every update to a terminal simulation, which is exactly right for
+-- the product — a completed conversation is written once — and exactly wrong
+-- for a migration filling in a column that did not exist when the row was
+-- written. Both statements are inside this file's transaction, so a failure
+-- anywhere in it leaves the guard on.
+--
 -- The index is the usage read's own shape: one organization's conversations
 -- that began inside a period.
 
 ALTER TABLE "simulation" ADD COLUMN "connection_type" text;--> statement-breakpoint
+ALTER TABLE "simulation" DISABLE TRIGGER "simulation_lifecycle_guard";--> statement-breakpoint
 UPDATE "simulation"
   SET "connection_type" = "connection"."connection_type"
   FROM "connection"
   WHERE "connection"."id" = "simulation"."connection_id";--> statement-breakpoint
+ALTER TABLE "simulation" ENABLE TRIGGER "simulation_lifecycle_guard";--> statement-breakpoint
 ALTER TABLE "simulation" ALTER COLUMN "connection_type" SET NOT NULL;--> statement-breakpoint
 CREATE INDEX "simulation_organization_id_started_at_idx" ON "simulation" USING btree ("organization_id","started_at");--> statement-breakpoint
 ALTER TABLE "simulation" ADD CONSTRAINT "simulation_connection_type_allowed" CHECK ("simulation"."connection_type" in ('retell_chat_api', 'retell_text_mode', 'retell_web_call', 'phone_number', 'livekit_room'));

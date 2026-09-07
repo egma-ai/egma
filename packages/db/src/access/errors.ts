@@ -121,13 +121,22 @@ export class RunWriteRefusedError extends Error {
  *   or malformed, or a persona a current version names is unavailable.
  * - `already_finished` — a cancel arrived after the run had finished, so there
  *   was nothing left to cancel and the caller missed.
+ * - `allowance_spent` — the deployment's entitlement source will not let this
+ *   organization start this kind of work now. Its own reason rather than
+ *   `not_admitted`, because nothing is wrong with the request: the same words
+ *   sent next month start the run, and the next move is a plan or a wait
+ *   rather than an edit. A deployment with no billing never produces one. It
+ *   is answered as an unprocessable refusal today, like every reason with no
+ *   answer of its own; the surface that links it to a billing page arrives
+ *   with the adapter that can raise it.
  */
 export type RunWriteRefusal =
   | "no_such_connection"
   | "connection_not_on_agent"
   | "no_adapter"
   | "not_admitted"
-  | "already_finished";
+  | "already_finished"
+  | "allowance_spent";
 
 /**
  * The person being invited is already in an organization.

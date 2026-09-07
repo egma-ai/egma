@@ -27,6 +27,8 @@ import type {
   UsageMeasurement,
   UsagePaymentSource,
 } from "../schema/billing.ts";
+import { billing } from "../billing/ports.ts";
+import type { StoredUsageRecord } from "../billing/ports.ts";
 import { authorize } from "./permissions.ts";
 import type { AuthContext } from "./context.ts";
 import { inActingProject, theOrganization, within } from "./within.ts";
@@ -358,12 +360,64 @@ export async function recordProviderUsage(
     .insert(usageRecord)
     .values(values)
     .onConflictDoNothing({ target: usageRecord.dedupeKey })
-    .returning({ amountMicros: usageRecord.amountMicros });
+    .returning({
+      id: usageRecord.id,
+      organizationId: usageRecord.organizationId,
+      projectId: usageRecord.projectId,
+      occurredAt: usageRecord.occurredAt,
+      provider: usageRecord.provider,
+      model: usageRecord.model,
+      paymentSource: usageRecord.paymentSource,
+      amountMicros: usageRecord.amountMicros,
+    });
+
+  await handToTheUsageSink(
+    stored.map((row) => ({
+      ...row,
+      paymentSource: row.paymentSource as UsagePaymentSource,
+    })),
+  );
 
   return {
     stored: stored.length,
     amountMicros: stored.reduce((all, row) => all + row.amountMicros, 0),
   };
+}
+
+/**
+ * Hand what was actually stored to the deployment's usage sink.
+ *
+ * **Only what was stored, which is what makes a resend safe.** The insert is
+ * `on conflict do nothing` on the deterministic identity, so a second delivery
+ * of the same measurement returns no rows and the sink hears nothing — an
+ * adapter that charges a balance for what it receives therefore cannot charge
+ * twice for one provider request, without knowing anything about resends.
+ *
+ * **A sink that fails must never fail the write.** The rows are already
+ * committed when this runs, so a failing sink has lost a delivery and not a
+ * fact: everything it would have done can be rebuilt from `usage_record`,
+ * which is exactly why the records are the product's and the charging is not.
+ * The alternative — letting the failure out — would turn a billing outage into
+ * a simulator that cannot record what it spent, which is the one thing this
+ * table exists to make impossible.
+ *
+ * It is reported rather than swallowed, on standard error, because this
+ * package has no logger of its own and a delivery that silently stopped
+ * happening is a bill nobody is sending.
+ */
+async function handToTheUsageSink(
+  stored: readonly StoredUsageRecord[],
+): Promise<void> {
+  if (stored.length === 0) return;
+  try {
+    await billing().usage.receive(stored);
+  } catch (fault) {
+    console.error(
+      `the usage sink refused ${stored.length} stored usage record(s); ` +
+        `they are stored and can be replayed from usage_record`,
+      fault,
+    );
+  }
 }
 
 /**
