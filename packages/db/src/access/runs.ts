@@ -631,6 +631,12 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
       // this costs a promise and nothing else. The claim path asks again, per
       // organization per batch, because a run admitted an hour ago can outlive
       // the allowance that admitted it.
+      //
+      // It is asked inside this transaction, which holds the suite. That is
+      // deliberate and it is cheap: an adapter that answers this is reading
+      // one of its own indexed rows, next to a transaction that already reads
+      // every test in the suite and writes a row per conversation. What it
+      // buys is that a refusal rolls back rather than racing a suite edit.
       const decision = await billing().entitlements.mayStart({
         organizationId: auth.organizationId,
         allowances: [
@@ -643,10 +649,19 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
       if (!decision.allowed) {
         // The refusal's own sentence, whole and relayed word for word: it was
         // written to be shown and it names the next move, which is a thing
-        // this module has no way to word.
+        // this module has no way to word. An adapter that refused and said
+        // nothing still gets a sentence, because a person meets this one and
+        // an empty refusal is the worst answer of all.
+        const said = decision.refusals
+          .map((refusal) => refusal.message.trim())
+          .filter((message) => message !== "")
+          .join(" ");
         refuseRun(
           "allowance_spent",
-          decision.refusals.map((refusal) => refusal.message).join(" "),
+          said === ""
+            ? "This organization cannot start this kind of work right now. " +
+                "Check its plan and usage under Settings."
+            : said,
         );
       }
       // A kind whose run start reads the agent's platform carries two demands

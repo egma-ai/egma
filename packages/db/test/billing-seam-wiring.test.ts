@@ -224,6 +224,30 @@ describe("run start asks the entitlement source", () => {
     expect(rows[0]?.started).toBe("0");
   });
 
+  it("still says something when an adapter refuses and words nothing", async () => {
+    // A person meets this sentence. An adapter that refused with an empty
+    // message would otherwise hand them a blank refusal, which is the worst
+    // answer of all.
+    const ready = await readyToRun(acme);
+    restore = installBillingPlugIn({
+      ...openBillingPlugIn(),
+      entitlements: {
+        mayStart: () => Promise.resolve({ allowed: false, refusals: [] }),
+        mayPlatformKeyFund: openEntitlementSource().mayPlatformKeyFund,
+      },
+    });
+
+    const refused = await startRun(sessionOf(acme), {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    }).catch((fault: unknown) => fault);
+
+    expect(refused).toBeInstanceOf(RunWriteRefusedError);
+    expect((refused as RunWriteRefusedError).message.trim()).not.toBe("");
+  });
+
   it("starts exactly as before when nothing is installed", async () => {
     // The acceptance criterion, stated: with no billing adapter in place the
     // run is the run it always was.
