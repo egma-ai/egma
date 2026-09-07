@@ -1,15 +1,7 @@
 /**
- * What every command does when this machine's keys file cannot be used.
- *
- * egma refuses to write over a keys file it cannot read, which is right — a
- * damaged file can be repaired and one egma has overwritten cannot. But a
- * refusal only counts as a refusal if it reaches the developer. Reaching them
- * as an unhandled exception means a Node stack trace, a `[cause]` dump of the
- * JSON parser's own words, and exit 1 in place of the verb's own answer, which
- * is neither readable by a person nor branchable by a coding agent.
- *
- * So it is checked here through real processes, on every verb that reads the
- * file, because only one of the five paths through `main` used to catch.
+ * Run each credential-reading command against unusable keys files.
+ * Require a clear command refusal without overwriting the file, exposing parser
+ * details, or emitting an unhandled stack trace.
  */
 
 import { spawn } from "node:child_process";
@@ -140,14 +132,8 @@ it("leaves the damaged file exactly as it was, on every one of them", async () =
 });
 
 /**
- * The other way a keys file stops a command: it is there, it is perfectly
- * well-formed, and this machine cannot open it.
- *
- * Told the same way as a damaged one, because it is the same fact about the
- * same file — and proved through the real command rather than reasoned about,
- * because the value of a refusal is entirely in whether it arrives.
- *
- * Skipped only for a user who can read anything, which cannot be staged for.
+ * Verify a real command reports an unreadable but valid keys file.
+ * Skip users whose privileges bypass the staged permission failure.
  */
 it.skipIf(process.getuid?.() === 0)(
   "says the same thing about a keys file it cannot open",

@@ -1,36 +1,13 @@
-# A whole simulation, with no database and no control plane.
-#
-# `docker compose up` starts no workbench, deliberately: a self-hoster's
-# simulator claims from the real control plane and from nothing else. This
-# file is for the other case — seeing the simulator claim fixtures and report
-# completions or refusals before there is anything to trigger one. A successful
-# real voice or phone proof starts a platform run, which supplies real provider
-# credentials and the carrier route through the production claim path.
-#
+# Run the simulator against a fixture control plane:
 #   docker compose -f docker-compose.yml -f docker-compose.workbench.yml \
 #     up --build simulator workbench
 #
-# It adds one container — the workbench, a fake control plane speaking the
-# same contract from the spec fixtures already inside the image — and
-# points the simulator at it instead of the API. The workbench names the
-# same Dockerfile as the simulator, so Compose builds it a second time and
-# tags a second image; every step of that second build is a cache hit on
-# the first, and nothing is installed or downloaded twice.
+# This replaces the API dependency but retains the bundled recording store.
+# It requires Compose support for !override. Real provider and phone acceptance
+# use platform runs with credentials and carrier routes from the claim path.
 #
-# Naming the two services is what keeps Postgres, ClickHouse, the API and
-# the web application out of it: the simulator's dependency on the API is
-# replaced below rather than added to, because a demo that needs two
-# databases running is not the demo the workbench exists to be. Replacing
-# it takes the `!override` tag, which Compose has had since 2.24 — this is
-# the one thing in this repository that asks for a version, and it asks
-# only of whoever wants the demo.
-#
-# Watch the workbench's log. Every claim, heartbeat, report and refusal
-# prints as one JSON line the moment it happens, which is a simulation
-# going queued → claimed → running → completed in front of you. The same
-# is readable at http://localhost:8085/workbench/records, where
-# `POST /workbench/specs` queues another spec and
-# `POST /workbench/simulations/<id>/cancel` stops one mid-exchange.
+# Inspect /workbench/records on localhost:8085. POST /workbench/specs queues
+# a spec; POST /workbench/simulations/<id>/cancel requests cancellation.
 
 services:
   workbench:

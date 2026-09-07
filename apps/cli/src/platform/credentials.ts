@@ -1,13 +1,7 @@
 /**
- * The keys Egma mints for this machine, keyed by platform origin.
- *
- * One file in the developer's home folder is readable by nobody else. Each key
- * stays beside the normalized origin that minted it. The file never chooses a
- * repository target; the repository binding does that.
- *
- * The folder is resolved rather than assumed. That is what lets a test and a
- * check against a real instance each run a whole login without ever reading or
- * writing the credentials of the person running them.
+ * Store machine login keys by normalized platform origin in a private home file.
+ * Repository bindings select targets; this file does not. Resolve the home path
+ * through the test seam to avoid touching real credentials in tests.
  */
 
 import { randomBytes } from "node:crypto";
@@ -48,16 +42,7 @@ import { normalizePlatformOrigin } from "./url.ts";
  */
 export const DEFAULT_PLATFORM_URL = "https://app.egma.ai";
 
-/**
- * A test seam, not product surface: this stands in for the built-in address
- * while a check runs, so the suite never signs in to the real hosted egma.
- *
- * It is not documented and it is not stable — the same treatment `main.ts`
- * gives the `-- <command>` seam that starts a scripted coding agent in place of
- * a real one. It is not a way for a developer to select a platform either:
- * `--url` is the one way to do that, and it sits above the built-in address in
- * the order rather than replacing it.
- */
+/** Test-only hosted-address override. Product platform selection uses --url. */
 export const TEST_DEFAULT_URL_VARIABLE = "EGMA_TEST_DEFAULT_URL";
 
 /** Which built-in address this run uses: egma's own, or a check's stand-in. */
@@ -219,18 +204,8 @@ function entriesIn(raw: string, file: string): CredentialEntries {
 }
 
 /**
- * The keys file's bytes, or `null` when there is no keys file yet.
- *
- * **Only `ENOENT` means nobody has signed in here.** Every other way a read can
- * fail — a permission change, a directory standing where the file goes, a
- * machine out of descriptors — means the keys are there and egma cannot see
- * them, which is the one thing that must never be mistaken for an empty file.
- * The write below merges what this returns, so a read that quietly answered
- * nothing would be every other platform's key deleted by the next login.
- *
- * Both callers go through here rather than each opening the file themselves,
- * because this distinction is exactly the kind that gets fixed on one path and
- * left on the other.
+ * Return null only for ENOENT. Other read failures must stop the write,
+ * otherwise merging with an assumed empty file would delete other platform keys.
  */
 async function bytesOf(file: string): Promise<string | null> {
   try {
@@ -270,18 +245,8 @@ const LOCK_WAIT_MS = 5_000;
 const LOCK_STALE_MS = 30_000;
 
 /**
- * Hold the file while it is read, merged and replaced.
- *
- * The write is a read-modify-write over everybody's keys, so two of them
- * running together is one platform's key being dropped: both read the same
- * file, both merge their own entry into it, and the second rename wins. Two
- * terminals in two repositories signing in at once is an ordinary Tuesday, and
- * the loser finds out the next time a command says "not signed in".
- *
- * A neighbouring file taken with `wx` is the whole mechanism, because `wx` is
- * one atomic question the filesystem answers for exactly one caller. A lock
- * left behind by something that died is taken over once it is plainly old, so
- * a crash cannot lock a developer out of signing in.
+ * Lock the read/merge/replace operation with atomic wx creation of a neighboring file.
+ * Concurrent logins must not overwrite each other's keys. Reclaim old abandoned locks.
  */
 async function whileLocked<T>(file: string, work: () => Promise<T>): Promise<T> {
   const lock = `${file}.lock`;
@@ -363,18 +328,9 @@ async function replaceCredentialsFile(
 }
 
 /**
- * Write the key, owner-readable and no wider.
- *
- * The key is written to a fresh file beside the target and renamed over it,
- * which is the only way to be sure of the mode it lands with. `writeFile` with
- * a mode applies that mode when it *creates* a file and never afterwards, so
- * writing straight at the target would put the key inside whatever was already
- * there, keeping whatever that was readable by — and if the target is a symlink
- * it would put the key wherever the link points. A rename replaces the name
- * itself, symlink and all, and it either happened or it did not, so no reader
- * ever sees half a file.
- *
- * The new file is created with `wx`, so it is this run's file or nothing.
+ * Create an owner-only temporary file with wx, then atomically rename it over
+ * the target. This replaces symlinks and old permissions without following them,
+ * and readers never see a partial key file.
  */
 export async function writeCredentials(
   file: string,
@@ -505,29 +461,9 @@ const SOURCE_NAMES: Record<PlatformSource, string> = {
 };
 
 /**
- * Which egma this command talks to, and which of the three places said so.
- *
- * Said on the command beats committed in the repository beats egma's own: one
- * explicit way to name a platform per invocation, one committed way per
- * repository, one default, and nothing else. A machine-level login never
- * chooses a repository target.
- *
- * There was a fourth place: an environment variable that was a second name for
- * `--url` over a whole shell. Two ways to say one thing is two answers to
- * "which egma is this" to keep straight — in a refusal, in a `--help` line, and
- * in the head of whoever is debugging — so the shell-wide one went and the flag
- * stayed. What it was for is served better by the rung below it: a script or a
- * container that cannot type a flag on each command binds the repository once
- * with `egma init --url`, and a binding is a committed file that travels with
- * the checkout rather than a shell nobody else has.
- *
- * The source travels with the address because a refusal that names the wrong
- * platform sends a developer to fix something they did not ask for: told to
- * start the platform this repository is bound to when what they actually named
- * on the command line is the one that is down.
- *
- * An address a person typed is checked here, at the edge that takes it, and a
- * bad one is refused by name rather than carried into the flow.
+ * Choose platform origin in order: --url, repository binding, built-in default.
+ * Machine login state does not select a target. Validate explicit addresses and
+ * retain the source so errors point to the setting the developer used.
  */
 export function selectPlatform(choice: PlatformChoice): SelectedPlatform {
   const named: readonly [PlatformSource, string | null | undefined][] = [
@@ -565,20 +501,9 @@ export type PlatformAccess = {
 };
 
 /**
- * A bound repository was pointed at a different address than the one it
- * recorded, whoever is answering there.
- *
- * A new address is still a change to a committed file that a developer must
- * make on purpose rather than have made for them.
- *
- * The sentence offers two edits that contradict each other — change the
- * platform origin, or delete the whole platform block — so it says which one
- * belongs to which situation. Under ADR-0007 a refusal that holds both without
- * a condition is one a coding agent cannot act on.
- *
- * The block under it is attached only when a developer really is being told no
- * about another platform. `binding` as the source would be the binding refusing
- * itself, which is not a move and must never end with four deletions.
+ * Explain an explicit address that differs from the committed binding.
+ * Distinguish changing the address of the same platform from moving to another.
+ * Attach move instructions only for an actual override, never for binding selection itself.
  */
 export class BoundPlatformAddressError extends Error {
   constructor(binding: PlatformBinding, source: PlatformSource, selected: string) {
@@ -590,27 +515,8 @@ export class BoundPlatformAddressError extends Error {
 }
 
 /**
- * The folder holds identifiers from a platform it no longer names.
- *
- * The half-applied move, refused rather than acted on. Deleting the platform
- * block is one edit; deleting the identifiers it was keeping in place is four
- * more. Between those two moments the repository names nothing and still holds
- * everything, and ADR-0008's rule is that those identifiers cannot silently
- * cross a platform boundary.
- *
- * **The deleted line is the one that said which platform they belong to**, so
- * once it is gone there is no address egma can safely send them to — not the
- * built-in one it would have chosen, and not one somebody types either. That is
- * why this cannot end by offering to use another platform, and why the two ways
- * out are the only two there are: put the line back, or take the identifiers
- * out. Both are named, because somebody who deleted that block by mistake is
- * not making the move at all and must not be told to throw away four working
- * identifiers to recover from a typo. The block is committed, which is exactly
- * what makes putting it back an ordinary thing to do.
- *
- * It ends with the same list every other refusal about moving ends with,
- * because the developer is in the middle of exactly that list: what they need
- * next is the rest of it, not a new set of words for the same five lines.
+ * Refuse stored resource IDs without a platform binding. Their issuing platform
+ * is unknown even with --url, so restore the binding or remove the IDs before moving.
  */
 export class UnboundPlatformIdentifiersError extends Error {
   constructor(held: readonly string[]) {
@@ -725,16 +631,7 @@ export type ChosenPlatform = SelectedPlatform & {
   readonly credentialsFile: string;
 };
 
-/**
- * Which egma, chosen without asking anybody anything.
- *
- * Separate from the read that follows it so address selection can be refused
- * before any network work begins.
- *
- * Everything refused here is refused on what is already on this machine — a bad
- * address, an unreadable config, a bound repository pointed somewhere else — so
- * none of it costs a request.
- */
+/** Select and validate the target using local settings before any network request. */
 export async function choosePlatform(choice: {
   readonly env: NodeJS.ProcessEnv;
   /** `--url`, when one was given. */
@@ -764,21 +661,8 @@ export async function choosePlatform(choice: {
     throw new BoundPlatformAddressError(binding, selected.source, selected.url);
   }
 
-  // And refused before anybody is asked anything for the other direction: a
-  // folder that names no platform and is still holding one platform's
-  // identifiers.
-  //
-  // Whichever of the two places named the address, because the question this
-  // asks is about the folder and not about the address. Once the platform block
-  // is gone, egma cannot tell the platform that issued these identifiers from
-  // any other — that is the one fact the deleted line held — so there is no
-  // address it can safely send them to, including one somebody typed. Refusing
-  // only the address egma chose would also be the wrong half: somebody moving a
-  // repository types `--url` mid-move, which is exactly when this is true.
-  //
-  // A folder with no identifiers at all is untouched, which is what keeps
-  // `egma init`'s own output — a bare `platform:` line and three names —
-  // working exactly as it did.
+  // Refuse resource IDs without a platform binding even when --url is explicit.
+  // A new folder without IDs can still initialize normally.
   if (binding === null && committed !== null) {
     const held = platformOwnedIds(committed.config, committed.suiteIds);
     if (held.length > 0) throw new UnboundPlatformIdentifiersError(held);

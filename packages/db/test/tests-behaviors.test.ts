@@ -18,20 +18,9 @@ import {
 } from "./support/test-factory.ts";
 
 /**
- * What a test version holds as content, now that it holds one thing fewer: the
- * scenario, the expected behaviors — an ordered list of plain sentences — and
- * the mock overrides. Behaviors mint a version when they change and round-trip
- * in the order they were authored.
- *
- * **The graders a version named left with the junction.** A test names none, so
- * there is nothing here to round-trip and no array for an edit to move between;
- * which project graders grade a simulation is resolved from their scopes,
- * tested where those live. What remains of that half is the case below
- * proving a read carries no graders at all — the removal, asserted rather than
- * assumed from a type that no longer has the field.
- *
- * Raw SQL appears once, in the version somebody wrote while behaviors carried
- * priorities, which no seam can write any more.
+ * Expected behaviors retain order and create a version when changed.
+ * Tests do not select graders; project grader scopes determine selection.
+ * Raw SQL creates legacy behavior objects to test read compatibility.
  */
 
 let database: MigratedDatabase;

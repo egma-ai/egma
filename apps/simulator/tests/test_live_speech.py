@@ -1,29 +1,7 @@
-"""One real voice exchange through real speech providers — opt-in.
-
-Everything else in this suite speaks the scripted codec, which proves the
-pipeline carries audio and nothing at all about a provider. This file is
-the other half: a whole voice simulation whose persona speaks with a
-Cartesia voice and hears with Deepgram's ears, conducted the way the
-local workbench story conducts one — a real simulator process, and every
-assertion read back off the
-records it reported.
-
-No telephony is involved. The counterpart is the loopback's echo test
-line, so what the persona says in a real voice is what comes back for
-real ears to read, and the whole round trip is provable without dialling
-anybody.
-
-The Deepgram leg is also proved on its own in ``test_live_deepgram.py``.
-
-It is opt-in because CI holds no provider account. With no credentials in
-the environment it skips — visibly, never failing, never waiting on
-anybody::
-
-    DEEPGRAM_API_KEY=... CARTESIA_API_KEY=... \\
-    uv run pytest tests/test_live_speech.py -v
-
-``TEST_DEEPGRAM_API_KEY`` and ``TEST_CARTESIA_API_KEY`` are read first,
-for a machine that keeps its test credentials apart from its working ones.
+"""Opt-in Cartesia TTS and Deepgram STT test through the loopback echo transport.
+Run with provider keys set: uv run pytest tests/test_live_speech.py -v
+TEST_DEEPGRAM_API_KEY and TEST_CARTESIA_API_KEY take precedence.
+No phone call is placed. Missing keys produce a skip.
 """
 
 from __future__ import annotations

@@ -1,41 +1,10 @@
 name: Tests
 
-# What runs, and when.
-#
-# Every pull request gets the cheap lane: lint, typecheck, and `test:fast` —
-# the unit, database, API, grader, CLI and web tests, with no Chrome and no web
-# application. That is the loop a change is written in, and it is what a review
-# needs to see.
-#
-# A pull request **into `main`** gets everything: the cheap lane plus the
-# real-browser proof, the simulator tests, the SDK tests and the fixture
-# tests. That is the handoff gate, and nothing in it is allowed to skip.
-#
-# A push to `main` runs the same jobs again on the tree `main` now owns.
-# One `Deploy` job then waits for all of them. This keeps the test names identical
-# on pull requests and main, and gives production one gate and one owner.
-#
-# The split is deliberate rather than thrifty. An effort lands as a dozen pull
-# requests into one integration branch and then one pull request from that
-# branch into `main`. Running the browser proof and separate SDK suites on each
-# of the dozen would pay for the complete proof twelve times and gate on it
-# once — which is the wrong way round. So the trigger is broad and the scope
-# depends on the branch being merged into: `github.base_ref`, which on a pull
-# request is the branch the change is going to.
-#
-# `vitest.config.ts` owns what each lane selects, as two Vitest projects. The
-# fast lane declares no `include` — it is Vitest's own default search minus the
-# one real-browser file — so a new test file joins it by existing. Every run
-# prints its lane and Vitest labels each file with the project it came from, so
-# a green tick can always be read back to the proof it stands for.
-#
-# Every job runs on a Blacksmith runner, which the organization already pays
-# for and which carries GitHub's own runner image — so docker, the compose
-# services and the official cache actions all behave as they did. One thing it
-# does not carry is `node-gyp`, which this repository needs to install at all;
-# `.github/native-toolchain.sh` is that gap and nothing else. The release
-# workflow beside this one stays on `ubuntu-latest` on purpose: it holds npm
-# publishing authority, and moving that is a separate decision.
+# All pull requests run lint, typecheck, and the fast tests. Pull requests
+# into main and pushes to main also run browser, simulator, SDK, and fixture
+# tests. Deployment on main waits for the required jobs.
+# Vitest defines test discovery and separates the browser acceptance file.
+# CI uses the native-toolchain script when dependencies need compilation.
 
 on:
   pull_request:
@@ -142,16 +111,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Install uv and sync the simulator
-        # The fast lane is not all TypeScript. `apps/api/test/simulator-
-        # conversation.test.ts` spawns the real shipped simulator — `uv run
-        # --frozen egma-simulator`, in `apps/simulator` — and drives a run
-        # through it to a verdict. Without uv that child never starts, and the
-        # pass waits sixty seconds for a simulation nothing was ever going to
-        # conduct.
-        #
-        # The sync is separate so the Python install is paid here rather than
-        # inside that sixty-second window. It is the same pair of steps
-        # `egma-dev-setup` runs on a developer's machine.
+        # The fast lane starts the shipped Python simulator in an API integration
+        # test. Install and sync it here so dependency setup does not consume the
+        # test's startup timeout.
         run: pipx install uv && uv sync --frozen
         working-directory: apps/simulator
 
@@ -160,21 +122,8 @@ jobs:
         # of their own from the image the compose file deploys, so pulling it
         # through compose keeps one version in one place.
         if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
-        # **Compose interpolates every service before it pulls one**, and the
-        # self-hosted phone platform declares ten variables with no default —
-        # the LiveKit pair, the recording store's four credentials, the auth
-        # secret. So `docker compose pull minio` fails on a variable that has
-        # nothing to do with MinIO, before any network call happens.
-        #
-        # Those guards are right where they are: a self-hoster who has not run
-        # `egma self-host up` should be told which variable by name rather than
-        # handed a half-started platform. CI is not that person and starts none
-        # of those services. Placeholders would work today and break on the
-        # eleventh variable, so this does not use them.
-        #
-        # The tag still lives in one place. This reads it out of the compose
-        # file rather than repeating it, so the image CI warms stays the image
-        # the compose file deploys.
+        # Pull the image directly to avoid interpolating unrelated required Compose
+        # settings. Read its tag from Compose so the warmed image matches deployment.
         run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
 
       - name: Run the fast lane

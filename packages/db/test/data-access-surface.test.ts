@@ -69,27 +69,8 @@ const CONTEXT_ESTABLISHING = [
 const INSTANCE_SCOPED = ["instanceIsClaimed"];
 
 /**
- * What hands egma's own services their work, and what keeps a dispatch honest
- * afterwards. The grader and the simulator each stand behind every
- * organization on the deployment at once and hold no credential, because
- * there is no honest one to give them — so each is handed work rather than
- * asked for one, and the simulator's heartbeat, orphan sweep and standing
- * resolver stand on the same ground: a beat arrives bearing a token that
- * resolves to nobody, silence is noticed by nobody in particular, and a
- * report about a held row is answered from the row.
- *
- * Every name is deliberate. None takes
- * an argument by which a caller could name a customer, and a build rule refuses
- * one that grows one; the only rows any of them reaches are egma's own queues —
- * grading jobs, and the simulations egma itself wrote and claimed. A claim
- * arrives carrying the `AuthContext` narrowed to that row's own organization
- * and project, which is what all of the work afterwards goes through; the
- * heartbeat can stamp only a row already claimed under the caller's own name
- * and answers one boolean egma wrote; the sweep ends orphaned simulations and
- * answers identifiers and no content; `resolveSimulationStanding` is the claim's context derived
- * again, by the id the claim handed out, for every call that comes back
- * about a row — the report door's lifecycle claims and the ingest door's
- * arriving spans alike — lifecycle stamps and filing pins, and no content.
+ * Service operations derive organization and project scope from stored work.
+ * This list keeps those operations separate from caller-scoped data access.
  */
 const WORK_DISPATCHING = [
   "claimGradingJobs",
@@ -121,25 +102,9 @@ const WORK_DISPATCHING = [
 ];
 
 /**
- * Everything that touches a customer's data. All of it needs the context.
- *
- * The trace store's are `appendSpans`, which writes, and `listTraces` and
- * `readTrace`, which arrived with the two v1 endpoints that call them — an
- * exported read with no caller would be a hole in the boundary that nothing is
- * watching, which is the same objection as a permission row nothing enforces.
- * Both reads take a required time window on top of the context, so neither can
- * be called in a way that scans the whole table.
- *
- * `committedSpans` and `committedTraces` are the write path's own two questions
- * about the same store, and they take the window for the reads' reason: the
- * partition key is the month a span started in, so a probe with no window is a
- * scan of every month the customer ever had. Neither returns evidence — one
- * answers fingerprints, the other answers which ids exist — which is why they
- * are a pair of their own rather than a third and fourth read.
- *
- * Grades are append-only ClickHouse rows. A trace read returns their complete
- * history, its current row per project grader, and the display-only combined
- * score. Regrading reopens the whole frozen trace plan; it never edits history.
+ * Caller-scoped data access requires AuthContext. Trace and committed-span
+ * queries also require a time window to bound partition scans. Grades are
+ * append-only; regrading retains their history.
  */
 const CONTEXT_REQUIRING = [
   "cloneGraderInProject",
@@ -349,21 +314,9 @@ const CONTEXT_REQUIRING = [
   // production.
   "simulationProviderReferencesIn",
   "revokeApiKey",
-  // egma's own graders, written onto the shelf from egma's own catalog at
-  // start-up. The deployment configuring itself again, one table over: no
-  // user, no customer — a predefined entry belongs to none — and an upsert, so
-  // running it on every boot writes only what a release changed.
+  // Upsert the shared Egma-provided persona catalog at startup.
   "seedPersonaLibrary",
-  // What a run built on the agent's platform, written for the teardown that has
-  // to put it back and readable by the landing that stamps a simulation's
-  // coverage from it.
-  // The one mocked world an agent has at a time, claimed under that agent's own
-  // advisory lock. Two mocked runs overlapping is a hijack — one run's teardown
-  // restores routing onto the other's temporary version — so the second run is
-  // refused here rather than queued.
-  // What one agent's runs still owe somebody's platform account: a temporary
-  // version that was never deleted, a pinned number that was never put back.
-  // The sweep's whole input, read inside the project like any other run read.
+
   "simulationStatusCountsOfRuns",
   "startRun",
   "startSimulation",
@@ -376,11 +329,7 @@ const CONTEXT_REQUIRING = [
   "pinnedSimulationGradersOn",
   "updateAgent",
   "updateConnection",
-  // A project's live name, slug and description, written against the revision
-  // the edit was read at. Its counterpart `createProject` above is the one
-  // factory signup uses too, so a project made from Settings is born with the
-  // same shared default-persona pointer and fixed Expected behaviors project
-  // grader.
+  // Update project metadata against its expected revision.
   "updateProject",
   // No `testsNamingGrader`, and it was here. It counted the live tests naming a
   // grader so an archive could be refused and the blocking tests named. A test
@@ -500,12 +449,8 @@ const VALUES = [
   // nothing failed and trying again will not help, and it carries the field,
   // the bound and the size so that whoever sent the record is told all three.
   "OversizeRecordError",
-  // The persona factory's one refusal, and it used to have three. Archiving
-  // the persona a project pointed at without naming a successor went with the
-  // pointer itself; refusing to archive one that live tests named went with
-  // the guard, because Delete is one verb with one confirmation now. What is
-  // left is the shelf: Egma builds a Predefined persona and no project edits
-  // or deletes one.
+  // Custom persona behavior and deletion are separate from protected
+  // Egma-provided persona content.
   "EgmaProvidedPersonaError",
   // An identity write that named the revision it was written against, after
   // somebody else moved the row. `TestMovedOnError` below is the same refusal
@@ -600,16 +545,8 @@ const READ_LIMITS = [
 const THE_AGENT_PLATFORMS = ["AGENT_PLATFORMS"];
 
 /**
- * The POV vocabulary: pure questions about words, reaching nothing.
- *
- * `povOf` turns the `emitter` column into the product's own word for it, and
- * `fromOnePov` narrows a trace's spans to one account of the conversation —
- * both so that `emitter` stays a storage word no reader ever meets.
- * `laneProducesAnAgentPov` answers whether a conversation over a connection
- * kind could ever have a second account at all, and is exported because the
- * read that tells a customer their record is missing one has to ask the same
- * list grading waits on: two lists would one day disagree about which
- * conversations were ever owed a second account.
+ * Pure POV helpers are shared by trace reads and grading so both use the
+ * same agent/persona vocabulary and expectations.
  */
 const THE_POV_WORDS = [
   "povOf",
@@ -629,20 +566,8 @@ const THE_AGENT_POV_BOUND = ["AGENT_POV_BOUND_SECONDS"];
 const THE_RETELL_BUDGET = ["MOST_RETELL_CALL_ATTEMPTS", "DRAIN_ADVISORY_LOCK"];
 
 /**
- * What a test's own world may cost the wire that carries it, and the record of
- * the temporary agent a mocked run built.
- *
- * The three numbers and the serializer are exported for the reason the read
- * limits above are: a refusal has to say what the cap is, and a cap named in
- * two places is a cap that will one day disagree with itself. The dispatch
- * metadata is measured on the very string egma sends, so the serializer crosses
- * the boundary with the number that measures it.
- *
- * The put-it-back note is pure both ways: a stored value or a set of classes
- * goes in, a checked shape comes out, and no store is touched. It crosses
- * because both halves of it are in two packages — a platform read produces the
- * classes and this module stores them — and a second implementation would be a
- * second answer about what a run promised to put back.
+ * Shared mock-tool limits, wire serialization, and cleanup-record validation.
+ * These exports are pure; API and database code use the same rules.
  */
 const THE_MOCKED_WORLD = [
   "LARGEST_MOCK_TOOL_ANSWER_BYTES",
@@ -673,19 +598,8 @@ const THE_FOLD = [
 ];
 
 /**
- * The two decisions about one span's evidence, taken on the fold's terms and
- * for the fold's reason: a record goes in, a fingerprint or a refusal comes
- * out, and neither reaches a store. There is no tenancy to stamp because there
- * is nothing to stamp it on.
- *
- * They cross the boundary because each has to be worked out in exactly one
- * place, and each has two halves in two packages. An acceptance path refuses an
- * oversize record before it is staged; this module refuses it again at the
- * write, and a second implementation of the bound is one of them storing a cut
- * value as if it were whole. An acceptance path fingerprints what it stages;
- * this module fingerprints the row and compares it against what is stored, and
- * a second implementation of the fingerprint is one of them calling a conflict
- * a replay.
+ * Shared span-size checks and fingerprints keep ingestion acceptance and
+ * database writes consistent. These functions do not access storage.
  */
 const THE_EVIDENCE_RULES = [
   "LARGEST_BOUNDED_RECORD_BYTES",

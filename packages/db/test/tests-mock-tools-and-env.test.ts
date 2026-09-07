@@ -25,18 +25,8 @@ import {
 } from "./support/test-factory.ts";
 
 /**
- * The world a test carries: the tools it answers for itself, and the env it
- * asks the lane for.
- *
- * Both are versioned test content — a change to either mints a version exactly
- * as a changed behavior does — and both are stored in columns of their own
- * beside the content rather than inside it, so the claim gate can ask whether a
- * run mocks anything without reading a single answer.
- *
- * **Every refusal here is authored-time.** The person who can fix a reserved
- * variable name or an oversize answer is the one writing the test, and the
- * alternative is a simulation discovering it halfway through a conversation
- * where nobody who could act on it is reading.
+ * Mock tools and test environment are versioned content. Invalid variables
+ * and oversized answers must fail when authored, before execution.
  */
 
 let database: MigratedDatabase;

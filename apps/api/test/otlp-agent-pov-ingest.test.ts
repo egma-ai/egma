@@ -52,34 +52,10 @@ import {
 } from "./support/traces.ts";
 
 /**
- * **The agent's own POV of a simulation, through the door a customer uses.**
- *
- * A simulation stores both POVs and shows the agent's (ADR-0024 §1). The
- * persona's POV is what egma's simulator said, heard and measured; the agent's
- * is what the agent's own process reported — its turns, its tool calls with the
- * arguments the model emitted and the results it received, its per-turn model
- * and voice timings. That second account arrives by **simulation ingestion**:
- * pushed here by the egma SDK over OTLP with the customer's own project key,
- * naming its conversation by the **provider reference** the platform gave it.
- *
- * What this file drives is the whole of that path, end to end and through no
- * seam that is not a customer's: the real captured LiveKit export goes in at
- * `POST /v1/traces` with a project key, and the simulation comes back out of
- * the v1 read a customer integrates against. Nothing here calls the filing step
- * or the normaliser directly — a test that did would prove the functions and
- * none of the contract.
- *
- * **The export is the real one.** `fixtures/livekit-otlp-trace` is fourteen
- * request bodies as an OTLP exporter actually sent them, byte for byte, from
- * one real conversation with a LiveKit voice agent: 133 spans, five human turns,
- * eight agent turns, two tool calls and three errored spans. The bytes on disk
- * are never edited. What this file adds before posting is the one thing the SDK
- * adds and the capture predates — the `egma.provider_reference` resource
- * attribute holding the room the conversation ran in — so the export posted is
- * the captured one plus exactly the fact that makes it a simulation's.
- *
- * The door answers on object-store durability and writes no row, so every post
- * is followed by a drain wherever the claim is about what a reader sees.
+ * Post captured LiveKit OTLP evidence through /v1/traces with a project key
+ * and the simulation's provider reference, then read it through the public API.
+ * Add the provider-reference attribute in memory; keep fixture files unchanged.
+ * Drain after acceptance before asserting query-visible agent POV evidence.
  */
 
 const storage: ObjectStorage = await startObjectStorage("otlp-agent-pov");
@@ -779,16 +755,8 @@ describe.skipIf(!storage.available)(
 
     it("files the spans that opened before the SDK's stamp existed too", () => {
       /*
-       * The case every customer with their own OpenTelemetry produces.
-       *
-       * The framework's metadata processor stamps a span when the span
-       * *starts*, and the SDK installs it partway through a job that has
-       * already begun — so the job's own entrypoint span, and anything else
-       * open at that moment, ends unstamped and rides the same export. There
-       * is nothing ambiguous about it: nothing else in the resource names
-       * another conversation. Refusing it would refuse the whole export, and
-       * every such customer would lose the agent's POV of every simulation,
-       * silently.
+       * Allow spans without a provider reference when the references present in
+       * the resource agree. Spans started before SDK metadata setup can lack it.
        */
       return (async () => {
         const [first] = captured;
@@ -1083,19 +1051,9 @@ describe.skipIf(!storage.available)("the row caps, across an export naming two",
 });
 
 /**
- * **When grading is asked for, and never before.**
- *
- * ADR-0024 §6: a simulation's evidence is ready when the row is complete *and*
- * the agent's own POV has been filed — or when 30 seconds have passed since
- * completion on a lane that produces one. Grading a conversation before the
- * account it will be judged on has arrived is grading the wrong evidence, and
- * the wait must end anyway, because a broken exporter cannot be allowed to hold
- * a simulation open forever.
- *
- * The three cases below are the whole rule: the wait, its end when the POV
- * lands, and its end when the bound expires. Each reads the queue through the
- * data-access seam the grading service claims from, because a job row is the
- * whole of what "grading was asked for" means.
+ * For connections that produce agent POV evidence, check that grading waits
+ * for completion plus filed evidence, or completion plus the wait bound.
+ * Read the grading queue to verify the handoff.
  */
 describe.skipIf(!storage.available)("when a simulation's grading is asked for", () => {
   /** What the v1 read says about the agent's account of one simulation. */
@@ -1184,14 +1142,8 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
   }, 120_000);
 
   /**
-   * A landing whose clock is an hour behind egma's.
-   *
-   * `ended_at` comes off the report, so a simulator with a skewed clock writes
-   * a moment egma never saw. The bound reads it — it is the conversation's own
-   * moment and the one a person reads — but the window this sweep looks in
-   * cannot, or a row would be stamped outside every window that could ever
-   * settle it and wait for grading forever with nothing saying so. The window
-   * reads egma's own landing stamp instead.
+   * Skew the simulator's reported end time. The sweep selection must use the
+   * server landing timestamp so old reported times cannot leave work unselected.
    */
   it("still settles a landing whose reported clock is far behind egma's", async () => {
     const room = "egma-grading-skewed-1";
@@ -1249,24 +1201,9 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
   }, 120_000);
 
   /**
-   * **The two Retell lanes that could never deliver one either.**
-   *
-   * A chat-API conversation's reference is a chat id, and egma's pull asks for
-   * a *call* record by call id — so a chat id would fetch nothing however long
-   * anything waited. Text mode is the same answer for a different reason: egma
-   * carries the whole exchange on its own requests and Retell hands back no
-   * reference to fetch anything by at all.
-   *
-   * Naming either as producing an agent POV would make every simulation over it
-   * wait out the whole bound and then be recorded as missing an account nobody
-   * was ever going to send. So the drain of egma's own POV is the whole handoff
-   * on both: grading is asked for as soon as that evidence is query-visible,
-   * with no bound in between.
-   *
-   * The chat lane is conducted here end to end. Text mode is pinned by the list
-   * itself rather than conducted, because a run over it is opened against a
-   * named agent version and cannot be started without the platform read this
-   * suite has no reason to stand up.
+   * Retell chat API and text mode do not produce the separately fetched agent
+   * POV. Their readable simulator evidence can trigger grading after completion
+   * without that wait. Exercise chat through the API and check text-mode classification.
    */
   it("grades a chat-lane landing off egma's own POV, with no bound in between", async () => {
     const landed = await aLandedSimulation(
@@ -1544,15 +1481,8 @@ describe.skipIf(!storage.available)("the booking that opened this effort", () =>
   });
 
   /**
-   * **The mocked mark, read by name and from nowhere else.**
-   *
-   * These spans are LiveKit's own: the agent's process wrote them and nothing
-   * of egma's ever touched them, so there is no stamp on them to read. What
-   * says `check_availability` was answered by a mock tool is the test version
-   * this simulation pinned, matched by tool name — the authored world itself,
-   * which cannot change under a result. The two calls that world does not
-   * cover ran for real and carry no mark at all, which is the whole
-   * distinction a developer opens this transcript for.
+   * Derive mock marks by tool name from the pinned test version. The imported
+   * LiveKit spans carry no separate Egma mock receipt.
    */
   it("marks the one call a mock tool answered, by name, and no other", async () => {
     const read = await api.app.inject({
@@ -1610,30 +1540,14 @@ describe.skipIf(!storage.available)("the booking that opened this effort", () =>
   });
 
   /**
-   * **The number this whole effort is about**, on the conversation that opened
-   * it, read back through the contract a customer reads.
-   *
-   * Five human turns, four of them answered. Each wait starts where the caller
-   * stopped being audible — the end of that `user_turn`'s last `user_speaking`
-   * child, which is the VAD's own detected end — and stops at the first
-   * `agent_speaking` before the next human turn. Hand-computed once from the
-   * export's raw nanosecond timestamps, held as the store keeps them: starts
-   * truncated to the microsecond, durations exact.
-   *
-   *   1. caller stops being audible 1788544388880703312, agent speaks
-   *      1788544392672227000 → 3791.523688 ms
-   *   2. 1788544412831362936 → 1788544414353803000 → 1522.440064 ms
-   *   3. 1788544429283150472 → 1788544431499003000 → 2215.852528 ms
-   *   4. 1788544442631104016 → 1788544444538535000 → 1907.430984 ms
-   *
-   * From `user_turn`'s own end — the endpointing commit, which is where the
-   * derivation stopped before catalog version 8 — the same four turns read
-   * 3334.056376, 1108.662037, 1770.409112 and 1394.444331 ms. That difference,
-   * about half a second a turn, is time the caller really waited.
-   *
-   * The fifth human turn is never answered: two agent turns follow it and
-   * neither speaks, so it measures nothing rather than borrowing the next
-   * conversation's silence.
+   * Hand-computed response latency from the last user_speaking end to the next
+   * agent_speaking start. Starts are truncated to microseconds; durations retain
+   * nanosecond precision. The four answered turns give these differences in ns:
+   *   1788544392672227000 - 1788544388880703312 = 3791523688
+   *   1788544414353803000 - 1788544412831362936 = 1522440064
+   *   1788544431499003000 - 1788544429283150472 = 2215852528
+   *   1788544444538535000 - 1788544442631104016 = 1907430984
+   * The fifth human turn has no following agent speech and contributes no sample.
    */
   it("measures the four answered waits from the caller's last audible sample", async () => {
     const read = await api.app.inject({
@@ -1737,15 +1651,8 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
     await startSimulation(auth, simulation.id, CONDUCTOR);
 
     /*
-     * The persona's POV, filed **before** the agent's and opening **earlier**
-     * than it.
-     *
-     * This is what makes the parentless-row ranking observable through the
-     * contract. Retell's own root is the row carrying the reported-measurements
-     * block, and under the reader's old rule — the earliest parentless row wins
-     * — this egma root would have taken its place and the block would have gone
-     * missing from a conversation Retell had measured. The ranking asks whether
-     * a row carries the block first, so it does not.
+     * File an earlier persona root first to verify that the reader prefers the
+     * Retell root carrying reported measurements over the earliest parentless span.
      */
     const own = `${traceId.slice(0, 14)}01`;
     const before = new Date(CONVERSATION_STARTED_AT.getTime() - 30_000);
@@ -1896,14 +1803,8 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
     expect(reported?.samples).toEqual([820, 910, 760]);
 
     /*
-     * And the resend an at-least-once reporter makes does not pull again.
-     *
-     * The duplicate is absorbed and answers `completed`, exactly as the
-     * landing it repeats did — so a door reading the status alone would ask
-     * Retell a second time, minutes later, and Retell fills a call document in
-     * after the call ends. That second reading would land as *changed* content
-     * under the same deterministic span ids, which is the integrity error
-     * ADR-0014 names rather than an update.
+     * A duplicate completion report must not start another Retell pull. A later
+     * provider document may differ under the same deterministic span IDs.
      */
     const askedSoFar = askedOfRetell.length;
     const again = await api.app.inject({
@@ -2088,16 +1989,8 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
   });
 
   /**
-   * **A blip on the first attempt is what the retries are for.**
-   *
-   * Retell answering "not yet" and the socket failing are two different
-   * things, and only the first arrives as an answer — a refused connection, a
-   * DNS wobble or a timeout arrives as a throw. Both mean the same to this
-   * simulation: no agent POV yet. So a throw on the first attempt has to fall
-   * into the same bounded retries a thin document does, because the door's
-   * completion resend deliberately starts no second pull — this is the only
-   * pull this conversation will ever get, and losing it loses the transcript
-   * and every tool call Retell holds for good.
+   * Retry a thrown fetch error within the same bounded pull, as with an
+   * incomplete provider document. Duplicate completion reports do not restart it.
    */
   it("retries a first attempt that threw, and files what the retry answers", async () => {
     const auth = contextFor(acme, "member");
@@ -2225,20 +2118,8 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
 });
 
 /**
- * **The mark says isolated, so a lane that isolates nothing must not carry it.**
- *
- * A mocked mark is read at display time from the pinned test version by tool
- * name — and by the lane, which is the half the claim has always applied:
- * a simulation is mocked when its own test named a tool *and* the lane can
- * serve one. The phone lane deliberately serves none: the real carrier leg,
- * the real band, the real tools. So a test that pins `book_appointment` and
- * then runs over a phone number had that call answered by the customer's own
- * backend, and marking it `mocked` would tell a developer a real booking was
- * a rehearsal.
- *
- * Reachable because the filing step never inspects a simulation's lane: an
- * export naming this row's provider reference with a project key is filed
- * under it, whatever the standing or the lane.
+ * Phone connections cannot serve mock tools. Do not mark their tool spans as
+ * mocked merely because the pinned test names matching tools.
  */
 describe.skipIf(!storage.available)("a tool call on a lane that mocks nothing", () => {
   it("carries no mocked mark, though the pinned test names that tool", async () => {

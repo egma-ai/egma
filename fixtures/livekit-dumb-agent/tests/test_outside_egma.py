@@ -1,14 +1,6 @@
-"""This agent is the same agent whether or not egma exists.
-
-The SDK proves inertness about itself, against agents it wrote for the
-purpose. This file proves it about **this** agent — the one with the
-integration line really in it, in the place a customer would put it — and
-that is a different claim: a wiring mistake here would leave the SDK's own
-suite green and this fixture changed.
-
-Nothing here needs a room, a model or a key. A production room is a room
-egma did not name, and a room's name is a string, so the whole property is
-testable on a laptop with the network unplugged.
+"""Verify this fixture's simulation integration leaves production-room behavior
+unchanged.
+Use offline contexts so no room, model, or provider key is required.
 """
 
 from __future__ import annotations

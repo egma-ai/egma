@@ -14,49 +14,11 @@ import {
 } from "./segment.ts";
 
 /**
- * Opening a pending object, and refusing to believe one that does not add up.
- *
- * The drainer reads bytes it did not write. They came off a network, sat in a
- * bucket, and may have been sealed by an Egma older than this one — so every
- * claim the object makes is checked against the object itself before a single
- * row is formed from it. **Nothing here repairs anything.** A segment that does
- * not verify is retained where it is and reported; it is never partly written,
- * never trimmed to the part that parses, and never reclassified as bad customer
- * input, because the request that carried this evidence was answered as
- * accepted long before anybody read it back.
- *
- * ## What is checked, and what each check is for
- *
- * - **Gzip.** The bytes decompress, or the object is damaged.
- * - **A header line.** The first line is the header and parses as one.
- * - **Format version.** This Egma reads version 1. A later version is not a
- *   corrupt object — it is an object this build has no business guessing at,
- *   and the deployment that can read it is the one that should.
- * - **Key against identity.** The key spells one segment id and the header
- *   states one; a key that has been copied or renamed makes them disagree, and
- *   a drainer that believed the key would file evidence under a segment it is
- *   not.
- * - **Checksum.** One SHA-256 over the header and the record lines together,
- *   uncompressed and in the canonical form `segmentChecksum` defines. It covers
- *   the evidence rather than the compression, so it still holds if a store or a
- *   proxy ever re-encodes the transfer — and it covers the scope, which is what
- *   makes the two fields below safe to write under.
- * - **Record count and record shape.** Every line is a record of this version,
- *   with every field present and of the right type, and there are exactly as
- *   many of them as the header says.
- *
- * ## Tenancy comes from inside, and only from inside
- *
- * The scope is read from the sealed header and is **inside the checksum**, so
- * an object whose organization or project has been edited fails verification
- * rather than filing one customer's evidence under another's. It is never read
- * from the key: the key is a name, and a name a person can type is not a thing
- * to file a customer's evidence by.
- *
- * Whether the project the header names is *that organization's* project is a
- * question this module cannot answer — it needs Postgres — so it is asked by
- * the drainer, before any row is written, and a header that fails it is an
- * impossible tenant binding rather than a corrupt object.
+ * Verify gzip, header shape/version, key-to-segment identity, checksum, count,
+ * and record shape before forming rows. Invalid objects are retained for
+ * operator action rather than repaired or partially ingested.
+ * The checksum covers header scope but is not an authentication signature.
+ * The drainer separately checks project ownership in PostgreSQL.
  */
 
 /** One pending object, opened and checked far enough to be written. */

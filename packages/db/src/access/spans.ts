@@ -16,31 +16,11 @@ import {
 } from "./span-identity.ts";
 
 /**
- * Writing spans, and the only way anything ever does.
- *
- * The ClickHouse client is as private as the Postgres pool beside it, so a door
- * that has decoded some telemetry hands rows to this function and never touches
- * the store. Tenancy is stamped here from the `AuthContext` and from nothing a
- * caller passed: `NewSpan` has no organization and no project on it, so a
- * payload claiming one cannot be obeyed even by a handler that wanted to.
- *
- * **A span is immutable, and its identity is the whole of it**: organization,
- * project, trace and span. Nothing is read before the write and nothing is ever
- * overwritten — a second arrival of one identity is either the same evidence,
- * which is a replay and changes nothing visible, or different evidence, which is
- * an integrity defect somebody has to look at. The table collapses the first on
- * the identity above. It cannot recognise the second, and is never asked to: a
- * caller with two arrivals to reconcile checks them against `committedSpans`
- * before it appends, so a conflict is refused while both meanings still exist.
- *
- * Two shields sit in front of that, and neither is the guarantee. A byte-
- * identical insert block is dropped while it is still in the store's recent
- * window, and a caller that can name what it is replaying passes that name as
- * `segmentId` so the same output twice is dropped even when the bytes were
- * regrouped. Both windows are finite. The identity is not.
- *
- * **Nothing here shortens a value.** A record that violates a documented bound
- * is refused whole, by name, before anything is staged.
+ * Append spans with organization and project stamped from AuthContext.
+ * Span identity is organization, project, trace, and span. Callers must compare
+ * committedSpans before replaying: this writer cannot detect conflicting evidence.
+ * Block and segment tokens reduce duplicate inserts within finite store windows;
+ * identity-based reads handle exact replays afterward. Reject oversized fields whole.
  */
 
 /**
@@ -134,19 +114,8 @@ export type NewSpan = {
    */
   readonly payload: string;
   /**
-   * Whether the platform said in so many words that this span ends its trace.
-   *
-   * The fact is known at normalization time and belongs to the platform that
-   * supplied it: LiveKit's session span, Retell's reported end. A platform with
-   * no such fact says `false` rather than having one inferred for it, because a
-   * parentless span is not an ending — an exporter flush whose parent never
-   * arrived produces one too.
-   *
-   * Required like every other field, and required *because* the honest value is
-   * so often `false`: an optional one would let a normalizer that has a real end
-   * fact to state forget to state it, and the trace would then go quiet with
-   * nothing anywhere saying why. Stating `false` is a sentence about the
-   * platform; leaving it out is a sentence about the code.
+   * Explicit evidence that this span ends the trace, supplied by the normalizer.
+   * Use false when unknown; a missing parent does not imply completion.
    */
   readonly endsTrace: boolean;
 };
@@ -182,19 +151,9 @@ const MAXIMUM_BYTES_PER_INSERT = 16 * 1024 * 1024;
 const SPANS_TABLE = "spans";
 
 /**
- * Where a single field stops, in **bytes of UTF-8**, because that is what
- * ClickHouse stores and what a `String` column is measured in.
- *
- * These are **hard bounds and refusals**, not caps a value is quietly cut to
- * fit. A shortened transcript is stored as if it were the whole one: nothing on
- * the row says a cut happened, no reader can tell, and the evidence a team
- * later disputes is evidence egma edited. So a record over a bound is refused
- * by name and whoever sent it is told which field and by how much, which is a
- * thing they can act on.
- *
- * The numbers are the ones this table has always documented. `payload` has no
- * bound and never had one — it is the provider's document exactly as it
- * arrived, and the batch splitter below is what keeps a large one writable.
+ * UTF-8 byte limits for normalized fields. Reject the whole record when exceeded;
+ * never truncate evidence. payload has no field limit here and may form a large
+ * single-row insert block.
  */
 const FIELD_BOUNDS = {
   name: 1_024,
@@ -218,19 +177,8 @@ const FIELD_BOUNDS = {
 const BOUNDED_FIELDS = Object.keys(FIELD_BOUNDS) as readonly (keyof typeof FIELD_BOUNDS)[];
 
 /**
- * The most evidence one record may carry in its bounded fields, in bytes.
- *
- * Derived from the bounds above rather than written out again, so a bound that
- * moves moves this with it. It is what a caller reserving room for one more
- * record has to reserve, and it is deliberately the *sum* of every ceiling: a
- * record is allowed to sit at all of them at once, and a reserve computed from
- * the largest single field would be a reserve one long transcript overruns.
- *
- * **`payload` is not in it, because `payload` has no bound.** It is the
- * provider's document exactly as it arrived; nothing here refuses one for its
- * size, and the batch splitter is what keeps a large one writable. A caller
- * using this to size a reserve is therefore reserving against the fields this
- * module bounds, and no more.
+ * Sum of all bounded field limits for ingestion reservations. A record may use
+ * every limit at once. This excludes payload and is not a total record-size bound.
  */
 export const LARGEST_BOUNDED_RECORD_BYTES = BOUNDED_FIELDS.reduce(
   (total, field) => total + FIELD_BOUNDS[field],
@@ -238,17 +186,8 @@ export const LARGEST_BOUNDED_RECORD_BYTES = BOUNDED_FIELDS.reduce(
 );
 
 /**
- * Refuse a record that violates a documented bound, and say nothing about one
- * that does not.
- *
- * Pure, exported, and deliberately separate from the write: an acceptance path
- * has to make this decision *before* anything is staged, so that a record egma
- * will not store never enters the log, never rides a segment, and is reported
- * to whoever sent it while the request is still open. Calling it again at the
- * write is not a second opinion — it is the same function on the same record.
- *
- * The first field over its bound is the one named. A record with three
- * enormous fields has one problem, and reporting the first is enough to act on.
+ * Reject the first field over its UTF-8 byte limit. Acceptance calls this before
+ * staging; appendSpans repeats the same validation before sending any insert.
  */
 export function refuseOversizeRecord(span: NewSpan): void {
   for (const field of BOUNDED_FIELDS) {
@@ -261,17 +200,8 @@ export function refuseOversizeRecord(span: NewSpan): void {
 }
 
 /**
- * Refuse a record whose span begins at an instant the trace store cannot hold,
- * and say nothing about one inside the range.
- *
- * The other door beside `refuseOversizeRecord`, over the other thing a stored
- * span needs: an instant a `DateTime64` row and the partitioned read that guards
- * every replay can be built around. The bound is the store's own readable
- * ceiling, so a record refused here is exactly one whose window the identity
- * probe could not build — a span past it seals into a valid segment, is
- * answered, and then stops the drain that guards it. The half-open read carries
- * the latest instant one past its own end, so an instant at the ceiling is
- * already one too far.
+ * Require a span start within the identity probe's readable range. The upper
+ * bound is exclusive because a half-open probe must extend beyond the span.
  */
 export function refuseUnstorableInstant(span: NewSpan): void {
   const instant = span.startedAtMicroseconds;
@@ -306,28 +236,10 @@ function asDateTime64(microseconds: bigint): string {
 }
 
 /**
- * The one canonical form of a span's evidence, and the fingerprint taken from
- * it.
- *
- * **Every field of `NewSpan`, and nothing else.** Not the tenancy, which is
- * part of the identity this hash is filed under rather than part of the content
- * it describes; not the moment anything was received, which says how the
- * evidence travelled and not what it says; not a format version, because the
- * shape being hashed is this type and a change to it is a change to the type.
- * A rule with exceptions is a rule two implementations disagree about, and the
- * two are in different packages.
- *
- * Keys are sorted so that object literal order cannot move a hash, and the two
- * 64-bit counts are written as decimal rather than left to `JSON.stringify`,
- * which refuses a `bigint` outright.
- *
- * **`connection_kind` is a frozen name, not a rename somebody missed.** The
- * TypeScript field became `connectionType` (ADR-0015); this key did not follow
- * it, because these key names are hashed. Renaming one changes the fingerprint
- * of every span already stored, so the drainer would meet a stored hash that
- * no longer matches the evidence it was taken from and refuse the whole
- * segment as a second account of one immutable identity. Changing it is an
- * evidence-contract change with a rewrite behind it, never a rename.
+ * Canonical evidence used by ingestion and storage fingerprints: sorted keys and
+ * decimal strings for bigint values. Organization and project belong to the identity.
+ * Keep connection_kind unchanged: stored hashes include this exact key. Changing
+ * it requires an evidence migration, even though the source field is connectionType.
  */
 function canonicalEvidence(span: NewSpan): string {
   const evidence: Record<string, string | boolean> = {
@@ -365,17 +277,8 @@ function canonicalEvidence(span: NewSpan): string {
 }
 
 /**
- * What this span says, as one comparable value.
- *
- * Stored on the row and compared against on a replay. The comparison is the
- * only thing that can tell an exact replay — which changes nothing and is
- * always safe — from a second, different account of one immutable identity,
- * which is a defect and must never overwrite the first. The engine cannot make
- * that distinction and is not asked to.
- *
- * Exported because the acceptance path computes it over the record it is about
- * to stage, long before this module sees a row, and two implementations of one
- * fingerprint is one of them quietly deciding that a conflict is a replay.
+ * Hash canonical evidence to distinguish exact replay from conflicting content.
+ * Acceptance and storage share this function; never overwrite a different stored hash.
  */
 export function spanContentHash(span: NewSpan): string {
   return createHash("sha256").update(canonicalEvidence(span), "utf8").digest("hex");
@@ -464,18 +367,9 @@ export type SpanInsertPlan = {
 };
 
 /**
- * Rows in, insert-sized blocks out, in the order they arrived.
- *
- * **One month per block, first**, because the partition key is
- * `toYYYYMM(started_at)` and `max_partitions_per_insert_block` defaults to 100:
- * a client's clock decides how many months a batch spans, and a batch of spans
- * across more than a hundred of them would otherwise be refused whole by the
- * engine. Splitting by month is a pure function of the rows, so it costs
- * nothing on ordinary traffic — a trace lives inside one month — and it takes
- * the engine's limit out of a client's hands.
- *
- * A single row larger than the byte cap still goes, alone: splitting is how a
- * big batch gets written, never a reason to refuse one.
+ * Group rows by month, then split by row and byte limits within each month.
+ * Preserve order within each month, not across months. A row over the byte limit
+ * is sent alone. One month per block avoids multi-partition insert failures.
  */
 function inserts(rows: readonly SerialisedRow[]): InsertBlock[] {
   // Insertion-ordered, so the first month to arrive is the first block written
@@ -545,16 +439,9 @@ function preparedInserts(
 }
 
 /**
- * The refusals that are about the rows rather than about the moment.
- *
- * Named symbolically, because ClickHouse's names are stable and its numbers are
- * the thing nobody can read. Everything absent from this list — a connection
- * that failed, a memory limit, a table behind on its merges — is a *later*
- * problem, stays an ordinary error, and reaches an exporter as a status it will
- * retry. `TOO_MANY_PARTS` is deliberately not here: it is both "this block
- * touches too many partitions" and "this table is behind on its merges", and
- * the second is the retryable case. The first is prevented above instead, by
- * splitting a batch by month before it is sent.
+ * Errors caused by invalid rows become permanent ingestion refusals. Leave all
+ * other errors retryable. TOO_MANY_PARTS can reflect merge backlog, so it stays
+ * retryable; monthly insert blocks avoid the partition-count case.
  */
 const REFUSED_BY_THE_DATA: ReadonlySet<string> = new Set([
   "ARGUMENT_OUT_OF_BOUND",
@@ -603,34 +490,17 @@ function* lines(block: readonly string[]): Generator<string> {
 
 export type AppendSpansOptions = {
   /**
-   * What is being written, when the caller knows: the identity of the segment
-   * these spans were drained from.
-   *
-   * It becomes each block's `insert_deduplication_token`, which is the shield
-   * in front of the identity for the case block dedup cannot see — the same
-   * evidence re-serialised, regrouped or re-split by a retry, which is
-   * different bytes and the same output. Deterministic in the segment and the
-   * block, so a replay of one segment produces the same tokens in the same
-   * order and every one of them is recognised.
-   *
-   * Absent from the doors that write straight through, which have no segment to
-   * name; those rely on block dedup and, permanently, on the identity.
+   * Optional source segment ID used with the block index as an insert deduplication
+   * token. Replaying it requires the same deterministic block plan. Callers without
+   * a segment ID use ordinary block deduplication and span identity checks.
    */
   readonly segmentId?: string | undefined;
 };
 
 /**
- * File these spans under the caller's organization and project.
- *
- * Every record is checked against the documented bounds before anything is
- * staged, and a record over one is refused whole — the batch does not go, and
- * nothing partial is left behind, because the first block is not sent until the
- * last record has passed.
- *
- * Nothing is read first and nothing is overwritten. An exact replay collapses
- * on the span identity; evidence that disagrees with what is already stored is
- * a defect this function cannot see and must not be asked to settle, so a
- * caller replaying anything checks `committedSpans` before it calls.
+ * Validate all field sizes before sending blocks under the context's organization
+ * and project. Later insert failures may leave earlier blocks stored. Callers must
+ * check committedSpans before replay to prevent conflicting evidence.
  */
 export async function appendSpans(
   auth: AuthContext,

@@ -1757,15 +1757,9 @@ describe("the bounded Retell retry budget", () => {
   });
 
   /**
-   * The two passes of one turn can both reach the same call: the retry pass
-   * recovers it and deletes its row, and the page then lists it — with its
-   * transient row gone and its evidence not yet drained, so neither of the
-   * page's two batched questions can see the work.
-   *
-   * Accepting it twice would be two readings of one conversation under one
-   * immutable identity. Where the provider reports no timestamps of its own
-   * those readings differ, and the drainer would refuse the pair as an
-   * integrity defect that nothing outside the poller caused.
+   * A retry may accept a call and remove its retry row before the same scan
+   * lists it. Until drain makes it visible, track that acceptance locally to
+   * avoid fetching changed evidence under the same immutable identity.
    */
   it("accepts a call recovered by the retry pass once, even though the same page lists it", async () => {
     const world = failingWorld();

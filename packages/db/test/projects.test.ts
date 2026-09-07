@@ -23,21 +23,8 @@ import { createConnectedDatabase, type MigratedDatabase } from "./support/databa
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * Creating a project, editing one, and renaming the organization that holds
- * them.
- *
- * **The whole of this file is about one claim: a project is created whole or
- * not at all.** A project is not a row — it is a row, the shared persona a first
- * test gets when it names none, the pointer that makes that persona the default,
- * and its Expected behaviors project grader. Signup writes all of them together. An
- * admin creating a second project used to write one of them, and
- * everything downstream of that gap failed later and somewhere else: the first
- * test in the new project refused because the project pointed at nobody, and
- * completed simulations could receive no expected-behavior grade.
- *
- * So the create is proven by what it leaves behind rather than by what it
- * returns, and the failure case is proven by the absence of every one of those
- * rows.
+ * Project creation must commit its Expected behaviors project grader with
+ * the project, or leave neither behind. No default persona is required.
  */
 
 let database: MigratedDatabase;

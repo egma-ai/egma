@@ -21,14 +21,10 @@ export function povOf(emitter: string): SpanPov {
 }
 
 /**
- * **One conversation, told once**: the rows of one POV where the record holds
- * any, and every row where it holds none.
- *
- * This compatibility selection is for recordings and lanes that collect the
- * conversation directly. Retell web-call and LiveKit simulation transcripts
- * require agent rows explicitly: those readers must filter by POV even when
- * that leaves no evidence. A missing platform record must not be replaced by
- * the simulator's record.
+ * Select the requested POV when present; otherwise return all rows. Use this
+ * for recordings and directly collected conversations. Retell web-call and
+ * LiveKit simulation transcript readers must select agent rows explicitly,
+ * including when no agent evidence is available.
  */
 export function fromOnePov<Span extends { readonly pov: SpanPov }>(
   spans: readonly Span[],

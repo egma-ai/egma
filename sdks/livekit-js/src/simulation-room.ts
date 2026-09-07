@@ -43,16 +43,9 @@ type Seat = {
 let processOwner: voice.AgentSession | undefined;
 
 /**
- * This agent could not report to Egma, so this simulation must not run.
- *
- * Thrown out of {@link simulation}, in a simulation room only, whenever the
- * exchange did not end with a hello Egma answered. It stops the session from
- * starting, which is the point: an agent that runs anyway calls its real
- * backends where a mock tool was meant to answer, and Egma's record of the
- * simulation would claim nothing about tools that in fact ran.
- *
- * Never thrown in a production room. There is nothing there to report to, and
- * nothing there to stop.
+ * A simulation could not complete the Egma startup exchange.
+ * Thrown by {@link simulation} before AgentSession.start so tools cannot run
+ * without the required mock setup. Never thrown in a production room.
  */
 export class NotReported extends Error {
   override readonly name = "NotReported";
@@ -61,39 +54,16 @@ export class NotReported extends Error {
 export type SimulationOptions = ExportOptions;
 
 /**
- * Report this simulation to Egma, and let Egma answer for its tools.
+ * Set up mock tools and agent POV export for a simulation.
+ * Await once after constructing the agent and session, before AgentSession.start.
+ * In production rooms this does nothing, including no connection or export setup.
  *
- * Await it once after constructing the agent and session, and before
- * `AgentSession.start`.
+ * Throws {@link NotReported} when the room or Egma exchange fails. Throws Error
+ * for invalid configuration, unsupported LiveKit APIs, or unsafe exporter setup.
+ * Set endpoint and apiKey in options or through EGMA_URL and EGMA_API_KEY.
  *
- * In a production room it returns having touched nothing: no wrapping, no
- * exporter, not one message on the wire, and no connect the agent was not
- * already making.
- *
- * In a simulation room it throws rather than carry on without Egma, and
- * **which** error says where to look:
- *
- * - {@link NotReported} — the exchange itself did not happen. The room would
- *   not open, no Egma participant arrived, two claimed to be Egma, Egma
- *   refused the census, or the reply was unreadable. Something about this room
- *   or this deployment needs fixing.
- * - a plain `Error` — this worker is misconfigured, and it is said before a
- *   byte is sent: `EGMA_URL` or `EGMA_API_KEY` missing or malformed, a
- *   `@livekit/agents` too old to expose the telemetry seam, a tracer provider
- *   this SDK cannot safely extend, or a second LiveKit job asking for a
- *   different room in this process. The `endpoint` and `apiKey` options are
- *   the two settings' other source.
- *
- * They are deliberately different types. A misconfigured worker is wrong for
- * every simulation it will ever run and is a deployment fault; an unreported
- * simulation is one conversation that must not be graded.
- *
- * **One LiveKit job per process.** Two things in this package are process-wide
- * and cannot be made per-job: the mock-tool table, which LiveKit keys by agent
- * class, and the exporter's resource, which is fixed when the provider is
- * built and carries the room this process files spans under. So a second job
- * in this process is refused rather than served wrongly. LiveKit runs one job
- * per process by default; keep it that way.
+ * Use one LiveKit job per process. LiveKit keys mock tools by agent class, and the
+ * exporter resource fixes the room name; these settings cannot be isolated per job.
  */
 export async function simulation(
   agent: voice.Agent,
@@ -323,17 +293,10 @@ async function findEgmaPersona(
 }
 
 /**
- * Whether a participant in this room is Egma, by the name it joined as.
+ * Accept egma-persona or egma-persona- followed by a nonempty simulation ID.
+ * Exact matching avoids sending the tool inventory to unrelated prefix matches.
  *
- * Two forms and no others: the bare name, which is what Egma joins as where it
- * mints its own token, and the name with the simulation after it, which is
- * what a customer's token endpoint is asked to mint. A plain prefix test would
- * also match a name that merely starts with these letters, and a bare
- * `egma-persona-` names no simulation — so the second form has to carry one.
- * The whole of the addressing rests on this: the census is the agent's entire
- * tool inventory.
- *
- * @internal Exported for this package's own tests; not exported from the root.
+ * @internal Exported for this package's tests; not exported from the root.
  */
 export function answersToEgma(identity: string): boolean {
   return (
@@ -551,18 +514,8 @@ function courier(name: string, seat: Seat): MockTool {
         RESPONSE_TIMEOUT_SECONDS,
       );
     } catch (error) {
-      // Every refusal ends the call, and none of them runs the real tool.
-      // This courier only exists in a simulation room, and a real backend
-      // that runs there books a real appointment and charges a real card —
-      // so an Egma this side cannot reach mid-conversation is the one moment
-      // a real tool must not be touched, not the moment to touch it. The
-      // five transport codes that used to mean "run the real one" are read
-      // the same way as every other refusal here.
-      //
-      // Whose complaint it was is said out loud, because the two send a
-      // developer to opposite halves of the system: a mock tool to author, or
-      // a room that could not carry a message. The Python SDK says the same
-      // two things in its own log.
+      // Mock failures and transport failures both stop the tool call; neither runs the
+      // real tool. Distinguish them in the error so the developer can locate the fault.
       const code = rpcCode(error);
       console.warn(
         `Egma: ${

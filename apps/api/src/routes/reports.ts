@@ -34,38 +34,14 @@ import {
 } from "../retell-simulation-ingestion.ts";
 
 /**
- * The report door: `POST /v1/simulations/:simulationId/reports`, where the
- * simulator says what happened — the lifecycle landing, and only that. What
- * was said in the conversation arrives at the OTLP ingest as spans and never
- * here, which the contract holds rather than this route: a document carrying
- * a turn does not validate, so there is no second record of one conversation
- * for two readers to disagree about.
+ * Accept lifecycle reports under the deployment service token, outside
+ * organization rate limits. Transcript spans arrive through OTLP separately.
+ * Resolve scope and claimedBy from stored simulation state; this shared token
+ * does not independently identify which simulator process sent the report.
  *
- * It sits with the claim door on the claim door's exact terms: the service
- * token is the whole gate and resolves to nothing, and the group is outside
- * the per-organization rate limit because the caller is egma's own service
- * standing behind every organization at once. What is different here is
- * where authority over each row comes from. **The token gates the door, and
- * the row names its conductor**: every write below is made under a context
- * derived from the row's own tenancy, in the name of the row's own
- * `claimed_by` — never in the name of anything the request said — so the one
- * secret a simulator holds decides only whether it may knock, and which
- * conversations it speaks for was decided when each row was claimed.
- *
- * **Idempotency without a ledger.** The client delivers at least once and
- * resends byte-identically, so this door must absorb what it has already
- * heard: a `running` for a row already running answers 200, a terminal event
- * matching the row's terminal state answers 200, and only a document that
- * would *rewrite* the record — a different ending, a different terminal
- * status, a running for a finished conversation — is refused with 409. No
- * table of seen event ids exists, on purpose: the row's own state says
- * everything a duplicate check needs, and a ledger would be a second record
- * to keep honest.
- *
- * The shipped simulator posts one event per document; the contract permits
- * several, and they apply in order. Each application commits by itself, so a
- * refusal partway leaves the earlier, valid transitions standing — exactly
- * what a resend of the same document then absorbs as duplicates.
+ * Apply events in order, committing each transition separately. Matching
+ * replays succeed; incompatible history returns conflict. If a later event
+ * fails, earlier transitions remain committed and can be replayed.
  */
 
 export type ReportRoutesOptions = {
@@ -138,18 +114,9 @@ const FAILED_ENDING_OF: Record<
 };
 
 /**
- * The reported moments, trusted exactly when they can be true.
- *
- * A landing given the conduction's own moments writes them over its server
- * stamps, so a retried report cannot stretch the record — but a document
- * whose `ended_at` precedes its `started_at` describes an interval that
- * never existed on any clock, and writing it verbatim would put an
- * impossible duration on the row forever. Refusing the document would be
- * worse: the reporter treats a final refusal as final, and punishing
- * delivery for a skewed clock would turn a truthful conversation into a
- * sweep's false orphan. So an incoherent pair is answered with `undefined`,
- * the landing falls back to its own server stamps for both moments, and the
- * caller logs the pair it declined to believe.
+ * Use reported execution times only when coherent. A reversed interval
+ * returns undefined so storage uses server timestamps and the route logs
+ * the rejected pair without discarding the lifecycle report.
  */
 function reportedMoments(facts: {
   readonly started_at: string;
@@ -334,39 +301,10 @@ export async function reportRoutes(
     }
 
     /*
-     * The agent's POV of a Retell simulation, pulled the moment the
-     * conversation ends.
-     *
-     * Retell exports nothing, so this is where the second POV of a Retell
-     * simulation comes from at all (ADR-0024 §2). Every terminal landing may
-     * carry a call record, including failed and canceled calls. The resolver
-     * requires a Retell web-call snapshot and a provider reference, so a
-     * dispatch that created no call makes no request.
-     *
-     * **Once per conversation, on the landing that moved the row** — never on
-     * a resend of it. A reporter delivers at least once and an absorbed
-     * duplicate answers with the same status as the transition it repeats,
-     * so a condition reading the status alone would pull again minutes later.
-     * Retell fills a call document in after the call ends, so that second pull
-     * can normalise *changed* content under the same deterministic span ids —
-     * which is not an update but the integrity error ADR-0014 names, and the
-     * drainer would rightly retain the pair for repair. The bit that says this
-     * document is what moved the row is threaded out of the landing for
-     * exactly this.
-     *
-     * The first attempt is awaited, so an ordinary call's record is durable
-     * before this request answers and grading starts on a record that already
-     * holds the agent's POV. A record that came back thin retries in the
-     * background and never reaches this request; the module says why.
-     *
-     * The context is the standing's own — the conducting context the row's
-     * tenancy built, which is the one thing a connection's credential is
-     * unsealed for. Nothing here is answered with: the module logs every
-     * failure itself, and this catch is the last resort for a throw it did not
-     * expect, said out loud rather than swallowed. The simulator is waiting to
-     * be told its landing was accepted, and what Retell owes egma is not that
-     * landing's problem — a POV that never arrived is a state the record
-     * already has a word for.
+     * Pull Retell agent evidence when a report moves the simulation to completed,
+     * failed, or canceled. Replays must not fetch changed evidence under the same
+     * span IDs. Await the first attempt; incomplete documents retry in the
+     * background. Log pull failures without failing report acceptance.
      */
     if (options.simulationPullReach !== undefined && endedNow) {
       await pullRetellSimulationRecord(
@@ -389,17 +327,9 @@ export async function reportRoutes(
       });
     }
 
-    // The teardown, when this document may have been the last thing a mocked
-    // run was waiting for.
-    //
-    // It settles only runs that have **finished**, so this is a cheap read for
-    // every landing and a delete plus a restore exactly once per mocked run.
-    // Nothing depends on it happening here: a run whose teardown never ran —
-    // because this deployment restarted, or because the platform was away — is
-    // finished by the next run's sweep, which is the same act in the same
-    // order. That is why a failure here is logged rather than answered: the
-    // simulator is waiting on a report about a conversation, and what Egma owes
-    // somebody's Retell account is not that conversation's problem.
+    // Attempt owed mock cleanup after terminal reports. The shared sweep skips
+    // active runs and can retry unfinished cleanup before a later build.
+    // Cleanup failure does not change the simulation report response.
     if (
       options.mockedWorldReach !== undefined &&
       (lastKnownStatus === "completed" ||
@@ -419,15 +349,9 @@ export async function reportRoutes(
 }
 
 /**
- * One status event against the row as it now stands: the transition when the
- * row is there to move, a 200-worthy nothing when the row already says what
- * the event says, and a refusal when the document and the record disagree
- * about history. Answers the row's status afterwards, or the refusal it sent.
- *
- * The row is re-read per event rather than once per document, because each
- * event's application moves it and the next event's duplicate check must see
- * where it landed. Each read is one indexed select; a document carries a
- * handful of events at most.
+ * Apply one event against freshly read state and distinguish a transition
+ * from an absorbed replay. Reread per event because earlier events commit
+ * independently.
  */
 /**
  * What one status event did to the row: where it stands afterwards, and

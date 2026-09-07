@@ -203,14 +203,8 @@ describe("a name only an archived persona answers to", () => {
 
 describe("a name that is not one persona", () => {
   /**
-   * Its own class, and the sentence that says where the identifier goes.
-   *
-   * The usual reader is a repository file rather than a form: a version-1 test
-   * file carries persona *names* and nothing else, and the fix is to put the
-   * stable identifier in the file — an instruction no browser would be given.
-   * Nothing picks one of the two, ever: there is no uniqueness rule on a
-   * persona's name, so choosing by list order would put somebody in a test that
-   * nobody chose and the run would be about a caller the author never named.
+   * Ambiguous persona names must fail with guidance to use a stable ID.
+   * List order must never choose a persona for the author.
    */
   it("is refused when two personas answer to it, rather than one being picked", async () => {
     const first = await seedPersona(actingIn(acme.project), "Twice Over");

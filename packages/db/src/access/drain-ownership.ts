@@ -3,31 +3,10 @@ import type pg from "pg";
 import { dedicatedConnection } from "../client.ts";
 
 /**
- * Which process, out of however many are running, is the one that drains.
- *
- * **One drainer per deployment is a correctness rule, not a tuning choice.**
- * Two processes walking the same pending prefix can each read the trace store,
- * each find an identity absent, and each then write a different account of one
- * immutable span — because neither one's write was visible when the other
- * looked. The integrity check that is supposed to refuse exactly that cannot
- * see a write that has not landed yet. Nothing else in this design has that
- * shape: acceptance is safe on every process because an object is immutable and
- * a replay of one is a no-op, and Retell polling is safe because every selected
- * agent is leased before a provider request. Draining is the one place where
- * "more than one" is wrong.
- *
- * **A session-scoped Postgres advisory lock, and nothing new.** It is held on a
- * connection of this process's own, so it is released by Postgres the moment
- * that connection goes — including when the process is killed, which is the
- * case a lease with a timeout has to be tuned for and this one does not. A
- * process that does not get it is not broken and does not stop: it keeps its
- * scan loop, drains nothing, asks again on the next interval, and reports
- * itself as standing by.
- *
- * **It takes no tenancy, because there is nothing here to scope.** The claim is
- * one per deployment rather than one per customer: the pending prefix holds
- * every project's evidence and the process that walks it walks all of it. The
- * same reason the channel subscription beside it takes none.
+ * Allow one ingestion drainer per deployment. Concurrent drainers could both
+ * accept conflicting versions of an immutable span before either write is visible.
+ * Hold a session advisory lock on a dedicated Postgres connection. Standby processes
+ * retry each interval; Postgres releases the lock when its session ends.
  */
 
 /**
@@ -71,14 +50,8 @@ export async function openDrainOwnership(): Promise<DrainOwnership> {
   let closed = false;
 
   /**
-   * The connection this claim lives on, built if there is not one.
-   *
-   * **A dead connection is a lost lock and nothing more.** Postgres drops the
-   * lock the moment the session goes, so the honest state afterwards is "not
-   * held" — and the honest next step is to connect again and ask. A process
-   * that remembered the failure instead would stand by for the rest of its
-   * life over one dropped socket, which on the single-instance deployment
-   * everybody actually runs means draining stops until somebody restarts it.
+   * Reconnect after a lost session and clear the held flag. A disconnected session
+   * no longer proves ownership of the advisory lock.
    */
   const connected = async (): Promise<pg.Client> => {
     const open = client;
@@ -107,25 +80,9 @@ export async function openDrainOwnership(): Promise<DrainOwnership> {
       return held && !closed && client !== undefined;
     },
     /**
-     * Asked every time, including inside a pass and by the process that already
-     * holds it.
-     *
-     * **A claim believed without asking is the dangerous one.** A session can
-     * die without this process being told promptly — a failover, a reaper, a
-     * network that went away — and Postgres releases the lock the moment it
-     * does. A holder that short-circuited on its own memory would go on
-     * believing it was the drainer while another instance took the claim, and
-     * the two would walk the prefix together: exactly the arrangement this lock
-     * exists to prevent, arrived at by trusting a cached answer.
-     *
-     * So a session that already holds it is still asked — but only whether it
-     * is still alive, with a plain round trip rather than a second
-     * `pg_try_advisory_lock`. A session-level lock cannot be taken by anyone
-     * else while this session lives and holds it, so liveness is the whole
-     * question left, and asking it that way is what keeps a per-object re-ask
-     * from stacking one hold on top of another it would then have to unlock as
-     * many times to release. A session that does not hold it asks for it
-     * outright.
+     * Check session liveness even when held is true; a lost session may have released
+     * the lock. Use SELECT 1 for a held lock to avoid stacking advisory lock acquisitions.
+     * Otherwise attempt to acquire it.
      */
     async take() {
       if (closed) return false;

@@ -27,32 +27,12 @@ import {
 } from "./columns.ts";
 
 /**
- * A persona is the person an agent gets tested against: synthetic, and
- * reusable across any number of tests. These tables hold who they are —
- * nothing about what they want on a given occasion (the test's business) and
- * nothing about how the agent under test is reached.
- *
- * A test names the
- * identity row — this persona, however they currently behave. A run
- * pins a version row — this persona, frozen exactly as they were when
- * the simulation happened, so editing today never rewrites what an old result
- * meant. Renames touch the identity row only; behavior lives in the version.
- *
- * **Two names, and they answer different questions.** `name` on the identity
- * row is the team's word for this persona — what a list, a picker and a sheet
- * header show, and what nobody ever hears. `identity_name` on the version row
- * is the human name the persona gives the agent on the call, so the same test
- * hears the same person every time it runs. One is a label a team may relabel
- * at will; the other is authored behavior and versions like any other.
- *
- * **A Custom persona is stamped, never deleted.** The product word is Delete
- * and it is permanent as far as anybody using egma is concerned; underneath,
- * `archived_at` is set and every row stays exactly where it was, so a run that
- * pinned one of these versions still reads true forever. The column keeps the
- * archive word on purpose — the product word and the storage word differ here,
- * and that split is a recorded decision rather than something to tidy up.
- * Egma-provided personas have null tenancy, stay active and read-only, and can
- * be forked into a Custom persona for customization.
+ * Reusable persona identity and immutable behavior versions. Tests select identities;
+ * simulations pin versions so later edits do not change past results.
+ * name is the team's label; identity_name is the name given to the agent under test.
+ * Deleting a Custom persona archives it while preserving versions. Shared
+ * Egma-provided personas have null tenancy and read-only core behavior; fork one
+ * for a Custom persona.
  */
 
 export const persona = pgTable(
@@ -114,14 +94,9 @@ export const persona = pgTable(
 );
 
 /**
- * One frozen core: who this persona is and which settings it declares.
- * Project choices live on project_persona and simulations freeze those choices
- * independently. A version owns only core behavior and the parameter contract.
- *
- * The provider catalog, not Postgres, decides which provider, model and
- * adapter combinations this release can execute; these checks protect the
- * stored shape only. Credentials are resolved for each claimed work item and
- * never belong in this immutable authored value.
+ * Immutable persona core and parameter contract. Project settings live on
+ * project_persona and simulations pin them separately. Catalog validation decides
+ * which model combinations execute; credentials are resolved at claim time.
  */
 export const personaVersion = pgTable(
   "persona_definition_version",

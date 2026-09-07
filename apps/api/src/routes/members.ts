@@ -30,21 +30,9 @@ import { registerPlatformOperation } from "../http/platform-operation.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 
 /**
- * Who is in this organization, and the four things an admin may do about it:
- * ask somebody to join, change what somebody may do, remove them, and switch
- * an account off.
- *
- * **Every one of them is gated on `manage_members`, which only an `admin`
- * holds.** Reading the list is not: everybody may read anything in the
- * organization, and a `member` who cannot see who their colleagues are cannot
- * work out who to ask for anything.
- *
- * **Inviting never depends on email.** With a transport configured the message
- * is posted; with none, the link comes straight back to the person who created
- * it and they pass it on however they like. Nothing errors and nothing quietly
- * does nothing, which is the failure this route exists to avoid: a self-hosted
- * install is pleasant right up until the second person, and requiring SMTP is
- * where competitors make that the moment it stops being pleasant.
+ * Member management requires manage_members; the member list is readable
+ * by other roles. Invitations use SMTP when configured or return a shareable
+ * link. A configured sender can still fail to deliver.
  */
 
 export type MemberRoutesOptions = {
@@ -125,16 +113,8 @@ export async function memberRoutes(
   });
 
   /**
-   * Asking somebody to join.
-   *
-   * The token is minted here, hashed once, and only the hash is written — so a
-   * copy of the database is a pile of expired-looking rows rather than a pile of
-   * working links. The plaintext exists for the length of this request and then
-   * only in whichever of the two places it went: a message, or this response.
-   *
-   * The role defaults to `admin`, which is the default for everybody in this
-   * version. An organization whose second person cannot invite a third is a
-   * two-person product.
+   * Store only the invitation token hash. Deliver the link by email or return
+   * it when delivery is disabled. An omitted role defaults to admin.
    */
   registerPlatformOperation(app, memberOperations.createInvitation, async (request, reply) => {
     const { auth } = requesterOf(request);

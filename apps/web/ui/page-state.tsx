@@ -7,19 +7,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 /**
- * What a page shows when it is not showing its data.
- *
- * Loading, empty, failed and not-found are four different sentences and they
- * must never be collapsed into one. "Nothing here" and "egma could not answer"
- * point somebody in opposite directions, and a spinner that stays forever
- * because a request failed is the worst of the four.
- *
- * Every state is the same component with a different tone, so a page that
- * grows a fifth state cannot invent a fifth appearance for it.
- *
- * The tone is also on the element as `data-tone`, because the appearance is now
- * a class list rather than a named module class. A page under test, or a person
- * reading the inspector, can still ask which of the four this is.
+ * Keep loading, empty, failed, and missing states distinct. Data-tone exposes
+ * the state for styling and tests.
  */
 
 export type StateTone = "quiet" | "plain" | "bad";
@@ -76,27 +65,9 @@ function PageState({
 }
 
 /**
- * Waiting on egma. It says what it is waiting for, not just that it is waiting.
- *
- * **The sentence is the state; the bars are the proof it is still running.**
- * `DESIGN.md` asks a loading state for a "fast, quiet indicator", and a page
- * that only wrote "Loading agents…" and then held perfectly still could not be
- * told from one that had given up. Three neutral bars breathing under the
- * sentence say the wait is alive. They are `aria-hidden`, because the sentence
- * above them is already announced by this section's `role="status"` and a
- * screen reader gains nothing from three rectangles.
- *
- * **No motion is written here, and the slot names are why.** The wait before
- * this appears, the breath in the bars and the phase between them are all in
- * `tailwind-theme.css`, under the same `DESIGN.md` rule as the run state
- * mark's turn and keyed on the two names this component publishes:
- * `page-state` on the section and `loading-indicator` on the group below. That
- * is what lets one rule treat a route fallback, the card inside it and the
- * bars inside that as a single arrival rather than three overlapping ones —
- * something three separate class lists could never agree on.
- *
- * Nothing here flashes on a fast read, and reduced motion keeps the meaning:
- * both are properties of those rules, and both are argued where they live.
+ * Announce what is loading; hide decorative bars from assistive technology.
+ * The theme owns delay, animation, and reduced-motion behavior. Animation
+ * indicates a waiting state, not proof that the request is progressing.
  */
 export function Loading({ what }: { readonly what: string }) {
   return (
@@ -115,24 +86,8 @@ export function Loading({ what }: { readonly what: string }) {
 }
 
 /**
- * There is nothing here, and that is a fact about the project, not a fault.
- *
- * **It is drawn here rather than through `PageState`, and the reason is what
- * the four states are about.** Loading, failed and not-available are about
- * *egma* — a wait, a refusal, an address that leads nowhere. They interrupt,
- * so they are set apart from the page. An empty list is about the *project*:
- * it is the ordinary first day of a list nobody has written to yet, it belongs
- * on the page, and it is the one state that offers an action.
- *
- * `AN8-0` (page `B-0`) draws exactly that and it is what this matches, value
- * for value: a solid `--surface` card inside one `--border` hairline with no
- * corner, 40px of padding, a 16px weight-500 title over one 14px sentence at
- * the board's measure, and the primary action under them as the wash button.
- * The dashed outline and 24px heading it wore before said "something has gone
- * wrong here", which is the one thing an empty list has not done.
- *
- * The gap inside the head block is the board's 6px rounded to the 4px grid,
- * the same rounding ticket 01 made for the sheet's padding.
+ * Render an empty collection as a normal page state with an optional next
+ * action. Keep its appearance distinct from loading and failure.
  */
 export function Empty({
   title,

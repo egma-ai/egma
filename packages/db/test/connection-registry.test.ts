@@ -21,19 +21,8 @@ import {
 import type { Modality } from "../src/schema/agents.ts";
 
 /**
- * The registry's gates, tested where they are: pure functions over a payload,
- * with no database anywhere near them.
- *
- * The optional-gate machinery is exercised through a made-up type's gate map
- * rather than through whichever real connection type happens to carry an
- * optional key today. What is under test is the rule — absence admitted,
- * presence still checked, demanded keys still demanded — and a test written
- * against one type's shape would start measuring that type instead the moment
- * its config changed.
- *
- * The real types are here too, and only for the thing a made-up map cannot
- * say: that giving the machinery an optional case did not quietly relax the
- * types that had none.
+ * Synthetic field definitions test optional-field validation independently
+ * of shipped connection types. Real types verify their required fields.
  */
 
 /**
@@ -65,16 +54,7 @@ const AN_ENDPOINT = "https://acme.example/egma/livekit-token";
 /** The key-pair shape's config, whole, for the tests that vary one key. */
 const LIVEKIT_CONFIG = { url: A_URL, agentName: A_NAME };
 
-/**
- * The made-up kind the per-variant modality rule is exercised on: it speaks
- * both, and its access variants are built one at a time, with a narrowing or
- * without one.
- *
- * Made up for the same reason the optional-gate machinery above is. What is
- * under test is the rule — absent means the kind's list, present replaces it —
- * and a test written against whichever real variant happens to narrow today
- * would start measuring that variant instead the moment its reasons changed.
- */
+/** Synthetic access variants test modality inheritance and explicit narrowing. */
 function madeUpVariant(
   narrowing?: AccessVariantDescriptor["modalities"],
 ): AccessVariantDescriptor {

@@ -5,14 +5,8 @@ import { hashInvitationToken } from "../src/auth/invitation.ts";
 import { cookiesFrom, createApi, type TestApi } from "./support/api.ts";
 
 /**
- * Adding a second person, on an instance where nobody configured email.
- *
- * This is the ticket the whole self-hosting story turns on. A local install is
- * pleasant while it is one person; the second person is where every comparable
- * product breaks, because inviting them needs SMTP and a self-hoster has none.
- * So the promise being tested here is narrow and absolute: **with no transport
- * configured the flow completes anyway and the link comes back to the person who
- * created it.** Nothing errors, and nothing silently does nothing.
+ * Without email transport, invitation creation returns a link the inviter can
+ * share and the recipient can accept.
  */
 
 let api: TestApi;

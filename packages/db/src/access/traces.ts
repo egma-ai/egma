@@ -21,55 +21,15 @@ import {
 import { fromOnePov, povOf, type SpanPov } from "../models/pov.ts";
 
 /**
- * Reading traces, and the only way anything ever does.
- *
- * The write side is `spans.ts`; this is the other half of the same boundary. The
- * ClickHouse client stays as private as the Postgres pool, tenancy is stamped
- * from the `AuthContext` and from nothing a caller passed, and no exported call
- * here takes a predicate — a project can be *narrowed* to by name, never widened
- * past the organization the credential resolved to.
- *
- * **Everything here is filed along the table's own sort key**, which is
- * `(organization_id, project_id, trace_id, span_id)` — the span's whole
- * permanent identity. So every query below names the organization, names the
- * project when there is one, and names a bounded window of time. There is no
- * call in this file that can be made without a window, which is what makes an
- * unfiltered scan unreachable rather than merely discouraged.
- *
- * **Every correctness-sensitive read says `FINAL`.** `spans` and `turns`
- * collapse on that identity, and a collapse happens on a merge that has not
- * necessarily run — so two physical copies of one replayed span are ordinary
- * and momentary, and a read without `FINAL` would show them as the human having
- * said the same thing twice. `FINAL` is what makes the visible evidence the
- * identity's evidence rather than whatever parts happen to exist right now. It
- * is the first implementation on purpose: a cheaper read replacing it needs a
- * proof that it answers the same, not an argument that duplicates are rare.
- *
- * What that is not is a way to reconcile *different* evidence under one
- * identity. Nothing in this file chooses between two accounts of one span, and
- * nothing may be added that does: the writer refuses a conflict before the
- * second account is stored, so by the time a read happens there is one.
- *
- * **Reading is permitted to every role, `viewer` included.** The permission
- * table's `read` row names all three, and this file asks for it the way every
- * other read in the module does. Looking at what an agent did is the product; a
- * role that could not do it would be a login with nothing behind it.
+ * Read traces through the private ClickHouse access boundary. Require read permission
+ * and a bounded time window; AuthContext sets organization and project scope.
+ * Use FINAL where replay duplicates would change visible evidence. Ingestion must
+ * reject conflicting span content before storage; reads do not resolve conflicts.
  */
 
 /**
- * How wide a window one request may name.
- *
- * Thirty-one days, and a wider one is **refused rather than quietly narrowed**.
- * Clamping answers a different question than the one asked and says nothing
- * about having done so — a caller paginating ninety days would walk to the end of
- * a month and conclude that was all there was. What to do about a window too wide
- * to serve is the caller's decision, and a refusal naming the cap is what lets
- * them make it.
- *
- * The number is the partition key's: `spans` is partitioned by
- * `toYYYYMM(started_at)`, so a window of at most thirty-one days touches at most
- * two partitions however it is placed, and the widest legal request is therefore
- * still a bounded amount of work.
+ * Reject windows wider than this limit instead of silently returning a shorter
+ * range. The time bound limits scans across monthly partitions.
  */
 export const MAXIMUM_WINDOW_MILLISECONDS = 31 * 24 * 60 * 60 * 1000;
 
@@ -78,26 +38,8 @@ export const MAXIMUM_LIST_LIMIT = 200;
 const DEFAULT_LIST_LIMIT = 50;
 
 /**
- * How many spans one trace is read back as.
- *
- * A trace is one exchange end to end and those are small — the captured LiveKit
- * trace is 133 spans — but "small" is the producer's opinion, and this is a
- * read that has to be bounded by egma's. What is over the line is reported rather
- * than dropped in silence, so a caller is never handed a transcript with a hole
- * in it and no way to know.
- *
- * The cap bounds the **tree** and nothing else. Every count beside it is the
- * whole trace inside the window, taken from an aggregate rather than from the
- * rows that fitted, so `spanCount` is the number a caller compares against to
- * learn how much of the trace they are holding.
- *
- * **Doubled when a simulation began holding both POVs under one trace.** The
- * rows are read before either POV is chosen between — the read returns both,
- * and the surface above picks — so a cap sized for one POV would have bitten
- * at half a conversation as soon as the second arrived. Doubling it rather than
- * applying it per POV keeps the cap one number over one read: a per-POV cap
- * would need two ordered reads, and the prefix it produced would no longer be
- * the trace's own time order.
+ * Maximum span-tree rows returned across both POVs. Report truncation explicitly;
+ * aggregate counts still cover the selected POV's full trace within the window.
  */
 export const MAXIMUM_SPANS_PER_TRACE = 20_000;
 
@@ -122,50 +64,15 @@ const LIVEKIT_LIFECYCLE_SPAN_NAMES = [
 ] as const;
 
 /**
- * The outer of the two payload keys reaching the block walks — the egma-owned
- * corner of an otherwise vendor-owned document.
- *
- * Taken off the path the contract exports rather than written out a second time
- * here, so a normalizer's spelling and this reader's cannot come apart. The
- * inner key needs no such derivation: the contract exports it as
- * `REPORTED_MEASUREMENTS_PAYLOAD_KEY` and this file uses that constant itself.
- *
- * The `= ""` is not a case that can arise. Indexing is strictly typed here, so
- * the first element of a split is `string | undefined` however literal the
- * string being split was, and a default is how that is answered rather than
- * asserted away.
+ * Derive the outer normalized-payload key from the shared contract path.
+ * Reported measurement parsing uses REPORTED_MEASUREMENTS_PAYLOAD_KEY inside it.
  */
 const [NORMALISED_KEY = ""] = REPORTED_MEASUREMENTS_PAYLOAD_PATH.split(".");
 
 /**
- * How the parentless rows of one trace are ordered when the reader has to pick
- * the one carrying the report block.
- *
- * **Two parentless rows are normal now, and this is the rule that makes them
- * safe.** A simulation holds both POVs under one trace (ADR-0024 §1): egma's
- * own root and the agent's session root sit side by side, and before this a
- * reader took whichever opened first — so an agent whose exporter started a
- * millisecond earlier would have moved the block out from under the reader and
- * a measured trace would have read as one that measured nothing.
- *
- * Three keys, in the order the questions actually matter:
- *
- * 1. **A row that carries the block beats one that does not.** The block only
- *    ever rides the row a normalizer wrote it on, so a parentless row holding
- *    one is the answer to this question by construction — nothing is guessed
- *    and no kind is named. On a Retell simulation this is what keeps the
- *    platform's own reported latencies reachable: they ride the agent's root,
- *    because Retell measured them.
- * 2. **Then egma's own root.** Where no parentless row carries a block — a
- *    LiveKit simulation, where neither POV reports aggregates — the persona's
- *    root is the row this reader has always answered with, and it stays so
- *    whatever order the two arrived in.
- * 3. **Then earliest, then the span id.** The tie-breakers the query already
- *    had, so two readings of one trace answer with one row.
- *
- * Production is untouched by all three: a production trace has no
- * `egma-runtime` row at all, and at most one of its parentless rows was written
- * by a normalizer.
+ * Choose parentless rows with normalized payload first, then egma-runtime rows,
+ * then earliest start and span ID. A simulation may have two roots; this keeps
+ * agent-platform reported measurements reachable regardless of arrival order.
  */
 const PARENTLESS_ROW_ORDER =
   `JSONExtractRaw(payload, '${NORMALISED_KEY}') != '' desc, ` +
@@ -173,19 +80,8 @@ const PARENTLESS_ROW_ORDER =
   `started_at asc, span_id asc`;
 
 /**
- * A window of time, closed at the start and open at the end, counted in
- * **microseconds since the epoch**.
- *
- * Required on both calls, with no default. A default window is a question
- * somebody did not ask, and the one thing this store must never do is answer one
- * nobody bounded.
- *
- * Microseconds rather than `Date`s, because a `Date` holds milliseconds and this
- * store holds microseconds. The end is exclusive, so a bound that had been
- * rounded down to the millisecond would quietly exclude the 999 microseconds
- * after it: a caller pasting a trace's own `ended_at` back in as `to` would not
- * be given the span that ended at it, and nothing in the answer would say why.
- * The unit here is the column's own, so a window means exactly what it says.
+ * Required half-open interval [from, to) in microseconds since the epoch.
+ * Use bigint to preserve the trace store's precision beyond JavaScript Date.
  */
 export type TimeWindow = {
   readonly from: bigint;
@@ -203,18 +99,7 @@ export type ListTracesOptions = {
    * project.
    */
   readonly projectId?: string | undefined;
-  /**
-   * Which kind of traffic to read: a conversation egma conducted, or one a real
-   * caller had. **Absent is both**, which is what this list has always answered
-   * and what a caller written before this option existed still gets.
-   *
-   * Narrowing only, like the project beside it — there is nothing wider than
-   * both. The column is on every row because comparing a simulation against a
-   * production exchange is the premise of the product, so a surface that shows
-   * one kind asks the store for one kind rather than reading a page of both and
-   * throwing half of it away: a page filtered after the fact holds however many
-   * rows survived, and how many rows a page holds is what a token walks.
-   */
+  /** Filter production or simulation traffic before pagination. Omit to include both. */
   readonly source?: SpanSource | undefined;
   readonly limit?: number | undefined;
   /** Where the last page stopped. Opaque, and issued by this module alone. */
@@ -227,14 +112,8 @@ export type ReadTraceOptions = {
 };
 
 /**
- * Trace-level facts, as both endpoints report them.
- *
- * Times are RFC 3339 strings rather than `Date`s, and that is deliberate: this
- * store keeps microseconds and a JavaScript date holds milliseconds, so handing
- * back a `Date` would round away precision the ingest path went out of its way
- * to preserve. Durations are decimal strings for the same reason in the other
- * direction — a nanosecond count passes 2^53 inside four months of uptime, and a
- * JSON number would quietly lose its low digits.
+ * Trace facts within the requested window. RFC 3339 time strings retain
+ * microseconds; decimal duration strings retain integer nanoseconds.
  */
 export type TraceFacts = {
   /** The project stamped on every span of this trace. */
@@ -265,14 +144,8 @@ export type TraceFacts = {
    */
   readonly emitter: string;
   /**
-   * **Whose POV these facts count** — the product word for the `emitter`
-   * column, which never reaches a screen.
-   *
-   * `agent` where the trace holds the agent's own POV of the conversation, and
-   * `persona` where the only POV is egma's own simulator's. It is not a
-   * property of the trace so much as of the reading: a simulation holds both
-   * POVs, and every count beside this one is the POV named here, so nothing
-   * ever counts one conversation twice.
+   * POV used for these aggregate facts: agent or persona.
+   * Count one POV at a time to avoid counting the same exchange twice.
    */
   readonly pov: SpanPov;
   readonly environment: string;
@@ -288,15 +161,8 @@ export type TraceFacts = {
 
 export type TraceSummary = TraceFacts & {
   /**
-   * **The first thing the human said**, truncated — read from the turn-grain
-   * view, which is exactly what its truncated text column is for.
-   *
-   * Not the transcript's opening line, and the difference is not an accident:
-   * an agent that greets first opens most traces it is in, so a preview of the
-   * opening line would be the same sentence on every row of the list. What
-   * somebody scanning a list is looking for is what the caller wanted, so that
-   * is what this is. Empty when the human said nothing, or when the provider
-   * emits no turn spans at all.
+   * Truncated first human utterance from the turns view, for list previews.
+   * Empty if no human turn was recorded; an agent greeting is not the preview.
    */
   readonly preview: string;
   /**
@@ -340,17 +206,8 @@ export type TraceSpan = {
   readonly toolArguments: string;
   readonly toolResult: string;
   /**
-   * **Whose POV this row is** — the product word for the `emitter` column,
-   * which never reaches a screen.
-   *
-   * `persona` is what egma's own simulator said, heard, measured and recorded.
-   * `agent` is what the agent's own process reported about its turns, its tool
-   * calls and its timings. A simulation holds both under one trace, and a
-   * production conversation holds only the agent's.
-   *
-   * Returned on every span because the read returns both POVs and the surface
-   * above chooses: a run view shows the agent's, and mixing the two into one
-   * transcript would be one conversation told twice.
+   * POV for this span: persona for simulator evidence, agent for evidence from
+   * the agent platform. Reads return both; displays select the appropriate POV.
    */
   readonly pov: SpanPov;
   /** This span's own children, in time order. A turn is never nested here. */
@@ -412,19 +269,9 @@ export type TraceDetail = TraceFacts & {
    */
   readonly truncated: boolean;
   /**
-   * What the platform reported about this trace, when its root span carries a
-   * block that reads.
-   *
-   * **Absent is the ordinary answer, and never an error.** A simulation has no
-   * platform to report anything; a platform egma reads no numbers from reports
-   * nothing; and a root that never arrived, a payload with no egma-owned corner
-   * in it, and a block that is malformed all land here the same way, because a
-   * trace is still a trace whatever a vendor wrote in one key of one row.
-   *
-   * The numbers are read by the shared measure module and by nothing else: a
-   * display and any metric-based grader both reach them through that one arithmetic rather
-   * than through this field, so provenance and priority are decided in one
-   * place for every source.
+   * Optional parsed measurements reported by the agent platform, including for
+   * simulations. Missing or malformed blocks yield no reported measurements.
+   * The shared measure module applies metric provenance and priority rules.
    */
   readonly reported?: ReportedOnTrace | undefined;
 };
@@ -434,20 +281,8 @@ export type TraceDetail = TraceFacts & {
  * ------------------------------------------------------------------- */
 
 /**
- * The instants a window may name, which are the ones the store can hold and do
- * arithmetic over.
- *
- * `DateTime64` begins in 1900, and the far end is where a trace's *end* stops
- * fitting: the list adds a duration in nanoseconds to a start in nanoseconds,
- * and nanoseconds since the epoch pass what signed 64 bits hold on 2262-04-11.
- * Outside these two a window is refused rather than clamped, on the same terms
- * as one that is too wide.
- *
- * It has to be refused *here*, before a literal is built from it. A `Date` will
- * hold the year 275760 quite happily, and `toISOString` writes that year with a
- * sign and six digits — so a window nobody bounded would reach ClickHouse as a
- * timestamp literal that is not a timestamp, and the customer would be told
- * their query was a server fault rather than a window they cannot have.
+ * Readable window bounds: DateTime64 starts at 1900 and nanosecond arithmetic
+ * is bounded at 2262-04-11. Reject out-of-range input before creating SQL literals.
  */
 const EARLIEST_READABLE_MICROSECONDS = BigInt(Date.UTC(1900, 0, 1)) * 1000n;
 const LATEST_READABLE_MICROSECONDS = BigInt(Date.UTC(2262, 3, 11)) * 1000n;
@@ -493,34 +328,10 @@ function checkedWindow(window: TimeWindow): TimeWindow {
 }
 
 /**
- * Where a page stopped, as a position in the sort order rather than a count of
- * rows skipped.
- *
- * **The justification is correctness, and it is not cost.** The usual argument
- * for a token — an offset re-reads everything before it, so page fifty costs
- * fifty pages — does not apply to this query and should not be claimed for it:
- * the list groups a whole window by `trace_id` and then orders the groups, so
- * the aggregation is the cost, an offset and a token pay it identically, and
- * page fifty is exactly as expensive either way.
- *
- * What a position buys is a walk that is stable while spans are still arriving.
- * `offset 100` means *skip whatever sorts first at the moment you ask*, so a
- * trace ingested mid-walk shifts every later row by one and the next page hands
- * back a trace the last page already showed — while the one that fell off the
- * boundary is never shown at all. A position cannot do either: the next page
- * asks for what sorts strictly after the row the caller last saw, so a row
- * arriving anywhere else changes nothing about where the walk resumes. Nothing
- * is skipped and nothing is repeated, whatever ingest does meanwhile.
- *
- * The two parts are the two the list orders by, in that order: when the trace
- * started, and its id to break the tie. Ties are real and not rare — the sort key
- * buckets time to the minute, and traces of one busy minute routinely share a
- * start.
- *
- * It travels as base64url of a versioned string, which makes it opaque without
- * pretending to be a secret. Clients hand it back and nothing else is promised
- * about it; the version is what stops a token from an older shape being read as
- * though it meant the same thing.
+ * Versioned base64url cursor for trace start microseconds and trace ID. It avoids
+ * offset shifts when new rows arrive, but late evidence can still move a trace's
+ * start time. It is not a snapshot or an authenticated token. Each page still
+ * aggregates the requested window; the cursor does not remove that cost.
  */
 type CursorPosition = {
   readonly startedAtMicroseconds: bigint;
@@ -574,18 +385,8 @@ function decodeCursor(cursor: string): CursorPosition {
  * ------------------------------------------------------------------- */
 
 /**
- * The exact literal `DateTime64(6)` reads.
- *
- * Written into the statement rather than passed as a parameter on purpose: the
- * window is what the primary index prunes on, and a constant of the column's own
- * type is the form ClickHouse's key analysis reads without hesitating. It is
- * built from an integer count of microseconds and never from anything a caller
- * typed, so there is nothing in it for a quote to escape out of.
- *
- * The four-digit year it slices out is guaranteed by `checkedWindow`, which
- * refuses anything outside the range `DateTime64` holds before a literal is ever
- * built. `toISOString` writes a year outside 0000–9999 with a sign and six
- * digits, and the slice would take the timestamp apart in the middle.
+ * Build a typed DateTime64(6) literal from validated integer microseconds.
+ * checkedWindow guarantees four-digit years before ISO formatting and slicing.
  */
 function asDateTime64(microseconds: bigint): string {
   const MILLION = 1_000_000n;
@@ -620,18 +421,9 @@ type Tenancy = {
 };
 
 /**
- * The organization, and the project when there is one to name.
- *
- * `auth.projectId` wins over anything asked for: a key minted for one product
- * area reads that product area, and the argument can only narrow an
- * organization-wide credential. Both travel as parameters — they are ids, and an
- * id is the one thing in these statements that ever came from outside.
- *
- * An **empty** project id is nobody's project and is read as absence, on both
- * halves. `?project_id=` is what a form submits for a field left blank, and
- * `??` does not catch it: taken as a name it would put `project_id = ''` in the
- * predicate, which no row has ever been written under, and the customer would be
- * handed an empty list indistinguishable from having no traces.
+ * Use the context's project when present; a requested project can only narrow
+ * an organization-wide context. Treat empty project IDs as absent and bind
+ * organization/project IDs as query parameters.
  */
 function tenancyOf(auth: AuthContext, asked: string | undefined): Tenancy {
   const projectId = named(auth.projectId) ?? named(asked);
@@ -683,19 +475,8 @@ const TRACE_POSITION = "min(toUnixTimestamp64Micro(started_at))";
 const AGENT_POV = "agent";
 
 /**
- * One count, over one POV — the same rule the surfaces above read by.
- *
- * A simulation holds both POVs of one conversation under one trace: the
- * persona's, which is what egma's own simulator said, heard and recorded, and
- * the agent's, which is what the agent's own process reported. They describe
- * the same turns and the same calls, so counting the rows would say a
- * thirteen-turn conversation had twenty-six. **The agent's POV is counted
- * wherever the trace holds one**, exactly as the run view renders it; a trace
- * with one POV is counted whole, because there is nothing to choose between.
- *
- * Written as one conditional over the aggregate rather than as a filtered
- * subquery so the whole fact block stays one pass over rows the sort key has
- * already pruned.
+ * Count agent POV rows when any exist; otherwise count all rows. This prevents
+ * double-counting a simulation's agent and persona evidence in the same aggregate.
  */
 function counting(rows: string): string {
   // The column, qualified. This block aliases one expression `as emitter`, and
@@ -710,21 +491,9 @@ function counting(rows: string): string {
 }
 
 /**
- * Every trace-level fact, as one pass of `countIf`s over the spans a window
- * holds for a trace.
- *
- * One string, read by both endpoints. The list groups it by `trace_id` across
- * the whole window; the transcript runs the identical aggregate scoped to the
- * one trace it is returning. So the numbers printed beside a transcript and the
- * numbers in the list that found it are the same numbers arrived at the same
- * way, rather than two implementations that agree until the day they do not —
- * and the transcript's counts are the trace's own even when its tree had to stop
- * at the cap.
- *
- * `duration_ns` is a `UInt64` and this arithmetic is signed, so a row carrying a
- * duration near 2^64 would come through `toInt64` negative and end the trace
- * before it began. Ingest clamps what it writes at Int64's ceiling; `greatest`
- * is the same floor under rows that were written before it did.
+ * Shared trace aggregates for list and detail reads. Counts use one POV and
+ * cover the full window even when the detail tree is truncated. Clamp negative
+ * signed duration conversions to zero when computing the trace end.
  */
 const TRACE_FACTS = `toString(${TRACE_POSITION}) as started_at_micros,
        toString(max(
@@ -773,25 +542,9 @@ type SummaryRow = {
 };
 
 /**
- * The traces this customer has inside this window, newest first.
- *
- * **A trace is whatever spans arrived under one trace id**, and this reads
- * `spans` rather than the turn-grain view for a reason worth writing down. A
- * trace whose provider emits no `turn:` span has no row in that view at all —
- * which today is every framework except LiveKit, because an unrecognised
- * instrumentation scope normalises to `other` — and a list that silently omits a
- * customer's traces is a worse thing than a slower one. The view is still read,
- * for the single thing it is uniquely good at: the truncated opening line,
- * without touching the untruncated column beside it.
- *
- * Every count is a `countIf` in the same single pass, so a page's whole set of
- * numbers costs one scan of a window the sort key has already pruned to this
- * organization, this project, and these minutes.
- *
- * **`source` narrows that scan and nothing else about this call changes.** A
- * caller naming none reads both kinds of traffic, exactly as every caller did
- * before the option existed; a caller naming one reads that one, and a token it
- * was handed resumes inside the same narrowed ordering.
+ * List traces newest first from spans so traces without turn rows remain visible.
+ * Use the turns view only for previews. Apply source filtering before grouping
+ * and pagination; omit source to include production and simulation traffic.
  */
 export async function listTraces(
   auth: AuthContext,
@@ -806,20 +559,8 @@ export async function listTraces(
       ? undefined
       : decodeCursor(options.cursor);
 
-  // The kind of traffic, when a caller asked for one. It joins the scan rather
-  // than the page, which is what makes a token minted under it walk the
-  // filtered ordering: `having` prunes groups after this predicate has already
-  // decided which rows there were to group, so the row a page stopped at is a
-  // position in the same ordering the next request resumes.
-  //
-  // **Qualified by the table, and that is not decoration.** The select list
-  // aliases `any(source) as source`, and ClickHouse resolves a bare `source` in
-  // the `where` against that alias — then refuses the whole query, because an
-  // aggregate cannot be a predicate on the rows it aggregates. Naming the table
-  // is what points this at the column.
-  //
-  // A parameter, because it is the one part of this statement that came from
-  // outside.
+  // Filter source in WHERE before grouping. Qualify the column to avoid resolving
+  // to the select alias any(source), which cannot be used in a row predicate.
   const source = named(options.source);
   const narrowing =
     source === undefined
@@ -841,17 +582,9 @@ export async function listTraces(
       : `(${TRACE_POSITION}, trace_id) < ` +
         `({cursor_started_at:Int64}, {cursor_trace_id:String})`;
 
-  // LiveKit JavaScript emits successful start/drain activity trees under
-  // their own wire trace ids. They remain immutable evidence and a direct
-  // detail read can still open them; they are omitted only from the production
-  // transcript list.
-  //
-  // This belongs in HAVING because the decision is about every span in one
-  // trace. It runs in the list's existing grouped scan, after the WHERE clause
-  // has used the month, time min-max and tenancy primary-key indexes, and
-  // before ORDER BY/LIMIT so an omitted group never consumes a page slot.
-  // Exact names, all-LiveKit provenance, no root and no error make this fail
-  // open: anything new, mixed or failed stays visible.
+  // Hide only known successful LiveKit lifecycle-only traces from the production
+  // list. Apply HAVING before pagination; mixed, new, rooted, or failed traces stay
+  // visible. Direct detail reads retain access to the omitted evidence.
   const visibleProductionTracePredicate =
     source === "production"
       ? `not (
@@ -1147,14 +880,8 @@ function factsOf(traceId: string, row: SummaryRow): TraceFacts {
 }
 
 /**
- * The first thing the human said in each trace on the page, from the turn-grain
- * view.
- *
- * Bounded to the traces the page actually holds and to the slice of the window
- * they start in — the earliest of them is the earliest any of their turns can be,
- * since a turn is a span and each position is a minimum over all of a trace's
- * spans. So this reads a strictly smaller range than the list itself did, over
- * one truncated column, and never touches the untruncated text on `spans`.
+ * Read first human-turn previews only for traces on this page, from their earliest
+ * start to the window end. Select text_preview without loading full span text.
  */
 async function previewsFor(
   tenancy: Tenancy,
@@ -1208,37 +935,10 @@ function isTurn(kind: string): boolean {
 }
 
 /**
- * One trace, transcript-ordered and shaped for reading.
- *
- * **The window is required here too**, and it is not ceremony. `trace_id` is not
- * a prefix of the sort key — it is hashed into the fourth position, under the
- * minute — so a lookup naming only an id would have nothing to prune with and
- * would read every partition the store holds. Saying when the trace happened is
- * what makes fetching one of them cheap, and the list that found it already
- * said.
- *
- * **The safe provider payload is not returned.** It is by a wide margin the
- * largest column on the row — every span carries its resource and scope after
- * credential redaction — and a transcript that shipped it would be megabytes
- * of JSON nobody asked to render. It is neither lost nor unreachable: it is on the row,
- * and the way a caller will reach it is a per-span read
- * (`GET /v1/traces/:traceId/spans/:spanId`) that this ticket deliberately does
- * not build, because nothing consumes it yet and an endpoint with no caller is a
- * contract nobody has checked.
- *
- * **Two narrow projections are the exception.** The reported-measurements block
- * rides the root, so the third query reads only its `egma_normalised` corner.
- * Retell rows written before tool timing was understood also need a compatible
- * read, so ClickHouse projects only tool ids, event roles and order, event
- * times, and summary latency. It does not select transcript content, arguments,
- * results, or the provider document. The tool row contributes only its matching
- * id. Both extractions happen in ClickHouse, so vendor evidence the reader does
- * not need never crosses the wire.
- *
- * Absent when the window holds no span of that trace for this customer — which is
- * also the answer another customer gets for a trace id they guessed correctly,
- * because the organization leads the filing order and their query never reaches
- * the rows at all.
+ * Read one trace within a required time window and authorization scope. Return
+ * bounded transcript rows and full-window aggregates. Omit the provider payload;
+ * project only normalized measurements and the Retell IDs/times needed for
+ * tool-timing compatibility. Return undefined when no visible span exists.
  */
 export async function readTrace(
   auth: AuthContext,
@@ -1256,23 +956,9 @@ export async function readTrace(
        and trace_id = {trace_id:String}`;
   const parameters = { ...tenancy.parameters, trace_id: traceId };
 
-  // Three reads of the same window, and none of them is another's leftovers.
-  // The rows build the tree and stop at the cap; the aggregate counts the whole
-  // trace, so that a transcript which had to stop somewhere still reports what
-  // it stopped short of. It is the list's own aggregate, scoped to one trace,
-  // over a window the sort key has already pruned to this organization, this
-  // project and these minutes — one cheap pass. The third reads the reported
-  // block and the bounded Retell compatibility fields from the root. All three
-  // are asked in parallel because no answer is another's input, and all three
-  // carry the same tenancy and the same window, so the third can no more reach
-  // another customer's row than the first two can.
-  //
-  // The tree is ordered by when a span started and then by its id, and there is
-  // nothing after that. There used to be: a long tail of tie-breakers ending at
-  // the payload, which existed to give a stable order to two rows carrying
-  // different evidence under one span id. That is not a case to order any more —
-  // it is refused before the second row can be written — and an order that made
-  // it look settled would be the response quietly picking a winner.
+  // Read capped tree rows, full-window aggregates, and the parentless payload
+  // projection in parallel with the same scope and time bounds. Order tree rows
+  // by start time and span ID; ingestion handles evidence conflicts before storage.
   const [summaries, rows, roots] = await Promise.all([
     rowsOf<SummaryRow & { agent_evidence_complete: number; agent_evidence_incomplete: number }>(
       `select
@@ -1321,27 +1007,9 @@ export async function readTrace(
       parameters,
     ),
     rowsOf<RootSliceRow>(
-      // **The egma-owned slice and exact structural compatibility fields of one
-      // parentless row, and never the payload.** Every normalizer writes its
-      // root naming no parent, and the block is written on that row — so what
-      // this selects is the parentless rows, earliest first, and keeps one.
-      // Selected by the parent and
-      // deliberately not by a kind: a root wears whatever word its platform
-      // uses, `root` on egma's own traces and `conversation` on a Retell one,
-      // and a reader that named kinds would have to learn a new one per
-      // platform.
-      //
-      // The same predicate also catches a span whose unusable parent id
-      // normalised away at the door — the orphan `transcriptOf` files at the
-      // top, below — so this is honestly *one parentless row* and not "the
-      // root" by any stronger claim. **That is a read concern and never a
-      // completion authority**: whether a trace has ended is a fact its platform
-      // states, and no query here may be read as answering it.
-      //
-      // Which of several it is, is `PARENTLESS_ROW_ORDER`'s decision and is
-      // explained there: a simulation now holds both POVs under one trace, so a
-      // second parentless row is ordinary rather than the sign of a lost flush
-      // it once was.
+      // Project normalized measurements and Retell timing fields from one parentless
+      // row chosen by PARENTLESS_ROW_ORDER. A missing parent can also produce such a
+      // row, so this selection does not prove trace completion.
       `select
        span_id,
        span_id as root_span_id,
@@ -1399,19 +1067,8 @@ type RootSliceRow = RetellToolTimelineSlice & {
 };
 
 /**
- * The reported-measurements block off the trace's root, or nothing at all.
- *
- * **Nothing at all is a first-class answer here and is never an error.** No
- * root row, no egma-owned slice, no block inside it, a slice that is not JSON,
- * a block of a version this code predates — every one of them is a trace that
- * reported nothing, which is what almost every trace in the store is. A read
- * that threw on any of them would turn one bad write by one vendor into a
- * transcript nobody can open, and the transcript is the part that was never in
- * doubt.
- *
- * The parse of the block itself is `reportedMeasurementsOf` and is deliberately
- * not repeated here: this walks two payload keys and hands over what it found,
- * and the contract decides what a block is.
+ * Read the measurement block through reportedMeasurementsOf. Missing, malformed,
+ * or unsupported blocks return undefined without preventing transcript access.
  */
 function reportedOn(row: RootSliceRow | undefined): ReportedOnTrace | undefined {
   if (row === undefined || row.normalised === "") return undefined;
@@ -1438,49 +1095,10 @@ function reportedOn(row: RootSliceRow | undefined): ReportedOnTrace | undefined 
 }
 
 /**
- * The rows as a transcript: the turns in the order they happened, each holding
- * what happened inside it, and the root span kept to one side.
- *
- * **Every row that was read comes back, exactly once**, and that is the property
- * the rest of this is arranged around. A transcript that quietly dropped a span
- * would disagree with the count printed beside it, and a caller comparing the
- * two would be told the store had lost something.
- *
- * Four rules, each of them somebody else's decision honoured here.
- *
- * **A span whose parent is not in this trace is top-level.** A malformed parent
- * id normalises to `''` at the door with the original kept in the payload, so a
- * span that named a parent nobody sent reads as its own root rather than
- * disappearing down a chain that goes nowhere. Ticket 03 wrote that down; this is
- * where it is obeyed.
- *
- * **Turns are lifted, never nested.** A turn is a child of the root span in
- * LiveKit's tree, and leaving it there would make the transcript something you
- * find by walking into the root span's bookkeeping. So a turn appears once, in
- * `turns`, and never inside another span's children — including inside another
- * turn's, on the day some framework nests them.
- *
- * **A span the parent chain never reaches is top-level too.** Two spans naming
- * each other as parent are a cycle, and every span in one has a parent that is
- * present, so none of them files under the root; none is a turn, so none is
- * lifted. Walking down from the top would therefore never arrive at them and
- * they would vanish out of a response that still counted them. So the walk runs
- * a second time over whatever it did not visit: the first span of a cycle
- * reached that way becomes the top of it and the rest hang beneath, because the
- * visited set closes the loop. Nothing sends this on purpose; it is what a
- * truncated exporter buffer or a hand-written client produces, and the answer to
- * it is to show the spans rather than to be clever about the shape.
- *
- * **Everything else keeps its shape.** LiveKit's model calls nest four adapters
- * deep and only the innermost names the real model, so flattening would throw
- * away the one structure that says which of several `llm_request_run` spans was
- * the retry. The tree is returned as it arrived.
- *
- * **Row identity, not span id, bounds the walk.** Changed evidence may reuse a
- * span id and the append-only store keeps both rows. Each stored row therefore
- * becomes one node here. If duplicate parents make the tree ambiguous, the
- * first parent reached owns their shared children; the other row still appears
- * as its own node. Nothing is hidden to make the tree look unique.
+ * Return every input row once. Lift turns into their own list; retain other
+ * parent/child structure. Missing or self parents become top-level spans.
+ * Visit remaining rows after roots to retain cycles. Track row objects, not span
+ * IDs, so duplicate IDs do not hide rows; the first visited parent takes shared children.
  */
 function transcriptOf(rows: readonly SpanRow[]): {
   readonly turns: readonly TraceSpan[];

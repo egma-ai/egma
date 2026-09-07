@@ -20,19 +20,8 @@ import {
 } from "../src/measures.ts";
 
 /**
- * The measure catalog, held to the three things it exists to be.
- *
- * **Versioned**, so that neither side can change what a measure means quietly.
- * **Complete**, so that a threshold grader names a measure the simulator
- * actually emits — which is checked here against the simulator's own Python
- * rather than against a list somebody kept up to date by hand. And **readable**,
- * so that the document a refusal points somebody at says the same thing the
- * constant does.
- *
- * The document and the constant are two halves of one contract, exactly as the
- * two JSON schemas beside them are two halves of another. A measure in one and
- * not the other fails here rather than surfacing months later as a grader
- * nobody noticed was silent.
+ * Keep catalog version, documented definitions, and simulator-emitted measure
+ * names aligned. Read simulator source rather than maintaining another list.
  */
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -44,16 +33,8 @@ const document = await readFile(
 );
 
 /**
- * Every measure name the simulator emits as a literal, read out of its own
- * source.
- *
- * The simulator emits timing measures by calling one of a handful of functions
- * with a name — the span emitter's own `measure`, or one of the callbacks that
- * reach it; a measure passed through as a variable is one of those calls made
- * again from a caller that named it, so the literals are the whole vocabulary.
- * Reading them rather than listing them is what makes this a drift test: a
- * measure added in Python and not added to the catalog fails the TypeScript
- * build's test run, which is the only place the two languages meet.
+ * Extract literal names passed to the simulator's measurement emitters.
+ * This detects emitted measures missing from the shared catalog.
  */
 async function measuresTheSimulatorEmits(): Promise<readonly string[]> {
   const source = path.join(repositoryRoot, "apps", "simulator", "src");
@@ -156,15 +137,8 @@ describe("what the catalog names", () => {
 });
 
 /**
- * The half of the catalog that says how each measure is **computed**, which is
- * what stops the dropdown a developer picks from and the arithmetic that answers
- * them being two lists.
- *
- * The list a form offers, the list a write accepts and the list the shared
- * measure module implements are all `SPAN_DERIVED_MEASURES`. What is asserted
- * here is that the catalog is complete enough for that to be safe: every measure
- * says how it is computed, the definitions are readable in the document, and the
- * two ways of asking "can a grader name this" agree.
+ * Check each measure's derivation rule and documentation, and agreement
+ * between the exported span-derived list and its lookup helpers.
  */
 describe("how each measure is computed from the spans", () => {
   it("is pinned beside every measure's name, with no gaps", () => {

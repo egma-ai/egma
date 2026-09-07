@@ -14,65 +14,15 @@ import path from "node:path";
 import { crc32 } from "node:zlib";
 
 /**
- * The bounded local log evidence is staged in between being accepted and being
- * durable, and the only thing that survives an unclean stop.
+ * Bounded local staging before object-store acceptance. Frames contain
+ * [u32 length][u32 CRC32][payload], with big-endian integers.
+ * Recovery keeps valid frames, isolates the first damaged tail in a unique
+ * .torn file, truncates at the last valid boundary, and continues to later
+ * log files. Isolated tails are retained for inspection, not replayed.
  *
- * It exists for four reasons and no others: to group small arrivals into one
- * segment worth uploading, to give the process something to come back to after
- * a crash it did not choose, to make overload an explicit refusal instead of a
- * silent loss, and to hold a sealed segment's identity so an ambiguous upload
- * reaches for the same object rather than inventing a second one. **It is not
- * the acknowledgement boundary** — nothing here has been promised to a customer
- * — and it is not a query store. What it holds is on its way somewhere.
- *
- * ## A frame, and why the length and the checksum are both there
- *
- * `[u32 length][u32 CRC32 of the payload][payload]`, big-endian, appended and
- * never rewritten. The length alone would let recovery walk the file, and would
- * also let a half-written length walk it straight off a cliff — a torn write
- * that landed four plausible bytes claims a payload that is not there, and the
- * next frame boundary is then wherever those bytes said. The checksum is what
- * separates *a complete frame* from *four bytes that look like one*, which is
- * the one question recovery has to answer after a power cut. CRC32 rather than
- * a cryptographic digest because the question is integrity of a local file, not
- * identity of evidence: the durable content hash is over the record and lives
- * in `record.ts`.
- *
- * ## What recovery may and may not do
- *
- * It reads forward, keeps every frame whose checksum holds, and stops at the
- * first frame that is short or fails its checksum. It never repairs a frame,
- * never re-reads a damaged region hoping for a boundary further on, and never
- * synthesises a record — a log that invented evidence would be worse than one
- * that lost some, because the loss is visible and the invention is not.
- *
- * The damaged tail is **isolated rather than deleted**: its bytes are moved
- * beside the file with a `.torn` suffix and the file is truncated at the last
- * good boundary. Nothing reads a `.torn` file again. It is there so that the
- * operator meeting a gap has the bytes that made it, which is the same rule the
- * ingestion bucket follows for an object it cannot process.
- *
- * Reading then continues with the next file. Damage in an older sealed file
- * costs the records inside it and no more; dropping the newer complete files
- * behind it would turn one lost region into every lost record after it.
- *
- * ## Rolling files, and why they are files rather than one file
- *
- * One active file takes appends. When the next frame would carry it past
- * `maxFileBytes` it is sealed and a new one starts. A sealed file whose every
- * frame has reached the object store is deleted whole — that is the entire
- * compaction story, and it is the reason there is more than one file: a single
- * growing file can only be compacted by rewriting it, and rewriting a
- * write-ahead log is how a write-ahead log stops being one.
- *
- * ## Durability, and the one place it is bought
- *
- * An append reaches the operating system immediately and the disk when the
- * caller asks. `sync()` is called before a segment is uploaded, so what the log
- * promises is: anything that reached the object store was on this disk first.
- * Paying for a disk flush on every appended record would buy nothing that
- * matters — a record lost with the process before the segment holding it was
- * ever sealed was never acknowledged to anybody.
+ * Rotate before the next frame exceeds the file bound. Delete sealed files
+ * only after all their frames are released. append writes to the OS; sync
+ * flushes before upload. Local staging alone is not acknowledgement.
  */
 
 /** `[u32 length][u32 CRC32]` in front of every payload. */
@@ -89,14 +39,8 @@ const LOG_FILE_PATTERN = /^[0-9]{8}\.log$/u;
 const ORDINAL_DIGITS = 8;
 
 /**
- * The log will not take more, and says so.
- *
- * Raised rather than answered, and raised **before** anything is written, so
- * the refusal is the whole outcome: nothing older is discarded to make room, no
- * partial frame reaches the file, and the caller's own retryable refusal is the
- * only thing the sender sees. A discard would make an overloaded Egma look
- * healthy while losing the evidence it already staged, which is the one failure
- * this whole path exists to rule out.
+ * Backpressure before an append would exceed a byte or record bound.
+ * Existing frames are retained; the caller can return a retryable refusal.
  */
 export class IngestionBackpressureError extends Error {}
 
@@ -126,14 +70,8 @@ export type WriteAheadLog = {
    */
   append(payload: Uint8Array): StagedEntry;
   /**
-   * Whether one more frame carrying this many payload bytes would still fit.
-   *
-   * The same judgment `append` makes, asked without writing anything — and it
-   * is the same judgment because `append` asks this. A caller deciding whether
-   * this log will take more evidence must not re-derive the rule from `bytes`
-   * and the bound it was opened with: the bound is on frames, a frame is the
-   * payload plus this log's own header, and a caller comparing usage against
-   * the bound would call a log writable while the very next append refused it.
+   * Apply the same byte and record limits as append, including frame overhead.
+   * Use this instead of reconstructing capacity from current usage.
    */
   accepts(payloadBytes: number): boolean;
   /** Everything staged and not yet released, oldest first. */
@@ -208,15 +146,8 @@ function framesIn(
 }
 
 /**
- * Move a damaged tail beside its file without ever writing over one already
- * there.
- *
- * A first-frame tear leaves nothing whole, so recovery removes the empty `.log`
- * and the next append re-creates the same ordinal — and a later tear at that
- * ordinal would land on the same `.torn` name. Writing over it would destroy the
- * bytes of the earlier tear, which is the one thing isolation exists to keep. So
- * each tear takes a name of its own by exclusive create: `NNNNNNNN.log.torn`,
- * then `.2.torn`, `.3.torn`, and the operator keeps every isolated tail.
+ * Preserve each damaged tail with exclusive creation and a unique suffix.
+ * A reused log ordinal must not overwrite an earlier .torn file.
  */
 function isolateTornTail(where: string, bytes: Buffer): void {
   let attempt = 1;

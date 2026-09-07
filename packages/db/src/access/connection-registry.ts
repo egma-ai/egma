@@ -12,23 +12,9 @@ import {
 import { AgentWriteRefusedError } from "./errors.ts";
 
 /**
- * What each simulation connection type is made of. The registry is code, not
- * a table, because a table could claim kinds the code cannot run: an entry lands here
- * in the same commit as its adapter, following the `VOICE_PROVIDERS`
- * precedent.
- *
- * It drives everything the access layer decides about a connection at the
- * door — which modalities the kind supports, the topology it implies (derived,
- * never caller-supplied: it predicts who moves first when a simulation
- * starts, and a caller's guess would just be wrong), which config keys are
- * demanded and how each is checked, and whether a credential is required or
- * refused outright. Every failure is named at create, so a typo surfaces
- * immediately rather than at run time.
- *
- * The map is `Record<ConnectionType, …>`, so it cannot drift from the schema:
- * a kind added to `CONNECTION_TYPES` refuses to build until it is described
- * here, and an entry describing a kind the schema's CHECK would reject cannot
- * be written at all.
+ * Connection types define supported modalities, topology, access variants, and
+ * validation rules. Keep simulatorAdapter in step with the shipped simulator.
+ * Record<ConnectionType, …> requires an entry for every schema connection type.
  */
 
 /**
@@ -38,19 +24,7 @@ import { AgentWriteRefusedError } from "./errors.ts";
  */
 type ConfigGate = (key: string, value: unknown) => string;
 
-/**
- * A gate the caller may leave out.
- *
- * Most config keys are demanded, because a missing one means a reach nobody
- * can complete. Some are not: a key whose absence is itself a setting — "no
- * name given" meaning "whoever answers" — has to be allowed to be absent, and
- * demanding it would make a caller write down a value to mean the default they
- * already had.
- *
- * Optional is about absence and nothing else. A key that is there faces the
- * same gate it would have faced if it were demanded, so an optional key is
- * never a key where anything goes.
- */
+/** Allow an absent config key; validate a supplied value with the same gate. */
 type OptionalGate = { readonly optional: true; readonly gate: ConfigGate };
 
 /** What a descriptor holds against one config key. */
@@ -74,12 +48,7 @@ export type ConfigFieldMetadata = {
   readonly kind: ConfigFieldKind;
   /** One sentence a person can act on. Never names a validator or a rule id. */
   readonly help: string;
-  /**
-   * Keep a supporting config field after the credential fields when that is
-   * the order a person needs to fill the form in. Most config comes first;
-   * this is only for a field that completes the setup once the credential is
-   * in, and no shipped field asks for it today.
-   */
+  /** Place this supporting field after credentials when the form requests that order. */
   readonly afterCredentials?: true;
 };
 
@@ -102,16 +71,7 @@ export type CredentialFieldMetadata = {
   readonly help: string;
 };
 
-/**
- * The three answers to "does the customer supply a secret for this access variant",
- * said in the words the product uses everywhere else.
- *
- * The registry's own `required` field says the same thing in the words the
- * gates are written in (`true`, `false`, `"if-sent"`). This is the translation,
- * and it exists because a Restore is held to exactly this rule and its three
- * refusals are named after these three words — so the word a refusal uses and
- * the word a form shows come from one place.
- */
+/** Public names for credential rules, shared by forms and restore validation. */
 export const CREDENTIAL_RULES = ["required", "forbidden", "optional"] as const;
 export type CredentialRuleName = (typeof CREDENTIAL_RULES)[number];
 
@@ -151,14 +111,8 @@ export type CredentialGate = (
 export type CredentialHint = (sealed: Record<string, string>) => string;
 
 /**
- * Whether the customer hands over a secret for this access variant, and what it holds.
- *
- * `true` demands it and `false` refuses it outright — a credential supplied
- * where none belongs is rejected rather than stored and silently ignored,
- * because a caller who sent one believes it matters. `"if-sent"` is the third
- * case, and it is not a softening of the first: it belongs to an access variant that
- * really works either way, where demanding one would be egma inventing a rule
- * the customer's own deployment does not have.
+ * Require, reject, or optionally accept credentials for an access variant.
+ * When supplied, credentials must contain the complete set of required fields.
  */
 export type CredentialRule =
   | {
@@ -177,16 +131,8 @@ export type CredentialRule =
     };
 
 /**
- * One access variant inside a connection type: its config keys and credential
- * rule, together.
- *
- * Together rather than separately because an access variant is a fact about
- * the pair. A variant that asks an endpoint for a token holds no key pair of
- * its own, and a variant that mints tokens has nowhere to put an endpoint's
- * headers — so gating config and credentials against separate rules would
- * admit connections that are half of each and can do neither.
- *
- * Most connection types have one access variant and use a one-entry list.
+ * Config and credential rules for one access variant. Validate them together
+ * to prevent mixing a token endpoint config with a project key pair.
  */
 export type AccessVariantDescriptor = {
   /**
@@ -204,19 +150,8 @@ export type AccessVariantDescriptor = {
   readonly label: string;
   readonly config: Readonly<Record<string, ConfigDemand>>;
   /**
-   * The same keys as `config`, in their relative form order, with the words a
-   * person needs to answer each one. A supporting field may explicitly follow
-   * the credential group, while keeping its order among the config fields.
-   *
-   * Two lists rather than one because they answer two questions that must not
-   * be allowed to become one: `config` is what a write is *gated* by, and this
-   * is what a browser is *told*. Merging them would put presentation strings
-   * inside the gate and would make the safe projection a filtered view of the
-   * gate rather than a thing of its own — one forgotten spread away from
-   * shipping a validator to a browser. They are held level by
-   * the catalog projection, which refuses an access variant whose two
-   * lists disagree, so drift is a failure at the door rather than a field
-   * missing from a form.
+   * Config field labels in form order. The catalog checks that these keys match
+   * config. Keep presentation metadata separate from validators sent only to the server.
    */
   readonly fields: readonly ConfigFieldMetadata[];
   readonly credentials: CredentialRule;
@@ -237,17 +172,8 @@ export type AccessVariantDescriptor = {
    */
   readonly mixedUp?: string;
   /**
-   * Fewer modalities than the connection type speaks, for an access variant
-   * that cannot carry all of them. Absent means the type's own list, which is
-   * the ordinary case: a variant is about who holds the credential, and that is
-   * usually no business of the modality at all.
-   *
-   * The narrowing and the sentence explaining it are one field on purpose.
-   * Whoever is refused here is being told that the *kind* can do the thing and
-   * *their* way of reaching it cannot, which is a fact only the person who
-   * wrote the narrowing knows — and a list without its reason would leave that
-   * refusal to be derived, which is how a caller ends up reading that a
-   * connection speaks voice when the question they had was why.
+   * Optionally restrict the connection type's modalities and explain the restriction.
+   * Omit to use all modalities supported by the connection type.
    */
   readonly modalities?: {
     readonly speaks: readonly Modality[];
@@ -271,44 +197,22 @@ export type ConnectionDescriptor = {
     ...AccessVariantDescriptor[],
   ];
   /**
-   * Whether the simulator holds an adapter for this kind — whether Egma can
-   * actually conduct a conversation over it.
-   *
-   * A kind can be registered before anything can run over it: a customer can
-   * describe how to reach their agent while the adapter that reaches it is
-   * still being written. So this is a fact about the shipped simulator, kept
-   * here beside the rest of what the kind is, and it is what refuses a run at
-   * creation instead of leaving it queued forever for a conductor that does
-   * not exist. It flips to `true` in the same commit as the adapter.
+   * Whether the shipped simulator can run this connection type.
+   * Run creation rejects types without an adapter; deployment setup is checked separately.
    */
   readonly simulatorAdapter: boolean;
   /** Whether conducting this kind spends the deployment's shared carrier. */
   readonly usesPlatformCarrier: boolean;
   /**
-   * How this kind decides that two registrations are about one vendor agent,
-   * and absent for the kinds that cannot decide it at all.
-   *
-   * Registering the same vendor agent twice must not mint a second egma agent,
-   * because a retry after an uncertain network failure is the ordinary case and
-   * a duplicate identity splits a team's results history in half. So a kind
-   * that can say "this is the same agent you already registered" says how, and
-   * a kind that cannot — a phone number is where egma dials rather than who
-   * answers, and two agents may legitimately share one — declares nothing and
-   * always creates.
+   * Optional agent identity rule for registration retries. Without it, always create
+   * an agent; a shared phone number, for example, does not identify one agent.
    */
   readonly reuse?: ReuseRule;
 };
 
 /**
- * A kind's create-or-reuse rule, in two halves.
- *
- * Two halves rather than one config key, because the honest identity of a
- * vendor agent is not always a value sitting in the config. `matchedKeys` is
- * what a query can narrow the candidates by; `identityOf` is what actually
- * decides, and it runs over the rows that come back. A LiveKit server written
- * `wss://acme.livekit.cloud` and the same one written
- * `https://acme.livekit.cloud:443` are one server, and no SQL comparison will
- * ever know that.
+ * matchedKeys narrows database candidates; identityOf compares normalized identities.
+ * A raw config comparison cannot match equivalent LiveKit server URL forms.
  */
 export type ReuseRule = {
   /**
@@ -327,15 +231,9 @@ export type ReuseRule = {
     config: Readonly<Record<string, string>>,
   ) => string | undefined;
   /**
-   * The identity namespace this rule's answers live in, shared by every
-   * connection type that reaches the same vendor agent a different way.
-   * Retell's chat API, text mode and web call all name one Retell agent, so a
-   * registration through any of the three lands on the one Egma agent the
-   * first door created. Absent means the type is a family of one.
-   *
-   * Two types may declare one family only when their `matchedKeys` narrow the
-   * same way and their `identityOf` answers are mutually comparable — the
-   * shared namespace is what makes comparing identities across types honest.
+   * Shared identity namespace for connection types that reach the same agent platform
+   * identity. Family members must use comparable matchedKeys and identityOf rules.
+   * Omit to match only this connection type.
    */
   readonly family?: string;
 };
@@ -356,15 +254,8 @@ export function credentialRuleOf(
 }
 
 /**
- * The access variant a stored connection names, by the id its row carries.
- *
- * Every rule about an existing connection goes through this read. It never
- * infers an answer from config, so a stored id cannot drift.
- *
- * An id no entry claims is this deployment running against rows a later
- * release wrote. It is a fault rather than a refusal — nothing the caller sent
- * is wrong — and it says which access variant id and connection type, because that is
- * what somebody needs to find it.
+ * Look up the stored access variant ID without inferring it from config.
+ * Throw for unknown IDs, which indicate a stored-data or deployment mismatch.
  */
 export function accessVariantById(
   connectionType: ConnectionType,
@@ -386,28 +277,9 @@ export function accessVariantById(
 }
 
 /**
- * Every supported simulation connection tuple, as a browser may be told about it.
- *
- * **What is not here is the point.** No gate, no hint function, no refusal
- * sentence, no credential value — the whole of what crosses is labels, field
- * shapes, the credential rule, and the two adapter facts. It is built by
- * reading the registry rather than by copying it, so an option added to the
- * registry appears in a form with nothing else edited, and a web application
- * that kept its own copy of any of this would be a second opinion able to
- * disagree with the gate.
- *
- * **An access variant whose two field lists disagree is refused here**, loudly
- * and for every caller at once. A gated key nobody described would be a field a form
- * never asks for and a create that then refuses for missing it; a described key
- * nothing gates would be a box whose answer is silently dropped. Both are
- * caught the first time anything asks for the catalog.
- *
- * **An option offering a modality its access variant does not speak is refused
- * the same way.** The product-label table and the variants' modality lists are
- * two lists that must agree, and they are held level here rather than by
- * discipline: an option nobody caught would be a combination a form offers, a
- * browser sends, and the door then refuses — the one failure a customer cannot
- * do anything about.
+ * Browser-safe connection options from the registry: labels, field metadata,
+ * credential rules, and simulator capabilities. Exclude validators and secrets.
+ * The catalog checks field lists and offered modalities against each access variant.
  */
 export type ConnectionOptionMetadata = {
   readonly agentPlatform: AgentPlatform | null;
@@ -422,7 +294,7 @@ export type ConnectionOptionMetadata = {
   readonly simulatorAdapter: boolean;
   /** Whether a claimed work order for this kind needs the platform carrier. */
   readonly usesPlatformCarrier: boolean;
-  /** Whether egma ships something that can measure this connection's target. */
+  /** Configuration field metadata for this access variant. */
   readonly fields: AccessVariantMetadata["fields"];
   readonly credentialRule: CredentialRuleName;
   readonly credentialHelp: string;
@@ -512,14 +384,8 @@ type ConnectionOption = {
   readonly modality: Modality;
   readonly productLabel: string;
   /**
-   * Whether a flow may offer this combination. Absent means yes.
-   *
-   * **Dormant, not deleted.** Egma registers Retell **voice** agents only, so
-   * no connect flow offers the chat-native door — but rows written through it
-   * still read back with their own label, and the plug that conducts them
-   * still ships. Hiding it is a fact about what is offered, and it belongs
-   * beside the offer rather than in each flow that would otherwise have to
-   * remember.
+   * Hide this option from connection setup while preserving labels for stored rows.
+   * Retell chat-native connections remain readable and runnable.
    */
   readonly dormant?: true;
 };
@@ -716,15 +582,8 @@ export function lastFourOf(field: string): CredentialHint {
 }
 
 /**
- * The names in a field holding a JSON object, and never their values.
- *
- * For a credential with no public half at all. Where a key pair has a key
- * whose tail gives nothing away, a set of auth headers is secret the whole way
- * through: the last four characters of `Bearer eyJ…` are four real characters
- * of a live credential, and printing them would buy a reader nothing they
- * could not get from the names. The names are what a person actually needs —
- * "this connection carries an Authorization header" — and they are not secret:
- * the shape of the request is public, only the values are not.
+ * Show JSON credential field names only. Even a suffix of a header value could
+ * expose part of a secret.
  */
 export function namesIn(field: string): CredentialHint {
   return (sealed) => {
@@ -793,29 +652,9 @@ function livekitServerUrl(key: string, value: unknown): string {
 }
 
 /**
- * Which LiveKit server a url names, as one comparable string.
- *
- * The scheme is deliberately dropped, all four of them. The SDKs normalise
- * between the websocket pair and the HTTP pair themselves, so
- * `wss://acme.livekit.cloud` and `https://acme.livekit.cloud` reach one
- * server, and a customer who typed one in the browser and the other in the
- * terminal must not end up with two egma agents for one worker. Host case and
- * a trailing root dot go the same way and for the same reason.
- *
- * What is left is host and port, which is exactly what tells a team's staging
- * project from their production one. The port needs no arithmetic here:
- * `URL` already reports an empty port for one that is its scheme's default,
- * so `wss://a`, `wss://a:443` and `ws://a:80` all arrive bare and compare
- * equal, while the `:7880` a self-hosted LiveKit runs on is kept and keeps it
- * apart from whatever else answers on that host.
- *
- * This is a comparison key and never a value anybody dials: the url is stored
- * as it was written, because what goes to the SDK should be what the customer
- * pasted.
- *
- * A url the gate would refuse can never reach a stored row, so an unparseable
- * one answers with what it was given rather than throwing. It then compares
- * equal only to itself, which is the safe answer for a row nobody can explain.
+ * Compare LiveKit servers by lowercase host and non-default port, ignoring scheme
+ * and a trailing root dot. URL removes scheme-default ports. Keep the stored URL
+ * unchanged for the SDK; return trimmed lowercase input if parsing fails.
  */
 export function livekitServerOrigin(url: string): string {
   const written = url.trim();
@@ -832,22 +671,9 @@ export function livekitServerOrigin(url: string): string {
 }
 
 /**
- * Which token endpoint a url names, as one comparable string.
- *
- * The whole address, where `livekitServerOrigin` keeps only host and port. A
- * LiveKit server is one host and a path on it means nothing; a token endpoint
- * is a route on a service the customer wrote, and one service commonly mints
- * for several projects on several routes — `/staging/token` beside
- * `/production/token`, or a tenant named in the query — so the origin alone
- * would fold two workers behind one gateway into one agent. Host case and a
- * trailing root dot go the way they do for a server. The path and query are
- * kept as written, because a route is case-sensitive and the query is the
- * customer's to shape. The scheme is dropped for the reason it is dropped
- * there: a stored endpoint is https, admitted or refused at the gate above.
- *
- * A comparison key and never a value anybody requests: the endpoint is stored
- * as it was written. An unparseable one answers with what it was given, as a
- * server url does, and compares equal only to itself.
+ * Compare token endpoints by host, port, path, and query. Paths and queries may
+ * select different projects on one service. Drop the scheme and trailing host dot;
+ * return trimmed input if parsing fails. This key does not replace the stored URL.
  */
 export function tokenEndpointIdentity(endpoint: string): string {
   const written = endpoint.trim();
@@ -865,61 +691,22 @@ export function tokenEndpointIdentity(endpoint: string): string {
 }
 
 /*
- * **There is no dispatch-metadata config key here.** There was one: a LiveKit
- * connection carried a JSON object that rode the room's metadata and the
- * dispatch's, and every run over that connection carried the same one.
- *
- * A test asks for its own now — `env.job_dispatch_metadata` — because what a
- * worker should be told is a fact about the scenario rather than about the
- * wiring, and one object per connection could not say two things for two tests.
- * LiveKit's own 512 KiB ceiling moved with it, to
- * `LARGEST_JOB_DISPATCH_METADATA_BYTES` beside the test that authors the value.
+ * LiveKit dispatch metadata belongs to each test: env.job_dispatch_metadata.
+ * Its size limit is LARGEST_JOB_DISPATCH_METADATA_BYTES in test validation.
  */
 
 /**
- * Where egma asks the customer for a token, per simulation.
- *
- * An address egma makes a request to, so ws and wss are refused here although
- * the server URL beside it takes them: a websocket scheme on this key is
- * somebody who pasted the wrong one of the two, and finding that out at create
- * costs a sentence where finding it out mid-run costs a simulation.
- *
- * This value later becomes an outbound request from the simulator. The
- * platform therefore admits only HTTPS hostnames here. Literal addresses and
- * localhost names are refused before storage; the simulator resolves the
- * hostname again at request time and admits only public addresses there. The
- * second check is load-bearing because DNS can change after this write.
+ * Validate the per-simulation token endpoint before storage. The simulator must
+ * also check resolved addresses at request time because DNS can change.
  */
 function tokenEndpointUrl(key: string, value: unknown): string {
   return publicHttpsUrl(key, value, "https://example.com/egma/livekit-token");
 }
 
 /**
- * An address on the public internet that Egma itself will make a request to.
- *
- * **The rule every customer-written outbound address is held to**, written
- * once because it is one rule: a config key a customer fills in decides where
- * this platform's own process sends a request, and every such key is therefore
- * a way to ask Egma to fetch something on the customer's behalf. HTTPS only, a
- * real hostname, and nothing that resolves inside the deployment: a literal
- * address, `localhost`, or a name under `.localhost` is refused before it is
- * ever stored.
- *
- * **A private address is an operator's setting, never a customer's.** A
- * deployment that really does reach a provider through something on its own
- * network says so in its own configuration, where the person who runs the
- * platform can see it — not in a connection row any member of any organization
- * can write. That is the whole distinction: this gate guards a value that
- * arrives over the API from a customer, and no such value may name the
- * platform's own neighbourhood.
- *
- * A URL carrying its own credentials, a backslash, or a control character is
- * refused too, because none of the three is an address anybody means and each
- * is a way to make one string parse two ways.
- *
- * This is a check at write time and it is not the whole defence: DNS can move
- * after the row is written, so a caller that resolves the name again at request
- * time should say so where it does it.
+ * Accept HTTPS hostnames without credentials, IP literals, localhost names,
+ * backslashes, or control characters. This check does not resolve DNS; outbound
+ * request code must reject private addresses after resolution.
  */
 function publicHttpsUrl(key: string, value: unknown, example: string): string {
   const candidate = typeof value === "string" ? value.trim() : "";
@@ -961,14 +748,8 @@ function publicHttpsUrl(key: string, value: unknown, example: string): string {
 }
 
 /**
- * The headers egma sends when it asks for a token: a JSON object of header
- * name to header value, carried as the text it was written as.
- *
- * Checked at create like the config's own JSON is, and for the same reason: a
- * stray comma refused here is a person looking at their own mistake, while the
- * same comma refused at token time is a simulation that failed for a reason
- * nobody can see. The refusal names the field and shows the shape, and quotes
- * nothing of what was sent — the values are the credential.
+ * Validate a nonempty JSON object of header names to nonempty string values.
+ * Keep its text for storage and never include secret values in validation errors.
  */
 function authHeadersJson(what: string, field: string, value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
@@ -1064,21 +845,8 @@ export const CONNECTION_REGISTRY: Readonly<
     label: "Retell text mode",
     agentPlatforms: ["retell"],
     /**
-     * Chat, and a chat with a **voice** agent — which is the whole of why this
-     * kind exists.
-     *
-     * `retell_chat_api` reaches a Retell *chat* agent. A Retell voice agent has
-     * no chat door there at all, so the only way to test one was to dial it.
-     * Retell's own dashboard tests a voice agent in text through the
-     * agent-playground-completion API, and this is that door: the same test
-     * suite over chat and over voice against one agent, which is the diagnostic
-     * the domain model promises — passes on text, fails on voice means the
-     * prompt is fine and the speech stack is broken.
-     *
-     * Voice is not admitted here, and never will be: a text-mode exchange
-     * synthesizes nothing and hears nothing. A voice simulation of the same
-     * agent is a phone or a web-call connection beside this one, on the same
-     * Egma agent, so both histories accumulate under one identity.
+     * Text-mode access to a Retell voice agent through agent-playground-completion.
+     * Use a separate phone or web-call connection for voice simulations of that agent.
      */
     modalities: ["chat"],
     // Retell brokers the exchange exactly as it brokers a chat session: Egma
@@ -1144,17 +912,9 @@ export const CONNECTION_REGISTRY: Readonly<
     label: "Retell web call",
     agentPlatforms: ["retell"],
     /**
-     * Voice, and a different voice from the phone lane's.
-     *
-     * A web call is WebRTC: Egma asks Retell to create the call, and joins the
-     * room Retell answers with. There is no carrier and no 8 kHz band, so under
-     * the connection-band rule a simulation over this kind is **a different
-     * unit** from a phone simulation of the same agent, and the recorded
-     * connection is what keeps the two from being compared by accident.
-     *
-     * This is the lane a mocked run uses. The agent's published number is never
-     * dialled for one, so a real caller ringing mid-run reaches the real agent
-     * with real tools.
+     * Retell web calls use WebRTC without the phone carrier. Record the connection
+     * so results remain distinguishable from phone simulations. A run using mock
+     * tools creates a temporary agent version instead of dialing the published number.
      */
     modalities: ["voice"],
     // Egma asks Retell to create the call and joins what Retell hands back.
@@ -1242,23 +1002,8 @@ export const CONNECTION_REGISTRY: Readonly<
         },
       },
     ],
-    // The simulator dials. `egma_simulator.plugs.phone.PhoneCall` is registered
-    // for this kind and places the call over the deployment's own carrier
-    // trunk, so a run over a phone connection is one egma can conduct.
-    //
-    // **What this says is a fact about the build, never about one deployment's
-    // carrier.** Whether *this* platform has been given a trunk is a carrier
-    // precondition, and it is a separate question that has to be asked where
-    // a deployment's configuration is known — this package cannot see it.
-    //
-    // That second question is asked, and it is asked in front of this one.
-    // `POST /v1/runs` reads the carrier precondition from the platform's own
-    // store and refuses a run over a phone connection with
-    // `phone_setup_required` before a row is written, so a platform nobody has
-    // given a carrier says so instead of queueing a call it cannot place. The
-    // two refusals sit in two layers because they are two different facts: this
-    // line is about what the simulator ships with, and that one is about what
-    // one installation has been configured with.
+    // The phone adapter ships in the simulator. POST /v1/runs separately checks the
+    // deployment's carrier setup and returns phone_setup_required before writing a run.
     simulatorAdapter: true,
     usesPlatformCarrier: true,
   },
@@ -1276,32 +1021,11 @@ export const CONNECTION_REGISTRY: Readonly<
     // laptop reachable at all — nothing has to dial in to it.
     topology: "agent-dials-out",
     /**
-     * The first kind to have two access variants, two answers to one
-     * question: who mints the token that opens the room.
-     *
-     * The customer either hands egma their project's key pair and egma mints
-     * its own, or they keep the pair and stand up an endpoint egma asks. The
-     * first is the quickest setup and lets egma manage each simulation. The
-     * second is an advanced, customer-operated integration for a team that
-     * must keep the token-signing secret on its side.
-     *
-     * Both variants name the worker, and on both a test's
-     * `env.job_dispatch_metadata` reaches it. On the key-pair variant egma
-     * dispatches the worker itself and writes the string on that dispatch. On
-     * the endpoint variant it asks the endpoint for that worker by name, in
-     * the `room_config` block of LiveKit's standard token request, with the
-     * test's string as that dispatch's metadata; the endpoint copies the
-     * block into the token it mints — which is how every LiveKit frontend
-     * dispatches a named agent without holding the key pair. What the
-     * endpoint variant does not hold is a server url: the endpoint's answer
-     * names the server, exactly as LiveKit's standard token endpoint answers
-     * `server_url` beside `participant_token`.
-     *
-     * What egma still cannot do on the endpoint variant is create or delete
-     * a room. Both variants speak both modalities: the telling that a
-     * simulation is typed is the room's name, and on the endpoint variant
-     * egma asks the endpoint for the marked name exactly as it asks for the
-     * bare one.
+     * Both LiveKit access variants require a worker name and carry test dispatch metadata.
+     * With project credentials, Egma mints tokens and manages the room and dispatch.
+     * With a token endpoint, Egma requests room_config and receives server_url plus
+     * participant_token; room management depends on the authority the endpoint grants.
+     * Both support voice and chat, with chat marked in the requested room name.
      */
     accessVariants: [
       {
@@ -1312,16 +1036,8 @@ export const CONNECTION_REGISTRY: Readonly<
           // The LiveKit server: a customer's cloud project, or the one they
           // run.
           url: livekitServerUrl,
-          // Which worker to dispatch, and demanded rather than offered.
-          //
-          // Every egma dispatch is explicit. Automatic dispatch — the state a
-          // blank name would leave the worker in — hands the room to
-          // whichever workers are listening, so the record could never say
-          // which agent it graded, and no dispatch would exist for a test's
-          // own env to ride on. The name is also how egma
-          // knows this worker again: one agent per server and name, however
-          // many modalities it is tested in. Asked for once at create instead
-          // of missed at run time.
+          // Require a named worker for explicit dispatch, test metadata, and stable identity.
+          // An unnamed worker could trigger automatic dispatch to a different agent.
           agentName: nonEmptyString,
         },
         fields: [
@@ -1435,19 +1151,8 @@ export const CONNECTION_REGISTRY: Readonly<
     ],
     simulatorAdapter: true,
     usesPlatformCarrier: false,
-    // The key is the server the worker stands on and the name it answers to.
-    //
-    // Neither half is an identity alone. A url names a server that a whole
-    // team shares, and a name is one a team commonly reuses across its staging
-    // and production projects — so matching on either would fold two agents
-    // into one. Together they name a worker, and that is what demanding the
-    // name bought: registering the same worker from the UI one day and the CLI
-    // the next lands on one agent, so a chat score and a voice score
-    // accumulate somewhere they can be read side by side.
-    //
-    // `agentName` is what the query narrows on because it is the half SQL can
-    // compare honestly. The address is settled afterwards, in `identityOf`,
-    // where two spellings of one server can be seen for what they are.
+    // Reuse by worker name and normalized server or token endpoint identity.
+    // Filter candidates by agentName in SQL, then compare addresses in identityOf.
     reuse: {
       matchedKeys: ["agentName"],
       identityOf: (config) => {
@@ -1477,19 +1182,7 @@ function nameOf(
   return variant.named ?? `a ${connectionType} connection`;
 }
 
-/**
- * What one access variant of one kind actually speaks.
- *
- * The type's list is the answer unless the variant narrowed it, so a kind whose
- * variants are all about who holds the credential says its modalities once and
- * nothing repeats them. Every rule that asks about a modality asks here, so a
- * narrowing cannot be honoured at one door and forgotten at the next.
- *
- * It takes the two descriptors rather than reading them off a pair of ids, for
- * `gatedConfig`'s reason: the rule can then be exercised on a made-up kind, and
- * the test that proves it is about the rule rather than about whichever real
- * variant happens to narrow today.
- */
+/** Use the access variant's restricted modalities, or the connection type's defaults. */
 export function modalitiesOf(
   descriptor: ConnectionDescriptor,
   variant: AccessVariantDescriptor,
@@ -1505,21 +1198,9 @@ export function conductableConnectionTypes(): readonly ConnectionType[] {
 }
 
 /**
- * Every connection type whose reuse rule names the same identity namespace as
- * this one — the family that means one underlying platform agent.
- *
- * Two connection types that declare one `family` reach the **same** platform
- * agents: Retell's chat API, its text mode, and its web call all name one
- * `retellAgentId`, so a text lane and a voice lane on one Retell agent are two
- * ways to reach one thing rather than two agents. Registering a second one
- * therefore lands on the first's Egma agent, whichever door it came through.
- * A type whose rule declares no family is a family of one — a LiveKit worker
- * reuses onto itself and nothing else. A type with no reuse rule at all — a
- * phone number — is in no family and answers an empty list: a number is where
- * Egma dials, not who answers, and two agents may share one.
- *
- * The set always includes the type asked about when it has a reuse rule, so a
- * caller may treat it as "this connection's whole reuse family".
+ * Return connection types that share this reuse family. With no family, return
+ * only this type; with no reuse rule, return []. Family members identify the same
+ * agent platform identity across different connection types.
  */
 export function reuseFamilyOf(
   connectionType: ConnectionType,
@@ -1536,14 +1217,9 @@ export function reuseFamilyOf(
 }
 
 /**
- * Whether this exact stored connection can be handed to a simulator.
- *
- * The modality is checked here as well as at write time. Dispatch trusts only
- * a kind/access-variant/modality tuple the current registry says its adapter can
- * conduct. This
- * check cannot know whether an id inside a chat-labelled row belongs to a
- * provider voice agent; the Retell read in the API claim assembler owns that
- * second, provider-aware check.
+ * Check the stored connection type, access variant, and modality against the
+ * shipped adapter. Agent-platform validation, such as Retell agent type, happens
+ * separately during API claim assembly.
  */
 export function connectionIsConductable(
   connectionType: string,
@@ -1562,16 +1238,8 @@ export function connectionIsConductable(
 }
 
 /**
- * The connection types whose run start reads the agent's own platform.
- *
- * **A named set rather than a fact worked out from something else**, because
- * what it unlocks is narrow and specific: the one door that opens a
- * connection's sealed credential outside the simulator. A run over one of these
- * kinds cannot honestly begin until Egma has read which version the agent
- * serves, and reading it means reaching the platform with the connection's own
- * key.
- *
- * Every other kind reads nothing at run start and gets nothing unsealed.
+ * Connection types allowed to open credentials for the platform read at run start.
+ * These reads resolve the agent version before simulations are claimed.
  */
 const READS_PLATFORM_AT_RUN_START: ReadonlySet<string> = new Set([
   // Text mode names its version on every request, so the version has to be
@@ -1601,16 +1269,7 @@ export function connectionTypeUsesPlatformCarrier(
   );
 }
 
-/**
- * What a run over a connection type nothing can conduct is told.
- *
- * The wording is the platform's own and a client relays it word for word to
- * whoever is reading a terminal, so it says all of it in one place: what is
- * missing, why egma would rather refuse now than queue something forever, and
- * the move that works today. The list of kinds comes off the registry rather
- * than out of the sentence, so it can never name an adapter that has not
- * shipped or miss one that has.
- */
+/** Explain the missing adapter and list available connection types from the registry. */
 export function noSimulatorAdapterMessage(
   connectionType: string,
   modality?: string,
@@ -1626,7 +1285,7 @@ export function noSimulatorAdapterMessage(
   );
 }
 
-/** The descriptor, or a refusal naming what egma actually supports. */
+
 /**
  * Which platform a connection type pins, or null when it pins none.
  *
@@ -1706,18 +1365,9 @@ export function validModality(
 }
 
 /**
- * A config as it will be stored, checked against a gate map: every demanded
- * key present and checked, every optional key checked when it is there, every
- * unknown key refused by name. Refusing unknowns is what turns a typo'd key
- * into an error at create rather than a demanded key "missing" at run time.
- *
- * `what` names the thing being described — "a livekit connection" — and every
- * refusal is built from it, so one wording serves every access variant.
- *
- * It takes the gates rather than reading them off a variant, so the rule can be
- * exercised on its own and a new gate can be tried without a connection type
- * to hang it on. `validConfig` below is the registry-aware door, and is what
- * everything in the product actually calls.
+ * Validate required and supplied optional config keys; reject unknown keys.
+ * Return normalized storage values. Product callers use validConfig to select
+ * the gates from the access variant.
  */
 export function gatedConfig(
   what: string,
@@ -1800,17 +1450,9 @@ function couldBe(
 }
 
 /**
- * The credentials as they will be sealed, plus the display hint — or null for
- * an access variant where the customer supplies no secret. A credential handed
- * to such a variant is refused with its own reason, never stored and never
- * silently dropped.
- *
- * The access variant selects this rule explicitly. A caller who sent the
- * *other* access variant's credentials
- * hears about the mix rather than about a key it never meant to send: whoever
- * pastes a key pair under a token endpoint has mixed up two whole ways of
- * working, and being told `"apiKey"` is not a field would send them looking
- * for a typo that is not there.
+ * Validate credentials for the explicit access variant and return values plus a
+ * display hint, or null when absent and permitted. Reject forbidden credentials
+ * and report when supplied keys belong to another access variant.
  */
 export function validCredentials(
   connectionType: ConnectionType,

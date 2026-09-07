@@ -1,36 +1,9 @@
-"""The LiveKit driver: a room joined outbound, and a call placed into it.
+"""Place phone calls through LiveKit SIP and a shared Pipecat room transport.
+The simulator joins outbound; the answering phone appears as a room participant.
 
-Two halves, both LiveKit's own:
-
-- **The room.** The simulator joins it through Pipecat's stock LiveKit
-  transport, purely outbound — signalling over a websocket it opens,
-  media over ICE it negotiates — so the simulator needs no inbound
-  network surface to conduct a phone call. Nothing dials the simulator;
-  the simulator dials. That half is :mod:`egma_simulator.media.room`,
-  shared with every other driver that reaches an agent through a room.
-- **The call.** LiveKit's SIP service places it, over a SIP trunk the
-  deployment brings, and the answering phone appears in the room as an
-  ordinary participant. Pipecat ships no example of this half, so the
-  ``create_sip_participant`` call below is written here — it is about
-  twenty lines, and it is what turns a room into a phone call.
-
-The same driver serves a self-hosted LiveKit and LiveKit Cloud, which
-are the same API behind the same URL: a deployment moves between them by
-changing one variable, and nothing in this file knows the difference.
-
-The carrier route belongs to the deployment and arrives on each validated
-phone work order. :class:`egma_simulator.config.MediaSettings` combines it
-with the LiveKit bridge this container reads at startup, then checks the
-complete result before dialling. Nothing in this file reads an environment
-variable or connection credential.
-
-What can only be known at dial time stays at dial time: a trunk whose
-credentials the *carrier* rejects is a SIP refusal like any other, and it
-is reported as one.
-
-(This module is named for the product it drives. ``from livekit import
-api`` inside it reaches the installed LiveKit package, not this file:
-Python resolves imports absolutely.)
+MediaSettings combines the deployment bridge with the validated work order's
+carrier route. This driver reads no environment settings or connection credentials.
+Carrier authentication failures are reported from the dial response.
 """
 
 from __future__ import annotations

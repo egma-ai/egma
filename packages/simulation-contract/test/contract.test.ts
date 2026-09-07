@@ -18,19 +18,8 @@ import {
 const addFormats = ajvFormats.default;
 
 /**
- * The simulation contract, held to its own golden fixtures.
- *
- * The two schemas under `schemas/` are the one meeting point between the
- * TypeScript control plane and the Python simulator. This suite is the
- * TypeScript half of the guarantee that the two sides cannot drift apart
- * silently: every fixture under `fixtures/<direction>/valid` must validate,
- * every fixture under `fixtures/<direction>/invalid` must be rejected, and the
- * simulator's own suite reads the same files. An incompatible edit to a schema
- * or a fixture fails this suite, and this suite runs in CI.
- *
- * The fixtures are read from disk rather than imported, deliberately: they are
- * plain files with no TypeScript identity, because the other reader of these
- * bytes is not TypeScript.
+ * Validate the same valid/invalid JSON fixtures as the Python simulator.
+ * Read them from disk so both implementations test the same contract bytes.
  */
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -957,18 +946,7 @@ describe("the report schema structurally forbids credential material", () => {
   });
 });
 
-/**
- * One thing has one name. The contract is where a word becomes permanent —
- * a schema property outlives the prose that explained it — so the words the
- * project has settled against are held out of it here rather than caught in
- * review. The scan covers everything a reader of this package meets: both
- * schemas, every document beside them, and every golden fixture.
- *
- * The list itself is `src/vocabulary.ts`, shared with the guard over the
- * platform's own mock-tool surface. Two lists written separately had already
- * drifted apart, which is precisely the failure a vocabulary guard exists to
- * prevent — so there is one, and both scanners read it.
- */
+/** Scan schemas, documentation, and fixtures with the shared mock-tool vocabulary. */
 describe("the contract's surface, held to the words the project settled on", () => {
   it("uses none of them, anywhere a reader of this package looks", async () => {
     const files = (

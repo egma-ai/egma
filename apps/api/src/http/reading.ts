@@ -1,13 +1,6 @@
 /**
- * Reading what a request said, for the routes that read JSON bodies and query
- * strings.
- *
- * Three lines of code that every route would otherwise write for itself, and
- * would eventually write differently. The one that matters is `given`: **a
- * parameter that arrived empty is a parameter nobody set.** `?project=` is what
- * a form submits for a field left blank, and reading it as a name would answer
- * about a project that cannot exist. Every route that treats absence as a
- * meaningful case has to agree about what absence is.
+ * Shared body and query readers. given treats an empty parameter as absent,
+ * so project= follows the same selection rules as an omitted project.
  */
 
 /** A string somebody sent, trimmed, or nothing at all for anything else. */

@@ -1,41 +1,13 @@
-"""The one Egma exporter in this process, shared by both verbs.
+"""Shared OTLP exporter for ``monitor`` and ``simulation``.
 
-:func:`egma.monitor` and :func:`egma.simulation` send the same thing to
-the same door: this worker's OpenTelemetry spans, over OTLP, with the
-project API key on them. They differ in one fact and one only — a
-simulation stamps the room it runs in on every span, so egma can file the
-agent's POV under the simulation that room belongs to. Everything else,
-from reading ``EGMA_URL`` to flushing the last buffered span when the job
-stops, is written once, here.
+Use the project API key and export the simulation room as its provider
+reference. Set that reference on resources when creating a provider and
+on spans through LiveKit metadata when extending an existing provider.
+This preserves the customer's tracing setup, whose resource is immutable.
 
-## Why the room name rides two ways at once
-
-The **resource** is fixed when a tracer provider is built, and this SDK
-does not always build one: a customer who already runs Langfuse, or any
-other OpenTelemetry setup, hands us a provider that exists. That provider
-must keep working — refusing it, or replacing it, would take a customer's
-own tracing away to add ours.
-
-So the room name goes on twice:
-
-- as a **resource attribute**, where this SDK builds the provider itself;
-- as a **span attribute on every span**, through LiveKit's own
-  ``set_tracer_provider(..., metadata=…)`` seam, which works on any
-  provider, including one this SDK did not make.
-
-egma's door reads the resource first and falls back to the spans when
-every span in a resource agrees. Both ways carry the same string, so an
-export is filed the same wherever the provider came from.
-
-## One job per process
-
-A provider's resource cannot be rewritten and LiveKit's metadata
-processor is added once, so the room name this process exports under is
-decided by the first job that asks. LiveKit runs one job per process by
-default and that is the arrangement both verbs are written for: a second
-job asking for different settings is refused here, loudly, rather than
-quietly filing one conversation's spans under another conversation's
-name.
+Ingestion prefers the resource value, falling back to matching span
+values. One job per process is supported: the first job fixes exporter
+settings, and another job requesting different settings is refused.
 """
 
 from __future__ import annotations

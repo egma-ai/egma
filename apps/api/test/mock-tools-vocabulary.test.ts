@@ -6,28 +6,8 @@ import { bannedWordIn } from "@egma/simulation-contract";
 import { describe, expect, it } from "vitest";
 
 /**
- * The words the mocked world is described in, held to the ones the product has
- * settled on.
- *
- * One entity, one word: a **mock tool**. The inverted form and the two
- * near-synonyms each read as a different thing to somebody arriving from
- * another tool, and a schema, a wire field or a refusal sentence carrying one
- * of them is the version that sticks — a column is renamed by a migration, and
- * a refusal sentence a client branches on is renamed by nobody at all. So the
- * whole surface is read back and checked, rather than trusted to review.
- *
- * **The list is the contract package's**, shared with the guard over that
- * package's own documents. Two lists written separately had already drifted
- * into disagreeing about which words are banned, which is exactly the failure
- * a vocabulary guard exists to prevent happening to itself.
- *
- * The files are the whole of what somebody outside egma can meet: the tables a
- * test's own world is stored in, the factory and its refusals, the route groups
- * that carry mock tools across the wire, both directions of the simulation
- * contract, the simulator's own side of the exchange, the test file a
- * developer's repository is written by — and both SDKs a customer installs in
- * their own agent, which is the surface with the least chance of anyone at egma
- * rereading it.
+ * Check exposed mock-tool vocabulary using the contract package's shared list
+ * of forbidden terms. Keep schema, API, simulator, repository files, and SDKs aligned.
  */
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));

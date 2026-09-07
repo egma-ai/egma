@@ -1,39 +1,10 @@
 import type { FastifyReply } from "fastify";
 
 /**
- * What the auth provider refused, said in egma's own vocabulary.
- *
- * Two routes relay to the provider's own HTTP endpoints — signup and the
- * completing half of a password reset — and both then have to turn the
- * provider's answer into egma's. **They must not each invent that translation.**
- * A refusal's code is the contract's spine (ADR-0007): clients branch on it
- * and only on it, so two relays that spelled the same refusal two ways would
- * be two contracts. This module is the one translation,
- * and it is why a rate limit reads the same whichever door met it.
- *
- * **The provider's own spelling of a code never reaches a client.** It writes
- * `PASSWORD_TOO_SHORT`; egma's codes are snake_case, always, so what ships is
- * `password_too_short`. That is not decoration: a code is a promise egma makes
- * about egma, and shipping the vendor's exact spelling would make every code
- * in this API a vendor's word to keep — a provider swap would then be a
- * breaking change for every client rather than a change behind the seam.
- * egma's own refusals travel this same channel already spelled egma's way
- * (`invitation_required` from the signup hooks), and pass through untouched,
- * sentence and all.
- *
- * A code egma cannot recognise as a code is not relayed at all. The caller's
- * fallback is used instead, because a client branching on `error` must never
- * be handed a sentence, a stack frame, or an empty string wearing the shape of
- * a promise.
- *
- * **The provider's sentence is relayed only where it is about the caller.**
- * "Password is too short" describes what somebody typed, and the provider is
- * the one holding that rule, so it goes back word for word. What its body
- * schema writes does not: `[body.email] Invalid email address` names a field in
- * a parser rather than the situation a person is in, and ADR-0007 forbids a
- * refusal generated from validation internals. There is nothing in it to
- * translate, so none of it is relayed — the door's own fallback is what a
- * caller reads, at both doors, without either of them having to remember.
+ * Translate provider refusals into stable snake_case API codes.
+ * Preserve recognized caller-facing messages and Egma hook errors; use the
+ * route fallback for invalid codes or validation-internal messages. Signup
+ * and password-reset relays share this translation.
  */
 
 /** How long to wait when the provider refused for rate and said nothing more. */

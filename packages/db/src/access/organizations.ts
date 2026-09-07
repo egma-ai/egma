@@ -51,22 +51,8 @@ export async function readOrganization(
 }
 
 /**
- * The customer's own name, changed.
- *
- * **The name and not the slug.** A name is what the product shows and is
- * nobody's identifier: two organizations on one deployment may both be called
- * Acme, and renaming one breaks no link anybody holds. The slug is unique
- * across the whole deployment, and letting a customer take a word another
- * customer might be using — or lose the one their invitation links were sent
- * under — is a different decision with a different blast radius, so it is not
- * one this door offers.
- *
- * **Only an `admin`**, on the row of the permission table that already covers
- * retention and provider credentials. Renaming the customer is felt by
- * everybody in it at once.
- *
- * It takes no organization id, like every read above it: which organization
- * is a fact about the credential, not a thing a caller gets to ask for.
+ * Allow admins to change the organization name. Scope comes from AuthContext;
+ * the deployment-unique slug remains unchanged.
  */
 export async function updateOrganization(
   auth: AuthContext,
@@ -112,15 +98,9 @@ export type OrganizationSettingsChanges = {
 };
 
 /**
- * Settings live on the caller's organization. Only supplied fields are updated,
- * so concurrent edits to different settings preserve each other's values.
- * The settings timestamp leaves the organization's own edit timestamp alone.
- *
- * **Only an `admin` writes them.** Retention is on this row, and retention
- * decides how long a customer's trace data survives — so this is the one
- * setting in the product that can destroy data without deleting anything. The
- * check is here rather than at a route because there is no route yet, and a row
- * of the permission table with no call site refuses nobody.
+ * Update only supplied settings on the caller's organization, preserving
+ * concurrent changes to other fields. Use a separate settings timestamp.
+ * Require manage_organization here so every caller is subject to the admin rule.
  */
 export async function updateOrganizationSettings(
   auth: AuthContext,

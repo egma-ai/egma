@@ -15,14 +15,8 @@ import {
 import { openaiJudge } from "../src/judge/openai.ts";
 
 /**
- * The OpenAI provider's wire, without the wire.
- *
- * The live smoke beside this file asks a real model and needs a real account;
- * this one asserts everything about the request and the answer that does not
- * need one — the endpoint, the header the key rides in, the shape of the body,
- * what a malformed answer comes to, and which refusals are worth asking again
- * about. `fetch` is replaced rather than intercepted, because what is under
- * test is the one function that calls it.
+ * Replace fetch to test request shape, authentication, parsing, and retry rules.
+ * The live smoke test separately checks compatibility with the provider.
  */
 
 const EVIDENCE: JudgeInput = {

@@ -35,21 +35,9 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * The run events record, at the seam the rest of egma reaches it through.
- *
- * This is the effort's one new seam, and it exists because HTTP cannot prove
- * what matters most about it: **the lifecycle change and its event land
- * together or not at all**. Over the wire you can only ever see the two after
- * the fact, and two writes that usually agree look exactly like two writes
- * that always agree. So both directions are driven here — a change that could
- * not record itself, and a record with no change under it — and the second is
- * forced by breaking the events table for one transaction, which is the only
- * honest way to ask "and what if the append had failed?".
- *
- * Everything else here is what a follower depends on: the numbering is dense,
- * the same page asked for twice is the same page, and `done` is true exactly
- * when the run has finished. The lifecycle underneath is tested in
- * `runs.test.ts` and is not tested again — what is new is the record of it.
+ * Force event-write failure to verify lifecycle changes and events commit
+ * atomically. Also test sequence numbering, replay, and completion status;
+ * runs.test.ts covers the underlying lifecycle.
  */
 
 let database: MigratedDatabase;

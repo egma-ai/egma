@@ -19,22 +19,9 @@ import {
 } from "./support/clickhouse.ts";
 
 /**
- * The two identity probes: what the store already holds, asked about a batch at
- * a time and answered without reading any evidence.
- *
- * They exist for one guarantee that nothing else in the package can make. A
- * span is immutable, so a second arrival under one identity is either the same
- * evidence — a replay, and a no-op — or different evidence, which is a defect
- * and must never overwrite what is already there. The engine cannot tell those
- * apart: it collapses both onto the identity and, having no version column,
- * keeps whichever row it read last. So the decision is made **before** the
- * write, by comparing fingerprints, and this file proves that comparison
- * answers correctly and that a writer holding to it leaves the original
- * visible.
- *
- * Real ClickHouse throughout, on the pattern the rest of the module's tests use:
- * what `FINAL` does over unmerged parts, and whether a batched lookup finds
- * every identity it was handed, are engine behaviours.
+ * Use real ClickHouse to test batched identity probes and FINAL reads.
+ * Callers compare fingerprints before writing: matching evidence is a replay,
+ * while changed evidence must leave the committed span intact.
  */
 
 let store: MigratedTraceStore;
@@ -246,14 +233,8 @@ describe("asking which spans are already committed", () => {
 });
 
 /**
- * The guarantee the probe exists for, made the way a caller makes it.
- *
- * This is the whole pre-write integrity check in miniature: read what is
- * committed, compare fingerprints, and write nothing when they disagree. The
- * complete version belongs to the drainer, which also keeps the conflicting
- * object rather than deleting it; what has to be true here is that the
- * comparison is possible, that it is right, and that the evidence already
- * stored is what a reader still sees afterwards.
+ * Probe committed fingerprints and skip a conflicting write. The full
+ * drainer also retains the conflicting object for inspection.
  */
 describe("a second, different account of one span", () => {
   const TRACE = "cccc0000cccc0000cccc0000cccc0000";

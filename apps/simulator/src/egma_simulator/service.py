@@ -1,31 +1,9 @@
-"""The standing service: claim, conduct, heartbeat, report, repeat.
+"""Claim work within capacity and run each simulation with its own heartbeat.
+Heartbeat cancellation stops the conductor. All requests are outbound.
 
-One long-poll claim loop asks the control plane for exactly as much work as
-the executor has room for. Each claimed spec becomes one running simulation
-— a task conducting the exchange, and a task beating every few seconds —
-and a cancel directive arriving on a beat's answer stops the conducting at
-that beat.
-Every arrow points out: the simulator is never dialled into.
-
-A running simulation writes two records of itself and this is where they
-are joined. The lifecycle goes to the control plane as report events; the
-conversation goes to the OTLP ingest as spans, authored here from what
-whichever conductor ran observed. Neither says what the other says: a
-turn, a tool call and a measurement are spans and only spans, and what the
-lifecycle carries about them is the one summary fact a reader of a single
-simulation asks for — how many turns it reached. Both go through one
-reporter, so they are delivered in the order they happened and the
-terminal document is last.
-
-The executor is deliberately a seam. Today it runs each simulation as one
-asyncio task in this process; a process- or container-per-simulation
-executor implements the same handful of methods and the claim loop never
-learns the difference.
-
-Nothing here may take the whole service down. A control plane that is slow,
-broken, or answering nonsense is an ordinary Tuesday, and the loops below
-are written so that the worst it costs is the work in flight — never the
-simulator itself, and never a capacity slot that no longer comes back.
+Conductors report observations here for a shared span emitter. Lifecycle reports
+and OTLP evidence use one ordered reporter, with the terminal report last.
+Isolate claim and simulation faults so failed work releases its capacity.
 """
 
 from __future__ import annotations
@@ -68,26 +46,9 @@ for whoever wants to count them."""
 
 
 def blob_store_for(config: SimulatorConfig) -> BlobStore:
-    """Where this simulator's recordings go, decided once at startup.
-
-    Naming an object-storage endpoint is the whole of what selects it —
-    the same shape as naming a media backend, and the reason the entire
-    test suite runs against a directory with no container anywhere. The
-    two are exclusive because the configuration made them so: a
-    deployment with a store has no blob directory to fall back to. One
-    place or the other, never both — a copy kept on the container's own
-    disk beside the one in the store would hide exactly the fault the
-    store is here to fix, until the day a second simulator made half the
-    recordings unreadable and nothing said so.
-
-    Everything above this line is given a :class:`BlobStore` and never
-    learns which one it got.
-
-    The settings are taken apart here rather than handed over whole, so
-    that ``blob.py`` stays a leaf: it knows what an object store needs and
-    nothing about where a deployment's answers come from. That is what
-    lets the seam be tested with five arguments and no environment, and
-    what would otherwise make the store's tests configuration's tests too.
+    """Select the configured recording store once. Object storage has no filesystem
+    fallback. Pass explicit storage values so blob.py stays independent of
+    configuration.
     """
     store = config.object_store
     if store is None:
@@ -189,15 +150,8 @@ class AsyncioExecutor:
 
 
 class RunningSimulation:
-    """One claimed spec being conducted, and its heartbeat.
-
-    It is also the one place that sees everything a conductor observes,
-    which is why the conversation's spans are authored here rather than
-    deeper in. There are two conductors and they observe in two
-    currencies: the conversation loop sees a turn at the moment it happened, and the
-    voice conductor sees both ends of one, read off the audio. Both report
-    to the callbacks below, and what comes out is one emitter for chat and
-    voice alike.
+    """Run one claimed simulation and its heartbeat. Shared callbacks turn chat and
+    voice observations into spans while preserving each conductor's timing.
     """
 
     def __init__(
@@ -467,34 +421,17 @@ class RunningSimulation:
         )
 
     async def _on_answered(self) -> None:
-        """One flush per answer, which is where the conversation actually
-        has a seam: the persona's turn, whatever the agent did while
-        answering, and the answer itself go together, and the flush after
-        them is the moment a reader could watch this simulation live.
-        Finer would be a request per span; coarser would be a transcript
-        that only exists once it is over.
-
-        Whichever conductor ran says when an answer is whole rather than
-        this file inferring it from a turn arriving, because an answer that
-        made a tool call and said nothing produces no turn — and it is
-        precisely that answer whose evidence must not sit in a buffer
-        waiting for the agent to speak again.
+        """Flush after each complete agent answer, including tool-only answers.
+        The conductor supplies the boundary; a transcript turn alone cannot identify it.
         """
         self._record_reported_tool_calls()
         self._spans.flush()
 
     def _record_reported_tool_calls(self) -> None:
-        """Every tool call a platform has reported since this last asked.
-
-        Taken rather than pushed: a report arrives in whatever task the
-        plug reads it in, and a span authored from over there would be
-        minted between two the conversation was in the middle of. Drained
-        here instead, at the seams the conversation already has, so the
-        order of the record is the order the simulation learned things in.
-
-        Empty on every lane but one. Where the agent's own process runs the
-        egma SDK, that process reports its own calls and egma writes no row
-        at all.
+        """Drain platform-reported tool calls at conversation boundaries to preserve
+        order.
+        LiveKit calls are reported by the agent SDK and do not create duplicate spans
+        here.
         """
         assembled = self._assembled
         if assembled is None:
@@ -741,15 +678,9 @@ class SimulatorService:
         self._claim_failure_said_at = now
 
     def _accept(self, documents: list, executor: Executor) -> None:
-        """Take what fits and can be understood; refuse the rest out loud.
-
-        The claim declared how much room there was, but the answer is the
-        control plane's to compose, and a simulator that trusted it blindly
-        would overload on a bad answer. Anything past capacity is left
-        alone: it stays claimed at the control plane, whose sweep is what
-        notices a claimed simulation nobody is beating for. Overloading, or
-        dying on the surprise, would both be worse than being one queue
-        deep for a while.
+        """Accept only valid claims within capacity. Leave excess work for the
+        control-plane
+        sweep rather than overloading the simulator or inventing terminal reports.
         """
         for position, document in enumerate(documents):
             if executor.free_capacity < 1:

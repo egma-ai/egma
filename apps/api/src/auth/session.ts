@@ -10,27 +10,9 @@ import {
 import type { SessionIdentityProvider } from "./seam.ts";
 
 /**
- * Turning a browser session into who is asking, which customer, which project
- * and what role.
- *
- * This is the one place the provider is on the authenticated-request path, and
- * it is there by design: a session cookie becomes an identity, and only the
- * provider can say so. An API-key request runs none of this — egma verifies
- * those against its own table — and that asymmetry is what keeps the
- * high-volume programmatic path free of the provider entirely.
- *
- * Two lookups follow the provider's answer, and neither is optional. Which
- * organization goes through `membershipsOf`, the single resolver, which returns
- * a **list** even though v1's unique constraint guarantees at most one — so no
- * caller is written as though *the* person's organization is a fact rather than
- * a lookup. Which projects goes through `projectsOf`. Only then is there enough
- * to build a context, and everything downstream takes the context.
- *
- * **A switched-off account is nobody here.** Records of what somebody did are
- * preserved; powers that act on their behalf are revoked — and a live cookie is
- * a power, exactly as a live key is. Deprovisioning is the case this is for: an
- * IT script switches somebody off, and the browser they left open stops being
- * an admin on its very next request rather than whenever the cookie expires.
+ * Resolve the session identity, then read current membership and projects
+ * to build AuthContext. Reject memberships marked with account deactivation.
+ * Organization and role come from storage, not request parameters.
  */
 
 export type SessionOrganization = {

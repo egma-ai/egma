@@ -135,14 +135,8 @@ function strings(value: unknown, field: string): readonly string[] | string {
 const MOCK_TOOL_KEYS: readonly string[] = ["tool", "answer", "error"];
 
 /**
- * The tools a body says this test answers for, forwarded rather than judged.
- *
- * **The door owns the envelope and nothing inside it.** A list, of objects,
- * with no key the shape has no place for — that is all this checks. Whether
- * the two answer keys add up to exactly one branch, whether a name is blank or
- * said twice, and whether an answer is inside the cap are one rule in the
- * access layer, said in one set of words, so the same mistake cannot come back
- * in two dialects depending on which door it arrived at.
+ * Check only the mock tool envelope here. The data-access layer validates
+ * tool names, response branches, duplicates, and response size.
  */
 export function mockToolsIn(value: unknown): TestMockTool[] | string {
   if (!Array.isArray(value)) return "mockTools must be a list";

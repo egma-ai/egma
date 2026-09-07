@@ -3,25 +3,14 @@ import { createHash, randomBytes } from "node:crypto";
 import { resolveApiKey, type AuthContext } from "@egma/db";
 
 /**
- * The secret a terminal holds, and how a request carrying one becomes a
- * context.
- *
- * This is the sibling of `session.ts`, and the whole of the difference is
- * stated in one line of code: nothing here touches the auth provider. egma
- * mints the secret, egma hashes it, egma verifies it against egma's own table.
- * The programmatic path is the high-volume one and the one a customer
- * integrates against, and it is the one a provider swap must not be able to
- * reach.
+ * Resolve API keys through Egma's own hashed-key store without invoking
+ * the session identity provider.
  */
 
 /**
- * The static prefix every egma secret starts with.
- *
- * It exists so a secret-scanning service can recognise a leaked egma key in a
- * repository, a log or a paste, which only works if the shape never varies:
- * `egma_sk_` and then 43 characters of base64url. Changing it affects only keys
- * minted afterwards, so it is reversible — but every day it stays the same is a
- * day the scanners keep working.
+ * Prefix for API keys, followed by 43 base64url characters when minted.
+ * Keep this shape stable for secret scanners; other Egma credentials use
+ * different formats.
  */
 export const API_KEY_SECRET_PREFIX = "egma_sk_";
 

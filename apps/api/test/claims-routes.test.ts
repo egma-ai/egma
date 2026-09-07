@@ -33,15 +33,9 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The simulator's claim door, over real HTTP against real Postgres.
- *
- * This is the one route a customer credential can never open: the service
- * token is the whole gate, the claim reaches every customer's queue at once,
- * and what comes back is the fully assembled spec — credentials included —
- * that the shipped simulator conducts from. So what is asserted here is what
- * that simulator observes: the token gate's one sentence, the held claim
- * answering the moment work arrives, every outgoing spec speaking the
- * contract, and a budget that belongs to no organization being spent by none.
+ * Claim-route coverage against Postgres: service-token access, held claims,
+ * assembled simulation specs, and no use of organization request budgets.
+ * Real socket lifecycle behavior is covered in claims-hold.test.ts.
  */
 
 let api: TestApi;
@@ -504,20 +498,8 @@ describe("claiming work", () => {
   });
 
   /**
-   * **The spec speaks the version the simulation pinned, never the persona as
-   * they stand now — and this is the test that can tell the two apart.**
-   *
-   * Everywhere else in this file the persona is created and never edited, so
-   * the pinned version and the current one are the same row: an assembler that
-   * quietly read `getPersona` instead of `getPersonaVersion` would pass every
-   * one of them. That is the whole guarantee this effort exists for — the same
-   * test hears the same person on every run, and an old result can still say
-   * who the agent actually heard — so it gets a test that fails when it breaks.
-   *
-   * The pin is taken when the run is created, so the edit below lands strictly
-   * after this simulation already names version 1 by its own `prsv_` id. Every
-   * authored field moves at once, because each of the three travels in the work
-   * order and each would be a separate way to leak the current row.
+   * Edit all persona behavior fields after run creation to distinguish the
+   * pinned persona version from the current one in the claimed spec.
    */
   it("speaks the persona version the simulation pinned, not the edit that came after", async () => {
     const { ada, key, connectionId, versionId, persona } =
@@ -685,17 +667,8 @@ describe("claiming work", () => {
 
   it("leaves Egma's own variables off a call placed on the serving version", async () => {
     /*
-     * **The run branched a copy, and this simulation is not on it.** A web-call
-     * run makes one temporary version for the tests that mock, and conducts
-     * every other test against the version real callers reach. The routing
-     * variables are names that only the temporary version declares, so a call
-     * on the serving version is handed none of them — a row of empty
-     * `egma_url_…` on the customer's own call record would name variables that
-     * version never had.
-     *
-     * The run's world is written here rather than branched, because branching
-     * one is Retell's business and this door's business is what it hands the
-     * simulator once one exists.
+     * An unmocked test uses the serving version without temporary routing
+     * variables. Seed mock metadata directly here; Retell branching has separate coverage.
      */
     const { key, connectionId, versionId } = await aCustomerReadyToRun(
       "claims_serving_version_variables",

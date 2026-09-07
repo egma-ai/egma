@@ -1,14 +1,7 @@
 /**
- * Secret fields that may cross only explicit custody seams: into an Egma
- * connection request, or into a provider worker's child environment. The
- * platform either seals a durable credential or uses a request-only platform
- * selection credential and discards it.
- *
- * The values live behind a private field. String conversion, JSON conversion,
- * and Node inspection all return a mask, so passing this object through a log
- * or an error does not reveal a provider credential. `reveal` is used only at
- * approved custody boundaries: the platform request body and a local provider
- * worker's child-process environment.
+ * Hold provider secrets behind a private field. String, JSON, and inspection
+ * conversions return a mask. Reveal only for a platform request body or a provider
+ * worker's child environment; the platform seals or discards credentials by request type.
  */
 
 /** What every accidental way of printing connection credentials sees. */

@@ -1,14 +1,8 @@
 import { isId, type IdPrefix } from "@egma/ids";
 
 /**
- * Keyset pagination, written once. The ids are Crockford base32 of UUIDv7
- * under `COLLATE "C"`, so ordering by id *is* ordering by mint time and the
- * last id of a page is the whole cursor — no second sort column, no offset to
- * drift when rows arrive mid-scroll. Three lists page this way; the rules
- * live here so a fourth cannot come to disagree with them.
- *
- * Internal to the module: nothing here reads a store or takes a context, and
- * none of it is exported from the package.
+ * Shared keyset pagination for IDs ordered under COLLATE "C". Use the last returned
+ * ID as the cursor and fetch one extra row to detect another page.
  */
 
 export const DEFAULT_PAGE_SIZE = 50;

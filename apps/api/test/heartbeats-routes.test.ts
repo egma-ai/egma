@@ -23,15 +23,9 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The simulator's heartbeat door, over real HTTP against real Postgres.
- *
- * What is asserted here is what the shipped simulator observes: the token
- * gate's one sentence, a `directive` that is `null` while the conversation is
- * the claimant's to conduct and `"cancel"` the moment it is not — requested
- * cancellation and every row beyond help answering alike, because the
- * simulator obeys exactly one directive and must stop conducting closed
- * conversations. There is deliberately no 404 anywhere in the matrix, and no
- * organization's request budget moves.
+ * Heartbeat-route coverage: service-token access, null for an active claim,
+ * and cancel for work the worker must stop. These requests do not spend an
+ * organization's request budget.
  */
 
 let api: TestApi;

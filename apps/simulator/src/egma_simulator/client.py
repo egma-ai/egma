@@ -1,22 +1,6 @@
-"""The simulator's side of the wire: outbound calls, nothing inbound.
-
-The simulator pulls its own work rather than being sent it. It claims
-simulations with a capacity declaration, on a request the control plane may
-hold open until there is something to give; it heartbeats each running
-simulation and receives any directive on the answer; it posts report
-documents as events happen; it registers LiveKit room references before
-workers start; and it posts the conversation itself as OTLP
-span batches, at the same ingest door a customer's agent exports to. Every
-arrow points out, so the simulator needs no inbound network surface at all
-— which is what makes it one more container that only dials out.
-
-All calls reach the same deployment, so there is one address to configure
-and the telemetry path is derived from it rather than named separately: a
-simulator that can claim work can always file the evidence of it.
-
-In development and test the other end is the workbench. Nothing here knows
-the difference, and nothing here changes when the real control plane
-answers instead: both ends speak the contract, not each other.
+"""Outbound client for claims, heartbeats, room registration, reports, and OTLP.
+Claims can wait for work; heartbeat replies carry directives. All endpoints
+derive from one deployment URL. The simulator needs no inbound listener.
 """
 
 from __future__ import annotations
@@ -197,19 +181,10 @@ class ControlPlaneClient:
         )
 
     async def spans(self, simulation_id: str, serialized: bytes) -> None:
-        """Post one already-serialized OTLP span batch, byte-identically.
-
-        The specification's own path, JSON encoding, the service token as
-        bearer — an ordinary OTLP export, refused and retried on exactly
-        the terms a report is. A 400 is the door saying the batch names no
-        simulation it can file under, which resending cannot fix.
-
-        A 200 may still carry a partial success, which is how the
-        specification says an ingest reports data it will not store.
-        Nothing is retried on it — the specification is explicit that
-        rejected data must not be. It is still a final rejection to the
-        ordered reporter, because a terminal simulation may not claim that
-        incomplete evidence landed.
+        """Post serialized OTLP bytes with the service token.
+        Retry transient failures using the report policy. HTTP 400 and partial success
+        are final rejections: do not retry rejected data or report incomplete evidence
+        as fully delivered.
         """
         body = await self._post_document(
             f"{self._base_url}{OTLP_TRACES_PATH}",

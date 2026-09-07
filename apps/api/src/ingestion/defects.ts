@@ -5,38 +5,10 @@ import type { FastifyBaseLogger } from "fastify";
 import { UnreadableSegmentError, type SegmentDefect } from "./verify.ts";
 
 /**
- * An accepted segment this Egma could not turn into rows, and what is done
- * about it: **nothing is deleted, and an operator is told.**
- *
- * The rule is one sentence and everything here follows from it. *Egma promised
- * this evidence was safe before it ever read it back.* The request was answered
- * `200`, the sender stopped owing the bytes, and the local copy is long gone —
- * so an object that then turns out to be corrupt, to state a version this build
- * does not read, or to disagree with evidence already stored is **Egma's
- * problem, permanently**. It is not a validation failure, because the moment to
- * refuse customer input passed at the door. It is not a reason to delete
- * anything, because deleting it is the one action nobody can undo. The object
- * stays under its key, retained and visible, and a person decides.
- *
- * Automatic deletion of a retained object is deliberately out of scope: the
- * repair or the explicit discard is operational work somebody chooses to do.
- *
- * ## One event and one metric, and the shape of both
- *
- * A defect is reported twice, on purpose, because two different people need it.
- * The **event** is for whoever is going to go and look at the object: it names
- * the key, so it can be found. The **metric** is for whoever is watching a
- * deployment: it carries the reason class and nothing else — no key, no
- * organization, no project, no segment id — because every one of those is
- * unbounded, and an unbounded metric label is how a monitoring system is taken
- * down by the incident it was supposed to report.
- *
- * ## What is never in either
- *
- * No evidence value and no credential. Not a transcript, not a tool argument,
- * not a payload, not an access key. A log line is copied into places a sealed
- * object is not, and the reason this release stopped rewriting evidence is the
- * same reason it must not print it.
+ * Retain accepted objects that cannot be drained; repair or discard requires
+ * operator action. Log the object key and reason without evidence values or
+ * credentials. Metrics use only the bounded reason class, never object or
+ * customer identifiers.
  */
 
 /**
@@ -147,27 +119,10 @@ export function defectOf(cause: unknown): IngestionDefect | undefined {
 }
 
 /**
- * Whether a drain step failed for a reason that will pass — the store did not
- * answer, a query timed out, a connection went — rather than for something about
- * the evidence.
- *
- * **This is the one that decides retry from retain.** A cause it recognises is
- * left where it is and taken again next pass; everything else is an internal
- * defect the object is retained under, so an accepted segment this build cannot
- * drain is a number an operator sees rather than one more download every scan.
- *
- * A driver or infrastructure error carries a code — a Node errno, a Postgres
- * SQLSTATE, a ClickHouse number — and this build's own not-connected wrappers
- * name the store. The after-acceptance data defects it is asked to tell those
- * apart from carry no code, so a code is the signal that the fault is the
- * moment rather than the rows. The specific permanent classes that do carry a
- * code — a refusal the store already made — are matched by their own class
- * ahead of this, never reaching here.
- *
- * The cause chain is walked, because a query layer wraps a driver's error and
- * the code lives one link down: a handoff that failed on a Postgres error the
- * ORM re-threw is a transient failure to replay, not a segment to retain, and
- * the signal that says so is on the error it wrapped.
+ * Classify retryable drain failures by string error codes, known connection
+ * messages, or timeout/network error names, including wrapped causes.
+ * Callers handle known permanent error classes first. This is a heuristic;
+ * a code alone does not prove that an error will resolve.
  */
 export function isTransientDrainFailure(cause: unknown): boolean {
   for (

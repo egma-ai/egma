@@ -85,18 +85,8 @@ type Registered = {
 };
 
 /**
- * Every active agent in this project that names a platform agent, keyed by the
- * platform's own id.
- *
- * This is what turns the account listing into a picker: an account agent this
- * project already registers is *recognized* rather than offered again, and an
- * unregistered one can be ticked to be registered and watched. The key is
- * (project, agent platform, platform agent id) — the pull-uniqueness index's
- * own triple, read through the acting project's own scoped list.
- *
- * **It decides nothing about whether a switch may be flipped.** At most one
- * agent per triple may hold the switch, and the database is what enforces
- * that; this map is for words on a screen.
+ * Map active project agents by platform identity for discovery display.
+ * This does not authorize pull enablement; the database enforces uniqueness.
  */
 async function registeredByPlatformAgent(
   auth: AuthContext,
@@ -282,18 +272,9 @@ export async function monitoringRoutes(
   });
 
   /**
-   * Start pulling: seal the key onto every agent this names, flip each switch,
-   * and open each notebook on the 30-day historical window.
-   *
-   * **A platform agent this project does not register yet is registered here.**
-   * Watching an unregistered platform agent *means* registering it, because the
-   * roster is the mirror of what egma knows (ADR-0015). One that is already
-   * registered is recognized by (project, platform, platform agent id) and
-   * updated in place.
-   *
-   * **One agent at a time, and a refusal does not undo what already started.**
-   * Starting an agent is a whole act on its own, so a tick that loses to the
-   * one-switched-on-agent rule is reported as itself and the rest still start.
+   * Enable pull per selected platform agent, registering missing agents.
+   * First enablement imports history; re-enablement starts a new observation.
+   * Process independently: a refusal does not undo agents already enabled.
    */
   registerPlatformOperation(app, monitoringOperations.startMonitoring, async (request, reply) => {
     const { auth } = requesterOf(request);

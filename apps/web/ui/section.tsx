@@ -17,20 +17,7 @@ import { cn } from "@/lib/utils";
  * than inventing a second row.
  */
 
-/**
- * A titled block of one page: connections, traits, or history.
- *
- * A detail page is a stack of these rather than one long form, because the
- * blocks answer different questions and are written at different times — and
- * because a heading is what lets somebody land on the part they came for.
- *
- * **There used to be two of these**, one in the old control set and one in the
- * shell, drawn from the same stylesheet classes and differing only in whether
- * the head was a `<header>` and whether the action was wrapped. Ticket 14 asked
- * whether the product keeps one control vocabulary or two; this is the answer
- * for this component. The `<header>` won, because it is what thirteen of the
- * fourteen callers were already getting and because it is what the element is.
- */
+/** Shared titled section with optional actions for related page content. */
 export function Section({
   title,
   lead,
@@ -66,19 +53,8 @@ export function Section({
 }
 
 /**
- * A strip of controls above a list: the filters, and the one action the list
- * itself offers.
- *
- * **One shape on every list page, because the developer read five of them side
- * by side and none of them agreed.** Filters go left, in the order a person
- * narrows by; the action goes hard right. The Agents page used to do the
- * opposite — an oversized-looking button leading the row and a search box
- * running the whole remaining width behind it — and that single row is what
- * made the product look like a side project beside a competitor's dashboard.
- *
- * The action is a slot rather than the last child, so a page cannot put it
- * anywhere else by accident. It is `flex-none`: an action is the width of its
- * own label, and the filters take what is left.
+ * Place list filters on the left and the action in a separate right-hand slot.
+ * Keep the action at its content width while filters use remaining space.
  */
 export function Toolbar({
   children,
@@ -113,20 +89,8 @@ export function Toolbar({
 }
 
 /**
- * The search box every list is filtered with: 300 by 36, with a magnifier.
- *
- * **One box, one size, on every list page.** `71Q-0` is 300px wide and 36px
- * tall with 12px of side padding and an 8px gap to the icon, and it is that on
- * the agents board, the personas board and the tests board alike — which is the
- * point of drawing it once here. A page that reached for a bare `Input` got a
- * 44px form control that ran to whatever width was left.
- *
- * The icon is decoration: the field carries its own `aria-label`, and a
- * magnifier read out as "search" beside a field already called "Search agents
- * by name" is the word twice.
- *
- * `TOOLBAR_SEARCH` below is the same shape as a class list, for the pages that
- * have not moved onto this component yet.
+ * Shared compact toolbar search. Give the input an accessible label and keep
+ * the magnifier decorative.
  */
 export function SearchField({
   className,
@@ -145,23 +109,8 @@ export function SearchField({
 }
 
 /**
- * How wide a control in a toolbar is allowed to be.
- *
- * **Declared once here rather than page by page**, which is the whole point:
- * five pages each choosing a width is what a person sees as five different
- * products. A search box was `width: 100%` of whatever was left, so on a wide
- * screen it ran to 1500px for a field holding a name; a filter that names one
- * column never needs more room than its longest option.
- *
- * `min-w-*` keeps both usable at the wrap point, where the strip becomes two
- * rows and each control is on its own line.
- *
- * **`flex-1` on the search is load-bearing, and a screenshot is what found
- * it.** The shared `Input` is `width: 100%`, which in a wrapping flex row means
- * 100% *of the row* — so the search box claimed the whole line and pushed the
- * agent filter beside it onto a second one. `flex-1` sets `flex-basis: 0%`,
- * which wins the main axis back from `width`: the box grows into whatever the
- * filters leave and stops at its maximum.
+ * Bound toolbar controls while allowing wrapping. flex-1 gives search a zero
+ * basis so Input's full width does not push adjacent filters to another row.
  */
 export const TOOLBAR_SEARCH = [
   "w-(--search-width) max-w-full min-h-(--control-md) text-sm",
@@ -240,18 +189,8 @@ export function Facts({
   if (!panel) return list;
 
   /*
-   * **The panel is the shared card, not a second one written here.**
-   *
-   * It used to draw `rounded-card border border-border bg-surface p-6` itself,
-   * which is the kit `Card`'s declaration copied out — and `DESIGN.md` is
-   * explicit that no page or component adds a one-off where a shared component
-   * already owns the behaviour. Two copies is how a product ends up with two
-   * card looks: the next change to a card reaches one of them.
-   *
-   * `Card` is a `<div>` and cannot become the `<dl>`, so the list goes inside
-   * it rather than wearing it. That is the honest arrangement anyway — the card
-   * is the surface, the definition list is the content, and a screen reader
-   * still reads each fact with the name of the fact.
+   * Compose a definition list inside the shared Card instead of copying its
+   * surface styles onto a separate element.
    */
   return <Card className="max-[40rem]:p-5">{list}</Card>;
 }

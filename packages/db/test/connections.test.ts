@@ -719,14 +719,8 @@ describe("a livekit connection", () => {
 });
 
 /**
- * The second shape: the customer keeps the key pair that signs tokens for
- * their whole LiveKit project, and egma asks an endpoint of theirs for one
- * scoped token per simulation.
- *
- * What is pinned here is the same three things mode A pins — what lands, what
- * a read shows, and what the resolver hands the simulator — because the
- * headers that authenticate egma to that endpoint are a credential exactly as
- * the key pair is, and nothing about them being headers makes them less so.
+ * Token-endpoint headers are credentials: test sealed storage, safe reads,
+ * and resolution for the simulator.
  */
 describe("a livekit connection that asks an endpoint for its tokens", () => {
   const HEADERS = '{"Authorization":"Bearer SENTINEL-endpoint-token-91af"}';
@@ -805,16 +799,8 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
   });
 
   /**
-   * The shape a connection is in is written down when it is created and never
-   * derived again, so there is no edit that moves one between the shapes.
-   *
-   * This used to be allowed when the new shape's credentials came along, and
-   * that was one rule short: the credential rule a Restore is held to is read
-   * from the stored shape, so a connection that changed shape underneath its
-   * stored id would be held to one shape's rule while carrying the other's
-   * credential. The two shapes hold different config keys and different
-   * credentials, which is what makes them a different connection rather than a
-   * different setting.
+   * The access variant is immutable. Its configuration and credential rules
+   * must remain consistent for updates and restoration.
    */
   it("refuses config keys outside the stored access variant", async () => {
     const agentId = await agentNamed("LiveKit Shape Change");

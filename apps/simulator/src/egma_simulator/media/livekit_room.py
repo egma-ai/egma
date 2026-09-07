@@ -1,164 +1,29 @@
-"""The livekit-room driver: the agent's own room, joined and dispatched into.
+"""Shared LiveKit room lifecycle for voice and chat simulations.
 
-The agent under test lives in a LiveKit room. So egma gets into one — in
-the *customer's* LiveKit project, not the deployment's — as an ordinary
-participant, gets the agent's worker into it, holds the exchange, and
-tidies up when it is over. That is the whole of this file, in the four
-verbs every media driver has (see :mod:`egma_simulator.media`):
+WayIn selects token authority:
+- Project credentials: create and name a room, sign its token, explicitly
+  dispatch agentName, then delete the room during teardown.
+- Token endpoint: request a named room and participant over HTTPS, including
+  agentName and test-owned dispatch metadata in room_config. The endpoint must
+  copy the dispatch into its token. Egma leaves; the customer owns room expiry.
+- Given token: join the platform-created room once. The platform owns dispatch
+  and deletion; Egma does not invent a room ID.
 
-1. ``create_transport`` — come by a token and a room, then build
-   Pipecat's stock transport. The simulator needs no inbound network
-   surface: it opens the websocket and negotiates the media.
-2. ``dial`` — get the agent in, by name, always explicitly. LiveKit
-   would hand a new room to a worker registered without a name on its
-   own, and egma deliberately does not lean on that: **a room filled
-   automatically is a room where the record cannot say which agent it
-   graded** — whichever workers were listening took it — and where the
-   test's job dispatch metadata has no dispatch of egma's to ride.
-   The simulation's own signals need no dispatch to travel: the room's
-   name carries them (``egma-sim-`` says simulation, ``egma-sim-chat-``
-   says which kind), and egma is found among the room's participants by
-   the identity it joined as. So the connection names the agent, and one
-   that names none is refused at the settings read, before anything is
-   reached.
-3. ``wait_answered`` — the agent's participant arrives and its audio
-   flows, within a bounded wait. Both halves matter: a participant that
-   joins and publishes nothing is a worker that crashed on its first
-   frame, and an exchange conducted against it would grade an agent that
-   never spoke.
-4. ``teardown`` — leave, and delete the room where egma has the power to.
-   Deleting is what ends everything the room held, including a dispatched
-   worker.
+RoomLifecycle handles setup, RPC registration, dispatch, and cleanup. Voice uses
+Pipecat and waits for agent audio; chat uses text streams and waits for words.
+Configuration comes from the connection, not the simulator environment.
 
-## The three ways in
+Dispatch metadata contains only the test's job_dispatch_metadata as JSON,
+or an empty string. Room metadata stays empty. Do not add scenario text, persona
+instructions, expected behavior, or mock answers to agent-visible metadata.
+Egma-created room names select simulation and modality; participant identity
+addresses mock-tool RPC. These names alone are not proof of authentication.
 
-Step 1 is where the connection's shapes differ, and they differ over one
-question: who mints the token that opens the room.
-
-- **egma mints it.** The connection carries the project's ``apiKey`` and
-  ``apiSecret``. egma creates a fresh ``egma-sim-``-prefixed room, signs a
-  token that opens that room and nothing else, dispatches the worker, and
-  deletes the room at the end.
-- **The customer mints it.** The connection names a ``tokenEndpoint``
-  instead, and the secret that signs tokens for their whole project never
-  leaves their side. egma invents the room and participant names, POSTs
-  them in LiveKit's standard token request — with a ``room_config`` naming
-  the worker to dispatch and carrying the test's job dispatch metadata —
-  and joins the server the answer names with the token that comes back.
-  It holds no key pair, so the dispatch is the endpoint's to perform, by
-  copying that block into the token it mints, and the reason a room
-  nobody joined gives says so; and it cannot delete, so it leaves the
-  room for the customer's own empty timeout to close.
-- **A platform minted it, opening the room itself.** The caller was handed
-  a ``given_token`` and the platform's own server URL — what a call created
-  through somebody's API comes back as — so egma asks nobody for anything:
-  it joins, and the token is spent on that one join. Getting the agent in
-  was the platform's own doing when it opened the room, and deleting is
-  beyond a token that only opens one; egma leaves and the platform closes
-  what it made.
-
-Above :class:`WayIn` the three are one code path. Everything after "a
-token and a room name exist" — joining, waiting, conducting, leaving — is
-the same code whichever it was, which is what keeps a second shape from
-being a second driver.
-
-Two deliberate differences from the driver that places a phone call:
-
-- **Configuration arrives from the spec's connection block**, never from
-  this deployment's environment. The room is the customer's: their
-  LiveKit project, their key pair, their agent. A trunk belongs to a
-  deployment and a room does not, so nothing in this file reads an
-  environment variable.
-- **"Dial" means dispatch, not SIP.** Nothing is called; a worker is
-  asked for.
-
-## Two currencies, one room
-
-A room can carry speech or it can carry typing, and everything *about
-the room* is the same either way: making it, signing a token for it,
-asking a customer's endpoint for one, dispatching a worker into it,
-offering the mock-tool seam in it, deleting it, and every sentence and
-every scrubbing above. Only the join differs — a voice join hands
-Pipecat a full-duplex transport, and a chat join is a bare
-``rtc.Room`` with text-stream handlers and no media at all.
-
-So that shared half is :class:`RoomLifecycle`, and the two drivers are
-subclasses of it that differ in what a join produces and in what they
-then wait for. :class:`LiveKitRoomBackend` is the voice one, with the
-four verbs above. :class:`LiveKitChatRoomBackend` is the chat one, and
-it waits for a participant and then for words rather than for audio.
-Neither is written beside the other: a second copy of the room
-lifecycle would drift from the first, and the first anybody would know
-is a customer's simulation.
-
-## The one metadata channel egma writes on
-
-A room carries two, and egma writes on exactly one:
-
-- **Dispatch metadata** is the test's own ``job_dispatch_metadata``,
-  written as one compact JSON string. It is the channel LiveKit's own
-  documentation teaches agents to read for per-session context, so an
-  agent doing ``json.loads(ctx.job.metadata)["their_key"]`` finds the
-  keys this scenario meant it to find. A test that wrote none dispatches
-  the empty string, which is what that agent meets in its own production
-  rooms. Where a customer's endpoint mints the token, the same string goes
-  to that endpoint inside ``room_config``, as the metadata of the dispatch
-  egma asks it for, and the endpoint copies it into the token.
-- **Room metadata** is left empty, always. The value belongs to one
-  simulation and the dispatch is what carries one simulation's worker
-  into the room, so writing it in a second place would be a second thing
-  to keep true.
-
-Neither carries **anything else of the test's content** — no scenario
-text, no persona, no expected behavior, and no mock answer — because an
-agent that reads its script stops being under test. What a test does put
-here it wrote key by key, as the world its worker starts in: a tenant, a
-caller id, the account the scenario is about.
-
-**Where egma's own signal lives instead.** Not in either of these. An
-agent learns it is in a simulation from the room's name, which begins
-``egma-sim-`` on every way into a room, and it addresses egma by the
-persona's participant identity — see :mod:`egma_simulator.media.room`,
-where both are declared as the published contracts they are. Dispatch
-metadata cannot carry that signal: where a platform opened the room egma
-writes no metadata at all, and on the endpoint shape the test's string
-rides only as far as the request — the customer's endpoint decides what
-the token it mints carries — so an agent reading that channel for egma's
-context could find nothing and conclude it was in production while a
-simulation ran around it.
-
-## Answering for the agent's tools
-
-A room driver is also where egma stands in the agent's tool path, for the
-simulations that mock anything. The two methods are registered on egma's
-participant the moment the room is joined, and what answers them knows
-nothing about rooms — see :mod:`egma_simulator.mock_tools`, which owns
-the exchange and the record it leaves. Room membership is the whole of the
-authorisation, which is why a room with no egma participant leaves the
-agent's tools untouched by construction.
-
-## Which failed ending a refusal deserves
-
-- :data:`AGENT_NEVER_JOINED` — the room opened and nobody came. A worker
-  that is down, or one registered under a different name than the
-  connection asks for. Never the agent failing: nothing was tested.
-- :data:`ERROR` — the server could not be reached, the token was refused,
-  the room could not be created or dispatched into. Somebody has
-  something to fix, and the platform's own words say what, scrubbed of
-  the credentials it was given.
-
-## Credentials
-
-The key pair arrives on the connection and is used to reach the room and
-for nothing else: never logged, never in an exception message, never in a
-returned value. Whatever the platform says back is quoted through this
-driver's own :class:`egma_simulator.redaction.SecretRegistry` first, so a
-server that echoes a secret cannot get it repeated onto the record.
-
-(``from livekit import api`` inside this file reaches the installed
-LiveKit package, not the module beside it: Python resolves imports
-absolutely. Every such import sits inside a function, so a simulator that
-joins no room never loads the library — see the quarantine suite.)
+Register hello and tool RPC at join time, including when no tools are mocked.
+The SDK must complete hello before starting. Missing agents produce
+AGENT_NEVER_JOINED; connection and setup faults produce ERROR.
+Redact connection credentials and tokens from platform errors.
+LiveKit imports remain lazy so non-room simulations do not load the library.
 """
 
 from __future__ import annotations
@@ -220,35 +85,15 @@ crosses the network under TLS or not at all.
 """
 
 ENDPOINT_CONFIG_KEYS = frozenset({"tokenEndpoint", "agentName"})
-"""What the token-endpoint access variant's config holds — and what it
-does not.
-
-The worker's name is here because egma can ask for the dispatch without a
-key pair: LiveKit's standard token request carries a ``room_config`` block
-naming the agents to dispatch, the endpoint copies it into the token it
-mints, and LiveKit dispatches them when the room is created. The test's
-``job_dispatch_metadata`` rides that same block, as the dispatch's
-metadata, and arrives with the simulation rather than with the connection
-— on this variant as on the other. What is *not* here is a server url. The
-endpoint's answer names the server — ``server_url`` beside
-``participant_token``, exactly as LiveKit's own token endpoints answer —
-so a url held on the connection would be a second answer to a question the
-endpoint settles, and a key the driver would read and quietly prefer one
-way or the other is worse than one it refuses by name.
+"""Token-endpoint config requires the endpoint and agentName, not a server URL.
+The reply supplies server_url and participant_token. Request room_config carries
+the named worker and test-owned dispatch metadata for inclusion in the token.
 """
 
 ENDPOINT_CREDENTIAL_KEYS = frozenset({"headers"})
 PLATFORM_NAMED_ROOM = "the room the platform opened"
-"""What egma calls a room it did not name.
-
-The given-token shape joins a room somebody else made, and its real name
-belongs to them: egma is handed a way in and never told what the room is
-called. So this is a description and deliberately not an identifier —
-Pipecat prints the room name into every connect and disconnect line, and a
-name invented here would read like a room that could be looked up, in
-telemetry where no such room exists. What joins the two sides on this
-shape is the platform's own id for the exchange, which the plug carries as
-the provider reference.
+"""Log description for a platform-created room whose name is unknown.
+This is not an identifier; the adapter supplies the platform provider_reference.
 """
 
 ENDPOINT_SCHEME = "https://"
@@ -294,61 +139,18 @@ why a chat simulation needs nothing installed in the agent to be *heard*.
 """
 
 TRANSCRIPTION_TOPIC = "lk.transcription"
-"""The text-stream topic the agent's own words come back on.
-
-One stream per utterance, opened at its first chunk and closed when that
-utterance is done. The close is an end-of-*utterance* marker and nothing
-more: an agent that says a filler, calls a tool and then answers sends
-three streams for one turn. What says the *turn* is over arrives on
-another channel entirely — :data:`AGENT_STATE_ATTRIBUTE`.
-
-This docstring used to say the close was the only end-of-turn marker this
-wire has. It was not, and that sentence is why the driver below waited out
-a fixed quiet period on every turn instead of reading the marker the
-platform already publishes. Corrected here so nobody derives the old rule
-from the old sentence a second time.
+"""Agent text-stream topic. Closing a stream ends an utterance, not a whole turn.
+Agent state and stream draining determine turn completion in take_turn().
 """
 
 AGENT_STATE_ATTRIBUTE = "lk.agent.state"
-"""The participant attribute an agent publishes its own turn state on.
+"""Agent state attribute used to detect turn completion after first output.
+React to arrival of a finished state; fast transitions can coalesce, so do not
+require observing thinking or speaking first.
 
-LiveKit's own agent session sets it on every change of state, out of
-``RoomIO`` — which registers that handler whether or not the session has
-any audio in it, so a text-only agent publishes it exactly as a speaking
-one does. Against an agent built the **STT-LLM-TTS** way a chat
-simulation therefore watches it go ``listening`` → ``thinking`` →
-``speaking`` → ``listening``, with ``speaking`` flipped by the first
-forwarded *text* where there is no audio output to flip it, and the
-return to ``listening`` is the end-of-turn marker
-:data:`TRANSCRIPTION_TOPIC` does not carry.
-
-Three facts keep it from being the whole rule, and all three are why the
-quiet period survives underneath it rather than being replaced by it:
-
-- **An agent that is not a LiveKit ``AgentSession`` publishes nothing
-  here.** Egma reads the attribute where it is offered and requires it
-  nowhere.
-- **Fast transitions coalesce.** ``RoomIO`` cancels the in-flight
-  attribute write before starting the next one, so a turn whose states
-  change faster than one round trip to the server can publish only its
-  last state — and where that last state is the one already published,
-  nothing is published at all. So egma keys on the *arrival* of a
-  finished state and never assumes it saw ``thinking`` or ``speaking``
-  first.
-- **A realtime-model agent never comes back at all under this setup.**
-  The two generation paths in the agents SDK are not the same here: the
-  pipeline one returns to ``listening`` off the state it is already in,
-  and the realtime one guards that return with ``if audio_output is not
-  None``. Both reach ``speaking`` on the first forwarded text, so an
-  agent running a realtime model in a chat simulation — where the setup
-  this driver asks for has audio output off — goes ``thinking`` →
-  ``speaking`` and stops. The end-of-turn marker simply never fires, and
-  the quiet period is the whole of the rule for that agent.
-
-Read from LiveKit's documentation and from the agents SDK in this
-checkout, and not yet observed on a live wire. That is the fourth reason
-the fallback below is a real path rather than a formality, and together
-they are why its value is the measured one rather than a tuned one.
+Keep the quiet fallback for agents without this attribute and realtime agents
+whose SDK does not publish a finished state with audio output disabled.
+These SDK paths were source-inspected; that is not live-wire verification.
 """
 
 AGENT_FINISHED_STATES = frozenset({"listening", "idle"})
@@ -487,16 +289,8 @@ def unreachable_refusal(what_failed: str, url: str, told: str) -> MediaBackendEr
 
 @dataclass(frozen=True)
 class RoomSettings:
-    """One LiveKit room's coordinates, however egma came by them.
-
-    Three shapes live in here, and they are three answers to one question:
-    who minted the token that opens the room. Egma mints it from the
-    project's key pair; or a ``tokenEndpoint`` means egma asks the customer
-    for one; or a ``given_token`` means egma was handed one already — by a
-    platform that opened the room itself, which is what a call created
-    through somebody's API comes back as. The fields the other shapes use
-    are left empty rather than absent, so everything below can ask
-    :attr:`mints_its_own` once and read the rest plainly.
+    """Room access settings for project credentials, token endpoint, or a given token.
+    Unused fields stay empty; mints_its_own identifies local token creation.
     """
 
     url: str
@@ -838,16 +632,8 @@ class WayIn:
 
 
 class RoomLifecycle:
-    """One room, made and dispatched into and deleted — whatever it carries.
-
-    Everything about a LiveKit room that is the same whether the exchange
-    in it is spoken or typed: coming by a token, creating the room,
-    offering the mock-tool seam in it, asking for the worker, tearing it
-    down, and every refusal and every scrubbing on the way. What a join
-    *produces* is the one thing that differs, and that is what the two
-    subclasses below are for.
-
-    One instance per exchange, per simulation.
+    """Per-simulation room setup, token acquisition, mock RPC, dispatch, and cleanup.
+    Subclasses supply voice or chat joining and answer handling.
     """
 
     MODALITY: str
@@ -895,17 +681,8 @@ class RoomLifecycle:
         # than through a second implementation of it.
         self._secrets = SecretRegistry()
         self._secrets.register(list(settings.secrets))
-        # A room egma opens itself is named by the driver conducting it,
-        # because the name is a channel: the chat driver's rooms carry the
-        # modality mark the customer's worker reads. A room egma asks for
-        # a token into is named after the simulation, because the endpoint
-        # being asked has to be able to check the name against its own
-        # rules — and it carries the same mark, because the worker reads
-        # the name however the token was minted. A room a platform opened
-        # is **not named here at all**: it
-        # has a name already, egma is never told it, and inventing one
-        # would put a string in every log line that exists in nobody's
-        # telemetry.
+        # Use a simulation room name with the chat modality prefix where applicable.
+        # A platform-provided token already selects a room; do not invent its identity.
         self._room_name = (
             PLATFORM_NAMED_ROOM
             if settings.given_token
@@ -943,45 +720,11 @@ class RoomLifecycle:
         return room_name_for(simulation_id)
 
     def _answer_for_mocked_tools(self) -> None:
-        """Stand ready to answer for the agent's tools, in the room.
-
-        Done at the join itself, which is the earliest moment it can be
-        done and the only one that is early enough. The agent's side says
-        hello as its session starts, and on two of the three ways into a
-        room nothing egma does decides when that session starts: the
-        worker can already be in the room, mid-hello, while egma is still
-        connecting. A method registered a step later than the connect is a
-        race with the first thing the agent says, and losing it reads on
-        the far side as "no egma here" — every real tool then runs inside
-        a live simulation, and the record says nothing about it.
-
-        Asked for twice, deliberately: once by the room the instant it is
-        entered, and once from :meth:`dial` for a room that offers no such
-        moment. Whichever call gets both methods on is the one that
-        offers the exchange, and the other returns having done nothing.
-        The flag that decides which is which is set only after both
-        registrations return, so the second ask stays a real second
-        chance: a room that refused at the join is a room the fallback
-        can still offer in, and a flag raised before the work would spend
-        that chance on nothing and leave every mocked tool running its
-        own implementation for the whole simulation.
-
-        Both methods go on whether or not this simulation mocks anything.
-        A room where egma answers for no tools still answers the hello
-        with an empty list, which is how the agent's side learns to wrap
-        nothing and leave every tool alone — and it is what puts the
-        agent's own tool list on the record, so a simulation that isolated
-        nothing still says so.
-
-        **Nothing here may sink a conversation that would otherwise have
-        run.** Offering the methods is the one step in this driver that
-        the simulation does not depend on: a room where egma answered for
-        nothing is exactly the room every simulation was before mock tools
-        existed, and failing the whole thing over it would make a feature
-        nobody asked for on this connection into a way to lose a test run.
-        So a refusal is logged loudly and the exchange is simply never
-        offered — and the record then claims nothing about tools, which is
-        the truth, because egma never stood in their path.
+        """Register hello and tool RPC as soon as the room joins. dial() retries if
+        needed.
+        Mark setup complete only after both registrations succeed. Register even with
+        no mock tools: hello returns an empty list and records the agent tool inventory.
+        Registration failures are logged here; simulation startup still requires hello.
         """
         if self._mock_tools is None or self._room is None or self._offered:
             return
@@ -1031,27 +774,9 @@ class RoomLifecycle:
         )
 
     async def dial(self) -> None:
-        """Get the agent in.
-
-        There is nothing to dial: who to reach is the room's own
-        configuration, and asking for it is one explicit dispatch by the
-        name the connection carries. Nothing here falls back on LiveKit's
-        automatic dispatch: a room filled that way goes to whichever
-        workers are listening, so the record could not name the agent it
-        graded, and the test's job dispatch metadata would have no
-        dispatch to ride.
-
-        A connection that did not mint its own token asks for nothing here
-        at all. Dispatching takes the key pair egma deliberately was not
-        given, so putting a worker in the room is somebody else's job —
-        the token endpoint's, which was asked for the worker by name in
-        the token request and dispatches by minting a token that carries
-        it, or the platform's that opened the room — and egma's part is to
-        be in the room when it arrives.
-
-        On two of the three ways in the agent may have arrived already,
-        so the room is asked who is in it before anybody starts waiting
-        for somebody to come.
+        """Dispatch the named worker only when Egma holds project credentials.
+        Token endpoints and platforms own their dispatch. Check current participants
+        before waiting because the agent may already have joined.
         """
         if self._room is None:
             raise MediaBackendError("an agent was requested before a room transport")
@@ -1070,24 +795,8 @@ class RoomLifecycle:
         return await first_of(room.arrivals, within=seconds)
 
     async def teardown(self) -> None:
-        """Leave, and delete the room where egma has the power to.
-
-        Deleting is what ends everything the room held — the dispatched
-        worker included — so it is done however the exchange ended: a
-        natural close, a limit, a cancel directive, or a fault at any step
-        above. A room left running would go on costing the customer, and
-        the one call that could have stopped it is this one.
-
-        Every path where no room was ever asked for skips it, because a
-        delete for a room nobody made could only fail — which is both
-        shapes that were handed their token. A token minted to join one
-        room carries no power to delete it, so egma leaves and the room
-        stands empty. What closes it then is whoever opened it: the
-        customer's own empty timeout on the room — which is why the
-        hardening recipe asks for a short one on ``egma-sim-`` rooms — or
-        the platform that made the room for its own call. Trying the
-        delete anyway would spend a request to be refused and put a line
-        in the log about a failure that was never a failure.
+        """Leave on every ending and delete rooms created with project credentials.
+        With endpoint or given tokens, room cleanup belongs to the token issuer.
         """
         room, self._room = self._room, None
         try:
@@ -1097,19 +806,8 @@ class RoomLifecycle:
             if self._asked_for_a_room:
                 await self._delete_room()
 
-    # -- The places this driver touches the network ---------------------------
-    #
-    # Making the room, dispatching into it, joining it, deleting it, and
-    # asking a customer's endpoint for a token — and nothing else in this
-    # file reaches anywhere. Gathered here so that a room-shaped fake
-    # standing in for a LiveKit is these and no more: every wait above,
-    # every ending, every sentence and every scrubbing is then the real
-    # driver's, in CI as on a customer's server.
-    #
-    # The token request is the one CI does not stand in for. It goes to a
-    # real HTTP server on loopback implementing the published contract, so
-    # what is proved about the request egma sends and the answers it takes
-    # is proved about the code, over a socket, rather than about a mock.
+    # Network operations are grouped here for room test doubles.
+    # Token-endpoint tests use a real local HTTP server to validate the request bytes.
 
     async def _create_room(self) -> None:
         """One `CreateRoom`, and it carries a name and nothing else.
@@ -1161,29 +859,11 @@ class RoomLifecycle:
         return guarded, connector
 
     def _token_request(self) -> dict[str, Any]:
-        """The body egma POSTs: LiveKit's standard token request, filled in.
-
-        The same JSON every LiveKit client SDK sends to a token endpoint —
-        ``room_name``, ``participant_identity``, ``participant_name`` and a
-        ``room_config`` naming the agent to dispatch — so an endpoint written
-        for the customer's own frontend serves egma unchanged. Two of egma's
-        own rules ride on it: the room is always a fresh ``egma-sim-`` name,
-        and the identity is always the persona's.
-
-        ``participant_name`` carries the identity again on purpose. LiveKit
-        keeps identity and display name apart, and endpoints written against
-        egma's earlier contract read the display-name key as the identity;
-        sending both keeps those working, and a standard endpoint gets a
-        harmless display name out of it.
-
-        ``room_config`` is always there, because the name is always demanded:
-        one dispatch entry, the worker's name, and the test's own
-        ``job_dispatch_metadata`` as that dispatch's metadata where the test
-        wrote one — the same string the key-pair shape writes on the dispatch
-        it makes itself. Nothing else of the simulation's — no scenario, no
-        persona, no participant metadata or attributes — because an agent
-        that reads its script stops being under test; the room's name is the
-        whole of egma's signal.
+        """Build the token request with room and participant names plus one named
+        dispatch.
+        participant_name repeats participant_identity for endpoint compatibility.
+        Dispatch metadata contains only the test-owned job_dispatch_metadata.
+        Do not expose other test content through metadata or participant attributes.
         """
         dispatch: dict[str, str] = {"agent_name": self._settings.agent_name}
         if self._dispatch_metadata:
@@ -1196,22 +876,10 @@ class RoomLifecycle:
         }
 
     async def _token_from_endpoint(self) -> WayIn:
-        """Ask the customer's endpoint for a way into the room.
-
-        One POST, one JSON object, and the answer read against the
-        contract the docs publish — LiveKit's own: the token and the server
-        under the names LiveKit's standard endpoint answers with, or the
-        spellings the wild already uses. The server is required, because the
-        endpoint is the one side that knows which of the customer's LiveKit
-        projects this agent lives in, and the connection holds no address of
-        its own.
-
-        egma invents both names and sends them, so the endpoint can mint a
-        token for exactly the identity egma will join as and exactly the
-        room it will join, and can refuse anything else. Every way this
-        can go wrong ends the simulation with a fault that names the status or
-        broken contract part. Endpoint bodies and network exceptions are never
-        customer-visible text.
+        """Request a token and server URL from the customer endpoint.
+        The endpoint selects the server; the connection has no separate server address.
+        Report status or contract errors without exposing response bodies or network
+        exceptions.
         """
         import aiohttp
 
@@ -1351,39 +1019,10 @@ class RoomLifecycle:
     async def _joinable_server(
         self, endpoint: str, named: str, server_url: str
     ) -> None:
-        """Refuse a server the endpoint named that egma must not join.
-
-        The answer decides where the simulator opens its next connection and
-        sends the token it was just handed, so it is held to the rule the
-        endpoint itself was held to. TLS, first: a ``ws://`` or ``http://``
-        server would carry the token in the clear. Then nothing that
-        resolves inside the deployment: a literal address is judged as
-        written; a name is resolved through the resolver the token request
-        went through, and every answer must be public — because an endpoint
-        that is wrong, or compromised, or simply pointed at a staging server
-        on the office network must not make egma a client of that network.
-
-        The join itself is made by the LiveKit SDK on a socket of its own,
-        so unlike the token request there is no socket factory here to hold
-        the connected address to the checked one, and the SDK cannot be
-        handed the checked address in place of the name: under TLS the name
-        is what the server's certificate is checked against. So a name that
-        moves between this lookup and the SDK's is not closed by pinning.
-
-        What it is closed by, as far as this process can close it, is the
-        scheme rule above. The token rides the WebSocket upgrade, which the
-        SDK sends only once the peer has shown a certificate for the
-        answered name. A host inside the deployment holds one only if it
-        already holds a key for a name the endpoint chose, or if the
-        operator's own trust store mints for any name, and in both cases
-        the host was the operator's or the attacker's before this check
-        ran. The token itself was minted by the endpoint that answered, so
-        a moved name discloses nothing to it. What a moved name can reach
-        is one TCP connect and one TLS handshake against an address of its
-        choosing, and a join refusal that says how that went. That residue
-        is accepted here, said rather than implied away, and the layer that
-        closes it is the deployment's egress policy on this process: a
-        socket the SDK owns is guarded where sockets are, not here.
+        """Require TLS and public resolved addresses before sending the room token.
+        The LiveKit SDK opens its own socket and resolves the host again, so this check
+        does not pin its connection against DNS changes. TLS checks the hostname;
+        deployment egress policy must block access to internal addresses.
         """
         located = _server_host(server_url)
         if located is None:
@@ -1591,16 +1230,8 @@ class LiveKitRoomBackend(RoomLifecycle):
         )
 
 
-# -- The room carrying typing ------------------------------------------------
-#
-# No Pipecat, no transport, no audio, and no text-to-speech anywhere: a
-# chat simulation types onto one topic and reads the agent's own words
-# back off another. What makes that possible without touching the
-# customer's agent is that LiveKit's session already listens on the chat
-# topic; what makes it *fast* is the six lines the customer adds, which
-# read the modality off the name of the room this driver makes — the
-# ``egma-sim-chat-`` mark — and stop the agent synthesising speech nobody
-# hears.
+# Chat room transport: text topics only. The egma-sim-chat- prefix tells
+# an integrated agent worker to disable speech.
 
 
 @dataclass(frozen=True)
@@ -1629,16 +1260,7 @@ class Utterance:
     """
 
     opened: int
-    """Where this stream opened in the room's own order of streams.
-
-    A turn is several utterances joined together, and they are joined in
-    *this* order rather than in the order they finished arriving. The two
-    are not the same order: a stream that opens first may close last, and
-    when it did the agent's opening words landed behind the sentence that
-    followed them and the record read as if the agent began mid-sentence.
-    Arrival order is what the queue can offer; open order is what the
-    agent actually said.
-    """
+    """Stream-open order used to join utterances. Streams can finish out of order."""
 
 
 @dataclass(frozen=True)
@@ -1660,38 +1282,16 @@ class AgentTurn:
     plug above ends the simulation rather than grading it."""
 
     answer_began_at: float | None = None
-    """When this turn's answer started, on the running loop's clock.
-
-    The turn's finish line for ``turn_response_latency``. It is carried
-    up rather than turned into a duration here because the starting line
-    is the conversation loop's — the moment the persona's turn went out —
-    and only one of the two ends is visible from inside this driver.
-
-    ``None`` where the agent never began answering: a turn that only
-    called a tool, or one that produced nothing at all.
+    """Answer start on the event loop clock, or None without an answer.
+    The conversation loop supplies the starting line for turn_response_latency.
     """
 
 
 class TextRoom:
-    """One LiveKit room joined for typing, with no media in it at all.
-
-    The chat counterpart of :class:`egma_simulator.media.room.JoinedRoom`,
-    and deliberately much smaller than it: there is no transport to build,
-    no conversion, no pacing and no recording. Egma connects, subscribes
-    to nothing, offers the mock-tool methods on its own participant, types
-    on one topic and reads closed streams off another.
-
-    What it exposes upward is five events and a queue, because that is the
-    whole of what the wire says: somebody arrived, somebody published
-    audio, the agent left, the room dropped egma, the agent said it has
-    finished its turn — and, in order, every utterance that finished
-    arriving.
-
-    It also answers one question the queue cannot: which streams this room
-    knows are still *open*. A queue holds what has finished; a turn that
-    ends on what has finished alone throws away whatever had started and
-    not landed, which is exactly how the agent's opening words once left
-    the record.
+    """Chat room with participant events, text streams, and mock-tool RPC; no audio
+    pipeline.
+    Track open readers as well as completed utterances so take_turn() can drain
+    streams that started before the turn ended.
     """
 
     def __init__(
@@ -1722,20 +1322,8 @@ class TextRoom:
         an utterance carries, and the reason a turn can be joined in the
         order the agent said it rather than the order it finished."""
         self._answer_began: dict[int, float] = {}
-        """When each turn's answer *started*, against the turn it started.
-
-        The finish line of ``turn_response_latency``, and the only place
-        on this lane that can see it. A stream's header is the first
-        moment the wire says the agent is answering this question — before
-        a word of it exists — and it is what a caller would hear as the
-        agent beginning to reply. Everything after it is the answer being
-        written and then egma deciding no more is coming, which is egma's
-        own wait and not the agent's speed.
-
-        Kept per turn rather than as one instant because a stream opening
-        late still belongs to the turn it opened in, and the first stream
-        of *this* turn is the one that answers it. Only the first is kept:
-        a turn's later utterances are the same answer continuing.
+        """First stream-open timestamp per turn, used as the answer-latency finish line.
+        Later streams continue the same answer and must not replace its start time.
         """
         self.utterances: asyncio.Queue[Utterance] = asyncio.Queue()
         self._turn = 0
@@ -1746,15 +1334,10 @@ class TextRoom:
         self.failed = asyncio.Event()
         self.audio_published = asyncio.Event()
         self.agent_finished = asyncio.Event()
-        """Set when the agent's own state says it has finished a turn.
-
-        Cleared where a turn begins, and cleared again by an utterance
-        whose stream opened *after* that state arrived: that is the agent
-        writing again, and the latch has to follow the words rather than
-        outrank them. An utterance whose stream was already open when the
-        state arrived clears nothing, because the state is about that very
-        utterance — the words travel the data channel and the state the
-        signalling one, and neither order is the wrong one.
+        """Finished-state latch. Clear at turn start and for streams opened after the
+        signal.
+        Streams already open at the signal do not clear it: text and state can arrive
+        in either order on separate channels.
         """
         self._finished_after = 0
         """How many streams this room had seen open when the latch above
@@ -1806,19 +1389,9 @@ class TextRoom:
                     self.audio_published.set()
 
     def _watch(self, room: Any) -> None:
-        """Put every handler this room reads the wire through onto it.
-
-        Its own method rather than a block inside the join, because
-        these six signatures *are* the wire: what LiveKit hands each
-        event, and in what order, is the one thing here that cannot be
-        derived from anything else, and a test that reaches past them
-        proves nothing about the unpacking each one does. So a
-        room-shaped fake registers through this and fires what it kept.
-
-        Registered before the connect rather than after it, for the reason
-        the mock-tool methods are: a worker already in the room can speak
-        the moment egma becomes visible to it, and a handler attached
-        afterwards is a race with the agent's first word.
+        """Register event handlers before connect so an already-present agent's first
+        output
+        cannot race registration. Test rooms use these same callback signatures.
         """
         from livekit import rtc
 
@@ -1952,29 +1525,11 @@ class TextRoom:
     async def next_utterance(
         self, *, within: float, finished_ends_it: bool = False
     ) -> Utterance | None:
-        """The next finished utterance, or nothing inside the budget.
-
-        Five things end the wait early and each one means nothing more is
-        coming on its own: the utterance arriving, the agent leaving, the
-        server dropping egma, an audio track appearing, and the agent's
-        own state saying it has finished. Neither of the middle two is an
-        answer at all — a room egma has been dropped from has nothing
-        left to say, and a track is the wire saying this agent is
-        speaking — and there is no point waiting out a quiet period for
-        words that are not coming or that will arrive at speech pace.
-
-        ``finished_ends_it`` is off until the turn has heard something,
-        and that is deliberate rather than defensive. A session publishes
-        ``listening`` when it *starts*, before it has been asked anything
-        and before it greets anybody, so a turn that took a finished state
-        as an answer would end the greeting before the agent opened its
-        mouth. Waiting for the first word is a different question from
-        waiting for the next one, and the caller pays a different budget
-        for it; the state signal only answers the second.
-
-        Returning ``None`` never means the turn is over on its own. It
-        means nothing more will *arrive* on its own — the caller still
-        owes this turn every stream it opened and has not seen close.
+        """Wait for an utterance, departure, disconnect, audio output, or finished
+        state.
+        Enable finished_ends_it only after first output; startup listening must not
+        end the greeting. None does not complete a turn: its open streams still need
+        draining.
         """
         if not self.utterances.empty():
             return self.utterances.get_nowait()
@@ -2050,17 +1605,9 @@ class TextRoom:
         reading.add_done_callback(lambda done: self._reading.pop(done, None))
 
     def _note_agent_state(self, changed: dict[str, str], identity: str) -> None:
-        """Take the agent's own word for where it is in its turn.
-
-        Dropped for egma's own participant for the reason its own words
-        are dropped one method up: nothing egma publishes about itself is
-        the agent saying anything.
-
-        Only a *finished* state does anything, and it only ever sets the
-        latch. Nothing here waits for ``thinking`` or ``speaking`` first,
-        because the platform is free to publish neither: it cancels an
-        attribute write that a faster transition overtakes, so a quick
-        turn can announce only where it ended up.
+        """Latch remote finished states, ignoring Egma's own participant.
+        Do not require a prior thinking or speaking event: rapid transitions can
+        coalesce.
         """
         if identity == PERSONA_IDENTITY:
             return
@@ -2104,17 +1651,9 @@ class TextRoom:
         return self._answer_began.get(turn)
 
     async def settle_turn(self, turn: int, *, within: float) -> None:
-        """Let this turn's still-open streams finish, for a bounded while.
-
-        The bound is what keeps one stalled stream from holding a whole
-        simulation, and :meth:`streams_open_in` is what the caller asks
-        afterwards to find out whether the bound is what ended the wait.
-
-        Waited on with :func:`asyncio.wait` rather than gathered, because
-        a gather that times out cancels what it was waiting for. A reader
-        cancelled here would lose its words *and* its line in the log —
-        and a dropped utterance nobody can see is the whole shape of the
-        defect this rule exists to end.
+        """Wait within the drain budget without cancelling unfinished stream readers.
+        Use asyncio.wait so late words and diagnostics remain available.
+        streams_open_in() reports readers still open after the wait.
         """
         reading = [
             reading
@@ -2252,19 +1791,9 @@ class LiveKitChatRoomBackend(RoomLifecycle):
     async def wait_greeting(
         self, seconds: float, *, quiet_seconds: float, drain_seconds: float
     ) -> AgentTurn:
-        """What the agent opens with, if it opens with anything.
-
-        A turn with no words in it is the ordinary answer here: plenty of
-        agents wait to be spoken to, and the conversation loop then has the persona
-        open. The budget is separate from the quiet period because a
-        greeting is a whole model round trip after a session starts, where
-        a quiet period is the gap between two things already being said.
-
-        The greeting is also the one turn the agent's own state cannot
-        end. A session publishes ``listening`` the moment it starts, which
-        is before it has greeted anybody — so here that state means ready,
-        never finished, and only the first word egma hears turns the
-        signal on.
+        """Collect an optional greeting using its own first-output budget.
+        Ignore finished state until words arrive; otherwise startup listening could
+        end the greeting early. No greeting lets the persona speak first.
         """
         # Nought: the only turn the agent takes before it has been asked
         # anything is the one it opens with.
@@ -2280,26 +1809,11 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         quiet_seconds: float,
         drain_seconds: float,
     ) -> AgentTurn:
-        """Type one persona turn in, and read the agent's answer back.
-
-        Two budgets, because they measure two different things. Waiting for
-        the answer to *start* is waiting on a whole model round trip, and
-        possibly a tool call inside it; waiting for the answer to *continue*
-        is the gap between two utterances of one turn that is already under
-        way. Giving the first the second's budget would call a thinking
-        agent silent.
-
-        Only what this turn opened counts as this turn's answer. A stream
-        that opened before the question went out is answering an earlier
-        prompt — a greeting that outran its wait included — however late
-        it finishes, and is left off the record instead of filed under a
-        question it was never asked. That is why the send comes first and
-        the turn begins the moment it returns: the two run in one step of
-        the event loop, with no await between them, so there is no moment
-        at which a stream could open after the question left and still be
-        stamped with the turn before it. A stream that opens while the
-        text is still leaving egma is stamped with the old turn, because
-        nothing that had not yet arrived can have prompted it.
+        """Send persona text, then collect the answer with separate start and quiet
+        budgets.
+        Begin the new turn immediately after send returns, without another await.
+        Only streams opened in that turn belong to its answer; earlier streams remain
+        assigned to their original turn even if they finish later.
         """
         room = self._room
         if room is None:
@@ -2323,64 +1837,18 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         turn: int,
         silence_ends_it: bool = False,
     ) -> AgentTurn:
-        """One agent turn, out of however many utterances it took.
+        """Collect one agent turn, preserving utterances in stream-open order.
 
-        An utterance ends when its stream closes. The *turn* ends when two
-        separate things hold together, and either one alone gets a turn
-        wrong.
+        After the first words, a finished agent state or the quiet period ends input.
+        Do not use the state signal before first output: startup can publish listening
+        before the greeting. Assign streams to the turn when they open, then drain
+        its open streams before returning. Reset the bounded drain wait as utterances
+        arrive; log when the bound expires.
 
-        **The agent has to be finished.** It says so itself: a LiveKit
-        session publishes :data:`AGENT_STATE_ATTRIBUTE` and its return to
-        a finished state is the end of the whole turn, the tool call
-        inside it included. Where that never arrives — an agent that is
-        not a LiveKit session, or a turn whose state changes coalesced
-        into a publish that changed nothing — the room going quiet for the
-        whole quiet period says the same thing less certainly, and the
-        agent leaving says it for good. An agent that says a filler, calls
-        a tool and then answers is one turn that arrived in pieces, and a
-        rule that stopped at the first close would put the filler on the
-        record and the answer nowhere.
-
-        **And every stream this turn opened has to have closed.** Neither
-        a finished state nor a spent quiet period ends a turn while a
-        stream stamped with it is still open. That is not a refinement: a
-        stream is stamped when it *opens*, so one that opens promptly and
-        finishes late still belongs to the question it began answering —
-        and a turn that ended on what had already arrived threw those
-        words away, because the next turn then refuses them for being
-        older. The record read as if the agent began
-        mid-sentence, with nothing on it saying a word had gone. The wait
-        is bounded, because one stalled stream must not hold a whole
-        simulation; when the bound is what ends it, the log says so and
-        names the time it really spent. The bound is per stream and not
-        per turn: every utterance of this turn that lands starts it
-        again, because what it measures is the writing of one utterance
-        the agent has already begun, and a turn that arrives in several
-        slow pieces is an agent writing rather than an agent stalled.
-
-        Two things keep that wait from being entered at all, and neither
-        of them is a turn being recorded: an audio track in the room,
-        which is the wire saying this agent is speaking and is refused
-        above this driver at its first output, and the server dropping
-        egma, which raises below this loop. Both are read before the
-        wait starts, because entering it in either case would spend a
-        bound on a turn nothing will read. Neither shortens a wait
-        already under way: once the drain is running it watches this
-        turn's readers and nothing else.
-
-        The turn's utterances are joined in the order their streams
-        *opened*, which is the order the agent said them. Arrival order is
-        what a queue can offer and it is not the same order.
-
-        ``silence_ends_it`` is what keeps a delivered turn from running on
-        into a question egma can no longer answer honestly. A stream is
-        stamped when it opens, so one that opens *before* the next question
-        goes out can always be told from that question's answer — but one
-        that has not opened at all by then cannot. There is no marker for
-        it and no rule that could invent one, so the exchange stops where
-        the ambiguity would begin rather than filing a guess. The greeting
-        never passes it: nothing has been asked yet, so quiet there is an
-        agent waiting to be spoken to.
+        Audio output or disconnection prevents entry into drain. Once draining starts,
+        only this turn's readers are watched until the wait ends.
+        With silence_ends_it, an unanswered persona turn ends the exchange so a late
+        stream cannot be assigned to the next question. The optional greeting is exempt.
         """
         room = self._room
         if room is None:

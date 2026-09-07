@@ -7,16 +7,9 @@ import {
 } from "../src/index.ts";
 
 /**
- * The Retell derivations, pinned to the live validation of 2026-08-22.
- *
- * A word-bounded Retell conversation carries turns with real timestamps and a
- * root filed as `conversation` — not `root` — so this file is the proof of the
- * two rules that made its latencies computable: the root is recognised by its
- * empty parent, never by a kind word, and a turn with no `speaking` children
- * measures from its own bounds. The shape below is the captured call
- * `call_72ecf…` in miniature: the derived gaps matched Retell's own reported
- * `e2e` exactly where both measured, and caught an answered turn its list
- * missed — which is why the derivation outranks the reported block.
+ * Retell turn timestamps provide word boundaries without speaking children.
+ * Recognize its root by the empty parent, not the conversation kind name.
+ * These captured shapes exercise derived latency before reported fallback.
  */
 
 const STARTED = "2026-08-22T10:00:00.000000Z";

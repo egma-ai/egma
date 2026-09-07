@@ -1,21 +1,7 @@
-"""The persona brain: one component, shared by every modality forever.
-
-It composes the authored persona — the name they answer to, how they behave,
-the language they speak — and the test's scenario into a system prompt, takes
-turns — the transcript's ``human`` side — and decides when the exchange is
-concluded. What it does not know is deliberate: it never sees a platform
-(that is the plug's business) and never produces its own words (that is the
-model client's), so the same brain conducts a chat today and speaks through
-voice legs when those arrive.
-
-The name is stated in the frame rather than left among the details the model
-may invent. A prompt that licensed one produced a different person on every
-run of the same test, which made a name-keyed mock world impossible and an
-old transcript unanswerable about who the agent actually heard.
-
-Role mapping is from the persona's own seat at the table: the persona is
-the ``assistant`` the model plays, and the agent under test is the
-``user`` it is answering.
+"""Compose the authored persona and test scenario for the model client.
+Use the supplied persona name so repeated simulations preserve identity.
+The same component serves chat and voice without agent-platform knowledge.
+From the persona POV, the persona is assistant and the agent under test is user.
 """
 
 # The prompt is product copy. Its long lines stay intact so source and runtime match.

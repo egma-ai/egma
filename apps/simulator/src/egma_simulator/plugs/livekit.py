@@ -1,97 +1,15 @@
-"""The livekit plug: the simulator joins the agent's own room.
+"""LiveKit voice connection. The room driver owns room setup and cleanup;
+the Pipecat transport owns audio and turn processing.
 
-The second plug that reaches an agent the way its customers do, and the
-first that reaches one where it lives. A LiveKit agent is a worker
-waiting to be given a room; so egma makes a room in the customer's own
-LiveKit project, joins it, asks for the worker, and holds the exchange
-there. What a spec names is a server, a key pair, and — where the
-customer runs more than one agent — which agent to ask for.
+access_variant explicitly selects token authority:
+- Project credentials: url and agentName are required; credentials contain
+  apiKey and apiSecret. Egma creates, dispatches into, and deletes the room.
+- Token endpoint: tokenEndpoint and agentName are required; credentials contain
+  auth headers. The HTTPS endpoint must include the requested worker and
+  test-owned job_dispatch_metadata in the token's room_config.
 
-The room itself is a media driver's job — see
-:mod:`egma_simulator.media.livekit_room`, which owns the room whole: come
-by a token and a room, join outbound, get the agent in where it can, learn
-that it really turned up, and tidy up whatever happened. This module
-owns the *lifecycle* above that seam, and it is deliberately thin: open,
-carry the persona's speech out and the agent's speech back, notice the
-agent leaving, end deliberately, and offer the room's name as the
-provider reference — the one join between egma's record and the
-platform's own telemetry.
-
-Its config keys, like every plug's, are its own, and they are read by the
-driver that uses them. There are two shapes of them, told apart by whether
-``tokenEndpoint`` is there, and they are two answers to one question: who
-mints the token that opens the room.
-
-**egma mints it.** The connection carries the project's key pair, and egma
-creates the room, dispatches the worker and deletes the room at the end:
-
-- ``url`` (string, required) — the customer's LiveKit, ``ws``/``wss`` or
-  ``http``/``https``. Cloud and self-hosted are the same URL and the same
-  API; nothing here knows the difference.
-- ``agentName`` (string, required) — the name the agent's worker
-  registered under. Required rather than optional, because egma always
-  dispatches explicitly: the record then names the agent it graded, and
-  the test's job dispatch metadata always has a dispatch to ride.
-
-There is no metadata key here and there is not meant to be. What the
-agent is dispatched with is the **test's** ``job_dispatch_metadata``, and
-it arrives with the simulation rather than with the connection: two tests
-of one suite start their worker in two different worlds, which one value
-on the connection could never do.
-
-Its credentials are the customer's LiveKit ``apiKey`` and ``apiSecret``.
-Unlike a phone connection, a room connection carries its own: the room is
-the customer's project, not this deployment's, so nothing about reaching
-it comes from the environment.
-
-**The customer mints it.** The connection names where egma asks instead,
-and the secret that signs tokens for the whole project never leaves the
-customer's side:
-
-- ``tokenEndpoint`` (string, required) — the public ``https`` address egma
-  POSTs to, once per simulation, in LiveKit's standard token request. The
-  simulator repeats the HTTPS check before an auth header or room token can
-  cross the network. The answer names the LiveKit server to join, so this
-  shape holds no ``url`` of its own.
-- ``agentName`` (string, required) — as above. egma cannot dispatch here, so
-  it asks the endpoint for this worker by name, in the request's
-  ``room_config``, with the test's ``job_dispatch_metadata`` as that
-  dispatch's metadata; the endpoint copies that block into the token it
-  mints and LiveKit dispatches the worker when the room is created.
-
-Its credentials are that endpoint's auth ``headers``. They are required.
-**Dispatching is the endpoint's job** — egma names the worker, the endpoint
-puts it in the room — and a room nobody joined says exactly that.
-
-## Media
-
-The stock Pipecat LiveKit transport owns the room's input, output,
-conversion, and pacing. Egma does not select or expose a processing rate.
-
-## Answering for the agent's tools
-
-A room is the one connection where egma can stand in the agent's tool
-path, because it is the one where egma is already in the room with it. The
-mock-tool exchange is offered on egma's own participant, and how the
-agent's side finds it is the room itself: the name every simulation room
-carries says a simulation is running, and the persona's participant
-identity is the address — both published, both the same on all three
-ways into a room, and neither of them a metadata channel the customer
-writes.
-What answers it is :mod:`egma_simulator.mock_tools`, handed to this plug
-already holding the answers the run resolved. Nothing about it is this
-file's: the plug passes it to the driver that joins the room, and the
-driver offers it there, at the join, before an agent that was quicker
-into the room can ask.
-
-## Where a turn begins and ends
-
-Nowhere in here. A live room does carry an end-of-turn signal — a LiveKit
-session publishes ``lk.agent.state`` and the chat driver next door reads
-it — but a spoken exchange does not need one: the running Pipecat
-pipeline reads turns from the transport's own frames, at the pace speech
-arrives, and a room attribute would be a second, slower answer to a
-question already settled.
+Both variants offer MockToolSeam RPC on the Egma participant before agent
+startup completes. The room name is the provider reference for agent POV spans.
 """
 
 from __future__ import annotations
@@ -202,19 +120,9 @@ class LiveKitRoom:
             raise PlugError(str(refused), ending=refused.ending) from refused
 
     async def open(self) -> None:
-        """Make the room and wait for the agent to turn up and report.
-
-        Nothing is heard here. The line is open the moment the agent's
-        audio flows. The running Pipecat transport then carries both
-        sides, including the agent's opening.
-
-        An agent that turned up and never reported to Egma fails the
-        simulation. The SDK sends its hello as the session starts, which
-        is before the first audio anybody hears, so by the time the agent
-        is audible a hello has either arrived or never will. Letting the
-        conversation run instead would produce a green record of a test
-        that isolated nothing: every mocked tool would have called its
-        real backend, and nothing on the record would say so.
+        """Open the room and wait for the agent's audio and Egma hello.
+        The running transport carries the greeting. Missing hello fails setup
+        before the simulation proceeds without its required mock configuration.
         """
         try:
             await self._backend.dial()

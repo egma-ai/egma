@@ -1,31 +1,6 @@
-"""The livekit chat plug: the same room, typed into instead of spoken into.
-
-The claim proved here is that a spec naming a chat ``livekit_room``
-connection becomes a whole simulation — a transcript, a distinct ending,
-the answers egma served, and the room's own name as the join to
-the platform's telemetry — with no LiveKit server, no project, no worker and
-no network anywhere. What stands in for the LiveKit is
-:mod:`room_stub`'s chat half, which is the real chat driver and the real
-text room with only the three requests and the one join answered locally.
-Everything else — stamping each stream at its header, reading it to its
-close, dropping egma's own words, reading the agent's own state off the
-wire, deciding where a turn ends and waiting out whatever it has to wait
-out, offering the mock-tool methods on egma's participant — is the code a
-customer's server will run.
-
-The specs go in at the top, through the plug registry and the pipeline the
-service assembles, for the same reason the voice suite's do: a test that
-built the plug by hand would prove the plug and nothing about the seam
-above it.
-
-Two failures matter more than the rest and get the most room below. An
-agent that never took the chat setup is caught at its **first** output,
-because a speech-paced exchange graded as if it were typed is a record of
-the wrong kind of run and every further turn spends more of the customer's
-speech budget proving the same thing twice. And a connection that names
-no agent is refused before a single request leaves egma, because every
-egma dispatch is explicit: the record names the agent it graded, or there
-is no dispatch and whichever worker was listening takes the room.
+"""Chat connection tests through the registry, pipeline, and stubbed room boundary.
+Exercise stream ownership, turn completion, RPC, transcript, and room attribution.
+Reject missing agentName before requests and accidental audio at first output.
 """
 
 from __future__ import annotations
@@ -144,15 +119,8 @@ stalled stream anywhere.
 """
 
 A_SLOW_TOOL = 3.0
-"""How long the scripted agent stays quiet in the middle of one turn.
-
-The room stub's own pause, and it stands for the slowest honest thing an
-agent does inside a turn: call a tool that egma is **not** answering for,
-wait on the customer's real backend, and answer out of what came back.
-Egma serves its own answers at once, so nothing egma does puts a gap
-here; what leaves one is a real lookup, and
-:data:`~egma_simulator.plugs.livekit_chat.REPLY_SECONDS` is written to
-clear it.
+"""Scripted pause between filler and answer, representing an unmocked tool lookup.
+The fallback quiet period must allow the final answer to arrive.
 """
 
 A_TOOL_TURN_GAP = A_SLOW_TOOL + 0.5
@@ -414,16 +382,8 @@ async def test_a_chat_livekit_spec_conducts_a_whole_simulation_in_a_room(
 async def test_the_dispatch_carries_chat_and_none_of_the_test(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """What an agent is told when it is asked for a typed simulation.
-
-    Nothing, on this channel. The signal that lets it go text-only is the
-    room's name, and dispatch metadata is the test's: a test that wrote
-    none sends none, so an agent reads here in a chat simulation exactly
-    what it reads in its own production rooms.
-
-    Which makes the second half of this test the one that matters: not a
-    word about what the agent will be asked, because an agent that reads
-    its script stops being under test.
+    """Chat modality belongs in the room name. Dispatch metadata contains only
+    test-authored context and must not expose scenario instructions.
     """
     scenario = "Ask to move the Tuesday cleaning to Thursday. Say you are Margaret."
     stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
@@ -439,20 +399,8 @@ async def test_the_dispatch_carries_chat_and_none_of_the_test(
 async def test_a_chat_rooms_name_carries_the_mark_the_worker_reads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The published contract, written out by hand on purpose.
-
-    A chat simulation's room begins ``egma-sim-chat-``, and the six lines
-    in Egma's LiveKit integration instructions key their one decision off
-    exactly that string — so this test spells it rather than importing the
-    constant that builds it. A rename in ``media/room.py`` must land here
-    as a red test: every worker already carrying the chat setup would
-    answer the renamed room aloud, and the fail-fast would stop each of
-    those simulations at the agent's first utterance. Read the red as the
-    contract refusing to move.
-
-    The bare ``egma-sim-`` prefix survives inside the marked form, so
-    everything that recognises it — the SDK's simulation detection, a
-    token endpoint's allowlist, the hardening recipe — still matches.
+    """Pin the published egma-sim-chat- literal independently of the room-name builder.
+    Deployed workers rely on it, and it must retain the general egma-sim- prefix.
     """
     stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
     await chat_walk(tmp_path, stub, monkeypatch)
@@ -519,17 +467,8 @@ async def test_a_chat_dispatch_carries_the_tests_metadata_byte_for_byte(
 async def test_a_greeting_that_outran_its_wait_is_never_the_first_answer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The late greeting lands mid-send, and the record refuses it.
-
-    An agent slower than the greeting wait can open its greeting's stream
-    while the persona's first turn is still leaving egma. The question has
-    not arrived anywhere, so those words cannot be its answer — and the
-    turn now begins only once the send has returned, in the same step of
-    the event loop, so a stream opening mid-send is stamped with the
-    greeting era and refused from the first answer. The refusal costs the
-    real answer nothing: a refused utterance leaves the reply budget
-    standing, so the answer that follows is recorded under the question
-    that prompted it.
+    """A greeting stream opened during persona send belongs to the old turn.
+    Discard it from the answer without consuming the new turn's reply budget.
     """
     stub = ChatStub(
         greeting_during_first_send="Welcome to Lakeside Dental!",
@@ -774,21 +713,8 @@ async def test_a_tool_call_pause_inside_a_turn_does_not_end_it(
 async def test_an_utterance_left_over_from_the_last_turn_is_never_this_one_s(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """A late answer is dropped rather than filed under the next question.
-
-    The wire carries no marker saying which persona turn an utterance
-    answers, so one that arrives after egma stopped waiting for it cannot
-    be told from a prompt answer to the question asked next. Filed that
-    way it would put the agent's words against a question it never
-    answered, on the record a grader reads.
-
-    So whatever is still queued when the next turn goes out is taken off
-    first. That is the half of the problem a rule can settle; the other
-    half — a stream that has not opened at all by then — is why
-    :data:`REPLY_SECONDS` is sized to make running out of budget
-    exceptional rather than routine. An utterance still in flight at that
-    moment is neither half: its stream opened while its own turn was
-    outstanding, so the turn waits for it rather than losing it.
+    """Clear queued earlier-turn utterances before collecting the next answer.
+    Do not assign old words to a new question; streams already open retain their turn.
     """
     hurry(monkeypatch)
     stub = ChatStub(greeting=None, replies=["The second answer."])
@@ -816,26 +742,8 @@ async def test_an_utterance_left_over_from_the_last_turn_is_never_this_one_s(
 async def test_an_utterance_still_open_when_its_own_turn_ends_stays_on_the_record(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """A stream that opens promptly and closes late is still its turn's.
-
-    That is this plug's own rule, written down in its module docstring: an
-    utterance belongs to the turn that was outstanding when its stream
-    **opened**, "so one that opens promptly and finishes late still
-    belongs to the question it began answering". The stamp was taken for
-    exactly that reason and then used only to *refuse* a late utterance,
-    never to wait for one, so the rule it was taken for was not kept.
-
-    The agent here opens its greeting in two streams and the first one
-    closes last, after the quiet period has run out. Both opened while the
-    greeting was outstanding, so both are the greeting, and the turn is
-    not over while either is open: it waits, takes the late words, and
-    joins the two in the order they opened rather than the order they
-    arrived.
-
-    What the red looks like is what the founder read: an agent turn that
-    begins part-way through the sentence the agent started with — the
-    greeting ends without the open stream, the turn after refuses it for
-    being older, and nothing on the record says a word of it went missing.
+    """Drain both greeting streams even when the first closes after the quiet period.
+    Join them in open order, preserving the opening words.
     """
     hurry(monkeypatch)
     stub = ChatStub(greeting=None, replies=[])
@@ -927,19 +835,8 @@ async def test_a_turn_arrives_in_the_order_it_was_said_not_the_order_it_landed(
 async def test_a_stream_that_never_closes_bounds_the_turn_and_says_so(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
-    """The bound is real, and what it costs the record is said out loud.
-
-    A turn waits for a stream it opened, and it cannot wait for ever: an
-    agent whose process died mid-sentence would otherwise hold the turn,
-    and the simulation behind it, until the run's own duration limit — and
-    the record would then say ``limit_reached`` about something else
-    entirely.
-
-    So the wait is bounded, and where the bound is what ended it the log
-    names the room, the turn, how many streams were still open and what
-    the agent last said about itself. That line is the only place this
-    fact exists: the report schema and the span vocabulary are the
-    simulation contract's, and this lane does not settle those alone.
+    """Bound a stalled stream wait and log the room, turn, open-reader count,
+    and last agent state. The diagnostic belongs in logs, not an invented report field.
     """
     caplog.set_level(logging.WARNING)
     stub = ChatStub(
@@ -975,23 +872,8 @@ async def test_a_stream_that_never_closes_bounds_the_turn_and_says_so(
 async def test_a_turn_of_slow_utterances_gives_every_stream_the_whole_bound(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
-    """The bound is on one stream, not on a turn's worth of them.
-
-    Five utterances of one turn, each opening just after the one before it
-    closed, every one of them slower than the quiet period and not one of
-    them stalled. Each is the agent still writing, so each is waited for,
-    and what each gets is the whole bound — because
-    :data:`~egma_simulator.plugs.livekit_chat.TURN_DRAIN_SECONDS` measures
-    "the writing of one utterance the agent has already begun" and nothing
-    larger.
-
-    Spent as one budget for the whole turn it runs out part-way down an
-    honest one: the streams that closed perfectly normally have already
-    eaten it, the next stream is dropped for stalling when it did not, and
-    the log names a stalled stream where there is none. That is the very
-    defect this rule was written to end, arriving by the rule's own doing,
-    and the honest half of a bad outcome — the log — would be pointing at
-    the agent.
+    """Reset the drain budget as each utterance arrives. Five slow but progressing
+    streams must complete instead of sharing one expiring turn-wide budget.
     """
     caplog.set_level(logging.WARNING)
     hurry(monkeypatch)
@@ -1035,16 +917,8 @@ async def test_a_turn_of_slow_utterances_gives_every_stream_the_whole_bound(
 async def test_the_agents_own_state_ends_the_turn_without_the_quiet_period(
     monkeypatch: pytest.MonkeyPatch
 ):
-    """The whole point of reading ``lk.agent.state``: not waiting.
-
-    The quiet period is a guess about time, and a guess has to be
-    generous — which is why the founder's run spent two thirds of its
-    wall clock in one. The agent publishes the answer instead, and a turn
-    that has it does not pay the guess at all.
-
-    Held to a quiet period ten times the suite's so the difference cannot
-    be a scheduling accident: the turn has to come back in a fraction of
-    a wait it never took.
+    """A finished agent state must bypass the quiet fallback. Use a much larger quiet
+    period here so scheduler noise cannot explain a fast return.
     """
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_LONG_QUIET)
@@ -1071,16 +945,8 @@ async def test_the_agents_own_state_ends_the_turn_without_the_quiet_period(
 async def test_a_state_change_egma_never_saw_go_by_still_ends_the_turn(
     monkeypatch: pytest.MonkeyPatch
 ):
-    """The coalesced transition, which is the common one on a quick turn.
-
-    LiveKit's room plumbing cancels an attribute write that a faster
-    transition overtakes, so a turn can publish ``listening`` and nothing
-    else — ``thinking`` and ``speaking`` never reach egma at all. A rule
-    that waited to see the agent leave ``listening`` before believing it
-    had come back would wait for ever here.
-
-    So nothing waits for them. What ends the turn is the arrival of a
-    finished state after the turn began, whatever came before it.
+    """A listening-only transition must end a started turn without prior thinking
+    or speaking events, which LiveKit can coalesce away.
     """
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_LONG_QUIET)
@@ -1134,24 +1000,9 @@ async def test_an_agent_that_publishes_no_state_is_no_worse_off_than_before(
 async def test_a_stateless_agent_may_take_a_slow_real_tool_inside_one_turn(
     monkeypatch: pytest.MonkeyPatch
 ):
-    """The gap the quiet period is sized for, held to the number itself.
-
-    An agent that publishes no state has nothing but the quiet period to
-    end its turns, and the slowest honest thing it does inside one is call
-    a tool and answer out of what came back. That tool is one egma is not
-    answering for: egma serves its own answers at once, so the wait is the
-    customer's real backend taking as long as it takes, which is why
-    :data:`~egma_simulator.plugs.livekit_chat.REPLY_SECONDS` is written to
-    clear it. The gap between the filler and the answer is then that
-    lookup with a model round trip on either side of it, and the quiet
-    period has to outlast the whole gap or the answer belongs to no turn
-    at all — the record keeps "one moment", the words that answered the
-    question are dropped, and only a line in the log says so.
-
-    The pause below is that gap carried onto this suite's clock at the
-    production ratio, divided by the production number rather than by a
-    copy of it. So this test holds the *number*: cut the quiet period and
-    the pause grows past it, and the turn ends on the filler.
+    """Preserve the final answer after an unmocked-tool pause from a stateless agent.
+    Scale the pause by the production quiet period so shortening that constant
+    causes this regression test to fail.
     """
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_MEASURED_QUIET)
@@ -1186,20 +1037,8 @@ async def test_a_stateless_agent_may_take_a_slow_real_tool_inside_one_turn(
 async def test_the_finish_line_is_the_answers_start_not_the_turns_end(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """``turn_response_latency`` stops where the agent began answering.
-
-    The measure runs between two events. Its starting line is the moment
-    the persona's turn went out; its finish line is the moment the agent
-    began replying. Everything after that is egma establishing the agent
-    has no more to say, so the persona may speak — real work, and egma's
-    own, not the agent's speed.
-
-    A stateless agent pays the whole quiet period for that, every turn.
-    This test holds the two apart: the call really does take the quiet
-    period, and the reported instant really is before it. Carrying the
-    wait was a production defect — an agent answering in about a second
-    read as 6890 ms on the page, which is the quiet period plus the
-    answer, and it was the number the Response latency grader judged.
+    """turn_response_latency ends when the answer starts, before the quiet wait.
+    Check that deliver() pays the wait but the reported timestamp excludes it.
     """
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_MEASURED_QUIET)
@@ -1235,19 +1074,8 @@ async def test_the_finish_line_is_the_answers_start_not_the_turns_end(
 async def test_the_state_a_session_starts_in_never_ends_the_greeting(
     monkeypatch: pytest.MonkeyPatch
 ):
-    """``listening`` means ready before it means finished.
-
-    A LiveKit session publishes ``listening`` the moment it starts, which
-    is before it has greeted anybody. A turn-end rule that took that as
-    the agent finishing would end the greeting turn on it — and the
-    greeting, arriving a moment later, would land in the persona's first
-    question and be refused for being older.
-
-    So the state signal is off until the turn has heard something. Before
-    that the greeting's own budget owns the wait, which is the exemption
-    the greeting has always had: nothing has been asked yet, so silence
-    here is an agent waiting to be spoken to rather than an agent that
-    has finished.
+    """Startup listening must not end a greeting before its first words.
+    Enable the finished-state signal only after output begins.
     """
     hurry(monkeypatch)
     stub = ChatStub(
@@ -1332,22 +1160,9 @@ async def test_a_finished_state_never_ends_a_turn_that_owes_itself_a_stream(
 async def test_a_finished_state_ends_the_turn_in_either_channel_order(
     monkeypatch: pytest.MonkeyPatch, state_first: bool
 ):
-    """The state and the last trailer race, and either one may win.
-
-    An agent's state travels the signalling channel and its words travel
-    the data channel, so ``listening`` and the close of the last stream of
-    the same turn arrive in whichever order the wire happens to hand them
-    over. Both orderings are one turn ending, and the turn has to end at
-    once either way.
-
-    A landing utterance does outrank the latch — a stream that closes
-    after the agent called itself finished is the agent still writing —
-    but only where that stream *opened* after the state arrived. Clearing
-    the latch on every landing utterance threw the signal away whenever it
-    merely beat its own trailer, and the turn then waited out the whole
-    quiet period it had just been told it need not pay. On an agent whose
-    wire happens to deliver that ordering, that is one quiet period per
-    turn: the exact cost reading the state was for.
+    """Accept finished state and the last stream trailer in either arrival order.
+    Only a stream opened after the state clears the latch; earlier streams must
+    not force another quiet wait when their trailers arrive later.
     """
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_LONG_QUIET)
@@ -1446,19 +1261,8 @@ async def test_the_server_dropping_egma_is_answered_at_once_not_after_the_drain(
 async def test_a_stream_that_cannot_be_read_says_which_path_lost_the_words(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
-    """The other way an utterance leaves the record, told apart from the first.
-
-    Two paths drop an agent's words. One is a stream that closed after the
-    turn it belonged to had ended; the other is a stream that could not be
-    read at all. On a production record they leave the same fingerprint —
-    an agent turn that begins part-way through a sentence — so the log has
-    to say which of the two happened, or the next run teaches nobody
-    anything.
-
-    Both lines name the room and the turn. Only the stale-turn one can
-    name a length, because only it has the words; this one says the
-    length is not known rather than pretending to a number. That is the
-    difference a reader keys on.
+    """Distinguish unreadable streams from discarded stale-turn words in logs.
+    Both diagnostics identify room and turn; unreadable content has no known length.
     """
     caplog.set_level(logging.WARNING)
     hurry(monkeypatch)
@@ -1514,18 +1318,8 @@ async def test_a_speaking_agent_is_still_caught_when_it_publishes_its_state(
 async def test_a_turn_the_agent_never_answers_stops_the_exchange(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Quiet where an answer belongs ends it, rather than asking again.
-
-    A stream is stamped when it opens, so one that opens before the next
-    question goes out can always be told from that question's answer. One
-    that has not opened at all by then cannot: nothing on the wire
-    separates a late answer to this question from a prompt answer to the
-    next, and no rule could invent the difference.
-
-    So the exchange stops where the ambiguity would begin. A transcript
-    with a silent gap is a record a customer can read; one where the agent
-    appears to answer a question it was never asked is one they cannot,
-    and they would have no way of knowing.
+    """End the exchange when a persona turn receives no answer within its budget.
+    A stream that opens after the next question could not be attributed safely.
     """
     stub = ChatStub(greeting="Front desk.", replies=[])
 

@@ -29,26 +29,10 @@ import {
 } from "../http/refusals.ts";
 
 /**
- * The projects an organization holds: listing them, creating one, and editing
- * the three live fields of one.
- *
- * **A project is not addressed the way every other product resource is**, and
- * this file is where that shows. Everything else in this API names its project
- * in a query or a body and is read *inside* it; a project names itself in the
- * path, because the caller is administering the container rather than working
- * in it. So the acting-project helpers are deliberately not used here: what
- * bounds these routes is the organization the credential resolved to, and
- * `listProjects` is already scoped by it.
- *
- * **Creating one is the whole factory or nothing.** The data-access module
- * writes the project, its shared default-persona pointer, and its seeded grader
- * in one transaction —
- * exactly what signup writes. A route that created a bare row would hand
- * somebody a project that refuses the first test written in it.
- *
- * **Only an `admin`**, on the permission table's `manage_projects` row. Reading
- * the list is not gated: every member of an organization may work in every
- * project of it, so a `viewer` who could not list them could not choose one.
+ * Project administration uses organization scope and project IDs in the path,
+ * without resolving an acting project. Admins create/edit through the data
+ * layer; creation includes the Expected behaviors project grader atomically.
+ * No default persona is required. Other roles can list accessible projects.
  */
 
 export type ProjectRoutesOptions = {

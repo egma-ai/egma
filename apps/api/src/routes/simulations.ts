@@ -63,27 +63,9 @@ function windowOf(
 }
 
 /**
- * The mock tools this simulation's pinned test version names, by name.
- *
- * **The one place a mocked mark comes from.** A mock tool is matched to a call
- * by tool name and by nothing else, and the version a simulation pins is
- * immutable — so reading the mark here, at display time, is reading exactly
- * the world this simulation ran against. egma writes no second copy onto the
- * span: a second copy is a fact that can come to disagree with the first, and
- * the version is the half that cannot move.
- *
- * **The lane is the other half of the same question, and this is the same
- * sentence the claim says.** A simulation is mocked when its own test named a
- * tool *and* the lane can serve one, which is exactly what the work order
- * decides with `LANES_SERVING_MOCK_TOOLS` before the simulator ever runs. The
- * phone lane is deliberately not mockable — the real carrier leg, the real
- * tools — so a test that pins `book_appointment` and then runs over a phone
- * number had that call answered by the customer's own backend. Reading the
- * name alone would mark that real, side-effecting booking as isolated, which
- * is the one lie this mark exists to prevent.
- *
- * Empty for a simulation whose test mocked nothing, which is most of them, and
- * then no call carries a mark at all.
+ * Derive mock tool marks from the pinned test version and connection type.
+ * Phone connections cannot serve mock tools, even if the test names them.
+ * The mark describes configured coverage; it is not a separate execution receipt.
  */
 function mockedToolNames(
   connectionType: string,
@@ -199,27 +181,10 @@ function describedMeasures(
 }
 
 /**
- * Whether a finished conversation is missing the agent's own account of it.
- *
- * **Read rather than stored**, because everything it needs is already in hand
- * here and a stored answer would be a second record to keep honest. Four facts,
- * and all four have to hold:
- *
- * - the conversation **ended**, including failed and canceled calls;
- * - a second account was **coming**: the lane can deliver one and this landing
- *   reported the reference to deliver it under (ADR-0024 §2);
- * - **the final record is absent** — partial spans alone do not complete it;
- * - and the **bound has passed**, so the import has stopped waiting (§6). Inside
- *   the bound nothing is missing yet; it is simply not here yet.
- *
- * A provider document explicitly marked incomplete is reported immediately;
- * its presence is not proof that the whole conversation arrived.
- *
- * **A reader that shows the agent's POV needs this and cannot infer it.** Such
- * a reader takes the rows filed as the agent's and shows them as the
- * conversation, so a partial export — or none — would quietly become the whole
- * record with nothing saying it was a fragment. Regrade is what picks up a late
- * arrival.
+ * Report incomplete platform evidence for an ended simulation. Explicitly
+ * degraded evidence is incomplete immediately; an absent final session or call
+ * record becomes incomplete after the wait bound. Partial spans do not prove
+ * completion.
  */
 function agentPovIncomplete(
   simulation: Simulation,

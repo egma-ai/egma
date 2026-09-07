@@ -89,17 +89,9 @@ export type RecordingSpeakerTimeline = {
 };
 
 /**
- * The speaker bands drawn over the recording, from the POV that recorded it.
- *
- * The recording is egma's own: the persona's POV heard this conversation,
- * timed it and wrote the audio, so its turn boundaries are measured on the
- * recording's own clock and land where the sound is. The agent's clock is a
- * different clock — near enough to read a transcript by and not near enough to
- * draw on a waveform — so the bands stay the persona's even while the
- * transcript beside them is the agent's. This, and the origin a row seeks
- * against, is the whole of what the persona's POV is still drawn for.
- *
- * A record with no persona turns is drawn with the turns it has.
+ * Prefer persona POV turn timing for recording speaker bands because the
+ * simulator records that POV. Fall back to available turns when persona turns
+ * are absent; agent timings can differ from the recording clock.
  */
 export function recordingSpeakerTimeline(
   transcript: EvidenceTranscript,
@@ -180,19 +172,8 @@ const SUMMARY_STRIP_CELL = cn(
 const SUMMARY_STRIP_LABEL = cn(SUMMARY_LABEL, "whitespace-nowrap");
 
 /**
- * What this simulation measured — the observed metrics, mean-led, under the
- * summary facts and apart from the verdicts for the transcript page's exact
- * reason: a metric measures and a grader judges, and a number is not good or
- * bad until a grader has been asked.
- *
- * **Every figure came off the platform's one shared measure module through the
- * one shared projection**, and the words come off the one shared formatter —
- * so this strip and the production transcript's can never come to word one
- * conversation's numbers two ways.
- *
- * A simulation whose spans carried no metrics renders nothing here: a measure
- * the conversation did not produce is absent, not zero, and the summary facts
- * above already say what the machinery recorded.
+ * Render observed metrics separately from grades using shared API projections
+ * and formatting. Omit the strip when no metrics are available.
  */
 export function SimulationMetrics({
   metrics,
@@ -1368,20 +1349,10 @@ export function RecordingEvidence({
 }
 
 /**
- * **One conversation, told once**: the steps of one POV where the record holds
- * any, and every step where it holds none.
- *
- * A simulation stores both POVs of the same conversation under one trace — the
- * persona's, which is what egma's own simulator said, heard, measured and
- * recorded, and the agent's, which is what the agent's own process reported.
- * They describe the same turns and the same calls, so every reader that shows,
- * counts or judges them chooses one, and they all choose the same way or one
- * surface says a thirteen-turn conversation had twenty-six while another says
- * thirteen.
- *
- * Used for recordings and lanes that collect their transcript directly, where
- * historical rows can carry only the runtime's POV. A simulation with a
- * separate platform transcript instead passes its required POV explicitly.
+ * Select the requested POV when present; otherwise retain all supplied steps.
+ * Keep this behavior aligned with @egma/db fromOnePov. The browser cannot
+ * import the database package directly.
+ * Platform simulation transcripts bypass this fallback by requiring their POV.
  */
 function fromOnePov<Step extends { readonly pov: EvidenceStep["pov"] }>(
   steps: readonly Step[],
@@ -1776,15 +1747,9 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
             )}
           >
             {/*
-              **Who answered, beside what happened.** A mock tool answered this
-              call, read by name off the test version this simulation pinned, so
-              a reader knows the answer in front of them came from the test
-              rather than from their own backend. The mock tool's own name is
-              not repeated here: it is the tool's name, already on this row in
-              mono one slot away. One muted word at the same size — no chip and
-              no colour of its own, because a real call is the ordinary case and
-              says nothing extra.
-            */}
+             * Show the API's derived mock-coverage mark beside the tool result without
+             * repeating the tool name or presenting it as a quality verdict.
+             */}
             {mocked ? (
               <span className="text-muted-foreground">mocked · </span>
             ) : null}
@@ -2498,32 +2463,9 @@ export function SimulationEvidenceReview({
       className={cn(
         REVIEW,
         /*
-         * **The sheet is docked beside this page, so the page steps aside for
-         * it.** That is what a non-modal reading surface promises — the test
-         * covering this panel says it in as many words: "a panel docked beside
-         * this page rather than a layer over it, so the grader results stay
-         * reachable while the transcript is open". The panel is `position:
-         * fixed` against the viewport's right edge, so nothing under it moves
-         * on its own: at 1440 the transcript covered the grader findings it is
-         * evidence *for*, and a reader had to close the transcript to read the
-         * finding that cited it.
-         *
-         * **The room is reserved here, on the block that holds both halves**,
-         * and not on the review panel alone. The summary strip is that panel's
-         * sibling, so padding the panel left the strip running on under the
-         * sheet — Duration cut in half and Total turns gone — while the panel
-         * beside it sat clear of it. One ancestor pays, and every child is
-         * inside what is left.
-         *
-         * The room is the sheet's own width from the theme plus one gutter,
-         * and only where there is room to give: below 1100px the sheet is
-         * most of the screen and reading it *is* the mode, so the page stays
-         * where it is and the sheet covers it.
-         *
-         * It is not animated. `DESIGN.md` asks motion to run on `transform`
-         * and `opacity`, and this is padding — a layout property, on a block
-         * holding a whole review. The sheet's own entrance already explains
-         * where the room went.
+         * Reserve reading-sheet width plus a gutter on the ancestor of summary and
+         * grades so neither sits behind the sheet. Below 1100px, let the sheet cover
+         * the page. Do not animate layout padding; the sheet has its own entrance motion.
          */
         evidenceOpen &&
           "min-[1100px]:pe-[calc(var(--sheet-width-wide)+var(--page-gutter))]",

@@ -1,17 +1,6 @@
-"""The exporter both verbs share, and the production verb that uses it.
-
-``egma.monitor`` and ``egma.simulation`` send the same spans to the same
-door, so the machinery under them is written once in ``egma.export`` and
-proved once here: how ``EGMA_URL`` and ``EGMA_API_KEY`` are read, which
-tracer provider is reused, how a customer's own telemetry is left intact,
-and when the last buffered spans are flushed. The two ways the room name
-rides out of a simulation are proved here too, because both are the
-exporter's own doing.
-
-These tests never use an external service. They use real OpenTelemetry
-providers, in-memory exporters, and one local HTTP collector. This proves
-that Egma is added beside existing telemetry only once and that a LiveKit
-job flushes Egma's own processor when it stops.
+"""Verify the exporter shared by monitor() and simulation().
+Use real OpenTelemetry providers, in-memory exporters, and a local HTTP
+collector to check settings, provider reuse, room attributes, and final flush.
 """
 
 from __future__ import annotations
@@ -590,18 +579,8 @@ async def test_shutdown_failure_is_safe_and_does_not_stop_the_job(caplog):
     assert secret not in caplog.text
 
 
-# -- How a simulation's room name rides out with its spans --------------------
-#
-# Egma's door reads one attribute to tell a simulation's agent POV from
-# somebody's production traffic: the provider reference, which for LiveKit
-# is the room's name. It goes out two ways, and both are here because
-# either one alone leaves a real customer uncovered.
-#
-# A resource is fixed when a tracer provider is built, and this SDK does
-# not always build one — a worker already running Langfuse hands it a
-# provider that exists, and that provider must keep working. So the room
-# name also goes on every span, through LiveKit's own metadata seam, which
-# works on any provider whoever built it.
+# Simulation room names must be exported on both new resources and spans.
+# Span metadata also supports an existing provider whose resource cannot change.
 
 
 def test_the_room_name_is_on_the_resource_when_this_sdk_builds_the_provider(

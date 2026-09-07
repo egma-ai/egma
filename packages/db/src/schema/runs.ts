@@ -22,19 +22,9 @@ import { user } from "./identity.ts";
 import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
 
 /**
- * A run is the trigger's record — who asked for simulations, when, how, and
- * what was requested. A simulation is one conversation inside it, born
- * `queued` before anything else happens, so nothing a team triggers can
- * silently vanish. A terminal run's numbers are frozen and never reopened.
- *
- * **A run executes frozen test versions.** Each simulation carries the exact
- * test version it conducts beside the persona who calls about it — so one test with three
- * personas is three conversations, and improving that test tomorrow rewrites
- * none of them. Every simulation always has both exact pins.
- *
- * Grader scores are the grader system's side of the line. The counts on this
- * header are simulation outcomes — did each conversation happen — never a
- * score or a grade of what happened in one.
+ * A run records the requested simulations. Each simulation starts queued and
+ * pins its test and persona versions. Terminal run counts record execution
+ * status; grades are stored separately.
  */
 
 /**
@@ -56,20 +46,11 @@ export const RUN_TRIGGERS = ["manual"] as const;
 export type RunTrigger = (typeof RUN_TRIGGERS)[number];
 
 /**
- * The whole lifecycle, and every move between its states is guarded: the
- * migration installs a trigger refusing any transition not in the legal set,
- * so an illegal one cannot be written even by a migration script or a manual
- * fix — the same paths the composite foreign keys defend.
- *
- *   queued → claimed → running → completed | failed | canceled
- *              ↘ queued
- *
- * `claimed → queued` releases a lease when a bounded provider preflight could
- * not answer before dispatch. It clears every claim fact in the same write;
- * the queued-shape constraint refuses a partial release. `queued → canceled`
- * is the cancel-before-claim path, and a canceled row can never be claimed. A
- * terminal row is frozen entirely.
- *
+ * Simulation status transitions are enforced by a database trigger.
+ * The usual path is queued → claimed → running → a terminal status.
+ * A deferred preflight releases claimed → queued and clears the lease facts
+ * in the same write. Cancellation can occur before dispatch. Terminal rows
+ * cannot transition again.
  */
 export const SIMULATION_STATUSES = [
   "queued",
@@ -93,18 +74,9 @@ export const COMPLETED_ENDING_REASONS = [
 ] as const;
 
 /**
- * Why a simulation never produced a conversation to grade. These must never
- * collapse into "the agent behaved badly": an agent that never joined, a line
- * that was never answered, a platform out of capacity, egma's own error, and
- * a simulator that died mid-conversation are all "the test never ran", and
- * grading any of them as a failure is the false red a test product cannot
- * afford.
- *
- * The last two are the platform's own words, never a simulator's report:
- * `orphaned` is the sweep's finding that a simulator stopped answering,
- * and `dispatch_failed` is the claim path's confession that it could not turn
- * a claimed row into a spec worth handing over — a broken row is the
- * platform's fault, never pinned on a simulator that was handed nothing.
+ * Execution failures, separate from grades of agent behavior.
+ * The platform records orphaned when a simulator stops reporting, and
+ * dispatch_failed when it cannot prepare a claimed simulation for dispatch.
  */
 export const FAILED_ENDING_REASONS = [
   "agent_never_joined",
@@ -160,29 +132,11 @@ export const run = pgTable(
      * stamped here at start. Never credentials.
      */
     connectionSnapshot: jsonb("connection_snapshot").notNull(),
-    /*
-     * **There is no frozen mocked world here.** There was one: a run resolved
-     * the project's mock tools at creation and froze them, because a project
-     * mock tool was the one authored thing with no version chain and could be
-     * edited underneath a run that was already going.
-     *
-     * A test carries its own mock tools now, and a simulation pins the test
-     * version it executes — which is immutable. So what a simulation is
-     * answered is read off that pinned version at the moment a call is served,
-     * and there is nothing left that could move underneath a run. A copy here
-     * would be a second version of an immutable fact, free to disagree with it.
-     */
+
     /**
-     * The serving version this run conducted against, resolved once at its
-     * start and named on every request from then on.
-     *
-     * Retell's own default is "the newest version", and the newest version is
-     * exactly the one a concurrent edit has just made — so a suite that leaned
-     * on the default could be testing two different agents halfway through.
-     *
-     * Set on every text-mode and web-call run, mocked or not. Null on a phone
-     * run, where Egma names no version at all, and null on every lane whose
-     * platform has no versions to name.
+     * Retell serving version resolved at run start. Text and web-call runs use
+     * this pin; mocked web calls use the temporary version derived from it.
+     * Null for phone runs and platforms without a version pin.
      */
     agentVersion: integer("agent_version"),
     /**
@@ -194,25 +148,15 @@ export const run = pgTable(
      */
     tempMockAgentVersion: integer("temp_mock_agent_version"),
     /**
-     * Whether the account has been put back: null when no copy was made, false
-     * while a cleanup is owed, true once the account is as it was found.
-     *
-     * **A real column rather than a key inside `mock_metadata` beside it**,
-     * because the claim searches by it. Before a run branches anything, one
-     * indexed query asks whether this agent has a run whose cleanup is still
-     * owed; that cleanup is finished first, inside the claim, or the new run is
-     * refused rather than branched.
+     * Null without a mock-draft lifecycle; false while cleanup is owed; true
+     * after verified cleanup. The indexed column lets claims find unfinished
+     * cleanup before creating another draft for this agent.
      */
     tempMockAgentVersionCleanup: boolean("temp_mock_agent_version_cleanup"),
     /**
-     * The put-it-back note, and nothing else: the serving engine capture the
-     * verify step compares against, and each touched number's binding verbatim.
-     *
-     * A number's entry is `{ number, was, pinned_to }` — where the binding
-     * pointed before Egma touched it, and the numeric version Egma pinned it
-     * to. A restore reads where the number points **now** and writes only where
-     * it still points at `pinned_to`, so a late retry of a failed teardown can
-     * never move a binding the customer has since changed.
+     * Persisted mock-draft cleanup data: serving-engine fingerprint, engine
+     * identities, and deletion progress. See MockMetadata in mock-tools/record.ts.
+     * Phone-number bindings are not changed by this lifecycle.
      */
     mockMetadata: jsonb("mock_metadata"),
     /** Immutable grader selection captured before the initial run insert. */
@@ -291,8 +235,7 @@ export const run = pgTable(
       columns: [table.agentId, table.projectId],
       foreignColumns: [agent.id, agent.projectId],
     }).onDelete("cascade"),
-    // And the connection is that same agent's — the dormant unique built for
-    // exactly this row, now doing its work.
+    // Keep the run's connection on its selected agent.
     foreignKey({
       name: "run_connection_agent_fk",
       columns: [table.connectionId, table.agentId],
@@ -366,30 +309,16 @@ export const simulation = pgTable(
     personaVersionId: idText("persona_version_id").notNull(),
     personaParameterValues: jsonb("persona_parameter_values").$type<PersonaParameterValues>().notNull(),
     /**
-     * What was being checked, and the pin — the persona pin's shape exactly,
-     * for the same reason. The version is frozen content, so this row says
-     * exactly what was executed for as long as it is kept, and editing the
-     * test tomorrow rewrites nothing — which is where a grader's reads start.
-     * The identity rides beside the version because it is what the composite
-     * keys below pair on: the version is this test's, and the test is this
-     * project's.
-     *
-     * Required on every row. `startRun` names both pins for every conversation.
+     * Frozen test version executed by this simulation. The identity is also
+     * stored so composite foreign keys enforce test and project ownership.
      */
     testId: idText("test_id").notNull(),
     testVersionId: idText("test_version_id").notNull(),
     /** Where in the run's requested order this conversation sits, from one. */
     position: integer("position").notNull(),
     /**
-     * The connection's modality as it was at execution — the one thing about
-     * the connection this row keeps its own copy of, and it keeps it because
-     * its own check names it. `simulation_audio_facts_are_voice_facts` below
-     * refuses a recording on a conversation that was not voice, and a Postgres
-     * CHECK cannot join: the column it compares has to
-     * sit on the row it guards. Reaching the connection for it instead would
-     * make that guarantee a trigger — a second mechanism on the report-write
-     * path, and one an operator can switch off — so the fact rides here
-     * rather than being looked up.
+     * Execution modality is stored here because the audio-facts CHECK cannot
+     * join the connection table. It rejects recordings on non-voice simulations.
      */
     modality: text("modality").notNull(),
     status: text("status").notNull(),
@@ -440,15 +369,7 @@ export const simulation = pgTable(
      * terminal report; null when the plug had none to offer.
      */
     providerReference: text("provider_reference"),
-    /*
-     * **There is no coverage stamp here.** There was one — three name lists
-     * saying which of the agent's tools Egma answered for and which reached
-     * their real implementations. It is gone with the project-owned mocked
-     * world it described: what a simulation was answered is the pinned test
-     * version's own list, and every answered call is already on the transcript,
-     * so a stamp beside them was a second telling of a fact the record already
-     * holds.
-     */
+
     createdAt: createdAt(),
   },
   (table) => [
@@ -644,28 +565,10 @@ export const simulation = pgTable(
 );
 
 /**
- * Everything that has changed about a run, in the order it changed, numbered
- * densely from one within the run.
- *
- * **A row lands here in the same transaction as the change it describes.** A
- * simulation moving or the run's own header settling writes its event beside
- * itself, or neither is written. That is what makes the feed a record rather
- * than a guess. Grader results live in the grade store and do not rewrite this
- * lifecycle log.
- *
- * **Deriving the feed from the run and simulation rows was rejected.** Those
- * rows are overwritten by every transition, so a follower that was away while a
- * simulation went `claimed → running → completed` could never learn it had
- * happened — it would see only where things ended. A log can be replayed from
- * any point; a mutable row cannot be replayed at all.
- *
- * **The number, not the clock, is the cursor.** A follower asks for everything
- * after the last number it applied, so a crash and a restart miss nothing, and
- * a page served twice is harmless because applying the same number twice is the
- * client's own no-op. The server is stateless about who has read what.
- *
- * The row is written once and never rewritten — a trigger in the migration says
- * so, the way the two lifecycle guards do.
+ * Append-only run lifecycle events, numbered from one within each run.
+ * Each event commits with the state change it describes. Sequence numbers
+ * let clients replay missed transitions and deduplicate repeated pages.
+ * Grader results live in the grade store and do not rewrite this log.
  */
 export const runEvent = pgTable(
   "run_event",

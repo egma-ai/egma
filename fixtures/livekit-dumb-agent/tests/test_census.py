@@ -1,16 +1,5 @@
-"""What egma would be told this agent has, and when.
-
-The census is read off the agent object at the moment ``simulation`` runs,
-so two things have to be true of this file and neither is obvious from
-reading it: the tools must be **attached before** that line, and there
-must be **two of them** — one for a mock tool to answer for, one for
-nothing to answer for.
-
-The second is the whole reason ``opening_hours`` exists. A run where egma
-answers for everything cannot show the other half of the rule, which is
-*a tool this test did not name ran for real, and egma saw nothing of it*.
-Delete that tool and the live proof quietly loses that half — so the
-count is asserted here rather than trusted to survive a tidy-up.
+"""Both tools must exist before simulation() reads the inventory.
+Keep one tool for mocked execution and another for its real fixture implementation.
 """
 
 from __future__ import annotations
@@ -121,21 +110,8 @@ def test_the_supported_livekit_version_exposes_its_current_provider():
 
     assert export._livekit_provider() is not None
 def test_the_six_lines_key_on_the_marked_room_name_before_the_session_starts():
-    """The chat decision, read off the source of the entrypoint itself.
-
-    The mark is written out by hand here, exactly as egma's own suite
-    writes it, because it is a published contract and not a constant to
-    import: a chat simulation's room begins ``egma-sim-chat-``, the name
-    arrives with the job before the worker connects to anything, and the
-    six lines have decided their room options off it by the time the
-    session starts. Read a failure here as the contract refusing to move.
-
-    The decision is made from that name **alone**. This agent does read
-    its dispatch metadata now — it is the test's own world and reading it
-    is the point — but no key a test writes may reach into this decision,
-    a ``modality`` of their own included. So the line that decides it is
-    read here and held to naming the room and nothing else, and the room's
-    own metadata is read by nobody at all.
+    """Pin chat selection to the published egma-sim-chat- literal in the entrypoint.
+    Only the room name may select modality; customer metadata must not affect it.
     """
     from agent import entrypoint
 

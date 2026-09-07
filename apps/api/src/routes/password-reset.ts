@@ -12,34 +12,9 @@ import {
 } from "../http/provider-refusal.ts";
 
 /**
- * Getting back in, for somebody who cannot sign in to ask.
- *
- * Both routes are deliberately outside the credentialed scope, on the
- * invitation routes' terms and for the invitation routes' reason: whoever is
- * using this has no session — that is the entire point — so there is no
- * `AuthContext` to resolve them into and no organization to key a budget on.
- * **The link is the credential here**, and it names exactly one account.
- *
- * The provider owns the token, the hash and the password. These own the one
- * thing the provider has no way to say, for as long as it is knowable at all:
- * *which* dead link a person is holding. It consumes a token on the way past,
- * so a spent link and an expired one both come back as one word,
- * `Invalid token` — and "you already did this" and "nothing happened at all"
- * are opposite instructions.
- *
- * **The rule every refusal here is written to is that egma never names a state
- * it has not checked.** Inside the hour a link states, egma can tell the two
- * apart and says which. Past it, both systems have forgotten the token at the
- * same moment — there is one deadline, deliberately — so egma says that it
- * cannot tell rather than picking the likelier one. A refusal that guessed
- * wrong would tell somebody to go on using a password that no longer signs them
- * in, which is worse than one that admits what it does not know.
- *
- * Relaying to the provider's own endpoints rather than calling methods is the
- * signup route's pattern, for the signup route's reason: what egma depends on
- * stays the provider's HTTP surface plus four seam calls, so a different
- * provider is a different implementation of the seam rather than an audit of
- * every route.
+ * Unauthenticated password-reset routes relay token/password operations to
+ * the identity provider. Verify Egma's signed link and expiration before
+ * completion; translate provider failures into API refusals.
  */
 
 export type PasswordResetRoutesOptions = {
@@ -63,17 +38,8 @@ export async function passwordResetRoutes(
   options: PasswordResetRoutesOptions,
 ): Promise<void> {
   /**
-   * Asking for a link.
-   *
-   * **The answer never says whether that address holds an account here**, and
-   * that is the whole shape of this route. An address nobody signed up with and
-   * an address somebody did get one status and one sentence, so a form anybody
-   * on the internet can reach is never a way to ask egma who its customers are.
-   *
-   * That promise is about how long the answer takes as much as about what it
-   * says, and the length is decided next door: the handler in
-   * `auth/better-auth.ts` is what keeps posting the message off the path the
-   * answer travels back along.
+   * Return the same accepted response for known and unknown email addresses.
+   * Provider background handling keeps SMTP latency off this response path.
    */
   app.post("/api/password-reset", async (request, reply) => {
     const body = (request.body ?? {}) as Body;
@@ -158,18 +124,8 @@ export async function passwordResetRoutes(
   });
 
   /**
-   * Setting the new password, behind the link.
-   *
-   * The order is what makes each refusal true. A link that will not open is not
-   * egma's; one that opens and is past its deadline is dead, and dead is the
-   * whole of what egma knows about it, because the provider's own record of the
-   * token went at the same moment; and inside the deadline the provider is
-   * asked to set the password, where a refusal can only mean the token was
-   * already consumed.
-   *
-   * Nobody is signed in by this. Setting a password and then using it are two
-   * steps a person can see, and the second one is the one that proves the first
-   * worked.
+   * Verify link signature and expiry before asking the provider to reset.
+   * Success requires a separate sign-in; this route creates no session.
    */
   app.post("/api/password-reset/complete", async (request, reply) => {
     const body = (request.body ?? {}) as Body;
@@ -207,17 +163,9 @@ export async function passwordResetRoutes(
         message: "that password could not be set",
       });
 
-      // The provider's word for a token it does not know, in egma's spelling.
-      // Egma has already ruled out the other two ways to reach it — a link it
-      // never minted, and one past its deadline — so what is left is a link
-      // that was used.
-      //
-      // What that leaves unverified, and it is named rather than hidden: the
-      // provider consumes the token before it writes the password, so a failure
-      // between the two steps would spend a link and change nothing, and this
-      // sentence would then say a password had been set that had not. That is
-      // the provider's ordering rather than egma's, egma cannot see between the
-      // two steps from out here, and no run has produced it.
+      // Map invalid_token before the signed deadline to already-used. This does
+      // not prove a password write succeeded: token consumption can precede a
+      // failed write, and this route cannot inspect that intermediate state.
       if (refusal.error === "invalid_token") return alreadyUsed(reply);
 
       // Everything else is about the password that was typed — too short is the
@@ -260,20 +208,9 @@ function alreadyUsed(reply: FastifyReply): FastifyReply {
 }
 
 /**
- * Dead, and egma cannot say which way — the honest answer past the hour.
- *
- * "You already did this" and "nothing happened at all" are worth keeping apart
- * only while both are things egma has checked, and past the deadline neither
- * is: the provider was configured with that same deadline, so its record of the
- * token is gone and there is nothing left to ask. Saying "it ran out" would
- * tell somebody their old password still works when it may not; saying "it was
- * used" would tell them it has changed when it may not have. So this one says
- * both, and what to do either way.
- *
- * **This is the cost of there being one number**, and it is paid deliberately.
- * A second, longer deadline at the provider would leave a record to read past
- * the first — and would also be a second, longer way in for anybody holding the
- * raw token, which is readable straight out of any link.
+ * Past the signed deadline, do not infer whether the token was used earlier.
+ * The link contains a readable raw token, so the provider must enforce the
+ * same lifetime independently.
  */
 function cannotTell(reply: FastifyReply): FastifyReply {
   return reply.code(409).send({

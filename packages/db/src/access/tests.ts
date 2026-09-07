@@ -35,75 +35,31 @@ import { isProjectOfOrganization } from "./projects.ts";
 import { within } from "./within.ts";
 
 /**
- * Reading and writing tests — what they are is the schema file's story
- * (`schema/tests.ts`); this file is how they are reached.
- *
- * Project scoping works as the persona factory's does, verb for verb. A context
- * acting in a project writes and reads there; a context acting in none — an
- * organization-scoped credential — reads the whole customer and creates
- * nothing, because a test belongs to a project and a credential for the whole
- * customer is acting in none. What already exists it may edit: the row names
- * its own project, so that write has somewhere to land.
- *
- * **A test is falsifiable from birth.** Its expected behaviors are required
- * non-empty at write time, and grading a simulation against them is part of
- * what running a test means, so there is no window in which a stored test could
- * pass without ever having been able to fail.
- *
- * **A test names no graders.** Which project graders grade a simulation is
- * resolved from each project grader's scope and never through test
- * content — so a version is the scenario, the behaviors, the mock tools and the
- * env, and there is nothing else in here for a writer to name.
+ * Project-scoped test authoring and version reads. Create requires an acting
+ * project; organization-scoped reads and edits use each row's project.
+ * Tests require a scenario, expected behaviors, and personas. Mock tools and
+ * environment are versioned content. Applicable project graders are resolved
+ * separately from their scopes.
  */
 
 /**
- * One statement about what should happen: **a plain sentence, and nothing
- * else.**
- *
- * Per-behavior priorities retired with the P0/P1/P2 ladder. Under binary scoring
- * every behavior has to hold, so a priority had nothing left to say — and the
- * rule it was propping up, that a test always keeps one blocking behavior,
- * collapses back into the plain non-empty rule the falsifiability decision
- * placed on the list.
- *
- * Each sentence is one **assertion** of the expected-behaviors grader, graded in
- * isolation and stored as one nested assertion detail in that grader's single
- * grade row for the trace. Its key comes from its position in this list.
+ * One expected behavior as a plain sentence. The expected-behaviors grader treats
+ * it as an assertion, keyed by list position, within one grade for the trace.
  */
 export type ExpectedBehavior = string;
 
 /**
- * One tool this test answers for itself: the value it returns, or the failure
- * it raises.
- *
- * **A mock tool is test content and has no identity of its own.** It is not a
- * row sitting somewhere else that the test points at — it is a sentence in the
- * test, versioned with the test exactly as an expected behavior is. There is no
- * project-level half any more, and that is the whole shape of the decision: the
- * world a scenario needs is written where the scenario is, so a test carries
- * everything a run needs to reproduce it and nothing outside it can move.
- *
- * Forcing a branch is what these are for. "The calendar has no free slots" is
- * this test with `get_availability` answering an empty list, and no other test
- * in the project is touched by saying so.
- *
- * Two shapes rather than one with a nullable failure, because `null` is a
- * perfectly good answer for a tool to give and a shape that could not tell it
- * from "no answer" would make an authored `null` unserveable.
+ * A test-owned, versioned mock tool matched by name. It returns an authored value
+ * or raises an authored error. Keep answer and error as separate variants so
+ * null remains a valid answer.
  */
 export type TestMockTool =
   | { tool: string; answer: unknown }
   | { tool: string; error: string };
 
 /**
- * The world outside the conversation, as this test asks for it.
- *
- * Both keys are the platforms' own words, kept in the platforms' own spelling
- * all the way down: `retell_dynamic_variables` are the template variables
- * Retell substitutes into a prompt, and `job_dispatch_metadata` is what LiveKit
- * hands the worker it dispatches. Renaming either into egma's house style would
- * make a person holding the platform's documentation guess which of ours is
- * which of theirs.
+ * Agent platform environment for this test: Retell dynamic variables and LiveKit
+ * job dispatch metadata. Preserve the platform field names in the contract.
  */
 export type TestEnv = {
   retell_dynamic_variables?: Record<string, string>;
@@ -111,17 +67,9 @@ export type TestEnv = {
 };
 
 /**
- * How large one mock tool's answer may be once serialized, in bytes.
- *
- * The exchange carrying it holds 15 KiB, so this is the transport's limit
- * written down where an author meets it rather than discovered at call time by
- * a simulation that fails halfway through. An answer that needs more than this
- * is a document rather than a tool answer.
- *
- * Counted against the **tagged** message the wire carries — `{"answer":…}` or
- * `{"error":…}` — because that is what the simulator measures, and a cap
- * measured two ways is two caps. The contract's seam fixture holds the copies
- * of this number to one value.
+ * Maximum UTF-8 bytes of the tagged RPC reply: {"answer":…} or {"error":…}.
+ * Validate at authoring time against the transport limit; seam fixtures keep
+ * this value aligned with the simulator.
  */
 export const LARGEST_MOCK_TOOL_ANSWER_BYTES = 15 * 1024;
 
@@ -148,14 +96,8 @@ export const LARGEST_JOB_DISPATCH_METADATA_BYTES = 512 * 1024;
 export const RESERVED_ENV_VARIABLE_PREFIX = "egma_";
 
 /**
- * The dispatch metadata as one compact JSON string — the exact bytes egma hands
- * LiveKit.
- *
- * **One serialization, used at save and again at dispatch.** The cap is
- * measured on this string's UTF-8 bytes, so what is admitted here is always a
- * value the dispatch can carry; a second serializer somewhere else, with
- * spacing or sorted keys, would measure a different number of bytes for the
- * same object and the two gates would disagree.
+ * Serialize LiveKit dispatch metadata identically at save and dispatch.
+ * Measure the UTF-8 bytes of this string for the size limit.
  */
 export function serializedJobDispatchMetadata(
   value: Record<string, unknown>,
@@ -171,18 +113,9 @@ export function serializedJobDispatchMetadata(
 }
 
 /**
- * What a version of a test says. The scenario is the situation as free text —
- * what the persona wants, and the circumstances. The expected behaviors are
- * statements about what should happen, in the order they were authored, and at
- * least one of them always exists. The mock tools are the tools this scenario
- * answers for itself, and the env is the world outside the conversation; there
- * are usually neither.
- *
- * Internal, because the exported API is flat: a caller hands the fields to
- * `createTest` beside the name, and reads them back off a `Test` the same way.
- * The pairing matters to the version row that stores them together and to the
- * comparator that decides whether an edit mints a version — the three columns
- * are one versioned statement however many columns hold it.
+ * Immutable test content: scenario, ordered expected behaviors, mock tools, and
+ * environment. Personas are versioned in their join table. Identity fields remain
+ * on the test; the public create/read shapes expose content fields directly.
  */
 type TestContent = {
   readonly scenario: string;
@@ -198,9 +131,8 @@ export type NewTest = {
   readonly scenario: string;
   readonly expectedBehaviors: readonly ExpectedBehavior[];
   /**
-   * Who calls about the scenario. Naming none — absent, or an empty list —
-   * takes the project's default persona, so authoring a first test never waits
-   * on authoring a persona.
+   * Personas that conduct this test. The list must contain at least one ID;
+   * no project default is substituted.
    */
   readonly personaIds?: readonly string[] | undefined;
   /**
@@ -267,14 +199,8 @@ export type TestChanges = {
   readonly scenario?: string;
   readonly expectedBehaviors?: readonly ExpectedBehavior[];
   /**
-   * Who calls about the scenario, as the next version should name them.
-   *
-   * An empty list means here exactly what it means on a create: take the
-   * project's default persona. The two verbs are deliberately not allowed to
-   * disagree about one input — a developer who learns `[]` on a create cannot
-   * be ambushed by a different meaning on an edit. It could not mean "name
-   * nobody" in any case: a test with no personas produces no simulations, so it
-   * could never run. Leaving the set alone is what leaving the field out does.
+   * Replace the next version's persona list. Reject an empty list; omit to keep
+   * the current selection. No default persona is inserted.
    */
   readonly personaIds?: readonly string[];
   /**
@@ -294,14 +220,8 @@ export type TestChanges = {
    */
   readonly env?: TestEnv | null;
   /**
-   * The version this edit was written against, when the writer knows it.
-   *
-   * A precondition rather than a change, and it rides here because it belongs
-   * to the same write: it is compared under the lock the edit already takes, so
-   * there is no moment between checking and writing for a second writer to
-   * arrive in. A mismatch refuses everything with `TestMovedOnError`.
-   *
-   * Identity-only edits may leave it out. Any content edit must name it.
+   * Required for content edits and optional for identity-only edits. Compare under
+   * the test lock and reject a mismatch with TestMovedOnError before writing.
    */
   readonly expectedVersionId?: string;
   /**
@@ -389,14 +309,8 @@ function validName(name: string): string {
 }
 
 /**
- * The scenario and the behaviors, as they will be stored.
- *
- * An empty behaviors list is refused rather than accepted, because a test with
- * nothing to check is a test that can never be red — and a suite of tests that
- * could never be red is the false confidence this product exists to kill. That
- * is the whole of the falsifiability rule now: with priorities retired there is
- * no way left to demote a test into never being able to fail, so non-empty is
- * the only thing this has to hold.
+ * Normalize scenario and expected behaviors, requiring both to be nonempty.
+ * Validate mock tools and environment as part of the same test content.
  */
 function validContent(input: {
   readonly scenario: string;
@@ -464,17 +378,8 @@ function servedBytes(value: unknown, key: "answer" | "error"): number {
 }
 
 /**
- * The mock tools as they will be stored: one entry per tool, each answering
- * exactly one way, within the size the exchange can carry.
- *
- * **One entry per tool name.** Matching is by the name and by nothing
- * else — no arguments are read — so two entries for one tool would be two
- * answers with no rule to choose between them.
- *
- * The size is checked here rather than at the transport, because an answer too
- * large is a fact about what somebody wrote and the person who can fix it is
- * reading this refusal — not the simulation that would otherwise have
- * discovered it mid-conversation.
+ * Validate one mock entry per tool name, with exactly one answer or error and
+ * a reply within the RPC byte limit. Matching does not inspect arguments.
  */
 function validMockTools(
   written: readonly TestMockTool[],
@@ -587,17 +492,8 @@ function tooLarge(tool: string, key: "answer" | "error", bytes: number): string 
 const ENV_KEYS = ["retell_dynamic_variables", "job_dispatch_metadata"] as const;
 
 /**
- * The env as it will be stored, or null where the test asks for nothing.
- *
- * **An empty env is null.** `{}`, `{"retell_dynamic_variables": {}}` and an
- * absent field all say the same thing — this test asks for nothing — so they
- * are all stored the same way, and no reader has to know three spellings of one
- * state.
- *
- * An unknown top-level key is refused rather than dropped. Every key here is a
- * platform's own word for something egma hands that platform, so a key nobody
- * recognises is a request egma is not going to carry out, and dropping it
- * silently would let a test claim a world it never got.
+ * Normalize empty environment settings to null and reject unknown top-level keys.
+ * Validate each supplied agent platform setting before storing it.
  */
 function validEnv(written: TestEnv | null | undefined): TestEnv | null {
   if (written === null || written === undefined) return null;
@@ -726,16 +622,8 @@ function validJobDispatchMetadata(value: unknown): Record<string, unknown> {
 }
 
 /**
- * Everything about the named ids that is answerable without the database: there
- * is at least one, every one is an identifier of a persona, and each one is
- * named once. Naming the same persona twice would ask for the same simulation
- * twice, which is a run's business and not a test's, so it is refused here
- * rather than left to a constraint.
- *
- * **Naming none is refused here too**, so a create that sent no list and an
- * edit that sent an empty one are answered before either costs a read.
- * `personaIdsFor` says the same thing at the write itself, where the set an
- * edit carried forward also passes.
+ * Require a nonempty list of distinct valid persona IDs before database access.
+ * personaIdsFor rechecks availability within the write transaction.
  */
 function validatePersonaIds(ids: readonly string[]): void {
   if (ids.length === 0) {
@@ -758,19 +646,9 @@ function validatePersonaIds(ids: readonly string[]): void {
 }
 
 /**
- * The shape guard on every read. Stored jsonb comes back `unknown`, and a row
- * somebody hand-edited must fail here, loudly and naming itself, rather than
- * leak into a caller as a `TestContent` that isn't one. Shape only,
- * deliberately: an old version must stay readable exactly as it was written.
- *
- * **A behavior stored as `{behavior, priority}` is read as its sentence.** The
- * versions written while priorities existed hold that shape, and every one of
- * them said the same thing the sentence says now — a priority never changed what
- * the behavior asked of the agent, only how loudly a failure spoke, and nothing
- * speaks loudly or quietly any more. So the priority is dropped on the way out
- * rather than migrated away: a version row is frozen the moment a run can pin
- * it, and rewriting one to tidy a retired field would be exactly the edit the
- * whole versioning exists to make impossible.
+ * Validate stored JSON shapes without applying current authoring rules to old
+ * versions. Read legacy {behavior, priority} entries as behavior strings without
+ * rewriting immutable version rows.
  */
 function contentFromRow(
   value: unknown,
@@ -988,20 +866,8 @@ function sameBehaviors(
 }
 
 /**
- * Byte-identical or not, decided field by field — the same answer canonical
- * serialization would give, without trusting any serializer to order keys the
- * way jsonb re-ordered them.
- *
- * One comparator per field, in a table the compiler holds exhaustive: a field
- * added to the content refuses to build until it is also told how to compare. A
- * hand-maintained comparator that missed a field would call two different
- * versions identical, and an edit would vanish without a version — the one loss
- * the whole versioning exists to rule out.
- *
- * The jsonb content is all this table covers. The personas a version names are
- * content too and version on exactly the same terms, but they are rows rather
- * than fields, so they are compared beside this rather than inside it —
- * `editTest` asks both questions and mints on either answer.
+ * Compare every JSON content field for a version change. The mapped type requires
+ * a comparator for new fields. Compare ordered persona join rows separately.
  */
 const sameContentField: {
   readonly [K in keyof TestContent]: (a: TestContent, b: TestContent) => boolean;
@@ -1014,17 +880,8 @@ const sameContentField: {
 };
 
 /**
- * The mock tools, compared as canonical JSON: the same tools, in the same
- * order, each answering the same way.
- *
- * An answer is compared whole rather than field by field, because a tool's
- * answer is whatever shape that tool's own contract has and there is no fixed
- * set of fields to hold a comparator exhaustive over. Canonically, because the
- * stored value came back through jsonb, which re-orders keys — so two answers
- * that differ only in key order are the same answer and must not mint a version.
- *
- * Order between entries is content, though: a test that answers for two tools
- * offers them in the order it named them, so moving one says something.
+ * Compare ordered mock entries with canonical JSON answers. Object key order
+ * changes from jsonb must not create versions; entry order remains test content.
  */
 function sameMockTools(
   a: readonly TestMockTool[],
@@ -1064,31 +921,10 @@ function theTest(auth: AuthContext, id: string): SQL {
 }
 
 /**
- * Whether the ids a write names are personas this project can use: each one
- * exists, is alive, and is this project's.
- *
- * One read for the whole set, and then one refusal per id that did not come
- * back whole. A persona of another customer or another project is not found and
- * is refused in the same words as one that never existed, because confirming
- * that somebody else's row exists is itself a leak.
- *
- * **The read takes a shared lock on every row it finds, and this write's
- * transaction holds it until it commits.** Deleting a persona takes an
- * exclusive lock on the same row, and the two lock modes conflict, so a delete
- * and a write naming the same persona cannot walk past each other: whichever
- * reaches the row first makes the other wait and then see how it ended. If the
- * delete got there first, this read resumes on the row it left behind and the
- * deleted marker below refuses this write — which is why the marker is
- * selected and judged here rather than filtered out in the `where`, where a
- * re-read would simply find nothing and say the persona never existed.
- *
- * **A test that got there first keeps the persona it named, and the delete
- * still lands.** That is the deliberate shape: Delete is one honest verb that
- * only a Predefined persona refuses, so a live test can come to name a deleted
- * persona. What that costs is bounded and answered elsewhere — the run refuses
- * to start, and this same rule refuses the test's next write until somebody
- * alive is named. What the lock buys is that a write never lands on a decision
- * it could not see.
+ * Share-lock the named personas, require active availability in this project,
+ * and ensure project settings exist. Out-of-scope IDs read as missing.
+ * The lock orders test writes against persona deletion. Deletion can still follow
+ * a committed test write; later test writes and run starts reject deleted personas.
  */
 async function validateNamedPersonas(
   on: Queryable,
@@ -1128,26 +964,9 @@ async function validateNamedPersonas(
 }
 
 /**
- * Which personas a write should name, from what it was handed.
- *
- * One function for both write verbs, so the two can never come to disagree
- * about the same input. Naming some checks them, and the ids come back in the
- * order they were given, because that order is content.
- *
- * **Naming none is refused, on a create and on an edit alike.** Until
- * 2026-08-24 an empty list quietly took the project's default persona, so a
- * test could exist that nobody had ever said who calls about — the substitution
- * answered for the author, and the answer read as authored. A test says who
- * calls because its author said so, and every other way of saying nothing is
- * refused here too.
- *
- * Every set a version is about to name comes through here, including the one an
- * edit carried forward from the version before it. A version names personas
- * that exist, are alive, and are this project's — a rule about the row being
- * written, not about who typed the ids.
- *
- * Called inside the write's transaction, so the set that was checked is the set
- * the join rows name.
+ * Require at least one active available persona and preserve authored order.
+ * Check inside the write transaction for creates, explicit edits, and selections
+ * carried forward from the current version.
  */
 async function personaIdsFor(
   on: Queryable,
@@ -1412,34 +1231,12 @@ async function readTestOn(
 }
 
 /**
- * One door for every change, so no caller needs the version rules to pick a
- * function — the rules live here. Name and description write in place and
- * version nothing. The scenario, the expected behaviors and the personas are
- * what the test checks: any of them differing from the current version inserts
- * the next version, with its own join rows, and moves the pointer — all in one
- * transaction with the identity row locked, so two concurrent edits number one
- * after the other rather than fighting over the same version number. The rows of
- * the version being left behind are never touched, because a run that pinned it
- * must still say what it executed. Content byte-identical to the current version
- * is not an edit at all: nothing is written, not even `updated_at`, and the
- * current version comes back.
- *
- * What an edit leaves out, it keeps. A field absent from the changes is read
- * off the current version and carried into the next one, which is what lets an
- * edit to the scenario alone stay an edit to the scenario alone. Carried
- * forward is not a way past validation, though: the personas a version is about
- * to name are checked whether the edit typed them or inherited them, so no
- * version can come to name one that is missing, deleted, or another project's.
- *
- * **`expectedVersionId` is compared inside that same transaction, on the row
- * this edit has already locked**, and a mismatch refuses the whole edit with
- * `TestMovedOnError`. Where the comparison happens is the whole guarantee: a
- * caller that read the current version and then called this would have a window
- * between the two, and a second writer walks straight through it — both edits
- * would be accepted, and the later one would quietly become what the test says.
- *
- * Editing what the caller cannot see returns what reading it would have:
- * `undefined`, with nothing disturbed.
+ * Edit the locked test in one transaction. Metadata changes update identity;
+ * changes to scenario, expected behaviors, personas, mock tools, or environment
+ * create an immutable version. Omitted fields carry forward and are revalidated.
+ * Content edits require expectedVersionId; check it and any expectedRevision
+ * under the lock. If content and identity match, keep the test row unchanged.
+ * Return undefined for an unseen test.
  */
 export async function editTest(
   auth: AuthContext,
@@ -1557,16 +1354,9 @@ async function editTestOn(
   const storedPersonas = await personasOf(on, currentVersion.id);
   const storedIds = storedPersonas.map((named) => named.id);
 
-    // Omitted means unchanged: what the edit did not mention is read off the
-    // current version, and the whole is then held to what a create is held to.
-    // One path, both ways round — a set carried forward is a set this write is
-    // about to name, and it is checked like any other.
-    //
-    // `contentFromRow` hands back what the row holds, untrimmed, because an old
-    // version has to stay readable exactly as it was written; `validContent`
-    // trims what it is given. Only raw SQL can make the two disagree, and when
-    // one has, the next edit mints a version that trims the row and every edit
-    // after it agrees.
+    // Carry forward omitted fields, then apply current authoring validation.
+    // Stored reads preserve text; validation trims it, so non-normalized stored
+    // content may create a corrected version on the next edit.
   const content = validContent({
     scenario: changes.scenario ?? storedContent.scenario,
     expectedBehaviors:
@@ -1824,27 +1614,9 @@ function expectRevision(
 }
 
 /**
- * One frozen version, by its own `tstv_` id — the read a run uses to stay
- * interpretable after the test moves on, and the read a grade row's assertion
- * key is resolved back into words through: the scenario and expected behaviors
- * as they were, and the personas the version named, by identity and in the order
- * they were authored. Which version of each of them a simulation met is the
- * run's to pin, never this row's.
- *
- * **Which graders ran is not here and is not a version's business.** A project
- * grader's scope decides where it applies, so the grading plan is resolved from
- * project graders rather than from the frozen content of a test.
- *
- * It also answers the two things about the test itself that whoever holds only a
- * version id cannot get anywhere else: what the test is called, and whether it
- * still stands here. Both come off the row this read already joins, so a caller
- * holding a version somebody committed months ago learns in one request whether
- * it is the current one and, when it is not, which test to go and look at. A
- * second fetch would answer neither for a version of a test that has since been
- * deleted.
- *
- * Deliberately no deleted filter: versions outlive their test's deletion, so a
- * run that pinned one can always say exactly what it executed.
+ * Read a pinned test version, ordered personas, and the test's current name and
+ * version status, including deleted tests. Simulations pin persona versions
+ * separately. Project grader scope determines grading, not this content.
  */
 export async function getTestVersion(
   auth: AuthContext,
@@ -1926,15 +1698,8 @@ export async function getTestVersionExecutionContent(
 }
 
 /**
- * One page of the tests the caller can reach — the acting project's, or the
- * whole customer's for a credential acting in none — and where the next page
- * starts.
- *
- * The ids are Crockford base32 of UUIDv7 under `COLLATE "C"`, so ordering by id
- * *is* ordering by mint time and the last id of a page is the whole cursor
- * — no second sort column, no offset to drift when rows arrive mid-scroll.
- * Newest first, because the test somebody is looking for is usually the one
- * they just wrote.
+ * Page visible tests newest first with an ID cursor. An explicit project narrows
+ * the organization scope; an organization-wide credential can read across projects.
  */
 export type TestPage = {
   readonly items: readonly Test[];
@@ -2168,27 +1933,10 @@ export type TestVersionPage = {
 };
 
 /**
- * The live tests whose current version names this persona — the set that
- * refuses the persona's own delete, and the set that refusal names.
- *
- * Current versions of live tests, and nothing else. A historical version names
- * who it named for as long as it is kept, because a run that pinned it has to
- * stay readable, and no delete taken today can change what that run executed; a
- * deleted test has no simulation left to lose. So neither is a reason to keep a
- * persona somebody wants gone, and neither appears here.
- *
- * The walk starts from the join table, where `persona_id` is indexed for
- * exactly this question, and keeps the rows a live test currently points at.
- *
- * The project is required. An Egma-provided persona can be named by tests in every
- * customer, so the persona id alone is not a boundary. The customer predicate
- * comes from the caller's context and the project is the one whose usage or
- * deletion is being decided. A Custom persona reaches the same set it did
- * before; the explicit scope stops a shared id from joining unrelated tests.
- *
- * Exported to the module, not from the package: this answers a question the
- * persona factory has to ask before it deletes, and the test tables have one
- * owner, which is this file.
+ * List active tests whose current version names this persona. Used for persona
+ * usage display, not to block deletion. Require an authorized project even for
+ * shared Egma-provided personas so the query cannot expose another
+ * organization's tests.
  */
 export async function liveTestsNamingPersona(
   on: Queryable,
@@ -2216,15 +1964,3 @@ export async function liveTestsNamingPersona(
     )
     .orderBy(asc(test.id));
 }
-
-/*
- * **There is no companion asking which tests name a grader.** There was one, and
- * it refused a grader's delete while a live test's current version pointed at
- * it. A test names no graders now. Which tests a grader covers is a selector in
- * the project grader's scope, resolved from that side without a test-to-grader
- * junction.
- *
- * The persona question above stands untouched, because a persona is still named
- * by test content and losing one really would empty a test of somebody who calls
- * about it.
- */

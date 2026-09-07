@@ -422,17 +422,8 @@ describe("this repository", () => {
 });
 
 /**
- * A package this repository publishes may not import one it never publishes.
- *
- * `apps/cli` ships its source compiled rather than bundled, so an import
- * written in `src` is still an import in the file `egma` runs. A
- * `private: true` workspace package is not on npm for it to resolve, so the
- * command installs, starts, and fails at the first line that needs it.
- *
- * This shipped once and the build caught it — but only because nothing had
- * built that package first, so the module was missing at build time too. The
- * natural repair for *that* error is to add a project reference, which makes
- * the build pass and ships the crash. Hence a rule rather than a memory.
+ * Published packages must resolve every workspace dependency after installation.
+ * A local TypeScript build alone cannot prove this.
  */
 describe("a published package importing one that is never published", () => {
   async function workspace(): Promise<void> {

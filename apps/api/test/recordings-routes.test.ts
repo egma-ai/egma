@@ -24,22 +24,9 @@ import {
 } from "./support/traces.ts";
 
 /**
- * Resolving a recording, over real HTTP against real Postgres.
- *
- * **Refusal before success**, which is the order this file is written in. The
- * boundary is the organization — the only boundary in the product — and audio
- * holds it exactly as every other read does: a reader outside the organization,
- * and a run belonging to another organization, are each proved here rather than
- * assumed from the machinery. Then the two honest absences that must never read
- * as a broken feature: a chat conversation, which carries no audio by schema
- * rule, and a voice conversation whose call never connected.
- *
- * What is deliberately **not** here is whether the link works. A signature is
- * only worth what the store makes of it, so that is proved against a real MinIO
- * in `recording-store.test.ts`, which skips visibly where one cannot be started.
- * This file asserts what the control plane promises: who is refused, and that
- * the link is minted against the address a browser was told to use, for as long
- * as it says.
+ * Check organization isolation, project scope, recording absence, and signed
+ * link host and lifetime through the API. Real storage signature validation
+ * and audio fetching are covered in recording-store.test.ts.
  */
 
 let api: TestApi;
@@ -293,21 +280,8 @@ describe("what has no recording to hear", () => {
   });
 
   /**
-   * A reference that tries to walk out of the bucket is never signed.
-   *
-   * **The line that actually holds is the store's**: the read credential is
-   * granted `s3:GetObject` on this bucket and nothing else, so a cross-bucket
-   * key is refused by MinIO however it is shaped, which
-   * `recording-store.test.ts` proves against a real one. This is depth behind
-   * that line, because the line is a policy document in a compose job and a
-   * deployment that ever widened it would lose the containment with nothing
-   * saying so.
-   *
-   * It is deliberately a **shape check and not a second `confined_key`**. That
-   * rule lives once, in the simulator, shared between both of its stores;
-   * a second implementation in a second language would be a second chance to
-   * get it wrong, and a copy that disagreed would make an honest recording
-   * unresolvable by the very reference its own simulation reported.
+   * Reject unsafe recording-reference shapes before signing. Bucket containment
+   * also depends on the read credential's storage policy, tested against MinIO.
    */
   it("will not sign a reference that walks out of the bucket", async () => {
     const { who } = await aCustomerWhoHasRecorded("recording_traversal");
@@ -397,18 +371,8 @@ describe("what the run's own results say about audio", () => {
 });
 
 /**
- * The second surface, reaching the first surface's route with what it already
- * holds.
- *
- * A transcript is opened by trace id and knows nothing else — no run, no
- * conversation id, no reference. What makes a player possible there without a
- * second endpoint is that a trace identifier and a simulation identifier are
- * the same 128 bits written two ways: the read a transcript already makes
- * derives the second from the first and says so, and the recording route that
- * serves a run's results then serves this one unchanged.
- *
- * Both halves are asserted here, because a route that answered only the happy
- * one would put a player on a transcript that has nothing to play.
+ * Verify that a simulation trace read supplies the simulation ID used by the
+ * existing recording route. Cover both available recordings and absence.
  */
 describe.skipIf(!storage.available)("what a transcript says about audio", () => {
   it("names the simulation it is, so one route serves both surfaces", async () => {

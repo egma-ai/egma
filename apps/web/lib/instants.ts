@@ -104,25 +104,8 @@ export function formatViewerInstant(
 }
 
 /**
- * The one absolute form a list column carries: `Aug 16, 2026`.
- *
- * **A list's date column is an absolute short date, and never a relative age.**
- * The boards print `Aug 16, 2026` in every list column that holds a time
- * (`6ZJ-0`, `8TQ-0`, `8P4-0`), and the product printed two other things: an ISO
- * day on the agents list and a changing age on personas, suites, tests, runs,
- * transcripts, keys and invitations. A column of ages is a column that cannot
- * be scanned — every row says "a moment ago" until it says "2 days ago" — and
- * two rows a minute apart are indistinguishable by the time anybody reads them.
- * Relative time stays where it is a fact inside a sentence: "started just now",
- * "last received 2 min ago".
- *
- * `precision` is here because one column names a *moment* rather than a day:
- * the transcript list's leading column is the exchange's own identity and has
- * always been to the second. It keeps that precision and takes this shape, so
- * there is still one absolute form in the product rather than two.
- *
- * The exact instant is not lost. `ListInstant` keeps the RFC 3339 value on the
- * element and the viewer-local moment with its zone in the title.
+ * Format absolute dates for list columns, with optional time precision.
+ * ListInstant separately preserves the exact timestamp and local time zone.
  */
 export function asListInstant(
   instant: string,

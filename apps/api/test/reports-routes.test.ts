@@ -24,17 +24,9 @@ import {
 import { fileTranscriptOf } from "./support/recordings.ts";
 
 /**
- * The report door, over real HTTP against real Postgres: the shipped
- * simulator's one way of saying what happened to a simulation it conducts.
- *
- * What is asserted here is what that simulator observes and what the record
- * then says: the token gate's one sentence, a contract violation answered
- * with the same complaints the simulator's own check would raise, the
- * lifecycle transitions landing with their facts, and the idempotency matrix
- * the client's at-least-once delivery leans on — duplicate 200s, conflicting
- * 409s, unknown 404s. The client resends byte-identical documents until one
- * answer is final, so every 200 here is a resend the record absorbed and
- * every 409 is a document the record refused to be rewritten by.
+ * Report-route coverage against Postgres: service-token access, contract
+ * validation, lifecycle facts, duplicate acceptance, conflicting reports, and
+ * unknown simulations. These cases protect at-least-once report delivery.
  */
 
 let api: TestApi;

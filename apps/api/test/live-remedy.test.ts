@@ -19,92 +19,22 @@ import {
 import { afterAll, describe, expect, it } from "vitest";
 
 /**
- * The real ring: one run whose two tests mock **different** tools of a live
- * Retell agent, in parallel, on one temporary version — and the proof that
- * production was untouched while it ran.
- *
- * **Nobody but the developer runs this.** Agents test against fakes only
- * (ruling, 2026-08-28); the live account is the developer's to touch. Every
- * check below is skipped — visibly, as skipped rather than passed — unless the
- * environment names a real Retell key and a real Egma deployment, and nothing
- * in this file reaches a network at module load. CI has neither, so CI never
- * touches an account.
- *
- * ## The one command
- *
- * ```sh
- * EGMA_LIVE_RETELL_API_KEY=<the Retell key for the account> \
- * EGMA_LIVE_RETELL_AGENT_ID=agent_b0e2e9cb267c47e7e7026cd8e8 \
- * EGMA_LIVE_API_URL=https://<your public tunnel or deployment> \
- * EGMA_LIVE_API_KEY=<an Egma project API key> \
- * EGMA_LIVE_AGENT_ID=agt_… \
- * EGMA_LIVE_CONNECTION_ID=con_…   # the agent's retell_web_call connection \
- * EGMA_LIVE_SUITE_ID=ste_…        # a suite with at least two tests \
+ * Developer-run live test; agents use fakes. Skips unless every NEEDED setting
+ * below is supplied. Run with:
  *   npx vitest run --project fast apps/api/test/live-remedy.test.ts
- * ```
  *
- * ## What it needs, and why
+ * Requires a public Egma deployment, running simulator, funded model access,
+ * a retell_web_call connection, two custom tools, and two tests in the suite.
+ * It starts real simulations that incur provider usage and can call real backends.
  *
- * - **A Retell API key** for the account that holds the agent. The suite reads
- *   the account directly with it — numbers, versions, engine configuration —
- *   so that what it asserts about production is read from Retell rather than
- *   from Egma's own record of Retell.
- * - **A public tunnel** in front of the Egma deployment, and `EGMA_BASE_URL`
- *   set to it. Retell refuses localhost and private addresses for a tool URL,
- *   so a mocked run against a real agent needs an address Retell's own
- *   infrastructure can reach. This is the effort's only new inbound
- *   requirement.
- * - **Funded model keys** on that deployment, and a simulator running against
- *   it. The simulations are real voice conversations: they spend speech
- *   synthesis, transcription and LLM tokens.
- * - **An agent with at least two custom tools**, and a suite with at least two
- *   tests. The whole point of this proof is two tests mocking different tools
- *   of one agent at the same time.
+ * The test edits mock tools on the first two tests. Teardown restores each only
+ * if its contents still match this test's last write; a read/write race remains.
+ * Edits and restoration can create new test versions. Egma's lifecycle creates
+ * and deletes a temporary Retell version without publishing or binding numbers.
  *
- * ## What it does to the account
- *
- * On the **Retell** side it only reads. Everything written there is written by
- * Egma's own run lifecycle — one temporary agent version, created and deleted
- * — and the suite's whole job is to watch that happen and check what is left
- * afterwards. It binds no number, publishes nothing, and creates no agent.
- *
- * On the **Egma** side it edits the mock tools of the suite's first two tests,
- * and puts them back. That is where a test's world lives now: there is no
- * project list and no connection switch, so making one test mock `A` and
- * another mock `B` **is** editing those two tests. Each edit mints a new test
- * version, and so does the restore — that is what a versioned test does, and
- * the developer sees two extra versions on each of the two tests afterwards.
- *
- * The teardown (in `afterAll`, so it runs on every failure path) touches only
- * those two tests, **by id**, and **reads each back before it writes**: it
- * restores a test only while that test still holds exactly what this suite
- * left it as. If anyone changed one of them in between, the change is left in
- * place and named in a warning. The residual is a microsecond between the
- * re-read and the write; closing it entirely would need a write precondition
- * the product does not have.
- *
- * ## What is proved here, and what stays the developer's own hand step
- *
- * Proved here: one temporary version for the whole run; every custom tool on
- * it carrying its own `{{egma_url_…}}` in front of the customer's URL byte for
- * byte, with the customer's headers and query params untouched; every routing
- * default stored as exactly one space; both tests running against that one
- * version; the serving version byte-identical before, during and after; and
- * the temporary version deleted at the end.
- *
- * **The receiver is the developer's.** Which host each *unmocked* tool call
- * reached is a fact about the customer's own backend, and no API of Egma's can
- * read it. Point one of the agent's tools at a receiver you can watch
- * (webhook.site is what the 2026-09-03 proof used), run this, and check that
- * the receiver saw exactly the calls of the test that did **not** mock that
- * tool. This file prints the two tests and the tool each of them mocked, so
- * there is something to compare the receiver against.
- *
- * ## What to bank when it passes
- *
- * The run's URL, the two version readings this file prints, and the receiver's
- * log. That is the artifact: two tests of one run answered by Egma for their
- * own tools while every other call reached the customer's backend.
+ * Checks routing defaults, per-test coverage, serving configuration, and cleanup.
+ * Verify unmocked tool destinations using backend receiver logs; these assertions
+ * cannot observe that backend. Retain the run URL, version readings, and receiver log.
  */
 
 const NEEDED = [
