@@ -13,6 +13,7 @@ import {
   markSimulationCanceled,
   releaseSimulationClaim,
   resolveSimulationConnection,
+  type EntitlementSource,
   type PersonaModels,
   type ProviderCatalogEntry,
   type Run,
@@ -31,6 +32,7 @@ import { specComplaints } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 
 import { acceptsServiceToken } from "../auth/service-token.ts";
+import { claimsWithheldByEntitlement } from "../claim-entitlement.ts";
 import type { CarrierRoute } from "../config.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
 import { mockToolBase } from "./mock-endpoint.ts";
@@ -101,6 +103,11 @@ export type ClaimRoutesOptions = {
   readonly providerCredentials: ProviderCredentialSource;
   /** Complete phone route, or absent when phone simulations are unavailable. */
   readonly carrierRoute: CarrierRoute | undefined;
+  /**
+   * Whether the deployment lets a customer's work begin, asked once per
+   * organization for each claim batch. The open adapter always says yes.
+   */
+  readonly entitlements: EntitlementSource;
   /** Test seam for Retell's read-only dispatch preflight. */
   readonly retellFetch?: typeof fetch | undefined;
 };
@@ -751,6 +758,19 @@ export async function claimRoutes(
         });
       }
 
+      // **The deployment is asked whether this work may go on — once per
+      // organization, for the whole batch.** It happens here rather than
+      // inside the claim because the claim is one transaction across every
+      // customer's queue and this is a question about one customer at a time;
+      // and it happens after that transaction has committed, so nothing here
+      // holds a lock, waits on another claimant, or changes how many
+      // conversations run at once. A deployment with no billing withholds
+      // nothing and this is one resolved promise per customer in the batch.
+      const withheld = await claimsWithheldByEntitlement(
+        options.entitlements,
+        claims,
+      );
+
       const specs: Record<string, unknown>[] = [];
       // One read of each run, however many of its conversations this batch
       // took. Lives exactly as long as this response.
@@ -764,25 +784,29 @@ export async function claimRoutes(
       // times or break the route's sub-30-second response promise.
       const assembled = await Promise.all(
         claims.map((claim) =>
-          assembledSpec(
-            claim,
-            runs,
-            retellTargets,
-            options.providerCredentials,
-            options.carrierRoute,
-            options.baseUrl,
-            options.retellFetch,
-            responseDeadline,
-          ).catch(
-            (
-              _fault: unknown,
-            ): { readonly unbuildable: string } => ({
-              // This broad catch can hold dependency or credential errors.
-              // Unlike a simulator report, it has no secret-redaction seam,
-              // so the retained customer-facing sentence stays generic.
-              unbuildable: "an internal error prevented Egma from building its simulation spec",
-            }),
-          ),
+          // A withheld conversation is never assembled: it is going back on
+          // the queue, and building a work order for it would read a
+          // customer's credentials to make a document nobody will receive.
+          withheld.has(claim.id)
+            ? Promise.resolve({ withheld: true } as const)
+            : assembledSpec(
+                claim,
+                runs,
+                retellTargets,
+                options.providerCredentials,
+                options.carrierRoute,
+                options.baseUrl,
+                options.retellFetch,
+                responseDeadline,
+              ).catch(
+                (_fault: unknown): { readonly unbuildable: string } => ({
+                  // This broad catch can hold dependency or credential errors.
+                  // Unlike a simulator report, it has no secret-redaction seam,
+                  // so the retained customer-facing sentence stays generic.
+                  unbuildable:
+                    "an internal error prevented Egma from building its simulation spec",
+                }),
+              ),
         ),
       );
       for (const [index, claim] of claims.entries()) {
@@ -794,6 +818,53 @@ export async function claimRoutes(
         // claim beside it from a simulator standing ready to conduct them.
         const spec = assembled[index];
         if (spec === undefined) continue;
+        if ("withheld" in spec) {
+          // **Back on the queue, and never failed.** Nothing is wrong with
+          // this conversation: the customer's allowance for its kind of work
+          // is spent, and it runs when the month resets, the plan changes or
+          // credit arrives. The lease goes back the same way a provider
+          // outage's does — and, exactly as there, a cancel that landed while
+          // the question was in flight is honored here rather than left for
+          // the orphan sweep to misname.
+          const kept = withheld.get(claim.id);
+          request.log.info(
+            platformEvent(
+              "egma.simulation.dispatch.withheld",
+              "simulation dispatch was withheld by the entitlement source",
+              {
+                "egma.simulation_id": claim.id,
+                "egma.run_id": claim.runId,
+                "egma.allowance": kept?.allowance ?? "",
+              },
+            ),
+          );
+          const released = await releaseSimulationClaim(
+            claim.auth,
+            claim.id,
+            claim.claimedBy,
+          );
+          if (!released) {
+            const canceled = await markSimulationCanceled(
+              claim.auth,
+              claim.id,
+              claim.claimedBy,
+            );
+            if (canceled === undefined) {
+              request.log.error(
+                platformEvent(
+                  "egma.simulation.claim.release_failed",
+                  "simulation claim could not be released or canceled",
+                  {
+                    "egma.simulation_id": claim.id,
+                    "egma.run_id": claim.runId,
+                    "error.type": "simulation_claim_release_failed",
+                  },
+                ),
+              );
+            }
+          }
+          continue;
+        }
         if ("retryable" in spec) {
           // A provider outage says nothing about the customer or their agent.
           // Give this lease back instead of minting a terminal error; a later

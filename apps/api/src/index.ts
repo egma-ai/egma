@@ -3,6 +3,7 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  installBillingPlugIn,
   reconcileGraderCatalog,
   runClickHouseMigrations,
   runMigrations,
@@ -100,6 +101,14 @@ const graderCatalog = await reconcileGraderCatalog();
 // later effective date, and the old row is what a past simulation is still
 // priced at.
 const rateCard = await upsertRateCard();
+
+// The billing plug-in, put in place for the whole process before the first
+// request. It was chosen from the settings when the configuration was read;
+// this is where the seams inside the data-access module — run start, and the
+// write that stores a usage record — start reaching it. With no Stripe secret
+// named this installs the open plug-in over the open plug-in, which is a
+// no-op, and that is the deployment every self-hoster runs.
+installBillingPlugIn(config.billing);
 
 const { app } = buildApi({
   config,

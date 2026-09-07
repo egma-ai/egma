@@ -404,6 +404,13 @@ services:
       EGMA_PHONE_SOURCE_NUMBER: ${EGMA_PHONE_SOURCE_NUMBER:-}
       EGMA_PHONE_TRUNK_USERNAME: ${EGMA_PHONE_TRUNK_USERNAME:-}
       EGMA_PHONE_TRUNK_PASSWORD: ${EGMA_PHONE_TRUNK_PASSWORD:-}
+      # What selects a billing adapter. Empty on every deployment that does not
+      # charge anybody, which is every deployment today: the product then runs
+      # on the open plug-in — every allowance unlimited, every usage record
+      # discarded — and measures what it spends all the same. Nothing here
+      # derives from whether this deployment is the hosted one; a self-hoster
+      # who sets the same secret gets the same billing.
+      EGMA_STRIPE_SECRET_KEY: ${EGMA_STRIPE_SECRET_KEY:-}
       # Egma platform telemetry, behind one flag that defaults to off — see
       # .env.example. Deliberately not the trace store: what customers send
       # through the OTLP door is their data in ClickHouse. This process sends

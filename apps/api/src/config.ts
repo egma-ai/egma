@@ -1,3 +1,4 @@
+import { billingPlugInFor, type BillingPlugIn } from "@egma/db";
 import {
   providerCredentialSource,
   type ProviderCredentialSource,
@@ -168,6 +169,18 @@ export type Config = {
    * Postgres, and neither keeps a cross-work key cache.
    */
   readonly providerCredentials: ProviderCredentialSource;
+  /**
+   * The billing plug-in this deployment runs on: an entitlement source and a
+   * usage sink, chosen once from the settings below.
+   *
+   * **Absent billing is the default and is not a special case.** With no Stripe
+   * secret named, the plug-in is the open one — every allowance unlimited,
+   * every usage record discarded — and the product is exactly the product. A
+   * self-hoster who names the same secret gets the same billing, which is what
+   * makes billing a hosted service rather than a cloud-only feature (ADR-0024).
+   * Nothing about the choice derives from whether this deployment is the cloud.
+   */
+  readonly billing: BillingPlugIn;
   /**
    * The deployment's phone carrier route, read from the process environment.
    *
@@ -605,6 +618,10 @@ export function loadConfig(
     rateLimitPerMinute,
     simulatorServiceToken,
     providerCredentials: providerCredentialSource(environment),
+    // Chosen once, here, from one optional setting. See `billingPlugInFor`.
+    billing: billingPlugInFor({
+      stripeSecretKey: environment.EGMA_STRIPE_SECRET_KEY,
+    }),
     carrierRoute: carrierRoute(environment),
     blob: blobStore(environment, parsedBaseUrl),
     ingestion: ingestionSettings(environment),

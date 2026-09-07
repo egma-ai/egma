@@ -10,6 +10,7 @@ import {
   reconcileGraderCatalog,
   seedPersonaLibrary,
   upsertRateCard,
+  type BillingPlugIn,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 import type { Fetch as RetellFetch } from "@egma/retell";
@@ -183,6 +184,11 @@ export type TestApiOptions = {
   readonly retellFetch?: RetellFetch;
   /** Current model-provider keys for claim and grader boundary tests. */
   readonly providerCredentials?: ProviderCredentialSource;
+  /**
+   * The billing plug-in this instance runs on. Absent is the deployment
+   * everybody runs: every allowance unlimited, every usage record discarded.
+   */
+  readonly billing?: BillingPlugIn;
 };
 
 export function testConfig(overrides: Partial<Config> = {}): Config {
@@ -252,6 +258,7 @@ export async function createApi(
     ...(options.providerCredentials === undefined
       ? {}
       : { providerCredentials: options.providerCredentials }),
+    ...(options.billing === undefined ? {} : { billing: options.billing }),
   });
   const config: Config =
     options.ingestStore === undefined || ingestionLogDirectory === undefined

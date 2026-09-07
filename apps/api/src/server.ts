@@ -445,6 +445,9 @@ export function buildApi(options: ServerOptions): Api {
     serviceToken: config.simulatorServiceToken,
     providerCredentials: config.providerCredentials,
     carrierRoute: config.carrierRoute,
+    // Asked once per organization for each batch this door hands out. On a
+    // deployment with no billing it answers yes without reaching anything.
+    entitlements: config.billing.entitlements,
     // Where the mock endpoint answers. A mocked web call's tool URLs carry no
     // address of Egma's at all — the claim fills one in per call, for exactly
     // the tools that simulation's own test names.
