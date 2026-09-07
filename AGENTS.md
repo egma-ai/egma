@@ -14,3 +14,6 @@ The first open-source platform purpose-built to help teams shipping voice agents
 # design system
 
 Before any visual or interaction change, read `DESIGN.md` in full. It is the product design source of truth. Do not change its locked palette, styling architecture, or the Egma logo without explicit developer approval. Treat its type, component shape, dark mode, and motion rules as current product rules. In UI review, flag code that does not follow `DESIGN.md`.
+
+# code comments
+keep inline comments crisp and try to only describe the current behavior of code as much as possible.
