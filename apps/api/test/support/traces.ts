@@ -401,6 +401,13 @@ export type DetailMeasure = {
   /** True when Egma did not time this itself. Absent on an older answer. */
   readonly derived?: boolean;
   /**
+   * Whose account of the conversation this number is: the persona's, measured
+   * off Egma's own recording, or the agent's, off its own process. `derived`
+   * says which machinery produced it; this says whose conversation it
+   * describes, which is what decides whether two numbers may be compared.
+   */
+  readonly pov?: "persona" | "agent";
+  /**
    * The agent platform that measured this, on the figures a platform reported
    * rather than Egma measured — and **absent on every other measure**, which is
    * the whole of what keeps simulation traffic what it always was.

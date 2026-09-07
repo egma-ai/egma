@@ -5,7 +5,10 @@ import {
   createPersona,
   createTest,
   createTestSuite,
+  getGradingJobForTrace,
+  laneProducesAnAgentPov,
   listSimulations,
+  settleSimulationsPastTheAgentPovBound,
   startRun,
   startSimulation,
 } from "@egma/db";
@@ -249,6 +252,81 @@ async function post(body: string, key: string) {
     },
     payload: body,
   });
+}
+
+/**
+ * egma's own POV of one simulation, at the service door its simulator posts to:
+ * a root and one turn, filed under the trace the simulation's id spells.
+ *
+ * The persona's account, in other words — what egma said, heard and measured —
+ * and the only account a lane that files no agent POV ever has.
+ */
+async function postOwnPov(landed: {
+  simulationId: string;
+  traceId: string;
+}): Promise<void> {
+  const at = (seconds: number): string =>
+    String(
+      BigInt(CONVERSATION_STARTED_AT.getTime() + seconds * 1000) * 1_000_000n,
+    );
+  const root = `${landed.traceId.slice(0, 14)}91`;
+  const posted = await api.app.inject({
+    method: "POST",
+    url: OTLP_TRACES_PATH,
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${api.config.simulatorServiceToken}`,
+    },
+    payload: JSON.stringify({
+      resourceSpans: [
+        {
+          resource: {
+            attributes: [
+              { key: "service.name", value: { stringValue: "egma-simulator" } },
+              {
+                key: "egma.simulation_id",
+                value: { stringValue: landed.simulationId },
+              },
+            ],
+          },
+          scopeSpans: [
+            {
+              scope: { name: "egma-simulator", version: "1" },
+              spans: [
+                {
+                  traceId: landed.traceId,
+                  spanId: root,
+                  parentSpanId: "",
+                  name: "simulation",
+                  kind: "SPAN_KIND_INTERNAL",
+                  startTimeUnixNano: at(0),
+                  endTimeUnixNano: at(60),
+                  attributes: [],
+                },
+                {
+                  traceId: landed.traceId,
+                  spanId: `${landed.traceId.slice(0, 14)}92`,
+                  parentSpanId: root,
+                  name: "agent_turn",
+                  kind: "SPAN_KIND_INTERNAL",
+                  startTimeUnixNano: at(1),
+                  endTimeUnixNano: at(3),
+                  attributes: [
+                    {
+                      key: "egma.turn.text",
+                      value: { stringValue: "I moved it to Tuesday." },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  });
+  expect(posted.statusCode, posted.body).toBe(200);
+  await api.drainEvidence();
 }
 
 /** The whole capture, posted as the agent's POV of one simulation. */
@@ -901,6 +979,226 @@ describe.skipIf(!storage.available)("the row caps, across an export naming two",
   }, 120_000);
 });
 
+/**
+ * **When grading is asked for, and never before.**
+ *
+ * ADR-0015 §6: a simulation's evidence is ready when the row is complete *and*
+ * the agent's own POV has been filed — or when 30 seconds have passed since
+ * completion on a lane that produces one. Grading a conversation before the
+ * account it will be judged on has arrived is grading the wrong evidence, and
+ * the wait must end anyway, because a broken exporter cannot be allowed to hold
+ * a simulation open forever.
+ *
+ * The three cases below are the whole rule: the wait, its end when the POV
+ * lands, and its end when the bound expires. Each reads the queue through the
+ * data-access seam the grading service claims from, because a job row is the
+ * whole of what "grading was asked for" means.
+ */
+describe.skipIf(!storage.available)("when a simulation's grading is asked for", () => {
+  /** What the v1 read says about the agent's account of one simulation. */
+  async function agentPovIncompleteOf(simulationId: string): Promise<unknown> {
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    return (read.json() as { agentPovIncomplete: boolean }).agentPovIncomplete;
+  }
+
+  it("waits: a landing files no grading work while the agent's POV is still coming", async () => {
+    const room = "egma-grading-waits-1";
+    const landed = await aLandedSimulation(acme, "waits", room, {
+      ...A_LIVEKIT_AGENT,
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk-waits" },
+    });
+
+    const auth = contextFor(acme, "member");
+    // The row is complete and its graders are planned, and still nothing is
+    // queued: the agent has not said anything about this conversation yet.
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+    const [row] = (await listSimulations(auth, landed.runId, { limit: 1 }))
+      ?.items ?? [];
+    expect(row?.status).toBe("completed");
+  }, 120_000);
+
+  it("asks the moment the agent's POV lands, and says the record has it", async () => {
+    const room = "egma-grading-lands-1";
+    const landed = await aLandedSimulation(acme, "lands", room, {
+      ...A_LIVEKIT_AGENT,
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk-lands" },
+    });
+    const auth = contextFor(acme, "member");
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+
+    await exportTheCapture(acmeKey, room);
+
+    const job = await getGradingJobForTrace(auth, landed.traceId);
+    expect(job?.traceId).toBe(landed.traceId);
+    expect(job?.source).toBe("simulation");
+    // And the read says the record is whole, so a page showing the agent's POV
+    // knows it is showing the conversation rather than a fragment of it.
+    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(false);
+  }, 120_000);
+
+  /**
+   * The bound, and the record it leaves. Nothing is exported for this
+   * conversation at all — the agent's exporter is broken, or its platform never
+   * answered — so the wait can only end on a clock.
+   *
+   * The sweep is called directly rather than waited for: the loop that runs it
+   * on an interval is the API's, and what is proved here is the seam's own
+   * decision.
+   */
+  it("stops waiting at the bound, grades anyway, and says the POV is incomplete", async () => {
+    const room = "egma-grading-bound-1";
+    const landed = await aLandedSimulation(acme, "bound", room, {
+      ...A_LIVEKIT_AGENT,
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk-bound" },
+    });
+    const auth = contextFor(acme, "member");
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+
+    const settled = await settleSimulationsPastTheAgentPovBound();
+    expect(settled.map((one) => one.id)).toContain(landed.simulationId);
+    expect(
+      settled.find((one) => one.id === landed.simulationId)?.agentPovFiled,
+    ).toBe(false);
+
+    const job = await getGradingJobForTrace(auth, landed.traceId);
+    expect(job?.traceId).toBe(landed.traceId);
+    // **And the read says so**, which is the half a reader needs: a view that
+    // shows the agent's POV would otherwise show whatever fragment arrived as
+    // if it were the whole conversation.
+    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(true);
+
+    // **And it settles nothing a second time.** The queue row is the record of
+    // grading having been asked for, so a later tick reads it and passes the
+    // row over — which is what keeps one conversation to one handoff however
+    // many replicas are reading the clock.
+    const again = await settleSimulationsPastTheAgentPovBound();
+    expect(again.map((one) => one.id)).not.toContain(landed.simulationId);
+  }, 120_000);
+
+  /**
+   * A landing whose clock is an hour behind egma's.
+   *
+   * `ended_at` comes off the report, so a simulator with a skewed clock writes
+   * a moment egma never saw. The bound reads it — it is the conversation's own
+   * moment and the one a person reads — but the window this sweep looks in
+   * cannot, or a row would be stamped outside every window that could ever
+   * settle it and wait for grading forever with nothing saying so. The window
+   * reads egma's own landing stamp instead.
+   */
+  it("still settles a landing whose reported clock is far behind egma's", async () => {
+    const room = "egma-grading-skewed-1";
+    const longAgo = new Date(Date.now() - 6 * 60 * 60 * 1_000);
+    const landed = await aLandedSimulation(
+      acme,
+      "skewed",
+      room,
+      {
+        ...A_LIVEKIT_AGENT,
+        config: {
+          url: "wss://acme.livekit.cloud",
+          agentName: "front-desk-skewed",
+        },
+      },
+      {
+        startedAt: new Date(longAgo.getTime() - 60 * 1_000),
+        endedAt: longAgo,
+      },
+    );
+    const auth = contextFor(acme, "member");
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+
+    // The standing window, unwidened: six hours outside it by the report's own
+    // clock, and inside it by the stamp egma wrote when the landing arrived.
+    const settled = await settleSimulationsPastTheAgentPovBound();
+    expect(settled.map((one) => one.id)).toContain(landed.simulationId);
+    expect(
+      (await getGradingJobForTrace(auth, landed.traceId))?.traceId,
+    ).toBe(landed.traceId);
+  }, 120_000);
+
+  /**
+   * A lane egma dials rather than joins produces no agent POV at all: nothing
+   * of egma's runs on the far end of a phone call. There is no second account
+   * coming, so there is nothing to wait for.
+   */
+  it("does not wait at all for a lane that produces no agent POV", async () => {
+    const landed = await aLandedSimulation(acme, "phone", "", {
+      agentPlatform: "retell",
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+15551230000" },
+    });
+
+    const auth = contextFor(acme, "member");
+    const [row] = (await listSimulations(auth, landed.runId, { limit: 1 }))
+      ?.items ?? [];
+    expect(row?.status).toBe("completed");
+    // Nothing to warn a reader about: no account was ever owed.
+    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(false);
+    const bounded = await settleSimulationsPastTheAgentPovBound();
+    expect(bounded.map((one) => one.id)).not.toContain(landed.simulationId);
+  }, 120_000);
+
+  /**
+   * **The two Retell lanes that could never deliver one either.**
+   *
+   * A chat-API conversation's reference is a chat id, and egma's pull asks for
+   * a *call* record by call id — so a chat id would fetch nothing however long
+   * anything waited. Text mode is the same answer for a different reason: egma
+   * carries the whole exchange on its own requests and Retell hands back no
+   * reference to fetch anything by at all.
+   *
+   * Naming either as producing an agent POV would make every simulation over it
+   * wait out the whole bound and then be recorded as missing an account nobody
+   * was ever going to send. So the drain of egma's own POV is the whole handoff
+   * on both: grading is asked for as soon as that evidence is query-visible,
+   * with no bound in between.
+   *
+   * The chat lane is conducted here end to end. Text mode is pinned by the list
+   * itself rather than conducted, because a run over it is opened against a
+   * named agent version and cannot be started without the platform read this
+   * suite has no reason to stand up.
+   */
+  it("grades a chat-lane landing off egma's own POV, with no bound in between", async () => {
+    const landed = await aLandedSimulation(
+      acme,
+      "chatlane",
+      "chat_5d1f9a3b7c",
+      {
+        agentPlatform: "retell",
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+        modality: "chat",
+        config: { retellAgentId: "agent_chat_lane" },
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
+    );
+    const auth = contextFor(acme, "member");
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+
+    await postOwnPov(landed);
+
+    // No sweep, no bound: the one account this lane has arrived, and that is
+    // the whole of what grading was waiting on.
+    const job = await getGradingJobForTrace(auth, landed.traceId);
+    expect(job?.traceId).toBe(landed.traceId);
+    // And nothing is missing, because nothing was owed.
+    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(false);
+
+    // The same decision about the lane beside it, and about the two that can.
+    expect(laneProducesAnAgentPov("retell_text_mode")).toBe(false);
+    expect(laneProducesAnAgentPov("retell_chat_api")).toBe(false);
+    expect(laneProducesAnAgentPov("livekit_room")).toBe(true);
+    expect(laneProducesAnAgentPov("retell_web_call")).toBe(true);
+  }, 120_000);
+});
+
 describe.skipIf(!storage.available)("a project-key export naming nothing", () => {
   it("is production, exactly as it was before the branch existed", async () => {
     const [first] = captured;
@@ -1206,6 +1504,73 @@ describe.skipIf(!storage.available)("the booking that opened this effort", () =>
            and JSONExtractString(payload, '${WIRE_TRACE_ID_PAYLOAD_KEY}') = '${APPOINTMENT_TRACE.wireTraceId}'`,
       ),
     ).toBe(APPOINTMENT_TRACE.spans);
+  });
+
+  /**
+   * **The number this whole effort is about**, on the conversation that opened
+   * it, read back through the contract a customer reads.
+   *
+   * Five human turns, four of them answered. Each wait starts where the caller
+   * stopped being audible — the end of that `user_turn`'s last `user_speaking`
+   * child, which is the VAD's own detected end — and stops at the first
+   * `agent_speaking` before the next human turn. Hand-computed once from the
+   * export's raw nanosecond timestamps, held as the store keeps them: starts
+   * truncated to the microsecond, durations exact.
+   *
+   *   1. caller stops being audible 1788544388880703312, agent speaks
+   *      1788544392672227000 → 3791.523688 ms
+   *   2. 1788544412831362936 → 1788544414353803000 → 1522.440064 ms
+   *   3. 1788544429283150472 → 1788544431499003000 → 2215.852528 ms
+   *   4. 1788544442631104016 → 1788544444538535000 → 1907.430984 ms
+   *
+   * From `user_turn`'s own end — the endpointing commit, which is where the
+   * derivation stopped before catalog version 8 — the same four turns read
+   * 3334.056376, 1108.662037, 1770.409112 and 1394.444331 ms. That difference,
+   * about half a second a turn, is time the caller really waited.
+   *
+   * The fifth human turn is never answered: two agent turns follow it and
+   * neither speaks, so it measures nothing rather than borrowing the next
+   * conversation's silence.
+   */
+  it("measures the four answered waits from the caller's last audible sample", async () => {
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${landed.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    const metrics = (
+      read.json() as {
+        metrics: {
+          measure: string;
+          pov: string;
+          derived: boolean;
+          samples: number[];
+          otherPov?: unknown;
+        }[];
+      }
+    ).metrics;
+
+    const latency = metrics.find(
+      (metric) => metric.measure === "turn_response_latency",
+    );
+    expect(latency?.samples).toEqual([
+      3791.523688, 1522.440064, 2215.852528, 1907.430984,
+    ]);
+    // The agent's own POV, and it is the headline: egma timed nothing here, so
+    // there is no second series beside it either.
+    expect(latency?.pov).toBe("agent");
+    expect(latency?.derived).toBe(true);
+    expect(latency?.otherPov).toBeUndefined();
+
+    // And the first answer, from the moment the conversation opened to the
+    // agent's first word: `agent_session` at 1788544385416091000, first
+    // `agent_speaking` at 1788544388880227000.
+    const first = metrics.find(
+      (metric) => metric.measure === "first_response_latency",
+    );
+    expect(first?.samples).toEqual([3464.136]);
+    expect(first?.pov).toBe("agent");
   });
 });
 

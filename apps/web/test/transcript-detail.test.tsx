@@ -162,6 +162,7 @@ const MEASURE: Measured = {
   measure: "agent_response_latency",
   unit: "ms",
   derived: false,
+  pov: "persona",
   samples: [420, 1100],
   spanIds: ["span_turn_agent", "span_turn_agent"],
   mean: 760,

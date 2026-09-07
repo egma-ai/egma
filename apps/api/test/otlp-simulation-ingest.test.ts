@@ -493,7 +493,10 @@ describe.skipIf(!storage.available)("the contract's golden flushes, posted with 
         organization_id: globex.organizationId,
         project_id: globex.projectId,
         run_id: voiceRunId,
-        n: 4,
+        // Two turns and the agent's speech duration beside them. The persona's
+        // own speech duration left the catalog with version 8, and the golden
+        // fixture with it.
+        n: 3,
       },
     ]);
 
@@ -592,7 +595,7 @@ describe.skipIf(!storage.available)("the same path in the other encoding", () =>
     const turnsBefore = await countOf(
       `select count() as n from turns final where trace_id = '${VOICE_TRACE}'`,
     );
-    expect(before).toBe(4);
+    expect(before).toBe(3);
     expect(turnsBefore).toBe(2);
 
     const changed = JSON.parse(
@@ -676,7 +679,7 @@ describe.skipIf(!storage.available)("the same path in the other encoding", () =>
         traceId: VOICE_TRACE,
         spanId: "bb20000000000006",
         parentSpanId: "bb20000000000001",
-        name: "time_to_first_word",
+        name: "turn_response_latency",
         kind: "SPAN_KIND_INTERNAL",
         startTimeUnixNano: "1785924902100000000",
         endTimeUnixNano: "1785924902950000000",
@@ -1075,6 +1078,9 @@ describe.skipIf(!storage.available)("the simulation grading handoff", () => {
    * Completion and evidence readiness can arrive in either order. The drainer
    * requests grading only after ClickHouse can return the evidence, and the
    * per-trace request is replay safe across later segments.
+   *
+   * A chat-API conversation has one account of itself — egma's — so nothing is
+   * waited for beyond it becoming query-visible.
    */
   it("mints exactly one job after the completed simulation is queryable", async () => {
     const jobs = await api.database.sql<{ n: string }>(

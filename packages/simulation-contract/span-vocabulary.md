@@ -82,7 +82,7 @@ barge-in is represented when the persona becomes full-duplex, and
 | `human_turn` | transcript turn spoken by the persona | The turn, ear to ear. Zero on chat, where a message is one instant. | `egma.turn.text` |
 | `agent_turn` | transcript turn spoken by the agent under test | Same terms as `human_turn`. | `egma.turn.text` |
 | `tool_call` | tool call a platform reported making | One instant. Egma did not conduct the exchange — the platform matched Egma's answers and served them itself — so there is no round trip to bracket and no duration is claimed. Only that lane emits this span: where the agent's own process runs the Egma SDK, that process reports its own calls and Egma writes no row. | `egma.tool.name`, `egma.tool.arguments`, `egma.tool.result` |
-| *measure name* | measurement | **The measurement itself.** A timing span is named for the measure it takes — `first_response_latency`, `turn_response_latency`, `time_to_first_word`, `agent_speech_duration`, `persona_speech_duration` — and its start and end bracket the measured interval, so the span's duration *is* the number, in nanoseconds. The catalog (`measure-catalog.md`) says what each measure means and who emits it. | none |
+| *measure name* | measurement | **The measurement itself.** A timing span is named for the measure it takes — `first_response_latency`, `turn_response_latency`, `agent_speech_duration` — and its start and end bracket the measured interval, so the span's duration *is* the number, in nanoseconds. The catalog (`measure-catalog.md`) says what each measure means and who emits it. | none |
 
 The speaker of a turn rides the span name — `human_turn` and `agent_turn` are
 the transcript's two labels, exactly — so there is no second field free to
@@ -136,7 +136,7 @@ This reverses the earlier rule that Egma observed tool facts at the seam
   stored rows by span id.
 - `voice-overlapping-turns.json` — a mid-conversation voice flush where the
   persona starts speaking before the agent finishes: two turns whose intervals
-  cross, with the two speech-duration measures beside them.
+  cross, with the agent's speech-duration measure beside them.
 - `voice-flush-recording-root.json` — a closing voice flush: the zero-duration
   recording span places audio sample zero on the trace clock, followed by the
   root last.

@@ -1125,24 +1125,22 @@ async def test_a_voice_simulation_reports_a_measurement_for_every_turn(
         if record["span"]["name"] in measures_for(records, "sim-voice-measures")
     ]
     measures = measures_for(records, "sim-voice-measures")
-    assert measures.count("time_to_first_word") == 3
     assert measures.count("agent_speech_duration") == 3
-    assert measures.count("persona_speech_duration") == 3
     # The wall-clock measures every simulation reports are still there:
     # voice adds measurements, it does not replace them.
     assert measures.count("first_response_latency") == 1
     assert measures.count("turn_response_latency") == 2
 
-    # Every agent turn has a positive quiet span before its first word.
+    # Every answered turn has a positive wait before the agent's first word.
     # Frame alignment is proved at the media seam; this black-box test
     # does not pin scheduling to one exact millisecond count.
-    quiet = [
+    waits = [
         milliseconds_of(span)
         for span in timed
-        if span["name"] == "time_to_first_word"
+        if span["name"] == "turn_response_latency"
     ]
-    assert all(number > 0 for number in quiet), quiet
-    assert len(quiet) == 3
+    assert all(number > 0 for number in waits), waits
+    assert len(waits) == 2
 
     # Overlap may make different measure families close out of order. Each
     # individual interval must still point forward on the media clock.
@@ -1337,9 +1335,7 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     # as long as it waits before speaking, on every one of its turns, and
     # nothing was stamped before the measurement reported ahead of it.
     measures = measures_for(records, "sim-phone-001")
-    assert measures.count("time_to_first_word") == 3
     assert measures.count("agent_speech_duration") == 3
-    assert measures.count("persona_speech_duration") == 3
     assert measures.count("first_response_latency") == 1
     assert measures.count("turn_response_latency") == 2
     timed = [
@@ -1347,13 +1343,13 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
         for record in spans_for(records, "sim-phone-001")
         if record["span"]["name"] in measures
     ]
-    quiet = [
+    waits = [
         milliseconds_of(span)
         for span in timed
-        if span["name"] == "time_to_first_word"
+        if span["name"] == "turn_response_latency"
     ]
-    assert all(number > 0 for number in quiet), quiet
-    assert len(quiet) == 3
+    assert all(number > 0 for number in waits), waits
+    assert len(waits) == 2
     assert all(
         int(span["endTimeUnixNano"]) >= int(span["startTimeUnixNano"])
         for span in timed
@@ -1716,9 +1712,7 @@ async def test_a_voice_simulation_produces_the_same_shapes_plus_its_audio_facts(
     assert names[-1] == "simulation"
 
     # Plus what only voice can measure, one span per measurement.
-    assert names.count("time_to_first_word") == 3
     assert names.count("agent_speech_duration") == 3
-    assert names.count("persona_speech_duration") == 3
 
     def durations(name: str) -> list[int]:
         return [
@@ -1734,9 +1728,9 @@ async def test_a_voice_simulation_produces_the_same_shapes_plus_its_audio_facts(
     # that conclude the simulation, has a recorded length.
     assert all(length > 0 for length in durations("human_turn"))
 
-    # Each agent turn has a positive quiet span before its first word.
+    # Each answered turn has a positive wait before the agent's first word.
     # The media-seam tests own the frame-level alignment rule.
-    assert all(length > 0 for length in durations("time_to_first_word"))
+    assert all(length > 0 for length in durations("turn_response_latency"))
 
 
 async def test_a_voice_simulation_ends_on_its_turn_limit_like_a_chat_one(

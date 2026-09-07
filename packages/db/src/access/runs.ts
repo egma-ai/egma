@@ -31,6 +31,7 @@ import { planGroupsFor } from "../grading/plan.ts";
 import {
   agent,
   connection,
+  laneProducesAnAgentPov,
   type AccessVariant,
   type AgentPlatform,
   type ConnectionType,
@@ -70,7 +71,10 @@ import {
 } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
 import { IdempotencyConflictError, RunWriteRefusedError } from "./errors.ts";
-import { requestGradingIn, traceEvidenceStartedAt } from "./grading.ts";
+import {
+  requestGradingIn,
+  simulationEvidenceReadiness,
+} from "./grading.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import {
@@ -2845,12 +2849,34 @@ async function landSimulation(
         throw new Error(`completed simulation ${row.id} has no grading plan`);
       }
       if (hasPlannedGraders) {
+        // **Whether a second account of this conversation is still coming.**
+        // ADR-0015 §6: grading waits for the agent's own POV where one is
+        // coming, because a conversation graded without the account it will be
+        // judged on is graded on the wrong evidence. Two halves, both facts
+        // about this row: the lane says whether egma has any way to receive one
+        // — read off the run's own frozen snapshot rather than the connection,
+        // which can be edited or archived after the run — and the reference
+        // this landing reported says whether *this* conversation gave egma the
+        // handle to file or fetch it under. Neither needs any evidence to have
+        // arrived, which is what makes the question answerable here.
+        const [executed] = await tx
+          .select({ connectionSnapshot: run.connectionSnapshot })
+          .from(run)
+          .where(eq(run.id, row.runId))
+          .limit(1);
+        const reference = row.providerReference;
+        const producesAnAgentPov =
+          laneProducesAnAgentPov(
+            (executed?.connectionSnapshot as { connectionType?: string })
+              ?.connectionType ?? "",
+          ) &&
+          reference !== null &&
+          reference !== "";
         // Evidence may have drained before this lifecycle transition. Probe the
         // bounded trace window, then request work inside this same Postgres
         // transaction. A crash cannot commit "completed" without also
         // committing the queue row when evidence was already visible.
-        const evidenceStartedAt = await traceEvidenceStartedAt(auth, {
-          source: "simulation",
+        const readiness = await simulationEvidenceReadiness(auth, {
           traceId,
           runId: row.runId,
           window: {
@@ -2862,15 +2888,18 @@ async function landSimulation(
             // stamped at the landing boundary inside this small probe.
             to: BigInt(now.getTime() + 1_000) * 1_000n,
           },
+          producesAnAgentPov,
+          completedAt: now,
+          now,
         });
         await requestGradingIn(tx, auth, {
           source: "simulation",
           traceId,
-          traceStartedAt: evidenceStartedAt ?? row.startedAt,
+          traceStartedAt: readiness.traceStartedAt ?? row.startedAt,
           runId: row.runId,
           endsTrace: true,
           modality: row.modality as Modality,
-          evidenceReady: evidenceStartedAt !== undefined,
+          evidenceReady: readiness.ready,
         });
       }
     }

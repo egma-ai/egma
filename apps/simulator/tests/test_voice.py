@@ -603,9 +603,7 @@ async def test_every_turn_is_measured_and_the_measures_never_run_backwards(
     agent_turns = sum(1 for speaker, _ in observed.turns if speaker == "agent")
     persona_turns = sum(1 for speaker, _ in observed.turns if speaker == "human")
 
-    assert named.count("time_to_first_word") == agent_turns
     assert named.count("agent_speech_duration") == agent_turns
-    assert named.count("persona_speech_duration") == persona_turns
     # The measures every simulation reports are still there: voice adds
     # measurements, it does not replace them.
     assert named.count("first_response_latency") == 1
@@ -615,10 +613,6 @@ async def test_every_turn_is_measured_and_the_measures_never_run_backwards(
     # alignment check above owns the frame-level timing assertion.
     assert all(
         milliseconds > 0
-        for milliseconds in observed.milliseconds_of("time_to_first_word")
-    )
-    assert all(
-        milliseconds > 0
         for milliseconds in observed.milliseconds_of("agent_speech_duration")
     )
 
@@ -626,10 +620,10 @@ async def test_every_turn_is_measured_and_the_measures_never_run_backwards(
     # measures were reported in is the order they happened in.
     assert all(milliseconds >= 0 for _, milliseconds in observed.measures)
     assert named[:4] == [
-        "time_to_first_word",
         "agent_speech_duration",
-        "persona_speech_duration",
-        "time_to_first_word",
+        "first_response_latency",
+        "turn_response_latency",
+        "agent_speech_duration",
     ]
 
 
@@ -1150,7 +1144,6 @@ async def test_genuine_overlap_stays_in_the_transcript_and_recording(
     assert persona_samples & agent_samples
 
     for measure in (
-        "time_to_first_word",
         "first_response_latency",
         "turn_response_latency",
     ):

@@ -106,6 +106,11 @@ const WORK_DISPATCHING = [
   "claimMockDraftFor",
   "owedMockCleanups",
   "sweepOrphanedSimulations",
+  // The agent-POV bound, read on the same clock and on the same terms: a POV
+  // that never arrives sends nothing, so its absence is noticed by nobody in
+  // particular. It moves rows egma's own claim machinery stamped and answers
+  // identifiers and no content.
+  "settleSimulationsPastTheAgentPovBound",
   "watchGradingWork",
   // The poller names no customer. It claims the next due pulled agent and
   // receives the context narrowed to that row. Every later update and trace
@@ -584,7 +589,34 @@ const READ_LIMITS = [
 ];
 
 const THE_AGENT_PLATFORMS = ["AGENT_PLATFORMS"];
+
+/**
+ * The POV vocabulary: pure questions about words, reaching nothing.
+ *
+ * `povOf` turns the `emitter` column into the product's own word for it, and
+ * `fromOnePov` narrows a trace's spans to one account of the conversation —
+ * both so that `emitter` stays a storage word no reader ever meets.
+ * `laneProducesAnAgentPov` answers whether a conversation over a connection
+ * kind could ever have a second account at all, and is exported because the
+ * read that tells a customer their record is missing one has to ask the same
+ * list grading waits on: two lists would one day disagree about which
+ * conversations were ever owed a second account.
+ */
+const THE_POV_WORDS = [
+  "povOf",
+  "fromOnePov",
+  "laneProducesAnAgentPov",
+];
 const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS"];
+
+/**
+ * How long grading waits for a simulation's agent POV before it stops waiting.
+ *
+ * Exported for the reason every other cap here is: the loop that reads the
+ * bound on a clock lives in the API, and a number written in two places is a
+ * number that will one day disagree with itself.
+ */
+const THE_AGENT_POV_BOUND = ["AGENT_POV_BOUND_SECONDS"];
 const THE_RETELL_BUDGET = ["MOST_RETELL_CALL_ATTEMPTS", "DRAIN_ADVISORY_LOCK"];
 
 /**
@@ -669,7 +701,9 @@ describe("the data-access module's surface", () => {
         ...VALUES,
         ...READ_LIMITS,
         ...THE_AGENT_PLATFORMS,
+        ...THE_POV_WORDS,
         ...THE_GRADING_BUDGET,
+        ...THE_AGENT_POV_BOUND,
         ...THE_RETELL_BUDGET,
         ...THE_FOLD,
         ...THE_MOCKED_WORLD,

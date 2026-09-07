@@ -1563,13 +1563,10 @@ async def test_a_livekit_spec_conducts_a_whole_simulation_in_a_room(
     # room wearing it would mute every worker carrying the chat setup.
     assert not conducted.provider_reference.startswith("egma-sim-chat-")
 
-    # Measured, and measured per turn: the agent's quiet and speech on
-    # each of its three turns, the persona's on each of its three, and the
-    # answer latencies every simulation reports.
+    # Measured, and measured per turn: the agent's speech on each of its
+    # three turns, and the answer latencies every simulation reports.
     named = [measure for measure, _, _ in measures]
-    assert named.count("time_to_first_word") == 3
     assert named.count("agent_speech_duration") == 3
-    assert named.count("persona_speech_duration") == 3
     assert named.count("first_response_latency") == 1
     assert named.count("turn_response_latency") == 2
     # The configured quiet is present before every answer. Pipecat also
@@ -1578,9 +1575,9 @@ async def test_a_livekit_spec_conducts_a_whole_simulation_in_a_room(
     delays = [
         milliseconds
         for measure, milliseconds, _ in measures
-        if measure == "time_to_first_word"
+        if measure == "turn_response_latency"
     ]
-    assert len(delays) == 3
+    assert len(delays) == 2
     assert all(delay >= 300.0 for delay in delays)
     # And nothing was stamped before the measurement reported ahead of it.
     stamped = [at for _, _, at in measures]
