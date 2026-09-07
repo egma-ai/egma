@@ -98,6 +98,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..contract import AGENT_NEVER_JOINED
 from ..media import MediaBackendError, VoiceMedia
 from ..media.livekit_room import LiveKitRoomBackend, RoomSettings
 from ..mock_tools import MockToolSeam
@@ -162,6 +163,10 @@ class LiveKitRoom:
         )
         self._media: VoiceMedia | None = None
         self._reference: str | None = None
+        # Kept as well as handed over, because this plug has to ask one
+        # question of it after the agent is in the room: did the agent's
+        # own side ever say hello.
+        self._mock_tools = mock_tools
 
     @property
     def provider_reference(self) -> str | None:
@@ -194,17 +199,29 @@ class LiveKitRoom:
             raise PlugError(str(refused), ending=refused.ending) from refused
 
     async def open(self) -> None:
-        """Make the room and wait for the agent to turn up in it.
+        """Make the room and wait for the agent to turn up and report.
 
         Nothing is heard here. The line is open the moment the agent's
         audio flows. The running Pipecat transport then carries both
         sides, including the agent's opening.
+
+        An agent that turned up and never reported to Egma fails the
+        simulation. The SDK sends its hello as the session starts, which
+        is before the first audio anybody hears, so by the time the agent
+        is audible a hello has either arrived or never will. Letting the
+        conversation run instead would produce a green record of a test
+        that isolated nothing: every mocked tool would have called its
+        real backend, and nothing on the record would say so.
         """
         try:
             await self._backend.dial()
             self._reference = await self._backend.wait_answered(AGENT_JOIN_SECONDS)
         except MediaBackendError as refused:
             raise PlugError(str(refused), ending=refused.ending) from refused
+        if self._mock_tools is not None and not self._mock_tools.agent_reported:
+            raise PlugError(
+                self._mock_tools.why_unreported, ending=AGENT_NEVER_JOINED
+            )
 
     async def close(self) -> None:
         """Leave, and delete the room. Safe from every state."""

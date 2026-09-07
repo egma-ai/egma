@@ -33,7 +33,7 @@ import pytest
 from conftest import ReceptionAgent, called, couriers_on
 from livekit import rtc
 
-from egma import mockable, seam
+from egma import seam, simulation
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -63,7 +63,7 @@ class _JobRoom:
 class _LiveContext:
     """A job context whose room is a real, connected LiveKit room.
 
-    The two things ``mockable`` reads, and nothing invented beside them:
+    The two things the simulation verb reads, and nothing invented beside them:
     the name the server gave this job, and the room this process is in.
     ``connect`` is here because the SDK will call it on a room that is not
     yet open; these tests hand it one that already is, so it never runs.
@@ -72,6 +72,12 @@ class _LiveContext:
     def __init__(self, room_name: str, room: rtc.Room) -> None:
         self.job = _Job(room_name)
         self.room = room
+        self._shutdown_callbacks: list[object] = []
+
+    def add_shutdown_callback(self, callback: object) -> None:
+        """Where the export puts its last flush. Never run here: these
+        tests end the room, not the job."""
+        self._shutdown_callbacks.append(callback)
 
     async def connect(self) -> None:  # pragma: no cover - room is already open
         raise AssertionError("the room was already connected")
@@ -128,7 +134,7 @@ async def _agent_joins(live: Any, room_name: str, identity: str = "the-agent"):
 
 
 async def test_egma_already_in_the_room_is_found_and_answers(
-    live_livekit: Any, session: Any
+    live_livekit: Any, session: Any, egma_export: Any
 ) -> None:
     """The named-dispatch order: egma is in the room before the agent.
 
@@ -141,7 +147,7 @@ async def test_egma_already_in_the_room_is_found_and_answers(
     room = await _agent_joins(live_livekit, room_name)
     agent = ReceptionAgent()
     try:
-        await mockable(agent, _LiveContext(room_name, room), session)
+        await simulation(agent, _LiveContext(room_name, room), session)
 
         assert egma.census() is not None, "the census never reached egma"
         reported = {tool["name"] for tool in egma.census()["tools"]}
@@ -158,7 +164,7 @@ async def test_egma_already_in_the_room_is_found_and_answers(
 
 
 async def test_the_agent_in_the_room_first_waits_for_egma(
-    live_livekit: Any, session: Any
+    live_livekit: Any, session: Any, egma_export: Any
 ) -> None:
     """The order that made two of the three dispatch paths work.
 
@@ -178,7 +184,7 @@ async def test_the_agent_in_the_room_first_waits_for_egma(
 
     late = asyncio.create_task(arrive_late())
     try:
-        await mockable(agent, _LiveContext(room_name, room), session)
+        await simulation(agent, _LiveContext(room_name, room), session)
 
         assert egma.census() is not None, (
             "the SDK gave up before egma arrived, so nothing was wrapped — "
@@ -207,7 +213,7 @@ async def test_a_production_room_is_left_alone(
     agent = ReceptionAgent()
     before = list(agent.tools)
     try:
-        await mockable(agent, _LiveContext(room_name, room), session)
+        await simulation(agent, _LiveContext(room_name, room), session)
 
         assert egma.asked == [], "a production room asked egma something"
         assert couriers_on(session, agent) == {}
