@@ -259,4 +259,3 @@ function contentOf(said: unknown): string {
   }
   return content;
 }
-
