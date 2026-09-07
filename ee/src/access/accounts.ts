@@ -17,7 +17,11 @@ import { and, eq, isNull, or, sql, sum } from "drizzle-orm";
 
 import { welcomeCreditKey } from "../idempotency.ts";
 import { readPlanCatalog, type PlanCatalog } from "../plans.ts";
-import { readBillingLedger, type BillingLedgerPage } from "./ledger.ts";
+import {
+  markInferenceSettlementFailed,
+  readBillingLedger,
+  type BillingLedgerPage,
+} from "./ledger.ts";
 import { readPlan, type CloudPlan } from "./plans.ts";
 
 const {
@@ -37,6 +41,9 @@ export type BillingAccount = {
   readonly stripeCustomerId: string | null;
   readonly stripeSubscriptionId: string | null;
   readonly stripeSubscriptionStatus: string | null;
+  readonly stripeFailedAt: Date | null;
+  readonly stripeFailureVersion: number;
+  readonly stripePaymentsReady: boolean;
   readonly balanceMicros: number;
   readonly settlementFailedAt: Date | null;
 };
@@ -50,6 +57,8 @@ const ACCOUNT_COLUMNS = {
   stripeCustomerId: cloudBillingAccount.stripeCustomerId,
   stripeSubscriptionId: cloudBillingAccount.stripeSubscriptionId,
   stripeSubscriptionStatus: cloudBillingAccount.stripeSubscriptionStatus,
+  stripeFailedAt: cloudBillingAccount.stripeFailedAt,
+  stripeFailureVersion: cloudBillingAccount.stripeFailureVersion,
   balanceMicros: cloudBillingAccount.balanceMicros,
   settlementFailedAt: cloudBillingAccount.settlementFailedAt,
 } as const;
@@ -57,16 +66,27 @@ const ACCOUNT_COLUMNS = {
 async function accountRow(
   on: Queryable,
   organizationId: string,
-): Promise<BillingAccount | undefined> {
+): Promise<
+  { account: BillingAccount; welcomeCreditGranted: boolean } | undefined
+> {
   const [row] = await on
-    .select(ACCOUNT_COLUMNS)
+    .select({
+      ...ACCOUNT_COLUMNS,
+      stripePaymentsReady: cloudPlan.stripePaymentsReady,
+      welcomeCreditGranted: sql<boolean>`exists(select 1 from ${cloudLedgerEntry} where ${cloudLedgerEntry.organizationId} = ${cloudBillingAccount.organizationId} and ${cloudLedgerEntry.kind} = 'welcome_credit')`,
+    })
     .from(cloudBillingAccount)
+    .innerJoin(cloudPlan, eq(cloudPlan.code, "hobby"))
     .where(eq(cloudBillingAccount.organizationId, organizationId))
     .limit(1);
   if (row === undefined) return undefined;
   if (row.planCode !== "hobby" && row.planCode !== "pro")
     throw new Error("Unknown billing plan");
-  return { ...row, planCode: row.planCode };
+  const { welcomeCreditGranted, ...account } = row;
+  return {
+    account: { ...account, planCode: row.planCode },
+    welcomeCreditGranted,
+  };
 }
 
 /** Record the deployment cutoff once. Plan seeding never changes this field. */
@@ -102,6 +122,7 @@ export async function activateBilling(at = new Date()): Promise<Date> {
         createBillingAccount(tx, customer.id, catalog),
       );
     } catch (fault) {
+      await markInferenceSettlementFailed(customer.id);
       console.error(
         "Billing account repair failed; other organizations continue",
         { organizationId: customer.id, fault },
@@ -191,14 +212,14 @@ export async function createBillingAccount(
   const account = await accountRow(on, organizationId);
   if (account === undefined)
     throw new Error("Billing account creation returned no account");
-  return account;
+  return account.account;
 }
 
 export async function openBillingAccount(
   organizationId: string,
 ): Promise<BillingAccount> {
   const held = await accountRow(fencedDatabase(), organizationId);
-  if (held !== undefined) return held;
+  if (held?.welcomeCreditGranted) return held.account;
   const read = await readPlanCatalog();
   return fencedDatabase().transaction((tx) =>
     createBillingAccount(tx, organizationId, read),

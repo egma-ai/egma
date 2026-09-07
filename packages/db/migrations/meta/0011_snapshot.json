@@ -1,5 +1,5 @@
 {
-  "id": "bbc7facf-d96f-4c1e-9c78-7c7c13798bfd",
+  "id": "32dc970d-69e5-4b56-b008-162144e32c0c",
   "prevId": "11e1df41-55b0-40fa-9028-a38b95c42131",
   "version": "7",
   "dialect": "postgresql",
@@ -5236,6 +5236,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "stripe_failed_at": {
+          "name": "stripe_failed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_failure_version": {
+          "name": "stripe_failure_version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
         "activated_at": {
           "name": "activated_at",
           "type": "timestamp with time zone",
@@ -5338,6 +5351,10 @@
         "cloud_billing_account_plan_code_allowed": {
           "name": "cloud_billing_account_plan_code_allowed",
           "value": "\"cloud_billing_account\".\"plan_code\" in ('hobby', 'pro')"
+        },
+        "cloud_billing_account_stripe_failure_version_is_exact": {
+          "name": "cloud_billing_account_stripe_failure_version_is_exact",
+          "value": "\"cloud_billing_account\".\"stripe_failure_version\" >= 0 and \"cloud_billing_account\".\"stripe_failure_version\" <= 9007199254740991"
         },
         "cloud_billing_account_subscription_status_allowed": {
           "name": "cloud_billing_account_subscription_status_allowed",
@@ -5619,6 +5636,13 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "stripe_payments_ready": {
+          "name": "stripe_payments_ready",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "created_at": {
           "name": "created_at",

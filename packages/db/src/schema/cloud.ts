@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   check,
   foreignKey,
   index,
@@ -72,14 +73,14 @@ export const cloudPlan = pgTable(
     phoneMinutesAllowance: bigint("phone_minutes_allowance", {
       mode: "number",
     }),
-    
+
     webCallOverageMicrosPerMinute: bigint("web_call_overage_micros_per_minute", {
       mode: "number",
     }).notNull(),
     phoneOverageMicrosPerMinute: bigint("phone_overage_micros_per_minute", {
       mode: "number",
     }).notNull(),
-    
+
     stripeProductId: text("stripe_product_id"),
     stripeFeePriceId: text("stripe_fee_price_id"),
     stripeWebCallMeterPriceId: text("stripe_web_call_meter_price_id"),
@@ -87,6 +88,8 @@ export const cloudPlan = pgTable(
     stripeWebCallMeterId: text("stripe_web_call_meter_id"),
     stripePhoneMeterId: text("stripe_phone_meter_id"),
     billingActivatedAt: moment("billing_activated_at"),
+    /** The Hobby row holds deployment-wide payment readiness. */
+    stripePaymentsReady: boolean("stripe_payments_ready").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -121,7 +124,7 @@ export const cloudBillingAccount = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     planCode: text("plan_code").notNull(),
-    
+
     periodAnchor: moment("period_anchor").notNull(),
     /** What Stripe holds, once it holds anything. Hobby never has any of it. */
     stripeCustomerId: text("stripe_customer_id"),
@@ -131,6 +134,8 @@ export const cloudBillingAccount = pgTable(
     stripeSubscriptionRefreshedAt: moment("stripe_subscription_refreshed_at"),
     stripePeriodStartedAt: moment("stripe_period_started_at"),
     stripePeriodEndsAt: moment("stripe_period_ends_at"),
+    stripeFailedAt: moment("stripe_failed_at"),
+    stripeFailureVersion: bigint("stripe_failure_version", { mode: "number" }).notNull().default(0),
     /** Usage before this immutable boundary is excluded. */
     activatedAt: moment("activated_at").notNull(),
     inferenceSettledThrough: moment("inference_settled_through"),
@@ -150,6 +155,7 @@ export const cloudBillingAccount = pgTable(
     oneOf("cloud_billing_account_plan_code_allowed", table.planCode, [
       ...PLAN_CODES,
     ]),
+    check("cloud_billing_account_stripe_failure_version_is_exact", sql`${table.stripeFailureVersion} >= 0 and ${table.stripeFailureVersion} <= 9007199254740991`),
     check(
       "cloud_billing_account_subscription_status_allowed",
       sql`${table.stripeSubscriptionStatus} is null
@@ -276,4 +282,3 @@ export const cloudLedgerEntry = pgTable(
     ),
   ],
 );
-

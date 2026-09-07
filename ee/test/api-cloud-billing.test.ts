@@ -80,6 +80,7 @@ async function aBillingDeployment(label: string): Promise<void> {
   });
   // The plan rows the entry point writes on boot, from the file in `ee/`.
   await seedCloudPlans();
+  await api.database.sql("update cloud_plan set stripe_payments_ready = true where code = 'hobby'");
   await activateBilling(ANCHOR);
 }
 

@@ -90,6 +90,9 @@ beforeAll(async () => {
   store = await createMigratedTraceStore("activation_settlement");
   connectClickHouse({ clickhouseUrl: store.url });
   await seedCloudPlans();
+  await database.sql(
+    "update cloud_plan set stripe_payments_ready = true where code = 'hobby'",
+  );
   await upsertRateCard();
 });
 afterAll(async () => {
@@ -471,4 +474,78 @@ it("lets members page through every ledger movement with stable boundaries and t
   await expect(readBillingLedger(one, "broken-cursor")).rejects.toThrow(
     "Invalid ledger cursor",
   );
+});
+
+it("keeps an unresolved Stripe fault after successful inference collection", async () => {
+  const one = await customer();
+  await activateBilling(cutoff);
+  await database.sql(
+    "update cloud_billing_account set balance_micros = 0, stripe_failed_at = $2, stripe_failure_version = 1 where organization_id = $1",
+    [one.organizationId, cutoff],
+  );
+  await settleInferenceForOrganization(one.organizationId);
+  const { rows } = await database.sql<{
+    stripe_failed_at: Date;
+    stripe_failure_version: string;
+    settlement_failed_at: Date | null;
+  }>(
+    "select stripe_failed_at, stripe_failure_version, settlement_failed_at from cloud_billing_account where organization_id = $1",
+    [one.organizationId],
+  );
+  expect(rows[0]).toMatchObject({
+    stripe_failed_at: cutoff,
+    stripe_failure_version: "1",
+    settlement_failed_at: null,
+  });
+  expect(
+    await cloudEntitlementSource().mayPlatformKeyFund({
+      organizationId: one.organizationId,
+      providers: ["openai"],
+    }),
+  ).toEqual({ funded: true });
+});
+
+it("does not enforce an existing zero account when its missing welcome credit cannot be repaired", async () => {
+  const one = await customer();
+  await activateBilling(cutoff);
+  await database.sql(
+    "delete from cloud_ledger_entry where organization_id = $1",
+    [one.organizationId],
+  );
+  await database.sql(
+    "update cloud_billing_account set balance_micros = 0 where organization_id = $1",
+    [one.organizationId],
+  );
+  await database.sql(
+    "create function fail_welcome_repair() returns trigger language plpgsql as $$ begin if NEW.kind = 'welcome_credit' then raise exception 'welcome grant unavailable'; end if; return NEW; end $$",
+  );
+  await database.sql(
+    "create trigger fail_welcome_repair before insert on cloud_ledger_entry for each row execute function fail_welcome_repair()",
+  );
+  try {
+    await activateBilling(cutoff);
+    expect(
+      await cloudEntitlementSource().mayPlatformKeyFund({
+        organizationId: one.organizationId,
+        providers: ["openai"],
+      }),
+    ).toEqual({ funded: true });
+    await expect(
+      settleInferenceForOrganization(one.organizationId),
+    ).rejects.toThrow();
+    expect((await readBillingLedger(one)).entries).toHaveLength(0);
+  } finally {
+    await database.sql(
+      "drop trigger fail_welcome_repair on cloud_ledger_entry",
+    );
+  }
+  await settleInferenceForOrganization(one.organizationId);
+  await activateBilling(cutoff);
+  expect((await readBillingLedger(one)).entries).toMatchObject([
+    { kind: "welcome_credit", amountMicros: 5_000_000 },
+  ]);
+  expect(
+    (await openBillingAccount(one.organizationId)).settlementFailedAt,
+  ).toBeNull();
+  expect(await readLedgerBalance(one)).toBe(5_000_000);
 });

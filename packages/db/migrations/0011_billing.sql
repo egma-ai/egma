@@ -28,6 +28,8 @@ CREATE TABLE "cloud_billing_account" (
 	"stripe_subscription_refreshed_at" timestamp with time zone,
 	"stripe_period_started_at" timestamp with time zone,
 	"stripe_period_ends_at" timestamp with time zone,
+	"stripe_failed_at" timestamp with time zone,
+	"stripe_failure_version" bigint DEFAULT 0 NOT NULL,
 	"activated_at" timestamp with time zone NOT NULL,
 	"inference_settled_through" timestamp with time zone,
 	"settlement_failed_at" timestamp with time zone,
@@ -39,6 +41,7 @@ CREATE TABLE "cloud_billing_account" (
 	CONSTRAINT "cloud_billing_account_stripe_subscription_unique" UNIQUE("stripe_subscription_id"),
 	CONSTRAINT "cloud_billing_account_id_prefix" CHECK ("cloud_billing_account"."id" ~ '^cba_[0-9A-HJKMNP-TV-Z]{26}$'),
 	CONSTRAINT "cloud_billing_account_plan_code_allowed" CHECK ("cloud_billing_account"."plan_code" in ('hobby', 'pro')),
+	CONSTRAINT "cloud_billing_account_stripe_failure_version_is_exact" CHECK ("cloud_billing_account"."stripe_failure_version" >= 0 and "cloud_billing_account"."stripe_failure_version" <= 9007199254740991),
 	CONSTRAINT "cloud_billing_account_subscription_status_allowed" CHECK ("cloud_billing_account"."stripe_subscription_status" is null
         or "cloud_billing_account"."stripe_subscription_status" in ('trialing', 'active', 'past_due', 'canceled', 'unpaid', 'incomplete', 'incomplete_expired', 'paused')),
 	CONSTRAINT "cloud_billing_account_subscription_needs_a_customer" CHECK ("cloud_billing_account"."stripe_subscription_id" is null
@@ -101,6 +104,7 @@ CREATE TABLE "cloud_plan" (
 	"stripe_web_call_meter_id" text,
 	"stripe_phone_meter_id" text,
 	"billing_activated_at" timestamp with time zone,
+	"stripe_payments_ready" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "cloud_plan_code_unique" UNIQUE("code"),

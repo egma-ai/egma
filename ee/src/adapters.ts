@@ -19,6 +19,7 @@ import {
   createBillingAccount,
   openBillingAccount,
   readEntitlementFacts,
+  type BillingAccount,
   type CloudPlan,
   type EntitlementFacts,
 } from "./access/index.ts";
@@ -173,6 +174,10 @@ function refusalsAmong(
   return refusals;
 }
 
+function billingIsUnreliable(account: BillingAccount): boolean {
+  return account.settlementFailedAt !== null || account.stripeFailedAt !== null || !account.stripePaymentsReady;
+}
+
 export function cloudEntitlementSource(
   options: CloudAdapterOptions = {},
 ): EntitlementSource {
@@ -187,7 +192,7 @@ export function cloudEntitlementSource(
       if (request.allowances.length === 0) return { allowed: true };
 
       const facts = await readEntitlementFacts(request.organizationId, now());
-      if (facts.account.settlementFailedAt !== null) return { allowed: true };
+      if (billingIsUnreliable(facts.account)) return { allowed: true };
       const refusals = refusalsAmong(request.allowances, facts);
       return refusals.length === 0 ? { allowed: true } : { allowed: false, refusals };
     },
@@ -203,18 +208,15 @@ export function cloudEntitlementSource(
       );
       if (onEgmasKey.length === 0) return { funded: true };
 
-      // **The account and nothing else.** This is asked on the claim path,
-      // once per organization per batch, and the only fact it needs is the
-      // balance — a month's allowance is the other question's business. Asking
-      // for the whole entitlement picture here would run the period aggregate
-      // over a customer's conversations to read one integer beside it.
+      // Balance, billing health and the welcome grant share one indexed read.
+      // Funding does not need the conversation aggregate or a Stripe request.
       const account = await openBillingAccount(request.organizationId);
 
       // **Above zero, and not "enough".** Egma cannot know what a simulation
       // will cost before it runs, so the rule is the one the founders set: new
       // balance-funded work is refused at zero, and work already claimed
       // finishes and is charged.
-      if (account.settlementFailedAt !== null || account.balanceMicros > 0) return { funded: true };
+      if (billingIsUnreliable(account) || account.balanceMicros > 0) return { funded: true };
 
       return {
         funded: false,

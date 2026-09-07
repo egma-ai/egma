@@ -103,6 +103,7 @@ beforeAll(async () => {
   }
   await upsertRateCard();
   await seedCloudPlans();
+  await database.sql("update cloud_plan set stripe_payments_ready = true where code = 'hobby'");
   await activateBilling(CREATED_AT);
 });
 
@@ -771,4 +772,27 @@ it("starts a fresh allowance tally at activation and assigns a crossing call to 
   expect(beforeReset.period.resetsAt).toEqual(PERIOD_RESETS);
   const afterReset = await readEntitlementFacts(who.organizationId, new Date("2026-10-15T08:01:00Z"));
   expect(afterReset.usage.used.phone_minutes).toBe(0);
+});
+
+it("allows work on Hobby and Pro when Stripe is unavailable and preserves readiness across reseeding", async () => {
+  const source = cloudEntitlementSource({ now: () => NOW });
+  const accounts = await Promise.all([acme, globex].map((who) => openBillingAccount(who.organizationId)));
+  for (const who of [acme, globex]) {
+    await database.sql("update cloud_billing_account set balance_micros = 0 where organization_id = $1", [who.organizationId]);
+    expect((await source.mayPlatformKeyFund({ organizationId: who.organizationId, providers: ["openai"] })).funded).toBe(false);
+  }
+  try {
+    for (const fault of ["unready", "account"] as const) {
+      await database.sql("update cloud_plan set stripe_payments_ready = $1 where code = 'hobby'", [fault !== "unready"]);
+      await database.sql("update cloud_billing_account set stripe_failed_at = $1, stripe_failure_version = 1 where organization_id in ($2,$3)", [fault === "account" ? NOW : null, acme.organizationId, globex.organizationId]);
+      await seedCloudPlans();
+      for (const who of [acme, globex]) {
+        expect(await source.mayPlatformKeyFund({ organizationId: who.organizationId, providers: ["openai"] })).toEqual({ funded: true });
+      }
+      expect(await source.mayStart({ organizationId: acme.organizationId, allowances: ["web_call_minutes", "phone_minutes"] })).toEqual({ allowed: true });
+    }
+  } finally {
+    await database.sql("update cloud_plan set stripe_payments_ready = true where code = 'hobby'");
+    for (const account of accounts) await database.sql("update cloud_billing_account set balance_micros = $2, stripe_failed_at = null, stripe_failure_version = 0 where organization_id = $1", [account.organizationId, account.balanceMicros]);
+  }
 });
