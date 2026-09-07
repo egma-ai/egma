@@ -42,9 +42,8 @@ import {
 } from "../otlp/decode.ts";
 import {
   budgetForOneRequest,
-  namesAProviderReference,
   normaliseOtlpExport,
-  providerReferenceNamedBy,
+  providerReferenceClaimedBy,
   simulationNamedBy,
   PROVIDER_REFERENCE_ATTRIBUTE,
   SIMULATION_ID_ATTRIBUTE,
@@ -806,11 +805,49 @@ export async function traceRoutes(
      * nobody has finds nothing, and both are told the same thing.
      */
     const resources = decoded.resourceSpans ?? [];
-    // Carrying the key, not holding a value: the two filters below are
-    // complements and must be built from one predicate, or a resource that
-    // carries the key with nothing in it would fall through both into
-    // production. `namesAProviderReference` says why that matters.
-    const naming = resources.filter(namesAProviderReference);
+    // Claimed once per resource, and the answer carried, because the two
+    // filters below are complements: a resource that claims a reference and
+    // one that does not must be built from the same reading, or a resource
+    // whose claim this door could not read would fall through both into
+    // production. `providerReferenceClaimedBy` says why the claim can come
+    // from the resource or from the spans.
+    const claimed = new Map(
+      resources.map((one) => [one, providerReferenceClaimedBy(one)] as const),
+    );
+    const naming = resources.filter(
+      (one) => claimed.get(one)?.kind !== "none",
+    );
+    const named = (one: OtlpResourceSpans): string => {
+      const claim = claimed.get(one);
+      return claim?.kind === "named" ? claim.reference : "";
+    };
+
+    // Spans that disagree name no one conversation, so there is nothing to
+    // look up and nothing safe to guess: one export from one agent process is
+    // one conversation, and filing a disagreeing resource under either answer
+    // would put one customer's turns on another's record.
+    const disagreeing = naming.find(
+      (one) => claimed.get(one)?.kind === "disagreeing",
+    );
+    if (disagreeing !== undefined) {
+      const claim = claimed.get(disagreeing);
+      const references =
+        claim?.kind === "disagreeing" ? claim.references : [];
+      return statusResponse(
+        reply,
+        encoding,
+        400,
+        RPC_INVALID_ARGUMENT,
+        `a resource in this export has spans that do not agree on ` +
+          `${PROVIDER_REFERENCE_ATTRIBUTE} (${references
+            .map((one) => (one === "" ? "spans carrying none" : `"${shortened(one)}"`))
+            .join(", ")}). One agent process runs one conversation, so every ` +
+          `span under one resource names the same room or call — a resource ` +
+          `whose spans disagree names no conversation to file them under. ` +
+          `Export each room from the process running it. Nothing from this ` +
+          `request was stored.`,
+      );
+    }
 
     // A malformed export before anything is looked up, because an empty
     // reference has nothing to look up: the sender said these spans are a
@@ -818,7 +855,7 @@ export async function traceRoutes(
     // attribution failure at this door, and told apart from a reference that
     // simply matched nothing — quoting an empty string back would name nothing
     // for the developer to go and fix.
-    if (naming.some((one) => providerReferenceNamedBy(one) === "")) {
+    if (naming.some((one) => named(one) === "")) {
       return statusResponse(
         reply,
         encoding,
@@ -834,7 +871,7 @@ export async function traceRoutes(
       );
     }
 
-    const references = new Set(naming.map(providerReferenceNamedBy));
+    const references = new Set(naming.map(named));
     /*
      * How many conversations one export may speak for.
      *
@@ -909,7 +946,7 @@ export async function traceRoutes(
     const production = normaliseOtlpExport(
       {
         resourceSpans: resources.filter(
-          (resourceSpans) => !namesAProviderReference(resourceSpans),
+          (resourceSpans) => claimed.get(resourceSpans)?.kind === "none",
         ),
       },
       undefined,
@@ -921,7 +958,7 @@ export async function traceRoutes(
 
     const filings = normalisedFilings(
       gatheredBySimulation(naming, (resourceSpans) =>
-        carriers.get(providerReferenceNamedBy(resourceSpans)),
+        carriers.get(named(resourceSpans)),
       ),
       "agent",
       rejected,

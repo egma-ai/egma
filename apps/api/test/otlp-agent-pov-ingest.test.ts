@@ -195,6 +195,48 @@ function naming(exported: OtlpExport, reference: string): string {
   });
 }
 
+/**
+ * The SDK's other copy of the same fact: on every span, not on the resource.
+ *
+ * A resource is fixed when a tracer provider is built, and the SDK does not
+ * always build one — a worker already running its own OpenTelemetry hands it a
+ * provider that exists. There the room name rides through the framework's
+ * metadata seam instead, which stamps every span the provider starts. This is
+ * what that exporter's bytes look like.
+ */
+function namingOnEverySpan(
+  exported: OtlpExport,
+  ...references: string[]
+): string {
+  let at = 0;
+  return JSON.stringify({
+    resourceSpans: (exported.resourceSpans ?? []).map((resourceSpans) => ({
+      ...resourceSpans,
+      scopeSpans: (resourceSpans.scopeSpans ?? []).map((scopeSpans) => ({
+        ...scopeSpans,
+        spans: (scopeSpans.spans ?? []).map((span) => {
+          const reference = references[at % references.length];
+          at += 1;
+          return {
+            ...span,
+            attributes: [
+              ...(span.attributes ?? []),
+              ...(reference === undefined
+                ? []
+                : [
+                    {
+                      key: PROVIDER_REFERENCE_ATTRIBUTE,
+                      value: { stringValue: reference },
+                    },
+                  ]),
+            ],
+          };
+        }),
+      })),
+    })),
+  });
+}
+
 async function post(body: string, key: string) {
   return api.app.inject({
     method: "POST",
@@ -498,6 +540,57 @@ describe.skipIf(!storage.available)(
   },
 );
 
+describe.skipIf(!storage.available)(
+  "a project-key export naming its simulation on every span",
+  () => {
+    it("files it the same way, for the worker whose provider Egma did not build", () => {
+      // The SDK stamps the resource where it builds the tracer provider and
+      // every span where it does not — a worker already running its own
+      // OpenTelemetry keeps its provider, resource and all. Both copies carry
+      // the same string, so both must file the same way, or a customer with
+      // Langfuse installed would find their simulations in Monitoring.
+      return (async () => {
+        const [first] = captured;
+        if (first === undefined) throw new Error("the capture is empty");
+        const landed = await aLandedSimulation(
+          acme,
+          "livekit-span-stamped",
+          "room-stamped-on-spans",
+          {
+            ...A_LIVEKIT_AGENT,
+            config: {
+              url: "wss://acme.livekit.cloud",
+              agentName: "front-desk-span-stamped",
+            },
+          },
+        );
+
+        const answered = await post(
+          namingOnEverySpan(first, "room-stamped-on-spans"),
+          acmeKey,
+        );
+        expect(answered.statusCode, answered.body).toBe(200);
+        await api.drainEvidence();
+
+        const rows = await store().rows<{
+          emitter: string;
+          source: string;
+          n: number;
+        }>(
+          `select emitter, source, count() as n
+           from spans final
+           where trace_id = '${landed.traceId}'
+           group by emitter, source`,
+        );
+        expect(rows.map(({ emitter, source }) => ({ emitter, source }))).toEqual([
+          { emitter: "agent", source: "simulation" },
+        ]);
+        expect(Number(rows[0]?.n ?? 0)).toBeGreaterThan(0);
+      })();
+    }, 120_000);
+  },
+);
+
 describe.skipIf(!storage.available)("a reference that names no simulation", () => {
   it("refuses the whole export and stores nothing", async () => {
     const [first] = captured;
@@ -532,6 +625,59 @@ describe.skipIf(!storage.available)("a reference that names no simulation", () =
     const refusal = answered.json() as { message: string };
     expect(refusal.message).toContain("with no value");
     expect(refusal.message).toContain("Nothing from this request was stored");
+
+    await api.drainEvidence();
+    expect(
+      await countOf(
+        `select count() as n from spans final
+         where project_id = '${globex.projectId}'`,
+      ),
+    ).toBe(0);
+  });
+
+  it("refuses a resource whose spans do not agree on the conversation", async () => {
+    const [first] = captured;
+    if (first === undefined) throw new Error("the capture is empty");
+
+    // One agent process runs one conversation, so spans under one resource
+    // that name two rooms are a sender this door cannot file for — and
+    // guessing either answer is how one customer's turns land on another's
+    // record.
+    const answered = await post(
+      namingOnEverySpan(first, "room-lisbon", "room-oslo"),
+      globexKey,
+    );
+    expect(answered.statusCode).toBe(400);
+    const refusal = answered.json() as { message: string };
+    expect(refusal.message).toContain("do not agree");
+    expect(refusal.message).toContain("room-lisbon");
+    expect(refusal.message).toContain("room-oslo");
+    expect(refusal.message).toContain("Nothing from this request was stored");
+
+    await api.drainEvidence();
+    expect(
+      await countOf(
+        `select count() as n from spans final
+         where project_id = '${globex.projectId}'`,
+      ),
+    ).toBe(0);
+  });
+
+  it("refuses a resource where only some spans carry the reference", async () => {
+    const [first] = captured;
+    if (first === undefined) throw new Error("the capture is empty");
+
+    // Half stamped, half not: the same disagreement wearing a quieter face.
+    // Filing the whole resource under the one reference some spans named
+    // would file spans that never claimed to be a simulation's.
+    const answered = await post(
+      namingOnEverySpan(first, "room-lisbon", ""),
+      globexKey,
+    );
+    expect(answered.statusCode).toBe(400);
+    expect((answered.json() as { message: string }).message).toContain(
+      "do not agree",
+    );
 
     await api.drainEvidence();
     expect(
