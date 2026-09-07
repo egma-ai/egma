@@ -873,6 +873,51 @@ describe("one persona's sheet", () => {
     expect(within(sheet).getByText("Created")).toBeTruthy();
   });
 
+  it.each(["Use", "Edit settings"])(
+    "recovers %s after the model catalog request fails",
+    async (action) => {
+      const persona: Persona = {
+        ...PREDEFINED,
+        settings: action === "Use" ? null : {
+          id: "ppr_0",
+          models: RECOMMENDED_MODELS,
+          createdAt: PREDEFINED.createdAt,
+          updatedAt: PREDEFINED.updatedAt,
+        },
+      };
+      const { asked } = apiAnswers({
+        ...screenWith("admin", [persona]),
+        "GET /v1/personas/prs_0": { status: 200, body: persona },
+        "GET /v1/persona-form": [
+          { status: 503, body: {
+            error: "unavailable",
+            message: "The model catalog could not be loaded. Try again.",
+          } },
+          { status: 200, body: PERSONA_FORM },
+        ],
+      });
+      render(<PersonasPage />);
+      const sheet = await openRow("Everyday caller");
+      await openSheetMenu("Everyday caller");
+      fireEvent.click(await screen.findByRole("menuitem", { name: action }));
+
+      const failure = await within(sheet).findByRole("alert");
+      expect(within(failure).getByText(
+        "The model catalog could not be loaded. Try again.",
+      )).toBeTruthy();
+      expect(within(sheet).queryByText("Loading the supported persona models…")).toBeNull();
+      fireEvent.click(within(failure).getByRole("button", { name: "Try again" }));
+
+      const model = await within(sheet).findByLabelText("Language model*");
+      expect((model as HTMLSelectElement).value).toBe(
+        action === "Use" ? "openai::gpt-5.6-terra" : "openai::gpt-4o-mini",
+      );
+      expect(within(sheet).queryByRole("alert")).toBeNull();
+      expect(asked.filter(request => request.path === "/v1/persona-form?projectId=prj_1")).toHaveLength(2);
+      expect(asked.every(request => request.method === "GET")).toBe(true);
+    },
+  );
+
   /** The editor, open on Rita, with one unsaved change in it. */
   async function aDirtyEditor(): Promise<HTMLElement> {
     await openRow("Impatient Rita");

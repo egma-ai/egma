@@ -653,7 +653,8 @@ function ProjectPersonas({ projectId }: { readonly projectId: string }) {
           projectId={projectId}
           personaId={openedHere.persona.id}
           open={openedOpen}
-          form={form?.status === "ready" ? form.value : null}
+          form={form}
+          reloadForm={reloadForm}
           role={role}
           mayAuthor={mayAuthor}
           whyNot={mayAuthor ? undefined : whyNot}

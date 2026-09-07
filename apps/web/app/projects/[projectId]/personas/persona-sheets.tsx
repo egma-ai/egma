@@ -511,6 +511,7 @@ export function PersonaSheet({
   personaId,
   open,
   form,
+  reloadForm,
   role,
   mayAuthor,
   whyNot,
@@ -526,7 +527,8 @@ export function PersonaSheet({
   readonly personaId: string;
   readonly open: boolean;
   /** The authoring choices, read once by the screen and lent to every sheet. */
-  readonly form: PersonaForm | null;
+  readonly form: Answer<PersonaForm> | null;
+  readonly reloadForm: () => void;
   readonly role: string | null;
   readonly mayAuthor: boolean;
   readonly whyNot: string | undefined;
@@ -541,6 +543,7 @@ export function PersonaSheet({
   readonly onFork: (persona: Persona) => void;
   readonly onDelete: (persona: Persona) => void;
 }) {
+  const choices = form?.status === "ready" ? form.value : null;
   const now = useMinuteClock();
   const draftNavigation = useDraftNavigation();
   const nameField = useRef<HTMLInputElement>(null);
@@ -603,8 +606,10 @@ export function PersonaSheet({
   }, [answer]);
 
   useEffect(() => {
-    if (answer?.status === "signed-out") window.location.replace("/sign-in");
-  }, [answer]);
+    if (answer?.status === "signed-out" || form?.status === "signed-out") {
+      window.location.replace("/sign-in");
+    }
+  }, [answer, form]);
 
   /**
    * A panel that opens again opens on the record, not on what was left over.
@@ -802,7 +807,7 @@ export function PersonaSheet({
    * panel this is, and the authoring choices have arrived.
    */
   const editable =
-    editing && persona !== null && role !== null && form !== null;
+    editing && persona !== null && role !== null && choices !== null;
 
   /** The head of the panel: what kind of record it is, and which version. */
   function meta(): string {
@@ -853,7 +858,7 @@ export function PersonaSheet({
         </SheetSection>
 
         {shown === null ? <SheetSection label={one.settings === null ? "Default models" : "Project settings"}>
-          <Reads reads={modelReads(models, form)} />
+          <Reads reads={modelReads(models, choices)} />
         </SheetSection> : null}
 
         {(
@@ -996,12 +1001,21 @@ export function PersonaSheet({
       );
     }
 
-    if (editing && role !== null && form === null) {
-      return (
-        <SheetBody ref={bodyRef}>
-          <Loading what="the supported persona models" />
-        </SheetBody>
-      );
+    if (editing && role !== null) {
+      if (form === null || form.status === "signed-out") {
+        return (
+          <SheetBody ref={bodyRef}>
+            <Loading what="the supported persona models" />
+          </SheetBody>
+        );
+      }
+      if (form.status !== "ready") {
+        return (
+          <SheetBody ref={bodyRef}>
+            <Failure message={form.refusal.message} onRetry={reloadForm} />
+          </SheetBody>
+        );
+      }
     }
 
     return (
@@ -1023,7 +1037,7 @@ export function PersonaSheet({
               }
             />
           )}
-          {editable && form !== null ? editBody(held, form) : readBody(one)}
+          {editable && choices !== null ? editBody(held, choices) : readBody(one)}
         </SheetBody>
         {footer(one)}
       </form>
