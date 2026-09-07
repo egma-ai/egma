@@ -380,6 +380,73 @@ describe("an illegal simulation move", () => {
     );
   });
 
+  /**
+   * **The one write a terminal row still accepts**, and the whole of it.
+   *
+   * Grading waits for the agent's own POV of a simulation, and that wait ends
+   * after the row has closed — when the account lands, or when the 30-second
+   * bound expires (ADR-0015 §6). The freeze would otherwise refuse the one
+   * write that says how it ended, so the guard lets `agent_pov` move off null
+   * and nothing else: not a second time, not on a failed row, and never with
+   * another column riding beside it.
+   */
+  it("lets a completed row say how grading's wait for the agent POV ended, once", async () => {
+    const id = await insertSimulation("completed");
+
+    await db.sql("update simulation set agent_pov = $1 where id = $2", [
+      "incomplete",
+      id,
+    ]);
+    const said = await db.sql<{ agent_pov: string | null }>(
+      "select agent_pov from simulation where id = $1",
+      [id],
+    );
+    expect(said.rows[0]?.agent_pov).toBe("incomplete");
+
+    // Said once. A second writer finds it already settled and is refused,
+    // which is what keeps one conversation to one grading handoff.
+    await expect(
+      db.sql("update simulation set agent_pov = $1 where id = $2", [
+        "filed",
+        id,
+      ]),
+    ).rejects.toSatisfy(
+      (error) =>
+        errorCodeOf(error) === POSTGRES_ERROR.raiseException &&
+        String(error).includes("written once"),
+    );
+  });
+
+  it("refuses another column riding in beside the agent-POV write", async () => {
+    const id = await insertSimulation("completed");
+
+    await expect(
+      db.sql(
+        "update simulation set agent_pov = $1, turn_count = 99 where id = $2",
+        ["filed", id],
+      ),
+    ).rejects.toSatisfy(
+      (error) =>
+        errorCodeOf(error) === POSTGRES_ERROR.raiseException &&
+        String(error).includes("written once"),
+    );
+  });
+
+  it("refuses the agent-POV write on a row that never completed", async () => {
+    const id = await insertSimulation("failed");
+
+    await expect(
+      db.sql("update simulation set agent_pov = $1 where id = $2", [
+        "incomplete",
+        id,
+      ]),
+    ).rejects.toSatisfy(
+      (error) =>
+        errorCodeOf(error) === POSTGRES_ERROR.raiseException &&
+        String(error).includes("written once"),
+    );
+  });
+
   it("keeps a canceled-before-claim row unclaimable forever", async () => {
     const id = await insertSimulation("canceled");
 

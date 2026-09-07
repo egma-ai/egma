@@ -42,9 +42,14 @@ BEGIN
 		-- the agent's own POV ended. It is not a fact about the conversation —
 		-- the conversation is over and its record is closed — it is a fact
 		-- about a second account that had not arrived yet when the row closed.
-		-- Off null only, status unchanged, and every other column identical, so
-		-- nothing else can ride in beside it.
-		IF OLD.agent_pov IS NULL
+		-- A completed row only, off null only, status unchanged, and every
+		-- other column identical, so nothing else can ride in beside it. The
+		-- completed-row half repeats what `simulation_agent_pov_only_when_
+		-- completed` says, on purpose: a write the guard would wave through and
+		-- the check would then refuse would answer with the wrong sentence, and
+		-- the sentence is what a reader is given.
+		IF OLD.status = 'completed'
+			AND OLD.agent_pov IS NULL
 			AND NEW.agent_pov IS NOT NULL
 			AND NEW.status = OLD.status
 			AND to_jsonb(NEW) - 'agent_pov' = to_jsonb(OLD) - 'agent_pov'
