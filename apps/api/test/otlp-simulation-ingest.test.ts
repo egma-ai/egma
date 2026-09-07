@@ -1051,6 +1051,18 @@ describe.skipIf(!storage.available)("the simulation grading handoff", () => {
  * backwards into work already paid for.
  */
 describe.skipIf(!storage.available)("a provider_usage span", () => {
+  it("does not let customer OTLP attributes create platform-funded usage", async () => {
+    const before = await countOf("SELECT count() AS n FROM spans WHERE usage_identity_hash != ''");
+    const key = await mintKey(api.app, globex.cookie, "Customer provider-usage forgery", globex.projectId);
+    const body = (await fixture("valid", "voice-provider-usage.json")).replaceAll("cc1000000000001", "fa1000000000001");
+    const response = await post(body, key);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(await countOf("SELECT count() AS n FROM spans WHERE usage_identity_hash != ''")).toBe(before);
+    const rows = await store().rows<{ emitter: string; usage_payment_source: string }>("SELECT emitter, usage_payment_source FROM spans WHERE span_id LIKE 'fa1000000000001%'");
+    expect(rows).toHaveLength(3);
+    for (const row of rows) expect(row).toEqual({ emitter: "agent", usage_payment_source: "" });
+  });
+
   type UsageRow = {
     organization_id: string;
     project_id: string;
@@ -1141,6 +1153,30 @@ describe.skipIf(!storage.available)("a provider_usage span", () => {
     // The write-ahead log replays the same bytes, span ids included, so the
     // second delivery collapses onto the first and nothing is charged twice.
     expect(await usageOf(USAGE_SIMULATION)).toHaveLength(3);
+  });
+
+  it("bounds inference independently while retaining the usual allowance period", async () => {
+    const read = (query = "") => api.app.inject({
+      method: "GET", url: `/api/organization/usage${query}`,
+      headers: { cookie: globex.cookie },
+    });
+    const defaultPeriod = await read();
+    const included = await read("?from=2026-01-01T00:00:00Z&to=2027-01-01T00:00:00Z");
+    const excluded = await read("?from=2027-01-01T00:00:00Z&to=2028-01-01T00:00:00Z");
+    expect(included.statusCode, included.body).toBe(200);
+    expect(included.json().inference).toMatchObject({ amountMicros: 4408, requests: 3 });
+    expect(excluded.json().inference).toMatchObject({ amountMicros: 0, requests: 0 });
+    for (const response of [included, excluded]) {
+      const { inference: _inference, ...period } = response.json();
+      const { inference: _defaultInference, ...expected } = defaultPeriod.json();
+      expect(period).toEqual(expected);
+    }
+    for (const query of [
+      "?from=2026-01-01T00:00:00Z",
+      "?from=bad&to=2027-01-01T00:00:00Z",
+      "?from=2027-01-01T00:00:00Z&to=2026-01-01T00:00:00Z",
+      "?from=2027-01-01T00:00:00Z&to=2027-01-01T00:00:00Z",
+    ]) expect((await read(query)).statusCode).toBe(400);
   });
 
   it("files the span itself under its own kind, like every other span", async () => {

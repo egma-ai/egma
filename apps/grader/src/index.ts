@@ -25,7 +25,16 @@ const log = makeLog(config.logLevel, config.claimant);
 connect({ databaseUrl: config.databaseUrl });
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
 
-if (config.ingestion.store !== undefined) openAcceptance({ settings: config.ingestion, log });
+if (config.ingestion.store !== undefined) {
+  try {
+    openAcceptance({ settings: config.ingestion, log });
+  } catch (cause) {
+    log.error(
+      { err: cause },
+      "usage recovery log could not open; grading continues and direct usage writes remain available",
+    );
+  }
+}
 
 const cloud = await loadCloudBilling(config);
 if (cloud !== undefined) {

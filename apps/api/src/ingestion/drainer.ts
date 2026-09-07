@@ -443,11 +443,18 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     );
   }
 
+  let usagePending = false;
   try {
     spans = await priceUsageSpans(auth, spans);
     segment = { ...segment, records: spans.map(recordFor) };
   } catch (cause) {
-    return waitAndTryAgain(cause, "usage pricing did not finish; its accepted evidence remains pending");
+    // Billing must not hold the conversation. Retain the complete durable
+    // object, while ordinary evidence and its grading handoff continue.
+    waitAndTryAgain(cause, "usage pricing did not finish; its accepted evidence remains pending");
+    usagePending = true;
+    spans = spans.filter((span) => span.usage === undefined);
+    if (spans.length === 0) return false;
+    segment = { ...segment, records: spans.map(recordFor) };
   }
 
   let authoritative: ReadonlySet<string>;
@@ -482,7 +489,7 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     // blocks under the same deduplication token, and the token would then
     // suppress the very rows the replay existed to write. Identity is what makes
     // the repeat free; the token only makes it cheap.
-    await appendSpans(auth, insertable, { segmentId: segment.segmentId });
+    await appendSpans(auth, insertable, { segmentId: usagePending ? `${segment.segmentId}:conversation` : segment.segmentId });
   } catch (cause) {
     if (cause instanceof TraceStoreRefusedError) {
       // Rows the store has looked at and will refuse forever. Retained rather
@@ -509,6 +516,8 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     // repeated forever.
     return classify(cause, "a drained segment's handoffs did not finish");
   }
+
+  if (usagePending) return false;
 
   try {
     await store.delete(key);

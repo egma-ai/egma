@@ -62,10 +62,7 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // budget, and then the identity-only marker that stops the overlap starting
   // a second one. It holds no provider document and expires by itself.
   retell_call_retry: "rcr",
-  // One price on the rate card, and one measured provider request. The usage
-  // record's own identity is `usg_`; the deterministic identity that makes a
-  // resend collapse is a hash and rides its own unique column, because a hash
-  // is neither prefixed nor sortable and could never be one of these.
+  // One immutable price on the rate card. Provider usage lives in ClickHouse.
   rate_card: "rat",
   // Egma Cloud's own four. They are in this tree because one schema serves
   // every deployment — a self-hoster carries them empty — and they follow the

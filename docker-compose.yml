@@ -511,7 +511,7 @@ services:
       EGMA_INGEST_REGION: ${EGMA_INGEST_REGION:-${EGMA_S3_REGION:-}}
       EGMA_INGEST_ACCESS_KEY_ID: ${EGMA_INGEST_ACCESS_KEY_ID:-${EGMA_S3_INGEST_ACCESS_KEY_ID:-}}
       EGMA_INGEST_SECRET_ACCESS_KEY: ${EGMA_INGEST_SECRET_ACCESS_KEY:-${EGMA_S3_INGEST_SECRET_ACCESS_KEY:-}}
-      EGMA_INGESTION_LOG_DIR: /var/lib/egma/grader-ingestion
+      EGMA_GRADER_INGESTION_LOG_DIR: /var/lib/egma/grader-ingestion
       EGMA_GRADER_CLAIMANT: ${EGMA_GRADER_CLAIMANT:-}
       # How many conversations one copy judges at once. It claims only what it
       # has room for, so a burst of finished simulations degrades to a queue
@@ -705,5 +705,6 @@ volumes:
   # a container replacement, which is what makes a restart a recovery rather
   # than a loss; `docker compose down -v` deletes it, and doing that with a
   # backlog in it throws away evidence Egma answered success to.
-  grader-ingestion:
   api-ingestion:
+  # Each grader keeps its own recoverable paid-attempt log.
+  grader-ingestion:

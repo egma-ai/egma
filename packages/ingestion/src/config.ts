@@ -82,7 +82,8 @@ function ingestionStore(
   }
 
   const accessKeyId = environment.EGMA_INGEST_ACCESS_KEY_ID?.trim() || "";
-  const secretAccessKey = environment.EGMA_INGEST_SECRET_ACCESS_KEY?.trim() || "";
+  const secretAccessKey =
+    environment.EGMA_INGEST_SECRET_ACCESS_KEY?.trim() || "";
   const missing = [
     accessKeyId === "" ? "EGMA_INGEST_ACCESS_KEY_ID" : "",
     secretAccessKey === "" ? "EGMA_INGEST_SECRET_ACCESS_KEY" : "",
@@ -98,7 +99,8 @@ function ingestionStore(
     );
   }
 
-  const bucket = environment.EGMA_INGEST_BUCKET?.trim() || DEFAULT_INGEST_BUCKET;
+  const bucket =
+    environment.EGMA_INGEST_BUCKET?.trim() || DEFAULT_INGEST_BUCKET;
   if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(bucket)) {
     throw new Error(
       `EGMA_INGEST_BUCKET must be a bucket name — lower case, 3 to 63 ` +
@@ -139,15 +141,28 @@ function ingestRegion(environment: NodeJS.ProcessEnv, address: URL): string {
 /** Everything the durable ingestion path is told. See `IngestionSettings`. */
 export function loadIngestionSettings(
   environment: NodeJS.ProcessEnv,
-  defaults: { readonly role?: DeploymentRole; readonly logDirectory?: string } = {},
+  defaults: {
+    readonly role?: DeploymentRole;
+    readonly logDirectory?: string;
+  } = {},
 ): IngestionSettings {
   return {
     role: defaults.role ?? deploymentRole(environment),
     store: ingestionStore(environment),
     logDirectory:
-      environment.EGMA_INGESTION_LOG_DIR?.trim() || defaults.logDirectory || DEFAULT_INGESTION_LOG_DIR,
-    logMaxBytes: bound(environment, "EGMA_INGESTION_LOG_MAX_BYTES", 536_870_912),
-    logMaxRecords: bound(environment, "EGMA_INGESTION_LOG_MAX_RECORDS", 200_000),
+      environment.EGMA_INGESTION_LOG_DIR?.trim() ||
+      defaults.logDirectory ||
+      DEFAULT_INGESTION_LOG_DIR,
+    logMaxBytes: bound(
+      environment,
+      "EGMA_INGESTION_LOG_MAX_BYTES",
+      536_870_912,
+    ),
+    logMaxRecords: bound(
+      environment,
+      "EGMA_INGESTION_LOG_MAX_RECORDS",
+      200_000,
+    ),
     flushMilliseconds: bound(
       environment,
       "EGMA_INGESTION_FLUSH_MILLISECONDS",

@@ -67,7 +67,9 @@ function positiveWholeNumber(name: string, fallback: number): number {
 
   const value = Number(written);
   if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`${name} is a positive whole number, and "${written}" is not`);
+    throw new Error(
+      `${name} is a positive whole number, and "${written}" is not`,
+    );
   }
   return value;
 }
@@ -95,9 +97,18 @@ export function loadConfig(): Config {
 
   const config: Config = {
     databaseUrl: required("DATABASE_URL"),
-    ingestion: loadIngestionSettings(process.env, { role: "ingest", logDirectory: "/var/lib/egma/grader-ingestion" }),
+    ingestion: loadIngestionSettings(
+      {
+        ...process.env,
+        EGMA_INGESTION_LOG_DIR:
+          process.env["EGMA_GRADER_INGESTION_LOG_DIR"]?.trim() ||
+          "/var/lib/egma/grader-ingestion",
+      },
+      { role: "ingest" },
+    ),
     clickhouseUrl: required("CLICKHOUSE_URL"),
-    claimant: claimant === undefined || claimant === "" ? defaultClaimant() : claimant,
+    claimant:
+      claimant === undefined || claimant === "" ? defaultClaimant() : claimant,
     capacity: positiveWholeNumber("EGMA_GRADER_CAPACITY", DEFAULT_CAPACITY),
     heartbeatSeconds: positiveWholeNumber(
       "EGMA_GRADER_HEARTBEAT_SECONDS",

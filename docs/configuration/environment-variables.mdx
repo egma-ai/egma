@@ -386,6 +386,7 @@ The bundled stack uses MinIO and does not need them in `.env`.
 | `EGMA_GRADER_LEASE_SECONDS` | Claim lease; default 120 |
 | `EGMA_GRADER_SWEEP_SECONDS` | Backstop queue scan; default 30 |
 | `EGMA_GRADER_LOG_LEVEL` | Grader log level; default `INFO` |
+| `EGMA_GRADER_INGESTION_LOG_DIR` | Persistent paid-usage log; default `/var/lib/egma/grader-ingestion`. Mount a separate writable volume here. The grader does not use the API ingestion log directory. |
 
 ### Egma platform telemetry
 

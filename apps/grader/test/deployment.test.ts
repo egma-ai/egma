@@ -2,7 +2,8 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { loadConfig } from "../src/config.ts";
 
 /**
  * Check environment names against the operator reference, Compose, and README.
@@ -179,4 +180,21 @@ describe("the API process", () => {
     await walk(source);
     expect(offending).toEqual([]);
   });
+});
+
+
+it("keeps the grader WAL on its own volume when the shared environment names the API log", () => {
+  vi.stubEnv("DATABASE_URL", "postgres://unused");
+  vi.stubEnv("CLICKHOUSE_URL", "http://unused:8123");
+  vi.stubEnv("EGMA_INGEST_ENDPOINT", "");
+  vi.stubEnv("EGMA_INGESTION_LOG_DIR", "/a/host/path/for/the/api");
+  vi.stubEnv("EGMA_GRADER_INGESTION_LOG_DIR", "");
+  vi.stubEnv("EGMA_ROLE", "drain");
+  try {
+    expect(loadConfig().ingestion).toMatchObject({
+      role: "ingest", logDirectory: "/var/lib/egma/grader-ingestion",
+    });
+    vi.stubEnv("EGMA_GRADER_INGESTION_LOG_DIR", "/mounted/grader/log");
+    expect(loadConfig().ingestion.logDirectory).toBe("/mounted/grader/log");
+  } finally { vi.unstubAllEnvs(); }
 });

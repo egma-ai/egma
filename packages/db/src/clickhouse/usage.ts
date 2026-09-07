@@ -6,4 +6,3 @@ export const USAGE_IDENTITIES = `SELECT organization_id, project_id, trace_id, s
   any(usage_quantities) AS quantities
  FROM spans WHERE organization_id = {org:String} AND usage_identity_hash != ''
  GROUP BY organization_id, project_id, trace_id, span_id`;
-

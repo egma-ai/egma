@@ -67,9 +67,10 @@ async function conversation(
        (id, run_id, organization_id, project_id, agent_id, connection_id,
         persona_id, persona_version_id, test_id, test_version_id,
         position, modality, connection_type, status, ending_reason,
-        started_at, ended_at, claimed_by, claimed_at, heartbeat_at)
+        started_at, ended_at, claimed_by, claimed_at, heartbeat_at, persona_parameter_values)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'completed',
-             'persona_concluded',$14,$15,'the-simulator',$14,$14)`,
+             'persona_concluded',$14,$15,'the-simulator',$14,$14,
+             (select persona_parameter_values from simulation where run_id = $2 limit 1))`,
     [
       newId("sim"),
       seeded.runId,
@@ -194,7 +195,6 @@ async function aCustomerWhoRan(
     suiteId: String(suite.body.id),
     agentId,
     connectionId,
-    idempotencyKey: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -240,6 +240,7 @@ describe("the organization's usage this period", () => {
   it("answers three allowances, their units and the period's two dates", async () => {
     api = await createApi("organization_usage", {
       retellFetch: RETELL_CHAT_FETCH,
+      traceStore: true,
     });
     const acme = await aCustomerWhoRan("ada@acme.example", "Acme");
 
@@ -294,6 +295,7 @@ describe("the organization's usage this period", () => {
   it("answers zero for a customer who has run nothing", async () => {
     api = await createApi("organization_usage_empty", {
       retellFetch: RETELL_CHAT_FETCH,
+      traceStore: true,
     });
     const acme = await aCustomerWhoRan("ada@acme.example", "Acme");
     const answer = await ask(
@@ -310,6 +312,7 @@ describe("the organization's usage this period", () => {
   it("counts nothing of another customer's", async () => {
     api = await createApi("organization_usage_tenancy", {
       retellFetch: RETELL_CHAT_FETCH,
+      traceStore: true,
     });
     const acme = await aCustomerWhoRan("ada@acme.example", "Acme");
     const globex = await aCustomerWhoRan("bob@globex.example", "Globex");
@@ -339,6 +342,7 @@ describe("the organization's usage this period", () => {
   it("is readable by a viewer, who can change none of it", async () => {
     api = await createApi("organization_usage_viewer", {
       retellFetch: RETELL_CHAT_FETCH,
+      traceStore: true,
     });
     const acme = await aCustomerWhoRan("ada@acme.example", "Acme");
     await conversation(acme, {
@@ -348,8 +352,7 @@ describe("the organization's usage this period", () => {
       seconds: 45,
     }, 301);
 
-    // Demoted to the read-only role, and the number is still theirs to see: a
-    // run that paused for money has to explain itself to whoever started it.
+    // A viewer can read the organization's usage without changing it.
     await api.database.sql(
       "update membership set role = 'viewer' where user_id = $1",
       [acme.customer.userId],
@@ -370,6 +373,7 @@ describe("the organization's usage this period", () => {
   it("refuses a request with no credential", async () => {
     api = await createApi("organization_usage_uncredentialed", {
       retellFetch: RETELL_CHAT_FETCH,
+      traceStore: true,
     });
     const response = await api.app.inject({
       method: "GET",

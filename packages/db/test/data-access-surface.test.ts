@@ -708,6 +708,7 @@ const THE_EVIDENCE_RULES = [
   "refuseOversizeRecord",
   "refuseUnstorableInstant",
   "spanContentHash",
+  "providerUsageSpan",
 ];
 
 describe("the data-access module's surface", () => {
@@ -715,6 +716,8 @@ describe("the data-access module's surface", () => {
     expect(Object.keys(dataAccess).sort()).toEqual(
       [
         ...THE_EVIDENCE_RULES,
+        // Deployment settlement reads an explicitly named account, outside user API scope.
+        "readPlatformUsageTotal",
         ...CONNECTION,
         ...MIGRATIONS,
         ...IDENTITY,

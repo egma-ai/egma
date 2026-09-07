@@ -1,14 +1,43 @@
 import { USAGE_IDENTITIES } from "../clickhouse/usage.ts";
-import { providerUsageSpan, usageEvidenceHash, type ProviderUsageEvidence, type NewUsageRecord, type OrganizationUsage, type RecordedProviderUsage } from "../models/provider-usage.ts";
-export type { ProviderUsageEvidence, NewUsageRecord, OrganizationUsage, RecordedProviderUsage, UsageByModel, UsageIdentity, UsageQuantities } from "../models/provider-usage.ts";
+import {
+  providerUsageSpan,
+  usageEvidenceHash,
+  type ProviderUsageEvidence,
+  type NewUsageRecord,
+  type OrganizationUsage,
+  type RecordedProviderUsage,
+} from "../models/provider-usage.ts";
+export type {
+  ProviderUsageEvidence,
+  NewUsageRecord,
+  OrganizationUsage,
+  RecordedProviderUsage,
+  UsageByModel,
+  UsageIdentity,
+  UsageQuantities,
+} from "../models/provider-usage.ts";
 import { TupleParam } from "@clickhouse/client";
 import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import { newId } from "@egma/ids";
 import { db } from "../client.ts";
 import { traceStore } from "../clickhouse/client.ts";
-import { allowanceTotalsSelection, begunInThePeriod, periodAt, periodUsageFrom, type PeriodUsage } from "../billing/period-usage.ts";
+import {
+  allowanceTotalsSelection,
+  begunInThePeriod,
+  periodAt,
+  periodUsageFrom,
+  type PeriodUsage,
+} from "../billing/period-usage.ts";
 export type { PeriodUsage } from "../billing/period-usage.ts";
-import { billableUsageTypesOf, isUsageType, readRateCard, unitOfQuantities, type RateCardEntry, type UsageType, type UsageUnit } from "../models/rate-card.ts";
+import {
+  billableUsageTypesOf,
+  isUsageType,
+  readRateCard,
+  unitOfQuantities,
+  type RateCardEntry,
+  type UsageType,
+  type UsageUnit,
+} from "../models/rate-card.ts";
 import { PROVIDER_CATALOG } from "../models/catalog.ts";
 import { rateCard } from "../schema/billing.ts";
 import { simulation } from "../schema/runs.ts";
@@ -19,9 +48,16 @@ import { theOrganization, within } from "./within.ts";
 import { appendSpans, type NewSpan } from "./spans.ts";
 
 function requireWriter(auth: AuthContext): void {
-  if (auth.via !== "simulator" && auth.via !== "engine") throw new Error("provider usage requires the trusted simulation or grading claim");
-  if (!auth.projectId) throw new Error("provider usage requires a project-scoped context");
-  authorize(auth, "read", { organizationId: auth.organizationId, projectId: auth.projectId });
+  if (auth.via !== "simulator" && auth.via !== "engine")
+    throw new Error(
+      "provider usage requires the trusted simulation or grading claim",
+    );
+  if (!auth.projectId)
+    throw new Error("provider usage requires a project-scoped context");
+  authorize(auth, "read", {
+    organizationId: auth.organizationId,
+    projectId: auth.projectId,
+  });
 }
 
 /** The `usd_per_million` numeric as Postgres hands it back, exactly. */
@@ -52,7 +88,8 @@ function micros(quantity: number, usdPerMillion: string): number {
   }
   const [whole = "0", fraction = ""] = usdPerMillion.split(".");
   const scale = 10n ** BigInt(fraction.length);
-  const price = BigInt(whole) * scale + BigInt(fraction === "" ? "0" : fraction);
+  const price =
+    BigInt(whole) * scale + BigInt(fraction === "" ? "0" : fraction);
   // The quantity itself can be fractional — seconds of audio are — so it is
   // taken to the same twelve places the price column holds before scaling.
   // Written as a power rather than as twelve zeros, because a plain million
@@ -73,7 +110,9 @@ async function ratesFor(
   const models = [...new Set(records.map((record) => record.model))];
   const latest = records.reduce(
     (newest, record) =>
-      record.occurredAt.getTime() > newest.getTime() ? record.occurredAt : newest,
+      record.occurredAt.getTime() > newest.getTime()
+        ? record.occurredAt
+        : newest,
     new Date(0),
   );
   if (models.length === 0) return [];
@@ -101,7 +140,8 @@ function priceAt(
 ): RateRow | undefined {
   let chosen: RateRow | undefined;
   for (const rate of rates) {
-    if (rate.provider !== record.provider || rate.model !== record.model) continue;
+    if (rate.provider !== record.provider || rate.model !== record.model)
+      continue;
     if (rate.usageType !== usageType) continue;
     if (rate.effectiveFrom.getTime() > record.occurredAt.getTime()) continue;
     if (chosen === undefined || rate.effectiveFrom >= chosen.effectiveFrom) {
@@ -111,31 +151,65 @@ function priceAt(
   return chosen;
 }
 
-
 /** Price at occurrence time; restore committed facts on a replay. */
-export async function priceUsageSpans(auth: AuthContext, spans: readonly NewSpan[]): Promise<NewSpan[]> {
+export async function priceUsageSpans(
+  auth: AuthContext,
+  spans: readonly NewSpan[],
+): Promise<NewSpan[]> {
   const measured = spans.filter((span) => span.usage !== undefined);
   if (measured.length === 0) return [...spans];
   if (!auth.projectId) throw new Error("usage pricing requires a project");
-  const result = await traceStore().query({
-    query: `SELECT trace_id, span_id, usage_evidence FROM spans WHERE organization_id = {org:String} AND project_id = {project:String} AND usage_identity_hash != '' AND (trace_id, span_id) IN {identities:Array(Tuple(String, String))}`,
-    query_params: { org: auth.organizationId, project: auth.projectId, identities: measured.map((span) => new TupleParam([span.traceId, span.spanId])) }, format: "JSONEachRow",
-  });
   const held = new Map<string, ProviderUsageEvidence>();
-  for (const row of await result.json<{ trace_id: string; span_id: string; usage_evidence: string }>()) {
-    const usage = JSON.parse(row.usage_evidence) as ProviderUsageEvidence;
-    const key = `${row.trace_id}/${row.span_id}`;
-    const old = held.get(key);
-    if (old && usageEvidenceHash(old) !== usageEvidenceHash(usage)) throw new Error(`conflicting provider usage for ${key}`);
-    if (!old || usage.receivedAt < old.receivedAt) held.set(key, usage);
+  for (let offset = 0; offset < measured.length; offset += 500) {
+    const result = await traceStore().query({
+      query: `SELECT trace_id, span_id, usage_evidence FROM spans WHERE organization_id = {org:String} AND project_id = {project:String} AND usage_identity_hash != '' AND (trace_id, span_id) IN {identities:Array(Tuple(String, String))}`,
+      query_params: {
+        org: auth.organizationId,
+        project: auth.projectId,
+        identities: measured
+          .slice(offset, offset + 500)
+          .map((span) => new TupleParam([span.traceId, span.spanId])),
+      },
+      format: "JSONEachRow",
+    });
+    for (const row of await result.json<{
+      trace_id: string;
+      span_id: string;
+      usage_evidence: string;
+    }>()) {
+      const usage = JSON.parse(row.usage_evidence) as ProviderUsageEvidence;
+      const key = `${row.trace_id}/${row.span_id}`;
+      const old = held.get(key);
+      if (old && usageEvidenceHash(old) !== usageEvidenceHash(usage))
+        throw new Error(`conflicting provider usage for ${key}`);
+      if (!old || usage.receivedAt < old.receivedAt) held.set(key, usage);
+    }
   }
-  const rates = await ratesFor(measured.filter((span) => !span.usage?.price && !held.has(`${span.traceId}/${span.spanId}`)).map((span) => ({ ...span.usage!, occurredAt: new Date(span.usage!.occurredAt) })));
+  const rates = await ratesFor(
+    measured
+      .filter(
+        (span) =>
+          !span.usage?.price && !held.has(`${span.traceId}/${span.spanId}`),
+      )
+      .map((span) => ({
+        ...span.usage!,
+        occurredAt: new Date(span.usage!.occurredAt),
+      })),
+  );
   return spans.map((span) => {
     if (!span.usage) return span;
     const usage = span.usage;
     const existing = held.get(`${span.traceId}/${span.spanId}`);
     if (existing) {
-      if (usageEvidenceHash(existing, false) !== usageEvidenceHash(usage, false) || (usage.price && usageEvidenceHash(existing) !== usageEvidenceHash(usage))) throw new Error(`conflicting provider usage for ${span.traceId}/${span.spanId}`);
+      if (
+        usageEvidenceHash(existing, false) !==
+          usageEvidenceHash(usage, false) ||
+        (usage.price &&
+          usageEvidenceHash(existing) !== usageEvidenceHash(usage))
+      )
+        throw new Error(
+          `conflicting provider usage for ${span.traceId}/${span.spanId}`,
+        );
       return { ...span, usage: existing };
     }
     if (usage.price) return span;
@@ -143,36 +217,91 @@ export async function priceUsageSpans(auth: AuthContext, spans: readonly NewSpan
     let amountMicros = 0;
     const pricedBy: Record<string, string> = {};
     for (const [type, quantity] of Object.entries(usage.quantities)) {
-      if (!isUsageType(type) || !Number.isFinite(quantity) || quantity < 0) throw new TypeError("invalid provider usage quantity");
+      if (!isUsageType(type) || !Number.isFinite(quantity) || quantity < 0)
+        throw new TypeError("invalid provider usage quantity");
       const rate = priceAt(rates, record, type);
       if (!rate) continue;
       amountMicros += micros(quantity, rate.usdPerMillion);
       pricedBy[type] = rate.id;
     }
-    if (!Number.isSafeInteger(amountMicros)) throw new Error("provider usage amount exceeds exact integer range");
-    return { ...span, usage: { ...usage, price: { amountMicros, pricedBy, unit: unitOfQuantities(usage.quantities) } } };
+    if (!Number.isSafeInteger(amountMicros))
+      throw new Error("provider usage amount exceeds exact integer range");
+    return {
+      ...span,
+      usage: {
+        ...usage,
+        price: {
+          amountMicros,
+          pricedBy,
+          unit: unitOfQuantities(usage.quantities),
+        },
+      },
+    };
   });
 }
 
 /** Direct appends are safe to retry by complete span identity, independently of block deduplication. */
-export async function recordProviderUsage(auth: AuthContext, records: readonly NewUsageRecord[]): Promise<RecordedProviderUsage> {
+export async function recordProviderUsage(
+  auth: AuthContext,
+  records: readonly NewUsageRecord[],
+): Promise<RecordedProviderUsage> {
   requireWriter(auth);
-  const spans = await priceUsageSpans(auth, records.map((record) => providerUsageSpan(record)));
+  const spans = await priceUsageSpans(
+    auth,
+    records.map((record) => providerUsageSpan(record)),
+  );
   await appendSpans(auth, spans);
-  return { stored: spans.length, amountMicros: spans.reduce((total, span) => total + (span.usage?.price?.amountMicros ?? 0), 0) };
+  return {
+    stored: spans.length,
+    amountMicros: spans.reduce(
+      (total, span) => total + (span.usage?.price?.amountMicros ?? 0),
+      0,
+    ),
+  };
 }
 
 /** Organization-wide provider/model totals for the shared settings read. */
-export async function readOrganizationUsage(auth: AuthContext, period: { from: Date; to: Date }): Promise<OrganizationUsage> {
-  authorize(auth, "read", { organizationId: auth.organizationId, projectId: undefined });
+export async function readOrganizationUsage(
+  auth: AuthContext,
+  period: { from: Date; to: Date },
+): Promise<OrganizationUsage> {
+  authorize(auth, "read", {
+    organizationId: auth.organizationId,
+    projectId: undefined,
+  });
   const result = await traceStore().query({
     query: `SELECT provider, model, unit, toString(sum(usage.amount)) AS amount, toString(count()) AS requests, sumMap(usage.quantities) AS quantities, countIf(variants != 1) AS conflicts FROM (${USAGE_IDENTITIES}) AS usage WHERE occurred_at >= fromUnixTimestamp64Milli({from:Int64}) AND occurred_at < fromUnixTimestamp64Milli({to:Int64}) GROUP BY provider, model, unit ORDER BY sum(usage.amount) DESC, provider, model`,
-    query_params: { org: auth.organizationId, from: period.from.getTime(), to: period.to.getTime() }, format: "JSONEachRow",
+    query_params: {
+      org: auth.organizationId,
+      from: period.from.getTime(),
+      to: period.to.getTime(),
+    },
+    format: "JSONEachRow",
   });
-  const rows = await result.json<{ provider: string; model: string; unit: UsageUnit; amount: string; requests: string; quantities: Record<string, number>; conflicts: number }>();
-  if (rows.some((row) => Number(row.conflicts) !== 0)) throw new Error("provider usage contains conflicting immutable identities");
-  const byModel = rows.map((row) => ({ provider: row.provider, model: row.model, unit: row.unit, amountMicros: Number(row.amount), requests: Number(row.requests), quantities: row.quantities }));
-  return { amountMicros: byModel.reduce((sum, row) => sum + row.amountMicros, 0), requests: byModel.reduce((sum, row) => sum + row.requests, 0), byModel };
+  const rows = await result.json<{
+    provider: string;
+    model: string;
+    unit: UsageUnit;
+    amount: string;
+    requests: string;
+    quantities: Record<string, number>;
+    conflicts: number;
+  }>();
+  if (rows.some((row) => Number(row.conflicts) !== 0))
+    throw new Error("provider usage contains conflicting immutable identities");
+  const byModel = rows.map((row) => ({
+    provider: row.provider,
+    model: row.model,
+    unit: row.unit,
+    amountMicros: Number(row.amount),
+    requests: Number(row.requests),
+    quantities: row.quantities,
+  }));
+  return {
+    amountMicros: byModel.reduce((sum, row) => sum + row.amountMicros, 0),
+    requests: byModel.reduce((sum, row) => sum + row.requests, 0),
+    byModel,
+  };
 }
 
 export async function readUsageThisPeriod(
