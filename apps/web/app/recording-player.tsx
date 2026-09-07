@@ -8,39 +8,12 @@ import { offersNothing } from "../lib/recording-refusals.ts";
 import { Notice } from "./ui.tsx";
 
 /**
- * The audio egma recorded of one voice conversation, wherever somebody is
- * reading about it.
+ * Shared recording playback for simulation results and transcript views.
+ * Resolve signed links on demand, retry playback once, and restore position.
+ * Call load() on replacement even if the URL is unchanged.
  *
- * **One component and not two, because the awkward parts are not the markup.**
- * Two surfaces want this: a run's results, where somebody found the conversation
- * whose transcript looks wrong, and one transcript, where somebody is already
- * looking at the turn they doubt. What they share is everything that took a bug
- * to learn — fetching a link rather than carrying one, retrying once when a link
- * has gone stale, saying `load()` out loud because a same-second retry mints a
- * byte-identical URL, and putting the listener back where they were. A second
- * copy of that would drift from the fixes, and the fixes are the file.
- *
- * **What the two surfaces do not share is words**, so words are handed in. A
- * run's results name the persona who called, because that page is about a run
- * and names the persona of every conversation on it. A transcript may be a
- * production exchange nobody simulated, so `persona` names nothing there and the
- * page speaks the transcript's own vocabulary — `human` and `agent` — which is
- * held against the banned list in one file. One sentence for two surfaces would
- * have to be wrong on one of them.
- *
- * Every string this can render comes from those words, with exactly one
- * exception: the line saying a link is being fetched, which is behind
- * `knownToExist` and therefore cannot reach a transcript at all. That is what
- * keeps the transcript surface's copy checkable in one file — any word that
- * could appear there belongs in `RecordingWords`, including the ones only a
- * broken deployment would ever show.
- *
- * A refusal egma writes is shown as its own sentence, which is a **wire**
- * sentence rather than page copy — the same way a run's results have shown one
- * since ticket 02, and the reason a client is given a stable code to branch on
- * and a sentence that improves. Which refusals reach a screen at all is decided
- * by `offersNothing`; the one that says `conversation` out loud is the chat
- * refusal, and a chat is an absence, so it is never one of them.
+ * Callers provide surface-specific labels and whether a recording is known
+ * to exist. The refusal policy distinguishes expected absence from failures.
  */
 
 export type RecordingWords = {
@@ -63,17 +36,8 @@ export type RecordingWords = {
 };
 
 /**
- * What a recording resolves to, or why it did not.
- *
- * There is no "idle": this component is only mounted once somebody could hear
- * something, which is the moment they asked.
- *
- * **The two failures are separate states because they are separate facts.**
- * `unresolved` is egma declining to hand over a link at all. `unplayable` is a
- * link that resolved and a store that then would not serve it twice running:
- * by then a player is on screen, somebody has pressed play, and a control that
- * silently vanished would be worse than the error it was hiding — so that one
- * is always said out loud, on both surfaces.
+ * Keep link-resolution failure separate from playback failure after resolution.
+ * The latter must stay visible once the user has a player to operate.
  */
 type Playable =
   | { readonly status: "resolving" }
@@ -94,51 +58,21 @@ export type RecordingPlayerProps = {
   readonly simulationId: string;
   readonly words: RecordingWords;
   /**
-   * Whether the surface already knows there is a recording to hear.
-   *
-   * A run's results do: the run's own answer says which conversations have one,
-   * so this is mounted only where there is, and a refusal there contradicts
-   * what the same page was just told — worth a sentence, whatever it says.
-   *
-   * A transcript does not. It holds a trace identifier, which says which
-   * simulation this is and nothing about whether that simulation recorded
-   * anything — a chat never can, and a voice conversation whose call never
-   * connected did not. So asking *is* how it finds out, an answer about this
-   * conversation is an answer rather than a fault, and the honest thing to show
-   * for one is nothing at all: not a disabled control, not an error, and not
-   * even the line saying a recording is being looked for, because each of those
-   * implies audio that does not exist.
-   *
-   * It buys silence for that one case and no other. A fault is still said, and
-   * so is a refusal of a link that had already worked — see `hidden` below.
+   * When true, a missing link contradicts the caller's recording metadata and
+   * should be shown. When false, initial lookup can silently confirm expected
+   * absence. Actual faults and failures after successful playback remain visible.
    */
   readonly knownToExist: boolean;
   /**
-   * The project this conversation is in, where the surface is inside one.
-   *
-   * **A run's evidence page names it and a transcript does not**, which is the
-   * same split `knownToExist` draws and for the same reason: one surface is a
-   * page inside a project and the other is the organization's. The recording
-   * route narrows by the acting project, and a session's acting project is the
-   * organization's *first* — so a run in any other project asked for its audio,
-   * was told there is no such conversation, and showed a page with a transcript
-   * on it and no player. The evidence page had loaded perfectly, because its
-   * own read does name the project.
+   * Project context for recording lookup. Both simulation evidence and transcript
+   * pages pass their project so a session default cannot select the wrong one.
    */
   readonly project?: string | undefined;
 };
 
 /**
- * **The page fetches its own link rather than carrying one**, and that is what
- * keeps both of these addresses shareable. A link to a recording is signed,
- * short-lived and bound to one object; baking one into a page's own answer
- * would put a credential in the address bar, make the page stale a quarter of an
- * hour after it loaded, and mean that a run of two hundred conversations minted
- * two hundred links to serve the one somebody wanted.
- *
- * The audio itself goes from the store straight to this element and never
- * through egma, which is what makes seeking cost nothing: dragging the scrubber
- * is a byte range the store serves.
+ * Resolve short-lived signed URLs when needed instead of storing them in
+ * shareable page URLs. The browser fetches audio and seek ranges from storage.
  */
 export function RecordingPlayer({
   simulationId,
@@ -218,18 +152,9 @@ export function RecordingPlayer({
   }, [simulationId, project, asked]);
 
   /**
-   * A replacement link is loaded because it is a replacement, not because it
-   * happens to read differently.
-   *
-   * A signature is stamped to the second, so a link asked for again inside the
-   * same second as the one it replaces comes back **byte for byte identical** —
-   * same instant, same expiry, same signature. React then sets `src` to the
-   * string it already holds, the DOM does not change, no request is made, and
-   * the recovery below quietly does nothing at all. Which is the whole failure
-   * it was written to fix, hiding behind a string comparison.
-   *
-   * So a retry says `load()` out loud. It is skipped on the first resolve,
-   * where the element loads on its own and calling this would fetch twice.
+   * Call load() on retries even if src is unchanged: signatures issued in the
+   * same second may produce identical URLs. Skip it on initial resolution to
+   * avoid a duplicate load.
    */
   useEffect(() => {
     if (playable.status !== "ready" || asked === 0) return;
@@ -276,22 +201,9 @@ export function RecordingPlayer({
         preload="metadata"
         src={playable.url}
         data-recording="true"
-        // A link lives a quarter of an hour and a page left open for an
-        // afternoon outlives it: the next seek comes back refused, and what a
-        // person sees is a scrubber that stopped for no stated reason.
-        //
-        // **One retry, asked for unconditionally, and only the second failure
-        // is believed.** The obvious version of this compares the link's expiry
-        // to `Date.now()` and refreshes only past it — and that is wrong,
-        // because `Date.now()` is the *reader's* clock: a browser a few minutes
-        // slow decides a dead link is still good and never asks again, which is
-        // exactly the failure this is here to fix, now reachable only by people
-        // whose laptops are wrong. A link is cheap and a second one settles it,
-        // so nothing here reasons about time at all.
-        //
-        // It cannot loop: the retry flag is set before asking and cleared only
-        // by a load that worked, so a store that is genuinely gone costs two
-        // requests and then says so.
+        // Retry once after a playback error without relying on the browser clock to
+        // diagnose expiry. Set the retry flag before requesting; reset it only after
+        // a successful load so repeated failures cannot loop.
         onError={() => {
           if (isASecondTry.current) {
             return setPlayable({ status: "unplayable" });
@@ -322,16 +234,8 @@ export function RecordingPlayer({
 }
 
 /**
- * A refusal, said where the player would have been.
- *
- * It keeps the standing-off room the player's own section has, because it
- * stands in the same place: what sits above it is a strip of facts, and a
- * sentence pressed against the edge of one reads as part of it. That spacing
- * used to be a sibling rule in the transcript stylesheet — the notice was
- * spaced by whatever happened to precede it — which meant the same refusal was
- * spaced differently depending on whether the exchange had been graded. The
- * shared notice still owns everything else: the edge, the tone, and telling
- * somebody who is not looking at the screen.
+ * Keep refusal spacing consistent with the player section, independent of
+ * which facts or grades precede it.
  */
 function Said({ children }: { readonly children: string }) {
   return (

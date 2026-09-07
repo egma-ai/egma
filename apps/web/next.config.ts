@@ -1,41 +1,15 @@
 import type { NextConfig } from "next";
 
 /**
- * The API is reached through this process, not around it.
- *
- * The pages and the API answer on one origin in every deployment, so the
- * session cookie is valid for both and there is no cross-origin cookie handling
- * anywhere. The browser only ever talks to the instance it loaded the page
- * from, which is also what makes a self-hoster's login depend on nothing they
- * do not run.
- *
- * **Not only the browser.** A mocked run points a customer's agent at
- * `/mock-tools/…` on this same origin, so the agent's own platform calls this
- * process too. A path this process does not forward is answered by its
- * not-found page, and a page is not an answer a caller's agent can use.
- *
- * `EGMA_API_ORIGIN` is read when the site is built rather than when it starts,
- * because Next resolves rewrites into the build. In Compose that is the API
- * service; running the two processes by hand it is localhost. Neither is a
- * value a self-hoster has to choose.
+ * Proxy API paths through the web origin for browser sessions and agent-platform
+ * mock-tool requests. Next resolves EGMA_API_ORIGIN when building rewrites;
+ * the default is the local API port.
  */
 const api = process.env.EGMA_API_ORIGIN ?? "http://127.0.0.1:3100";
 
 /**
- * Whether this build has to produce a server somebody else will start.
- *
- * `standalone` writes `.next/standalone`: the server plus the one copy of
- * `node_modules` it actually reached for. That directory is the self-hosted
- * product — `apps/web/Dockerfile` copies it into the runtime image and Compose
- * runs `node apps/web/server.js` out of it — and it is the only place the
- * directory is ever read.
- *
- * Vercel is the other place this builds, and it is not that place. It takes
- * `.next` and makes its own functions from it; it has never opened
- * `standalone`. So asking for the directory there only ever bought a slower
- * build and a copy nobody consumed, and from Next 16 it stopped being free:
- * the deployment that follows a clean build now fails. `VERCEL` is set in
- * every Vercel build, so the ask goes where the answer is used.
+ * Produce standalone output for self-hosted runtime images. Vercel builds
+ * use its deployment output instead.
  */
 const forSelfHosting = !process.env.VERCEL;
 
@@ -98,16 +72,8 @@ const config: NextConfig = {
           source: "/api/password-reset/:path*",
           destination: `${api}/api/password-reset/:path*`,
         },
-        // Where a mocked run's tool calls arrive. They come from the agent's
-        // own platform rather than from a browser, and the URLs Egma mints for
-        // them point at this origin — one origin is the design, and Retell
-        // refuses localhost and private addresses for a tool URL, so the mock
-        // endpoint has to answer where the pages answer.
-        //
-        // Without this rule they were answered by this process's not-found
-        // page: every mocked tool call on a live agent got Egma's own HTML 404,
-        // and the agent apologized to the caller for a broken backend on every
-        // call. The endpoint itself is the API's.
+        // Forward mock-tool URLs to the API. Agent platforms call these URLs directly
+        // and must receive the tool response, not Next's HTML not-found page.
         {
           source: "/mock-tools/:path*",
           destination: `${api}/mock-tools/:path*`,

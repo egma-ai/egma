@@ -45,18 +45,7 @@ export function graderOwnerLabel(owner: GraderOwner): string {
   return owner === "egma" ? "Egma" : "Project";
 }
 
-/**
- * There is no `graderTypeLabel`, and that is a decision rather than an
- * omission.
- *
- * "LLM judge" and "Code" were product words for `llm_as_judge` and `code`, and
- * the two never agreed: the API's word is what a person reads in a request, in
- * a webhook and in the library's own contract. **The type now reads as the
- * identifier it is** — the raw value, in the monospace stack, in a chip
- * (developer decision, 2026-08-25). A screen that wants it only has to draw
- * `grader.type`, so a helper that renamed it would be a second name to keep in
- * step with nothing.
- */
+
 
 /** One modality, as the word a person reads on a chip. */
 export function graderModalityLabel(modality: GraderModality): string {

@@ -29,30 +29,8 @@ export type PageNavigationItems = readonly [
 ];
 
 /**
- * The one navigation model for a page below a product section.
- *
- * The shell says which stable product section somebody is in. This module says
- * where the current record sits inside that section: run, then simulation;
- * agent, then connection; Settings, then one settings page. Pages provide only
- * the ordered labels and parent addresses. List navigation, separators,
- * current-page heading and narrow-screen wrapping stay here. Every segment is
- * the same 14px / 400 text; colour and the slash communicate hierarchy without
- * changing the current page's size or weight.
- *
- * Operational controls never belong here. Cancel, Retry, Edit, Archive and
- * Save remain page actions because they change the current record rather than
- * move through its hierarchy.
- *
- * **This one is not built on a kit primitive, and that is the finding rather
- * than an omission.** The structure-and-navigation migration rebuilt its two
- * neighbours — a tab strip became the kit's tabs, a hand-drawn rule became the
- * kit's separator — and looked for the same here. There is nothing to move to:
- * the kit holds no breadcrumb, the trail is an ordered list because that is
- * what a trail is, and the separator between two crumbs is a `/` a reader
- * understands and not a rule. The rest of the file was already on the shared
- * vocabulary — semantic tokens, the fine-pointer hover variant, a coarse-
- * pointer target — and carries no motion, which is what `DESIGN.md` asks of a
- * navigation row. Rewriting it would have been churn with a diff attached.
+ * Render ordered parent links and the current page heading with shared
+ * separators and responsive wrapping. Keep operational actions outside the trail.
  */
 export function PageNavigation({ items }: { readonly items: PageNavigationItems }) {
   return (
@@ -78,17 +56,8 @@ export function PageNavigation({ items }: { readonly items: PageNavigationItems 
           >
             {item.href === undefined ? (
               /*
-               * The last step is the page, so it is the page's `<h1>`. It
-               * carries the line's own type rather than a heading size: the
-               * trail is one line of navigation, and a step in a different
-               * size would say the two halves are different kinds of thing.
-               *
-               * **It truncates only where the bar is one line.** Above 900px
-               * that bar is a fixed 56px strip, so a record name as long as
-               * somebody typed it has to end in an ellipsis or spill over the
-               * strip's own border. Under 900px the bar is `h-auto` and the
-               * trail is the page's first lines, so the name wraps there and
-               * a reader gets all of it.
+               * Use the final segment as h1. Truncate in the fixed-height wide header and
+               * allow wrapping when the narrow header grows with its content.
                */
               <h1
                 className={cn(

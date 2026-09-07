@@ -10,15 +10,8 @@ import { Refused } from "../../../../ui/form.tsx";
 import { Menu } from "../../../../ui/menu.tsx";
 
 /**
- * The controls the Tests screens share: the ⋮ a page carries for itself, and
- * the confirmation that names what is about to go.
- *
- * They are here rather than in the shared set because two screens use them and
- * both are this route's — the promise this file made was that the pair moves to
- * `apps/web/ui/` as soon as a third area grows it. Runs and Running graders did,
- * so the row's own ⋮ and the two panel parts that go with it left on
- * 2026-08-23 and are now `ui/row-menu.tsx`. What is left is the toolbar's ⋮,
- * which no other area draws, and the confirmation these three screens share.
+ * Test-screen toolbar actions and deletion confirmation. Shared row menus
+ * live in ui/row-menu.tsx.
  */
 
 /**

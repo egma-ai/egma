@@ -23,16 +23,7 @@ import type { TestSuite } from "../../../../lib/test-suites.ts";
 import { Field, Refused } from "../../../../ui/form.tsx";
 import { RelativeInstant, useMinuteClock } from "../../../../ui/relative-time.tsx";
 
-/**
- * Where a test suite is created and where it is renamed.
- *
- * **A suite is one short record, so it is written in the side sheet** rather
- * than on a page of its own: the list a person came from stays on screen behind
- * it, which is the arrangement `DESIGN.md` records for agents, connections,
- * personas and tests alike. Both boards (`94I-0`, `9FG-0`) draw the same panel
- * with the same one field; what differs is the title, the sentence under the
- * field, and whether there is anything to delete yet.
- */
+/** Create and rename suites in sheets over the list using the same name field. */
 
 /**
  * The hint under the field, which is the only place either sheet explains

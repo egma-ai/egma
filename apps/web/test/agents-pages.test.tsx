@@ -21,15 +21,9 @@ import {
 } from "./platform-request.ts";
 
 /**
- * The Agents and Connections pages, rendered and driven.
- *
- * They are here in the fast lane rather than in the one real-browser journey
- * because none of what they prove needs a browser: a form drawn from what the
- * server said the connection options are, a control a viewer may not use being
- * genuinely disabled, a stale save keeping the typing it was refused for, and a
- * page that says `unknown` where nothing has been measured. Each drives the real
- * component the way somebody with a keyboard would and reads what the DOM then
- * says; nothing here asserts that a source file contains a string.
+ * Drive agent and connection components in jsdom: catalog-based fields, viewer
+ * restrictions, retained drafts after refused saves, and unknown measurements.
+ * These tests do not prove browser layout or server authorization.
  */
 
 const routed = vi.hoisted(() => ({
@@ -571,17 +565,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/**
- * The agent editors use the same layout primitive as every other product form.
- *
- * It asks the elements what they are rather than what they are painted with.
- * A class name used to be the fingerprint of a shared component, because a CSS
- * Module hashes one and nothing else can produce it. On the Tailwind base a
- * class list is copyable, so a hand-rolled `<div className="flex gap-3">` would
- * pass a class check — and the migration itself failed one, which is the other
- * half of the same problem. `data-slot` is what `Form` and `FormActions` put on
- * the elements they draw, and a page that stopped using them fails this.
- */
+/** Check the shared form slots rather than copied utility classes. */
 function expectSheetLayout(action: HTMLElement): void {
   const form = action.closest("form");
   expect(form).not.toBeNull();
