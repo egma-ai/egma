@@ -165,6 +165,63 @@ function theCallWithAFalseStart(): {
   };
 }
 
+/**
+ * The same shape on a word-bounded trace: no turn carries speech, and the
+ * caller's second turn opens while the agent's is still running — the caller
+ * talking over the agent, which on such a trace is their own turn.
+ */
+function theWordBoundedCallWithABargeIn(): {
+  turns: readonly TraceSpan[];
+  spans: readonly TraceSpan[];
+} {
+  return {
+    turns: [
+      span({
+        spanId: "human_first",
+        parentSpanId: "session",
+        name: "user_turn",
+        kind: "turn:human",
+        from: 40_000,
+        to: 50_000,
+      }),
+      span({
+        spanId: "agent_first",
+        parentSpanId: "session",
+        name: "agent_turn",
+        kind: "turn:agent",
+        from: 50_500,
+        to: 52_690,
+      }),
+      span({
+        spanId: "human_barge_in",
+        parentSpanId: "session",
+        name: "user_turn",
+        kind: "turn:human",
+        from: 52_000,
+        to: 52_970,
+      }),
+      span({
+        spanId: "agent_second",
+        parentSpanId: "session",
+        name: "agent_turn",
+        kind: "turn:agent",
+        from: 53_500,
+        to: 60_000,
+      }),
+    ],
+    spans: [
+      span({
+        spanId: "session",
+        parentSpanId: "",
+        name: "call",
+        kind: "root",
+        from: 0,
+        to: 70_000,
+      }),
+    ],
+  };
+}
+
 describe("a caller's sentence the transcriber delivered in two pieces", () => {
   it("measures the one wait the caller took, past the reply the second piece cut off", () => {
     const turnLatency = measuresFromSpans(theCallWithAFalseStart()).find(
@@ -184,5 +241,16 @@ describe("a caller's sentence the transcriber delivered in two pieces", () => {
     expect(turnLatency?.samples.map((one) => one.spanId)).not.toContain(
       "false_start_speech",
     );
+  });
+
+  it("reads no continuation on a word-bounded trace, where a turn opening inside the agent's is the caller talking over it", () => {
+    const turnLatency = measuresFromSpans(
+      theWordBoundedCallWithABargeIn(),
+    ).find((one) => one.measure === "turn_response_latency");
+
+    expect(turnLatency?.samples).toEqual([
+      { value: 500, spanId: "agent_first" },
+      { value: 530, spanId: "agent_second" },
+    ]);
   });
 });

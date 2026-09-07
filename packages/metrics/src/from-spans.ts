@@ -796,7 +796,7 @@ function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
     // The rest of the previous utterance is not a question of its own, so it
     // opens no wait: the wait it belongs to was opened by the turn that carried
     // the caller's speech, and is measured there.
-    if (isContinuation(turns, at)) continue;
+    if (isContinuation(turns, at, traceHasNoSpeakingSpans)) continue;
     const answered = answeringSpeech(turns, at, traceHasNoSpeakingSpans);
     if (answered === undefined) continue;
     const latency = milliseconds(answered.startedAt - stoppedSpeaking(turn));
@@ -912,14 +912,14 @@ function answeringSpeech(
     const turn = turns[next];
     if (turn === undefined) continue;
     if (turn.kind === HUMAN_TURN) {
-      if (isContinuation(turns, next)) continue;
+      if (isContinuation(turns, next, traceHasNoSpeakingSpans)) continue;
       return traceHasNoSpeakingSpans ? silentAnswer : undefined;
     }
     if (turn.kind !== AGENT_TURN) continue;
     // A false start — the reply the turn after it cut off. It answered nothing,
     // so it is neither the speech that ends the wait nor the silent turn that
     // stands in for one.
-    if (isContinuation(turns, next + 1)) continue;
+    if (isContinuation(turns, next + 1, traceHasNoSpeakingSpans)) continue;
     const speech = turn.speech[0];
     if (speech !== undefined) return speech;
     silentAnswer ??= { startedAt: turn.startedAt, spanId: turn.spanId };
@@ -946,8 +946,19 @@ function answeringSpeech(
  * turn is the one immediately before it in start order, because that is the
  * turn the late words cut off; where a human turn sits there instead, the
  * caller genuinely spoke twice and the second turn is their own.
+ *
+ * **A trace that records no speech for anyone says nothing by one turn's
+ * missing speech.** On Retell's word-bounded turns every human turn is
+ * speechless, so a human turn that opens inside the agent's turn there is the
+ * caller talking over the agent — their own turn, measured as one — and no
+ * continuation is ever read on such a trace.
  */
-function isContinuation(turns: readonly TimedSpan[], at: number): boolean {
+function isContinuation(
+  turns: readonly TimedSpan[],
+  at: number,
+  traceHasNoSpeakingSpans: boolean,
+): boolean {
+  if (traceHasNoSpeakingSpans) return false;
   const turn = turns[at];
   if (turn === undefined || turn.kind !== HUMAN_TURN) return false;
   if (turn.speech.length > 0) return false;
