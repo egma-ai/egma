@@ -1,3 +1,4 @@
+import { startInferenceSettlementJob } from "./settlement.ts";
 import type { FastifyInstance } from "fastify";
 
 import { loadCloudBilling } from "./load.ts";
@@ -27,12 +28,16 @@ export async function loadApiBilling(settings: ApiBillingSettings) {
     routes: (
       app: FastifyInstance,
       options: Pick<BillingRoutesOptions, "contextOf">,
-    ) => loaded.routes(app, { ...options, stripe }),
+    ) => loaded.routes(app, { ...options, ...(stripe.hasWebhookSecret ? { stripe } : {}) }),
     webhookRoutes: stripe.hasWebhookSecret
       ? (app: FastifyInstance) => billingWebhookRoutes(app, { stripe })
       : undefined,
     seededPlans: loaded.seededPlans,
     caughtUp: loaded.caughtUp,
-    startMeterJob: (log: MeterLog) => startOverageMeterJob({ gateway: stripe, log }),
+    startMeterJob: (log: MeterLog) => {
+      const inference = startInferenceSettlementJob(log);
+      const overage = startOverageMeterJob({ gateway: stripe, log });
+      return { stop() { inference.stop(); overage.stop(); } };
+    },
   };
 }

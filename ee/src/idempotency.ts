@@ -1,27 +1,13 @@
-/**
- * What makes a movement of an inference balance happen at most once.
- *
- * **The keys are derived here and nowhere else**, for the reason a usage
- * record's deterministic identity is derived in one place: a second derivation
- * is a second answer to "is this the same movement", and the two would be
- * found disagreeing by a customer whose money moved twice rather than by a
- * test. Nothing here reaches a store — a fact goes in, a string comes out —
- * and the unique index on `cloud_ledger_entry.idempotency_key` is what turns
- * the string into the guarantee.
- *
- * Each key names the thing that caused the movement rather than the movement,
- * so a replay of the cause writes nothing: an organization for its one welcome
- * credit, a usage record for its one charge.
- */
+/** Permanent ledger keys identify the organization, interval or Checkout payment. */
 
 /** The key a welcome credit is written under. One per organization, forever. */
 export function welcomeCreditKey(organizationId: string): string {
   return `welcome_credit:${organizationId}`;
 }
 
-/** The key an inference charge is written under. One per usage record. */
-export function inferenceChargeKey(usageRecordId: string): string {
-  return `inference_charge:${usageRecordId}`;
+/** The key an inference charge is written under. One per organization and settlement interval. */
+export function inferenceChargeKey(organizationId: string, start: Date, end: Date): string {
+  return `inference_charge:${organizationId}:${start.toISOString()}:${end.toISOString()}`;
 }
 
 /**
@@ -29,9 +15,7 @@ export function inferenceChargeKey(usageRecordId: string): string {
  *
  * The session is what caused the movement, so a webhook Stripe redelivers —
  * and Stripe redelivers on its own schedule until Egma answers — writes
- * nothing the second time. The processed-event table stops the same *event*
- * twice; this stops the same *payment* twice however many event ids it arrives
- * under.
+ * nothing the second time, regardless of which event id carries it.
  */
 export function purchasedCreditKey(sessionId: string): string {
   return `purchased_credit:${sessionId}`;

@@ -6,7 +6,7 @@ import {
 } from "@egma/db";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { readBillingOverview, type CloudPlan } from "./access/index.ts";
+import { InvalidLedgerCursorError, readBillingOverview, readBillingLedger, type CloudPlan } from "./access/index.ts";
 import {
   BillingStateError,
   CREDIT_AMOUNTS_MICROS,
@@ -152,7 +152,7 @@ export async function billingRoutes(
 
   app.get(BILLING_PATH, async (request, reply) => {
     const auth = options.contextOf(request);
-    const { account, plan, period, charges, mayManageBilling } =
+    const { account, plan, period, usage, ledger, mayManageBilling } =
       await readBillingOverview(auth, now());
 
     return reply.send({
@@ -167,18 +167,17 @@ export async function billingRoutes(
           kind,
           unit: ALLOWANCE_UNITS[kind],
           allowed: allowanceOf(plan, kind),
+          used: usage.used[kind],
+          overageMicrosPerMinute: kind === "phone_minutes" ? plan.phoneOverageMicrosPerMinute
+            : kind === "web_call_minutes" ? plan.webCallOverageMicrosPerMinute : 0,
         })),
       },
       balanceMicros: account.balanceMicros,
       periodStartedAt: period.startedAt.toISOString(),
       resetsAt: period.resetsAt.toISOString(),
       mayManageBilling,
-      charges: charges.map((charge) => ({
-        provider: charge.provider,
-        model: charge.model,
-        requests: charge.requests,
-        amountMicros: charge.amountMicros,
-      })),
+      usageStartedAt: new Date(Math.max(period.startedAt.getTime(), account.activatedAt.getTime())).toISOString(),
+      ledger,
       /**
        * What an admin may do here, and the amounts the picker offers.
        *
@@ -188,12 +187,24 @@ export async function billingRoutes(
        * what the route would refuse and says the same numbers.
        */
       actions: {
-        available: stripe !== undefined,
+        available: stripe?.hasWebhookSecret === true,
         creditAmountsMicros: [...CREDIT_AMOUNTS_MICROS],
         smallestCreditMicros: SMALLEST_CREDIT_MICROS,
         largestCreditMicros: LARGEST_CREDIT_MICROS,
       },
     });
+  });
+
+  app.get(`${BILLING_PATH}/ledger`, async (request, reply) => {
+    const query = request.query as { cursor?: unknown };
+    if (query.cursor !== undefined && typeof query.cursor !== "string") {
+      return refuse(reply, 400, "invalid_request", "Invalid ledger cursor.");
+    }
+    try { return reply.send(await readBillingLedger(options.contextOf(request), query.cursor)); }
+    catch (fault) {
+      if (fault instanceof InvalidLedgerCursorError) return refuse(reply, 400, "invalid_request", "Invalid ledger cursor.");
+      throw fault;
+    }
   });
 
   if (stripe === undefined) return;

@@ -164,43 +164,14 @@ const DEPLOYMENT_CONFIGURING = [
   "recordStripePlanObjects",
 ];
 
-/**
- * The exports of the **second** fenced home that answer the two billing ports.
- *
- * **They are Egma's own books about a customer, never a customer's data**, and
- * that is the whole of why they take an organization id where everything else
- * takes an `AuthContext`. The ports' shapes are fixed in shared code and
- * neither carries one: `mayStart` is handed an organization and a set of
- * allowance kinds, and a usage sink is handed rows Egma itself has just
- * written. There is no person on either path — a run start, a claim batch and
- * a stored usage record are each Egma asking itself a question about money it
- * is owed or has spent — so there is no honest context to require, and forging
- * one would be worse than naming the exception.
- *
- * What keeps it safe is not mechanical and is written where the functions
- * live: each reads or writes only `cloud_` tables and the period aggregate
- * over the organization's own simulations, and no route hands one a caller's
- * input. Every organization id that reaches them comes from a claim, from a
- * run start's own `AuthContext`, or off a row Egma wrote.
- *
- * **The fourth name is the catch-up behind the usage sink, and it takes
- * nothing at all.** A sink may fail without failing the write that stored the
- * record, so `sweepUnchargedUsage` reads the deployment's own stored records
- * that carry no charge and puts them through `chargeForStoredUsage`. There is
- * no customer to name it — "every record nobody has charged" is not a question
- * about one — and taking no parameter is what keeps that true: the day
- * somebody gives it one, this name has to be moved or the rule reconsidered.
- *
- * **This list belongs to `ee/` alone.** The rule refuses these names on the
- * shared surface, so the exemption cannot be borrowed by moving a function
- * into `packages/db/src/access/index.ts`. A fifth name here is a decision
- * somebody has to make on purpose.
- */
+/** Trusted billing hooks and collectors use organization IDs resolved by the product. */
 const BILLING_PORTS = [
   "openBillingAccount",
   "readEntitlementFacts",
-  "chargeForStoredUsage",
-  "sweepUnchargedUsage",
+  "createBillingAccount",
+  "activateBilling",
+  "settleInference",
+  "settleInferenceForOrganization",
 ];
 
 /**

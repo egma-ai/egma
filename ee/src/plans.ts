@@ -46,6 +46,7 @@ export type PlanEntry = {
 /** The whole file: the plans, and the credit every organization starts with. */
 export type PlanCatalog = {
   readonly welcomeCreditMicros: number;
+  readonly chargingIntervalSeconds: number;
   readonly plans: readonly PlanEntry[];
 };
 
@@ -92,7 +93,11 @@ export async function readPlanCatalog(
     throw new Error(`${file} states one plan code twice`);
   }
 
-  return { welcomeCreditMicros, plans };
+  const chargingIntervalSeconds = read["chargingIntervalSeconds"];
+  if (typeof chargingIntervalSeconds !== "number" || !Number.isSafeInteger(chargingIntervalSeconds) || chargingIntervalSeconds <= 0) {
+    throw new Error(`${file} needs a positive whole charging interval`);
+  }
+  return { welcomeCreditMicros, chargingIntervalSeconds, plans };
 }
 
 function planFrom(read: Record<string, unknown>, file: string): PlanEntry {

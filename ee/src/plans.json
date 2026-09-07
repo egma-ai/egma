@@ -1,20 +1,7 @@
 {
   "note": [
-    "The plans Egma Cloud sells, and the one-time welcome credit every",
-    "organization receives. Written into cloud_plan on boot, the way the rate",
-    "card is written into rate_card, so a price change is a row change and not",
-    "a deploy.",
-    "",
-    "Money is in millionths of a US dollar, the unit every amount in this",
-    "product is counted in: $50.00 is 50000000, $0.05 is 50000.",
-    "",
-    "An allowance of null is unlimited. Zero would mean none at all, which is",
-    "the opposite, so the absence is written as an absence.",
-    "",
-    "The two Pro overage prices are placeholders confirmed as placeholders by",
-    "the founder on 2026-09-07: $0.05 a phone minute and $0.01 a web-call",
-    "minute, until they are set. Hobby has no overage — it pauses — so its two",
-    "prices are zero and nothing reads them."
+    "Money is in millionths of a US dollar. Null allowance means unlimited.",
+    "The inference settlement interval is in seconds."
   ],
   "welcomeCreditMicros": 5000000,
   "plans": [
@@ -36,7 +23,8 @@
       "webCallMinutes": 5000,
       "phoneMinutes": 2000,
       "webCallOverageMicrosPerMinute": 10000,
-      "phoneOverageMicrosPerMinute": 50000
+      "phoneOverageMicrosPerMinute": 20000
     }
-  ]
+  ],
+  "chargingIntervalSeconds": 300
 }

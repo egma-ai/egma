@@ -1,24 +1,8 @@
-/**
- * The cloud data-access boundary: the second fenced home.
- *
- * Everything that reads or writes a `cloud_` table lives behind this file, on
- * the same terms `packages/db/src/access/index.ts` sets for the shared
- * tables — an `AuthContext` first on every call a person makes, tenancy
- * predicates built here rather than by a caller, and the query interface
- * reached through the one export `@egma/db` fences to this directory.
- *
- * Three exports take an organization id instead of a context, and all three
- * are named in the lint rule that enforces the rest: they answer the two
- * billing ports, whose shapes are fixed in shared code and neither of which
- * carries a person. A run start, a claim batch and a stored usage record are
- * each Egma asking itself about money it is owed or has spent.
- *
- * A fourth is named there and takes nothing at all: the sweep that charges the
- * stored records a failed sink never charged. It walks the deployment's own
- * unpaid records, so there is no customer to name it and no context to carry.
- */
+/** Cloud account, money and Stripe access. Person-facing calls carry AuthContext. */
 
 export {
+  activateBilling,
+  createBillingAccount,
   openBillingAccount,
   readBillingOverview,
   readEntitlementFacts,
@@ -28,13 +12,14 @@ export {
 } from "./accounts.ts";
 
 export {
-  MOST_RECORDS_SWEPT_AT_ONCE,
-  chargeForStoredUsage,
+  InvalidLedgerCursorError,
   readLedgerBalance,
-  sweepUnchargedUsage,
-  type ChargedUsage,
-  type PeriodCharge,
-  type SweptUsage,
+  readBillingLedger,
+  settleInference,
+  settleInferenceForOrganization,
+  type SettledUsage,
+  type BillingLedgerEntry,
+  type BillingLedgerPage,
 } from "./ledger.ts";
 
 export { seedCloudPlans, type CloudPlan, type SeededPlans } from "./plans.ts";

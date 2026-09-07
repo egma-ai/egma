@@ -24,6 +24,7 @@ export {
   ProjectOutsideOrganizationError,
   ProjectSlugTakenError,
   RunWriteRefusedError,
+  FundingRefusedError,
   TestMovedOnError,
   TraceStoreRefusedError,
   UnprocessableInputError,

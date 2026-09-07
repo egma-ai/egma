@@ -5,25 +5,7 @@ import {
 } from "@egma/db";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
-/**
- * Which billing adapter this deployment runs on, chosen once at boot.
- *
- * **The one place in the open product that names the commercially licensed
- * package**, and it names it through a dynamic `import()` taken only when a
- * Stripe secret is set. A self-hoster's process never evaluates that line, so
- * `@egma/ee` is never loaded, and the product is exactly the product. Shared
- * code — `packages/db` and everything under it — never mentions `ee/` at all;
- * this is one layer out, which is the whole reason the selection moved here.
- *
- * **Nothing here asks whether this deployment is Egma Cloud.** The setting is
- * the selection. A self-hoster who names the same secret gets the same
- * billing, which is what makes billing a hosted service rather than a
- * cloud-only feature (ADR-0024).
- *
- * **A failure to load is a boot failure, out loud.** An operator who set a
- * Stripe key expects to be charging, and a deployment that took the key and
- * billed nobody is the worse of the two failures by a long way.
- */
+/** Load the optional adapter only with a Stripe key. Billing faults allow boot. */
 
 /**
  * The Billing section's routes, as the API sees them.
@@ -73,8 +55,7 @@ export type CloudBilling = {
    */
   readonly seededPlans: readonly string[];
   /**
-   * What the boot's catch-up charged the inference balance for: the stored
-   * usage records a failed usage sink never charged.
+   * Eligible usage collected from the cumulative snapshot during boot.
    *
    * Zero on every ordinary boot. Anything else is a delivery that was lost
    * before this process started, collected late, and worth a line in the log
@@ -110,7 +91,12 @@ export async function loadCloudBilling(
   if (!billingIsConfigured(settings)) return undefined;
 
   // Resolve the optional package only at runtime, after billing is selected.
-  const packageName: string = "@egma/ee";
-  const billing: BillingModule = await import(packageName);
-  return billing.loadApiBilling(settings);
+  try {
+    const packageName: string = "@egma/ee";
+    const billing: BillingModule = await import(packageName);
+    return await billing.loadApiBilling(settings);
+  } catch (fault) {
+    console.error("Billing could not load; customer work continues", fault);
+    return undefined;
+  }
 }

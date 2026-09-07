@@ -1,3 +1,4 @@
+import { billing } from "../billing/ports.ts";
 import { newId } from "@egma/ids";
 
 import { db, type Queryable } from "../client.ts";
@@ -81,6 +82,12 @@ export async function provisionOrganization(
       name: input.organizationName,
       slug: input.organizationSlug,
     });
+
+    try {
+      await tx.transaction((billingTx) => billing().organizationCreated(billingTx, organizationId));
+    } catch (fault) {
+      console.error("Billing account creation failed; organization creation continues", fault);
+    }
 
     // The one project factory, on the same terms an admin's Settings create
     // gets: the row and its seeded grader. Signing up and creating a second

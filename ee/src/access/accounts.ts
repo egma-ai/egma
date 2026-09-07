@@ -13,45 +13,32 @@ import {
   type PeriodUsage,
   type Queryable,
 } from "@egma/db";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, or, sql, sum } from "drizzle-orm";
 
 import { welcomeCreditKey } from "../idempotency.ts";
 import { readPlanCatalog, type PlanCatalog } from "../plans.ts";
-import { periodChargesOf, type PeriodCharge } from "./ledger.ts";
+import { readBillingLedger, type BillingLedgerPage } from "./ledger.ts";
 import { readPlan, type CloudPlan } from "./plans.ts";
 
-const { cloudBillingAccount, cloudLedgerEntry, organization, simulation } = schema;
+const {
+  cloudBillingAccount,
+  cloudLedgerEntry,
+  cloudPlan,
+  organization,
+  simulation,
+} = schema;
 
-/**
- * One organization's billing account, and the welcome credit it starts with.
- *
- * **The account is created lazily, on the first question anybody asks about
- * this customer's money.** There is no organization-created hook to hang it
- * on — the open product has no seam that fires when a customer appears, and
- * adding one would put a cloud concern in the signup path of every self-hosted
- * deployment. Lazily is also the stronger rule: an account that exists because
- * somebody asked cannot be missing for a customer who was created before
- * billing was switched on.
- *
- * **A second welcome credit is impossible, and two things make it so.** The
- * account has a unique index on the organization, so two creations racing each
- * other leave one row; and the ledger row is keyed on the organization, so
- * even a deleted-and-recreated account cannot write a second credit while the
- * old row survives. The code only has to notice which of the two it was.
- */
-
-/** One billing account, as everything here reads it. */
 export type BillingAccount = {
   readonly id: string;
   readonly organizationId: string;
   readonly planCode: "hobby" | "pro";
-  /** When this customer's month turns over. */
   readonly periodAnchor: Date;
+  readonly activatedAt: Date;
   readonly stripeCustomerId: string | null;
   readonly stripeSubscriptionId: string | null;
   readonly stripeSubscriptionStatus: string | null;
-  /** The inference balance in millionths of a US dollar. Signed. */
   readonly balanceMicros: number;
+  readonly settlementFailedAt: Date | null;
 };
 
 const ACCOUNT_COLUMNS = {
@@ -59,24 +46,13 @@ const ACCOUNT_COLUMNS = {
   organizationId: cloudBillingAccount.organizationId,
   planCode: cloudBillingAccount.planCode,
   periodAnchor: cloudBillingAccount.periodAnchor,
+  activatedAt: cloudBillingAccount.activatedAt,
   stripeCustomerId: cloudBillingAccount.stripeCustomerId,
   stripeSubscriptionId: cloudBillingAccount.stripeSubscriptionId,
   stripeSubscriptionStatus: cloudBillingAccount.stripeSubscriptionStatus,
   balanceMicros: cloudBillingAccount.balanceMicros,
+  settlementFailedAt: cloudBillingAccount.settlementFailedAt,
 } as const;
-
-function accountFrom(row: {
-  readonly id: string;
-  readonly organizationId: string;
-  readonly planCode: string;
-  readonly periodAnchor: Date;
-  readonly stripeCustomerId: string | null;
-  readonly stripeSubscriptionId: string | null;
-  readonly stripeSubscriptionStatus: string | null;
-  readonly balanceMicros: number;
-}): BillingAccount {
-  return { ...row, planCode: row.planCode === "pro" ? "pro" : "hobby" };
-}
 
 async function accountRow(
   on: Queryable,
@@ -87,119 +63,148 @@ async function accountRow(
     .from(cloudBillingAccount)
     .where(eq(cloudBillingAccount.organizationId, organizationId))
     .limit(1);
-  return row === undefined ? undefined : accountFrom(row);
+  if (row === undefined) return undefined;
+  if (row.planCode !== "hobby" && row.planCode !== "pro")
+    throw new Error("Unknown billing plan");
+  return { ...row, planCode: row.planCode };
 }
 
-/**
- * This organization's account, created with its welcome credit if it has none.
- *
- * **One transaction, and the balance is written with the ledger row.** The
- * materialised balance is a cache of the sum of the ledger, so the only safe
- * moment to set it is the moment the row it caches is written. Nothing here
- * reads the sum back: a cache proved by a nightly job is the design, and a
- * read-back would be a second answer.
- */
+/** Record the deployment cutoff once. Plan seeding never changes this field. */
+export async function activateBilling(at = new Date()): Promise<Date> {
+  const [row] = await fencedDatabase()
+    .update(cloudPlan)
+    .set({
+      billingActivatedAt: sql`coalesce(${cloudPlan.billingActivatedAt}, ${at})`,
+    })
+    .where(eq(cloudPlan.code, "hobby"))
+    .returning({ at: cloudPlan.billingActivatedAt });
+  if (row?.at === null || row?.at === undefined)
+    throw new Error("Billing activation needs the Hobby plan");
+  const organizations = await fencedDatabase()
+    .select({ id: organization.id })
+    .from(organization)
+    .leftJoin(
+      cloudBillingAccount,
+      eq(cloudBillingAccount.organizationId, organization.id),
+    )
+    .leftJoin(
+      cloudLedgerEntry,
+      and(
+        eq(cloudLedgerEntry.organizationId, organization.id),
+        eq(cloudLedgerEntry.kind, "welcome_credit"),
+      ),
+    )
+    .where(or(isNull(cloudBillingAccount.id), isNull(cloudLedgerEntry.id)));
+  const catalog = await readPlanCatalog();
+  for (const customer of organizations) {
+    try {
+      await fencedDatabase().transaction((tx) =>
+        createBillingAccount(tx, customer.id, catalog),
+      );
+    } catch (fault) {
+      console.error(
+        "Billing account repair failed; other organizations continue",
+        { organizationId: customer.id, fault },
+      );
+    }
+  }
+  return row.at;
+}
+
+/** Create or repair the account and missing welcome grant on the caller's transaction. */
+export async function createBillingAccount(
+  on: Queryable,
+  organizationId: string,
+  catalog: PlanCatalog,
+): Promise<BillingAccount> {
+  const [cutoff] = await on
+    .select({ at: cloudPlan.billingActivatedAt })
+    .from(cloudPlan)
+    .where(eq(cloudPlan.code, "hobby"));
+  if (cutoff?.at === undefined || cutoff.at === null)
+    throw new Error("Billing has no recorded activation cutoff");
+  const [customer] = await on
+    .select({ createdAt: organization.createdAt })
+    .from(organization)
+    .where(eq(organization.id, organizationId));
+  if (customer === undefined)
+    throw new Error("Billing organization does not exist");
+  const activatedAt = new Date(
+    Math.max(customer.createdAt.getTime(), cutoff.at.getTime()),
+  );
+  // Existing ledger money survives account repair; only inference charges define collection progress.
+  const [balance] = await on
+    .select({ total: sum(cloudLedgerEntry.amountMicros) })
+    .from(cloudLedgerEntry)
+    .where(eq(cloudLedgerEntry.organizationId, organizationId));
+  await on
+    .insert(cloudBillingAccount)
+    .values({
+      id: newId("cba"),
+      organizationId,
+      planCode: "hobby",
+      periodAnchor: customer.createdAt,
+      activatedAt,
+      balanceMicros: Number(balance?.total ?? 0),
+    })
+    .onConflictDoNothing({ target: cloudBillingAccount.organizationId });
+  await on
+    .select({ id: cloudBillingAccount.id })
+    .from(cloudBillingAccount)
+    .where(eq(cloudBillingAccount.organizationId, organizationId))
+    .for("update");
+  const [welcome] = await on
+    .select({ id: cloudLedgerEntry.id })
+    .from(cloudLedgerEntry)
+    .where(
+      and(
+        eq(cloudLedgerEntry.organizationId, organizationId),
+        eq(cloudLedgerEntry.kind, "welcome_credit"),
+      ),
+    )
+    .limit(1);
+  const [granted] =
+    welcome !== undefined
+      ? []
+      : await on
+          .insert(cloudLedgerEntry)
+          .values({
+            id: newId("cle"),
+            organizationId,
+            kind: "welcome_credit",
+            amountMicros: catalog.welcomeCreditMicros,
+            referenceKind: "organization",
+            referenceId: organizationId,
+            idempotencyKey: welcomeCreditKey(organizationId),
+            occurredAt: activatedAt,
+          })
+          .onConflictDoNothing({ target: cloudLedgerEntry.idempotencyKey })
+          .returning({ amountMicros: cloudLedgerEntry.amountMicros });
+  if (granted !== undefined)
+    await on
+      .update(cloudBillingAccount)
+      .set({
+        balanceMicros: sql`${cloudBillingAccount.balanceMicros} + ${granted.amountMicros}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(cloudBillingAccount.organizationId, organizationId));
+  const account = await accountRow(on, organizationId);
+  if (account === undefined)
+    throw new Error("Billing account creation returned no account");
+  return account;
+}
+
 export async function openBillingAccount(
   organizationId: string,
-  at: Date = new Date(),
+  _at: Date = new Date(),
   catalog?: PlanCatalog,
 ): Promise<BillingAccount> {
-  const opened = await openAccountIfTheCustomerExists(organizationId, at, catalog);
-  // **An organization with no row has no account, and none can be opened.**
-  // The answer is the unopened one rather than a throw, because the two ports
-  // are asked about an organization rather than handed a context and must
-  // answer: nothing run, so no allowance spent; nothing held, so Egma's key
-  // funds nothing. Both are true and neither is generous. A path that goes on
-  // to *write* — the usage sink's charge — is refused by the ledger's own
-  // foreign key, which names the row it could not write.
-  return opened ?? unopened(organizationId, at);
-}
-
-async function openAccountIfTheCustomerExists(
-  organizationId: string,
-  at: Date,
-  catalog?: PlanCatalog,
-): Promise<BillingAccount | undefined> {
   const held = await accountRow(fencedDatabase(), organizationId);
   if (held !== undefined) return held;
-
   const read = catalog ?? (await readPlanCatalog());
-  return fencedDatabase().transaction(async (tx) => {
-    // Hobby's period anchor is the organization's own creation date, so a
-    // customer's reset day is theirs and needs no Stripe object to exist.
-    const [customer] = await tx
-      .select({ createdAt: organization.createdAt })
-      .from(organization)
-      .where(eq(organization.id, organizationId))
-      .limit(1);
-    if (customer === undefined) return undefined;
-
-    const [created] = await tx
-      .insert(cloudBillingAccount)
-      .values({
-        id: newId("cba"),
-        organizationId,
-        planCode: "hobby",
-        periodAnchor: customer.createdAt,
-        balanceMicros: read.welcomeCreditMicros,
-      })
-      .onConflictDoNothing({ target: cloudBillingAccount.organizationId })
-      .returning(ACCOUNT_COLUMNS);
-
-    if (created === undefined) {
-      // Somebody else created it while this transaction was in flight. Their
-      // row is the account, welcome credit and all.
-      const already = await accountRow(tx, organizationId);
-      if (already === undefined) {
-        throw new Error(
-          `the billing account for ${organizationId} was neither created nor ` +
-            "found, which the unique index makes impossible",
-        );
-      }
-      return already;
-    }
-
-    await tx
-      .insert(cloudLedgerEntry)
-      .values({
-        id: newId("cle"),
-        organizationId,
-        kind: "welcome_credit",
-        amountMicros: read.welcomeCreditMicros,
-        referenceKind: "organization",
-        referenceId: organizationId,
-        usageRecordId: null,
-        idempotencyKey: welcomeCreditKey(organizationId),
-        occurredAt: at,
-      })
-      .onConflictDoNothing({ target: cloudLedgerEntry.idempotencyKey });
-
-    return accountFrom(created);
-  });
-}
-
-/**
- * Everything the entitlement source decides from: the account, its plan, the
- * period it is in and what that period has used.
- *
- * **One organization id and no `AuthContext`, because there is nobody.** The
- * two moments this answers — a run start and a claim batch — are Egma asking
- * itself whether a customer's work may go on, and the organization on each
- * comes from a caller's own resolved context or from a row Egma claimed. See
- * the lint rule's note on the second fenced home.
- */
-/** What an organization with no rows looks like: nothing spent, nothing held. */
-function unopened(organizationId: string, at: Date): BillingAccount {
-  return {
-    id: "",
-    organizationId,
-    planCode: "hobby",
-    periodAnchor: at,
-    stripeCustomerId: null,
-    stripeSubscriptionId: null,
-    stripeSubscriptionStatus: null,
-    balanceMicros: 0,
-  };
+  return fencedDatabase().transaction((tx) =>
+    createBillingAccount(tx, organizationId, read),
+  );
 }
 
 export type EntitlementFacts = {
@@ -211,63 +216,37 @@ export type EntitlementFacts = {
 
 export async function readEntitlementFacts(
   organizationId: string,
-  at: Date = new Date(),
+  at = new Date(),
 ): Promise<EntitlementFacts> {
-  const account = await openBillingAccount(organizationId, at);
+  const account = await openBillingAccount(organizationId);
   const plan = await readPlan(account.planCode);
   const period = periodAt(account.periodAnchor, at);
-
-  // The same aggregate the organization settings page reads, from the same
-  // expressions, so an allowance a page says is half spent is half spent here.
   const [totals] = await fencedDatabase()
     .select(allowanceTotalsSelection())
     .from(simulation)
-    .where(organizationInThePeriod(organizationId, period));
-
+    .where(
+      organizationInThePeriod(organizationId, period, account.activatedAt),
+    );
   return { account, plan, period, usage: periodUsageFrom(period, totals) };
 }
 
-/**
- * Everything the Billing section shows, in one read.
- *
- * **One call rather than three**, because the plan, the balance, the month and
- * what the month's money went on are one answer to one question — what is this
- * organization's account — and a surface that made a page ask three times
- * would be a surface whose three answers could be about three moments.
- *
- * **`read` and not `manage_organization`.** A run that paused for money has to
- * explain itself to whoever started it, so every role reads the plan, the
- * allowances and the balance. What only an admin reads is the breakdown of
- * what the money went on, which is the account rather than the limit; it is
- * empty for everybody else and the flag beside it says which they are.
- */
-export type BillingOverview = {
-  readonly account: BillingAccount;
-  readonly plan: CloudPlan;
-  readonly period: AllowancePeriod;
-  /** What the balance paid for this period, by provider and model. Admins. */
-  readonly charges: readonly PeriodCharge[];
-  /** Whether this person may change the plan, the card or the credit. */
+export type BillingOverview = EntitlementFacts & {
+  readonly ledger: BillingLedgerPage;
   readonly mayManageBilling: boolean;
 };
 
 export async function readBillingOverview(
   auth: AuthContext,
-  at: Date = new Date(),
+  at = new Date(),
 ): Promise<BillingOverview> {
   authorize(auth, "read", {
     organizationId: auth.organizationId,
     projectId: auth.projectId,
   });
-  const account = await openBillingAccount(auth.organizationId, at);
-  const plan = await readPlan(account.planCode);
-  const period = periodAt(account.periodAnchor, at);
+  const facts = await readEntitlementFacts(auth.organizationId, at);
   const mayManageBilling = permits(auth, "manage_organization", {
     organizationId: auth.organizationId,
     projectId: auth.projectId,
   });
-  const charges = mayManageBilling
-    ? await periodChargesOf(auth.organizationId, period)
-    : [];
-  return { account, plan, period, charges, mayManageBilling };
+  return { ...facts, ledger: await readBillingLedger(auth), mayManageBilling };
 }

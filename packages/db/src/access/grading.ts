@@ -16,6 +16,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 
+import { FundingRefusedError } from "./errors.ts";
 import { billing } from "../billing/ports.ts";
 import { traceStore } from "../clickhouse/client.ts";
 import { graderJudgeProviders } from "../models/selections.ts";
@@ -1110,9 +1111,10 @@ export async function claimGradingJobs(
   });
 
   const funded = await gradingHeldForFunding(
-    rows.map((row) => String(row.organizationId)),
+    rows.filter((row) => row.source === "production").map((row) => String(row.organizationId)),
   );
-  const unfunded = rows.filter((row) => !funded.has(String(row.organizationId)));
+  const isFunded = (row: (typeof rows)[number]) => row.source === "simulation" || funded.has(String(row.organizationId));
+  const unfunded = rows.filter((row) => !isFunded(row));
   if (unfunded.length > 0) {
     // **Left unclaimed rather than failed.** Nothing is wrong with this work:
     // the customer's inference balance cannot pay the judge, and it runs when
@@ -1136,7 +1138,7 @@ export async function claimGradingJobs(
       );
   }
 
-  return rows.filter((row) => funded.has(String(row.organizationId))).map((row) => {
+  return rows.filter(isFunded).map((row) => {
     const job = jobFromRow(row);
     if (
       job.status !== "claimed" ||
@@ -1665,6 +1667,11 @@ export async function regradeTrace(
   ref: TraceGradingRef,
 ): Promise<RegradeTraceResult> {
   authorize(auth, "regrade", here(auth));
+  const funding = await billing().entitlements.mayPlatformKeyFund({
+    organizationId: auth.organizationId,
+    providers: graderJudgeProviders(),
+  });
+  if (!funding.funded) throw new FundingRefusedError(funding.message);
   return db().transaction(async (tx) => {
     await lockTrace(tx, auth, ref.traceId);
     const entries = await selectedEntries(tx, auth, ref);
