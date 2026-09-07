@@ -76,6 +76,7 @@ export default defineConfig({
       ),
       "@egma/retell": resolve("./packages/retell/src/index.ts"),
       "@egma/db": resolve("./packages/db/src/index.ts"),
+      "@egma/ee": resolve("./ee/src/index.ts"),
       "@egma/simulation-contract": resolve(
         "./packages/simulation-contract/src/index.ts",
       ),

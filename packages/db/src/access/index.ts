@@ -529,7 +529,6 @@ export {
   readUsageThisPeriod,
   recordProviderUsage,
   type NewUsageRecord,
-  type PeriodUsage,
   type RecordedProviderUsage,
   type SimulationUsage,
   type UsageByModel,

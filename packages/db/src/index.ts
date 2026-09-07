@@ -1,4 +1,13 @@
-export { connect, disconnect, ping, type ConnectOptions } from "./client.ts";
+export {
+  connect,
+  disconnect,
+  fencedDatabase,
+  ping,
+  type ConnectOptions,
+  type Database,
+  type Queryable,
+  type Transaction,
+} from "./client.ts";
 export {
   MIGRATIONS_DIRECTORY,
   readMigrations,
@@ -60,6 +69,25 @@ export {
   type AllowanceKind,
   type AllowancePeriod,
 } from "./billing/allowance.ts";
+/**
+ * A month of usage as one query, and the period arithmetic under it.
+ *
+ * It reaches no store: predicates and aggregate expressions go out, and
+ * whoever runs them supplies the tenancy and the connection. It crosses the
+ * boundary for the reason the pure arithmetic beside it does — the page that
+ * shows a month and the adapter that limits one must be counting the same
+ * thing, and a second copy of the SQL is a second answer a customer would find
+ * before a test did.
+ */
+export {
+  allowanceTotalsSelection,
+  begunInThePeriod,
+  organizationInThePeriod,
+  periodAt,
+  periodUsageFrom,
+  type AllowanceTotals,
+  type PeriodUsage,
+} from "./billing/period-usage.ts";
 export {
   billingPlugInFor,
   discardingUsageSink,

@@ -1,0 +1,26 @@
+{
+  "name": "@egma/ee",
+  "version": "0.0.0",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src/plans.json"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@egma/db": "workspace:*",
+    "@egma/ids": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "^5.6.1"
+  }
+}

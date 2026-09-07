@@ -73,6 +73,28 @@ export function db(): Database {
   return database;
 }
 
+/**
+ * The same query interface, for the second fenced home.
+ *
+ * **`ee/` is a separate package and cannot import `db()`**, which is the point
+ * of `db()` — the pool is private to this directory and the package's exports
+ * map offers `.` and nothing else. But the cloud billing tables' reads and
+ * writes have to live in `ee/`: no shared code may read a `cloud_` table, and
+ * putting them here would put them in every self-hoster's build. So this is
+ * the one door out, named after what it hands over rather than after who takes
+ * it, and a lint rule — `only-a-fenced-home-holds-the-query-interface` — fails
+ * the build for any file outside `packages/db/src/` or `ee/src/access/` that
+ * imports it. Without that rule this export would be the loophole the whole
+ * boundary exists to prevent.
+ *
+ * It is the same handle and therefore the same pool: a transaction opened
+ * through it can hold a shared row and a `cloud_` row at once, which is what a
+ * balance kept in step with its ledger needs.
+ */
+export function fencedDatabase(): Database {
+  return db();
+}
+
 export type Database = NonNullable<typeof database>;
 export type Transaction = Parameters<
   Parameters<Database["transaction"]>[0]

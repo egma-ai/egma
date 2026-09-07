@@ -104,6 +104,25 @@ export const ID_PREFIXES = [
    * is neither prefixed nor sortable and could never be one of these.
    */
   "usg",
+  /**
+   * One plan Egma Cloud sells: its fee, its three allowances and its two
+   * overage prices. Its own identity rather than the plan code as a key,
+   * because the code is what a customer's account names and a row can be
+   * superseded without the code moving.
+   */
+  "cpl",
+  /**
+   * One organization's billing account on Egma Cloud: its plan, its period
+   * anchor, whatever Stripe holds for it, and its inference balance.
+   */
+  "cba",
+  /**
+   * One movement of an inference balance: a welcome credit, a purchased
+   * credit, an inference charge or a correction. Its own identity because the
+   * ledger is append-only and a row is never edited — what makes a movement
+   * happen at most once is its idempotency key beside this, never this.
+   */
+  "cle",
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];

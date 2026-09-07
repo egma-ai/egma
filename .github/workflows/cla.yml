@@ -1,0 +1,69 @@
+name: CLA
+
+# Whoever opens a pull request signs the Contributor License Agreement once.
+#
+# **Why there is one at all.** `ee/` is licensed commercially and the rest of
+# the repository is Apache 2.0. Without a CLA, a contribution accepted into the
+# open product could never be moved into `ee/`, so the boundary between the two
+# would be decided by the history of who wrote what rather than by design.
+# `CLA.md` says that in full; section 4 is the clause this workflow exists for.
+#
+# **How it works.** CLA Assistant Lite is a GitHub Action rather than a hosted
+# service: it comments on the pull request, watches for the sentence back, and
+# writes the signature into this repository on the `cla-signatures` branch. So
+# the record of who signed is in the repository, readable by anybody, and no
+# third party holds it and no token but GitHub's own is needed.
+#
+# **Making it a required check is branch protection**, set on the repository by
+# a maintainer. This workflow reports a status; only the branch rule can refuse
+# a merge without it.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, synchronize, reopened, closed]
+
+# The action writes the signature file and comments on the pull request, so it
+# needs both. `pull_request_target` runs against this repository's own default
+# branch, never the fork's code, which is what makes writing safe here.
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: cla-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  cla:
+    name: Contributor License Agreement
+    runs-on: ubuntu-latest
+    # Every pull-request event, and only the comments that are the signature.
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request != null &&
+       contains(github.event.comment.body, 'I have read the CLA Document and I hereby sign the CLA'))
+    steps:
+      - name: Check or record the signature
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          # GitHub's own token, and nothing else. The signature file lives in
+          # this repository, so there is no second credential to hold.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          branch: cla-signatures
+          path-to-signatures: signatures/version1/cla.json
+          path-to-document: https://github.com/${{ github.repository }}/blob/main/CLA.md
+          allowlist: dependabot[bot]
+          custom-notsigned-prcomment: >-
+            Thanks for the pull request. Egma asks every contributor to sign its
+            [Contributor License Agreement](https://github.com/${{ github.repository }}/blob/main/CLA.md)
+            once, because part of this repository is commercially licensed and
+            section 4 of the agreement is what keeps a contribution able to move
+            between the two. Read it, then post the sentence below as a comment
+            on this pull request.
+          custom-pr-sign-comment: "I have read the CLA Document and I hereby sign the CLA"
+          custom-allsigned-prcomment: "All contributors have signed the CLA. Thank you."
