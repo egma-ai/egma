@@ -731,6 +731,12 @@ services:
       EGMA_CARTESIA_API_KEY: ${EGMA_CARTESIA_API_KEY:-}
       EGMA_PROVIDER_CREDENTIALS_SECRET_ID: ${EGMA_PROVIDER_CREDENTIALS_SECRET_ID:-}
       EGMA_PROVIDER_CREDENTIALS_REGION: ${EGMA_PROVIDER_CREDENTIALS_REGION:-}
+      # The same setting the api reads, for the same reason and from the same
+      # .env value. A grading job's only spend is the judge's model usage, so
+      # the claim asks the deployment whether Egma's key may fund it before it
+      # hands one out. Empty is every deployment that does not charge anybody:
+      # nothing is imported and every claim is funded.
+      EGMA_STRIPE_SECRET_KEY: ${EGMA_STRIPE_SECRET_KEY:-}
       # Egma platform telemetry, behind one flag that defaults to off. One
       # value in .env reaches this container and the api's alike — see the api
       # service.
