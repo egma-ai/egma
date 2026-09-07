@@ -91,6 +91,7 @@ export type GradingRequestResult =
 
 export type RegradeTraceResult =
   | { readonly kind: "not_requested" }
+  | { readonly kind: "waiting"; readonly for: "evidence" }
   | {
       readonly kind: "queued";
       readonly jobId: string;
@@ -556,11 +557,12 @@ export async function traceEvidenceStartedAt(
 }
 
 /**
- * Maximum wait for an expected agent POV after simulation completion (ADR-0024 §6).
- * Grade as soon as it is query-visible, or after this bound with available evidence.
+ * Maximum wait for a final platform record after simulation completion.
+ * Covers four minutes of Retell polling and its last five-second request.
+ * Grade as soon as the record is query-visible, or report missing evidence at the bound.
  * A later arrival requires regrading.
  */
-export const AGENT_POV_BOUND_SECONDS = 30;
+export const AGENT_POV_BOUND_SECONDS = 245;
 
 /**
  * Evidence readiness and agent POV availability. Without an expected agent POV,
@@ -749,18 +751,14 @@ function simulationExpectsAnAgentPov(row: {
 }
 
 /**
- * Start the agent POV wait at the earlier of reported end time and stored heartbeat.
- * A simulator clock ahead of the platform must not extend the wait.
+ * Start the agent POV wait when Egma received completion. The simulator's
+ * reported end time can use a different clock and must not shorten or extend it.
  */
 function theWaitBeganAt(row: {
   readonly endedAt: Date | null;
   readonly heartbeatAt: Date | null;
 }): Date {
-  const reported = row.endedAt;
-  const stamped = row.heartbeatAt;
-  if (reported === null) return stamped ?? new Date(0);
-  if (stamped === null) return reported;
-  return reported < stamped ? reported : stamped;
+  return row.heartbeatAt ?? row.endedAt ?? new Date(0);
 }
 
 /**
@@ -793,8 +791,8 @@ export type SimulationPastTheAgentPovBound = {
 
 /**
  * Check completed simulations without queued grading jobs across all organizations.
- * Use the platform heartbeat for the lookback window and the earlier reported end
- * or heartbeat for the wait bound. Request grading when evidence is ready.
+ * Use Egma's completion heartbeat for the lookback window and the wait bound.
+ * Request grading when evidence is ready.
  * Finished jobs may have been deleted; requestGradingIn returns terminal without
  * creating work when all graders already have results.
  */
@@ -895,7 +893,7 @@ export async function settleSimulationsPastTheAgentPovBound(options?: {
 
 /**
  * How far back one tick looks for a simulation nobody asked grading about, and
- * how many it settles at a time. An hour is far more than the thirty seconds a
+ * how many it settles at a time. An hour is far more than the four minutes a
  * healthy wait takes, and short enough that a deployment coming back after a
  * long outage does not grade a day of backlog in one tick.
  */
@@ -1607,15 +1605,50 @@ export async function regradeTrace(
     if (entries.length === 0) return { kind: "not_requested" };
 
     const existing = await jobForTrace(tx, auth, ref.traceId);
-    if (existing !== undefined) {
-      if (existing.status === "pending" || existing.status === "claimed") {
-        return {
-          kind: "queued",
-          jobId: existing.id,
-          reopened: false,
-          alreadyWaiting: true,
-        };
+    if (existing?.status === "pending" || existing?.status === "claimed") {
+      return {
+        kind: "queued",
+        jobId: existing.id,
+        reopened: false,
+        alreadyWaiting: true,
+      };
+    }
+    if (ref.source === "simulation") {
+      const simulationId = simulationIdOfTrace(ref.traceId);
+      if (simulationId === undefined || ref.runId === undefined) {
+        throw new Error(`trace ${ref.traceId} is not a simulation trace`);
       }
+      const [row] = await tx
+        .select({
+          startedAt: simulation.startedAt,
+          endedAt: simulation.endedAt,
+          heartbeatAt: simulation.heartbeatAt,
+          providerReference: simulation.providerReference,
+          connectionSnapshot: run.connectionSnapshot,
+        })
+        .from(simulation)
+        .innerJoin(run, eq(run.id, simulation.runId))
+        .where(within(auth, simulation, eq(simulation.id, simulationId)))
+        .limit(1);
+      if (row === undefined) throw new Error(`simulation ${simulationId} is not readable`);
+      if (simulationExpectsAnAgentPov(row)) {
+        const completedAt = theWaitBeganAt(row);
+        const now = new Date();
+        const readiness = await simulationEvidenceReadiness(auth, {
+          traceId: ref.traceId,
+          runId: ref.runId,
+          window: {
+            from: BigInt((row.startedAt ?? completedAt).getTime() - 5 * 60 * 1_000) * 1_000n,
+            to: BigInt(now.getTime() + 1_000) * 1_000n,
+          },
+          producesAnAgentPov: true,
+          completedAt,
+          now,
+        });
+        if (!readiness.ready) return { kind: "waiting", for: "evidence" };
+      }
+    }
+    if (existing !== undefined) {
       const prior = await readTraceGrades(auth, ref);
       const [row] = await tx
         .update(gradingJob)
