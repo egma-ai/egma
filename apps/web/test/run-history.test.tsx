@@ -1403,8 +1403,8 @@ describe("one run after suites", () => {
         "The media connection closed unexpectedly. This is an execution problem, not a failed grade.",
       ).closest('[role="alert"]'),
     ).not.toBeNull();
-    expect(dismiss).toHaveBeenCalledWith("run_1:1");
     await waitFor(() => {
+      expect(dismiss).toHaveBeenCalledWith("run_1:1");
       expect(screen.queryByText("Simulation execution failed")).toBeNull();
     });
 
