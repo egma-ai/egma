@@ -13,6 +13,8 @@ const RETRY_WAITS_MILLISECONDS = [
 const REQUEST_TIMEOUT_MILLISECONDS = 5_000;
 
 export type RetellSimulationPollOptions = {
+  /** Stored completion receipt; shared with the grading evidence deadline. */
+  readonly completionReceivedAtMilliseconds: number;
   /** Gaps between planned attempts. Empty makes the immediate attempt final. */
   readonly retryWaitsMilliseconds?: readonly number[] | undefined;
   /** The default wait uses an unreferenced timer. */
@@ -46,32 +48,40 @@ async function askWithin(
 }
 
 /**
- * Read at fixed offsets from the first request; request time does not extend
- * the schedule. Yield each result so the report can await just the first read.
- * Only a final transcript stops polling successfully. Never overlap requests.
+ * Read immediately within the stored completion deadline, then at fixed offsets
+ * from that receipt. Skip elapsed slots after delayed starts or timers; never
+ * extend the deadline or overlap requests. Yield the first read to the report.
  */
 export async function* pollRetellSimulationCall(
   apiKey: string,
   callId: string,
   reach: RetellReach,
-  options: RetellSimulationPollOptions = {},
+  options: RetellSimulationPollOptions,
 ): AsyncGenerator<RetrievedCall, void> {
   const waits = options.retryWaitsMilliseconds ?? RETRY_WAITS_MILLISECONDS;
   const sleep = options.sleep ?? waiting;
   const canceled = (): boolean => reach.signal?.aborted === true;
-  const startedAt = Date.now();
-  const deadline = startedAt + AGENT_POV_BOUND_SECONDS * 1_000;
-  let plannedAt = startedAt;
-  let retryAfter = startedAt;
+  const receivedAt = options.completionReceivedAtMilliseconds;
+  if (!Number.isFinite(receivedAt)) return;
+  const deadline = receivedAt + AGENT_POV_BOUND_SECONDS * 1_000;
+  let plannedAt = receivedAt;
+  let retryAfter = receivedAt;
+  let lastAttemptAt = Number.NEGATIVE_INFINITY;
 
-  for (const gap of [0, ...waits]) {
+  for (const [attempt, gap] of [0, ...waits].entries()) {
     plannedAt += gap;
     if (canceled() || plannedAt >= deadline) return;
+    if (
+      attempt > 0 &&
+      (plannedAt < Date.now() || plannedAt <= lastAttemptAt)
+    ) continue;
     if (plannedAt < retryAfter) continue;
-    const wait = plannedAt - Date.now();
+    const wait = attempt === 0 ? 0 : plannedAt - Date.now();
     if (wait > 0) await sleep(wait);
-    const remaining = deadline - Date.now();
+    const requestedAt = Date.now();
+    const remaining = deadline - requestedAt;
     if (canceled() || remaining <= 0) return;
+    lastAttemptAt = requestedAt;
 
     const answer = await askWithin(
       apiKey,

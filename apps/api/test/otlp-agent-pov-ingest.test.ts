@@ -1982,6 +1982,24 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
     expect(askedOfRetell).toHaveLength(asksBefore);
   });
 
+  it("does not give a delayed pull a new request budget after the stored deadline", async () => {
+    const running = await runningCall("expired-pull");
+    const landed = await api.app.inject({
+      method: "POST",
+      url: reportPathFor(running.simulationId),
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: terminalReport(running.simulationId, "completed", `missing_${running.simulationId}`),
+    });
+    expect(landed.statusCode, landed.body).toBe(200);
+    const standing = await resolveSimulationStanding(running.simulationId);
+    if (standing === undefined) throw new Error("the simulation has no standing");
+    advancePastEvidenceWait();
+    const fetchImpl = vi.fn(async () => new Response("", { status: 404 })) as unknown as typeof fetch;
+    await pullRetellSimulationRecord(standing.auth, running.simulationId,
+      { fetchImpl }, api.app.log, { retryWaitsMilliseconds: [] });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("keeps an explicitly incomplete provider record marked incomplete after it arrives", async () => {
     const running = await runningCall("partial-provider-record");
     const callId = `missing_${running.simulationId}`;
@@ -2123,7 +2141,7 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
       simulation.id,
       blippedReach,
       api.app.log,
-      { retryWaitsMilliseconds: [1], sleep: async () => {} },
+      { retryWaitsMilliseconds: [1_000], sleep: async () => {} },
     );
 
     // The retry runs after the door has answered, so the record arrives a

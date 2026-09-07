@@ -25,7 +25,10 @@ import {
 
 export type RetellSimulationPullReach = RetellReach;
 
-export type RetellSimulationPullOptions = RetellSimulationPollOptions & {
+export type RetellSimulationPullOptions = Omit<
+  RetellSimulationPollOptions,
+  "completionReceivedAtMilliseconds"
+> & {
   readonly now?: number | undefined;
 };
 
@@ -83,7 +86,10 @@ export async function pullRetellSimulationRecord(
       ...reach,
       ...(pull.baseUrl === null ? {} : { url: pull.baseUrl }),
     },
-    options,
+    {
+      ...options,
+      completionReceivedAtMilliseconds: pull.completionReceivedAt.getTime(),
+    },
   );
 
   const file = async (call: RetellCall): Promise<void> => {
