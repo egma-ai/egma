@@ -828,11 +828,17 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
       "p50",
       "p90",
       "partial",
+      "pov",
       "samples",
       "spanIds",
       "unit",
     ]);
     expect(only.derived).toBe(false);
+    // Whose account this number is. egma timed it off its own recording, so
+    // it is the persona's — and `otherPov` is absent, because the agent's
+    // process said nothing about this conversation.
+    expect(only.pov).toBe("persona");
+    expect("otherPov" in only).toBe(false);
     // Absent, not empty and not null — there is nothing on the wire to have to
     // interpret.
     expect("reportedBy" in only).toBe(false);
@@ -848,11 +854,15 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
       "p50",
       "p90",
       "partial",
+      "pov",
       "reportedBy",
       "samples",
       "spanIds",
       "unit",
     ]);
+    // The platform's account of its own agent is the agent's POV, however it
+    // reached egma.
+    expect(only.pov).toBe("agent");
     // `derived` says what it has always said — egma did not time this — and the
     // new field says which of the two untimed sources it was.
     expect(only.derived).toBe(true);
