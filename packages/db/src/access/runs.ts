@@ -781,6 +781,7 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
               testVersionId: current.versionId,
               position: simulationCount + index + 1,
               modality: reached.modality,
+              connectionType: reached.connectionType,
               status: "queued" as const,
               createdAt: at,
             })));
@@ -1912,6 +1913,14 @@ export type SimulationClaim = {
   readonly testId: string;
   readonly testVersionId: string;
   readonly modality: Modality;
+  /**
+   * The lane this conversation was written against, frozen at run start. It
+   * rides the claim because the claim path is where the deployment's
+   * entitlement source is asked what kind of work is about to begin, and the
+   * answer is a question about the lane rather than about the connection row,
+   * which may have been edited since.
+   */
+  readonly connectionType: ConnectionType;
   readonly claimedBy: string;
   readonly claimedAt: Date;
   /**
@@ -1935,6 +1944,7 @@ const SIMULATION_CLAIM_COLUMNS = {
   testId: simulation.testId,
   testVersionId: simulation.testVersionId,
   modality: simulation.modality,
+  connectionType: simulation.connectionType,
   claimedBy: simulation.claimedBy,
   claimedAt: simulation.claimedAt,
 } as const;
@@ -2110,6 +2120,7 @@ export async function claimSimulations(
       testId: row.testId,
       testVersionId: row.testVersionId,
       modality: row.modality as Modality,
+      connectionType: row.connectionType as ConnectionType,
       claimedBy: row.claimedBy ?? claimant,
       claimedAt: row.claimedAt ?? now,
       auth: conductingContext(row.organizationId, row.projectId),

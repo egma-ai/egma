@@ -64,6 +64,13 @@
       "when": 1788760671974,
       "tag": "0008_usage_records_and_rate_card",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788764232029,
+      "tag": "0009_simulation_connection_type",
+      "breakpoints": true
     }
   ]
 }
