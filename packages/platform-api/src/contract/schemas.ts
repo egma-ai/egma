@@ -95,8 +95,12 @@ const povSeriesSchema = {
 
 export const metricSchema = {
   type: "object",
+  description: "One metric from one side of the conversation. Turn response latency and first response latency prefer the agent's series when available. A second series stays separate in otherPov.",
   properties: {
-    measure: { type: "string" },
+    measure: {
+      type: "string",
+      description: "Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the start of the agent's reply, using speech boundaries for voice when available. first_response_latency measures the time from conversation start to the agent's first reply. Both use milliseconds.",
+    },
     unit: { type: "string" },
     derived: { type: "boolean" },
     /**
@@ -106,7 +110,11 @@ export const metricSchema = {
      * whose conversation it describes, which is the fact that decides whether
      * two numbers may be compared at all.
      */
-    pov: { type: "string", enum: ["persona", "agent"] },
+    pov: {
+      type: "string",
+      enum: ["persona", "agent"],
+      description: "The source of these measurements: agent for the agent's own evidence, or persona for Egma's simulated caller. The samples and summary values describe only this source.",
+    },
     reportedBy: { type: "string" },
     samples: { type: "array", items: { type: "number" } },
     spanIds: { type: "array", items: { type: "string" } },

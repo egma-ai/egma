@@ -14,6 +14,11 @@ Write short instructions with a complete example. Check each command and field
 against its implementation. Add the page to `docs.json`, update its links, and
 keep a redirect when you move a published page.
 
+Describe how the product works today. Check changes merged to `main` while a
+docs pull request is open and update the affected instructions. Explain the
+current setup and behavior without comparisons to earlier implementations or
+lists of renamed or removed features.
+
 ## Update the API reference
 
 Do not edit the generated endpoint pages or `openapi.json` by hand.

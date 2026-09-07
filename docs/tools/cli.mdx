@@ -34,7 +34,7 @@ egma init --url http://localhost:3101
 
 `init` connects the repository to an existing project and pulls its agents, connections, suites, and tests. It creates `egma/config.yaml` and `egma/tests/`. It does not create a project.
 
-If an organization-wide or older credential can access several projects, `init` lists their IDs. Run `egma init --project` with the ID you want. A login already scoped to a project does not take `--project`.
+If your credential can access several projects, `init` lists their IDs. Run `egma init --project` with the ID you want. A login already scoped to a project does not take `--project`.
 
 Running `init` again for the same project refreshes the repository. A repository already connected to another project is left unchanged.
 

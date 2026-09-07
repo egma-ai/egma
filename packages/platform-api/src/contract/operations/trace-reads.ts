@@ -46,7 +46,11 @@ const traceFactsSchema = {
      * The product's own word, and the only one on the wire. `emitter` is the
      * storage column the same fact lives in and stays inside egma.
      */
-    pov: { type: "string", enum: ["persona", "agent"] },
+    pov: {
+      type: "string",
+      enum: ["persona", "agent"],
+      description: "The trace's primary source: agent for the agent's own evidence, or persona for Egma's simulated caller. A simulation can contain spans from both sources; each span has its own pov.",
+    },
     environment: stringSchema,
     connectionType: stringSchema,
     providerCallId: stringSchema,

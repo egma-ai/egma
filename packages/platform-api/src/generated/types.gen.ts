@@ -341,7 +341,7 @@ export type RegisterAgentData = {
                 [key: string]: unknown;
             };
             /**
-             * Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. Do not send this together with the older agentPlatformSelection field.
+             * Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. Do not send this together with agentPlatformSelection.
              */
             platformAgentId?: string;
             /**
@@ -712,7 +712,7 @@ export type AddConnectionData = {
             [key: string]: unknown;
         };
         /**
-         * Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. Do not send this together with the older agentPlatformSelection field.
+         * Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. Do not send this together with agentPlatformSelection.
          */
         platformAgentId?: string;
         /**
@@ -4858,9 +4858,15 @@ export type GetSimulationResponses = {
          * Observed facts about the conversation, such as latency and duration. Metrics are separate from grader results.
          */
         metrics: Array<{
+            /**
+             * Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the start of the agent's reply, using speech boundaries for voice when available. first_response_latency measures the time from conversation start to the agent's first reply. Both use milliseconds.
+             */
             measure: string;
             unit: string;
             derived: boolean;
+            /**
+             * The source of these measurements: agent for the agent's own evidence, or persona for Egma's simulated caller. The samples and summary values describe only this source.
+             */
             pov: 'persona' | 'agent';
             reportedBy?: string;
             samples: Array<number>;
@@ -6110,6 +6116,9 @@ export type ListTracesResponses = {
             toolSpanCount: number;
             erroredSpanCount: number;
             source: 'simulation' | 'production';
+            /**
+             * The trace's primary source: agent for the agent's own evidence, or persona for Egma's simulated caller. A simulation can contain spans from both sources; each span has its own pov.
+             */
             pov: 'persona' | 'agent';
             environment: string;
             connectionType: string;
@@ -6190,6 +6199,9 @@ export type GetTraceResponses = {
             toolSpanCount: number;
             erroredSpanCount: number;
             source: 'simulation' | 'production';
+            /**
+             * The trace's primary source: agent for the agent's own evidence, or persona for Egma's simulated caller. A simulation can contain spans from both sources; each span has its own pov.
+             */
             pov: 'persona' | 'agent';
             environment: string;
             connectionType: string;
@@ -6205,9 +6217,15 @@ export type GetTraceResponses = {
         spans: Array<TraceSpan>;
         spansTruncated: boolean;
         metrics: Array<{
+            /**
+             * Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the start of the agent's reply, using speech boundaries for voice when available. first_response_latency measures the time from conversation start to the agent's first reply. Both use milliseconds.
+             */
             measure: string;
             unit: string;
             derived: boolean;
+            /**
+             * The source of these measurements: agent for the agent's own evidence, or persona for Egma's simulated caller. The samples and summary values describe only this source.
+             */
             pov: 'persona' | 'agent';
             reportedBy?: string;
             samples: Array<number>;

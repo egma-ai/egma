@@ -41,6 +41,12 @@ statement.
 turns. It returns `1` when the observed p90 is at or below your maximum, or `0`
 when it exceeds the maximum.
 
+For voice, response time starts when the caller stops speaking and ends when
+the agent starts its spoken reply. Egma uses the recorded speech boundaries
+when available. The agent's measurement includes the wait while its speech
+detector decides that the caller has finished. For chat, it measures the wait
+between the caller's message and the agent's reply.
+
 To add it:
 
 1. Open **Grader library** and find **Response latency**.

@@ -145,7 +145,7 @@ export const registerAgent = <ThrowOnError extends boolean = false>(parameters: 
             [key: string]: unknown;
         };
         /**
-         * Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. Do not send this together with the older agentPlatformSelection field.
+         * Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. Do not send this together with agentPlatformSelection.
          */
         platformAgentId?: string;
         /**

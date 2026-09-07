@@ -69,6 +69,21 @@ arrives.
 The combined score is a comparison value. Egma does not assign an overall
 pass/fail result to a run. See [Scores and thresholds](/guides/scores-and-thresholds).
 
+### Read timing metrics
+
+Each API metric has a `pov` field that identifies who measured it: `agent` for
+the agent's own evidence or `persona` for Egma's simulated caller. When both
+measure the same event, the API returns the second series in `otherPov`. Egma
+keeps the two sets of samples separate.
+
+`turn_response_latency` measures the wait from the end of the caller's turn to
+the start of the agent's reply. For voice, it uses speech boundaries when
+available. `first_response_latency` measures the time from the start of the
+conversation to the agent's first reply. Both use milliseconds and prefer the
+agent's series when it is available. The
+[Response latency grader](/guides/built-in-graders#response-latency) uses the
+same primary series shown in the metrics.
+
 ## Cancel a run
 
 Use the run ID printed by the create command:

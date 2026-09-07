@@ -178,7 +178,7 @@ Amazon S3 endpoints require the correct region. An absent or mismatched region c
 
 The file also records `EGMA_BASE_URL`. An explicit value in your operator environment updates the recorded address on the next start.
 
-Preserve the private file with PostgreSQL data. The CLI refuses to create replacement credentials when the file is missing and an existing database volume is present. If you are adopting an older installation, a complete set of its existing internal credentials can be read from `.env`; the CLI records them without replacing their values.
+Preserve the private file with PostgreSQL data. The CLI refuses to create replacement credentials when the file is missing and an existing database volume is present. If a complete set of internal credentials is stored in `.env`, the CLI can record those credentials without changing their values.
 
 ## Retell phone simulations
 

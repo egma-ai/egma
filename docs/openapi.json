@@ -672,7 +672,7 @@
                       },
                       "platformAgentId": {
                         "type": "string",
-                        "description": "Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. Do not send this together with the older agentPlatformSelection field.",
+                        "description": "Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. Do not send this together with agentPlatformSelection.",
                         "examples": [
                           "agent_receptionist"
                         ]
@@ -2669,7 +2669,7 @@
                   },
                   "platformAgentId": {
                     "type": "string",
-                    "description": "Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. Do not send this together with the older agentPlatformSelection field.",
+                    "description": "Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. Do not send this together with agentPlatformSelection.",
                     "examples": [
                       "agent_receptionist"
                     ]
@@ -16486,9 +16486,11 @@
                       "type": "array",
                       "items": {
                         "type": "object",
+                        "description": "One metric from one side of the conversation. Turn response latency and first response latency prefer the agent's series when available. A second series stays separate in otherPov.",
                         "properties": {
                           "measure": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the start of the agent's reply, using speech boundaries for voice when available. first_response_latency measures the time from conversation start to the agent's first reply. Both use milliseconds."
                           },
                           "unit": {
                             "type": "string"
@@ -16501,7 +16503,8 @@
                             "enum": [
                               "persona",
                               "agent"
-                            ]
+                            ],
+                            "description": "The source of these measurements: agent for the agent's own evidence, or persona for Egma's simulated caller. The samples and summary values describe only this source."
                           },
                           "reportedBy": {
                             "type": "string"
@@ -20495,7 +20498,8 @@
                             "enum": [
                               "persona",
                               "agent"
-                            ]
+                            ],
+                            "description": "The trace's primary source: agent for the agent's own evidence, or persona for Egma's simulated caller. A simulation can contain spans from both sources; each span has its own pov."
                           },
                           "environment": {
                             "type": "string"
@@ -20773,7 +20777,8 @@
                           "enum": [
                             "persona",
                             "agent"
-                          ]
+                          ],
+                          "description": "The trace's primary source: agent for the agent's own evidence, or persona for Egma's simulated caller. A simulation can contain spans from both sources; each span has its own pov."
                         },
                         "environment": {
                           "type": "string"
@@ -20845,9 +20850,11 @@
                       "type": "array",
                       "items": {
                         "type": "object",
+                        "description": "One metric from one side of the conversation. Turn response latency and first response latency prefer the agent's series when available. A second series stays separate in otherPov.",
                         "properties": {
                           "measure": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the start of the agent's reply, using speech boundaries for voice when available. first_response_latency measures the time from conversation start to the agent's first reply. Both use milliseconds."
                           },
                           "unit": {
                             "type": "string"
@@ -20860,7 +20867,8 @@
                             "enum": [
                               "persona",
                               "agent"
-                            ]
+                            ],
+                            "description": "The source of these measurements: agent for the agent's own evidence, or persona for Egma's simulated caller. The samples and summary values describe only this source."
                           },
                           "reportedBy": {
                             "type": "string"
