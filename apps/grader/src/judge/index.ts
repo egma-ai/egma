@@ -64,6 +64,7 @@ export {
   type Decision,
   type Judge,
   type JudgeAnswer,
+  type JudgeResult,
   type JudgeMaker,
   type JudgeQuestion,
   type ResolvedJudge,

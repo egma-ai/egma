@@ -33,7 +33,7 @@ export type GraderLibraryEntry = {
   readonly id: string;
   readonly name: string;
   readonly description: string | null;
-  readonly owner: "egma" | "organization";
+  readonly owner: "egma" | "project";
   readonly scopeEditable: boolean;
   readonly currentDefinitionVersion: number;
   readonly definitionVersion: number;
@@ -75,7 +75,6 @@ const VERSION_COLUMNS = {
   prompt: graderDefinitionVersion.prompt,
   parameterContract: graderDefinitionVersion.parameterContract,
   modalities: graderDefinitionVersion.modalities,
-  judgeModel: graderDefinitionVersion.judgeModel,
 } as const;
 
 const LIBRARY_COLUMNS = {
@@ -86,8 +85,11 @@ const LIBRARY_COLUMNS = {
 
 function visibleDefinition(auth: AuthContext) {
   return or(
-    isNull(graderDefinition.organizationId),
-    eq(graderDefinition.organizationId, auth.organizationId),
+    and(isNull(graderDefinition.organizationId), isNull(graderDefinition.projectId)),
+    and(
+      eq(graderDefinition.organizationId, auth.organizationId),
+      eq(graderDefinition.projectId, auth.projectId ?? ""),
+    ),
   );
 }
 
@@ -115,7 +117,6 @@ function libraryEntryFromRow(row: {
   readonly prompt: string | null;
   readonly parameterContract: unknown;
   readonly modalities: unknown;
-  readonly judgeModel: unknown;
   readonly activeProjectGraderId: string | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -125,7 +126,7 @@ function libraryEntryFromRow(row: {
     id: row.id,
     name: row.name,
     description: row.description,
-    owner: row.organizationId === null ? "egma" : "organization",
+    owner: row.organizationId === null ? "egma" : "project",
     scopeEditable: row.scopeEditable,
     currentDefinitionVersion: row.currentDefinitionVersion,
     definitionVersion: version.definitionVersion,
@@ -212,7 +213,6 @@ function catalogVersion(entry: PredefinedGraderDefinition) {
     prompt: entry.prompt,
     parameterContract: entry.parameterContract,
     modalities: entry.modalities,
-    judgeModel: entry.judgeModel,
   };
 }
 
@@ -276,7 +276,6 @@ async function reconcileDefinitions(
       prompt: installed.prompt,
       parameterContract: installed.parameterContract,
       modalities: installed.modalities,
-      judgeModel: installed.judgeModel,
     };
     let version = installed.version;
     if (!isDeepStrictEqual(held, wanted)) {

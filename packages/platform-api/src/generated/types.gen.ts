@@ -1346,6 +1346,68 @@ export type RevokeApiKeyResponses = {
 
 export type RevokeApiKeyResponse = RevokeApiKeyResponses[keyof RevokeApiKeyResponses];
 
+export type GetGraderFormData = {
+    body?: never;
+    path?: never;
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/grader-form';
+};
+
+export type GetGraderFormErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type GetGraderFormError = GetGraderFormErrors[keyof GetGraderFormErrors];
+
+export type GetGraderFormResponses = {
+    /**
+     * Supported grader model pairs and the default LLM contract.
+     */
+    200: {
+        modelCatalog: Array<{
+            provider: string;
+            model: string;
+            label: string;
+        }>;
+        settingDefinitions: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
+    };
+};
+
+export type GetGraderFormResponse = GetGraderFormResponses[keyof GetGraderFormResponses];
+
 export type ListGraderLibraryData = {
     body?: never;
     path?: never;
@@ -1387,14 +1449,14 @@ export type ListGraderLibraryError = ListGraderLibraryErrors[keyof ListGraderLib
 
 export type ListGraderLibraryResponses = {
     /**
-     * Grader definitions visible to the organization, with current-project use state.
+     * Grader definitions visible to the project, with current-project use state.
      */
     200: {
         graderLibraryEntries: Array<{
             id: string;
             name: string;
             description: string | null;
-            owner: 'egma' | 'organization';
+            owner: 'egma' | 'project';
             type: 'llm_as_judge' | 'code';
             scopeEditable: boolean;
             currentDefinitionVersion: number;
@@ -1405,8 +1467,8 @@ export type ListGraderLibraryResponses = {
             settingDefinitions: Array<{
                 key: string;
                 label: string;
-                valueType: 'integer';
-                defaultValue: number;
+                valueType: 'integer' | 'number' | 'string';
+                defaultValue: number | string;
                 unit: string | null;
                 minimum: number | null;
                 maximum: number | null;
@@ -1470,7 +1532,7 @@ export type GetGraderLibraryEntryResponses = {
         id: string;
         name: string;
         description: string | null;
-        owner: 'egma' | 'organization';
+        owner: 'egma' | 'project';
         type: 'llm_as_judge' | 'code';
         scopeEditable: boolean;
         currentDefinitionVersion: number;
@@ -1481,8 +1543,8 @@ export type GetGraderLibraryEntryResponses = {
         settingDefinitions: Array<{
             key: string;
             label: string;
-            valueType: 'integer';
-            defaultValue: number;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
             unit: string | null;
             minimum: number | null;
             maximum: number | null;
@@ -1494,6 +1556,88 @@ export type GetGraderLibraryEntryResponses = {
 };
 
 export type GetGraderLibraryEntryResponse = GetGraderLibraryEntryResponses[keyof GetGraderLibraryEntryResponses];
+
+export type UpdateGraderDefinitionData = {
+    body: {
+        baseDefinitionVersion: number;
+        gradingInstructions?: string;
+        name?: string;
+        description?: string | null;
+    };
+    path: {
+        graderDefinitionId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/grader-library/{graderDefinitionId}';
+};
+
+export type UpdateGraderDefinitionErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type UpdateGraderDefinitionError = UpdateGraderDefinitionErrors[keyof UpdateGraderDefinitionErrors];
+
+export type UpdateGraderDefinitionResponses = {
+    /**
+     * The current core. A prompt change creates the next immutable version.
+     */
+    200: {
+        id: string;
+        name: string;
+        description: string | null;
+        owner: 'egma' | 'project';
+        type: 'llm_as_judge' | 'code';
+        scopeEditable: boolean;
+        currentDefinitionVersion: number;
+        definitionVersion: number;
+        modalities: Array<'chat' | 'voice'>;
+        gradingInstructions: string | null;
+        requiredEvidence: Array<'transcript' | 'ending_outcome' | 'tool_calls' | 'observed_metrics' | 'test_expected_behaviors' | 'turn_response_latency'>;
+        settingDefinitions: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer' | 'number' | 'string';
+            defaultValue: number | string;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
+        activeProjectGraderId: string | null;
+        createdAt: string;
+        updatedAt: string;
+    };
+};
+
+export type UpdateGraderDefinitionResponse = UpdateGraderDefinitionResponses[keyof UpdateGraderDefinitionResponses];
 
 export type UseGraderInProjectData = {
     body: {
@@ -1511,7 +1655,7 @@ export type UseGraderInProjectData = {
                 samplePercent: number;
             } | null;
         };
-        settings: {
+        settings?: {
             [key: string]: unknown;
         };
         passThreshold: number;
@@ -1568,7 +1712,7 @@ export type UseGraderInProjectResponses = {
         graderDefinitionId: string;
         name: string;
         description: string | null;
-        owner: 'egma' | 'organization';
+        owner: 'egma' | 'project';
         type: 'llm_as_judge' | 'code';
         modalities: Array<'chat' | 'voice'>;
         scopeEditable: boolean;
@@ -1605,6 +1749,9 @@ export type CreateCustomGraderData = {
         gradingInstructions: string;
         passesWhen: string;
         failsWhen: string;
+        settings?: {
+            [key: string]: unknown;
+        };
         scope: {
             simulations: Array<{
                 kind: 'all';
@@ -1670,7 +1817,7 @@ export type CreateCustomGraderResponses = {
             id: string;
             name: string;
             description: string | null;
-            owner: 'egma' | 'organization';
+            owner: 'egma' | 'project';
             type: 'llm_as_judge' | 'code';
             scopeEditable: boolean;
             currentDefinitionVersion: number;
@@ -1681,8 +1828,8 @@ export type CreateCustomGraderResponses = {
             settingDefinitions: Array<{
                 key: string;
                 label: string;
-                valueType: 'integer';
-                defaultValue: number;
+                valueType: 'integer' | 'number' | 'string';
+                defaultValue: number | string;
                 unit: string | null;
                 minimum: number | null;
                 maximum: number | null;
@@ -1697,7 +1844,7 @@ export type CreateCustomGraderResponses = {
             graderDefinitionId: string;
             name: string;
             description: string | null;
-            owner: 'egma' | 'organization';
+            owner: 'egma' | 'project';
             type: 'llm_as_judge' | 'code';
             modalities: Array<'chat' | 'voice'>;
             scopeEditable: boolean;
@@ -1727,6 +1874,120 @@ export type CreateCustomGraderResponses = {
 };
 
 export type CreateCustomGraderResponse = CreateCustomGraderResponses[keyof CreateCustomGraderResponses];
+
+export type CloneGraderData = {
+    body: {
+        name: string;
+        description?: string | null;
+    };
+    path: {
+        graderDefinitionId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/grader-library/{graderDefinitionId}/clone';
+};
+
+export type CloneGraderErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type CloneGraderError = CloneGraderErrors[keyof CloneGraderErrors];
+
+export type CloneGraderResponses = {
+    /**
+     * The independent custom definition and its copied project settings.
+     */
+    201: {
+        definition: {
+            id: string;
+            name: string;
+            description: string | null;
+            owner: 'egma' | 'project';
+            type: 'llm_as_judge' | 'code';
+            scopeEditable: boolean;
+            currentDefinitionVersion: number;
+            definitionVersion: number;
+            modalities: Array<'chat' | 'voice'>;
+            gradingInstructions: string | null;
+            requiredEvidence: Array<'transcript' | 'ending_outcome' | 'tool_calls' | 'observed_metrics' | 'test_expected_behaviors' | 'turn_response_latency'>;
+            settingDefinitions: Array<{
+                key: string;
+                label: string;
+                valueType: 'integer' | 'number' | 'string';
+                defaultValue: number | string;
+                unit: string | null;
+                minimum: number | null;
+                maximum: number | null;
+            }>;
+            activeProjectGraderId: string | null;
+            createdAt: string;
+            updatedAt: string;
+        };
+        grader: {
+            id: string;
+            projectId: string;
+            graderDefinitionId: string;
+            name: string;
+            description: string | null;
+            owner: 'egma' | 'project';
+            type: 'llm_as_judge' | 'code';
+            modalities: Array<'chat' | 'voice'>;
+            scopeEditable: boolean;
+            removable: boolean;
+            scope: {
+                simulations: Array<{
+                    kind: 'all';
+                } | {
+                    kind: 'test_suite';
+                    id: string;
+                } | {
+                    kind: 'test';
+                    id: string;
+                }>;
+                production: {
+                    samplePercent: number;
+                } | null;
+            };
+            settings: {
+                [key: string]: unknown;
+            };
+            passThreshold: number;
+            createdAt: string;
+            updatedAt: string;
+        };
+    };
+};
+
+export type CloneGraderResponse = CloneGraderResponses[keyof CloneGraderResponses];
 
 export type ListGradersData = {
     body?: never;
@@ -1774,7 +2035,7 @@ export type ListGradersResponses = {
             graderDefinitionId: string;
             name: string;
             description: string | null;
-            owner: 'egma' | 'organization';
+            owner: 'egma' | 'project';
             type: 'llm_as_judge' | 'code';
             modalities: Array<'chat' | 'voice'>;
             scopeEditable: boolean;
@@ -1924,7 +2185,7 @@ export type UpdateGraderResponses = {
         graderDefinitionId: string;
         name: string;
         description: string | null;
-        owner: 'egma' | 'organization';
+        owner: 'egma' | 'project';
         type: 'llm_as_judge' | 'code';
         modalities: Array<'chat' | 'voice'>;
         scopeEditable: boolean;

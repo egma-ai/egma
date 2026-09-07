@@ -197,3 +197,5 @@ export {
 } from "./access/tests.ts";
 export * from "./access/index.ts";
 export * as schema from "./schema/index.ts";
+
+export { defaultGraderParameterValues, LLM_GRADER_PARAMETER_CONTRACT, graderModelOfParameters, validateExecutableGraderParameters, validateGraderParameterContract, validateGraderParameterValues, type GraderParameterValues } from "./grader-library/parameters.ts";

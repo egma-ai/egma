@@ -1,6 +1,11 @@
 import {
   authorize,
+  PROVIDER_CATALOG,
+  LLM_GRADER_PARAMETER_CONTRACT,
   createCustomLlmGrader,
+  cloneGraderInProject,
+  editGraderDefinition,
+  IdentityConflictError,
   getGraderDefinitionVersion,
   getGraderLibraryEntry,
   listGraderLibrary,
@@ -23,6 +28,7 @@ import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
 import {
   invalid,
+  conflict,
   notFound,
   notPermitted,
   unprocessable,
@@ -131,7 +137,7 @@ function describedLibraryEntry(
     // Egma-owned prompts and trusted implementation details are not an
     // authoring surface. Organization-owned instructions are the customer's.
     gradingInstructions:
-      entry.owner === "organization" ? prompt : null,
+      prompt,
     requiredEvidence: requiredEvidence({ id: entry.id, type }),
     settingDefinitions: parameterContract,
     activeProjectGraderId,
@@ -186,7 +192,7 @@ function pageAfter(
 }
 
 function noSuchDefinition(id: string): string {
-  return `There is no grader definition ${id} available in this organization.`;
+  return `There is no grader definition ${id} available in this project.`;
 }
 
 export async function graderLibraryRoutes(
@@ -194,6 +200,17 @@ export async function graderLibraryRoutes(
   options: GraderLibraryRoutesOptions,
 ): Promise<void> {
   credentialed(app, options);
+
+  registerPlatformOperation(app, graderLibraryOperations.getGraderForm, async (request, reply) => {
+    const query = (request.query ?? {}) as Query;
+    const acting = await actingIn(requesterOf(request).auth, given(query.projectId));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+    return reply.send({
+      modelCatalog: PROVIDER_CATALOG.filter((entry) => entry.job === "llm" && "graderEligible" in entry && entry.graderEligible === true)
+        .map((entry) => ({ provider: entry.provider, model: entry.model, label: entry.label })),
+      settingDefinitions: LLM_GRADER_PARAMETER_CONTRACT,
+    });
+  });
 
   registerPlatformOperation(
     app,
@@ -254,7 +271,7 @@ export async function graderLibraryRoutes(
       if (query.definitionVersion !== undefined && definition === undefined) {
         return notFound(
           reply,
-          `There is no grader definition ${graderDefinitionId} version ${String(query.definitionVersion)} available in this organization.`,
+          `There is no grader definition ${graderDefinitionId} version ${String(query.definitionVersion)} available in this project.`,
         );
       }
       return reply.send(describedLibraryEntry(entry, undefined, definition));
@@ -286,9 +303,7 @@ export async function graderLibraryRoutes(
         "a Use in project request",
       );
       if (unknown !== undefined) return invalid(reply, unknown);
-      if (!("scope" in body) || !("settings" in body)) {
-        return invalid(reply, "scope and settings are required");
-      }
+      if (!("scope" in body)) return invalid(reply, "scope is required");
       if (typeof body.passThreshold !== "number") {
         return invalid(reply, "passThreshold must be a number from 0 through 1");
       }
@@ -329,6 +344,7 @@ export async function graderLibraryRoutes(
           "passesWhen",
           "failsWhen",
           "scope",
+          "settings",
           "passThreshold",
         ],
         "a custom grader",
@@ -371,6 +387,7 @@ export async function graderLibraryRoutes(
         gradingInstructions,
         passesWhen,
         failsWhen,
+        parameterValues: body.settings,
         scope: scopeForDb(body.scope),
         passThreshold: body.passThreshold,
       });
@@ -384,7 +401,38 @@ export async function graderLibraryRoutes(
     },
   );
 
+  registerPlatformOperation(app, graderLibraryOperations.cloneGrader, async (request, reply) => {
+    const { graderDefinitionId } = request.params as { graderDefinitionId: string };
+    const query = (request.query ?? {}) as Query;
+    const body = request.body as Body;
+    const acting = await actingIn(requesterOf(request).auth, given(query.projectId));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+    const created = await cloneGraderInProject(acting.auth, graderDefinitionId, {
+      name: body.name as string,
+      ...(body.description === undefined ? {} : { description: body.description as string | null }),
+    });
+    return created === undefined ? notFound(reply, noSuchDefinition(graderDefinitionId)) : reply.code(201).send({
+      definition: describedLibraryEntry(created.definition), grader: describedProjectGrader(created.projectGrader),
+    });
+  });
+
+  registerPlatformOperation(app, graderLibraryOperations.updateGraderDefinition, async (request, reply) => {
+    const { graderDefinitionId } = request.params as { graderDefinitionId: string };
+    const query = (request.query ?? {}) as Query;
+    const body = request.body as Body;
+    const acting = await actingIn(requesterOf(request).auth, given(query.projectId));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+    const changed = await editGraderDefinition(acting.auth, graderDefinitionId, {
+      baseDefinitionVersion: body.baseDefinitionVersion as number,
+      ...(body.name === undefined ? {} : { name: body.name as string }),
+      ...(body.description === undefined ? {} : { description: body.description as string | null }),
+      ...(body.gradingInstructions === undefined ? {} : { gradingInstructions: body.gradingInstructions as string }),
+    });
+    return changed === undefined ? notFound(reply, noSuchDefinition(graderDefinitionId)) : reply.send(describedLibraryEntry(changed));
+  });
+
   app.setErrorHandler(async (error, _request, reply) => {
+    if (error instanceof IdentityConflictError) return conflict(reply, error.message);
     if (error instanceof NotPermittedError) {
       return notPermitted(reply, error.message);
     }

@@ -361,6 +361,8 @@ export {
 export {
   archiveProjectGrader,
   createCustomLlmGrader,
+  cloneGraderInProject,
+  editGraderDefinition,
   editProjectGrader,
   getExecutableGraderDefinition,
   getProjectGrader,

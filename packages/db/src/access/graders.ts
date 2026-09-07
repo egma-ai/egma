@@ -1,10 +1,12 @@
 import { newId } from "@egma/ids";
-import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
 import { PREDEFINED_GRADERS } from "../grader-library/catalog.ts";
 import {
-  validateGraderParameterValues,
+  defaultGraderParameterValues,
+  LLM_GRADER_PARAMETER_CONTRACT,
+  validateExecutableGraderParameters,
   type GraderParameterValues,
 } from "../grader-library/parameters.ts";
 import {
@@ -15,7 +17,6 @@ import {
   snapshotGraderDefinition,
   type GraderDefinitionSnapshot,
 } from "../grader-library/snapshot.ts";
-import { RECOMMENDED_GRADER_MODEL } from "../models/selections.ts";
 import {
   graderDefinition,
   graderDefinitionVersion,
@@ -27,7 +28,7 @@ import {
 } from "../schema/graders.ts";
 import { test, testSuite } from "../schema/tests.ts";
 import type { AuthContext } from "./context.ts";
-import { UnprocessableInputError } from "./errors.ts";
+import { IdentityConflictError, UnprocessableInputError } from "./errors.ts";
 import {
   getGraderLibraryEntry,
   type GraderLibraryEntry,
@@ -44,7 +45,7 @@ export type ProjectGrader = {
   readonly name: string;
   readonly description: string | null;
   readonly type: GraderDefinitionType;
-  readonly owner: "egma" | "organization";
+  readonly owner: "egma" | "project";
   readonly modalities: readonly GraderModality[];
   readonly scopeEditable: boolean;
   readonly scope: ProjectGraderScope;
@@ -64,7 +65,7 @@ export type ProjectGraderChanges = {
 
 export type UseGraderInProjectInput = {
   readonly scope: unknown;
-  readonly parameterValues: unknown;
+  readonly parameterValues?: unknown;
   readonly passThreshold: number;
 };
 
@@ -79,6 +80,7 @@ export type CreateCustomLlmGraderInput = {
   readonly failsWhen: string;
   readonly scope: unknown;
   readonly passThreshold: number;
+  readonly parameterValues?: unknown;
 };
 
 const COLUMNS = {
@@ -130,9 +132,10 @@ function fromRow(row: ProjectGraderRow): ProjectGrader {
   return {
     ...visible,
     type: row.type as GraderDefinitionType,
-    owner: organizationOwnerId === null ? "egma" : "organization",
+    owner: organizationOwnerId === null ? "egma" : "project",
     scope: validateProjectGraderScope(row.scope),
-    parameterValues: validateGraderParameterValues(
+    parameterValues: validateExecutableGraderParameters(
+      row.type,
       parameterContract,
       row.parameterValues,
     ),
@@ -158,8 +161,11 @@ function projectIdOf(auth: AuthContext): string {
 
 function visibleDefinition(auth: AuthContext) {
   return or(
-    isNull(graderDefinition.organizationId),
-    eq(graderDefinition.organizationId, auth.organizationId),
+    and(isNull(graderDefinition.organizationId), isNull(graderDefinition.projectId)),
+    and(
+      eq(graderDefinition.organizationId, auth.organizationId),
+      eq(graderDefinition.projectId, auth.projectId ?? ""),
+    ),
   );
 }
 
@@ -331,17 +337,21 @@ export async function useGraderInProject(
   const passThreshold = validatePassThreshold(input.passThreshold);
 
   const id = await db().transaction(async (tx) => {
+    const [identity] = await tx.select().from(graderDefinition)
+      .where(and(eq(graderDefinition.id, definitionId), visibleDefinition(auth)))
+      .for("update");
+    if (identity === undefined) return undefined;
     const [definition] = await tx
       .select({
         parameterContract: graderDefinitionVersion.parameterContract,
+        type: graderDefinitionVersion.type,
       })
       .from(graderDefinition)
       .innerJoin(graderDefinitionVersion, currentVersionJoin())
       .where(
         and(eq(graderDefinition.id, definitionId), visibleDefinition(auth)),
       )
-      .limit(1)
-      .for("update", { of: graderDefinition });
+      .limit(1);
     if (definition === undefined) return undefined;
 
     const [active] = await tx
@@ -360,15 +370,14 @@ export async function useGraderInProject(
       )
       .limit(1);
     if (active !== undefined) {
-      throw new UnprocessableInputError(
-        "this grader is already active in the project",
-      );
+      return active.id;
     }
 
     await validateScopeReferences(tx, auth, projectId, scope);
-    const parameterValues = validateGraderParameterValues(
+    const parameterValues = validateExecutableGraderParameters(
+      definition.type,
       definition.parameterContract,
-      input.parameterValues,
+      input.parameterValues ?? defaultGraderParameterValues(definition.parameterContract),
     );
     const projectGraderId = newId("grd");
     await tx.insert(projectGrader).values({
@@ -392,6 +401,14 @@ export async function editProjectGrader(
 ): Promise<ProjectGrader | undefined> {
   authorize(auth, "author_definitions", here(auth));
   return db().transaction(async (tx) => {
+    const [association] = await tx.select({ definitionId: projectGrader.graderDefinitionId })
+      .from(projectGrader).where(within(auth, projectGrader, and(
+        eq(projectGrader.id, id), isNull(projectGrader.archivedAt), inActingProject(auth, projectGrader),
+      )));
+    if (association === undefined) return undefined;
+    const [definition] = await tx.select({ id: graderDefinition.id }).from(graderDefinition)
+      .where(and(eq(graderDefinition.id, association.definitionId), visibleDefinition(auth))).for("update");
+    if (definition === undefined) return undefined;
     const [held] = await tx
       .select(COLUMNS)
       .from(projectGrader)
@@ -430,11 +447,13 @@ export async function editProjectGrader(
       await validateScopeReferences(tx, auth, held.projectId, scope);
     }
     const parameterValues = changes.parameterValues === undefined
-      ? validateGraderParameterValues(
+      ? validateExecutableGraderParameters(
+          held.type,
           held.parameterContract,
           held.parameterValues,
         )
-      : validateGraderParameterValues(
+      : validateExecutableGraderParameters(
+          held.type,
           held.parameterContract,
           changes.parameterValues,
         );
@@ -500,7 +519,7 @@ export async function archiveProjectGrader(
   });
 }
 
-/** Create one organization LLM definition and activate it in this project. */
+/** Create one project LLM definition and its complete project settings. */
 export async function createCustomLlmGrader(
   auth: AuthContext,
   input: CreateCustomLlmGraderInput,
@@ -540,6 +559,11 @@ export async function createCustomLlmGrader(
   const description = input.description?.trim() || null;
   const scope = validateProjectGraderScope(input.scope);
   const passThreshold = validatePassThreshold(input.passThreshold);
+  const parameterValues = validateExecutableGraderParameters(
+    "llm_as_judge",
+    LLM_GRADER_PARAMETER_CONTRACT,
+    input.parameterValues ?? defaultGraderParameterValues(LLM_GRADER_PARAMETER_CONTRACT),
+  );
 
   const ids = await db().transaction(async (tx) => {
     await validateScopeReferences(tx, auth, projectId, scope);
@@ -548,6 +572,7 @@ export async function createCustomLlmGrader(
     await tx.insert(graderDefinition).values({
       id: definitionId,
       organizationId: auth.organizationId,
+      projectId,
       name,
       description,
       scopeEditable: true,
@@ -558,9 +583,8 @@ export async function createCustomLlmGrader(
       version: 1,
       type: "llm_as_judge",
       prompt,
-      parameterContract: [],
+      parameterContract: LLM_GRADER_PARAMETER_CONTRACT,
       modalities: CUSTOM_GRADER_MODALITIES,
-      judgeModel: RECOMMENDED_GRADER_MODEL,
     });
     await tx.insert(projectGrader).values({
       id: projectGraderId,
@@ -568,7 +592,7 @@ export async function createCustomLlmGrader(
       projectId,
       graderDefinitionId: definitionId,
       scope,
-      parameterValues: {},
+      parameterValues,
       passThreshold,
     });
     return { definitionId, projectGraderId };
@@ -591,8 +615,107 @@ const EXECUTABLE_COLUMNS = {
   prompt: graderDefinitionVersion.prompt,
   parameterContract: graderDefinitionVersion.parameterContract,
   modalities: graderDefinitionVersion.modalities,
-  judgeModel: graderDefinitionVersion.judgeModel,
 } as const;
+
+/** Clone the current LLM core and this project's effective settings atomically. */
+export async function cloneGraderInProject(
+  auth: AuthContext,
+  definitionId: string,
+  input: { readonly name: string; readonly description?: string | null },
+): Promise<{ readonly definition: GraderLibraryEntry; readonly projectGrader: ProjectGrader } | undefined> {
+  authorize(auth, "author_definitions", here(auth));
+  const projectId = projectIdOf(auth);
+  const name = input.name.trim();
+  if (name === "") throw new UnprocessableInputError("a cloned grader needs a name");
+  const ids = await db().transaction(async (tx) => {
+    const [source] = await tx.select().from(graderDefinition)
+      .where(and(eq(graderDefinition.id, definitionId), visibleDefinition(auth)))
+      .for("update");
+    if (source === undefined) return undefined;
+    const core = await getExecutableGraderDefinition(auth, tx, source.id, source.currentDefinitionVersion);
+    if (core?.type !== "llm_as_judge") {
+      throw new UnprocessableInputError("only LLM graders can be cloned");
+    }
+    const [settings] = await tx.select().from(projectGrader)
+      .where(within(auth, projectGrader, and(
+        eq(projectGrader.projectId, projectId), eq(projectGrader.graderDefinitionId, definitionId),
+      )))
+      .orderBy(desc(projectGrader.updatedAt)).limit(1);
+    const parameterValues = validateExecutableGraderParameters(core.type, core.parameterContract,
+      settings?.parameterValues ?? defaultGraderParameterValues(core.parameterContract));
+    const clonedId = newId("grl");
+    const projectGraderId = newId("grd");
+    await tx.insert(graderDefinition).values({
+      id: clonedId, organizationId: auth.organizationId, projectId, name,
+      description: input.description === undefined ? source.description : input.description?.trim() || null,
+      scopeEditable: true, currentDefinitionVersion: 1,
+    });
+    await tx.insert(graderDefinitionVersion).values({
+      definitionId: clonedId, version: 1, type: core.type, prompt: core.prompt,
+      parameterContract: core.parameterContract, modalities: core.modalities,
+    });
+    await tx.insert(projectGrader).values({
+      id: projectGraderId, organizationId: auth.organizationId, projectId,
+      graderDefinitionId: clonedId, parameterValues,
+      scope: settings?.scope ?? { simulations: [{ kind: "all" }], production: null },
+      passThreshold: settings?.passThreshold ?? 1,
+    });
+    return { definitionId: clonedId, projectGraderId };
+  });
+  if (ids === undefined) return undefined;
+  const [definition, active] = await Promise.all([
+    getGraderLibraryEntry(auth, ids.definitionId), getProjectGrader(auth, ids.projectGraderId),
+  ]);
+  if (definition === undefined || active === undefined) throw new Error("the cloned grader is not readable");
+  return { definition, projectGrader: active };
+}
+
+/** Only the current custom core can be the base for a new immutable version. */
+export async function editGraderDefinition(
+  auth: AuthContext,
+  definitionId: string,
+  input: {
+    readonly baseDefinitionVersion: number;
+    readonly gradingInstructions?: string;
+    readonly name?: string;
+    readonly description?: string | null;
+  },
+): Promise<GraderLibraryEntry | undefined> {
+  authorize(auth, "author_definitions", here(auth));
+  projectIdOf(auth);
+  const changed = await db().transaction(async (tx) => {
+    const [held] = await tx.select().from(graderDefinition)
+      .where(and(eq(graderDefinition.id, definitionId), visibleDefinition(auth))).for("update");
+    if (held === undefined) return false;
+    if (held.organizationId === null) {
+      throw new UnprocessableInputError("Egma grader cores are read-only; clone this grader to edit its instructions");
+    }
+    if (input.baseDefinitionVersion !== held.currentDefinitionVersion) {
+      throw new IdentityConflictError("grader", definitionId, {
+        expected: String(input.baseDefinitionVersion), current: String(held.currentDefinitionVersion),
+      });
+    }
+    const core = await getExecutableGraderDefinition(auth, tx, definitionId, held.currentDefinitionVersion);
+    if (core?.type !== "llm_as_judge") throw new UnprocessableInputError("only custom LLM cores can be edited");
+    const name = input.name === undefined ? held.name : input.name.trim();
+    const prompt = input.gradingInstructions === undefined ? core.prompt : input.gradingInstructions.trim();
+    if (name === "" || !prompt) throw new UnprocessableInputError("a grader needs a name and grading instructions");
+    let version = held.currentDefinitionVersion;
+    if (prompt !== core.prompt) {
+      version += 1;
+      await tx.insert(graderDefinitionVersion).values({
+        definitionId, version, type: core.type, prompt,
+        parameterContract: core.parameterContract, modalities: core.modalities,
+      });
+    }
+    await tx.update(graderDefinition).set({
+      name, description: input.description === undefined ? held.description : input.description?.trim() || null,
+      currentDefinitionVersion: version, updatedAt: new Date(),
+    }).where(eq(graderDefinition.id, definitionId));
+    return true;
+  });
+  return changed ? getGraderLibraryEntry(auth, definitionId) : undefined;
+}
 
 /** Read one exact immutable definition version for execution. */
 export async function getExecutableGraderDefinition(

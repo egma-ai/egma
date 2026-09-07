@@ -13,6 +13,8 @@ import {
   type ProjectGraderScope,
 } from "../schema/graders.ts";
 import { project } from "../schema/tenancy.ts";
+import { defaultGraderParameterValues } from "../grader-library/parameters.ts";
+import { graderDefinitionVersion } from "../schema/graders.ts";
 
 /** Expected behaviors grades every simulation and never grades production. */
 export const EXPECTED_BEHAVIORS_SCOPE = {
@@ -40,8 +42,12 @@ export async function insertExpectedBehaviorsProjectGrader(
   },
 ): Promise<string> {
   const [installed] = await on
-    .select({ id: graderDefinition.id })
+    .select({ parameterContract: graderDefinitionVersion.parameterContract })
     .from(graderDefinition)
+    .innerJoin(graderDefinitionVersion, and(
+      eq(graderDefinitionVersion.definitionId, graderDefinition.id),
+      eq(graderDefinitionVersion.version, graderDefinition.currentDefinitionVersion),
+    ))
     .where(eq(graderDefinition.id, PREDEFINED_GRADERS.expectedBehaviors))
     .limit(1)
     .for("share");
@@ -56,7 +62,7 @@ export async function insertExpectedBehaviorsProjectGrader(
     projectId: input.projectId,
     graderDefinitionId: PREDEFINED_GRADERS.expectedBehaviors,
     scope: EXPECTED_BEHAVIORS_SCOPE,
-    parameterValues: {},
+    parameterValues: defaultGraderParameterValues(installed.parameterContract),
     passThreshold: 1,
   });
   return id;

@@ -5,7 +5,6 @@ import type {
   GraderExecutor,
   GraderResult,
 } from "./contract.ts";
-import { executeExpectedBehaviors } from "./expected-behaviors.ts";
 import { executeLlmAsJudge } from "./llm-as-judge.ts";
 import { executeResponseLatency } from "./response-latency.ts";
 
@@ -15,9 +14,6 @@ const GENERIC_LLM_EXECUTOR: GraderExecutor = {
 
 /** The shared definitions this worker knows how to execute. */
 const EXECUTORS: Readonly<Record<string, GraderExecutor | undefined>> = {
-  [PREDEFINED_GRADERS.expectedBehaviors]: {
-    execute: executeExpectedBehaviors,
-  },
   [PREDEFINED_GRADERS.responseLatency]: {
     execute: executeResponseLatency,
   },
