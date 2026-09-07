@@ -300,13 +300,17 @@ Returns the full transcript, metrics, and trace-level grades.
   of the caller's speech to the first audible sample of the agent's reply as it
   reaches the caller. On a simulation Egma measures it off the recording, which
   is the persona's POV. On a production trace Egma derives it from the agent's
-  own spans, from the VAD's end of the caller's speech — never the end-of-turn
-  commit, which lands about a second later and would delete a second the caller
-  waited.
+  own spans, from the end of the VAD's `user_speaking` span — which LiveKit
+  closes after its silence wait, about half a second past the caller's last
+  audible sample — and never from the end-of-turn commit, which lands about a
+  second later still and would delete a second the caller waited.
 
   On a simulation, `turn_response_latency` and `first_response_latency` lead
-  with the agent's POV. The persona's number is computed and returned beside
-  them under `otherPov`.
+  with the persona's POV — the number measured off the recording, which is the
+  audio the caller heard. The agent's own number is derived as well and
+  returned beside it under `otherPov`. Against the agent's own account the
+  recording reads 0.5 to 0.7 s longer per turn, constant across a call: the
+  detector's lag at the front and the playback hop at the back.
 
   `time_to_first_word` and `persona_speech_duration` described Egma's own
   caller rather than the agent, and are no longer in the catalog.

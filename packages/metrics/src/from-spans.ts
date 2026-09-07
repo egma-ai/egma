@@ -733,12 +733,18 @@ function put(
  * framework whose turns begin at their first word.
  *
  * **The start is the VAD's end of speech, never the endpointing commit**
- * (ADR-0024 §5, catalog version 8). In the agent's own spans the caller's last
- * audible sample is the end of the human turn's last `speaking` child; the
- * turn's own end is the moment the endpointer *decided* the caller had
- * finished, which the framework's own defaults put about a second later — a
- * Silero hangover plus a minimum delay. Measuring from the commit would delete
- * a second the caller actually waited and make a slow agent look fast. Where
+ * (ADR-0024 §5, catalog version 8). In the agent's own spans the nearest thing
+ * to the caller's last audible sample is the end of the human turn's last
+ * `speaking` child. It is not that sample: LiveKit closes the child once its
+ * VAD has waited its silence hangover (0.55 s by default) past the last
+ * speech it heard, so this start sits about half a second after the caller
+ * went quiet, and the agent's own account of its wait is that much short of
+ * the definition — which is one reason the persona's clock, not this one,
+ * leads on a simulation. The turn's own end is worse: the moment the
+ * endpointer *decided* the caller had finished, which the framework's own
+ * defaults put about a second later still — a minimum delay on top of the
+ * hangover. Measuring from the commit would delete a second the caller
+ * actually waited and make a slow agent look fast. Where
  * the framework recorded no speech for the caller — Retell's word-bounded
  * turns, egma's own chat lane — the turn's end is the only instant the trace
  * holds and stands in for it.
