@@ -40,10 +40,12 @@ from egma_simulator.mock_tools import (
     HELLO_METHOD,
     LARGEST_PAYLOAD_BYTES,
     MALFORMED_REQUEST,
+    NOT_REPORTED,
     PROTOCOL_VERSION,
     TOOL_METHOD,
     UNKNOWN_TOOL,
     UNSUPPORTED_PROTOCOL_VERSION,
+    MockToolRefusal,
     MockToolSeam,
 )
 from egma_simulator.model import ScriptedModel
@@ -221,6 +223,15 @@ def milliseconds_of(span: dict) -> float:
     return (int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])) / 1_000_000
 
 
+def terminal_reason(client: RecordingControlPlane) -> str:
+    """What the report says went wrong, in the words a reader sees."""
+    for document in client.filed:
+        for event in document.get("events", []):
+            if event["status"] in ("completed", "failed", "canceled"):
+                return event.get("reason") or ""
+    raise AssertionError("the simulation never reported a terminal state")
+
+
 def terminal_facts(client: RecordingControlPlane) -> dict:
     for document in client.filed:
         for event in document.get("events", []):
@@ -362,11 +373,17 @@ async def opened(
     mock_tools: tuple[MockTool, ...] = (),
     *,
     seam: MockToolSeam | None = None,
+    wait_for_the_agent: bool = True,
 ) -> object:
     """One room, joined, with egma standing ready to answer in it.
 
     ``seam`` is for the one test that has to ask what the seam claims
     afterwards; everything else only cares what comes back on the wire.
+
+    ``wait_for_the_agent`` is false where the room this test wants is one
+    the agent could never have reported in — waiting for a report that
+    cannot come would fail the simulation before the test got to look at
+    the exchange, which is the plug's job and is proved where the plug is.
     """
     spec = SimulationSpec.from_document(mocked_spec())
     plug = livekit_plug.LiveKitRoom(
@@ -379,7 +396,8 @@ async def opened(
         driver=stub.driver,
     )
     await plug.prepare()
-    await plug.open()
+    if wait_for_the_agent:
+        await plug.open()
     return plug
 
 
@@ -416,6 +434,54 @@ async def test_hello_answers_the_names_this_simulation_answers_for():
         "mocked_tools": ["check_calendar", "book_appointment"],
     }
     await plug.close()
+
+
+async def test_the_seam_says_whether_the_agent_ever_reported():
+    """The one fact a LiveKit simulation is required to see.
+
+    A hello is how the agent's own SDK announces itself. Without one,
+    every mocked tool in the simulation called its real backend and
+    nothing on the record would say so — which is why the plug reads this
+    and fails the simulation rather than conducting it.
+    """
+    seam = MockToolSeam((a_mock("check_calendar", {"slots": []}),))
+
+    assert seam.agent_reported is False
+
+    await seam.hello(
+        json.dumps(
+            {
+                "protocol_version": PROTOCOL_VERSION,
+                "tools": [{"name": "check_calendar", "schema": {}}],
+            }
+        )
+    )
+
+    assert seam.agent_reported is True
+
+
+async def test_a_hello_egma_refused_is_told_apart_from_one_that_never_came():
+    """Two failures, two sentences, because they are in two places.
+
+    A hello that never arrived is a worker with no SDK call in it. A hello
+    Egma received and refused told the agent nothing either — so nothing
+    was isolated, and the simulation still fails — but the SDK did call
+    and the fault is on Egma's side or in the test's own mock tools.
+    Sending a developer to add a call they already made is the wrong half
+    of the system.
+    """
+    seam = MockToolSeam((a_mock("check_calendar", {"slots": []}),))
+    assert seam.why_unreported == NOT_REPORTED
+
+    with pytest.raises(MockToolRefusal):
+        await seam.hello('{"protocol_version":99,"tools":[]}')
+
+    assert seam.agent_reported is False
+    said = seam.why_unreported
+    assert said != NOT_REPORTED
+    assert "Egma refused the report" in said
+    # Egma's own words for why, which is the half this sentence cannot know.
+    assert "99" in said
 
 
 async def test_hello_answers_a_test_that_mocks_nothing_with_an_empty_list():
@@ -681,13 +747,18 @@ async def test_a_reply_too_large_to_send_is_refused_before_it_is_sent():
     kept, so a reply the other side never received leaves this side
     believing nothing about what the agent holds.
     """
-    stub = RoomStub(greeting="Front desk.")
+    # The worker's own hello is the one refused here, so this room never
+    # reports and the plug would fail the simulation over it. Correctly:
+    # a reply that never arrived told the agent to wrap nothing. What this
+    # test is about is one step earlier, so the exchange is opened without
+    # the ordinary reporting worker in front of it.
+    stub = RoomStub(greeting="Front desk.", agent_reports=False)
     seam = MockToolSeam(
         tuple(
             a_mock(f"tool_number_{number:04d}", {"ok": True}) for number in range(900)
         )
     )
-    plug = await opened(stub, seam=seam)
+    plug = await opened(stub, seam=seam, wait_for_the_agent=False)
 
     refusal = await refused(
         stub, HELLO_METHOD, '{"protocol_version":1,"tools":[{"name":"one_tool"}]}'
@@ -772,13 +843,19 @@ async def test_a_hello_egma_refused_leaves_the_agent_wrapping_nothing(
 async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
-    """Nothing about mock tools may fail a conversation that would have run.
+    """A room with no exchange in it is a simulation that cannot report.
 
-    A room where egma answered for nothing is exactly the room every
-    simulation was before mock tools existed, so a participant that will
-    not take the methods costs the exchange and nothing else: it is said
-    loudly, the conversation goes on, and no call of the agent's reaches
-    egma — which is the truth, because egma never stood in their path.
+    This used to be the other way round: a participant that would not take
+    the methods cost the exchange and nothing else, because a room where
+    egma answered for nothing was exactly the room every simulation was
+    before mock tools existed.
+
+    It is not that room any more. The agent's own SDK reports through this
+    same exchange, so a room that cannot offer it is a room the agent
+    cannot report in — and a simulation whose mocked tools all called
+    their real backends must not be filed as a green result. The refusal
+    is still said loudly, and now it also ends the simulation with the
+    sentence that names what to check.
     """
     caplog.set_level("ERROR")
     stub = RoomStub(
@@ -798,7 +875,8 @@ async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
         nobody_can_ask,
     )
 
-    assert terminal_facts(client)["ending"] == "persona_concluded"
+    assert terminal_facts(client)["ending"] == "agent_never_joined"
+    assert "did not report to Egma" in terminal_reason(client)
     assert tool_spans(client) == []
     assert any(
         "could not offer the mock-tool exchange" in record.getMessage()

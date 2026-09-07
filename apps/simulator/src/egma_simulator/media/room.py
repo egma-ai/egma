@@ -52,7 +52,7 @@ update.
 
 Nothing links this constant to the far side of the contract, and nothing
 can: the SDK holds its own copy in
-``sdks/python/src/egma/mockable.py``, pinned again by
+``sdks/python/src/egma/simulation_room.py``, pinned again by
 ``sdks/python/tests/room_stub.py`` and
 ``fixtures/livekit-dumb-agent/tests/conftest.py``, and a customer runs
 whichever release of it they installed. A version already deployed cannot

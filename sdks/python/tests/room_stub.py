@@ -247,7 +247,13 @@ class StubJob:
 
 
 class StubContext:
-    """A job context, down to the two things the SDK touches."""
+    """A job context, down to the three things the SDK touches.
+
+    The third is the shutdown callback. Every export this SDK installs
+    registers one, because the last spans of a conversation are buffered
+    when the job is told to stop, and a job that exits without flushing
+    loses the end of its own record.
+    """
 
     def __init__(
         self, room: StubRoom, room_name: str, metadata: str = ""
@@ -255,10 +261,14 @@ class StubContext:
         self.room = room
         self.job = StubJob(room=StubJobRoom(name=room_name), metadata=metadata)
         self.connect_calls = 0
+        self.shutdown_callbacks: list[Any] = []
 
     async def connect(self) -> None:
         self.connect_calls += 1
         self.room.connected = True
+
+    def add_shutdown_callback(self, callback: Any) -> None:
+        self.shutdown_callbacks.append(callback)
 
 
 def egma_metadata(*, identity: str = EGMA_IDENTITY) -> str:

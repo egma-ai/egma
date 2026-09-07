@@ -1830,6 +1830,28 @@ async def test_a_worker_that_never_comes_is_never_the_agent_failing(
     assert stub.deleted == [stub.rooms[0].name]
 
 
+async def test_a_chat_worker_that_never_reports_to_egma_fails_the_simulation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A chat room is a LiveKit simulation, and needs the SDK just as much.
+
+    Same verb in the worker, same exchange in the room, same mocked tools
+    answered over it. So a worker that joins, types and never says
+    ``egma.hello`` isolated nothing here either — and a green record of
+    that is the one outcome this rule exists to stop.
+    """
+    stub = ChatStub(greeting="Front desk.", replies=["Noted."], agent_reports=False)
+
+    with pytest.raises(PlugError) as unreported:
+        await chat_walk(tmp_path, stub, monkeypatch, scenario="One point.")
+
+    assert failed_ending(unreported.value) == AGENT_NEVER_JOINED
+    told = str(unreported.value)
+    assert "did not report to Egma" in told
+    assert "egma.hello" in told
+    assert stub.deleted == [stub.rooms[0].name]
+
+
 async def test_a_dispatch_the_platform_refuses_is_a_fault_in_its_words(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

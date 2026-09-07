@@ -125,6 +125,49 @@ which is why the order is that way round.
 HELLO_METHOD = "egma.hello"
 """Where a session announces itself and learns what egma answers for."""
 
+NOT_REPORTED = (
+    "the agent did not report to Egma: no egma.hello arrived from the "
+    "worker's session, so this simulation isolated nothing and its record "
+    "would say nothing about the tools it ran. The Egma SDK is required for "
+    "a LiveKit simulation — check that the worker can reach the room and "
+    "that Egma's participant was in it, and check that `egma.simulation` is "
+    "called on the agent's session before it starts"
+)
+"""What a LiveKit simulation whose agent never said hello ends on.
+
+Written for whoever has to go and fix it, which for a customer's worker is
+the developer wiring the SDK in. The two halves are in the order they can
+be checked: the room first, because that is what Egma can see, and the
+call in the worker's own code second, because that is the one Egma cannot.
+
+One sentence, in one place, because three things use it: the voice plug,
+the chat plug, and the room driver where an agent joined and then went
+silent.
+
+It is the sentence for a hello that **never arrived**. A hello Egma
+received and refused is a different fault in a different place, and gets
+:data:`REPORTED_AND_REFUSED` instead — sending a developer to look for a
+missing SDK call when the SDK called and Egma said no is the wrong half of
+the system.
+"""
+
+REPORTED_AND_REFUSED = (
+    "the agent reported to Egma and Egma refused the report ({why}), so no "
+    "tool was isolated and this simulation ran against whatever the agent's "
+    "own tools do. The refusal is Egma's own, so the worker is wired up "
+    "correctly and what to look at is the reason above — most often a test "
+    "whose mock tools do not fit in one message, or a worker and an Egma "
+    "that speak different versions of the exchange"
+)
+"""What a simulation ends on where Egma answered the hello with a refusal.
+
+The other half of :data:`NOT_REPORTED`, and the half a bare "did not
+report" gets badly wrong: the SDK did call, the message did arrive, and
+the fault is on Egma's side of the exchange or in the test's own mock
+tools. Carries Egma's own words for why, because those are the half this
+sentence cannot know.
+"""
+
 TOOL_METHOD = "egma.tool"
 """Where one tool call is asked and answered."""
 
@@ -255,10 +298,51 @@ class MockToolSeam:
         self._answers = {mock.tool_name: mock for mock in mock_tools}
         self._clock = clock
         self._censuses = 0
+        self._refused_report: str | None = None
         self._discovered: tuple[str, ...] = ()
         self._reported: list[ReportedToolCall] = []
 
     # -- What the driver does with it -----------------------------------------
+
+    @property
+    def agent_reported(self) -> bool:
+        """Whether the agent's session has said hello at least once.
+
+        The one thing a LiveKit simulation is required to see. A hello is
+        how the agent's own SDK announces itself, and everything else this
+        seam does — answering for tools, refusing names it has none for —
+        follows from one having arrived. A simulation without one ran with
+        every mocked tool calling its real backend, and nothing here would
+        say so.
+
+        Counted rather than remembered separately: a second hello replaces
+        the first, so the count is the whole of the record.
+
+        Named for the agent because :meth:`reported` next door is the
+        platform lane's word for a tool call somebody else says was made,
+        and one name for two unrelated facts is how a reader ends up
+        checking the wrong one.
+
+        A hello this seam **refused** does not count. It never told the
+        agent which tools to wrap, so nothing was isolated — but it is a
+        different fault from silence, and :attr:`why_unreported` is what
+        tells the two apart.
+        """
+        return self._censuses > 0
+
+    @property
+    def why_unreported(self) -> str:
+        """Why this simulation has no agent report, in the words to act on.
+
+        Two answers, because they send a developer to opposite halves of
+        the system: a hello that never arrived is a worker with no SDK call
+        in it, and a hello Egma refused is a fault on Egma's own side or in
+        the test's mock tools. Read where a plug has already found that
+        :attr:`agent_reported` is false.
+        """
+        if self._refused_report is None:
+            return NOT_REPORTED
+        return REPORTED_AND_REFUSED.format(why=self._refused_report)
 
     def exchanged(self) -> list[ReportedToolCall]:
         """Every reported call since this was last asked, and then none.
@@ -335,6 +419,19 @@ class MockToolSeam:
         census is a snapshot of the agent's tools, and an agent that
         re-announces itself is announcing what it has *now*.
         """
+        try:
+            return await self._hello(payload)
+        except MockToolRefusal as refused:
+            # Remembered, not counted: a refused hello is not a report —
+            # it told the agent nothing, so nothing was wrapped — but it
+            # is a *different* failure from silence, and a simulation that
+            # ended saying "check that egma.simulation is called" when the
+            # SDK called and Egma said no sends a developer to the wrong
+            # half of the system.
+            self._refused_report = refused.message
+            raise
+
+    async def _hello(self, payload: str) -> str:
         asked = _object(HELLO_METHOD, payload)
         _speaks_this_version(asked)
 
