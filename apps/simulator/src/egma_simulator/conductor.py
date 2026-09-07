@@ -1592,6 +1592,12 @@ class VoiceConductor:
         ended = min(ended, heard_through)
         if began is not None and ended < began:
             ended = began
+        if began is not None and self._recorder is not None:
+            # An interruption that lands in the utterance's trailing silence
+            # still stops the persona where it was last heard, as a turn
+            # that ran its course does: the padding before the cut is no
+            # more the caller's speech than the padding after it would be.
+            ended = self._recorder.persona_voiced_through(began, ended)
         self._record.persona_last_stopped_at = ended
         self._record.quiet_since = max(self._record.quiet_since, ended)
         self._pending_persona_text = None

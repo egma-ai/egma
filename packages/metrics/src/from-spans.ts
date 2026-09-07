@@ -797,13 +797,19 @@ function put(
 function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
   const samples: Sample[] = [];
   const traceHasNoSpeakingSpans = hasNoSpeakingSpans(turns);
+  const continuation = continuationsIn(turns, traceHasNoSpeakingSpans);
   for (const [at, turn] of turns.entries()) {
     if (turn.kind !== HUMAN_TURN) continue;
     // The rest of the previous utterance is not a question of its own, so it
     // opens no wait: the wait it belongs to was opened by the turn that carried
     // the caller's speech, and is measured there.
-    if (isContinuation(turns, at, traceHasNoSpeakingSpans)) continue;
-    const answered = answeringSpeech(turns, at, traceHasNoSpeakingSpans);
+    if (continuation[at] === true) continue;
+    const answered = answeringSpeech(
+      turns,
+      at,
+      traceHasNoSpeakingSpans,
+      continuation,
+    );
     if (answered === undefined) continue;
     const latency = milliseconds(answered.startedAt - stoppedSpeaking(turn));
     if (latency < 0) continue;
@@ -913,6 +919,7 @@ function answeringSpeech(
   turns: readonly TimedSpan[],
   at: number,
   traceHasNoSpeakingSpans: boolean,
+  continuation: readonly boolean[],
 ): { readonly startedAt: bigint; readonly spanId: string } | undefined {
   let silentAnswer:
     | { readonly startedAt: bigint; readonly spanId: string }
@@ -921,13 +928,13 @@ function answeringSpeech(
     const turn = turns[next];
     if (turn === undefined) continue;
     if (turn.kind === HUMAN_TURN) {
-      if (isContinuation(turns, next, traceHasNoSpeakingSpans)) continue;
+      if (continuation[next] === true) continue;
       return traceHasNoSpeakingSpans ? silentAnswer : undefined;
     }
     if (turn.kind !== AGENT_TURN) continue;
     // A false start — the reply the turn after it cut off. It answered nothing,
     // so its speech is not the speech that ends the wait.
-    if (isContinuation(turns, next + 1, traceHasNoSpeakingSpans)) continue;
+    if (continuation[next + 1] === true) continue;
     const speech = turn.speech[0];
     if (speech !== undefined) return speech;
     silentAnswer ??= { startedAt: turn.startedAt, spanId: turn.spanId };
@@ -936,8 +943,8 @@ function answeringSpeech(
 }
 
 /**
- * Whether the human turn at `at` is the rest of the caller's previous
- * utterance rather than a turn of the caller's own.
+ * Which human turns are the rest of the caller's previous utterance rather
+ * than turns of the caller's own — one flag per turn, in the turns' order.
  *
  * **The caller was not audible when it opened.** A human turn with no
  * `speaking` child of its own that began while the agent's preceding turn was
@@ -972,26 +979,32 @@ function answeringSpeech(
  * caller talking over the agent — their own turn, measured as one — and no
  * continuation is ever read on such a trace.
  */
-function isContinuation(
+function continuationsIn(
   turns: readonly TimedSpan[],
-  at: number,
   traceHasNoSpeakingSpans: boolean,
-): boolean {
-  if (traceHasNoSpeakingSpans) return false;
-  const turn = turns[at];
-  if (turn === undefined || turn.kind !== HUMAN_TURN) return false;
-  if (turn.speech.length > 0) return false;
-  const before = turns[at - 1];
-  if (before === undefined) return false;
-  // Straight after a continuation: the transcriber flushed the same
-  // utterance again before the agent had replied to any of it.
-  if (before.kind === HUMAN_TURN) {
-    return isContinuation(turns, at - 1, traceHasNoSpeakingSpans);
+): readonly boolean[] {
+  const continuation: boolean[] = new Array<boolean>(turns.length).fill(false);
+  if (traceHasNoSpeakingSpans) return continuation;
+  // One pass, earliest first: each answer depends on the turn before it, and
+  // the turn before it has already been answered — so a run of flushes reads
+  // in one walk, however long a trace the door let in.
+  for (const [at, turn] of turns.entries()) {
+    if (turn.kind !== HUMAN_TURN || turn.speech.length > 0) continue;
+    const before = turns[at - 1];
+    if (before === undefined) continue;
+    if (before.kind === HUMAN_TURN) {
+      // Straight after a continuation: the transcriber flushed the same
+      // utterance again before the agent had replied to any of it.
+      continuation[at] = continuation[at - 1] === true;
+      continue;
+    }
+    if (before.kind !== AGENT_TURN) continue;
+    // Opened while the reply ran, and the reply did not outlive it: cut off by
+    // its arrival, not carried on past it.
+    continuation[at] =
+      turn.startedAt < before.endedAt && before.endedAt <= turn.endedAt;
   }
-  if (before.kind !== AGENT_TURN) return false;
-  // Opened while the reply ran, and the reply did not outlive it: cut off by
-  // its arrival, not carried on past it.
-  return turn.startedAt < before.endedAt && before.endedAt <= turn.endedAt;
+  return continuation;
 }
 
 /** Whether this trace's emitter recorded speech at all. */

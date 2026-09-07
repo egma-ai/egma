@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,13 @@ from conftest import (
     loopback_spec,
     scripted_spec,
     speech_in_the_recording,
+)
+from test_recording_timeline import (
+    FRAME_SECONDS,
+    persona_said,
+    quiet,
+    recorder_started,
+    tone,
 )
 from pipecat.audio.vad.vad_analyzer import VADState
 from pipecat.frames.frames import TextFrame
@@ -616,6 +624,52 @@ async def test_a_persona_turn_ends_on_its_words_and_not_on_its_mouths_pad(
             "from its own last audible sample"
         )
     assert persona_turns
+
+
+async def test_an_interruption_in_the_pad_stops_the_persona_on_its_words(
+    tmp_path: Path,
+):
+    """A cut that lands in the mouth's pad still stops the persona on its words.
+
+    The agent talks over the persona while the pad after its last word is
+    still playing, so the transport throws the rest of the pad away and
+    the turn is stamped at the cut. Everything played between the last
+    word and the cut is the mouth's quiet, and a stop stamped at the cut
+    would hand the agent that quiet exactly as the padded stop of an
+    uninterrupted turn did. The cut arrives before the mouth's own stop
+    frame — that frame waits behind the audio it closes, the interruption
+    does not — so this is the interrupted path, driven on its own.
+    """
+    recorder = await recorder_started()
+    spoke_for = 0.5
+    for step in range(round(1.0 / FRAME_SECONDS)):
+        await persona_said(
+            recorder,
+            playing_at=step * FRAME_SECONDS,
+            audio=tone() if step * FRAME_SECONDS < spoke_for else quiet(),
+        )
+    # Half a second of words, then half a second of pad, and the cut lands
+    # at the end of what played: half a second into the pad.
+    cut_at = recorder.bot_position
+    assert float(cut_at) == pytest.approx(1.0, abs=0.01)
+
+    assembled = assemble(
+        spec_for(scenario="First point.", replies=["Certainly."]),
+        blobs=FilesystemBlobStore(tmp_path),
+        speech=SCRIPTED_PAIR,
+    )
+    conductor = assembled.conductor
+    assert conductor is not None
+    conductor._recorder = recorder
+    conductor._persona_began = Fraction(0)
+    conductor._persona_ended = cut_at
+    conductor._pending_persona_text = "First point."
+
+    conductor.persona_interrupted(heard_through=cut_at)
+
+    stopped = conductor._record.persona_last_stopped_at
+    assert stopped is not None
+    assert float(stopped) == pytest.approx(spoke_for, abs=FRAME_SECONDS)
 
 
 async def test_the_recording_is_stamped_from_its_own_first_sample(
