@@ -104,6 +104,7 @@ const FACTS: Facts = {
   erroredSpanCount: 0,
   source: "production",
   emitter: "agent",
+  pov: "agent",
   environment: "default",
   connectionType: "",
   providerCallId: "egma-fixture-capture-1",
