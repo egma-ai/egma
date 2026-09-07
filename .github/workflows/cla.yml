@@ -47,8 +47,15 @@ jobs:
       (github.event.issue.pull_request != null &&
        contains(github.event.comment.body, 'I have read the CLA Document and I hereby sign the CLA'))
     steps:
+      # Pinned to a commit rather than a tag, the way `test.yml` and the release
+      # workflows pin theirs, and here it matters most: this job runs on
+      # `pull_request_target` with write access to this repository's contents,
+      # so whatever it runs is trusted with the signature file and with a token
+      # a fork's own workflow never gets. A tag can be moved, and a moved tag
+      # would hand that to code nobody here reviewed. The trailing comment is
+      # the human-readable version the SHA is.
       - name: Check or record the signature
-        uses: contributor-assistant/github-action@v2.6.1
+        uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
         env:
           # GitHub's own token, and nothing else. The signature file lives in
           # this repository, so there is no second credential to hold.
