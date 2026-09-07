@@ -346,3 +346,59 @@ describe("the migrated settings and execution guards", () => {
     expect((await store.sql("select grading_plan from run where id=$1", [runId])).rows).toEqual([{ grading_plan: plan }]);
   });
 });
+
+describe("the retired Response latency parameter", () => {
+  it("discards an old valid association while retaining the shared core and its version", async () => {
+    const oldDatabase = await createEmptyDatabase("old_latency_settings_migration");
+    let oldStore: SingleConnection | undefined;
+    let oldDirectory: string | undefined;
+    const oldContract = CODE_CONTRACT.map((parameter) => ({
+      ...parameter,
+      key: "maximum_average_response_time_ms",
+      label: "Maximum average response time",
+    }));
+    const oldSettings = { maximum_average_response_time_ms: 1234 };
+    try {
+      oldDirectory = await mkdtemp(path.join(tmpdir(), "egma-before-old-latency-"));
+      const earlier = (await readdir(MIGRATIONS_DIRECTORY))
+        .filter((name) => name.endsWith(".sql") && name < UNDER_TEST).sort();
+      for (const name of earlier) await cp(path.join(MIGRATIONS_DIRECTORY, name), path.join(oldDirectory, name));
+      await runMigrations(oldDatabase.url, oldDirectory);
+      oldStore = await openSingleConnection(oldDatabase.url);
+      await oldStore.sql("insert into organization (id,name,slug) values ($1,'Old latency organization','old-latency')", [organization]);
+      await oldStore.sql("insert into project (id,organization_id,name,slug,revision) values ($1,$2,'Old latency project','old-latency',$3)", [project, organization, newId("rev")]);
+      await oldStore.sql("begin");
+      await oldStore.sql("insert into grader_definition (id,name,scope_editable) values ($1,'Response latency',true)", [sharedLatency]);
+      await oldStore.sql("insert into grader_definition_version (definition_id,version,type,prompt,parameter_contract,modalities,judge_model) values ($1,1,'code',null,$2,'[\"chat\",\"voice\"]',null)", [sharedLatency, JSON.stringify(oldContract)]);
+      await oldStore.sql("commit");
+      await oldStore.sql("insert into project_grader (id,organization_id,project_id,grader_definition_id,scope,parameter_values,pass_threshold) values ($1,$2,$3,$4,$5,$6,0.8)", [codeAssociation, organization, project, sharedLatency, JSON.stringify(SCOPE), JSON.stringify(oldSettings)]);
+
+      // This is not a malformed-settings cleanup: the old integer value has
+      // the exact declared key and satisfies that installed core's bounds.
+      const { rows: before } = await oldStore.sql(`select
+        pg.parameter_values = jsonb_build_object(v.parameter_contract->0->>'key', 1234)
+        and v.parameter_contract->0->>'valueType' = 'integer'
+        and jsonb_typeof(pg.parameter_values->'maximum_average_response_time_ms') = 'number'
+        and 1234 between (v.parameter_contract->0->>'minimum')::numeric
+          and (v.parameter_contract->0->>'maximum')::numeric as matches_contract
+        from project_grader pg join grader_definition_version v
+          on v.definition_id=pg.grader_definition_id and v.version=1
+        where pg.id=$1`, [codeAssociation]);
+      expect(before).toEqual([{ matches_contract: true }]);
+
+      await cp(path.join(MIGRATIONS_DIRECTORY, UNDER_TEST), path.join(oldDirectory, UNDER_TEST));
+      expect((await runMigrations(oldDatabase.url, oldDirectory)).applied).toEqual([UNDER_TEST]);
+      expect((await oldStore.sql("select id from project_grader")).rows).toEqual([]);
+      const { rows: retained } = await oldStore.sql(`select d.id,d.current_definition_version,v.version,v.parameter_contract
+        from grader_definition d join grader_definition_version v on v.definition_id=d.id`);
+      expect(retained).toEqual([{
+        id: sharedLatency, current_definition_version: 1, version: 1, parameter_contract: oldContract,
+      }]);
+    } finally {
+      await oldStore?.sql("rollback").catch(() => undefined);
+      await oldStore?.close();
+      await oldDatabase.drop();
+      if (oldDirectory !== undefined) await rm(oldDirectory, { recursive: true, force: true });
+    }
+  });
+});
