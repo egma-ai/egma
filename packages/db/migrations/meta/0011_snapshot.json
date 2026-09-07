@@ -1,5 +1,5 @@
 {
-  "id": "32dc970d-69e5-4b56-b008-162144e32c0c",
+  "id": "15932549-f894-47e0-99e7-07209d3d0221",
   "prevId": "11e1df41-55b0-40fa-9028-a38b95c42131",
   "version": "7",
   "dialect": "postgresql",
@@ -5827,6 +5827,62 @@
           "primaryKey": false,
           "notNull": false
         },
+        "late_invoiced_cents": {
+          "name": "late_invoiced_cents",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "late_observed_seconds": {
+          "name": "late_observed_seconds",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "late_pending_identifier": {
+          "name": "late_pending_identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "late_pending_through_seconds": {
+          "name": "late_pending_through_seconds",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "late_pending_amount_cents": {
+          "name": "late_pending_amount_cents",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "late_invoice_create_started_at": {
+          "name": "late_invoice_create_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "late_invoice_id": {
+          "name": "late_invoice_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "late_item_create_started_at": {
+          "name": "late_item_create_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "late_invoice_item_id": {
+          "name": "late_invoice_item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "state": {
           "name": "state",
           "type": "text",
@@ -5929,6 +5985,18 @@
         "cloud_meter_period_pending_complete": {
           "name": "cloud_meter_period_pending_complete",
           "value": "\n      num_nonnulls(\"cloud_meter_period\".\"pending_identifier\", \"cloud_meter_period\".\"pending_seconds\", \"cloud_meter_period\".\"pending_value\",\n        \"cloud_meter_period\".\"pending_timestamp\", \"cloud_meter_period\".\"pending_hour\", \"cloud_meter_period\".\"pending_first_sent_at\") in (0, 6)\n    "
+        },
+        "cloud_meter_period_late_counted": {
+          "name": "cloud_meter_period_late_counted",
+          "value": "\n      \"cloud_meter_period\".\"late_invoiced_cents\" between 0 and 9007199254740991\n      and \"cloud_meter_period\".\"late_observed_seconds\" between 0 and 9007199254740991\n    "
+        },
+        "cloud_meter_period_late_pending_complete": {
+          "name": "cloud_meter_period_late_pending_complete",
+          "value": "\n      num_nonnulls(\"cloud_meter_period\".\"late_pending_identifier\", \"cloud_meter_period\".\"late_pending_through_seconds\", \"cloud_meter_period\".\"late_pending_amount_cents\") in (0, 3)\n      and (\"cloud_meter_period\".\"late_pending_identifier\" is not null or num_nonnulls(\"cloud_meter_period\".\"late_invoice_create_started_at\", \"cloud_meter_period\".\"late_invoice_id\", \"cloud_meter_period\".\"late_item_create_started_at\", \"cloud_meter_period\".\"late_invoice_item_id\") = 0)\n    "
+        },
+        "cloud_meter_period_late_pending_valid": {
+          "name": "cloud_meter_period_late_pending_valid",
+          "value": "\"cloud_meter_period\".\"late_pending_identifier\" is null or (\n      btrim(\"cloud_meter_period\".\"late_pending_identifier\") <> ''\n      and \"cloud_meter_period\".\"late_pending_through_seconds\" between 1 and 9007199254740991\n      and \"cloud_meter_period\".\"late_pending_amount_cents\" between 1 and 9007199254740991\n      and (\"cloud_meter_period\".\"late_invoice_id\" is null or (\"cloud_meter_period\".\"late_invoice_create_started_at\" is not null and btrim(\"cloud_meter_period\".\"late_invoice_id\") <> ''))\n      and (\"cloud_meter_period\".\"late_item_create_started_at\" is null or \"cloud_meter_period\".\"late_invoice_id\" is not null)\n      and (\"cloud_meter_period\".\"late_invoice_item_id\" is null or (\"cloud_meter_period\".\"late_item_create_started_at\" is not null and btrim(\"cloud_meter_period\".\"late_invoice_item_id\") <> ''))\n    )"
         },
         "cloud_meter_period_pending_valid": {
           "name": "cloud_meter_period_pending_valid",

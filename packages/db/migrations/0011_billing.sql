@@ -140,6 +140,15 @@ CREATE TABLE "cloud_meter_period" (
 	"pending_timestamp" timestamp with time zone,
 	"pending_hour" timestamp with time zone,
 	"pending_first_sent_at" timestamp with time zone,
+	"late_invoiced_cents" bigint DEFAULT 0 NOT NULL,
+	"late_observed_seconds" bigint DEFAULT 0 NOT NULL,
+	"late_pending_identifier" text,
+	"late_pending_through_seconds" bigint,
+	"late_pending_amount_cents" bigint,
+	"late_invoice_create_started_at" timestamp with time zone,
+	"late_invoice_id" text,
+	"late_item_create_started_at" timestamp with time zone,
+	"late_invoice_item_id" text,
 	"state" text DEFAULT 'open' NOT NULL,
 	"last_outcome" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -163,6 +172,22 @@ CREATE TABLE "cloud_meter_period" (
       num_nonnulls("cloud_meter_period"."pending_identifier", "cloud_meter_period"."pending_seconds", "cloud_meter_period"."pending_value",
         "cloud_meter_period"."pending_timestamp", "cloud_meter_period"."pending_hour", "cloud_meter_period"."pending_first_sent_at") in (0, 6)
     ),
+	CONSTRAINT "cloud_meter_period_late_counted" CHECK (
+      "cloud_meter_period"."late_invoiced_cents" between 0 and 9007199254740991
+      and "cloud_meter_period"."late_observed_seconds" between 0 and 9007199254740991
+    ),
+	CONSTRAINT "cloud_meter_period_late_pending_complete" CHECK (
+      num_nonnulls("cloud_meter_period"."late_pending_identifier", "cloud_meter_period"."late_pending_through_seconds", "cloud_meter_period"."late_pending_amount_cents") in (0, 3)
+      and ("cloud_meter_period"."late_pending_identifier" is not null or num_nonnulls("cloud_meter_period"."late_invoice_create_started_at", "cloud_meter_period"."late_invoice_id", "cloud_meter_period"."late_item_create_started_at", "cloud_meter_period"."late_invoice_item_id") = 0)
+    ),
+	CONSTRAINT "cloud_meter_period_late_pending_valid" CHECK ("cloud_meter_period"."late_pending_identifier" is null or (
+      btrim("cloud_meter_period"."late_pending_identifier") <> ''
+      and "cloud_meter_period"."late_pending_through_seconds" between 1 and 9007199254740991
+      and "cloud_meter_period"."late_pending_amount_cents" between 1 and 9007199254740991
+      and ("cloud_meter_period"."late_invoice_id" is null or ("cloud_meter_period"."late_invoice_create_started_at" is not null and btrim("cloud_meter_period"."late_invoice_id") <> ''))
+      and ("cloud_meter_period"."late_item_create_started_at" is null or "cloud_meter_period"."late_invoice_id" is not null)
+      and ("cloud_meter_period"."late_invoice_item_id" is null or ("cloud_meter_period"."late_item_create_started_at" is not null and btrim("cloud_meter_period"."late_invoice_item_id") <> ''))
+    )),
 	CONSTRAINT "cloud_meter_period_pending_valid" CHECK ("cloud_meter_period"."pending_identifier" is null or (
       btrim("cloud_meter_period"."pending_identifier") <> ''
       and "cloud_meter_period"."pending_seconds" between 1 and 9007199254740991
