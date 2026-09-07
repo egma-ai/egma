@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@egma/db": "workspace:*",
-    "@egma/ee": "workspace:*",
     "@egma/ids": "workspace:*",
     "@egma/metrics": "workspace:*",
     "@egma/provider-credentials": "workspace:*",
@@ -24,5 +23,8 @@
     "@opentelemetry/sdk-node": "^0.221.0",
     "pino": "^10.3.1",
     "posthog-node": "^5.49.1"
+  },
+  "optionalDependencies": {
+    "@egma/ee": "workspace:*"
   }
 }

@@ -7,12 +7,15 @@ WORKDIR /app
 # Manifests first, so editing source does not reinstall the world.
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY apps/grader/package.json apps/grader/
-COPY ee/package.json ee/
 COPY packages/db/package.json packages/db/
 COPY packages/ids/package.json packages/ids/
 COPY packages/metrics/package.json packages/metrics/
 COPY packages/provider-credentials/package.json packages/provider-credentials/
 COPY packages/simulation-contract/package.json packages/simulation-contract/
+RUN --mount=type=bind,target=/workspace \
+    if [ -f /workspace/ee/package.json ]; then \
+      mkdir -p ee && cp /workspace/ee/package.json ee/; \
+    fi
 RUN pnpm install --frozen-lockfile --filter "egma" --filter "@egma/grader..."
 
 COPY packages/ids packages/ids
@@ -20,9 +23,11 @@ COPY packages/metrics packages/metrics
 COPY packages/provider-credentials packages/provider-credentials
 COPY packages/simulation-contract packages/simulation-contract
 COPY packages/db packages/db
-COPY ee ee
+RUN --mount=type=bind,target=/workspace \
+    if [ -f /workspace/ee/package.json ]; then cp -R /workspace/ee/. ee/; fi
 COPY apps/grader apps/grader
-RUN pnpm exec tsc -b packages/ids packages/provider-credentials packages/db ee apps/grader
+RUN pnpm --filter @egma/ee --if-present build \
+    && pnpm exec tsc -b packages/ids packages/provider-credentials packages/db apps/grader
 
 ENV NODE_ENV=production
 
