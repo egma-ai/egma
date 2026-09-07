@@ -30,6 +30,9 @@ from conftest import (
     scripted_spec,
     speech_in_the_recording,
 )
+from pipecat.audio.vad.vad_analyzer import VADState
+from pipecat.frames.frames import TextFrame
+from pipecat.processors.frame_processor import FrameProcessor
 from test_recording_timeline import (
     FRAME_SECONDS,
     persona_said,
@@ -37,9 +40,6 @@ from test_recording_timeline import (
     recorder_started,
     tone,
 )
-from pipecat.audio.vad.vad_analyzer import VADState
-from pipecat.frames.frames import TextFrame
-from pipecat.processors.frame_processor import FrameProcessor
 
 from egma_simulator import conductor as conductor_module
 from egma_simulator import speech as speech_module
