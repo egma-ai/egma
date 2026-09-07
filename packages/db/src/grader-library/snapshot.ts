@@ -6,7 +6,6 @@ import {
   GRADER_DEFINITION_TYPES,
   GRADER_MODALITIES,
   type GraderDefinitionType,
-  type GraderJudgeModel,
   type GraderModality,
 } from "../schema/graders.ts";
 
@@ -17,7 +16,6 @@ export type GraderDefinitionSnapshot = {
   readonly prompt: string | null;
   readonly parameterContract: readonly GraderParameter[];
   readonly modalities: readonly GraderModality[];
-  readonly judgeModel: GraderJudgeModel | null;
 };
 
 export type GraderDefinitionSource = {
@@ -27,12 +25,7 @@ export type GraderDefinitionSource = {
   readonly prompt: string | null;
   readonly parameterContract: unknown;
   readonly modalities: unknown;
-  readonly judgeModel: unknown;
 };
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** Validate the complete immutable value before execution can receive it. */
 export function snapshotGraderDefinition(
@@ -69,12 +62,6 @@ export function snapshotGraderDefinition(
   }
 
   const type = source.type as GraderDefinitionType;
-  if (type === "llm_as_judge" && !isObject(source.judgeModel)) {
-    throw malformed("needs one LLM model selection");
-  }
-  if (type === "code" && source.judgeModel !== null) {
-    throw malformed("is code but holds an LLM model selection");
-  }
 
   return {
     definitionId: source.definitionId,
@@ -83,6 +70,5 @@ export function snapshotGraderDefinition(
     prompt: source.prompt,
     parameterContract,
     modalities: source.modalities as readonly GraderModality[],
-    judgeModel: source.judgeModel as GraderJudgeModel | null,
   };
 }

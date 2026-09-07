@@ -2,7 +2,7 @@ import { newId } from "@egma/ids";
 import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
-import { validateGraderParameterValues } from "../grader-library/parameters.ts";
+import { validateExecutableGraderParameters } from "../grader-library/parameters.ts";
 import { snapshotGraderDefinition } from "../grader-library/snapshot.ts";
 import {
   productionSampleSelected,
@@ -80,7 +80,6 @@ const CANDIDATE_COLUMNS = {
   prompt: graderDefinitionVersion.prompt,
   parameterContract: graderDefinitionVersion.parameterContract,
   modalities: graderDefinitionVersion.modalities,
-  judgeModel: graderDefinitionVersion.judgeModel,
 } as const;
 
 /** Read the active project policy and its one current immutable definition. */
@@ -117,8 +116,8 @@ export async function applicableGraders(
           ),
         ),
         or(
-          isNull(graderDefinition.organizationId),
-          eq(graderDefinition.organizationId, auth.organizationId),
+          and(isNull(graderDefinition.organizationId), isNull(graderDefinition.projectId)),
+          and(eq(graderDefinition.organizationId, auth.organizationId), eq(graderDefinition.projectId, projectId)),
         ),
       ),
     )
@@ -131,7 +130,8 @@ export async function applicableGraders(
       projectGraderId: row.projectGraderId,
       graderName: row.graderName,
       passThreshold: row.passThreshold,
-      parameterValues: validateGraderParameterValues(
+      parameterValues: validateExecutableGraderParameters(
+        definition.type,
         definition.parameterContract,
         row.parameterValues,
       ),

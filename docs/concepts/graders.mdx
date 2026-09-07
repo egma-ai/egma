@@ -1,40 +1,80 @@
 ---
 title: "Graders and scores"
 sidebarTitle: "Graders"
-description: "Understand how Egma turns trace evidence into individual grades and a display-only combined score."
+description: "Understand how grader cores and project settings turn trace evidence into scores."
 ---
 
-A **metric** is an observed fact. Duration and latency are metrics. They describe
-what happened and do not decide whether the behavior was good.
+A **metric** is an observed fact, such as duration or latency. A **grader** uses
+trace evidence, test values, or metrics to assign one normalized score from `0`
+through `1`. A **grade** records one grader's score, details, selected core,
+settings, pass threshold, and time.
 
-A **grader** uses trace evidence, test values, or metrics to assign one
-normalized score from `0` through `1` to a completed trace. One completed
-grader result is a **grade**. The grade keeps its score, details, frozen pass
-threshold, and time.
+## Cores and project settings
 
-## Expected behaviors
+A grader's core contains its LLM prompt or trusted code identity, parameter
+contract, and compatible modalities. Core versions are immutable. The name and
+description are live display metadata.
 
-Egma automatically adds the **Expected behaviors** grader to every project. It
-is the only predefined grader in the current product. Its fixed scope selects
-all simulations and no production traces. You cannot change this scope or
-remove the grader. You can change its individual pass threshold.
+Each project saves its own language model, other parameter values, scope, and
+pass threshold. Changing these settings does not create a core version or
+change another project's settings. Defaults are copied on first use; they do
+not replace saved model choices when Egma publishes a core improvement.
 
-Expected behaviors reads the completed simulation and the behavior statements
-from the exact test version used by that simulation. It evaluates each statement
-independently. The statement results stay inside the grade's assertion details,
-and the grader returns one top-level score:
+Egma maintains shared predefined graders. You can create a custom LLM grader
+for one project, or clone the current LLM core and the project's effective
+settings. A clone is independent of its source. Custom cores are visible only
+inside their owning project.
+
+Only the current custom core can be edited. A prompt change creates the next
+version. Historical cores and Egma-owned cores are read-only. You cannot clone
+a historical version or trusted code.
+
+## Expected behaviors and LLM grading
+
+Egma automatically adds **Expected behaviors** to every project. Its fixed
+scope selects all simulations and no production traces. You can change its
+language model and individual pass threshold. You cannot remove it or change
+its scope. A custom clone of this prompt is optional and can have a different
+scope.
+
+Expected behaviors reads the statements from the simulation's frozen test
+version. All LLM graders use the same executor and make one model request per
+trace. The request contains the saved instruction, the test's behavior
+statements when present, and the recorded transcript, ending outcome, tool
+names and arguments, and observed metrics. It does not include tool return
+payloads. Production traces have no test behaviors.
+
+An ordinary instruction produces one criterion result. A prompt such as
+Expected behaviors asks the model to judge every supplied behavior separately.
+Each result includes a decision, reason, and transcript citations. Egma accepts
+only the complete instruction result or a complete set of behavior results.
+Empty, partial, mixed, duplicate, unknown, or malformed results produce a null
+score. This validation checks response structure; it cannot prove that the
+model followed the intended criterion family.
+
+Egma computes the top-level score from the decisions:
 
 ```text
-passed assertions / total assertions = normalized grade score
+met criteria / all criteria = normalized grade score
 ```
 
-If an assertion cannot be graded, the top-level score is unavailable and the
-grade contains an error. Egma does not turn a grading error into a zero score.
+For example, two `met` decisions and one `not_met` decision produce `2/3`.
+`cannot_determine` makes the top-level score unavailable while preserving all
+criterion details. Egma does not turn a grading error into a zero score or score
+only the available subset.
 
-## Individual results
+## Response latency
 
-Each project grader has one pass threshold. Egma derives that grader's result
-from the frozen values on the grade:
+**Response latency** is an optional trusted code grader. You choose its scope,
+maximum response time in milliseconds, and pass threshold. It compares the
+90th percentile (p90) of recorded turn response latencies with your maximum.
+It scores `1` at or below the maximum and `0` above it. Missing latency evidence
+produces a null score.
+
+## Individual results and combined score
+
+Each project grader has one pass threshold. Egma derives its individual result
+from the grade's frozen values:
 
 ```text
 score >= pass threshold  → passed
@@ -42,60 +82,36 @@ score < pass threshold   → failed
 no score                 → errored
 ```
 
-This result describes one grader only. Egma does not assign an overall
-`passed` or `failed` result to a trace, test, test suite, or run.
+When every selected grader has a score, Egma shows their unweighted arithmetic
+mean as the **combined score**. Each grader contributes one equal share. If
+grading is pending or one grader errors, the combined score is unavailable.
+Egma does not assign an overall pass or fail result to a trace, test, suite, or run.
 
-## Combined score
+## Scope and stable history
 
-When at least one grader is selected and every selected grader has a score,
-Egma shows their unweighted arithmetic mean as the **combined score**. Each
-grader contributes one equal share.
+Simulation scope can select all tests, test suites, or individual tests.
+Production scope can sample a stable percentage of eligible traces. Modality
+compatibility also controls selection. Overlapping selectors run a project
+grader once. A scope or modality mismatch creates no pending work or grade row.
 
-The combined score is for comparison. Egma does not apply an overall threshold
-and does not turn it into pass or fail. If selected grading is pending or one
-grader errors, the combined score is unavailable.
-
-## Scope and modality
-
-A project grader's scope says which future traces it grades. Simulation scope
-can select all tests, test suites, or individual tests. Production scope can
-select a stable percentage of eligible traces. A grader definition also states
-whether it supports chat, voice, or both.
-
-Several selectors can match the same trace, but one project grader still runs
-once. A scope or modality mismatch produces no grade row and is not pending
-grading work.
-
-Expected behaviors supports chat and voice. Egma can add other predefined
-graders later without copying their prompts or code into each project.
-
-## Stable history
-
-Egma maintains a shared definition for each predefined grader. When Egma
-improves that definition, it creates one new immutable definition version.
-Future work uses the new version. Existing runs keep the exact definition
-version and pass threshold they already selected.
+A run freezes its selected core versions and project settings. Production work
+freezes them when grading is selected. Later setting changes, core edits, or
+removal cannot change that selected work, delayed execution, or retries.
 
 Trace and simulation reads return the latest grade from each project grader in
-`grades`. They return every grade, including older grades, in `gradeHistory`.
-The latest grade is current and contributes to the combined score.
-
-A simulation regrade runs the whole grader selection frozen for its completed
-trace, including the selected definition versions and pass thresholds. You
-cannot regrade only one grader. Each new grade is appended, so the earlier
-grades remain in `gradeHistory`.
+`grades`, and every grade in `gradeHistory`. A simulation regrade uses the whole
+frozen selection, including its core versions, settings, and pass thresholds.
+New grades are appended, so earlier grades remain in history.
 
 ## Grading progress
 
-Grading state reports operational progress, not quality:
+Grading state reports operational progress:
 
 - `not_requested` — no grader was selected.
 - `pending` — grading was requested but has not started.
 - `running` — a worker is grading the trace.
 - `complete` — all requested graders produced scores.
-- `error` — a grader errored or the grading work ended with a terminal system
-  error.
+- `error` — a grader errored or work ended with a terminal system error.
 
 A simulation that failed or was canceled before it produced a completed trace
-has no grading work to wait for. Simulation APIs return `null` for its grading
-state.
+has no grading work. Its API grading state is `null`.

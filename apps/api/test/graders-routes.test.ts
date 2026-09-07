@@ -98,7 +98,7 @@ describe("active project graders", () => {
           simulations: [{ kind: "all" }],
           production: null,
         },
-        settings: {},
+        settings: { llm_provider: "openai", llm_model: "gpt-5.6-terra" },
         passThreshold: 1,
       }),
     ]);

@@ -2,7 +2,6 @@ import { arrayOf, dateTimeSchema, nullable, stringIdSchema } from "../schemas.ts
 
 const stringSchema = { type: "string" } as const;
 const booleanSchema = { type: "boolean" } as const;
-const integerSchema = { type: "integer" } as const;
 
 export const graderTypeSchema = {
   type: "string",
@@ -11,7 +10,7 @@ export const graderTypeSchema = {
 
 export const graderOwnerSchema = {
   type: "string",
-  enum: ["egma", "organization"],
+  enum: ["egma", "project"],
 } as const;
 
 export const graderModalitySchema = {
@@ -71,19 +70,18 @@ export const graderScopeSchema = {
 
 /**
  * The small settings language the current product can render and validate.
- * It has one value type because Response latency is the one setting-bearing
- * grader in this release. A later real setting can extend the closed union.
+ * Strings hold catalog model choices. Numbers hold bounded code-grader values.
  */
 export const graderSettingDefinitionSchema = {
   type: "object",
   properties: {
     key: stringSchema,
     label: stringSchema,
-    valueType: { type: "string", enum: ["integer"] },
-    defaultValue: integerSchema,
+    valueType: { type: "string", enum: ["integer", "number", "string"] },
+    defaultValue: { oneOf: [{ type: "number" }, stringSchema] },
     unit: nullable(stringSchema),
-    minimum: nullable(integerSchema),
-    maximum: nullable(integerSchema),
+    minimum: nullable({ type: "number" }),
+    maximum: nullable({ type: "number" }),
   },
   required: [
     "key",

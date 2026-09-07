@@ -630,7 +630,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
       return (
         <Empty
           title="No graders in the library"
-          lead="Create a custom grader for this organization."
+          lead="Create a custom grader for this project."
         />
       );
     }

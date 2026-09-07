@@ -159,10 +159,10 @@ beforeAll(async () => {
   await setup.sql(
     `insert into grader_definition_version
        (definition_id, version, type, prompt, parameter_contract,
-        modalities, judge_model)
+        modalities)
      values ($1, 1, 'code', null,
              '[{"key":"maximum","label":"Maximum","valueType":"integer","defaultValue":7,"unit":null,"minimum":1,"maximum":null}]'::jsonb,
-             '["chat", "voice"]'::jsonb, null)`,
+             '["chat", "voice"]'::jsonb)`,
     [definitionId],
   );
   await setup.sql("commit");
@@ -718,10 +718,10 @@ describe("regrading uses frozen history", () => {
     await database.sql(
       `insert into grader_definition_version
          (definition_id, version, type, prompt, parameter_contract,
-          modalities, judge_model)
+          modalities)
        values ($1, 2, 'code', null,
                '[{"key":"maximum","label":"Maximum","valueType":"integer","defaultValue":2,"unit":null,"minimum":1,"maximum":null}]'::jsonb,
-               '["chat", "voice"]'::jsonb, null)`,
+               '["chat", "voice"]'::jsonb)`,
       [definitionId],
     );
     await database.sql(

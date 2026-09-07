@@ -221,9 +221,8 @@ describe("every table", () => {
    * through many.
    */
   const REVISION_COLUMNS: Readonly<Record<string, number>> = {
-    // A project grader has no live revision column. Updating project policy does
-    // not create a grader-definition version, and the current product exposes no
-    // project-grader archive or delete flow for a revision to guard.
+    // A project grader has no live revision column. Settings and removal change
+    // live policy without creating a grader-definition version.
     project: 1,
     test: 1,
   };
@@ -409,13 +408,13 @@ describe("the grader definition's nullable tenancy", () => {
         column.table_name === "grader_definition" && column.column_name === name,
     );
 
-  it("uses one nullable organization owner and no project owner", () => {
+  it("uses a nullable matching organization and project owner", () => {
     const organization = tenancy("organization_id");
     expect(organization).toBeDefined();
     expect(organization?.type_name).toBe("text");
     expect(organization?.collation_name).toBe("C");
     expect(organization?.not_null).toBe(false);
-    expect(tenancy("project_id")).toBeUndefined();
+    expect(tenancy("project_id")?.not_null).toBe(false);
   });
 
   /**
@@ -573,14 +572,13 @@ describe("a persona version is executable by itself", () => {
 });
 
 describe("grader execution ownership", () => {
-  it("stores type and the non-secret model only on the immutable grader version", () => {
+  it("stores core type on the immutable version and keeps model values off it", () => {
     const model = columns.find(
       (column) =>
         column.table_name === "grader_definition_version" &&
         column.column_name === "judge_model",
     );
-    expect(model?.type_name).toBe("jsonb");
-    expect(model?.has_default).toBe(false);
+    expect(model).toBeUndefined();
     expect(columns.some(
       (column) =>
         column.table_name === "grader_definition_version" &&

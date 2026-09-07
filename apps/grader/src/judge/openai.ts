@@ -1,12 +1,12 @@
 import {
   DECISIONS,
-  type Decision,
   type Judge,
   type JudgeAnswer,
   type JudgeQuestion,
   type ResolvedJudge,
 } from "./contract.ts";
 import { asJudgeReads } from "./input.ts";
+import { validateJudgeAnswer } from "./response.ts";
 
 /**
  * The OpenAI judge: one criterion, one chat completion, one answer.
@@ -33,11 +33,22 @@ const JUDGE_RESPONSE_FORMAT = {
     schema: {
       type: "object",
       properties: {
-        decision: { type: "string", enum: DECISIONS },
-        rationale: { type: "string" },
-        cited_turns: { type: "array", items: { type: "integer" } },
+        results: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              decision: { type: "string", enum: DECISIONS },
+              rationale: { type: "string" },
+              cited_turns: { type: "array", items: { type: "integer" } },
+            },
+            required: ["id", "decision", "rationale", "cited_turns"],
+            additionalProperties: false,
+          },
+        },
       },
-      required: ["decision", "rationale", "cited_turns"],
+      required: ["results"],
       additionalProperties: false,
     },
   },
@@ -107,7 +118,7 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       return response.json() as Promise<unknown>;
     });
 
-    return answerOf(said);
+    return answerOf(said, question);
   };
 }
 
@@ -151,8 +162,12 @@ async function withRetries<T>(attempt: () => Promise<T>): Promise<T> {
 /** The question, as the words after the system prompt. */
 function asked(question: JudgeQuestion): string {
   return [
-    "## Criterion",
+    "## Instruction (instruction_1)",
     question.criterion,
+    "",
+    "## Expected behaviors",
+    ...question.expectedBehaviors.map((behavior) => `${behavior.id}: ${behavior.text}`),
+    ...(question.expectedBehaviors.length === 0 ? ["(no test expected behaviors were supplied)"] : []),
     "",
     asJudgeReads(question.evidence),
   ].join("\n");
@@ -168,7 +183,7 @@ function asked(question: JudgeQuestion): string {
  * them would hide a broken integration behind a word that means "fine, not
  * applicable".
  */
-function answerOf(said: unknown): JudgeAnswer {
+function answerOf(said: unknown, question: JudgeQuestion): JudgeAnswer {
   const content = contentOf(said);
 
   let parsed: unknown;
@@ -181,30 +196,11 @@ function answerOf(said: unknown): JudgeAnswer {
     );
   }
 
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new JudgeRefused(
-      "the judge model answered JSON that is not an object",
-      false,
-    );
+  try {
+    return validateJudgeAnswer(parsed, question);
+  } catch (error) {
+    throw new JudgeRefused(error instanceof Error ? error.message : "invalid judge response", false);
   }
-
-  const fields = parsed as Record<string, unknown>;
-  const decision = DECISIONS.find((known) => known === fields["decision"]);
-  if (decision === undefined) {
-    throw new JudgeRefused(
-      `the judge model answered a decision Egma does not know; expected one of ${DECISIONS.join(", ")}`,
-      false,
-    );
-  }
-
-  return {
-    decision: decision as Decision,
-    rationale:
-      typeof fields["rationale"] === "string" && fields["rationale"].trim() !== ""
-        ? fields["rationale"].trim()
-        : "the judge gave no reason.",
-    citedTurns: citedTurnsOf(fields["cited_turns"]),
-  };
 }
 
 function contentOf(said: unknown): string {
@@ -231,10 +227,3 @@ function contentOf(said: unknown): string {
   return content;
 }
 
-/** Whole positive numbers only; anything else was not a turn. */
-function citedTurnsOf(value: unknown): readonly number[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter(
-    (at): at is number => Number.isInteger(at) && typeof at === "number" && at > 0,
-  );
-}

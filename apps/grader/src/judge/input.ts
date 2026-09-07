@@ -12,10 +12,8 @@ import type { Conversation } from "../conversation.ts";
  * day it arrives it joins the type and the rendering and nothing else moves.
  *
  * **It carries no criterion, and that is structural.** The evidence is
- * assembled once per conversation and shared by every judge call made about it;
- * what each call is deciding travels beside it. So one behavior's text cannot
- * reach another behavior's judge — not because the fan-out is careful, but
- * because there is nowhere in this type for it to be.
+ * assembled once per conversation. The saved instruction and test behavior
+ * context travel beside it in the judge question.
  *
  * Text-only in v1. Nothing fixes the shape of what arrives here — telemetry is
  * written by whoever emitted it, and no write door stands between an exporter
