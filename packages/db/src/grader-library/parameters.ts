@@ -1,11 +1,12 @@
 import { UnprocessableInputError } from "../access/errors.ts";
+import { RECOMMENDED_GRADER_MODEL, validGraderModel, type GraderModel } from "../models/selections.ts";
 
 /** One setting declared by an immutable grader definition version. */
 export type GraderParameter = {
   readonly key: string;
   readonly label: string;
-  readonly valueType: "integer";
-  readonly defaultValue: number;
+  readonly valueType: "integer" | "number" | "string";
+  readonly defaultValue: number | string;
   readonly unit: string | null;
   readonly minimum: number | null;
   readonly maximum: number | null;
@@ -31,9 +32,9 @@ function objectOf(value: unknown, message: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function integerOrNull(value: unknown): value is number | null {
+function numberOrNull(value: unknown): value is number | null {
   return value === null ||
-    (typeof value === "number" && Number.isInteger(value));
+    (typeof value === "number" && Number.isFinite(value));
 }
 
 /** Validate a stored immutable contract before it can shape a form or worker. */
@@ -78,24 +79,28 @@ export function validateGraderParameterContract(
     if (typeof label !== "string" || label.trim() === "") {
       throw new TypeError(`grader parameter ${key} needs a label`);
     }
-    if (valueType !== "integer") {
+    if (valueType !== "integer" && valueType !== "number" && valueType !== "string") {
       throw new TypeError(`grader parameter ${key} has an unsupported value type`);
     }
-    if (typeof defaultValue !== "number" || !Number.isInteger(defaultValue)) {
-      throw new TypeError(`grader parameter ${key} needs a whole-number default`);
+    if (valueType === "string" ? typeof defaultValue !== "string" || defaultValue.trim() === "" :
+      typeof defaultValue !== "number" || !Number.isFinite(defaultValue) ||
+      (valueType === "integer" && !Number.isInteger(defaultValue))) {
+      throw new TypeError(`grader parameter ${key} has an invalid default`);
     }
     if (unit !== null && (typeof unit !== "string" || unit.trim() === "")) {
       throw new TypeError(`grader parameter ${key} has an invalid unit`);
     }
-    if (!integerOrNull(minimum) || !integerOrNull(maximum)) {
-      throw new TypeError(`grader parameter ${key} has a non-integer range`);
+    if (!numberOrNull(minimum) || !numberOrNull(maximum) ||
+      (valueType === "integer" && [minimum, maximum].some((one) => one !== null && !Number.isInteger(one))) ||
+      (valueType === "string" && (minimum !== null || maximum !== null || unit !== null))) {
+      throw new TypeError(`grader parameter ${key} has an invalid range or unit`);
     }
     if (minimum !== null && maximum !== null && minimum > maximum) {
       throw new TypeError(`grader parameter ${key} has a reversed range`);
     }
     if (
-      (minimum !== null && defaultValue < minimum) ||
-      (maximum !== null && defaultValue > maximum)
+      typeof defaultValue === "number" && ((minimum !== null && defaultValue < minimum) ||
+      (maximum !== null && defaultValue > maximum))
     ) {
       throw new TypeError(`grader parameter ${key} has a default outside its range`);
     }
@@ -104,7 +109,7 @@ export function validateGraderParameterContract(
       key,
       label: label.trim(),
       valueType,
-      defaultValue,
+      defaultValue: defaultValue as number | string,
       unit: unit === null ? null : unit.trim(),
       minimum,
       maximum,
@@ -154,9 +159,17 @@ export function validateGraderParameterValues(
   const answer: Record<string, unknown> = {};
   for (const parameter of contract) {
     const value = values[parameter.key];
-    if (typeof value !== "number" || !Number.isInteger(value)) {
+    if (parameter.valueType === "string") {
+      if (typeof value !== "string" || value.trim() === "") {
+        throw new UnprocessableInputError(`${parameter.label} must be nonempty text`);
+      }
+      answer[parameter.key] = value.trim();
+      continue;
+    }
+    if (typeof value !== "number" || !Number.isFinite(value) ||
+      (parameter.valueType === "integer" && !Number.isInteger(value))) {
       throw new UnprocessableInputError(
-        `${parameter.label} must be a whole number`,
+        `${parameter.label} must be ${parameter.valueType === "integer" ? "a whole number" : "a number"}`,
       );
     }
     if (parameter.minimum !== null && value < parameter.minimum) {
@@ -172,4 +185,28 @@ export function validateGraderParameterValues(
     answer[parameter.key] = value;
   }
   return answer;
+}
+
+/** Defaults are materialized only on creation or first use. */
+export function defaultGraderParameterValues(contractValue: unknown): GraderParameterValues {
+  const contract = validateGraderParameterContract(contractValue);
+  return validateGraderParameterValues(contract, Object.fromEntries(
+    contract.map((parameter) => [parameter.key, parameter.defaultValue]),
+  ));
+}
+
+export const LLM_GRADER_PARAMETER_CONTRACT: readonly GraderParameter[] = [
+  { key: "llm_provider", label: "LLM provider", valueType: "string", defaultValue: RECOMMENDED_GRADER_MODEL.provider, unit: null, minimum: null, maximum: null },
+  { key: "llm_model", label: "LLM model", valueType: "string", defaultValue: RECOMMENDED_GRADER_MODEL.model, unit: null, minimum: null, maximum: null },
+];
+
+export function graderModelOfParameters(values: GraderParameterValues): GraderModel {
+  return validGraderModel({ provider: values.llm_provider, model: values.llm_model });
+}
+
+/** Model capability checks belong at every grader settings write/read boundary. */
+export function validateExecutableGraderParameters(type: string, contract: unknown, values: unknown): GraderParameterValues {
+  const checked = validateGraderParameterValues(contract, values);
+  if (type === "llm_as_judge") graderModelOfParameters(checked);
+  return checked;
 }
