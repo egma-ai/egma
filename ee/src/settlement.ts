@@ -2,6 +2,7 @@ import {
   activateBilling,
   seedCloudPlans,
   settleInference,
+  markInferenceSettlementFailed,
 } from "./access/index.ts";
 import { readPlanCatalog } from "./plans.ts";
 
@@ -26,6 +27,7 @@ export function startInferenceSettlementJob(log: SettlementLog): {
       if (settled.charged > 0)
         log.info({ ...settled }, "Inference usage settled");
     } catch (fault) {
+      await markInferenceSettlementFailed();
       log.error(
         { err: fault },
         "Inference settlement failed; customer work continues",

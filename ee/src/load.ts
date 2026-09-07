@@ -4,6 +4,7 @@ import {
   activateBilling,
   seedCloudPlans,
   settleInference,
+  markInferenceSettlementFailed,
   type SettledUsage,
 } from "./access/index.ts";
 import { billingRoutes } from "./routes.ts";
@@ -26,6 +27,7 @@ export async function loadCloudBilling(
     await activateBilling(options.now?.() ?? new Date());
     caughtUp = await settleInference(options.now?.() ?? new Date());
   } catch (fault) {
+    await markInferenceSettlementFailed();
     console.error(
       "Billing initialization failed; customer work continues",
       fault,

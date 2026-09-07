@@ -130,7 +130,7 @@ function allowanceSpentMessage(
   return (
     `This organization has used all ${counted} of its ${what} on the ` +
     `${plan.name} plan for this period. It resets on ${dateLabel(resetsAt)}. ` +
-    `${next} Open Settings → Organization to see the plan and this period's ` +
+    `${next} Open Settings → Usage and billing to see the plan and this period's ` +
     "usage."
   );
 }
@@ -147,7 +147,7 @@ function unfundedMessage(
   return (
     `Egma's provider keys cannot fund ${named}: this organization's ` +
     `inference balance is ${moneyLabel(balanceMicros)}. Add inference credit ` +
-    "under Settings → Organization, or use your own provider keys, and this " +
+    "under Settings → Usage and billing, or use your own provider keys, and this " +
     "work runs on its own."
   );
 }
@@ -159,11 +159,9 @@ function refusalsAmong(
 ): readonly AllowanceRefusal[] {
   const refusals: AllowanceRefusal[] = [];
   for (const kind of asked) {
+    // Pro voice continues beyond its included minutes and incurs metered overage.
+    if (facts.plan.code === "pro" && kind !== "chat_simulations") continue;
     const allowed = allowanceOf(facts.plan, kind);
-    // Unlimited by allowance. Pro's minutes are unlimited here because the
-    // overage is metered and billed, not because they are free; Pro's chat is
-    // unlimited because a chat's only marginal cost is inference, which the
-    // balance or the customer's own key pays for.
     if (allowed === null) continue;
     if (facts.usage.used[kind] < allowed) continue;
     refusals.push({

@@ -12,6 +12,8 @@ import {
   type NewUsageRecord,
 } from "@egma/db";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { loadCloudBilling } from "../src/load.ts";
+import { startInferenceSettlementJob } from "../src/settlement.ts";
 import {
   activateBilling,
   openBillingAccount,
@@ -376,6 +378,62 @@ it("keeps boot and funding available while a billing table is unavailable", asyn
     );
   }
 });
+
+for (const path of ["boot", "job"] as const) {
+  it(`allows an existing zero balance when ${path} cannot initialize collection and restores the gate after collection`, async () => {
+    const one = await customer();
+    await activateBilling(cutoff);
+    await database.sql(
+      "update cloud_billing_account set balance_micros = 0 where organization_id = $1",
+      [one.organizationId],
+    );
+    const source = cloudEntitlementSource();
+    const request = {
+      organizationId: one.organizationId,
+      providers: ["openai"],
+    };
+    expect((await source.mayPlatformKeyFund(request)).funded).toBe(false);
+    await database.sql(
+      "create or replace function fail_plan_seed() returns trigger language plpgsql as $$ begin raise exception 'plan seed unavailable'; end $$",
+    );
+    await database.sql(
+      "create trigger fail_plan_seed before insert or update on cloud_plan for each row execute function fail_plan_seed()",
+    );
+    let job: { stop(): void } | undefined;
+    let reported = false;
+    try {
+      if (path === "boot") {
+        await loadCloudBilling();
+      } else {
+        job = startInferenceSettlementJob({
+          info() {},
+          error() {
+            reported = true;
+          },
+        });
+        await expect.poll(() => reported).toBe(true);
+      }
+      // The fault affects plan writes. Healthy account reads can still see the stale zero.
+      expect((await openBillingAccount(one.organizationId)).balanceMicros).toBe(
+        0,
+      );
+      expect(await source.mayPlatformKeyFund(request)).toEqual({
+        funded: true,
+      });
+    } finally {
+      job?.stop();
+      await database.sql("drop trigger fail_plan_seed on cloud_plan");
+    }
+    await seedCloudPlans();
+    await activateBilling(cutoff);
+    expect(await source.mayPlatformKeyFund(request)).toEqual({ funded: true });
+    await settleInferenceForOrganization(one.organizationId);
+    expect(
+      (await openBillingAccount(one.organizationId)).settlementFailedAt,
+    ).toBeNull();
+    expect((await source.mayPlatformKeyFund(request)).funded).toBe(false);
+  });
+}
 
 it("lets members page through every ledger movement with stable boundaries and tenant isolation", async () => {
   const one = await customer(),

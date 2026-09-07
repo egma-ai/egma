@@ -17,6 +17,7 @@ export {
   readBillingLedger,
   settleInference,
   settleInferenceForOrganization,
+  markInferenceSettlementFailed,
   type SettledUsage,
   type BillingLedgerEntry,
   type BillingLedgerPage,

@@ -172,6 +172,7 @@ const BILLING_PORTS = [
   "activateBilling",
   "settleInference",
   "settleInferenceForOrganization",
+  "markInferenceSettlementFailed",
 ];
 
 /**

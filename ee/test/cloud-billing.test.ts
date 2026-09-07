@@ -435,7 +435,7 @@ describe("whether an organization may start a kind of work", () => {
     expect(refusal?.message).toContain("500");
     expect(refusal?.message).toContain("Hobby");
     expect(refusal?.message).toContain("Oct 15, 2026");
-    expect(refusal?.message).toContain("Settings");
+    expect(refusal?.message).toContain("Settings → Usage and billing");
   });
 
   it("refuses one kind and leaves the customer's other kinds alone", async () => {
@@ -475,7 +475,7 @@ describe("whether an organization may start a kind of work", () => {
     ).resolves.toEqual({ allowed: true });
   });
 
-  it("leaves Pro's chat unlimited and prices its minutes by allowance", async () => {
+  it("admits Pro voice overage while reporting its finite included minutes", async () => {
     // The row a Stripe subscription would have written, seeded directly: the
     // plan code and the anchor are the whole of what Egma keeps from Stripe.
     await database.sql(
@@ -487,14 +487,19 @@ describe("whether an organization may start a kind of work", () => {
        where organization_id = $1`,
       [globex.organizationId],
     );
-    // Five thousand web-call minutes, in one conversation, because the span is
-    // what a minute is counted from.
     await conversations(globex, {
       count: 1,
       modality: "voice",
       connectionType: "livekit_room",
       startedAt: new Date("2026-09-16T09:00:00.000Z"),
-      seconds: 5_000 * 60,
+      seconds: 5_001 * 60,
+    });
+    await conversations(globex, {
+      count: 1,
+      modality: "voice",
+      connectionType: "phone_number",
+      startedAt: new Date("2026-09-16T09:00:00.000Z"),
+      seconds: 2_001 * 60,
     });
 
     const source = cloudEntitlementSource({ now: () => NOW });
@@ -508,12 +513,48 @@ describe("whether an organization may start a kind of work", () => {
       organizationId: globex.organizationId,
       allowances: ["web_call_minutes", "phone_minutes"],
     });
-    expect(minutes.allowed).toBe(false);
-    if (minutes.allowed) return;
-    expect(minutes.refusals.map((one) => one.allowance)).toEqual([
-      "web_call_minutes",
+    expect(minutes).toEqual({ allowed: true });
+    const facts = await readEntitlementFacts(globex.organizationId, NOW);
+    expect(facts.plan.webCallMinutesAllowance).toBe(5_000);
+    expect(facts.plan.phoneMinutesAllowance).toBe(2_000);
+    expect(facts.usage.used.web_call_minutes).toBe(5_001);
+    expect(facts.usage.used.phone_minutes).toBe(2_001);
+    await database.sql(
+      "update cloud_billing_account set balance_micros = 0 where organization_id = $1",
+      [globex.organizationId],
+    );
+    try {
+      expect((await source.mayPlatformKeyFund({
+        organizationId: globex.organizationId,
+        providers: ["openai"],
+      })).funded).toBe(false);
+    } finally {
+      await database.sql(
+        "update cloud_billing_account set balance_micros = $2 where organization_id = $1",
+        [globex.organizationId, facts.account.balanceMicros],
+      );
+    }
+  });
+
+  it("keeps Hobby phone and web limits after the included minutes are spent", async () => {
+    for (const connectionType of ["livekit_room", "phone_number"] as const) {
+      await conversations(acme, {
+        count: 1,
+        modality: "voice",
+        connectionType,
+        startedAt: new Date("2026-09-16T09:00:00.000Z"),
+        seconds: 501 * 60,
+      });
+    }
+    const decision = await cloudEntitlementSource({ now: () => NOW }).mayStart({
+      organizationId: acme.organizationId,
+      allowances: ["web_call_minutes", "phone_minutes"],
+    });
+    expect(decision.allowed).toBe(false);
+    if (decision.allowed) return;
+    expect(decision.refusals.map((row) => row.allowance)).toEqual([
+      "web_call_minutes", "phone_minutes",
     ]);
-    expect(minutes.refusals[0]?.message).toContain("Pro");
   });
 
   it("asks about nothing and refuses nothing", async () => {
@@ -561,7 +602,7 @@ describe("whether Egma's own key may fund a provider", () => {
     expect(decision.message).toContain("openai");
     expect(decision.message).toContain("cartesia");
     expect(decision.message).toContain("$0.00");
-    expect(decision.message).toContain("Settings");
+    expect(decision.message).toContain("Settings → Usage and billing");
   });
 
   it("charges nothing for a provider the customer holds their own key for", async () => {
@@ -624,7 +665,7 @@ describe("the facts the adapter decides from", () => {
     expect(facts.account.planCode).toBe("pro");
     expect(facts.plan.webCallMinutesAllowance).toBe(5_000);
     expect(facts.period.resetsAt).toEqual(PERIOD_RESETS);
-    expect(facts.usage.used.web_call_minutes).toBe(5_000);
+    expect(facts.usage.used.web_call_minutes).toBe(5_001);
   });
 });
 

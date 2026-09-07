@@ -196,11 +196,11 @@ export async function billingRoutes(
   app.get(`${BILLING_PATH}/ledger`, async (request, reply) => {
     const query = request.query as { cursor?: unknown };
     if (query.cursor !== undefined && typeof query.cursor !== "string") {
-      return refuse(reply, 400, "invalid_request", "Invalid ledger cursor.");
+      return refuse(reply, 400, "invalid_request", "The billing history cursor is invalid. Reload the page to load billing history again.");
     }
     try { return reply.send(await readBillingLedger(options.contextOf(request), query.cursor)); }
     catch (fault) {
-      if (fault instanceof InvalidLedgerCursorError) return refuse(reply, 400, "invalid_request", "Invalid ledger cursor.");
+      if (fault instanceof InvalidLedgerCursorError) return refuse(reply, 400, "invalid_request", "The billing history cursor is invalid. Reload the page to load billing history again.");
       throw fault;
     }
   });

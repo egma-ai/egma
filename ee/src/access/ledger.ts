@@ -24,13 +24,13 @@ export async function settleInferenceForOrganization(
   organizationId: string,
   at = new Date(),
 ): Promise<SettledUsage> {
-  await openBillingAccount(organizationId);
-  const intervalMs = (await readPlanCatalog()).chargingIntervalSeconds * 1000;
-  const intervalEndedAt = new Date(
-    Math.floor(at.getTime() / intervalMs) * intervalMs,
-  );
-  const intervalStartedAt = new Date(intervalEndedAt.getTime() - intervalMs);
   try {
+    await openBillingAccount(organizationId);
+    const intervalMs = (await readPlanCatalog()).chargingIntervalSeconds * 1000;
+    const intervalEndedAt = new Date(
+      Math.floor(at.getTime() / intervalMs) * intervalMs,
+    );
+    const intervalStartedAt = new Date(intervalEndedAt.getTime() - intervalMs);
     return await fencedDatabase().transaction(async (tx) => {
       const [account] = await tx
         .select()
@@ -101,13 +101,26 @@ export async function settleInferenceForOrganization(
       return { charged: delta === 0n ? 0 : 1, amountMicros };
     });
   } catch (fault) {
-    // A failed collector cannot make a stale zero balance stop customer work.
+    await markInferenceSettlementFailed(organizationId);
+    throw fault;
+  }
+}
+
+/** A billing fault makes cached balances unreliable until successful collection. */
+export async function markInferenceSettlementFailed(
+  organizationId?: string,
+): Promise<void> {
+  try {
     await fencedDatabase()
       .update(cloudBillingAccount)
       .set({ settlementFailedAt: new Date() })
-      .where(eq(cloudBillingAccount.organizationId, organizationId))
-      .catch(() => undefined);
-    throw fault;
+      .where(
+        organizationId === undefined
+          ? undefined
+          : eq(cloudBillingAccount.organizationId, organizationId),
+      );
+  } catch (fault) {
+    console.error("Billing reliability could not be recorded", fault);
   }
 }
 
@@ -115,7 +128,11 @@ export async function settleInferenceForOrganization(
 export async function settleInference(at = new Date()): Promise<SettledUsage> {
   const accounts = await fencedDatabase()
     .select({ organizationId: cloudBillingAccount.organizationId })
-    .from(cloudBillingAccount);
+    .from(cloudBillingAccount)
+    .catch(async (fault: unknown) => {
+      await markInferenceSettlementFailed();
+      throw fault;
+    });
   let charged = 0;
   let amountMicros = 0;
   for (const account of accounts) {

@@ -318,6 +318,12 @@ describe("what the Billing section reads", () => {
     expect(read.balanceMicros).toBe(WELCOME_CREDIT_MICROS);
     expect(read.mayManageBilling).toBe(false);
     expect(read.ledger.entries).toMatchObject([{ kind: "welcome_credit", amountMicros: 5000000 }]);
+    const invalidCursor = await ask(api.app, "GET", "/api/organization/billing/ledger?cursor=broken", asMember);
+    expect(invalidCursor.statusCode).toBe(400);
+    expect(invalidCursor.body).toMatchObject({
+      error: "invalid_request",
+      message: "The billing history cursor is invalid. Reload the page to load billing history again.",
+    });
   });
 
   it("refuses a request with no credential", async () => {
@@ -351,7 +357,7 @@ describe("starting a run an organization cannot pay for", () => {
     );
     expect(message).toContain("500");
     expect(message).toContain("Hobby");
-    expect(message).toContain("Settings");
+    expect(message).toContain("Settings → Usage and billing");
 
     // And the other customer's month is its own.
     const admitted = await ask(api.app, "POST", "/v1/runs", globex.key, {
@@ -381,7 +387,7 @@ describe("starting a run an organization cannot pay for", () => {
     // A chat conversation needs its persona's LLM and nothing else.
     expect(message).toContain("openai");
     expect(message).toContain("$0.00");
-    expect(message).toContain("Settings");
+    expect(message).toContain("Settings → Usage and billing");
 
     // Nothing was written: one run in this project, the one the fixture made.
     const { rows } = await api.database.sql<{ started: string }>(
