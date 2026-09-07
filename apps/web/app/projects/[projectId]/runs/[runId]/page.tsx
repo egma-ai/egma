@@ -38,16 +38,11 @@ import {
   Loading,
   NotFound,
 } from "../../../../../ui/page-state.tsx";
-import {
-  readRunBillingHold,
-  type BillingHold,
-} from "../../../../../lib/run-billing-hold.ts";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import {
   RelativeInstant,
   useMinuteClock,
 } from "../../../../../ui/relative-time.tsx";
-import { RunBillingHold } from "../../../../../ui/run-billing-hold.tsx";
 import {
   RunStatus,
 } from "../../../../../ui/run-status.tsx";
@@ -184,26 +179,6 @@ function RunDetailView({
    */
   const [moved, setMoved] = useState<ReadonlyMap<string, Moved>>(new Map());
   const [runStatus, setRunStatus] = useState<string | null>(null);
-  /**
-   * Why this run's queued work is waiting, when it is waiting for money.
-   *
-   * Asked while the run is still live and asked again when its status moves,
-   * because the answer is about the customer's month rather than about the
-   * run: credit arriving or a month resetting makes it empty with nothing on
-   * the run itself having changed. A deployment that does not bill answers an
-   * empty list and this stays empty for the life of the page.
-   */
-  const [billingHolds, setBillingHolds] = useState<readonly BillingHold[]>([]);
-  useEffect(() => {
-    let current = true;
-    void readRunBillingHold(runId, projectId).then((answer) => {
-      if (!current) return;
-      setBillingHolds(answer.status === "ready" ? answer.value.holds : []);
-    });
-    return () => {
-      current = false;
-    };
-  }, [runId, projectId, runStatus]);
   /** The last sequence number applied. The whole of the cursor. */
   const applied = useRef(0);
   /** Last event already present when this page first observed the run. */
@@ -689,7 +664,6 @@ function RunDetailView({
             * for money. Nothing at all on a deployment that does not bill, and
             * nothing on a run nothing is holding back.
             */}
-          <RunBillingHold holds={billingHolds} />
 
           <dl
             className="m-0 grid flex-none grid-cols-5 gap-px border border-border bg-border max-[1000px]:grid-cols-2 max-[40rem]:grid-cols-1"

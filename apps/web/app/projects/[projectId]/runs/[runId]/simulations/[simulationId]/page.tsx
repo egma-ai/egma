@@ -24,10 +24,6 @@ import {
   type RegradeAsked,
   type SimulationEvidence,
 } from "../../../../../../../lib/simulations.ts";
-import {
-  readSimulationSpend,
-  type SimulationSpend,
-} from "../../../../../../../lib/simulation-usage.ts";
 import { Button } from "@/components/ui/button";
 import { Actions } from "../../../../../../../ui/section.tsx";
 import { Problem, Refused } from "../../../../../../../ui/form.tsx";
@@ -42,7 +38,6 @@ import {
   RelativeInstant,
   useMinuteClock,
 } from "../../../../../../../ui/relative-time.tsx";
-import { SimulationCost } from "../../../../../../../ui/simulation-cost.tsx";
 import {
   SimulationEvidenceReview,
   useSimulationEvidenceRecording,
@@ -106,21 +101,6 @@ function EvidenceView({
           { client: platformClient },
         ),
       ),
-    projectId,
-    simulationId,
-  );
-
-  /*
-   * What this simulation cost, read separately from the evidence.
-   *
-   * A second request rather than a field on the first, because the two are
-   * different subjects on different surfaces: cost is a product read on the
-   * browser's own path, and the published `/v1` contract gains nothing from
-   * this effort. It also means a deployment where the cost read fails still
-   * shows every grade and every turn.
-   */
-  const { answer: spend } = useProjectRead<SimulationSpend>(
-    (project) => readSimulationSpend(simulationId, project),
     projectId,
     simulationId,
   );
@@ -346,7 +326,6 @@ function EvidenceView({
           recording={recording}
         />
 
-        <SimulationCost spend={spend} />
 
       </PageBody>
 

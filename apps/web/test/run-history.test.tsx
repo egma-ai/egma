@@ -449,6 +449,7 @@ describe("one run after suites", () => {
     render(<RunDetailPage />);
 
     const title = await screen.findByRole("heading", { name: "Release check" });
+    expect(sent.some((request) => request.path.includes("/billing-hold"))).toBe(false);
     const navigation = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(title.closest("nav")).toBe(navigation);
     expect(

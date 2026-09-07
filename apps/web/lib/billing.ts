@@ -1,137 +1,76 @@
 import { answerFor, readJson, unreachable, type Answer } from "./api.ts";
+import type { AllowanceUsage } from "./organization-usage.ts";
 
-/**
- * This organization's plan and inference balance, on a deployment that bills.
- *
- * **Absent is the ordinary answer.** A self-hosted Egma has no plan, no balance
- * and no Billing routes at all, so this read answers "not available" and the
- * page shows nothing rather than an empty panel pretending there is a plan to
- * see. That is the same shape the usage panel beside it uses for a refusal:
- * every state says what happened.
- *
- * Money crosses as whole micro-dollars — millionths of a US dollar, the unit
- * every amount in this product is counted in — so nothing rounds on the way
- * here and the page rounds once, where it prints.
- */
-
-/** One allowance the plan includes. `allowed` of `null` is unlimited. */
-export type PlanAllowance = {
-  /** `chat_simulations`, `web_call_minutes` or `phone_minutes`. */
-  readonly kind: string;
-  /** `simulations` or `minutes`. */
-  readonly unit: string;
+export type PlanAllowance = AllowanceUsage & {
   readonly allowed: number | null;
+  readonly overageMicrosPerMinute: number;
 };
-
 export type BillingPlan = {
-  readonly code: string;
+  readonly code: "hobby" | "pro";
   readonly name: string;
   readonly feeMicros: number;
   readonly allowances: readonly PlanAllowance[];
 };
-
-/** One model's charge against the balance this period. Admins only. */
-export type PeriodCharge = {
-  readonly provider: string;
-  readonly model: string;
-  readonly requests: number;
-  readonly amountMicros: number;
-};
-
-/**
- * What an admin may do here, as the deployment states it.
- *
- * **Sent rather than assumed.** The buttons exist only on a deployment whose
- * Stripe adapter is in place, and a page cannot tell that from a plan: a
- * deployment can hold plans and balances and still be one whose operator has
- * not finished setting Stripe up. The bounds travel too, so the custom amount
- * box refuses what the route would refuse and says the same numbers.
- */
 export type BillingActions = {
   readonly available: boolean;
-  /** The amounts the picker offers, in micro-dollars. */
   readonly creditAmountsMicros: readonly number[];
   readonly smallestCreditMicros: number;
   readonly largestCreditMicros: number;
 };
-
+export type BillingLedgerEntry = {
+  readonly id: string;
+  readonly kind:
+    | "welcome_credit"
+    | "purchased_credit"
+    | "inference_charge"
+    | "correction";
+  readonly amountMicros: number;
+  readonly occurredAt: string;
+  readonly intervalStartedAt: string | null;
+  readonly intervalEndedAt: string | null;
+};
+export type BillingLedgerPage = {
+  readonly entries: readonly BillingLedgerEntry[];
+  readonly nextCursor: string | null;
+};
 export type BillingAccount = {
   readonly plan: BillingPlan;
-  /** The inference balance in millionths of a US dollar. Can be negative. */
   readonly balanceMicros: number;
-  /** ISO-8601, the first instant of the period. */
   readonly periodStartedAt: string;
-  /** ISO-8601, the next reset. */
+  readonly usageStartedAt: string;
   readonly resetsAt: string;
   readonly mayManageBilling: boolean;
-  readonly charges: readonly PeriodCharge[];
-  /** Absent on a deployment one release behind these pages. */
-  readonly actions?: BillingActions;
+  readonly ledger: BillingLedgerPage;
+  readonly actions: BillingActions;
 };
 
-/**
- * The read, or `null` where this deployment does not bill.
- *
- * A missing answer here is not a failure: it is what a deployment with no
- * Stripe secret says, because the Billing routes are mounted only when one is
- * set. Anything else keeps its own refusal, so a signed-out browser and a
- * broken read stay as distinguishable here as they are everywhere else.
- */
+/** A missing billing route means this deployment does not bill. */
 export async function readBillingAccount(): Promise<Answer<BillingAccount> | null> {
   const answer = await readJson<BillingAccount>("/api/organization/billing");
   return answer.status === "missing" ? null : answer;
 }
-
-/** What each plan is called on the page, when Egma knows the code. */
-const PLAN_LABELS: Readonly<Record<string, string>> = {
-  hobby: "Hobby",
-  pro: "Pro",
-};
-
-/**
- * The plan's name. The row's own name wins, because a plan is a row and a
- * deployment one release ahead of these pages can sell one this file has never
- * heard of.
- */
-export function planLabel(plan: BillingPlan): string {
-  return plan.name.trim() || PLAN_LABELS[plan.code] || plan.code;
+export function readBillingLedger(
+  cursor: string,
+): Promise<Answer<BillingLedgerPage>> {
+  return readJson<BillingLedgerPage>(
+    `/api/organization/billing/ledger?${new URLSearchParams({ cursor })}`,
+  );
 }
 
-/**
- * Money, as this product writes it: whole dollars and cents, from micros.
- *
- * A negative balance is written with its sign rather than in brackets. It is a
- * real state — work already claimed finishes and is charged, so a balance can
- * end a busy hour below zero — and a person reading it has to see at once that
- * they owe rather than hold.
- */
+/** Keep small nonzero usage amounts visible instead of rounding them to zero. */
 export function moneyLabel(micros: number): string {
   const sign = micros < 0 ? "-" : "";
   return `${sign}$${(Math.abs(micros) / 1_000_000).toLocaleString("en-US", {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits:
+      Math.abs(micros) > 0 && Math.abs(micros) < 10_000 ? 6 : 2,
   })}`;
 }
-
-/**
- * What a plan includes of one allowance, in that allowance's own unit.
- *
- * `null` is unlimited and says so in a word, because "0" would read as none at
- * all — which is the opposite.
- */
-export function allowedLabel(allowance: PlanAllowance): string {
-  if (allowance.allowed === null) return "Unlimited";
-  return `${allowance.allowed.toLocaleString("en-US")} ${allowance.unit}`;
-}
-
-/** The monthly fee, or the word for a plan that charges nothing. */
 export function feeLabel(plan: BillingPlan): string {
-  return plan.feeMicros === 0 ? "Free" : `${moneyLabel(plan.feeMicros)} a month`;
+  return plan.feeMicros === 0
+    ? "Free"
+    : `${moneyLabel(plan.feeMicros)} a month`;
 }
-
-/* ----------------------------------------------------------------- *
- * What an admin does: four actions, each of which opens Stripe.
- * ----------------------------------------------------------------- */
 
 /** Where each action is asked for. */
 export const BILLING_ACTION_PATHS = {
@@ -207,5 +146,6 @@ export async function openPaymentPortal(): Promise<Answer<HostedPage>> {
 export function creditMicrosFromDollars(typed: string): number | undefined {
   const trimmed = typed.trim().replace(/^\$/, "");
   if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return undefined;
-  return Math.round(Number(trimmed) * 1_000_000);
+  const micros = Math.round(Number(trimmed) * 1_000_000);
+  return Number.isSafeInteger(micros) ? micros : undefined;
 }
