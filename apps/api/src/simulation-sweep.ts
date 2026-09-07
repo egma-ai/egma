@@ -123,6 +123,20 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
           `swept ${swept.length} orphaned simulation(s) whose simulator went silent`,
         );
       }
+    } catch (fault) {
+      // A store this loop cannot reach is an ordinary Tuesday, and the rows
+      // it would have swept keep waiting for the next tick. Ending the loop
+      // is the one cost nothing here is worth.
+      options.log.error(
+        { err: fault },
+        "the orphan sweep failed; silent simulations stay put until a sweep reaches them",
+      );
+    }
+
+    // **Its own attempt, because these are two duties.** They share a tick to
+    // save a timer, not because either depends on the other — so one silence
+    // failing to be read must never leave the other unread.
+    try {
       // A conversation graded without the agent's own account of it is news:
       // the record says so, and an operator reading this line knows an
       // exporter or a pull is not delivering.
@@ -137,12 +151,9 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
         );
       }
     } catch (fault) {
-      // A store this loop cannot reach is an ordinary Tuesday, and the rows
-      // it would have swept keep waiting for the next tick. Ending the loop
-      // is the one cost nothing here is worth.
       options.log.error(
         { err: fault },
-        "the orphan sweep failed; silent simulations stay put until a sweep reaches them",
+        "the agent-POV bound could not be read; simulations waiting on one stay put until a sweep reaches them",
       );
     } finally {
       sweeping = false;
