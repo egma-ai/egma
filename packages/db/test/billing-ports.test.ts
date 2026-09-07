@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  billingPlugInFor,
+  billingIsConfigured,
   discardingUsageSink,
   entitlementSourceContract,
   installBillingPlugIn,
@@ -58,8 +58,8 @@ describe("what a deployment with no billing answers", () => {
   });
 });
 
-describe("which plug-in a deployment's settings select", () => {
-  it("selects the open one when no Stripe secret is named", () => {
+describe("what a deployment's settings say about billing", () => {
+  it("says billing is unconfigured when no Stripe secret is named", () => {
     // Both shapes of absent: the setting missing, and the setting present and
     // blank — a compose file with an empty variable is the common way to have
     // one without meaning to.
@@ -69,18 +69,16 @@ describe("which plug-in a deployment's settings select", () => {
       { stripeSecretKey: "" },
       { stripeSecretKey: "   " },
     ]) {
-      const plugIn = billingPlugInFor(settings);
-      expect(plugIn.entitlements).toBeDefined();
-      expect(plugIn.usage).toBeDefined();
+      expect(billingIsConfigured(settings)).toBe(false);
     }
   });
 
-  it("refuses a Stripe secret out loud, because the adapter it names is not here yet", () => {
-    // Never quietly "unlimited": an operator who set a Stripe key expects to
-    // be charging, and a deployment that took the key and billed nobody is the
-    // worse of the two failures.
-    expect(() => billingPlugInFor({ stripeSecretKey: "sk_test_whatever" })).toThrow(
-      /ee\//u,
+  it("says billing is configured when a Stripe secret is named", () => {
+    // What the secret then selects is decided in `apps/api`, which is the one
+    // place allowed to import the commercially licensed package — and only
+    // through an import taken when this answers true.
+    expect(billingIsConfigured({ stripeSecretKey: "sk_test_whatever" })).toBe(
+      true,
     );
   });
 
@@ -90,19 +88,18 @@ describe("which plug-in a deployment's settings select", () => {
     // ADR-0024 exists to prevent — Langfuse's own comments say why — so the
     // rule is checked two ways: it takes one argument, and it reads nothing
     // outside it.
-    expect(billingPlugInFor.length).toBe(1);
-    expect(billingPlugInFor.toString()).not.toContain("process.env");
+    expect(billingIsConfigured.length).toBe(1);
+    expect(billingIsConfigured.toString()).not.toContain("process.env");
 
     // And the same settings answer the same way whatever the process says
     // about itself.
     const before = process.env.EGMA_TEST_DEPLOYMENT_FLAVOUR;
     try {
       process.env.EGMA_TEST_DEPLOYMENT_FLAVOUR = "cloud";
-      const asCloud = billingPlugInFor({});
+      const asCloud = billingIsConfigured({});
       process.env.EGMA_TEST_DEPLOYMENT_FLAVOUR = "self-host";
-      const asSelfHost = billingPlugInFor({});
-      expect(Object.keys(asCloud)).toEqual(Object.keys(asSelfHost));
-      expect(() => billingPlugInFor({ stripeSecretKey: "sk_test_x" })).toThrow();
+      const asSelfHost = billingIsConfigured({});
+      expect(asCloud).toBe(asSelfHost);
     } finally {
       if (before === undefined) delete process.env.EGMA_TEST_DEPLOYMENT_FLAVOUR;
       else process.env.EGMA_TEST_DEPLOYMENT_FLAVOUR = before;

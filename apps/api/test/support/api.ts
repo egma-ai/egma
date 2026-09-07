@@ -7,6 +7,7 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  installBillingPlugIn,
   reconcileGraderCatalog,
   seedPersonaLibrary,
   upsertRateCard,
@@ -189,6 +190,25 @@ export type TestApiOptions = {
    * everybody runs: every allowance unlimited, every usage record discarded.
    */
   readonly billing?: BillingPlugIn;
+  /**
+   * Whether to put that plug-in in place for the whole process, the way the
+   * real entry point does.
+   *
+   * **Off by default, and the default is what most suites want.** The claim
+   * door is handed its entitlement source directly, so a suite about that door
+   * can hand in an adapter without changing what run start or the usage write
+   * do. A suite about the *cloud* adapter needs the other two seams as well —
+   * they reach the installed plug-in from inside the data-access module — so
+   * it asks for this and gets the deployment a Stripe secret would have built,
+   * without an environment variable anywhere.
+   */
+  readonly installBilling?: boolean;
+  /**
+   * The Billing section's routes, on an instance standing in for a deployment
+   * that selected the cloud adapter. A test passes `billingRoutes` from
+   * `@egma/ee` directly; nothing here reads a Stripe key.
+   */
+  readonly billingRoutes?: ServerOptions["billingRoutes"];
 };
 
 export function testConfig(overrides: Partial<Config> = {}): Config {
@@ -297,6 +317,15 @@ export async function createApi(
   await reconcileGraderCatalog();
   await upsertRateCard();
 
+  // The plug-in in place for the whole process, as `index.ts` does it. The
+  // undo is kept so an instance puts the deployment back the way it found it:
+  // suites share a process, and a cloud adapter left installed would answer
+  // the next file's run starts.
+  const restoreBilling =
+    options.installBilling === true
+      ? installBillingPlugIn(config.billing)
+      : undefined;
+
   const { app, identity, drainer } = buildApi({
     config,
     drainsPendingEvidence: options.drainsPendingEvidence ?? false,
@@ -315,6 +344,9 @@ export async function createApi(
     ...(options.retellReach === undefined
       ? {}
       : { retellReach: options.retellReach }),
+    ...(options.billingRoutes === undefined
+      ? {}
+      : { billingRoutes: options.billingRoutes }),
     // Retell production ingestion is not needed in a route test. Its focused
     // tests drive one ingestion turn directly and choose when that turn runs.
     retellProductionIngestionIntervalMilliseconds: 60 * 60_000,
@@ -338,6 +370,7 @@ export async function createApi(
     },
     async close() {
       await app.close();
+      restoreBilling?.();
       await disconnect();
       await database.drop();
       if (

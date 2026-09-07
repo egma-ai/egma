@@ -11,7 +11,8 @@ import {
   upsertRateCard,
 } from "@egma/db";
 
-import { loadConfig } from "./config.ts";
+import { loadCloudBilling } from "./billing.ts";
+import { loadConfig, type Config } from "./config.ts";
 import { platformEvent } from "./platform-log.ts";
 import { buildApi } from "./server.ts";
 
@@ -102,17 +103,30 @@ const graderCatalog = await reconcileGraderCatalog();
 // priced at.
 const rateCard = await upsertRateCard();
 
+// The billing adapter this deployment's settings select.
+//
+// With no Stripe secret named this is `undefined`, nothing is imported, and
+// the product runs on the open plug-in — every allowance unlimited, every
+// usage record discarded. That is the deployment every self-hoster runs and it
+// is not a special case. With one named, the commercially licensed package is
+// loaded here, once, and its plan rows are written before the first request:
+// an allowance cannot be answered against a plan nobody wrote.
+const cloudBilling = await loadCloudBilling(config);
+const plans = await cloudBilling?.seedPlans();
+
+const running: Config = cloudBilling === undefined
+  ? config
+  : { ...config, billing: cloudBilling.plugIn };
+
 // The billing plug-in, put in place for the whole process before the first
-// request. It was chosen from the settings when the configuration was read;
-// this is where the seams inside the data-access module — run start, and the
-// write that stores a usage record — start reaching it. With no Stripe secret
-// named this installs the open plug-in over the open plug-in, which is a
-// no-op, and that is the deployment every self-hoster runs.
-installBillingPlugIn(config.billing);
+// request. This is where the seams inside the data-access module — run start,
+// the claim door and the write that stores a usage record — start reaching it.
+installBillingPlugIn(running.billing);
 
 const { app } = buildApi({
-  config,
+  config: running,
   traceStoreReady: () => traceSchema.state === "ready",
+  ...(cloudBilling === undefined ? {} : { billingRoutes: cloudBilling.routes }),
 });
 
 /** The longest this process waits between attempts on the trace-store schema. */
@@ -179,6 +193,15 @@ if (rateCard.written.length > 0) {
   app.log.info(
     { prices: rateCard.written },
     "Rate-card prices were written from the shipped file",
+  );
+}
+if (plans !== undefined && plans.written.length > 0) {
+  // A plan is a price somebody set. Saying which rows this boot wrote is what
+  // makes a pricing change readable in a deployment log rather than only in a
+  // file's history.
+  app.log.info(
+    { plans: plans.written },
+    "Cloud plan rows were written from the shipped file",
   );
 }
 if (graderCatalog.projectGraders.length > 0) {

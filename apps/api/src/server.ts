@@ -30,6 +30,7 @@ import {
   pendingObjectStore,
   type PendingObjectStore,
 } from "./ingestion/object-store.ts";
+import type { BillingRoutes } from "./billing.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
@@ -43,6 +44,7 @@ import { reportRoutes } from "./routes/reports.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
 import { traceRoutes } from "./routes/traces.ts";
+import { credentialed, requesterOf } from "./http/credentialed.ts";
 import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
 import { webHandler } from "./http/web-handler.ts";
 import {
@@ -126,6 +128,18 @@ export type ServerOptions = {
    * for a suite that migrated its own store before building the API.
    */
   readonly traceStoreReady?: (() => boolean) | undefined;
+  /**
+   * The Billing section's reads, on a deployment whose settings selected the
+   * cloud adapter. Absent on every other deployment, and absent is the
+   * ordinary case: a self-hoster has no plan and no balance, so this address
+   * answers 404, which is the truth about their Egma rather than an empty
+   * panel pretending otherwise.
+   *
+   * They arrive as a plugin rather than as a set of reads because the routes
+   * are the commercially licensed package's, and the only thing they need from
+   * the API is the context a request already resolved.
+   */
+  readonly billingRoutes?: BillingRoutes | undefined;
 };
 
 export type Api = {
@@ -417,6 +431,26 @@ export function buildApi(options: ServerOptions): Api {
   // because it is not in the published contract and must not be able to enter
   // the OpenAPI document by sharing a prefix with something that is.
   void app.register(usageRoutes, { provider: identity.provider, rateLimit });
+
+  // The Billing section's reads, on a deployment that selected the cloud
+  // adapter. Registered here for the reason the usage routes above are: they
+  // are not in the published contract and must not be able to enter the
+  // OpenAPI document by sharing a prefix with something that is.
+  //
+  // The credential hook is applied inside this scope rather than by the
+  // routes themselves, so the commercially licensed package holds no opinion
+  // about how a request becomes a person: it is handed the context the API
+  // already resolved, and the per-organization budget applies to it exactly as
+  // it does to every other browser read.
+  const mountBillingRoutes = options.billingRoutes;
+  if (mountBillingRoutes !== undefined) {
+    void app.register(async (scope) => {
+      credentialed(scope, { provider: identity.provider, rateLimit });
+      await mountBillingRoutes(scope, {
+        contextOf: (request) => requesterOf(request).auth,
+      });
+    });
+  }
 
   // Every customer-managed resource is registered through this one boundary.
   // It is the same explicit operation set that produces OpenAPI and the

@@ -36,6 +36,9 @@ importers:
       '@egma/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@egma/ee':
+        specifier: workspace:*
+        version: link:../../ee
       '@egma/ids':
         specifier: workspace:*
         version: link:../../packages/ids

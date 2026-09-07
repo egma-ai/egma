@@ -89,7 +89,7 @@ export {
   type PeriodUsage,
 } from "./billing/period-usage.ts";
 export {
-  billingPlugInFor,
+  billingIsConfigured,
   discardingUsageSink,
   installBillingPlugIn,
   openBillingPlugIn,

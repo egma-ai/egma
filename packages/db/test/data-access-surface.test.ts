@@ -15,10 +15,19 @@ import { describe, expect, it } from "vitest";
  * Opening and closing the connections, and asking whether they are there. Two
  * stores, one module: the ClickHouse client is as private as the pool, and what
  * is exported for it is the same three verbs and no more.
+ *
+ * `fencedDatabase` is the seventh, and it is the one door out of the pool.
+ * `ee/` is a separate package holding the cloud billing tables' reads and
+ * writes — they cannot live here, because no shared code may read a `cloud_`
+ * table — so it needs a query interface and this is the only way it gets one.
+ * What keeps that from being a loophole is a build rule rather than this list:
+ * `only-a-fenced-home-holds-the-query-interface` fails the build for any file
+ * outside `packages/db/src/` or `ee/src/access/` that imports it.
  */
 const CONNECTION = [
   "connect",
   "disconnect",
+  "fencedDatabase",
   "ping",
   "connectClickHouse",
   "disconnectClickHouse",
@@ -440,13 +449,16 @@ const THE_RATE_CARD = [
 
 /**
  * What a month of platform usage is: the three allowances, which one a
- * conversation is counted against, how many seconds it counts and when the
- * month turns over.
+ * conversation is counted against, how many seconds it counts, when the month
+ * turns over — and the same arithmetic written once in SQL.
  *
- * It reaches no store and names no customer — a simulation row's own frozen
- * facts go in and a quantity comes out — and it crosses the boundary because
- * the page that shows a month, the read that sums it and any adapter that
- * limits it have to be counting the same thing.
+ * None of it reaches a store and none of it names a customer. The pure half
+ * takes a simulation row's own frozen facts and answers a quantity; the SQL
+ * half hands back predicates and aggregate expressions, and whoever runs them
+ * supplies the tenancy and the connection. It crosses the boundary because the
+ * page that shows a month, the read that sums it and the adapter that limits
+ * it have to be counting the same thing — and a second copy of the aggregate
+ * is a second answer a customer would find before a test did.
  */
 const THE_ALLOWANCES = [
   "ALLOWANCE_KINDS",
@@ -455,9 +467,14 @@ const THE_ALLOWANCES = [
   "allowanceKindOf",
   "allowanceKindsAmong",
   "allowancePeriodAt",
+  "allowanceTotalsSelection",
   "allowanceUsedBy",
+  "begunInThePeriod",
   "billableSecondsOf",
   "minutesFromSeconds",
+  "organizationInThePeriod",
+  "periodAt",
+  "periodUsageFrom",
 ];
 
 /**
@@ -472,7 +489,7 @@ const THE_ALLOWANCES = [
  * caller who could fetch the plug-in could ask it anything from anywhere.
  */
 const THE_BILLING_SEAM = [
-  "billingPlugInFor",
+  "billingIsConfigured",
   "discardingUsageSink",
   "entitlementSourceContract",
   "installBillingPlugIn",

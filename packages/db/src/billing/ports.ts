@@ -179,37 +179,28 @@ export function openBillingPlugIn(): BillingPlugIn {
 }
 
 /**
- * What selects a billing adapter. Settings, and never a mode.
+ * Which plug-in a deployment with no Stripe secret runs on: the open one.
  *
- * One optional value today. No field here may ever be derived from whether
- * this deployment is Egma Cloud: a self-hoster who sets the same secret gets
- * the same billing, which is what makes billing a hosted service rather than a
- * cloud-only feature. See ADR-0024, and Langfuse's own code comments on the
- * region variable that leaked into client-safe code.
+ * **The selection itself is not here, and that is the point.** Naming a Stripe
+ * secret selects the cloud adapter, which lives in the commercially licensed
+ * `ee/` package — and this package is shared code, which may never import
+ * `ee/`. So the choice is made one layer out, in `apps/api`, where a dynamic
+ * import is taken only when the secret is set and the open product never loads
+ * a line of the other package.
+ *
+ * What stays here is the half that belongs to everybody: with no secret named,
+ * the plug-in is the open one, every allowance unlimited and every usage
+ * record discarded. Nothing in this decision derives from whether this
+ * deployment is Egma Cloud — a self-hoster who names the same secret gets the
+ * same billing (ADR-0024).
  */
 export type BillingSettings = {
   readonly stripeSecretKey?: string | undefined;
 };
 
-/**
- * Which plug-in this deployment's settings select. A plain function of the
- * settings, called once at boot.
- *
- * Naming a Stripe secret selects the cloud adapter, which lives in the
- * commercially licensed `ee/` package and is not in this release. Until it
- * lands, naming one is refused out loud at boot rather than quietly answered
- * "unlimited": an operator who set a Stripe key expects to be charging, and a
- * deployment that took the key and billed nobody would be the worse of the two
- * failures by a long way.
- */
-export function billingPlugInFor(settings: BillingSettings): BillingPlugIn {
-  const stripeSecretKey = settings.stripeSecretKey?.trim() ?? "";
-  if (stripeSecretKey === "") return openBillingPlugIn();
-  throw new Error(
-    "a Stripe secret key selects the cloud billing adapter, which ships in " +
-      "the ee/ package and is not in this release; unset it to run without " +
-      "billing",
-  );
+/** Whether these settings name a Stripe secret at all. */
+export function billingIsConfigured(settings: BillingSettings): boolean {
+  return (settings.stripeSecretKey?.trim() ?? "") !== "";
 }
 
 /**

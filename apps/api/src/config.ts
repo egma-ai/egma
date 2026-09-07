@@ -1,4 +1,4 @@
-import { billingPlugInFor, type BillingPlugIn } from "@egma/db";
+import { openBillingPlugIn, type BillingPlugIn } from "@egma/db";
 import {
   providerCredentialSource,
   type ProviderCredentialSource,
@@ -181,6 +181,17 @@ export type Config = {
    * Nothing about the choice derives from whether this deployment is the cloud.
    */
   readonly billing: BillingPlugIn;
+  /**
+   * `EGMA_STRIPE_SECRET_KEY`, as the deployment named it, or `undefined`.
+   *
+   * **It is a setting and never a mode.** Its presence is what selects the
+   * cloud adapter, and the selection itself happens in `billing.ts` beside
+   * this file, because the adapter lives in the commercially licensed package
+   * and loading it is a dynamic import taken only when this is set. Reading
+   * the setting here rather than there keeps every deployment value in one
+   * place.
+   */
+  readonly stripeSecretKey: string | undefined;
   /**
    * The deployment's phone carrier route, read from the process environment.
    *
@@ -618,10 +629,11 @@ export function loadConfig(
     rateLimitPerMinute,
     simulatorServiceToken,
     providerCredentials: providerCredentialSource(environment),
-    // Chosen once, here, from one optional setting. See `billingPlugInFor`.
-    billing: billingPlugInFor({
-      stripeSecretKey: environment.EGMA_STRIPE_SECRET_KEY,
-    }),
+    // The open plug-in, always, and the one setting that can replace it. A
+    // deployment that named a Stripe secret has the cloud adapter installed
+    // over this at boot; see `billing.ts` and `index.ts`.
+    billing: openBillingPlugIn(),
+    stripeSecretKey: environment.EGMA_STRIPE_SECRET_KEY?.trim() || undefined,
     carrierRoute: carrierRoute(environment),
     blob: blobStore(environment, parsedBaseUrl),
     ingestion: ingestionSettings(environment),

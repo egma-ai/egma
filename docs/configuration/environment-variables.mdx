@@ -507,9 +507,16 @@ for them is separate, and it is off unless this key is set: with no key, plans
 and limits do not exist, every allowance is unlimited, and the usage page shows
 you your own numbers.
 
-The adapter this key selects is not in this release. Setting it today stops the
-API at start-up with a message that says so, rather than starting a deployment
-that believes it is charging and is not.
+Setting it turns on plans, monthly allowances and a prepaid inference balance
+for every organization on the deployment. Each organization starts on the free
+Hobby plan, receives a one-time welcome credit, and pauses new work when one of
+its allowances is spent or its balance reaches zero — with a message that names
+what is spent and when it comes back. A Billing section appears under Settings
+→ Organization.
+
+Nothing about that is Egma Cloud's alone. The same key gives the same billing
+on any deployment, which is what makes it a hosted service rather than a
+cloud-only feature.
 
 ---
 
