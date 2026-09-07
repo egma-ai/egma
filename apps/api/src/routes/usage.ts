@@ -1,7 +1,10 @@
 import {
+  ALLOWANCE_KINDS,
+  ALLOWANCE_UNITS,
   getSimulation,
   NotPermittedError,
   readSimulationUsage,
+  readUsageThisPeriod,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
@@ -13,7 +16,8 @@ import { given, text } from "../http/reading.ts";
 import { notFound, notPermitted } from "../http/refusals.ts";
 
 /**
- * What one simulation cost, for the pages that show it.
+ * What Egma's work has cost, for the pages that show it: one simulation's
+ * providers, and one organization's platform usage this period.
  *
  * **A browser path, not `/v1`, and that is the decision rather than an
  * oversight.** The published contract gains nothing from the billing effort:
@@ -82,6 +86,36 @@ export async function usageRoutes(
         requests: one.requests,
         quantities: one.quantities,
         amountMicros: one.amountMicros,
+      })),
+    });
+  });
+
+  /**
+   * How much of each allowance this organization has used this period.
+   *
+   * **The organization, and no project.** An allowance belongs to the customer
+   * the way membership and API keys do, so this route names no project and
+   * takes none — a settings page that reached it through a project-scoped door
+   * would be saying a month of usage belongs to whichever project happened to
+   * be selected, and somebody would eventually believe it.
+   *
+   * **On every deployment, and to every role.** A self-hoster reads the same
+   * three numbers against no limit at all; a member reads them because a run
+   * that paused for money has to explain itself to whoever started it.
+   */
+  app.get("/api/organization/usage", async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const usage = await readUsageThisPeriod(auth);
+    return reply.send({
+      periodStartedAt: usage.startedAt.toISOString(),
+      resetsAt: usage.resetsAt.toISOString(),
+      // An ordered list rather than an object, so the page renders three facts
+      // in one order on every deployment, and each carries the unit it is
+      // counted in rather than a word the page invented for it.
+      allowances: ALLOWANCE_KINDS.map((kind) => ({
+        kind,
+        unit: ALLOWANCE_UNITS[kind],
+        used: usage.used[kind],
       })),
     });
   });
