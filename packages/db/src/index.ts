@@ -33,6 +33,32 @@ export {
   type SeededPersona,
 } from "./persona-library/seed.ts";
 export {
+  upsertRateCard,
+  type UpsertedRateCard,
+} from "./rate-card/seed.ts";
+/**
+ * The rate card's vocabulary and its coverage rule. No store is reached: a
+ * catalog and a parsed file go in, and the usage types Egma measures, the unit
+ * each is counted in, and the models with no price come out. It crosses the
+ * boundary because the simulator's ingest, the grader and the tests all have
+ * to write the same words, and a second list of them is a second answer to
+ * what a token is.
+ */
+export {
+  USAGE_TYPES,
+  USAGE_UNITS,
+  billableUsageTypesOf,
+  catalogModelsMissingAPrice,
+  isUsageType,
+  readRateCard,
+  unitOfQuantities,
+  unitOfUsageType,
+  type RateCardEntry,
+  type RateCardPrice,
+  type UsageType,
+  type UsageUnit,
+} from "./models/rate-card.ts";
+export {
   MODEL_ADAPTERS,
   MODEL_JOBS,
   MODEL_PROVIDERS,

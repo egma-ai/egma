@@ -90,6 +90,20 @@ export const ID_PREFIXES = [
    * oldest-first without a second sort key.
    */
   "sgm",
+  /**
+   * One price on the rate card: what a million of one usage type of one model
+   * costs, from one date. Its own identity because a usage record cites the
+   * exact row that priced it, and because an append-only price history has to
+   * be able to hold two rows for the same model that differ only by date.
+   */
+  "rat",
+  /**
+   * One measured provider request. The row's identity is Egma's own, minted
+   * and time-sortable like every other; the deterministic identity that makes
+   * a resend collapse rides beside it in its own unique column, because a hash
+   * is neither prefixed nor sortable and could never be one of these.
+   */
+  "usg",
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];

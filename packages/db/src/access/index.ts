@@ -508,3 +508,29 @@ export {
   openDrainOwnership,
   type DrainOwnership,
 } from "./drain-ownership.ts";
+
+/**
+ * Usage records: what Egma's provider requests cost, measured where they are
+ * made and priced where they are stored.
+ *
+ * Both take the context the work already runs under — a simulation's claim, or
+ * a grading claim — so the organization and the project are stamped from the
+ * row that authorised the work and never from anything a measurement claimed.
+ * The boot upsert that fills the rate card is not here: it names no customer
+ * and configures the deployment, so it sits beside the persona shelf's seed.
+ */
+export {
+  readSimulationUsage,
+  recordProviderUsage,
+  type NewUsageRecord,
+  type RecordedProviderUsage,
+  type SimulationUsage,
+  type UsageByModel,
+  type UsageIdentity,
+  type UsageQuantities,
+} from "./usage.ts";
+export type {
+  UsageMeasurement,
+  UsagePaymentSource,
+  UsageWorkKind,
+} from "../schema/billing.ts";

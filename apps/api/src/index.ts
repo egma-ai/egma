@@ -7,6 +7,7 @@ import {
   runClickHouseMigrations,
   runMigrations,
   seedPersonaLibrary,
+  upsertRateCard,
 } from "@egma/db";
 
 import { loadConfig } from "./config.ts";
@@ -87,6 +88,19 @@ const personaShelf = await seedPersonaLibrary();
 // release that changed nothing writes nothing at all — not even `updated_at`.
 const graderCatalog = await reconcileGraderCatalog();
 
+// The rate card, written from the shipped file onto its table. After the
+// migrations because it writes rows, and before the first request because the
+// door that stores a usage record prices it against this table — a record
+// written before the prices existed would be stored at nothing and could never
+// be corrected, since a stored cost never moves.
+//
+// An insert that does nothing where the price is already there, so every
+// instance can run it on every boot and only a release that added a price
+// writes anything. A price is never updated: a change is a new row with a
+// later effective date, and the old row is what a past simulation is still
+// priced at.
+const rateCard = await upsertRateCard();
+
 const { app } = buildApi({
   config,
   traceStoreReady: () => traceSchema.state === "ready",
@@ -148,6 +162,14 @@ if (graderCatalog.definitions.length > 0) {
   app.log.info(
     { graders: graderCatalog.definitions },
     "Predefined graders were written to the library",
+  );
+}
+if (rateCard.written.length > 0) {
+  // Prices are product catalog facts and are worth saying once: what this
+  // release added, and from which date each applies.
+  app.log.info(
+    { prices: rateCard.written },
+    "Rate-card prices were written from the shipped file",
   );
 }
 if (graderCatalog.projectGraders.length > 0) {

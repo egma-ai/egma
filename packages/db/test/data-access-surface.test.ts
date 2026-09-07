@@ -256,6 +256,15 @@ const CONTEXT_REQUIRING = [
   "readTrace",
   "readTraceGrades",
   "readTraceGrading",
+  // One conversation's spend, by provider and model — what the simulation
+  // page shows on every deployment. A read like any other: it is answered
+  // inside the context's own project and returns no provider credential.
+  "readSimulationUsage",
+  // The measured provider requests of one piece of work, priced at the write
+  // against the rate card. It takes the context the work already runs under —
+  // a simulation's claim or a grading claim — so the organization and the
+  // project come off the row that authorised the work.
+  "recordProviderUsage",
   "reconcileGraderCatalog",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
@@ -403,6 +412,29 @@ const THE_GRADER_LIBRARY = [
   // execute, and the tests that press Use — and a repeated literal is an
   // identifier somebody can mistype into a pointer at nothing.
   "PREDEFINED_GRADERS",
+];
+
+/**
+ * The rate card: the vocabulary its file is written in, its coverage rule, and
+ * the boot upsert that writes it.
+ *
+ * The vocabulary and the coverage rule reach no store and name no customer —
+ * a catalog and a parsed file go in, and the usage types Egma measures come
+ * out — and they cross the boundary because the ingest, the grader and the
+ * tests all have to write the same words. `upsertRateCard` is the deployment
+ * configuring itself, exactly as the persona shelf's seed is: no user, no
+ * customer, and an insert that writes only what a release added.
+ */
+const THE_RATE_CARD = [
+  "USAGE_TYPES",
+  "USAGE_UNITS",
+  "billableUsageTypesOf",
+  "catalogModelsMissingAPrice",
+  "isUsageType",
+  "readRateCard",
+  "unitOfQuantities",
+  "unitOfUsageType",
+  "upsertRateCard",
 ];
 
 const THE_PERSONA_LIBRARY = [
@@ -658,6 +690,7 @@ describe("the data-access module's surface", () => {
         ...THE_MOCKED_WORLD,
         ...THE_GRADER_LIBRARY,
         ...THE_PERSONA_LIBRARY,
+        ...THE_RATE_CARD,
         ...THE_MODELS,
       ].sort(),
     );

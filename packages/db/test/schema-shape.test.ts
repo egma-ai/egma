@@ -70,6 +70,12 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // budget, and then the identity-only marker that stops the overlap starting
   // a second one. It holds no provider document and expires by itself.
   retell_call_retry: "rcr",
+  // One price on the rate card, and one measured provider request. The usage
+  // record's own identity is `usg_`; the deterministic identity that makes a
+  // resend collapse is a hash and rides its own unique column, because a hash
+  // is neither prefixed nor sortable and could never be one of these.
+  rate_card: "rat",
+  usage_record: "usg",
 };
 
 const declaredTables = (Object.values(schema) as unknown[])
@@ -652,6 +658,14 @@ describe("every enumerated value", () => {
       { table: "simulation", column: "modality" },
       { table: "run_event", column: "kind" },
       { table: "monitoring_state", column: "scan_kind" },
+      { table: "rate_card", column: "usage_type" },
+      { table: "rate_card", column: "unit" },
+      { table: "usage_record", column: "work_kind" },
+      { table: "usage_record", column: "provider" },
+      { table: "usage_record", column: "operation" },
+      { table: "usage_record", column: "unit" },
+      { table: "usage_record", column: "measurement" },
+      { table: "usage_record", column: "payment_source" },
     ];
 
     const { rows } = await database.sql<{

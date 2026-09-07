@@ -10,3 +10,4 @@ export * from "./tests.ts";
 export * from "./runs.ts";
 export * from "./plans.ts";
 export * from "./grading.ts";
+export * from "./billing.ts";
