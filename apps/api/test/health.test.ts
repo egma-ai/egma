@@ -17,7 +17,7 @@ import {
   type Email,
 } from "../src/auth/email.ts";
 import { loadConfig } from "../src/config.ts";
-import { LARGEST_STAGEABLE_RECORD_BYTES } from "../src/ingestion/record.ts";
+import { LARGEST_STAGEABLE_RECORD_BYTES } from "@egma/ingestion";
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { buildApi } from "../src/server.ts";
 import { createApi, testConfig } from "./support/api.ts";

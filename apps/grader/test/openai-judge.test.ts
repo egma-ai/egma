@@ -94,7 +94,7 @@ function judgeWith(...responses: readonly Answering[]) {
       model: "gpt-5.6-terra",
       reasoningEffort: "none",
       key: A_KEY,
-      usage: (usage) => spent.push(usage),
+      usage: (usage) => { spent.push(usage); },
     }),
   };
 }
@@ -405,5 +405,43 @@ describe("what one judge call consumed", () => {
       key: A_KEY,
     });
     await expect(judge(QUESTION)).resolves.toMatchObject({ results: [{ decision: "met" }] });
+  });
+});
+
+describe("paid attempt persistence", () => {
+  it("waits for usage durability before validating the answer", async () => {
+    let release: () => void = () => undefined;
+    let began: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { began = resolve; });
+    vi.stubGlobal("fetch", async () => answeringWithUsage({ broken: "answer" }, { prompt_tokens: 10, completion_tokens: 1 })());
+    const judge = openaiJudge({ provider: "openai", model: "gpt-5.6-terra", key: A_KEY, usage: async () => { began(); await pending; } });
+    let settled = false;
+    const asked = judge(QUESTION).finally(() => { settled = true; });
+    const rejection = expect(asked).rejects.toThrow();
+    await entered;
+    expect(settled).toBe(false);
+    release();
+    await rejection;
+  });
+
+  it("keeps the obtained grade when accounting fails and does not purchase another reply", async () => {
+    const fetch = vi.fn(async () => answeringWithUsage({ decision: "met", rationale: "yes", cited_turns: [1] }, { prompt_tokens: 10, completion_tokens: 1 })());
+    vi.stubGlobal("fetch", fetch);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const judge = openaiJudge({ provider: "openai", model: "gpt-5.6-terra", key: A_KEY, usage: async () => { throw new Error("store unavailable"); } });
+    await expect(judge(QUESTION)).resolves.toMatchObject({ results: [{ decision: "met" }] });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveBeenCalledTimes(1);
+    errors.mockRestore();
+  });
+
+  it("gives actual repeated HTTP calls different attempt identities even when their provider references match", async () => {
+    const { judge, spent } = judgeWith(answeringWithUsage({ decision: "met", rationale: "yes", cited_turns: [1] }, { prompt_tokens: 10, completion_tokens: 1 }, "same-provider-id"));
+    await judge(QUESTION);
+    await judge(QUESTION);
+    expect(spent).toHaveLength(2);
+    expect(spent[0]?.attemptId).not.toBe(spent[1]?.attemptId);
+    expect(spent[0]?.providerRef).toBe(spent[1]?.providerRef);
   });
 });

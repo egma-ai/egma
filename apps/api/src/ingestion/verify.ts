@@ -4,14 +4,14 @@ import {
   recordFrom,
   RECORD_FORMAT_VERSION,
   type IngestionRecord,
-} from "./record.ts";
+} from "@egma/ingestion";
 import {
   segmentChecksum,
   segmentIdIn,
   type SegmentBinding,
   type SegmentHeader,
   type SegmentScope,
-} from "./segment.ts";
+} from "@egma/ingestion";
 
 /**
  * Verify gzip, header shape/version, key-to-segment identity, checksum, count,

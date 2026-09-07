@@ -104,7 +104,6 @@ export const ID_PREFIXES = [
    * a resend collapse rides beside it in its own unique column, because a hash
    * is neither prefixed nor sortable and could never be one of these.
    */
-  "usg",
   /**
    * One plan Egma Cloud sells: its fee, its three allowances and its two
    * overage prices. Its own identity rather than the plan code as a key,

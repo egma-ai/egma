@@ -24,7 +24,7 @@ import {
   EXPORT_TRACE_SERVICE_RESPONSE,
 } from "../src/otlp/schema.ts";
 import { createApi, type TestApi } from "./support/api.ts";
-import { pendingObjectStore } from "../src/ingestion/object-store.ts";
+import { pendingObjectStore } from "@egma/ingestion";
 import { pendingSegments } from "./support/ingestion.ts";
 import {
   startObjectStorage,

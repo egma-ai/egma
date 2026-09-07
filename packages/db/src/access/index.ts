@@ -522,12 +522,16 @@ export {
  * the persona shelf's seed.
  */
 export {
-  readSimulationUsage,
+  readPlatformUsageTotal,
+  readOrganizationUsage,
+  priceUsageSpans,
+  providerUsageSpan,
   readUsageThisPeriod,
   recordProviderUsage,
   type NewUsageRecord,
   type RecordedProviderUsage,
-  type SimulationUsage,
+  type OrganizationUsage,
+  type ProviderUsageEvidence,
   type UsageByModel,
   type UsageIdentity,
   type UsageQuantities,

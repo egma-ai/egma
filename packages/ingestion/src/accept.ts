@@ -7,9 +7,8 @@ import {
   type NewSpan,
 } from "@egma/db";
 import { metrics as openTelemetryMetrics } from "@opentelemetry/api";
-import type { FastifyBaseLogger } from "fastify";
+import type { IngestionSettings, IngestionLogger } from "./settings.ts";
 
-import type { IngestionSettings } from "../config.ts";
 import {
   pendingObjectStore,
   SegmentIdentityConflictError,
@@ -106,7 +105,7 @@ export class IngestionUnavailableError extends Error {
 /** What the standing acceptance loop is told when it is opened. */
 export type AcceptanceOptions = {
   readonly settings: IngestionSettings;
-  readonly log: FastifyBaseLogger;
+  readonly log: IngestionLogger;
   /**
    * Told the moment a segment is durable, so a drainer in the same process can
    * start on it without waiting for its own scan.
@@ -163,7 +162,7 @@ type Standing = {
   readonly bounds: SegmentBounds;
   readonly requestTimeoutMilliseconds: number;
   readonly groups: Map<string, Group>;
-  readonly logger: FastifyBaseLogger;
+  readonly logger: IngestionLogger;
   readonly onSegmentDurable: (segment: SealedSegment) => void;
   timer: NodeJS.Timeout | undefined;
   running: Promise<void> | undefined;

@@ -27,17 +27,17 @@ import {
   pendingObjectStore,
   type PendingObject,
   type PendingObjectStore,
-} from "../src/ingestion/object-store.ts";
+} from "@egma/ingestion";
 import {
   contentHashOf,
   spanFor,
   type IngestionRecord,
-} from "../src/ingestion/record.ts";
+} from "@egma/ingestion";
 import {
   pendingKeyFor,
   sealSegment,
   type SegmentScope,
-} from "../src/ingestion/segment.ts";
+} from "@egma/ingestion";
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import { aRecord } from "./support/ingestion.ts";

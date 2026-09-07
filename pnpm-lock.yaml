@@ -280,6 +280,21 @@ importers:
 
   packages/ids: {}
 
+  packages/ingestion:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.1116.0
+        version: 3.1116.0
+      '@egma/db':
+        specifier: workspace:*
+        version: link:../db
+      '@egma/ids':
+        specifier: workspace:*
+        version: link:../ids
+      '@opentelemetry/api':
+        specifier: ^1.9.0
+        version: 1.9.1
+
   packages/lint:
     devDependencies:
       typescript:

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 
-import type { IngestionStore } from "../../src/ingestion/object-store.ts";
+import type { IngestionStore } from "@egma/ingestion";
 import {
   presignedObjectUrl,
   type BlobStore,

@@ -22,7 +22,7 @@ import type { Email, EmailSender } from "../../src/auth/email.ts";
 import type { RateLimit } from "../../src/http/rate-limit.ts";
 import { buildApi, type ServerOptions } from "../../src/server.ts";
 import type { Identity } from "../../src/auth/better-auth.ts";
-import type { IngestionStore } from "../../src/ingestion/object-store.ts";
+import type { IngestionStore } from "@egma/ingestion";
 import { drainPendingEvidence } from "./ingestion.ts";
 import {
   createMigratedDatabase,

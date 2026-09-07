@@ -535,6 +535,7 @@ export async function traceEvidenceStartedAt(
                and started_at >= {from:DateTime64(6, 'UTC')}
                and started_at < {to:DateTime64(6, 'UTC')}
                and (${input.runId === undefined ? "1" : "run_id = {run_id:String}"})
+               and kind != 'provider_usage'
                and (${input.emitter === undefined ? "1" : "emitter = {emitter:String}"})
                and (${input.requireAgentCompletion === true ? AGENT_EVIDENCE_COMPLETE_SQL : "1"})
              order by started_at
@@ -654,6 +655,7 @@ function simulationTracesIn(
 ): ReadonlyMap<string, DrainedSimulationTrace> {
   const traces = new Map<string, DrainedSimulationTrace>();
   for (const span of spans) {
+    if (span.kind === "provider_usage" || span.usage !== undefined) continue;
     if (span.source !== "simulation") continue;
     const simulationId = simulationIdOfTrace(span.traceId);
     if (simulationId === undefined) continue;
@@ -933,6 +935,7 @@ function completedProductionTracesIn(
 ): readonly CompletedProductionTrace[] {
   const completed = new Map<string, CompletedProductionTrace>();
   for (const span of spans) {
+    if (span.kind === "provider_usage" || span.usage !== undefined) continue;
     const modality = supportedProductionEndModality(span);
     if (modality === undefined) continue;
     const held = completed.get(span.traceId);

@@ -429,7 +429,7 @@ function tenancyOf(auth: AuthContext, asked: string | undefined): Tenancy {
   const projectId = named(auth.projectId) ?? named(asked);
   return {
     clause:
-      "organization_id = {organization_id:String}" +
+      "organization_id = {organization_id:String} and kind != 'provider_usage'" +
       (projectId === undefined ? "" : " and project_id = {project_id:String}"),
     parameters: {
       organization_id: auth.organizationId,

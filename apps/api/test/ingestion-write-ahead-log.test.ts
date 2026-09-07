@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   IngestionBackpressureError,
   openWriteAheadLog,
-} from "../src/ingestion/write-ahead-log.ts";
+} from "@egma/ingestion";
 
 /**
  * Use real files to test log capacity and recovery from truncated frames or

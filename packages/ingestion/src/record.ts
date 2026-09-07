@@ -2,6 +2,7 @@ import {
   LARGEST_BOUNDED_RECORD_BYTES,
   spanContentHash,
   type NewSpan,
+  type ProviderUsageEvidence,
 } from "@egma/db";
 
 /**
@@ -32,7 +33,7 @@ export const RECORD_FORMAT_VERSION = 1;
 export type RecordSource = "simulation" | "production";
 
 /** Which side measured this — Egma's outside view, or the agent's inside one. */
-export type RecordEmitter = "egma-runtime" | "agent";
+export type RecordEmitter = "egma-runtime" | "agent" | "grader";
 
 /**
  * One normalized span, as it is written down.
@@ -95,6 +96,7 @@ export type IngestionRecord = {
    * complete. False is the ordinary value and means the platform said nothing.
    */
   readonly ends_trace: boolean;
+  readonly usage?: ProviderUsageEvidence | undefined;
 };
 
 /**
@@ -137,6 +139,7 @@ const RECORD_KEYS = [
   "tool_result",
   "trace_id",
   "v",
+  "usage",
 ] as const satisfies readonly (keyof IngestionRecord)[];
 
 /**
@@ -189,6 +192,7 @@ export function spanFor(record: IngestionRecord): NewSpan {
     personaVersionId: record.persona_version_id,
     payload: record.payload,
     endsTrace: record.ends_trace,
+    ...(record.usage ? { usage: record.usage } : {}),
   };
 }
 
@@ -225,6 +229,7 @@ export function recordFor(span: NewSpan): IngestionRecord {
     persona_version_id: span.personaVersionId,
     payload: span.payload,
     ends_trace: span.endsTrace,
+    ...(span.usage ? { usage: span.usage } : {}),
   };
 }
 
@@ -258,6 +263,10 @@ export function recordFrom(value: unknown): IngestionRecord {
 
   for (const key of RECORD_KEYS) {
     const held = offered[key];
+    if (key === "usage") {
+      if (held !== undefined && (typeof held !== "object" || held === null || Array.isArray(held))) throw new MalformedRecordError("usage is an object");
+      continue;
+    }
     const wanted =
       key === "v" ? "number" : key === "ends_trace" ? "boolean" : "string";
     if (typeof held !== wanted) {

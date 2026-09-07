@@ -3,8 +3,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   pendingObjectStore,
   SegmentIdentityConflictError,
-} from "../src/ingestion/object-store.ts";
-import { PENDING_PREFIX, sealSegment } from "../src/ingestion/segment.ts";
+} from "@egma/ingestion";
+import { PENDING_PREFIX, sealSegment } from "@egma/ingestion";
 import { aRecord } from "./support/ingestion.ts";
 import {
   BUCKET,

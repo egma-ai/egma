@@ -23,7 +23,7 @@ import { metrics as openTelemetryMetrics } from "@opentelemetry/api";
 import {
   acceptEvidence,
   IngestionUnavailableError,
-} from "./ingestion/accept.ts";
+} from "@egma/ingestion";
 import { platformEvent, safeExceptionType } from "./platform-log.ts";
 import {
   getRetellCall,

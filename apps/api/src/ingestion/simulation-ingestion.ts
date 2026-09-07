@@ -1,4 +1,4 @@
-import type { NewSpan, SimulationStanding, SpanEmitter } from "@egma/db";
+import { priceUsageSpans, type NewSpan, type SimulationStanding, type SpanEmitter } from "@egma/db";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 
 import { WIRE_TRACE_ID_PAYLOAD_KEY, type SpanAttribution } from "../otlp/normalise.ts";
@@ -6,7 +6,7 @@ import {
   acceptEvidenceForProjects,
   type Acceptance,
   type EvidenceGroup,
-} from "./accept.ts";
+} from "@egma/ingestion";
 
 /**
  * File simulator, agent-export, and Retell-pull evidence under the simulation
@@ -112,15 +112,20 @@ export function filedUnderSimulation(
  * Accept simulation filings and already-attributed alongside groups in one
  * call. Successful acceptance requires all non-rejected records to be durable.
  */
-export function fileSimulationEvidence(
+export async function fileSimulationEvidence(
   filings: readonly SimulationFiling[],
   alongside: readonly EvidenceGroup[] = [],
 ): Promise<Acceptance> {
   const groups: EvidenceGroup[] = [...alongside];
 
   for (const filing of filings) {
-    const spans = filedUnderSimulation(filing);
+    let spans = filedUnderSimulation(filing);
     if (spans === undefined || spans.length === 0) continue;
+    try {
+      spans = await priceUsageSpans(filing.standing.auth, spans);
+    } catch (cause) {
+      console.error("usage pricing is unavailable; accepted raw evidence will be priced during draining", cause);
+    }
     groups.push({ auth: filing.standing.auth, spans });
   }
 

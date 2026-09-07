@@ -5,7 +5,7 @@ import type {
 } from "@egma/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { IngestionUnavailableError } from "../src/ingestion/accept.ts";
+import { IngestionUnavailableError } from "@egma/ingestion";
 import {
   acceptedIdentities,
   RETELL_HYDRATION_CONCURRENCY,

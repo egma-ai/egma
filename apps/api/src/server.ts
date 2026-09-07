@@ -23,13 +23,13 @@ import {
   closeAcceptance,
   openAcceptance,
   stagedLoad,
-} from "./ingestion/accept.ts";
+} from "@egma/ingestion";
 import { retainedDefects } from "./ingestion/defects.ts";
 import { startDrainer, type Drainer } from "./ingestion/drainer.ts";
 import {
   pendingObjectStore,
   type PendingObjectStore,
-} from "./ingestion/object-store.ts";
+} from "@egma/ingestion";
 import type { BillingRoutes, BillingWebhookRoutes } from "./billing.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
