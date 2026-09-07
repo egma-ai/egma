@@ -79,6 +79,12 @@ function openWith(usage: Stubbed, role = "admin"): void {
     "/api/me": { status: 200, body: meWith(role) },
     "/v1/organization": { status: 200, body: ORGANIZATION },
     "/api/organization/usage": usage,
+    // The deployment this file is about does not bill, so the Billing routes
+    // are not mounted and the section beside the month is not drawn at all.
+    "/api/organization/billing": {
+      status: 404,
+      body: { error: "not_found", message: "Not Found" },
+    },
   });
   render(<OrganizationSettingsPage />);
 }
