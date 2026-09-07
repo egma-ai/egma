@@ -215,6 +215,16 @@ export type TestApiOptions = {
    * `@egma/ee` directly; nothing here reads a Stripe key.
    */
   readonly billingRoutes?: ServerOptions["billingRoutes"];
+  /**
+   * Stripe's own door, on an instance standing in for a deployment that named
+   * a webhook signing secret.
+   *
+   * A test passes a closure over `billingWebhookRoutes` from `@egma/ee` with a
+   * Stripe adapter built from a test key. Nothing in that adapter reaches
+   * Stripe to check a signature: the check is the same cryptography whether
+   * the key was ever used against an account or not.
+   */
+  readonly billingWebhookRoutes?: ServerOptions["billingWebhookRoutes"];
 };
 
 export function testConfig(overrides: Partial<Config> = {}): Config {
@@ -353,6 +363,9 @@ export async function createApi(
     ...(options.billingRoutes === undefined
       ? {}
       : { billingRoutes: options.billingRoutes }),
+    ...(options.billingWebhookRoutes === undefined
+      ? {}
+      : { billingWebhookRoutes: options.billingWebhookRoutes }),
     ...(options.simulationPullOptions === undefined
       ? {}
       : { simulationPullOptions: options.simulationPullOptions }),

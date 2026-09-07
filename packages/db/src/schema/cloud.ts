@@ -126,15 +126,25 @@ export const cloudPlan = pgTable(
       mode: "number",
     }).notNull(),
     /**
-     * The Stripe prices for the fee and the two meters, once they exist.
+     * The Stripe objects this plan is sold through, once they exist.
      *
-     * Nullable because they do not exist yet: nothing in this release creates
-     * a Stripe object, and a plan row is complete without them — the
-     * allowances are enforced from Egma's own rows and never from Stripe.
+     * **Nullable, and a plan row is complete without any of them.** The
+     * allowances are enforced from Egma's own rows and never from Stripe, so
+     * Hobby — which has no Stripe object of any kind — leaves all six null and
+     * so does a deployment whose sandbox has not been set up yet.
+     *
+     * They are written by the setup that creates the Stripe objects and never
+     * by the boot seed, which would blank them on the next boot. The two meter
+     * ids are kept beside the prices they price because a meter is found by
+     * its event name and created once: Stripe's test-data deletion does not
+     * remove one, so the id is the proof this deployment already has it.
      */
+    stripeProductId: text("stripe_product_id"),
     stripeFeePriceId: text("stripe_fee_price_id"),
     stripeWebCallMeterPriceId: text("stripe_web_call_meter_price_id"),
     stripePhoneMeterPriceId: text("stripe_phone_meter_price_id"),
+    stripeWebCallMeterId: text("stripe_web_call_meter_id"),
+    stripePhoneMeterId: text("stripe_phone_meter_id"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -202,6 +212,24 @@ export const cloudBillingAccount = pgTable(
     balanceMicros: bigint("balance_micros", { mode: "number" })
       .notNull()
       .default(0),
+    /**
+     * The start of the last hour whose overage Stripe has taken, or `null`
+     * where none has been reported.
+     *
+     * **The mark that makes a missed hour recoverable.** The hourly job posts
+     * whole minutes as the difference between two running totals, so an hour
+     * that was never posted would have its minutes swallowed by the next one's
+     * "before" — the arithmetic that loses nothing inside a period loses
+     * everything about a gap. This says where to resume from, and it moves
+     * only after Stripe has accepted an hour or refused it as one it already
+     * has. A replay is safe either way: the meter event's identifier is the
+     * meter, the organization and the hour.
+     *
+     * Hobby has none and never will; a Pro account's is set the first time the
+     * job reports it, at the hour that had just closed, so moving to Pro never
+     * back-bills a month that was free.
+     */
+    overageReportedThrough: moment("overage_reported_through"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

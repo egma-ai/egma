@@ -89,7 +89,7 @@ function serviceBlock(service: string): string {
 }
 
 describe("the API's deployment story", () => {
-  it("keeps .env.example to the seven normal operator inputs", () => {
+  it("keeps .env.example to the normal operator inputs", () => {
     const example = readFileSync(path.join(ROOT, ".env.example"), "utf8");
     const assignments = example
       .split("\n")
@@ -104,6 +104,14 @@ describe("the API's deployment story", () => {
       "EGMA_PHONE_SOURCE_NUMBER",
       "EGMA_PHONE_TRUNK_USERNAME",
       "EGMA_PHONE_TRUNK_PASSWORD",
+      // The three optional Stripe settings. They are here because the operator
+      // template is where an operator learns what a deployment can be given,
+      // and a deployment that charges the people who use it needs all three —
+      // but every one of them is empty by default and the product is the
+      // product without them.
+      "EGMA_STRIPE_SECRET_KEY",
+      "EGMA_STRIPE_WEBHOOK_SECRET",
+      "EGMA_STRIPE_PUBLISHABLE_KEY",
     ]);
   });
 

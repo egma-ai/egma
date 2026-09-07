@@ -66,6 +66,38 @@ const countedSeconds = sql`sum(
 const voice = sql`${simulation.modality} <> 'chat'`;
 const onAPhone = sql`${simulation.connectionType} = 'phone_number'`;
 
+/** The two voice totals, in seconds. Both allowances and overage read these. */
+export type VoiceSeconds = {
+  readonly phoneSeconds: SQL<string>;
+  readonly webCallSeconds: SQL<string>;
+};
+
+/**
+ * What a caller selects to get the counted seconds of each voice kind.
+ *
+ * Split out of the three totals below because the overage a Pro organization
+ * owes is these two and nothing else — chat is unlimited on Pro and is never
+ * metered — and a second copy of the arithmetic would be a second answer to
+ * "how many minutes was that", found by a customer comparing an invoice line
+ * with the number on their own settings page.
+ *
+ * **The narrower goes inside the aggregate rather than into the `where`**, so
+ * one query can select the same seconds over two different time bounds. The
+ * hourly meter job needs exactly that: what a period owes up to the end of
+ * this hour, and what it owed up to the start of it.
+ */
+export function voiceSecondsSelection(narrower?: SQL): VoiceSeconds {
+  const also = narrower === undefined ? sql`true` : sql`(${narrower})`;
+  return {
+    phoneSeconds: sql<string>`coalesce(
+      ${countedSeconds} filter (where ${voice} and ${onAPhone} and ${also}), 0
+    )`,
+    webCallSeconds: sql<string>`coalesce(
+      ${countedSeconds} filter (where ${voice} and not ${onAPhone} and ${also}), 0
+    )`,
+  };
+}
+
 /** What a caller selects to get one period's three totals. */
 export function allowanceTotalsSelection(): {
   readonly chatSimulations: SQL<string>;
@@ -76,12 +108,7 @@ export function allowanceTotalsSelection(): {
     chatSimulations: sql<string>`count(*) filter (
       where ${simulation.modality} = 'chat'
     )`,
-    phoneSeconds: sql<string>`coalesce(
-      ${countedSeconds} filter (where ${voice} and ${onAPhone}), 0
-    )`,
-    webCallSeconds: sql<string>`coalesce(
-      ${countedSeconds} filter (where ${voice} and not ${onAPhone}), 0
-    )`,
+    ...voiceSecondsSelection(),
   };
 }
 

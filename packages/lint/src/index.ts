@@ -264,6 +264,15 @@ const DEPLOYMENT_CONFIGURING = [
   // rate card and the persona shelf are. It takes the parsed file and no
   // customer identifier, and it can write nothing but the two plan rows.
   "seedCloudPlans",
+  // The Stripe product, prices and meters a plan is sold through, written onto
+  // that plan's row by the setup that created them in Stripe. Added on
+  // 2026-09-07 with the Stripe adapter, deliberately and after the rule
+  // stopped the build. It is the plan seed's shape one step later in the same
+  // lifecycle: a product, a price and a meter belong to the deployment's
+  // Stripe account rather than to anybody on it, so there is no customer to
+  // name and the rule below still refuses this name the day somebody gives it
+  // one. It can write nothing but the six Stripe columns of one plan row.
+  "recordStripePlanObjects",
 ];
 
 /**
@@ -294,6 +303,36 @@ const BILLING_PORTS = [
   "openBillingAccount",
   "readEntitlementFacts",
   "chargeForStoredUsage",
+];
+
+/**
+ * The exports of the **second** fenced home that act on what Stripe has already
+ * proved, and the sweep that tells Stripe what an hour owes.
+ *
+ * **Neither has a person to carry, and neither can be given a customer.** A
+ * webhook arrives from Stripe with no session and no key: the signature is the
+ * whole credential, and the organization is found from Egma's own account row
+ * through the unique index on the Stripe customer id — never from anything the
+ * payload claimed. So `applyStripeEvent` is handed a delivery and finds whose
+ * money it is; a caller cannot name one, and the rule below refuses this name
+ * the day somebody adds a parameter that could. The hourly meter sweep is the
+ * other side of the same coin: it walks every paying Pro organization on the
+ * deployment, because that is what an hourly job is, and there is no honest
+ * context for "all of them".
+ *
+ * What keeps it safe beyond the mechanism is written where the functions live:
+ * `applyStripeEvent` writes the event row first and everything it causes in
+ * the same transaction, so a delivery is applied once or not at all, and a
+ * customer it cannot resolve is a fault rather than a shrug; `overageForHour`
+ * only reads, and only the `cloud_` accounts and the seconds of their own
+ * organizations' conversations.
+ *
+ * A third name here is a decision somebody has to make on purpose.
+ */
+const STRIPE_FACTS = [
+  "applyStripeEvent",
+  "overageOwedThrough",
+  "markOverageReported",
 ];
 
 /**
@@ -795,7 +834,8 @@ async function checkExportedCallShapes(
   const surface = path.join(root, which);
   // The second fenced home's own narrower exemption list, and it is the only
   // surface that may use it.
-  const billingPorts = which === EE_ACCESS_SURFACE ? BILLING_PORTS : [];
+  const billingPorts =
+    which === EE_ACCESS_SURFACE ? [...BILLING_PORTS, ...STRIPE_FACTS] : [];
   let source: string;
   try {
     source = await readFile(surface, "utf8");
@@ -891,7 +931,8 @@ async function checkExportedCallShapes(
 
       if (
         WORK_DISPATCHING.includes(name) ||
-        DEPLOYMENT_CONFIGURING.includes(name)
+        DEPLOYMENT_CONFIGURING.includes(name) ||
+        (which === EE_ACCESS_SURFACE && STRIPE_FACTS.includes(name))
       ) {
         for (const parameter of declaration.parameters) {
           const written = asWritten(declaring, parameter);

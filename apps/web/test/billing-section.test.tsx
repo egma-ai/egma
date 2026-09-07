@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import OrganizationSettingsPage from "../app/projects/[projectId]/settings/organization/page.tsx";
@@ -91,16 +97,44 @@ const HOBBY = {
       amountMicros: 640_000,
     },
   ],
+  actions: {
+    available: true,
+    creditAmountsMicros: [10_000_000, 25_000_000, 50_000_000, 100_000_000],
+    smallestCreditMicros: 5_000_000,
+    largestCreditMicros: 1_000_000_000,
+  },
+};
+
+const PRO = {
+  ...HOBBY,
+  plan: {
+    code: "pro",
+    name: "Pro",
+    feeMicros: 50_000_000,
+    allowances: [
+      { kind: "chat_simulations", unit: "simulations", allowed: null },
+      { kind: "web_call_minutes", unit: "minutes", allowed: 5_000 },
+      { kind: "phone_minutes", unit: "minutes", allowed: 2_000 },
+    ],
+  },
 };
 
 type Stubbed = { readonly status: number; readonly body: unknown };
 
-function openWith(billing: Stubbed, role = "admin"): void {
+/** What each billing action answered, and what the page asked for it. */
+const asked: { path: string; body: unknown }[] = [];
+
+function openWith(
+  billing: Stubbed,
+  role = "admin",
+  actions: Record<string, Stubbed> = {},
+): void {
   const answers: Record<string, Stubbed> = {
     "/api/me": { status: 200, body: meWith(role) },
     "/v1/organization": { status: 200, body: ORGANIZATION },
     "/api/organization/usage": { status: 200, body: USAGE },
     "/api/organization/billing": billing,
+    ...actions,
   };
   vi.stubGlobal(
     "fetch",
@@ -109,6 +143,15 @@ function openWith(billing: Stubbed, role = "admin"): void {
       const answer = answers[request.path];
       if (answer === undefined) {
         throw new Error(`nothing stubbed for ${request.path}`);
+      }
+      if (init?.method === "POST") {
+        asked.push({
+          path: request.path,
+          body:
+            typeof init.body === "string"
+              ? (JSON.parse(init.body) as unknown)
+              : null,
+        });
       }
       return new Response(JSON.stringify(answer.body), {
         status: answer.status,
@@ -120,7 +163,12 @@ function openWith(billing: Stubbed, role = "admin"): void {
 }
 
 beforeEach(() => {
+  asked.length = 0;
   vi.stubGlobal("scrollTo", vi.fn());
+  // Following Stripe is a whole-page navigation, which jsdom cannot do and
+  // does not need to: what matters here is that the page asked, and where it
+  // was told to go.
+  vi.stubGlobal("location", { assign: vi.fn(), href: "http://localhost/" });
 });
 
 afterEach(() => {
@@ -172,22 +220,7 @@ describe("what the organization page says about billing", () => {
   });
 
   it("writes an unlimited allowance as a word, never as a zero", async () => {
-    openWith({
-      status: 200,
-      body: {
-        ...HOBBY,
-        plan: {
-          code: "pro",
-          name: "Pro",
-          feeMicros: 50_000_000,
-          allowances: [
-            { kind: "chat_simulations", unit: "simulations", allowed: null },
-            { kind: "web_call_minutes", unit: "minutes", allowed: 5_000 },
-            { kind: "phone_minutes", unit: "minutes", allowed: 2_000 },
-          ],
-        },
-      },
-    });
+    openWith({ status: 200, body: PRO });
     expect(await screen.findByText("Pro")).toBeTruthy();
     expect(screen.getByText("$50.00 a month")).toBeTruthy();
     expect(screen.getByText("Unlimited")).toBeTruthy();
@@ -216,5 +249,141 @@ describe("what the organization page says about billing", () => {
     ).toBeTruthy();
     // One quiet line, and the rest of the page is unaffected.
     expect(await screen.findByDisplayValue("Acme")).toBeTruthy();
+  });
+});
+
+describe("what an admin can do about the plan and the balance", () => {
+  it("offers a member nothing to press", async () => {
+    openWith(
+      { status: 200, body: { ...HOBBY, mayManageBilling: false, charges: [] } },
+      "member",
+    );
+    expect(await screen.findByText("Billing")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Buy credit" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Upgrade to Pro" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Manage payment and invoices" }),
+    ).toBeNull();
+  });
+
+  it("offers nothing on a deployment whose Stripe is not in place", async () => {
+    openWith({
+      status: 200,
+      body: { ...HOBBY, actions: { ...HOBBY.actions, available: false } },
+    });
+    expect(await screen.findByText("Billing")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Buy credit" })).toBeNull();
+  });
+
+  it("takes an admin to Stripe to move to Pro", async () => {
+    openWith({ status: 200, body: HOBBY }, "admin", {
+      "/api/billing/upgrade": {
+        status: 200,
+        body: { url: "https://checkout.stripe.test/upgrade" },
+      },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Upgrade to Pro" }));
+
+    await waitFor(() => {
+      expect(window.location.assign).toHaveBeenCalledWith(
+        "https://checkout.stripe.test/upgrade",
+      );
+    });
+  });
+
+  it("buys one of the four amounts the deployment offers", async () => {
+    openWith({ status: 200, body: HOBBY }, "admin", {
+      "/api/billing/credit": {
+        status: 200,
+        body: { url: "https://checkout.stripe.test/credit" },
+      },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Buy credit" }));
+    fireEvent.click(await screen.findByRole("button", { name: "$25.00" }));
+
+    await waitFor(() => {
+      expect(asked).toContainEqual({
+        path: "/api/billing/credit",
+        body: { amountMicros: 25_000_000 },
+      });
+    });
+  });
+
+  it("refuses an amount outside the bounds before it asks for one", async () => {
+    openWith({ status: 200, body: HOBBY });
+    fireEvent.click(await screen.findByRole("button", { name: "Buy credit" }));
+    fireEvent.change(await screen.findByLabelText("Another amount [optional]"), {
+      target: { value: "2" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("$5.00");
+    expect(asked).toHaveLength(0);
+  });
+
+  it("confirms before it ends a paid plan, and names the date", async () => {
+    openWith({ status: 200, body: PRO }, "admin", {
+      "/api/billing/downgrade": {
+        status: 200,
+        body: { endsAt: "2026-10-15T08:00:00.000Z" },
+      },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Downgrade at period end" }),
+    );
+
+    // Nothing is asked of the API until the confirmation is answered.
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(asked).toHaveLength(0);
+    const confirm = await screen.findByRole("button", {
+      name: "Stop Pro on Oct 15, 2026",
+    });
+    expect(confirm.className).toContain("destructive");
+
+    fireEvent.click(confirm);
+
+    const said = await screen.findByRole("status");
+    expect(said.textContent).toContain("Pro stops on");
+    expect(said.textContent).toContain("stays available until then");
+    expect(asked).toContainEqual({ path: "/api/billing/downgrade", body: {} });
+  });
+
+  it("keeps the plan when the confirmation is turned down", async () => {
+    openWith({ status: 200, body: PRO });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Downgrade at period end" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Keep Pro" }));
+
+    expect(asked).toHaveLength(0);
+  });
+
+  it("offers no upgrade to an organization already on Pro", async () => {
+    openWith({ status: 200, body: PRO });
+    expect(await screen.findByText("Billing")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Upgrade to Pro" })).toBeNull();
+  });
+
+  it("keeps a refusal's own sentence", async () => {
+    openWith({ status: 200, body: HOBBY }, "admin", {
+      "/api/billing/portal": {
+        status: 422,
+        body: {
+          error: "unprocessable",
+          message:
+            "This organization has never paid Egma anything, so it has no " +
+            "card and no invoices yet.",
+        },
+      },
+    });
+    fireEvent.click(await screen.findByRole("button", {
+        name: "Manage payment and invoices",
+      }));
+
+    const said = await screen.findByRole("status");
+    expect(said.textContent).toContain("never paid Egma anything");
   });
 });

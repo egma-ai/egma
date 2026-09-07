@@ -501,6 +501,17 @@ it literal.
   you charge the people who use your deployment.
 </ParamField>
 
+<ParamField path="EGMA_STRIPE_WEBHOOK_SECRET" type="string">
+  The signing secret of the Stripe webhook endpoint you point at
+  `/api/billing/stripe/webhook`. Leave it empty until you have created that
+  endpoint in Stripe.
+</ParamField>
+
+<ParamField path="EGMA_STRIPE_PUBLISHABLE_KEY" type="string">
+  Your Stripe publishable key. It is public by design and nothing reads it
+  today; set it if you keep all three Stripe settings together.
+</ParamField>
+
 Egma measures every provider request and counts every chat simulation,
 web-call minute and phone minute on every deployment, whoever pays. Charging
 for them is separate, and it is off unless this key is set: with no key, plans
@@ -517,6 +528,39 @@ what is spent and when it comes back. A Billing section appears under Settings
 Nothing about that is Egma Cloud's alone. The same key gives the same billing
 on any deployment, which is what makes it a hosted service rather than a
 cloud-only feature.
+
+### Setting Stripe up
+
+Two steps, in this order.
+
+First, create the Stripe objects your deployment sells the paid plan through:
+
+```bash
+DATABASE_URL=... EGMA_STRIPE_SECRET_KEY=... \
+  pnpm --filter @egma/ee stripe:setup
+```
+
+It finds every object before it makes one, so it is safe to run again. It
+creates two billing meters, the paid product, its monthly fee price and two
+tiered metered prices whose first tier is the included allowance and whose
+second is the overage price, and it writes their identifiers onto the plan row.
+It refuses a live key unless you set `EGMA_STRIPE_SETUP_ALLOW_LIVE=1`.
+
+Supply your business address and it also sets your Stripe Tax head office,
+which is what activates Stripe Tax. Either the whole address as JSON in
+`EGMA_STRIPE_HEAD_OFFICE`, or the separate variables
+`EGMA_STRIPE_HEAD_OFFICE_LINE1`, `…_LINE2`, `…_CITY`, `…_STATE`,
+`…_POSTAL_CODE` and `…_COUNTRY`. Without an address the command says so and
+does everything else. These are read by the command only and are not
+deployment settings.
+
+Second, add a webhook endpoint in Stripe pointing at
+`https://your-deployment/api/billing/stripe/webhook`, subscribed to
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+`customer.subscription.created`, `customer.subscription.updated` and
+`customer.subscription.deleted`. Put its signing secret in
+`EGMA_STRIPE_WEBHOOK_SECRET` and restart. Until you do, the endpoint answers
+404 and no payment reaches a balance.
 
 ---
 

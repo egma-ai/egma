@@ -85,8 +85,10 @@ export {
   organizationInThePeriod,
   periodAt,
   periodUsageFrom,
+  voiceSecondsSelection,
   type AllowanceTotals,
   type PeriodUsage,
+  type VoiceSeconds,
 } from "./billing/period-usage.ts";
 export {
   billingIsConfigured,

@@ -18,6 +18,7 @@
     "test": "{ pnpm test:fast; fast=$?; pnpm test:browser; browser=$?; pnpm test:simulator; sim=$?; pnpm test:sdk; sdk=$?; pnpm test:fixture; fix=$?; exit $(( fast || browser || sim || sdk || fix )); }",
     "test:fast": "pnpm db:up && echo \"\\nlane: fast — every test except the real-browser proof\\n\" && vitest run --project fast",
     "test:browser": "pnpm --filter @egma/platform-api build && pnpm db:up && echo \"\\nlane: browser — the real-browser proof, and nothing else\\n\" && vitest run --project browser",
+    "test:stripe": "pnpm db:up && echo \"\\nlane: stripe — the real Stripe sandbox, skipped whole without a key\\n\" && vitest run --project stripe",
     "test:simulator": "pnpm --filter @egma/simulator test",
     "test:sdk": "{ pnpm test:sdk:python; python=$?; pnpm test:sdk:javascript; javascript=$?; exit $(( python || javascript )); }",
     "test:sdk:python": "pnpm --filter @egma/sdk-python test",

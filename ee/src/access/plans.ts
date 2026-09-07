@@ -38,6 +38,20 @@ export type CloudPlan = {
   readonly phoneMinutesAllowance: number | null;
   readonly webCallOverageMicrosPerMinute: number;
   readonly phoneOverageMicrosPerMinute: number;
+  /**
+   * The Stripe objects this plan is sold through, or `null` where it has none.
+   *
+   * Hobby has none and never will: it has no fee, no overage and no Stripe
+   * customer. Pro has none until the Stripe setup has run against the
+   * deployment's own account, which is why an upgrade checks them and refuses
+   * by name rather than opening a Checkout with a price that does not exist.
+   */
+  readonly stripeProductId: string | null;
+  readonly stripeFeePriceId: string | null;
+  readonly stripeWebCallMeterPriceId: string | null;
+  readonly stripePhoneMeterPriceId: string | null;
+  readonly stripeWebCallMeterId: string | null;
+  readonly stripePhoneMeterId: string | null;
 };
 
 const PLAN_COLUMNS = {
@@ -49,12 +63,29 @@ const PLAN_COLUMNS = {
   phoneMinutesAllowance: cloudPlan.phoneMinutesAllowance,
   webCallOverageMicrosPerMinute: cloudPlan.webCallOverageMicrosPerMinute,
   phoneOverageMicrosPerMinute: cloudPlan.phoneOverageMicrosPerMinute,
+  stripeProductId: cloudPlan.stripeProductId,
+  stripeFeePriceId: cloudPlan.stripeFeePriceId,
+  stripeWebCallMeterPriceId: cloudPlan.stripeWebCallMeterPriceId,
+  stripePhoneMeterPriceId: cloudPlan.stripePhoneMeterPriceId,
+  stripeWebCallMeterId: cloudPlan.stripeWebCallMeterId,
+  stripePhoneMeterId: cloudPlan.stripePhoneMeterId,
 } as const;
 
-/** What one boot of the plan seed wrote. */
+/** What one boot of the plan seed wrote, and the rows it left behind. */
 export type SeededPlans = {
   /** The plan codes this call inserted or changed. Empty on an unchanged boot. */
   readonly written: readonly PlanCode[];
+  /**
+   * Every plan row as it now stands, the Stripe ids included.
+   *
+   * **What the Stripe setup reads.** Creating the Pro product's prices needs
+   * the fee, the two allowances and the two overage prices, and creating them
+   * needs the rows to exist first — which is exactly what this call has just
+   * guaranteed. Answering with the rows keeps that a single step, and keeps a
+   * plan reader that takes no customer off the access surface, where it would
+   * have needed an exemption from the rule that every export carries a person.
+   */
+  readonly plans: readonly CloudPlan[];
 };
 
 export async function seedCloudPlans(
@@ -66,7 +97,10 @@ export async function seedCloudPlans(
     const changed = await upsertOnePlan(plan);
     if (changed) written.push(plan.code);
   }
-  return { written };
+  const plans = await Promise.all(
+    read.plans.map((plan) => readPlan(plan.code)),
+  );
+  return { written, plans };
 }
 
 async function upsertOnePlan(plan: PlanEntry): Promise<boolean> {

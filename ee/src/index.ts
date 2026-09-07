@@ -33,13 +33,95 @@ export {
 
 export {
   BILLING_PATH,
+  BILLING_WEBHOOK_PATH,
+  CREDIT_PATH,
+  DOWNGRADE_PATH,
+  PORTAL_PATH,
+  UPGRADE_PATH,
   billingRoutes,
+  billingWebhookRoutes,
   type BillingRoutesOptions,
+  type BillingWebhookOptions,
 } from "./routes.ts";
 
+/**
+ * The Stripe adapter: the client, the signature check, the four admin actions,
+ * the hourly meter job and the account setup.
+ *
+ * Nothing outside this package may import `stripe`, and nothing inside it
+ * holds a second client: the gateway below is where the secret is read and
+ * where a delivery is proved.
+ */
 export {
+  isSandboxKey,
+  stripeGateway,
+  type StripeGateway,
+  type StripeSettings,
+} from "./stripe/gateway.ts";
+
+export {
+  BillingStateError,
+  CREDIT_AMOUNTS_MICROS,
+  CreditAmountError,
+  LARGEST_CREDIT_MICROS,
+  SMALLEST_CREDIT_MICROS,
+  creditAmountRefusal,
+  openBillingPortal,
+  openCreditCheckout,
+  openUpgradeCheckout,
+  scheduleDowngrade,
+  type HostedPage,
+  type ScheduledDowngrade,
+} from "./stripe/actions.ts";
+
+export {
+  PRO_STATUSES,
+  centsFromMicros,
+  hourAround,
+  isPaying,
+  microsFromCents,
+  previousHour,
+  type AppliedDelivery,
+  type MeteredHour,
+  type StripeDelivery,
+  type StripeFact,
+} from "./stripe/facts.ts";
+
+export {
+  METER_EVENT_NAMES,
+  reportOverageOwed,
+  startOverageMeterJob,
+  type MeterLog,
+  type MeterReport,
+  type OverageMeterJob,
+} from "./stripe/meter.ts";
+
+export {
+  PRICE_LOOKUP_KEYS,
+  PRODUCT_METADATA_KEY,
+  setUpStripe,
+  type HeadOffice,
+  type StripeSetup,
+  type StripeSetupOptions,
+} from "./stripe/setup.ts";
+
+export {
+  HANDLED_EVENT_TYPES,
+  applyStripeDelivery,
+  deliveryFrom,
+} from "./stripe/webhook.ts";
+
+export {
+  METER_TIMESTAMP_WINDOW_DAYS,
+  MOST_HOURS_CAUGHT_UP_AT_ONCE,
+  accountForBillingAction,
+  applyStripeEvent,
   chargeForStoredUsage,
+  markOverageReported,
   openBillingAccount,
+  overageOwedThrough,
+  recordStripeCustomer,
+  recordStripePlanObjects,
   readBillingOverview,
   readEntitlementFacts,
   readLedgerBalance,
@@ -48,12 +130,23 @@ export {
   type BillingOverview,
   type ChargedUsage,
   type CloudPlan,
+  type BillingActor,
   type EntitlementFacts,
+  type OrganizationOverage,
+  type OverageMark,
   type PeriodCharge,
   type SeededPlans,
+  type StripePlanObjects,
 } from "./access/index.ts";
 
-export { inferenceChargeKey, welcomeCreditKey } from "./idempotency.ts";
+export {
+  inferenceChargeKey,
+  meterEventIdentifier,
+  purchasedCreditKey,
+  stripeAttemptKey,
+  stripeCustomerKey,
+  welcomeCreditKey,
+} from "./idempotency.ts";
 
 export {
   planCatalogFile,

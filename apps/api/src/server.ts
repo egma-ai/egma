@@ -30,7 +30,7 @@ import {
   pendingObjectStore,
   type PendingObjectStore,
 } from "./ingestion/object-store.ts";
-import type { BillingRoutes } from "./billing.ts";
+import type { BillingRoutes, BillingWebhookRoutes } from "./billing.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
@@ -147,6 +147,14 @@ export type ServerOptions = {
    * the API is the context a request already resolved.
    */
   readonly billingRoutes?: BillingRoutes | undefined;
+  /**
+   * Stripe's own door, on a deployment that named a webhook signing secret.
+   *
+   * Its own option because it is registered in its own scope: no session
+   * cookie, no API key, no per-organization budget, and the raw body its
+   * signature is over. See the registration below.
+   */
+  readonly billingWebhookRoutes?: BillingWebhookRoutes | undefined;
 };
 
 export type Api = {
@@ -462,6 +470,26 @@ export function buildApi(options: ServerOptions): Api {
       await mountBillingRoutes(scope, {
         contextOf: (request) => requesterOf(request).auth,
       });
+    });
+  }
+
+  // Stripe's own door, in a scope of its own and outside the credentialed one.
+  //
+  // **The signature is the whole gate.** Stripe holds no credential of Egma's
+  // and never will, so a cookie check here would refuse every real delivery
+  // and admit nothing extra; what proves a delivery is that only Stripe can
+  // sign a body against this deployment's signing secret. It is outside the
+  // per-organization budget for the claim door's reason: the caller resolves
+  // to no customer, so there is nothing to key a budget on.
+  //
+  // The scope also matters for the body. The routes declare a parser that
+  // keeps the raw bytes, because Stripe signs the body it sent — and Fastify
+  // keeps a content-type parser inside the scope that declared it, so every
+  // other route in this process still gets its JSON parsed as JSON.
+  const mountBillingWebhook = options.billingWebhookRoutes;
+  if (mountBillingWebhook !== undefined) {
+    void app.register(async (scope) => {
+      await mountBillingWebhook(scope);
     });
   }
 

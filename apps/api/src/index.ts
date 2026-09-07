@@ -11,7 +11,7 @@ import {
   upsertRateCard,
 } from "@egma/db";
 
-import { loadCloudBilling } from "./billing.ts";
+import { loadCloudBilling, type StoppableJob } from "./billing.ts";
 import { loadConfig, type Config } from "./config.ts";
 import { platformEvent } from "./platform-log.ts";
 import { buildApi } from "./server.ts";
@@ -126,6 +126,9 @@ const { app } = buildApi({
   config: running,
   traceStoreReady: () => traceSchema.state === "ready",
   ...(cloudBilling === undefined ? {} : { billingRoutes: cloudBilling.routes }),
+  ...(cloudBilling?.webhookRoutes === undefined
+    ? {}
+    : { billingWebhookRoutes: cloudBilling.webhookRoutes }),
 });
 
 /** The longest this process waits between attempts on the trace-store schema. */
@@ -221,9 +224,32 @@ app.log.info(
     : "schema migrations applied",
 );
 
+/**
+ * The hourly job that tells Stripe what each Pro organization's month has
+ * used.
+ *
+ * **In this process, on a deployment that bills, and nowhere else.** It is
+ * started with the cloud plug-in and it is the only scheduled work billing
+ * adds: the allowances are enforced from Postgres on every request, and this
+ * only reports minutes so Stripe can price the tiers and put the overage on
+ * the invoice. A Stripe that is unreachable delays a bill and stops no work.
+ *
+ * It runs once when this process starts serving, for the hour that has just
+ * closed — so a deployment that was restarting on the hour still reports it —
+ * and then on the hour.
+ * Every event carries an identifier made of the meter, the organization and
+ * the hour, so a repeat is refused by Stripe rather than counted twice.
+ *
+ * The `ingest` role does not run it, for the reason it skips the trace-store
+ * schema: a process that only accepts evidence has no business reporting
+ * somebody's month.
+ */
+let meterJob: StoppableJob | undefined;
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     stopping = true;
+    meterJob?.stop();
     void (async () => {
       await app.close();
       await disconnect();
@@ -239,3 +265,9 @@ app.log.info(
     "server.port": config.port,
   }),
 );
+
+// Started once the process is serving: it is neither a gate on serving nor
+// something a request waits for.
+if (cloudBilling !== undefined && config.ingestion.role !== "ingest") {
+  meterJob = cloudBilling.startMeterJob(app.log);
+}

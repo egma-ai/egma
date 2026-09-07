@@ -193,6 +193,27 @@ export type Config = {
    */
   readonly stripeSecretKey: string | undefined;
   /**
+   * `EGMA_STRIPE_WEBHOOK_SECRET`, as the deployment named it, or `undefined`.
+   *
+   * **What proves a delivery came from Stripe.** A webhook carries no cookie
+   * and no key: anybody can post to the endpoint, and only Stripe can sign a
+   * body against this secret. Absent, the endpoint is not mounted at all —
+   * an endpoint that could not check a signature would be one anybody could
+   * post a payment to. The buttons still work without it; Stripe's answers
+   * land the day it is set.
+   */
+  readonly stripeWebhookSecret: string | undefined;
+  /**
+   * `EGMA_STRIPE_PUBLISHABLE_KEY`, as the deployment named it, or `undefined`.
+   *
+   * Stripe's client-side key, which is public by design. Nothing in this
+   * release reads it — every payment happens on a Stripe-hosted Checkout page
+   * that needs no key of Egma's in the browser — and it is named here so that
+   * a deployment answering all three Stripe settings answers them in one
+   * place, and so the day an embedded form arrives it is already configured.
+   */
+  readonly stripePublishableKey: string | undefined;
+  /**
    * The deployment's phone carrier route, read from the process environment.
    *
    * All four values are one credential bundle. Empty is ordinary and means
@@ -634,6 +655,10 @@ export function loadConfig(
     // over this at boot; see `billing.ts` and `index.ts`.
     billing: openBillingPlugIn(),
     stripeSecretKey: environment.EGMA_STRIPE_SECRET_KEY?.trim() || undefined,
+    stripeWebhookSecret:
+      environment.EGMA_STRIPE_WEBHOOK_SECRET?.trim() || undefined,
+    stripePublishableKey:
+      environment.EGMA_STRIPE_PUBLISHABLE_KEY?.trim() || undefined,
     carrierRoute: carrierRoute(environment),
     blob: blobStore(environment, parsedBaseUrl),
     ingestion: ingestionSettings(environment),

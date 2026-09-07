@@ -411,6 +411,17 @@ services:
       # derives from whether this deployment is the hosted one; a self-hoster
       # who sets the same secret gets the same billing.
       EGMA_STRIPE_SECRET_KEY: ${EGMA_STRIPE_SECRET_KEY:-}
+      # What proves a webhook came from Stripe. A delivery carries no cookie
+      # and no key: anybody can post to the endpoint, and only Stripe can sign
+      # a body against this secret. Empty means the endpoint is not mounted at
+      # all — one that could not check a signature would be one anybody could
+      # post a payment to. The buttons still work without it.
+      EGMA_STRIPE_WEBHOOK_SECRET: ${EGMA_STRIPE_WEBHOOK_SECRET:-}
+      # Stripe's client-side key, which is public by design. Nothing reads it
+      # yet: every payment happens on a Stripe-hosted page that needs no key of
+      # Egma's in the browser. It is here so a deployment answers all three
+      # Stripe settings in one place.
+      EGMA_STRIPE_PUBLISHABLE_KEY: ${EGMA_STRIPE_PUBLISHABLE_KEY:-}
       # Egma platform telemetry, behind one flag that defaults to off — see
       # .env.example. Deliberately not the trace store: what customers send
       # through the OTLP door is their data in ClickHouse. This process sends

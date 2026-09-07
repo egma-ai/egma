@@ -78,6 +78,20 @@
       "when": 1788767607337,
       "tag": "0010_cloud_billing_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788772536439,
+      "tag": "0011_cloud_plan_stripe_objects",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788774416442,
+      "tag": "0012_cloud_overage_reported_through",
+      "breakpoints": true
     }
   ]
 }

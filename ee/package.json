@@ -15,12 +15,14 @@
     "src/plans.json"
   ],
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "stripe:setup": "node src/stripe/setup-cli.ts"
   },
   "dependencies": {
     "@egma/db": "workspace:*",
     "@egma/ids": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "fastify": "^5.6.1"
+    "fastify": "^5.6.1",
+    "stripe": "22.6.1"
   }
 }
