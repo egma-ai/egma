@@ -1,14 +1,16 @@
 import type { GraderDefinitionSnapshot } from "@egma/db";
 
 import type { Conversation } from "../conversation.ts";
-import type { AskableJudge } from "../judge/index.ts";
+import type { AskableJudge, Decision } from "../judge/index.ts";
 
 /** One assertion kept as evidence inside a grader's one top-level result. */
 export type GraderAssertionResult = {
   readonly key: string;
+  readonly decision?: Decision | undefined;
   readonly score?: number | undefined;
   readonly rationale?: string | undefined;
   readonly citedSpanIds?: readonly string[] | undefined;
+  readonly citedTurns?: readonly number[] | undefined;
   readonly error?: string | undefined;
 };
 
@@ -40,7 +42,7 @@ export type Judging = {
  * Test variables a grader may need, behind one narrow read interface.
  *
  * Production has no authored test, so it returns an empty list. The expected
- * behaviors executor does not know which database row supplied the values.
+ * LLM executor does not know which database row supplied the values.
  */
 export type Reading = {
   expectedBehaviors(): Promise<readonly string[]>;

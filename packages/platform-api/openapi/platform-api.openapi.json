@@ -16823,6 +16823,14 @@
                                     "key": {
                                       "type": "string"
                                     },
+                                    "decision": {
+                                      "type": "string",
+                                      "enum": [
+                                        "met",
+                                        "not_met",
+                                        "cannot_determine"
+                                      ]
+                                    },
                                     "score": {
                                       "type": "number",
                                       "minimum": 0,
@@ -16835,6 +16843,13 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string"
+                                      }
+                                    },
+                                    "citedTurns": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer",
+                                        "minimum": 1
                                       }
                                     },
                                     "error": {
@@ -16931,6 +16946,14 @@
                                     "key": {
                                       "type": "string"
                                     },
+                                    "decision": {
+                                      "type": "string",
+                                      "enum": [
+                                        "met",
+                                        "not_met",
+                                        "cannot_determine"
+                                      ]
+                                    },
                                     "score": {
                                       "type": "number",
                                       "minimum": 0,
@@ -16943,6 +16966,13 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string"
+                                      }
+                                    },
+                                    "citedTurns": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer",
+                                        "minimum": 1
                                       }
                                     },
                                     "error": {
@@ -21526,6 +21556,14 @@
                                     "key": {
                                       "type": "string"
                                     },
+                                    "decision": {
+                                      "type": "string",
+                                      "enum": [
+                                        "met",
+                                        "not_met",
+                                        "cannot_determine"
+                                      ]
+                                    },
                                     "score": {
                                       "type": "number",
                                       "minimum": 0,
@@ -21538,6 +21576,13 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string"
+                                      }
+                                    },
+                                    "citedTurns": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer",
+                                        "minimum": 1
                                       }
                                     },
                                     "error": {
@@ -21634,6 +21679,14 @@
                                     "key": {
                                       "type": "string"
                                     },
+                                    "decision": {
+                                      "type": "string",
+                                      "enum": [
+                                        "met",
+                                        "not_met",
+                                        "cannot_determine"
+                                      ]
+                                    },
                                     "score": {
                                       "type": "number",
                                       "minimum": 0,
@@ -21646,6 +21699,13 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string"
+                                      }
+                                    },
+                                    "citedTurns": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer",
+                                        "minimum": 1
                                       }
                                     },
                                     "error": {

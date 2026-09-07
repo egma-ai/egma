@@ -70,8 +70,7 @@ export const graderScopeSchema = {
 
 /**
  * The small settings language the current product can render and validate.
- * It has one value type because Response latency is the one setting-bearing
- * grader in this release. A later real setting can extend the closed union.
+ * Strings hold catalog model choices. Numbers hold bounded code-grader values.
  */
 export const graderSettingDefinitionSchema = {
   type: "object",

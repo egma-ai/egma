@@ -37,14 +37,13 @@ import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 
 /**
- * The organization-visible grader library and the two ways a definition enters
- * the current project.
+ * Shared Egma definitions and custom cores owned by the current project.
  *
  * Egma definitions are installed from the backend catalog. No route here can
  * author one. A customer can use a visible definition, or create one custom
  * LLM definition: the body draws the judge's boundary in three parts, and the
- * server compiles them into the one immutable prompt and fixes the type, the
- * model and the compatible modalities.
+ * server compiles them into one immutable prompt. Model choices are saved in
+ * the project settings; current custom prompts can be edited or cloned.
  */
 
 export type GraderLibraryRoutesOptions = {
@@ -99,14 +98,11 @@ function scopeForApi(scope: ProjectGraderScope): Record<string, unknown> {
 function requiredEvidence(
   entry: Pick<GraderLibraryEntry, "id" | "type">,
 ): readonly string[] {
-  if (entry.id === PREDEFINED_GRADERS.expectedBehaviors) {
-    return ["transcript", "test_expected_behaviors"];
-  }
   if (entry.id === PREDEFINED_GRADERS.responseLatency) {
     return ["turn_response_latency"];
   }
   return entry.type === "llm_as_judge"
-    ? ["transcript", "ending_outcome", "tool_calls", "observed_metrics"]
+    ? ["transcript", "ending_outcome", "tool_calls", "observed_metrics", "test_expected_behaviors"]
     : [];
 }
 
@@ -134,10 +130,7 @@ function describedLibraryEntry(
     currentDefinitionVersion: entry.currentDefinitionVersion,
     definitionVersion,
     modalities,
-    // Egma-owned prompts and trusted implementation details are not an
-    // authoring surface. Organization-owned instructions are the customer's.
-    gradingInstructions:
-      prompt,
+    gradingInstructions: prompt,
     requiredEvidence: requiredEvidence({ id: entry.id, type }),
     settingDefinitions: parameterContract,
     activeProjectGraderId,

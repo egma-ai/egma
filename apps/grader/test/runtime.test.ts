@@ -3,6 +3,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   appendSpans,
+  createCustomLlmGrader,
+  editGraderDefinition,
+  archiveProjectGrader,
   claimGradingJobs,
   connect,
   connectClickHouse,
@@ -17,6 +20,7 @@ import {
   reconcileGraderCatalog,
   regradeTrace,
   requestGrading,
+  releaseGradingJob,
   useGraderInProject,
   type AuthContext,
   type NewSpan,
@@ -33,6 +37,7 @@ import {
 } from "../../../packages/db/test/support/clickhouse.ts";
 import { seedOrganization, seedUser } from "../../../packages/db/test/support/tenancy.ts";
 import { gradeClaim } from "../src/grade.ts";
+import { scriptedJudge, met } from "./support/scripted-judge.ts";
 
 let database: MigratedDatabase;
 let store: MigratedTraceStore;
@@ -241,5 +246,64 @@ describe("the worker consumes one frozen trace plan", () => {
       score: 1,
       details: { maximumResponseTimeMs: 3_000 },
     }]);
+  });
+});
+
+describe("a frozen LLM model and core", () => {
+  it("uses the original production selection after edits and retries, then uses new choices for a new trace", async () => {
+    const custom = await createCustomLlmGrader(auth, {
+      name: "Frozen politeness", gradingInstructions: "The agent is polite", passesWhen: "Polite", failsWhen: "Rude",
+      parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
+      scope: { simulations: [], production: { sample_percent: 100 } }, passThreshold: 0.8,
+    });
+    const firstTrace = "6666666666666666666666666666eeee";
+    const laterTrace = "7777777777777777777777777777eeee";
+    async function select(traceId: string) {
+      await appendSpans(auth, [
+        { ...span(), traceId },
+        { ...span(), traceId, spanId: "3333333333333333", parentSpanId: rootSpanId, kind: "turn:agent", text: "Thank you. I can help.", endsTrace: false },
+      ]);
+      await requestGrading(auth, { source: "production", traceId, traceStartedAt: startedAt, endsTrace: true, evidenceReady: true, modality: "voice" });
+    }
+    await select(firstTrace);
+    await editProjectGrader(auth, custom.projectGrader.id, { parameterValues: { llm_provider: "openai", llm_model: "gpt-5.6-terra" }, passThreshold: 0.9 });
+    await editGraderDefinition(auth, custom.definition.id, { baseDefinitionVersion: 1, gradingInstructions: "The agent is calm and clear." });
+    const [first] = await claimGradingJobs({ claimant: "model-before-edit", capacity: 1 });
+    if (!first) throw new Error("missing selected production work");
+    expect(first.entries.find((entry) => entry.projectGraderId === custom.projectGrader.id)).toMatchObject({
+      graderDefinitionVersion: 1, graderPassThreshold: 0.8,
+      parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
+      definition: { prompt: custom.definition.gradingInstructions },
+    });
+    const scripted = scriptedJudge({ answers: {}, otherwise: met("Polite.", [1]) });
+    const options = { providerCredentials: { load: async () => ({ openai: "fixture-key" }) }, makers: scripted.makers };
+    await gradeClaim(first, options);
+    await releaseGradingJob(first.auth, first.id, first.claimedBy, "retry the frozen job");
+    const [retry] = await claimGradingJobs({ claimant: "model-retry", capacity: 1 });
+    if (!retry) throw new Error("missing retried production work");
+    expect(retry.entries).toEqual(first.entries);
+    await gradeClaim(retry, options);
+    await finishGradingJob(retry.auth, retry.id, retry.claimedBy);
+    expect(scripted.configured.map((model) => model.model)).toEqual(["gpt-4o-mini", "gpt-4o-mini"]);
+    expect(scripted.asked).toHaveLength(2);
+    expect(scripted.asked.every((question) => question.criterion === custom.definition.gradingInstructions && question.expectedBehaviors.length === 0)).toBe(true);
+    expect((await readTraceGrades(auth, { source: "production", traceId: firstTrace })).current).toEqual(expect.arrayContaining([
+      expect.objectContaining({ projectGraderId: custom.projectGrader.id, score: 1, graderDefinitionVersion: 1, graderPassThreshold: 0.8 }),
+    ]));
+    await select(laterTrace);
+    await archiveProjectGrader(auth, custom.projectGrader.id);
+    const [later] = await claimGradingJobs({ claimant: "model-after-edit", capacity: 1 });
+    if (!later) throw new Error("missing later production work");
+    expect(later.entries.find((entry) => entry.projectGraderId === custom.projectGrader.id)).toMatchObject({
+      graderDefinitionVersion: 2, graderPassThreshold: 0.9,
+      parameterValues: { llm_provider: "openai", llm_model: "gpt-5.6-terra" },
+      definition: { prompt: "The agent is calm and clear." },
+    });
+    await gradeClaim(later, options);
+    await finishGradingJob(later.auth, later.id, later.claimedBy);
+    expect(scripted.configured.at(-1)?.model).toBe("gpt-5.6-terra");
+    expect((await readTraceGrades(auth, { source: "production", traceId: laterTrace })).current).toEqual(expect.arrayContaining([
+      expect.objectContaining({ projectGraderId: custom.projectGrader.id, score: 1, graderDefinitionVersion: 2, graderPassThreshold: 0.9 }),
+    ]));
   });
 });

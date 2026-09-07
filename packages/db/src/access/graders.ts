@@ -373,11 +373,16 @@ export async function useGraderInProject(
       return active.id;
     }
 
+    const [previous] = await tx.select({ parameterValues: projectGrader.parameterValues })
+      .from(projectGrader)
+      .where(and(inActingProject(auth, projectGrader), eq(projectGrader.graderDefinitionId, definitionId)))
+      .orderBy(desc(projectGrader.updatedAt))
+      .limit(1);
     await validateScopeReferences(tx, auth, projectId, scope);
     const parameterValues = validateExecutableGraderParameters(
       definition.type,
       definition.parameterContract,
-      input.parameterValues ?? defaultGraderParameterValues(definition.parameterContract),
+      input.parameterValues ?? previous?.parameterValues ?? defaultGraderParameterValues(definition.parameterContract),
     );
     const projectGraderId = newId("grd");
     await tx.insert(projectGrader).values({

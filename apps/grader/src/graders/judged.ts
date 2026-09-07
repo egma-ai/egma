@@ -20,16 +20,20 @@ export function assertionResultOf(
   if (answer.decision === "cannot_determine") {
     return {
       key,
+      decision: answer.decision,
       rationale: answer.rationale,
       citedSpanIds,
+      citedTurns: answer.cited_turns,
       error: "the grader could not determine whether this behavior was met",
     };
   }
 
   return {
     key,
+    decision: answer.decision,
     score: answer.decision === "met" ? 1 : 0,
     rationale: answer.rationale,
     citedSpanIds,
+    citedTurns: answer.cited_turns,
   };
 }

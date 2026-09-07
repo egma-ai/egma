@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 async function request(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   url: string,
   key: string,
   body?: Record<string, unknown>,
@@ -44,7 +44,7 @@ async function request(
 type Listed = {
   readonly id: string;
   readonly name: string;
-  readonly owner: "egma" | "organization";
+  readonly owner: "egma" | "project";
   readonly type: "llm_as_judge" | "code";
   readonly scopeEditable: boolean;
   readonly currentDefinitionVersion: number;
@@ -89,9 +89,9 @@ describe("the grader library", () => {
       type: "llm_as_judge",
       scopeEditable: false,
       modalities: ["chat", "voice"],
-      gradingInstructions: null,
-      requiredEvidence: ["transcript", "test_expected_behaviors"],
-      settingDefinitions: [],
+      gradingInstructions: expect.stringContaining("every supplied expected behavior"),
+      requiredEvidence: ["transcript", "ending_outcome", "tool_calls", "observed_metrics", "test_expected_behaviors"],
+      settingDefinitions: expect.arrayContaining([expect.objectContaining({ key: "llm_model" })]),
     });
     expect(expected?.activeProjectGraderId).toMatch(/^grd_/u);
 
@@ -253,10 +253,11 @@ describe("the grader library", () => {
       key,
       input,
     );
-    expect(duplicate.statusCode).toBe(422);
+    expect(duplicate.statusCode).toBe(201);
+    expect(duplicate.body.id).toBe(used.body.id);
   });
 
-  it("creates an organization-owned LLM grader and activates it atomically", async () => {
+  it("creates a project-owned LLM grader and activates it atomically", async () => {
     api = await createApi("grader_library_custom");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
@@ -284,21 +285,21 @@ describe("the grader library", () => {
      */
     expect(created.body.definition).toMatchObject({
       name: "Polite close",
-      owner: "organization",
+      owner: "project",
       type: "llm_as_judge",
       modalities: ["chat", "voice"],
       gradingInstructions:
         "Decide whether: the agent closed the conversation politely. " +
         "Answer met when: the last agent turn thanks the caller. " +
         "Answer not_met when: the last agent turn ends with no closing courtesy.",
-      settingDefinitions: [],
+      settingDefinitions: expect.arrayContaining([expect.objectContaining({ key: "llm_model" })]),
     });
     expect(JSON.stringify(created.body)).not.toContain("outputContract");
     expect(created.body.grader).toMatchObject({
-      owner: "organization",
+      owner: "project",
       type: "llm_as_judge",
       modalities: ["chat", "voice"],
-      settings: {},
+      settings: { llm_provider: "openai", llm_model: "gpt-5.6-terra" },
       scope: { simulations: [{ kind: "all" }], production: null },
       passThreshold: 0.8,
       removable: true,
@@ -363,7 +364,7 @@ describe("the grader library", () => {
     }
   });
 
-  it("keeps custom definitions inside their organization and activation inside one project", async () => {
+  it("keeps custom definitions inside their project", async () => {
     api = await createApi("grader_library_tenants");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const globex = await signUp(api.app, "grace@globex.example", "Globex");
@@ -416,12 +417,87 @@ describe("the grader library", () => {
     expect(
       itemsOf(secondLibrary).find((entry) => entry.id === definitionId)
         ?.activeProjectGraderId,
-    ).toBeNull();
+    ).toBeUndefined();
     const secondActive = await request("GET", "/v1/graders", secondKey);
     expect(
       (secondActive.body.graders as { graderDefinitionId: string }[]).map(
         (grader) => grader.graderDefinitionId,
       ),
     ).toEqual([PREDEFINED_GRADERS.expectedBehaviors]);
+  });
+});
+
+describe("project grader model settings and current cores", () => {
+  it("isolates saved models, creates and clones atomically, and refuses historical and foreign edits", async () => {
+    api = await createApi("grader_models_and_cores");
+    const ada = await signUp(api.app, "models@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const other = await signUp(api.app, "models@other.example", "Other");
+    const otherKey = await projectKeyFor(api.app, other);
+    const made = await api.app.inject({ method: "POST", url: "/v1/projects", headers: { cookie: ada.cookie }, payload: { name: "Second" } });
+    const secondKey = await mintKey(api.app, ada.cookie, "Second", (made.json() as { id: string }).id);
+    const form = await request("GET", "/v1/grader-form", key);
+    expect(form.statusCode).toBe(200);
+    expect(form.body.modelCatalog).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: "openai", model: "gpt-4o-mini" }),
+    ]));
+    expect(form.body.modelCatalog).not.toEqual(expect.arrayContaining([expect.objectContaining({ model: "gpt-4o" })]));
+    const active = (await request("GET", "/v1/graders", key)).body.graders as { id: string; settings: unknown }[];
+    const defaultId = active[0]!.id;
+    const saved = await request("PATCH", `/v1/graders/${defaultId}`, key, { settings: { llm_provider: "openai", llm_model: "gpt-4o-mini" } });
+    expect(saved.statusCode, JSON.stringify(saved.body)).toBe(200);
+    expect((await request("GET", `/v1/grader-library/${PREDEFINED_GRADERS.expectedBehaviors}`, key)).body.currentDefinitionVersion).toBe(1);
+    for (const foreign of [secondKey, otherKey]) {
+      expect((await request("PATCH", `/v1/graders/${defaultId}`, foreign, { settings: { llm_provider: "openai", llm_model: "gpt-5.6-terra" } })).statusCode).toBe(404);
+      const theirs = (await request("GET", "/v1/graders", foreign)).body.graders as { settings: unknown }[];
+      expect(theirs[0]?.settings).toEqual({ llm_provider: "openai", llm_model: "gpt-5.6-terra" });
+    }
+    const clone = await request("POST", `/v1/grader-library/${PREDEFINED_GRADERS.expectedBehaviors}/clone`, key, { name: "My expected behaviors" });
+    expect(clone.statusCode, JSON.stringify(clone.body)).toBe(201);
+    const copied = clone.body.definition as Listed;
+    const copiedGrader = clone.body.grader as { id: string; settings: unknown };
+    expect(copied).toMatchObject({ owner: "project", currentDefinitionVersion: 1, scopeEditable: true, gradingInstructions: expect.stringContaining("every supplied expected behavior") });
+    expect(copiedGrader.settings).toEqual({ llm_provider: "openai", llm_model: "gpt-4o-mini" });
+    expect(clone.body.grader).toMatchObject({ removable: true });
+    expect((await request("PATCH", `/v1/grader-library/${PREDEFINED_GRADERS.expectedBehaviors}`, key, { baseDefinitionVersion: 1, gradingInstructions: "Change Egma" })).statusCode).toBe(422);
+    expect((await request("POST", `/v1/grader-library/${PREDEFINED_GRADERS.responseLatency}/clone`, key, { name: "Untrusted code" })).statusCode).toBe(422);
+    const core = await request("PATCH", `/v1/grader-library/${copied.id}`, key, { baseDefinitionVersion: 1, gradingInstructions: "The agent must stay polite." });
+    expect(core.statusCode).toBe(200);
+    expect(core.body.currentDefinitionVersion).toBe(2);
+    const history = await request("GET", `/v1/grader-library/${copied.id}?definitionVersion=1`, key);
+    expect(history.body).toMatchObject({ definitionVersion: 1, currentDefinitionVersion: 2, gradingInstructions: copied.gradingInstructions });
+    expect(history.body).not.toHaveProperty("settings");
+    const stale = await request("PATCH", `/v1/grader-library/${copied.id}`, key, { baseDefinitionVersion: 1, gradingInstructions: copied.gradingInstructions });
+    expect(stale.statusCode).toBe(409);
+    const races = await Promise.all(["New current instructions", "Other current instructions"].map((gradingInstructions) =>
+      request("PATCH", `/v1/grader-library/${copied.id}`, key, { baseDefinitionVersion: 2, gradingInstructions })));
+    expect(races.map((answer) => answer.statusCode).sort()).toEqual([200, 409]);
+    for (const foreign of [secondKey, otherKey]) {
+      expect((await request("GET", `/v1/grader-library/${copied.id}`, foreign)).statusCode).toBe(404);
+      expect((await request("GET", `/v1/grader-library/${copied.id}?definitionVersion=1`, foreign)).statusCode).toBe(404);
+      expect((await request("POST", `/v1/grader-library/${copied.id}/use`, foreign, policy())).statusCode).toBe(404);
+      expect((await request("POST", `/v1/grader-library/${copied.id}/clone`, foreign, { name: "Foreign copy" })).statusCode).toBe(404);
+      expect((await request("PATCH", `/v1/grader-library/${copied.id}`, foreign, { baseDefinitionVersion: 3, gradingInstructions: "Foreign edit" })).statusCode).toBe(404);
+    }
+    const count = itemsOf(await request("GET", "/v1/grader-library", key)).length;
+    for (const settings of [
+      { llm_provider: "openai", llm_model: "gpt-4o" },
+      { llm_provider: "unknown", llm_model: "gpt-4o-mini" },
+      { llm_provider: "openai", llm_model: 5 },
+      { llm_provider: "openai" },
+      { llm_provider: "openai", llm_model: "gpt-4o-mini", hidden: true },
+    ]) {
+      const rejected = await request("POST", "/v1/grader-library/custom", key, {
+        name: "Invalid save", gradingInstructions: "Be polite", passesWhen: "Polite", failsWhen: "Rude", ...policy(settings),
+      });
+      expect(rejected.statusCode, JSON.stringify(rejected.body)).toBe(422);
+    }
+    expect(itemsOf(await request("GET", "/v1/grader-library", key))).toHaveLength(count);
+    expect((await request("PATCH", `/v1/graders/${copiedGrader.id}`, key, { settings: { llm_provider: "openai", llm_model: "gpt-5.6-terra" } })).statusCode).toBe(200);
+    expect((await request("GET", `/v1/grader-library/${copied.id}`, key)).body.currentDefinitionVersion).toBe(3);
+    expect((await request("GET", "/v1/graders", key)).body.graders).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: defaultId, settings: { llm_provider: "openai", llm_model: "gpt-4o-mini" } }),
+    ]));
+    expect((await request("DELETE", `/v1/graders/${copiedGrader.id}`, key)).statusCode).toBe(204);
   });
 });

@@ -4538,9 +4538,11 @@ export type GetSimulationResponses = {
                 rationale?: string;
                 assertions?: Array<{
                     key: string;
+                    decision?: 'met' | 'not_met' | 'cannot_determine';
                     score?: number;
                     rationale?: string;
                     citedSpanIds?: Array<string>;
+                    citedTurns?: Array<number>;
                     error?: string;
                 }>;
                 error?: string;
@@ -4560,9 +4562,11 @@ export type GetSimulationResponses = {
                 rationale?: string;
                 assertions?: Array<{
                     key: string;
+                    decision?: 'met' | 'not_met' | 'cannot_determine';
                     score?: number;
                     rationale?: string;
                     citedSpanIds?: Array<string>;
+                    citedTurns?: Array<number>;
                     error?: string;
                 }>;
                 error?: string;
@@ -5835,9 +5839,11 @@ export type GetTraceResponses = {
                 rationale?: string;
                 assertions?: Array<{
                     key: string;
+                    decision?: 'met' | 'not_met' | 'cannot_determine';
                     score?: number;
                     rationale?: string;
                     citedSpanIds?: Array<string>;
+                    citedTurns?: Array<number>;
                     error?: string;
                 }>;
                 error?: string;
@@ -5857,9 +5863,11 @@ export type GetTraceResponses = {
                 rationale?: string;
                 assertions?: Array<{
                     key: string;
+                    decision?: 'met' | 'not_met' | 'cannot_determine';
                     score?: number;
                     rationale?: string;
                     citedSpanIds?: Array<string>;
+                    citedTurns?: Array<number>;
                     error?: string;
                 }>;
                 error?: string;

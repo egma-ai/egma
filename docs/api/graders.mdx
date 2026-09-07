@@ -1,116 +1,92 @@
 ---
 title: "Project graders"
 sidebarTitle: "Graders"
-description: "List a project's graders and update an individual pass threshold."
+description: "Save a project's grader models, scope, and individual pass thresholds."
 ---
 
-A project grader connects one project to one shared grader definition. It owns
-that project's scope and individual pass threshold. It does not copy Egma's
-prompt, code, or model choice.
+A project grader connects one project to a [grader definition](/api/grader-library).
+It owns the model choice, other settings, scope, and individual pass threshold.
+Editing these values does not create a core version. Other projects keep their
+own saved choices.
 
-Egma automatically adds one **Expected behaviors** project grader to every
-project. Its fixed scope selects all simulations and no production traces, and
-it cannot be removed. Its pass threshold starts at `1` and is editable.
+Egma automatically adds **Expected behaviors** to every project. It grades all
+simulations and no production traces. You cannot remove it or change its scope.
+You can change its language model and pass threshold.
 
-## List graders
+## List project graders
 
 **`GET /v1/graders`**
 
-<ParamField query="projectId" type="string">
-  The `prj_` project identifier. Omit it when your API key is already scoped to
-  a project.
-</ParamField>
-
-<ParamField query="pageToken" type="string">
-  The `nextPageToken` from the previous page.
-</ParamField>
-
-<ResponseField name="graders" type="array">
-  The project's active grader records.
-</ResponseField>
-
-<ResponseField name="nextPageToken" type="string | null">
-  The next page cursor, or `null` after the last page.
-</ResponseField>
+Use `projectId` when your credential does not select a project. The response
+contains active `graders` and `nextPageToken`. Use that token as `pageToken` for
+the next page.
 
 ```bash
 curl "https://your-egma-instance/v1/graders?projectId=prj_abc123" \
   -H "Authorization: Bearer egma_sk_..."
 ```
 
-## Update the pass threshold
+Each grader contains:
 
-**`PATCH /v1/graders/:graderId`**
+| Field | Meaning |
+| --- | --- |
+| `id` | This project's stable `grd_` identity. |
+| `projectId` | Owning project. |
+| `graderDefinitionId` | The `grl_` definition identity. |
+| `name`, `description` | Live definition metadata. |
+| `owner`, `type`, `modalities` | Definition owner, execution type, and supported modalities. |
+| `scopeEditable`, `removable` | Which project actions are allowed. |
+| `scope` | Simulation selectors and production sampling. |
+| `settings` | Complete saved values for the current parameter contract. |
+| `passThreshold` | Normalized threshold from `0` through `1`. |
+| `createdAt`, `updatedAt` | ISO 8601 timestamps. |
 
-<ParamField path="graderId" type="string" required>
-  The `grd_` project-grader identifier.
-</ParamField>
+## Update settings, scope, or pass threshold
 
-<ParamField query="projectId" type="string">
-  The project identifier. Omit it when your API key is project-scoped.
-</ParamField>
+**`PATCH /v1/graders/{graderId}`**
 
-<ParamField body="passThreshold" type="number" required>
-  A normalized value from `0` through `1`. A grade passes this individual
-  grader when `score >= passThreshold`.
-</ParamField>
+Send one or more of `settings`, `scope`, or `passThreshold`. A supplied settings
+object must be complete. Egma rejects missing keys, unknown keys, wrong types,
+values outside the contract bounds, and unsupported model pairs.
 
 ```bash
 curl -X PATCH \
   "https://your-egma-instance/v1/graders/grd_abc123?projectId=prj_abc123" \
   -H "Authorization: Bearer egma_sk_..." \
   -H "Content-Type: application/json" \
-  -d '{ "passThreshold": 0.8 }'
+  -d '{
+    "settings": { "llm_provider": "openai", "llm_model": "gpt-4o-mini" },
+    "passThreshold": 0.8
+  }'
 ```
 
-The update affects future grading work. Existing grades keep the threshold that
-was frozen when their work was selected.
+Read supported model pairs from `GET /v1/grader-form`. LLM settings contain
+`llm_provider` and `llm_model`. Trusted code graders use their own contract; for
+example, Response latency has the numeric `maximum_response_time_ms` setting.
 
-## The grader object
+Simulation scope accepts `all`, `test_suite`, or `test` selectors. Production
+scope is `null` or an object with `samplePercent` from `1` through `100`:
 
-<ResponseField name="id" type="string">
-  The stable `grd_` identifier for this project's policy.
-</ResponseField>
+```json
+{
+  "scope": {
+    "simulations": [{ "kind": "test_suite", "id": "ste_abc123" }],
+    "production": { "samplePercent": 10 }
+  }
+}
+```
 
-<ResponseField name="projectId" type="string">
-  The project that owns this policy.
-</ResponseField>
+These edits apply to future work. Work already selected keeps its exact core,
+model, other settings, scope result, and pass threshold, including delayed
+execution and retries. A score passes its individual grader when
+`score >= passThreshold`.
 
-<ResponseField name="graderDefinitionId" type="string">
-  The shared `grl_` grader-definition identifier.
-</ResponseField>
+## Add or remove a grader
 
-<ResponseField name="name" type="string">
-  The grader name.
-</ResponseField>
+Use the [grader library](/api/grader-library) to use a shared definition, create
+a custom grader, or clone a current LLM core.
 
-<ResponseField name="description" type="string | null">
-  What quality rule the grader applies and why.
-</ResponseField>
-
-<ResponseField name="scopeEditable" type="boolean">
-  Whether customer APIs may change this project's scope. The first API does not
-  expose a scope-write operation.
-</ResponseField>
-
-<ResponseField name="scope" type="object">
-  The complete project scope. `simulations` contains `all`, `test_suite`, or
-  `test` selectors. `production` is `null` or contains `samplePercent` from `1`
-  through `100`.
-</ResponseField>
-
-<ResponseField name="passThreshold" type="number">
-  The editable threshold for this grader's own passed or failed result.
-</ResponseField>
-
-<ResponseField name="createdAt" type="string">
-  ISO 8601 creation time.
-</ResponseField>
-
-<ResponseField name="updatedAt" type="string">
-  ISO 8601 last-update time.
-</ResponseField>
-
-There is no create or delete operation in the first API. Egma adds Expected
-behaviors during project creation. Optional predefined graders and customer
-grader authoring will add explicit operations only when those products ship.
+**`DELETE /v1/graders/{graderId}`** removes an optional grader from future
+selection. Its saved settings and existing grades remain available to the
+system. Already selected work still executes. Expected behaviors cannot be
+removed.

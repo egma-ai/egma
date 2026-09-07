@@ -1,183 +1,78 @@
-import {
-  GRADER_DEFINITION_CATALOG,
-  PREDEFINED_GRADERS,
-  type GraderDefinitionSnapshot,
-} from "@egma/db";
+import { GRADER_DEFINITION_CATALOG, PREDEFINED_GRADERS } from "@egma/db";
 import { describe, expect, it } from "vitest";
+import { execute } from "../src/graders/index.ts";
+import type { JudgeAnswer, JudgeQuestion } from "../src/judge/index.ts";
+import type { Execution } from "../src/graders/index.ts";
 
-import type { Conversation } from "../src/conversation.ts";
-import { executeExpectedBehaviors } from "../src/graders/expected-behaviors.ts";
-import {
-  cannotDetermine,
-  met,
-  notMet,
-  scriptedJudging,
-  type Scripted,
-} from "./support/scripted-judge.ts";
-
-const BEHAVIORS = [
-  "confirms the new time",
-  "does not quote a price",
-  "offers a reminder",
-  "states the cancellation policy",
-  "does not expose private data",
-  "answers the caller's question",
-  "ends politely",
-] as const;
-
-function definition(): GraderDefinitionSnapshot {
-  const found = GRADER_DEFINITION_CATALOG.find(
-    (candidate) => candidate.id === PREDEFINED_GRADERS.expectedBehaviors,
-  );
-  if (found === undefined) throw new Error("Expected behaviors is not cataloged");
-  return {
-    definitionId: found.id,
-    definitionVersion: 1,
-    type: found.type,
-    prompt: found.prompt,
-    parameterContract: found.parameterContract,
-    modalities: found.modalities,
-    judgeModel: found.judgeModel,
+const BEHAVIORS = ["Confirm cancellation", "Give a confirmation number", "Offer more help"];
+const expected = GRADER_DEFINITION_CATALOG.find((one) => one.id === PREDEFINED_GRADERS.expectedBehaviors)!;
+const result = (id: string, decision = "met") => ({ id, decision, rationale: `Evidence for ${id}`, cited_turns: [1] });
+function input(answer: unknown, id: string = expected.id, behaviors = BEHAVIORS) {
+  const asked: JudgeQuestion[] = [];
+  const execution: Execution = {
+    definition: { definitionId: id, definitionVersion: 1, type: "llm_as_judge", prompt: expected.prompt, parameterContract: expected.parameterContract, modalities: expected.modalities },
+    parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
+    conversation: { source: "simulation", traceId: "1", nothingToJudgeBecause: null, endingReason: "persona_concluded",
+      transcript: [{ span_id: "aaaaaaaaaaaaaaaa", speaker: "agent", text: "Cancelled. Your number is ABC123." }],
+      events: [{ kind: "tool_call", name: "cancel", arguments: { subscription: "1" }, result: "must not reach judge" }],
+      measures: [], runId: "run", agentId: "agent" },
+    judging: { judge: { ask: async (question) => { asked.push(question); return answer as JudgeAnswer; } } },
+    reading: { expectedBehaviors: async () => behaviors },
   };
+  return { execution, asked };
 }
 
-function conversation(
-  overrides: Partial<Conversation> = {},
-): Conversation {
-  return {
-    source: "simulation",
-    traceId: "1111111111111111111111111111aaaa",
-    nothingToJudgeBecause: null,
-    endingReason: "persona_concluded",
-    transcript: [
-      {
-        span_id: "aaaaaaaaaaaaaaaa",
-        speaker: "persona",
-        text: "Please cancel my appointment.",
-      },
-      {
-        span_id: "bbbbbbbbbbbbbbbb",
-        speaker: "agent",
-        text: "It is canceled. The policy permits it.",
-      },
-    ],
-    events: [],
-    measures: [],
-    runId: "run_01JQZ0000000000000000000AA",
-    agentId: "agt_01JQZ0000000000000000000AA",
-    ...overrides,
-  };
-}
-
-async function grade(
-  answers: Readonly<Record<string, Scripted>>,
-  overrides: {
-    readonly behaviors?: readonly string[];
-    readonly conversation?: Partial<Conversation>;
-  } = {},
-) {
-  const scripted = scriptedJudging({ answers });
-  const result = await executeExpectedBehaviors({
-    definition: definition(),
-    parameterValues: {},
-    conversation: conversation(overrides.conversation),
-    judging: scripted.judging,
-    reading: {
-      async expectedBehaviors() {
-        return overrides.behaviors ?? BEHAVIORS;
-      },
-    },
-  });
-  return { result, judge: scripted.judge };
-}
-
-describe("Expected behaviors produces one grade", () => {
-  it("normalizes seven independent assertions into one score", async () => {
-    const answers = Object.fromEntries(
-      BEHAVIORS.map((behavior, at) => [
-        behavior,
-        at < 5
-          ? met(`behavior ${at + 1} passed`, at === 0 ? [2] : [])
-          : notMet(`behavior ${at + 1} failed`),
-      ]),
-    );
-
-    const { result, judge } = await grade(answers);
-
-    expect(result.score).toBe(5 / 7);
-    expect(result.details.rationale).toBe(
-      "5 of 7 expected behaviors passed.",
-    );
-    expect(result.details.assertions).toHaveLength(7);
-    expect(result.details.assertions?.[0]).toEqual({
-      key: "behavior_1",
-      score: 1,
-      rationale: "behavior 1 passed",
-      citedSpanIds: ["bbbbbbbbbbbbbbbb"],
-    });
-    expect(result.details.assertions?.[6]).toMatchObject({
-      key: "behavior_7",
-      score: 0,
-    });
-    expect(judge.asked.map((question) => question.criterion)).toEqual(BEHAVIORS);
-  });
-
-  it("keeps completed assertion evidence but errors the grade when one call fails", async () => {
-    const { result } = await grade({
-      [BEHAVIORS[0]]: met("confirmed", [2]),
-      [BEHAVIORS[1]]: new Error("judge answered 503"),
-      [BEHAVIORS[2]]: notMet("no reminder"),
-    }, { behaviors: BEHAVIORS.slice(0, 3) });
-
-    expect(result.score).toBeNull();
-    expect(result.details.error).toBe(
-      "1 of 3 expected behaviors could not be graded",
-    );
-    expect(result.details.assertions).toEqual([
-      {
-        key: "behavior_1",
-        score: 1,
-        rationale: "confirmed",
-        citedSpanIds: ["bbbbbbbbbbbbbbbb"],
-      },
-      {
-        key: "behavior_2",
-        error: "this behavior could not be graded: judge answered 503",
-      },
-      {
-        key: "behavior_3",
-        score: 0,
-        rationale: "no reminder",
-        citedSpanIds: [],
-      },
+describe("the common LLM response", () => {
+  it.each([expected.id, "grl_01M01MH8KAE8ZB19B0YJ7Z7EX1"])("grades three behaviors in one call for definition %s", async (id) => {
+    const { execution, asked } = input({ results: [result("behavior_1"), result("behavior_2"), result("behavior_3", "not_met")] }, id);
+    const grade = await execute(execution);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.criterion).toBe(expected.prompt);
+    expect(asked[0]?.expectedBehaviors).toEqual([
+      { id: "behavior_1", text: BEHAVIORS[0] }, { id: "behavior_2", text: BEHAVIORS[1] }, { id: "behavior_3", text: BEHAVIORS[2] },
     ]);
+    expect(asked[0]?.evidence.toolCalls).toEqual([{ tool: "cancel", arguments: '{"subscription":"1"}' }]);
+    expect(grade.score).toBe(2 / 3);
+    expect(grade.details.assertions).toHaveLength(3);
+    expect(grade.details.assertions?.[2]).toMatchObject({ key: "behavior_3", decision: "not_met", score: 0, citedTurns: [1], citedSpanIds: ["aaaaaaaaaaaaaaaa"] });
   });
-
-  it("treats could-not-determine as an error rather than zero", async () => {
-    const { result } = await grade({
-      [BEHAVIORS[0]]: cannotDetermine("the evidence does not settle it"),
-    }, { behaviors: BEHAVIORS.slice(0, 1) });
-
-    expect(result.score).toBeNull();
-    expect(result.details.assertions?.[0]).toMatchObject({
-      key: "behavior_1",
-      rationale: "the evidence does not settle it",
-      error: "the grader could not determine whether this behavior was met",
-    });
+  it("retains all criterion details when one decision cannot be determined", async () => {
+    const { execution } = input({ results: [result("behavior_1"), result("behavior_2"), result("behavior_3", "cannot_determine")] });
+    const grade = await execute(execution);
+    expect(grade.score).toBeNull();
+    expect(grade.details.error).toContain("1 of 3");
+    expect(grade.details.assertions).toHaveLength(3);
+    expect(grade.details.assertions?.[2]).toMatchObject({ decision: "cannot_determine", rationale: "Evidence for behavior_3", citedTurns: [1] });
   });
-
-  it("writes one error result without asking a model when evidence is absent", async () => {
-    const { result, judge } = await grade({}, {
-      behaviors: BEHAVIORS.slice(0, 2),
-      conversation: { nothingToJudgeBecause: "the trace is incomplete" },
-    });
-
-    expect(result.score).toBeNull();
-    expect(result.details.error).toBe("the trace is incomplete");
-    expect(result.details.assertions).toEqual([
-      { key: "behavior_1", error: "the trace is incomplete" },
-      { key: "behavior_2", error: "the trace is incomplete" },
-    ]);
-    expect(judge.asked).toEqual([]);
+  it("accepts the complete instruction family with test context, without claiming prompt obedience", async () => {
+    const { execution, asked } = input({ results: [result("instruction_1")] });
+    expect((await execute(execution)).score).toBe(1);
+    expect(asked[0]?.expectedBehaviors).toHaveLength(3);
+  });
+  it("does not invent test context for production", async () => {
+    const { execution, asked } = input({ results: [result("instruction_1")] }, "custom", []);
+    expect((await execute({ ...execution, conversation: { ...execution.conversation, source: "production" } })).score).toBe(1);
+    expect(asked[0]?.expectedBehaviors).toEqual([]);
+  });
+  it.each([
+    { results: [] },
+    { results: [result("behavior_1")] },
+    { results: [result("behavior_1"), result("behavior_1"), result("behavior_3")] },
+    { results: [result("behavior_1"), result("behavior_2"), result("behavior_4")] },
+    { results: [result("instruction_1"), result("behavior_1")] },
+    { results: [result("instruction_1", "maybe")] },
+    { results: [{ ...result("instruction_1"), cited_turns: [99] }] },
+    { results: [{ ...result("instruction_1"), cited_turns: [1.5] }] },
+    { results: [{ ...result("instruction_1"), rationale: 3 }] },
+    { results: [{ ...result("instruction_1"), score: 1 }] },
+    { results: [result("instruction_1")], score: 1 },
+    { results: [{ id: "instruction_1", decision: "met", rationale: "no evidence field" }] },
+  ])("rejects incomplete or malformed responses %# without scoring a subset", async (answer) => {
+    const { execution } = input(answer);
+    expect(await execute(execution)).toMatchObject({ score: null, details: { error: expect.any(String) } });
+  });
+  it("rejects behavior judgments when no behaviors were supplied", async () => {
+    const { execution } = input({ results: [result("behavior_1")] }, "custom", []);
+    expect((await execute(execution)).score).toBeNull();
   });
 });

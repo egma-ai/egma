@@ -1,88 +1,141 @@
 ---
 title: "Grader library"
 sidebarTitle: "Grader library"
-description: "Browse stable grader definitions maintained by Egma or a customer."
+description: "Use shared graders and create independent project graders."
 ---
 
-The grader library contains reusable grader definitions. A definition owns its
-name, execution type, immutable versions, and whether project scope can be
-edited. A project grader holds one project's scope and pass threshold.
+A grader definition owns a stable `grl_` identity, display metadata, and an
+immutable core history. A core contains the prompt or trusted code identity,
+parameter contract, and compatible modalities. Each project saves its own
+model, other settings, scope, and pass threshold in a [project grader](/api/graders).
 
-Egma maintains one shared copy of each predefined definition. When Egma improves
-one, it creates a new definition version. Future grading work uses the new
-version; work that was already selected keeps its old version.
+Egma definitions are shared. Custom definitions belong to one project and are
+not visible in other projects, including projects in the same organization.
 
-The first product catalog contains only **Expected behaviors**. Every project
-receives its project grader automatically. Its fixed scope selects all
-simulations and no production traces, while its pass threshold stays editable.
-The API does not yet expose optional Add, Remove, or custom-authoring
-operations.
+For all operations below, add `?projectId=prj_abc123` if your credential does not
+already select a project.
 
-## List definitions
+## Read the library and supported models
 
-**`GET /v1/grader-library`**
+| Operation | Response |
+| --- | --- |
+| `GET /v1/grader-library` | `graderLibraryEntries` and `nextPageToken`. |
+| `GET /v1/grader-library/{graderDefinitionId}` | One definition's current core and use state. |
+| `GET /v1/grader-library/{graderDefinitionId}?definitionVersion=1` | One historical core, with live display metadata. |
+| `GET /v1/grader-form` | Supported `modelCatalog` provider/model pairs and default `settingDefinitions`. |
 
-<ParamField query="projectId" type="string">
-  Optional project context. Use it to include definitions visible to that
-  project.
-</ParamField>
+Use `pageToken` from the previous `nextPageToken` to read another library page.
+Model catalog entries contain `provider`, `model`, and `label`. Only supported
+grader models are offered. Use these pairs for `settings.llm_provider` and
+`settings.llm_model`.
 
-<ParamField query="pageToken" type="string">
-  The `nextPageToken` from the previous page.
-</ParamField>
+A definition response includes:
 
-<ResponseField name="graderLibraryEntries" type="array">
-  The visible stable grader definitions.
-</ResponseField>
+| Field | Meaning |
+| --- | --- |
+| `id` | Stable `grl_` identity. |
+| `name`, `description` | Live display metadata. |
+| `owner` | `egma` or `project`. |
+| `type` | `llm_as_judge` or `code`. |
+| `currentDefinitionVersion` | Core version that new work selects. |
+| `definitionVersion` | Core version returned by this read. |
+| `gradingInstructions` | Saved LLM prompt, or `null` for trusted code. |
+| `modalities` | Compatible `chat` and/or `voice` modalities. |
+| `requiredEvidence` | Evidence the grader reads. |
+| `settingDefinitions` | Parameter keys, labels, types, defaults, units, and bounds. |
+| `scopeEditable` | Whether the project's scope can change. |
+| `activeProjectGraderId` | Active `grd_` identity in this project, or `null`. |
+| `createdAt`, `updatedAt` | ISO 8601 timestamps. |
 
-<ResponseField name="nextPageToken" type="string | null">
-  The next page cursor, or `null` after the last page.
-</ResponseField>
+History contains the core's parameter contract and defaults. Read the project
+grader to get today's saved settings. History never presents today's model
+choice as a historical core field.
 
-```bash
-curl https://your-egma-instance/v1/grader-library \
-  -H "Authorization: Bearer egma_sk_..."
+## Use a grader
+
+**`POST /v1/grader-library/{graderDefinitionId}/use`**
+
+Supply `scope`, `passThreshold`, and optionally the complete `settings` object:
+
+```json
+{
+  "scope": {
+    "simulations": [{ "kind": "all" }],
+    "production": null
+  },
+  "settings": {
+    "llm_provider": "openai",
+    "llm_model": "gpt-4o-mini"
+  },
+  "passThreshold": 1
+}
 ```
 
-## The definition object
+The response is the project grader. If the definition is already active, Use
+returns that existing grader and preserves its settings. Omitted settings copy
+the contract defaults only on first use. If you add a removed grader again,
+omitted settings restore its last saved values.
 
-<ResponseField name="id" type="string">
-  The stable `grl_` definition identifier.
-</ResponseField>
+## Create a custom grader
 
-<ResponseField name="name" type="string">
-  The grader's name.
-</ResponseField>
+**`POST /v1/grader-library/custom`**
 
-<ResponseField name="description" type="string | null">
-  What quality rule this grader applies and why.
-</ResponseField>
+Creation saves the first core and its complete project settings together. An
+invalid request leaves neither record behind.
 
-<ResponseField name="type" type="string">
-  The grader definition's execution mechanism.
-</ResponseField>
+```json
+{
+  "name": "Cancellation policy",
+  "description": "Checks that the agent states the cancellation window.",
+  "gradingInstructions": "The agent stated the cancellation policy",
+  "passesWhen": "The agent names the 30-day window",
+  "failsWhen": "The agent ends the call without naming the window",
+  "settings": {
+    "llm_provider": "openai",
+    "llm_model": "gpt-4o-mini"
+  },
+  "scope": {
+    "simulations": [{ "kind": "all" }],
+    "production": null
+  },
+  "passThreshold": 1
+}
+```
 
-<ResponseField name="owner" type="string">
-  `egma` for a predefined definition or `customer` for a customer definition.
-</ResponseField>
+The three instruction fields compile into one saved prompt. `description` and
+`settings` are optional; omitted settings use the creation defaults. The
+response contains `definition` and `grader`.
 
-<ResponseField name="projectId" type="string | null">
-  The owning project for a customer definition, or `null` for an Egma-owned
-  predefined definition.
-</ResponseField>
+## Clone the current core
 
-<ResponseField name="scopeEditable" type="boolean">
-  Whether a customer may change the scope on its project grader.
-</ResponseField>
+**`POST /v1/grader-library/{graderDefinitionId}/clone`**
 
-<ResponseField name="currentDefinitionVersion" type="number">
-  The positive integer version that new grading work will freeze.
-</ResponseField>
+Send a required `name` and optional `description`. The response contains a new
+project-owned `definition` and `grader`. The clone copies the current LLM prompt
+and this project's effective settings. It has an independent history and can
+be edited or removed without changing the source.
 
-<ResponseField name="createdAt" type="string">
-  ISO 8601 creation time.
-</ResponseField>
+You can clone Expected behaviors. Its clone is optional and has editable scope.
+You cannot clone a historical core or a trusted code grader.
 
-<ResponseField name="updatedAt" type="string">
-  ISO 8601 last-update time.
-</ResponseField>
+## Edit a current custom core
+
+**`PATCH /v1/grader-library/{graderDefinitionId}`**
+
+```json
+{
+  "baseDefinitionVersion": 1,
+  "gradingInstructions": "Decide whether the agent explains the cancellation window before ending the call."
+}
+```
+
+`baseDefinitionVersion` must name the current core. A changed prompt creates
+the next immutable core. A stale or historical base returns `409`. Egma-owned
+cores and trusted code are read-only.
+
+You can also send `name` or `description` with the current base. These display
+metadata edits do not create a core version. Change the model through the
+project grader settings, which also do not create a core version.
+
+Unsupported models, incomplete settings, unknown keys, and invalid parameter
+values return `422`. Definitions outside the current project return `404`.

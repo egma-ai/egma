@@ -145,6 +145,11 @@ const DATES = {
   updatedAt: "2026-08-24T10:00:00.000Z",
 };
 
+const MODEL_SETTINGS = [
+  { key: "llm_provider", label: "LLM provider", valueType: "string", defaultValue: "openai", unit: null, minimum: null, maximum: null },
+  { key: "llm_model", label: "LLM model", valueType: "string", defaultValue: "gpt-5.6-terra", unit: null, minimum: null, maximum: null },
+] as const;
+
 const EXPECTED: ProjectGrader = {
   id: "grd_expected",
   projectId: "prj_1",
@@ -157,7 +162,7 @@ const EXPECTED: ProjectGrader = {
   scopeEditable: false,
   removable: false,
   scope: { simulations: [{ kind: "all" }], production: null },
-  settings: {},
+  settings: { llm_provider: "openai", llm_model: "gpt-5.6-terra" },
   passThreshold: 1,
   ...DATES,
 };
@@ -207,7 +212,7 @@ const EXPECTED_DEFINITION: GraderLibraryEntry = {
   modalities: ["chat", "voice"],
   gradingInstructions: null,
   requiredEvidence: ["transcript", "test_expected_behaviors"],
-  settingDefinitions: [],
+  settingDefinitions: [...MODEL_SETTINGS],
   activeProjectGraderId: EXPECTED.id,
   ...DATES,
 };
@@ -249,6 +254,10 @@ function standardAnswers(
 ): Record<string, Stubbed | Stubbed[]> {
   return {
     "GET /api/me": { status: 200, body: meWith(role) },
+    "GET /v1/grader-form": { status: 200, body: { settingDefinitions: MODEL_SETTINGS, modelCatalog: [
+      { provider: "openai", model: "gpt-4o-mini", label: "OpenAI" },
+      { provider: "openai", model: "gpt-5.6-terra", label: "OpenAI" },
+    ] } },
     "GET /v1/graders": {
       status: 200,
       body: { graders, nextPageToken: null },
@@ -303,7 +312,7 @@ function answersThatCreateAGrader(): Record<string, Stubbed | Stubbed[]> {
           ...LATENCY_DEFINITION,
           id: "grl_custom",
           name: "Polite resolution",
-          owner: "organization",
+          owner: "project",
           type: "llm_as_judge",
           settingDefinitions: [],
           activeProjectGraderId: "grd_custom",
@@ -313,7 +322,7 @@ function answersThatCreateAGrader(): Record<string, Stubbed | Stubbed[]> {
           id: "grd_custom",
           graderDefinitionId: "grl_custom",
           name: "Polite resolution",
-          owner: "organization",
+          owner: "project",
         },
       },
     },
@@ -659,14 +668,14 @@ describe("the project Graders surface", () => {
       ...EXPECTED,
       id: "grd_collision",
       graderDefinitionId: "grl_collision",
-      owner: "organization",
+      owner: "project",
       scopeEditable: true,
       removable: true,
     };
     const collisionDefinition: GraderLibraryEntry = {
       ...EXPECTED_DEFINITION,
       id: "grl_collision",
-      owner: "organization",
+      owner: "project",
       scopeEditable: true,
       gradingInstructions: "Check the organization's custom behavior.",
       activeProjectGraderId: collision.id,
@@ -791,7 +800,7 @@ describe("the project Graders surface", () => {
       id: "grl_custom",
       name: "Polite resolution",
       description: null,
-      owner: "organization",
+      owner: "project",
       type: "llm_as_judge",
       gradingInstructions: "Decide whether: the agent resolved the request.",
       requiredEvidence: ["transcript"],
@@ -803,7 +812,7 @@ describe("the project Graders surface", () => {
       id: "grd_custom",
       graderDefinitionId: "grl_custom",
       name: "Polite resolution",
-      owner: "organization",
+      owner: "project",
       scopeEditable: true,
       removable: true,
       scope: { simulations: [{ kind: "all" }], production: null },
@@ -821,7 +830,7 @@ describe("the project Graders surface", () => {
     const sheet = await screen.findByRole("dialog", { name: "Create custom grader" });
     expect(
       within(sheet).getByText(
-        "Create a grader for this organization and use it in this project.",
+        "Create a grader for this project.",
       ),
     ).toBeTruthy();
 
@@ -958,6 +967,7 @@ describe("the project Graders surface", () => {
           gradingInstructions: "the agent resolved the request",
           passesWhen: "the agent confirms the request is done",
           failsWhen: "the agent leaves the request open",
+          settings: { llm_provider: "openai", llm_model: "gpt-5.6-terra" },
           scope: { simulations: [{ kind: "all" }], production: null },
           passThreshold: 1,
         },
@@ -1204,7 +1214,7 @@ describe("the project Graders surface", () => {
     ).toBe("true");
   });
 
-  it("keeps Expected behaviors scope fixed and lets the project edit only its threshold", async () => {
+  it("keeps Expected behaviors scope fixed and lets the project edit models and threshold", async () => {
     const changed = { ...EXPECTED, passThreshold: 0.8 };
     const { asked } = apiAnswers({
       ...standardAnswers(),
@@ -1237,7 +1247,7 @@ describe("the project Graders surface", () => {
       expect(asked.find((one) => one.method === "PATCH")).toEqual({
         method: "PATCH",
         path: "/v1/graders/grd_expected?projectId=prj_1",
-        body: { settings: {}, passThreshold: 0.8 },
+        body: { settings: { llm_provider: "openai", llm_model: "gpt-5.6-terra" }, passThreshold: 0.8 },
       });
     });
   });

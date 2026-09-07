@@ -21,10 +21,9 @@ const EXECUTORS: Readonly<Record<string, GraderExecutor | undefined>> = {
 
 /** Execute one frozen grader definition and return one top-level result. */
 export async function execute(execution: Execution): Promise<GraderResult> {
-  const executor = EXECUTORS[execution.definition.definitionId] ??
-    (execution.definition.type === "llm_as_judge"
-      ? GENERIC_LLM_EXECUTOR
-      : undefined);
+  const executor = execution.definition.type === "llm_as_judge"
+    ? GENERIC_LLM_EXECUTOR
+    : EXECUTORS[execution.definition.definitionId];
   if (executor === undefined) {
     return {
       score: null,

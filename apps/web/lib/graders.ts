@@ -42,7 +42,7 @@ export function graderDefinitionDisplayName(
 }
 
 export function graderOwnerLabel(owner: GraderOwner): string {
-  return owner === "egma" ? "Egma" : "Organization";
+  return owner === "egma" ? "Egma" : "Project";
 }
 
 /**
