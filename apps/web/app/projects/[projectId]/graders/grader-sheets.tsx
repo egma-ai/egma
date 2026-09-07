@@ -504,11 +504,13 @@ function DefinitionRead({
   projectId,
   definitionId,
   definitionVersion,
+  header,
   children,
 }: {
   readonly projectId: string;
   readonly definitionId: string;
   readonly definitionVersion?: number;
+  readonly header?: (entry: GraderLibraryEntry | null) => ReactNode;
   readonly children: (entry: GraderLibraryEntry) => ReactNode;
 }) {
   const { answer, reload } = useProjectRead<GraderLibraryEntry>(
@@ -530,21 +532,24 @@ function DefinitionRead({
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
   }, [answer]);
   if (answer === null || answer.status === "signed-out") {
-    return <Loading what="grader details" />;
+    return <>{header?.(null)}<Loading what="grader details" /></>;
   }
   if (answer.status !== "ready") {
     return (
-      <Refused
-        message={answer.refusal.message}
-        action={
-          <Button type="button" variant="secondary" onClick={reload}>
-            Try again
-          </Button>
-        }
-      />
+      <>
+        {header?.(null)}
+        <Refused
+          message={answer.refusal.message}
+          action={
+            <Button type="button" variant="secondary" onClick={reload}>
+              Try again
+            </Button>
+          }
+        />
+      </>
     );
   }
-  return children(answer.value);
+  return <>{header?.(answer.value)}{children(answer.value)}</>;
 }
 
 export function LibraryGraderSheet({
@@ -910,20 +915,21 @@ export function ActiveGraderSheet({
   return (
     <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
       <SheetContent aria-describedby={undefined}>
-        <SheetHeader>
-          <SheetTitle>
-            {graderDefinitionDisplayName(
-              grader.graderDefinitionId,
-              grader.name,
-            )}
-          </SheetTitle>
-          <SheetDescription>
-            This project&apos;s scope, settings, and individual pass threshold.
-          </SheetDescription>
-        </SheetHeader>
         <DefinitionRead
           projectId={projectId}
           definitionId={grader.graderDefinitionId}
+          header={(entry) => (
+            <SheetHeader>
+              <SheetTitle>
+                {graderDefinitionDisplayName(grader.graderDefinitionId, grader.name)}
+              </SheetTitle>
+              {entry === null ? null : (
+                <SheetDescription>
+                  {entry.owner === "egma" ? "Predefined" : "Custom"} · v{entry.currentDefinitionVersion}
+                </SheetDescription>
+              )}
+            </SheetHeader>
+          )}
         >
           {(entry) => (
             <EditGraderForm

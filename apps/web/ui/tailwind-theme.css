@@ -275,6 +275,9 @@
   --control-md: 36px;
   --control-lg: 44px;
   --control-height: var(--control-lg);
+  /* The same light chevron dresses native select triggers in every browser. */
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%233c3c3c' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --select-picker-scale: 0.97;
   --tap-target: 44px;
 
   /*
@@ -471,6 +474,7 @@
   --surface-active: #43241c;
   --foreground: #f2f2ed;
   --muted: #a3a39b;
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%23a3a39b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   /*
    * Lifted from `#82827b`, which failed AA on the surface it is most often
    * drawn on.

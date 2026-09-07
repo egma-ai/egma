@@ -702,48 +702,93 @@ describe("one persona's sheet", () => {
     });
   }
 
-  it("reads a Custom persona one item per line, dated, with its versions last", async () => {
-    ritaOpen();
+  it("opens inline settings while keeping identity readable and the current version visible", async () => {
+    const { asked } = ritaOpen();
     render(<PersonasPage />);
     const sheet = await openRow("Impatient Rita");
 
     expect(within(sheet).getByText("Custom · v3")).toBeTruthy();
-
     expect(readsUnder(sheet, "Who they are")).toEqual([
-      "Description",
-      "Identity name",
-      "Personality",
-      "Language",
+      "Description", "Identity name", "Personality", "Language",
     ]);
     expect(within(sheet).getByText("Rita")).toBeTruthy();
+    const settings = within(sheet).getByRole("region", { name: "Settings" });
+    expect((within(settings).getByLabelText("Language model*") as HTMLSelectElement).value).toBe("openai::gpt-4o-mini");
+    expect((within(settings).getByLabelText("Speech rate*") as HTMLInputElement).value).toBe("1");
+    expect((within(sheet).getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(sheet).queryByText("Created")).toBeNull();
+    expect(within(sheet).queryByText("Updated")).toBeNull();
+    expect(within(sheet).queryByRole("region", { name: "Versions" })).toBeNull();
+    expect(within(sheet).queryByText("Project settings")).toBeNull();
+    expect(asked.some(request => request.path.includes("/versions"))).toBe(false);
+  });
 
-    expect(readsUnder(sheet, "Project settings")).toEqual([
-      "Language model",
-      "Speech-to-text",
-      "Text-to-speech",
-      "Speech rate",
-      "Voice",
-    ]);
-    expect(within(sheet).getByText("OpenAI · gpt-4o-mini")).toBeTruthy();
-    expect(within(sheet).getByText("1×")).toBeTruthy();
+  it("saves inline settings without changing the persona core", async () => {
+    const updatedModels = { ...RECOMMENDED_MODELS, llm: { provider: "openai", model: "gpt-4o" } };
+    const saved = { ...RITA, settings: { ...RITA.settings!, models: updatedModels } };
+    const { asked } = ritaOpen({
+      "GET /v1/personas/prs_1": [{ status: 200, body: RITA }, { status: 200, body: saved }],
+      "PATCH /v1/personas/prs_1": { status: 200, body: saved },
+    });
+    render(<PersonasPage />);
+    const sheet = await openRow("Impatient Rita");
+    fireEvent.change(within(sheet).getByLabelText("Language model*"), { target: { value: "openai::gpt-4o" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(asked.find(request => request.method === "PATCH")?.body).toEqual({ projectId: "prj_1", models: updatedModels }));
+    await waitFor(() => expect((within(sheet).getByRole("button", { name: "Saved" }) as HTMLButtonElement).disabled).toBe(true));
+    expect(within(sheet).getByRole("status").textContent).toBe("Persona saved.");
+    expect(within(sheet).getByText("Custom · v3")).toBeTruthy();
+    fireEvent.change(within(sheet).getByLabelText("Voice*"), { target: { value: "different-voice" } });
+    expect(within(sheet).queryByRole("button", { name: "Saved" })).toBeNull();
+    expect(within(sheet).getByRole("status").textContent).toBe("");
+    expect((within(sheet).getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(within(sheet).getByLabelText("Voice*"), { target: { value: RECOMMENDED_MODELS.tts.voiceId } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Impatient Rita" })).toBeNull());
+    const reopened = await openRow("Impatient Rita");
+    expect((within(reopened).getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(reopened).getByRole("status").textContent).toBe("");
+  });
 
-    /*
-     * Created and Updated are ordinary fields, and they come before the
-     * version list rather than as a line of small print under everything.
-     */
-    const terms = [...sheet.querySelectorAll("dt")].map(
-      (term) => term.textContent,
-    );
-    expect(terms).toContain("Created");
-    expect(terms).toContain("Updated");
+  it("protects inline settings and resets a discarded draft when reopened", async () => {
+    ritaOpen();
+    render(<PersonasPage />);
+    const sheet = await openRow("Impatient Rita");
+    fireEvent.change(within(sheet).getByLabelText("Voice*"), { target: { value: "different-voice" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Discard changes" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Impatient Rita" })).toBeNull());
+    const reopened = await openRow("Impatient Rita");
+    expect((within(reopened).getByLabelText("Voice*") as HTMLInputElement).value).toBe(RECOMMENDED_MODELS.tts.voiceId);
+    expect((within(reopened).getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
+  });
 
-    const dates = within(sheet).getByText("Created").closest("dl");
-    const versions = within(sheet).getByRole("region", { name: "Versions" });
-    expect(dates).toBeTruthy();
-    expect(
-      dates!.compareDocumentPosition(versions) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+  it.each(["Clone", "Delete"])("protects inline settings before %s", async (action) => {
+    const { asked } = ritaOpen();
+    render(<PersonasPage />);
+    const sheet = await openRow("Impatient Rita");
+    fireEvent.change(within(sheet).getByLabelText("Voice*"), { target: { value: "different-voice" } });
+    await openSheetMenu("Impatient Rita");
+    fireEvent.click(await screen.findByRole("menuitem", { name: action }));
+    const confirmation = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Keep editing" }));
+    expect((within(sheet).getByLabelText("Voice*") as HTMLInputElement).value).toBe("different-voice");
+    expect(asked.every(request => request.method === "GET")).toBe(true);
+    expect(screen.queryByRole("dialog", { name: "Delete Impatient Rita?" })).toBeNull();
+  });
+
+  it("keeps inline settings disabled for viewers", async () => {
+    apiAnswers({
+      ...screenWith("viewer", [RITA]),
+      "GET /v1/personas/prs_1": { status: 200, body: RITA },
+    });
+    render(<PersonasPage />);
+    const sheet = await openRow("Impatient Rita");
+    for (const label of ["Language model*", "Speech-to-text*", "Text-to-speech*", "Speech rate*", "Voice*"]) {
+      expect((within(sheet).getByLabelText(label) as HTMLInputElement).disabled).toBe(true);
+    }
+    expect((within(sheet).getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("carries Edit, Clone and Delete in the sheet's own ⋮", async () => {
@@ -833,20 +878,7 @@ describe("one persona's sheet", () => {
     expect((within(sheet).getByLabelText("Personality*") as HTMLTextAreaElement).value).toBe(current.personality);
   });
 
-  it("reads an older core version without project models or restoration", async () => {
-    const { asked } = ritaOpen({});
-    render(<PersonasPage />);
-    const sheet = await openRow("Impatient Rita");
-    fireEvent.click(within(sheet).getAllByRole("button", { name: "Read" })[0]!);
-    expect(await within(sheet).findByText("Custom · v1 of 3")).toBeTruthy();
-    expect(within(sheet).getByText("Rita, as she was first written.")).toBeTruthy();
-    expect(within(sheet).getByText("Core history is read-only.")).toBeTruthy();
-    expect(within(sheet).queryByRole("button", { name: "Use as new version" })).toBeNull();
-    expect(within(sheet).queryByText("Language model")).toBeNull();
-    expect(asked.some((one) => one.method === "PATCH")).toBe(false);
-  });
-
-  it("offers project settings and cloning for a Predefined persona", async () => {
+  it("offers inline settings and cloning while keeping a shared identity read-only", async () => {
     apiAnswers({
       ...screenWith("admin", [RITA, PREDEFINED]),
       "GET /v1/personas/prs_0": { status: 200, body: PREDEFINED },
@@ -862,23 +894,42 @@ describe("one persona's sheet", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Use", "Clone"]);
+    ).toEqual(["Clone"]);
     fireEvent.keyDown(menu, { key: "Escape" });
 
-    /* No footer, no history, and nothing about who it is shared with. */
-    expect(sheet.querySelector("[data-slot=sheet-footer]")).toBeNull();
-    expect(within(sheet).getByRole("region", { name: "Versions" })).toBeTruthy();
-    expect(within(sheet).queryByRole("region", { name: "Used by" })).toBeNull();
-    expect(within(sheet).queryByText(/shared with/iu)).toBeNull();
-    expect(within(sheet).getByText("Created")).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Use persona" })).toBeTruthy();
+    expect(within(sheet).getByRole("region", { name: "Settings" })).toBeTruthy();
+    expect(within(sheet).queryByLabelText("Identity name*")).toBeNull();
+    expect(within(sheet).queryByRole("region", { name: "Versions" })).toBeNull();
+    expect(within(sheet).queryByText("Created")).toBeNull();
+    expect(within(sheet).queryByText("Updated")).toBeNull();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
   });
 
-  it.each(["Use", "Edit settings"])(
-    "recovers %s after the model catalog request fails",
+  it("adopts a library persona with the selected settings", async () => {
+    const updatedModels = { ...RECOMMENDED_MODELS, llm: { provider: "openai", model: "gpt-4o" } };
+    const saved = { ...PREDEFINED, settings: { id: "ppr_0", models: updatedModels, createdAt: PREDEFINED.createdAt, updatedAt: PREDEFINED.updatedAt } };
+    const { asked } = apiAnswers({
+      ...screenWith("admin", [PREDEFINED]),
+      "GET /v1/personas/prs_0": [{ status: 200, body: PREDEFINED }, { status: 200, body: saved }],
+      "POST /v1/personas/prs_0/use": { status: 200, body: saved },
+    });
+    render(<PersonasPage />);
+    const sheet = await openRow("Everyday caller");
+    fireEvent.change(within(sheet).getByLabelText("Language model*"), { target: { value: "openai::gpt-4o" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Use persona" }));
+    await waitFor(() => expect(asked.find(request => request.method === "POST")?.body).toEqual({ projectId: "prj_1", models: updatedModels }));
+    expect(await within(sheet).findByRole("button", { name: "Saved" })).toBeTruthy();
+    expect(within(sheet).getByText("Predefined · v1")).toBeTruthy();
+  });
+
+  it.each(["library", "active"])(
+    "recovers inline %s settings after the model catalog request fails",
     async (action) => {
       const persona: Persona = {
         ...PREDEFINED,
-        settings: action === "Use" ? null : {
+        settings: action === "library" ? null : {
           id: "ppr_0",
           models: RECOMMENDED_MODELS,
           createdAt: PREDEFINED.createdAt,
@@ -898,8 +949,6 @@ describe("one persona's sheet", () => {
       });
       render(<PersonasPage />);
       const sheet = await openRow("Everyday caller");
-      await openSheetMenu("Everyday caller");
-      fireEvent.click(await screen.findByRole("menuitem", { name: action }));
 
       const failure = await within(sheet).findByRole("alert");
       expect(within(failure).getByText(
@@ -910,7 +959,7 @@ describe("one persona's sheet", () => {
 
       const model = await within(sheet).findByLabelText("Language model*");
       expect((model as HTMLSelectElement).value).toBe(
-        action === "Use" ? "openai::gpt-5.6-terra" : "openai::gpt-4o-mini",
+        action === "library" ? "openai::gpt-5.6-terra" : "openai::gpt-4o-mini",
       );
       expect(within(sheet).queryByRole("alert")).toBeNull();
       expect(asked.filter(request => request.path === "/v1/persona-form?projectId=prj_1")).toHaveLength(2);
