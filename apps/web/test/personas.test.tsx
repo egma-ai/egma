@@ -455,7 +455,7 @@ describe("the Personas list", () => {
       }),
       { key: "Escape" },
     );
-    /* A Egma-provided persona cannot be deleted, so it is not offered. */
+    /* An Egma-provided persona cannot be deleted, so it is not offered. */
     expect(await rowMenuItems("Everyday caller")).toEqual(["Clone"]);
   });
 
