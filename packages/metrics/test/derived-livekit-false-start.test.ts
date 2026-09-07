@@ -222,6 +222,55 @@ function theWordBoundedCallWithABargeIn(): {
   };
 }
 
+function turn(one: {
+  spanId: string;
+  kind: "turn:human" | "turn:agent";
+  from: number;
+  to: number;
+  speech?: readonly [number, number];
+}): TraceSpan {
+  return span({
+    spanId: one.spanId,
+    parentSpanId: "session",
+    name: one.kind === "turn:human" ? "user_turn" : "agent_turn",
+    kind: one.kind,
+    from: one.from,
+    to: one.to,
+    spans:
+      one.speech === undefined
+        ? []
+        : [
+            span({
+              spanId: `${one.spanId}_speech`,
+              parentSpanId: one.spanId,
+              name: one.kind === "turn:human" ? "user_speaking" : "agent_speaking",
+              kind: "speaking",
+              from: one.speech[0],
+              to: one.speech[1],
+            }),
+          ],
+  });
+}
+
+function aCallOf(turns: readonly TraceSpan[]): {
+  turns: readonly TraceSpan[];
+  spans: readonly TraceSpan[];
+} {
+  return {
+    turns,
+    spans: [
+      span({
+        spanId: "session",
+        parentSpanId: "",
+        name: "agent_session",
+        kind: "root",
+        from: 0,
+        to: 70_000,
+      }),
+    ],
+  };
+}
+
 describe("a caller's sentence the transcriber delivered in two pieces", () => {
   it("measures the one wait the caller took, past the reply the second piece cut off", () => {
     const turnLatency = measuresFromSpans(theCallWithAFalseStart()).find(
@@ -252,5 +301,40 @@ describe("a caller's sentence the transcriber delivered in two pieces", () => {
       { value: 500, spanId: "agent_first" },
       { value: 530, spanId: "agent_second" },
     ]);
+  });
+
+  it("keeps an answer the agent carried on with past a speechless turn that opened inside it", () => {
+    // A typed line, or a backchannel the transcriber wrote down and the VAD
+    // never gated, arrives while the agent is mid-answer; the agent finishes.
+    // The answer is still the answer, and the speechless turn is its own.
+    const turnLatency = measuresFromSpans(
+      aCallOf([
+        turn({ spanId: "h1", kind: "turn:human", from: 10_000, to: 11_400, speech: [10_000, 11_000] }),
+        turn({ spanId: "a1", kind: "turn:agent", from: 11_500, to: 20_000, speech: [13_000, 20_000] }),
+        turn({ spanId: "h2", kind: "turn:human", from: 19_000, to: 19_500 }),
+        turn({ spanId: "a2", kind: "turn:agent", from: 20_100, to: 30_000, speech: [22_000, 30_000] }),
+      ]),
+    ).find((one) => one.measure === "turn_response_latency");
+
+    expect(turnLatency?.samples).toEqual([
+      { value: 2_000, spanId: "a1_speech" },
+      { value: 2_500, spanId: "a2_speech" },
+    ]);
+  });
+
+  it("reads two flushes in a row as one continuation, and the wait runs past both", () => {
+    // The transcriber delivers the rest of the sentence twice before the agent
+    // replies to any of it; the reply it cut off ended inside the first flush.
+    const turnLatency = measuresFromSpans(
+      aCallOf([
+        turn({ spanId: "h1", kind: "turn:human", from: 10_000, to: 11_400, speech: [10_000, 11_000] }),
+        turn({ spanId: "a1", kind: "turn:agent", from: 11_500, to: 13_020, speech: [12_980, 13_020] }),
+        turn({ spanId: "h2", kind: "turn:human", from: 13_000, to: 13_300 }),
+        turn({ spanId: "h3", kind: "turn:human", from: 13_400, to: 13_700 }),
+        turn({ spanId: "a2", kind: "turn:agent", from: 13_700, to: 20_000, speech: [15_000, 20_000] }),
+      ]),
+    ).find((one) => one.measure === "turn_response_latency");
+
+    expect(turnLatency?.samples).toEqual([{ value: 4_000, spanId: "a2_speech" }]);
   });
 });

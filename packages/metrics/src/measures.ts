@@ -122,11 +122,12 @@
  * with. A production trace answers exactly as it did at version 8: egma
  * conducted nothing there, so the agent's POV is the only POV and still the
  * headline. Version 9 also reads the agent's own spans one way more carefully:
- * a caller turn with no speech of its own that opened while the agent's
- * previous turn still ran is the rest of the caller's last sentence, delivered
- * late, and the reply it cut off is no answer — so one sentence the
- * transcriber split is one wait, not two. A word-bounded trace records no
- * speech for any turn, so nothing there is read as a continuation.
+ * a caller turn with no speech of its own that opened inside the agent turn
+ * immediately before it, and that the agent turn did not outlive, is the rest
+ * of the caller's last sentence, delivered late, and the reply it cut off is
+ * no answer — so one sentence the transcriber split is one wait, not two. A
+ * word-bounded trace records no speech for any turn, so nothing there is read
+ * as a continuation.
  */
 export const MEASURE_CATALOG_VERSION = 9;
 

@@ -905,6 +905,9 @@ function agentSpeechDuration(turns: readonly TimedSpan[]): readonly Sample[] {
  * is skipped whole, its speech included, and the walk carries on to the speech
  * that did answer. The continuation itself is not a human turn the walk stops
  * at either: the caller had not spoken again, so their question is still open.
+ * What makes the turn a false start is the continuation's own test — the
+ * reply ended no later than the late turn closed — so an answer the agent
+ * carried on with past a speechless turn is never mistaken for one.
  */
 function answeringSpeech(
   turns: readonly TimedSpan[],
@@ -923,8 +926,7 @@ function answeringSpeech(
     }
     if (turn.kind !== AGENT_TURN) continue;
     // A false start — the reply the turn after it cut off. It answered nothing,
-    // so it is neither the speech that ends the wait nor the silent turn that
-    // stands in for one.
+    // so its speech is not the speech that ends the wait.
     if (isContinuation(turns, next + 1, traceHasNoSpeakingSpans)) continue;
     const speech = turn.speech[0];
     if (speech !== undefined) return speech;
@@ -950,8 +952,19 @@ function answeringSpeech(
  * ordinary turn of a framework that records no speech for the caller — Retell's
  * word-bounded turns, egma's own chat lane — and is measured as one. The agent
  * turn is the one immediately before it in start order, because that is the
- * turn the late words cut off; where a human turn sits there instead, the
- * caller genuinely spoke twice and the second turn is their own.
+ * turn the late words cut off — and cut off is the second half of the test:
+ * the agent turn ended no later than the late turn closed. A reply the agent
+ * carried on with past the late turn's end was not cut off by it, so a
+ * speechless turn that opens inside an answer the agent finished — a typed
+ * line, a backchannel the transcriber wrote down and the VAD never gated —
+ * is an ordinary turn, and the answer around it stays the answer it was.
+ *
+ * **Another flush is the same utterance again.** A speechless human turn
+ * straight after a continuation, with no agent turn between, is the
+ * transcriber delivering a third piece before the agent replied to any of
+ * it: a continuation too, and the walk reads the run of them as one. Where a
+ * human turn with speech sits before it instead, the caller genuinely spoke
+ * twice and the second turn is their own.
  *
  * **A trace that records no speech for anyone says nothing by one turn's
  * missing speech.** On Retell's word-bounded turns every human turn is
@@ -969,8 +982,16 @@ function isContinuation(
   if (turn === undefined || turn.kind !== HUMAN_TURN) return false;
   if (turn.speech.length > 0) return false;
   const before = turns[at - 1];
-  if (before === undefined || before.kind !== AGENT_TURN) return false;
-  return turn.startedAt < before.endedAt;
+  if (before === undefined) return false;
+  // Straight after a continuation: the transcriber flushed the same
+  // utterance again before the agent had replied to any of it.
+  if (before.kind === HUMAN_TURN) {
+    return isContinuation(turns, at - 1, traceHasNoSpeakingSpans);
+  }
+  if (before.kind !== AGENT_TURN) return false;
+  // Opened while the reply ran, and the reply did not outlive it: cut off by
+  // its arrival, not carried on past it.
+  return turn.startedAt < before.endedAt && before.endedAt <= turn.endedAt;
 }
 
 /** Whether this trace's emitter recorded speech at all. */
