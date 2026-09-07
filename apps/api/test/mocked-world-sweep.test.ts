@@ -191,7 +191,7 @@ async function seedRun(
         status, triggered_via, connection_snapshot,
         temp_mock_agent_version, temp_mock_agent_version_cleanup,
         mock_metadata, expected_simulation_count, created_at, started_at,
-        finished_at, completed_count, failed_count, canceled_count)
+        finished_at, completed_count, failed_count, canceled_count, grading_plan)
      values ($1,$2,$3,$4,$5,$6,$10,'manual',$7::jsonb,$8::integer,
         case when $11 = 'no' then null else false end,
         case when $11 = 'no' then null else $12::jsonb end,1,
@@ -200,7 +200,7 @@ async function seedRun(
         case when $10 = 'completed' then now() - interval '1 minute' end,
         case when $10 = 'completed' then 1 end,
         case when $10 = 'completed' then 0 end,
-        case when $10 = 'completed' then 0 end)`,
+        case when $10 = 'completed' then 0 end,$13::jsonb)`,
     [
       runId,
       organizationId,
@@ -228,6 +228,10 @@ async function seedRun(
           version: 105,
           ...(toolPrint === undefined ? {} : { tool_print: toolPrint }),
         },
+      }),
+      JSON.stringify({
+        capturedAt: new Date(Date.now() - minutesOld * 60_000).toISOString(),
+        groups: [{ tag: "test", testId: ready.testId, testVersionId: ready.testVersionId, items: [] }],
       }),
     ],
   );

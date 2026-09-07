@@ -85,5 +85,11 @@ History responses carry identity name, personality, language, parameter
 contract, version identity, and creation time. They never contain today's
 project model values. History is read-only; there is no restoration operation.
 
-Runs freeze the persona version and settings at creation. See
+Compatible shared core updates become current automatically. Current reads
+then return that core with the same saved project settings. Incompatible
+parameter changes are refused before publication. Clones receive no source
+updates, and historical reads remain separate from today's settings.
+
+Runs freeze the persona version and settings at creation. Queued simulations
+and retries keep that selection after later settings or core updates. See
 [Runs](/api/runs) and [persona concepts](/concepts/personas).

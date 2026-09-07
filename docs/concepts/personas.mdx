@@ -51,7 +51,11 @@ cannot be restored as the current core. Predefined core behavior is maintained
 by Egma; clone it to write your own instructions.
 
 Compatible Egma core updates become current for future runs automatically.
-Your project's saved settings and test selections stay in place.
+Your project's saved model and voice settings and test selections stay in
+place. Egma checks that the new core accepts saved settings before it becomes
+current. An incompatible update is refused and leaves the earlier core usable.
+Catalog defaults do not replace existing choices; custom clones receive no
+source updates.
 
 ## Runs keep their selection
 

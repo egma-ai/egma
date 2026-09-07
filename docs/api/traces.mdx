@@ -324,8 +324,12 @@ Returns the full transcript, metrics, and trace-level grades.
 <ResponseField name="grades" type="array">
   The current grade from each selected project grader. Each grade includes
   `projectGraderId`, `graderDefinitionId`, `graderDefinitionVersion`,
-  `graderName`, a normalized `score` or `null`, `details`, the frozen
-  `passThreshold`, its individual `result`, and `gradedAt`.
+  `graderName`, the executed `parameterValues`, a normalized `score` or `null`,
+  `details`, the frozen `passThreshold`, its individual `result`, and `gradedAt`.
+  Successful and
+  errored grades retain these parameters after temporary grading jobs are
+  removed. They describe the executed settings, including numeric grader
+  settings, and contain no credentials.
 </ResponseField>
 
 <ResponseField name="gradeHistory" type="array">

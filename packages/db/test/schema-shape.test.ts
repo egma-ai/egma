@@ -57,9 +57,6 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   run: "run",
   run_event: "run",
   simulation: "sim",
-  // One run's frozen grading plan: which versions and non-secret models grade
-  // each pinned test version.
-  grading_plan: "gpl",
   // The operations a client may safely send twice. Its identity is the whole
   // five-column key rather than an id of its own, so it pins its leading
   // column — the shape both junction tables have, for the same reason.
@@ -558,14 +555,11 @@ describe("grader execution ownership", () => {
     expect(values?.has_default).toBe(false);
   });
 
-  it("keeps no credential reference on a grading plan", () => {
-    expect(
-      columns.some(
-        (column) =>
-          column.table_name === "grading_plan" &&
-          column.column_name === "judge_credential_ids",
-      ),
-    ).toBe(false);
+  it("stores the complete grading plan on the run without a separate table", () => {
+    expect(columns.find(
+      (column) => column.table_name === "run" && column.column_name === "grading_plan",
+    )).toMatchObject({ type_name: "jsonb", not_null: true, has_default: false });
+    expect(columns.some((column) => column.table_name === "grading_plan")).toBe(false);
   });
 });
 
