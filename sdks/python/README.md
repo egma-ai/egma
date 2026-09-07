@@ -370,6 +370,16 @@ claimants means are all Egma's to evolve. That is precisely what
 
 Use the recipe as the bridge, not as the small tier.
 
+## Upgrading from 0.2
+
+Version 0.3 replaces `mockable` with `simulation` and `monitor_livekit` with
+`monitor`. Update the imports and calls; the old names are no longer exported.
+
+`simulation` now also exports the agent's traces. Set `EGMA_URL` and
+`EGMA_API_KEY`, or pass `endpoint` and `api_key`, before calling it. A simulation
+that cannot report its tools raises `NotReported` before the session starts.
+The supported LiveKit range remains `>=1.6.7,<1.7`.
+
 ## Compatibility
 
 The `egma-sim-` room-name prefix is a stated contract, not an internal
@@ -389,6 +399,11 @@ testing API. Monitoring also reads LiveKit's current dynamic tracer
 provider because the public telemetry API has a setter but no getter.
 The fixture and live tests verify both seams before the supported range
 changes.
+
+CI builds the wheel once and runs the core SDK tests against the minimum
+supported LiveKit version and the version in `uv.lock`, in parallel clean
+environments. The live tests run once on the locked version after those
+checks, so they have sole use of the local LiveKit server port.
 
 The package also keeps the OpenAI Python package on major version 2.
 LiveKit Agents 1.6 does not support OpenAI 3.

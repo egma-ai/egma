@@ -140,7 +140,6 @@ async function aRunningSimulation(
     suiteId: String(suite.body.id),
     agentId,
     connectionId,
-    idempotencyKey: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
   const runId = String(started.body.id);
@@ -659,7 +658,6 @@ describe("two tests of one run", () => {
       suiteId: String(suite.body.id),
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 

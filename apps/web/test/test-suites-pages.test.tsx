@@ -2807,7 +2807,7 @@ describe("the suite-first Tests route", () => {
       .toBe(false);
   });
 
-  it("keeps one key and every input for a refused intent, then changes the key with the intent", async () => {
+  it("keeps the chosen inputs after a failed start and sends each later attempt", async () => {
     routed.pathname = "/projects/prj_1/runs/new";
     routed.params = { projectId: "prj_1" };
     runBuilderAnswers({
@@ -2867,17 +2867,43 @@ describe("the suite-first Tests route", () => {
     const first = posts[0]?.body as Record<string, unknown>;
     const retry = posts[1]?.body as Record<string, unknown>;
     const changed = posts[2]?.body as Record<string, unknown>;
-    expect(first).toMatchObject({
+    expect(first).toEqual({
       suiteId: "ste_1",
       agentId: "agt_1",
       connectionId: "con_1",
       name: "Morning check",
     });
-    expect(first.idempotencyKey).toBe(retry.idempotencyKey);
-    expect(changed.idempotencyKey).not.toBe(first.idempotencyKey);
-    expect(changed.name).toBe("Evening check");
-    expect(first).not.toHaveProperty("label");
-    expect(first).not.toHaveProperty("testVersions");
+    expect(retry).toEqual(first);
+    expect(changed).toEqual({ ...first, name: "Evening check" });
+    expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_1");
+  });
+
+  it("keeps Start run disabled while a start request is pending", async () => {
+    routed.pathname = "/projects/prj_1/runs/new";
+    routed.params = { projectId: "prj_1" };
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    runBuilderAnswers({
+      started: {
+        status: 201,
+        body: { id: "run_1" },
+        waitFor: pending,
+      },
+    });
+
+    render(<NewRunPage />);
+    await chooseRunTarget();
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    const starting = await screen.findByRole("button", { name: "Starting…" });
+    expect((starting as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(starting);
+    await waitFor(() => {
+      expect(
+        sent.filter((request) => request.path === "/v1/runs" && request.method === "POST"),
+      ).toHaveLength(1);
+    });
+
+    await act(async () => { finish(); });
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_1");
   });
 
@@ -2974,7 +3000,7 @@ describe("the suite-first Tests route", () => {
         agentId: "agt_1",
         connectionId: "con_1",
       });
-      expect(typeof body?.idempotencyKey).toBe("string");
+      expect(body).not.toHaveProperty("idempotencyKey");
       expect(body).not.toHaveProperty("name");
       expect(body).not.toHaveProperty("tests");
     });

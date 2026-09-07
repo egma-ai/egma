@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -782,7 +781,6 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             suiteId,
             agentId,
             connectionId: connection,
-            idempotencyKey: newId("run"),
           },
         });
         expect(started.status, JSON.stringify(started.body)).toBe(201);

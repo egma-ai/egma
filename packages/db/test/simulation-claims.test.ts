@@ -150,7 +150,6 @@ async function oneQueuedSimulation(
     suiteId: seed.suiteId,
     agentId: seed.agentId,
     connectionId: seed.connectionId,
-    idempotencyKey: newId("run"),
   });
   const simulation = (await listSimulations(auth, started.id))?.items[0];
   if (simulation === undefined) throw new Error("the run has no simulation");
@@ -535,7 +534,6 @@ describe("the dispatch-failure landing", () => {
       suiteId: suite.id,
       agentId: acmeSeed.agentId,
       connectionId: acmeSeed.connectionId,
-      idempotencyKey: newId("run"),
     });
     const simulations =
       (await listSimulations(actingAsAcme(), started.id))?.items ?? [];

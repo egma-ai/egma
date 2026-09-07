@@ -1,4 +1,5 @@
 import {
+  authorize,
   cancelRun,
   connectionTypeOf,
   connectionTypeReadsPlatformAtRunStart,
@@ -6,7 +7,6 @@ import {
   getAgent,
   getConnection,
   getRun,
-  IdempotencyConflictError,
   latestRunEventSequence,
   listRunEvents,
   listRuns,
@@ -18,7 +18,6 @@ import {
   readRunGradingProgress,
   readSimulationGradingStates,
   resolveRunStartReach,
-  runAlreadyStartedFor,
   RUN_STATUSES,
   RunWriteRefusedError,
   simulationStatusCountsOfRuns,
@@ -422,7 +421,6 @@ export async function runRoutes(
           "suiteId",
           "agentId",
           "connectionId",
-          "idempotencyKey",
           "name",
           "expectedTestVersions",
         ],
@@ -450,10 +448,6 @@ export async function runRoutes(
       if (!isId("con", connectionId)) {
         return unprocessable(reply, "connectionId must be one con_ identifier");
       }
-      const idempotencyKey = given(text(body.idempotencyKey));
-      if (idempotencyKey === undefined) {
-        return unprocessable(reply, REFUSALS.idempotencyKeyRequired);
-      }
       if ("name" in body && typeof body.name !== "string") {
         return unprocessable(reply, "name must be text");
       }
@@ -464,7 +458,6 @@ export async function runRoutes(
         suiteId,
         agentId,
         connectionId,
-        idempotencyKey,
         ...(given(text(body.name)) === undefined
           ? {}
           : { name: text(body.name) }),
@@ -472,19 +465,10 @@ export async function runRoutes(
           ? {}
           : { expectedTestVersions: expected }),
       };
-      const replayed = await runAlreadyStartedFor(acting.auth, input);
-      if (replayed !== undefined) {
-        const described = await headerOf(
-          acting.auth,
-          replayed.id,
-          options.baseUrl,
-        );
-        if (described === undefined) {
-          throw new Error(`run ${replayed.id} vanished during replay`);
-        }
-        return reply.code(201).send(described);
-      }
-
+      authorize(acting.auth, "start_and_cancel_runs", {
+        organizationId: acting.auth.organizationId,
+        projectId: acting.auth.projectId,
+      });
       const carrier = phoneReadiness(options.carrierRoute);
       if (carrier.state !== "ready") {
         const kind = await connectionTypeOf(acting.auth, connectionId);
@@ -820,9 +804,6 @@ export async function runRoutes(
         return conflict(reply, error.message);
       }
       return unprocessable(reply, error.message);
-    }
-    if (error instanceof IdempotencyConflictError) {
-      return sendRefusal(reply, "idempotency_conflict", error.message);
     }
     if (error instanceof ProjectOutsideOrganizationError) {
       return notPermitted(reply, cannotActIn(error.projectId));

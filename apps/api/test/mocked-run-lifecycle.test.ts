@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import { createPersona } from "@egma/db";
 import { mockToolVariable } from "@egma/retell";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
@@ -463,7 +462,6 @@ describe("one mocked run, from the test to the teardown", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
@@ -642,7 +640,6 @@ describe("two tests of one run, mocking different tools", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
@@ -761,7 +758,6 @@ describe("a web-call run whose tests mock nothing", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -803,7 +799,6 @@ describe("a run over a Retell lane against an agent that publishes nothing", () 
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
 
     // A settled fact about the agent, not a bad moment: 422, not 503.
@@ -839,7 +834,6 @@ describe("a run over a Retell lane against an agent that publishes nothing", () 
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     expect(started.body.agentVersion).toBe(105);
@@ -858,7 +852,6 @@ describe("a run whose world cannot be built", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
     expect(refused.body.error).toBe("mock_tools_unbuildable");
@@ -895,7 +888,6 @@ describe("a second mocked run on an agent already holding its world", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
     const firstRunId = String(first.body.id);
@@ -914,7 +906,6 @@ describe("a second mocked run on an agent already holding its world", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
 
     // Refused as a conflict, naming the run to wait for.
@@ -947,7 +938,6 @@ describe("a second mocked run on an agent already holding its world", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
 
@@ -966,7 +956,6 @@ describe("a second mocked run on an agent already holding its world", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(second.statusCode, JSON.stringify(second.body)).toBe(201);
     const header = await ask(
@@ -1003,7 +992,6 @@ describe("a teardown that is in flight when the next run starts", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
     const specs = await claim();
@@ -1038,7 +1026,6 @@ describe("a teardown that is in flight when the next run starts", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     // The teardown is let go the moment the second run has branched — which is
     // the moment its copy could be hijacked — or after long enough that it
@@ -1092,7 +1079,6 @@ describe("a mocked run after a predecessor's teardown failed", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
     const firstRunId = String(first.body.id);
@@ -1116,7 +1102,6 @@ describe("a mocked run after a predecessor's teardown failed", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(second.statusCode, JSON.stringify(second.body)).toBe(422);
     expect(second.body.error).toBe("mock_tools_unbuildable");
@@ -1143,7 +1128,6 @@ describe("a mocked run after a predecessor's teardown failed", () => {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(third.statusCode, JSON.stringify(third.body)).toBe(201);
   });

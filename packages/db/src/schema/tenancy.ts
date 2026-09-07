@@ -34,6 +34,11 @@ export const organization = pgTable(
     slug: text("slug").notNull(),
     externalIdentityProvider: text("external_identity_provider"),
     externalIdentityId: text("external_identity_id"),
+    /** Null means keep forever. */
+    retentionDays: integer("retention_days"),
+    dataResidency: text("data_residency"),
+    /** Null until settings are first saved; independent of organization edits. */
+    settingsUpdatedAt: moment("settings_updated_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -43,26 +48,6 @@ export const organization = pgTable(
     unique("organization_external_identity_unique").on(
       table.externalIdentityProvider,
       table.externalIdentityId,
-    ),
-  ],
-);
-
-export const organizationSettings = pgTable(
-  "organization_settings",
-  {
-    organizationId: idText("organization_id")
-      .primaryKey()
-      .references(() => organization.id, { onDelete: "cascade" }),
-    /** Null means keep forever. */
-    retentionDays: integer("retention_days"),
-    dataResidency: text("data_residency"),
-    updatedAt: updatedAt(),
-  },
-  (table) => [
-    prefixCheck(
-      "organization_settings_organization_id_prefix",
-      table.organizationId,
-      "org",
     ),
   ],
 );

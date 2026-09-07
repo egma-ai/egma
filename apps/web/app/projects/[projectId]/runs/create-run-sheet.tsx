@@ -51,10 +51,6 @@ import { useProjectRead } from "../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../ui/settings-read.ts";
 import { useShellSession } from "../../../../ui/shell.tsx";
 
-function newRunIntentKey(): string {
-  return `run:${globalThis.crypto.randomUUID()}`;
-}
-
 export function CreateRunSheet({
   projectId,
   initialAgentPage,
@@ -93,7 +89,6 @@ export function CreateRunSheet({
   const [agentId, setAgentId] = useState("");
   const [connectionId, setConnectionId] = useState("");
   const [name, setName] = useState("");
-  const [idempotencyKey, setIdempotencyKey] = useState(newRunIntentKey);
   const [moreSuites, setMoreSuites] = useState<readonly TestSuite[]>([]);
   const [suiteCursor, setSuiteCursor] = useState<string | null>(null);
   const [moreAgents, setMoreAgents] = useState<
@@ -136,11 +131,6 @@ export function CreateRunSheet({
     suiteId,
   );
 
-  function beginNewIntent(): void {
-    setIdempotencyKey(newRunIntentKey());
-    setRefused(null);
-  }
-
   useEffect(() => {
     showing.current = projectId;
     const address = new URLSearchParams(window.location.search);
@@ -156,7 +146,6 @@ export function CreateRunSheet({
     setAgentCursor(null);
     setMoreRefused(null);
     setRefused(null);
-    setIdempotencyKey(newRunIntentKey());
   }, [projectId]);
 
   useEffect(() => {
@@ -173,7 +162,6 @@ export function CreateRunSheet({
     if (!known) return;
     setSuiteId(wantedSuite);
     setWantedSuite("");
-    setIdempotencyKey(newRunIntentKey());
   }, [wantedSuite, suitePage, moreSuites]);
 
   useEffect(() => {
@@ -356,7 +344,6 @@ export function CreateRunSheet({
           suiteId,
           agentId,
           connectionId,
-          idempotencyKey,
           ...(trimmedName === "" ? {} : { name: trimmedName }),
         },
         { client: platformClient },
@@ -435,7 +422,7 @@ export function CreateRunSheet({
                 aria-required="true"
                 value={suiteId}
                 onChange={(event) => {
-                  beginNewIntent();
+                  setRefused(null);
                   setSuiteId(event.target.value);
                 }}
               >
@@ -487,7 +474,7 @@ export function CreateRunSheet({
                   aria-required="true"
                   value={agentId}
                   onChange={(event) => {
-                    beginNewIntent();
+                    setRefused(null);
                     setConnectionId("");
                     setAgentId(event.target.value);
                   }}
@@ -527,7 +514,7 @@ export function CreateRunSheet({
                   aria-required="true"
                   value={connectionId}
                   onChange={(event) => {
-                    beginNewIntent();
+                    setRefused(null);
                     setConnectionId(event.target.value);
                   }}
                 >
@@ -571,7 +558,7 @@ export function CreateRunSheet({
                 autoComplete="off"
                 spellCheck={false}
                 onChange={(event) => {
-                  beginNewIntent();
+                  setRefused(null);
                   setName(event.target.value);
                 }}
               />

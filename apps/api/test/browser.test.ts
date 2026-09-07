@@ -2625,7 +2625,7 @@ describe("recovering when a page cannot load", () => {
  * A fake feed would have proved that a page can render invented rows.
  *
  * **And it resists growing, the way the flows above it do.** Permissions,
- * archive matrices, refusals, revisions, Retry, idempotency and
+ * archive matrices, refusals, revisions, run starts and
  * repository synchronization are all proved in the fast lane, where each costs
  * milliseconds. If a case here starts being about one of those, it belongs
  * there instead.
@@ -3393,10 +3393,9 @@ describe("the complete product, walked in order in a second project", () => {
 
       await walk.getByRole("button", { name: "Save changes" }).click();
 
-      // The new version is current and the one the earlier runs pinned is still
-      // in the list beside it, which is the whole point of versioning her.
+      // The new current version stays in the header after saving.
       await saysWithin(walk, "Custom · v2");
-      await saysWithin(walk, "Current");
+      await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
       await walk.keyboard.press("Escape");
 
       // Fork copies the current version into a persona this project owns, and
@@ -5637,7 +5636,7 @@ describe("project grader model settings", () => {
 });
 
 it(
-  "uses shared persona project settings and keeps core history read-only",
+  "edits shared persona settings inline and keeps the current core version visible",
   async () => {
     const key = await anotherCustomer(
       "settings@personas.example",
@@ -5662,10 +5661,6 @@ it(
       await walk
         .getByRole("button", { name: "Everyday caller", exact: true })
         .click();
-      await walk
-        .getByRole("button", { name: "Actions for Everyday caller" })
-        .click();
-      await walk.getByRole("menuitem", { name: "Use", exact: true }).click();
       await reactHasTakenOver(walk, "form");
       expect(await walk.locator("#persona-personality").count()).toBe(0);
       await walk.selectOption("#persona-llm", "openai::gpt-4o");
@@ -5674,20 +5669,14 @@ it(
       await walk.fill("#persona-tts-speed", "0.85");
       await walk.fill("#persona-tts-voice", "my-custom-voice");
       await walk.getByRole("button", { name: "Use persona" }).click();
-      await walk.getByRole("region", { name: "Project settings" }).waitFor();
-      expect(
-        await walk
-          .getByRole("region", { name: "Project settings" })
-          .innerText(),
-      ).toContain("my-custom-voice");
+      await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
+      await walk.getByRole("region", { name: "Settings" }).waitFor();
+      expect(await walk.inputValue("#persona-tts-voice")).toBe("my-custom-voice");
       await walk.keyboard.press("Escape");
       await walk
         .getByRole("button", { name: "Everyday caller", exact: true })
         .click();
-      await walk
-        .getByRole("button", { name: "Actions for Everyday caller" })
-        .click();
-      await walk.getByRole("menuitem", { name: "Edit settings" }).click();
+      await walk.getByRole("region", { name: "Settings" }).waitFor();
       expect(await walk.inputValue("#persona-llm")).toBe("openai::gpt-4o");
       expect(await walk.inputValue("#persona-stt")).toBe(
         "deepgram::nova-3-general",
@@ -5708,7 +5697,7 @@ it(
       await walk.getByRole("alert").waitFor();
       await walk.fill("#persona-tts-voice", "my-saved-voice");
       await walk.getByRole("button", { name: "Save changes" }).click();
-      await walk.getByRole("region", { name: "Project settings" }).waitFor();
+      await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
       await walk
         .getByRole("button", { name: "Actions for Everyday caller" })
         .click();
@@ -5730,24 +5719,14 @@ it(
       );
       await walk.getByRole("button", { name: "Save changes" }).click();
       await walk.getByText("Custom · v2", { exact: true }).waitFor();
-      await walk.getByRole("button", { name: "Read", exact: true }).click();
-      await walk.getByText("Older version", { exact: true }).waitFor();
-      expect(
-        await walk.getByRole("region", { name: "Project settings" }).count(),
-      ).toBe(0);
-      expect(
-        await walk.getByRole("button", { name: "Use as new version" }).count(),
-      ).toBe(0);
-      expect(
-        await walk
-          .getByRole("button", { name: "Actions for Patient Nora" })
-          .count(),
-      ).toBe(0);
+      await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
+      expect(await walk.getByRole("region", { name: "Versions" }).count()).toBe(0);
+      expect(await walk.getByRole("button", { name: "Read", exact: true }).count()).toBe(0);
+      await walk.getByRole("region", { name: "Settings" }).waitFor();
       await walk.screenshot({
-        path: "/tmp/egma-persona-history-light.png",
+        path: "/tmp/egma-persona-settings-light.png",
         fullPage: true,
       });
-      await walk.getByRole("button", { name: "Back to v2" }).click();
       await walk
         .getByRole("button", { name: "Actions for Patient Nora" })
         .click();

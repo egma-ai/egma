@@ -306,7 +306,6 @@ const CONTEXT_REQUIRING = [
   "restoreConnection",
   "renameTestSuite",
   "renewMonitoringLease",
-  "runAlreadyStartedFor",
   // Whether any simulation of one run pins a test version that mocks
   // something — the question the run-start machinery asks before it branches a
   // temporary copy of the customer's agent, asked of the run's own rows.
@@ -510,11 +509,6 @@ const VALUES = [
   // An identity write that named the revision it was written against, after
   // somebody else moved the row. `TestMovedOnError` below is the same refusal
   // one level down, about content rather than identity.
-  // A start action that reused an idempotency key over a different request.
-  // Its own class because the answer is neither the original run nor a second
-  // one: telling somebody their new selection had started when it had not is
-  // the one failure the key exists to prevent.
-  "IdempotencyConflictError",
   "IdentityConflictError",
   "ProductionGradingPlanConflictError",
   "ProjectOutsideOrganizationError",

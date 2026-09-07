@@ -124,7 +124,6 @@ async function oneQueuedSimulation(
     suiteId: suite.id,
     agentId: created.id,
     connectionId: created.connection?.id ?? "",
-    idempotencyKey: newId("run"),
   });
   const simulation = (await listSimulations(auth, started.id))?.items[0];
   if (simulation === undefined) throw new Error("the run has no simulation");

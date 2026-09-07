@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import { claimSimulations, createPersona, getSimulation } from "@egma/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -108,7 +107,6 @@ async function anOrphan(
     suiteId,
     agentId,
     connectionId,
-    idempotencyKey: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
   const runId = String(started.body.id);

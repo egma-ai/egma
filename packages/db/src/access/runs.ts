@@ -25,7 +25,6 @@ import {
 import {
   db,
   dedicatedConnection,
-  type Queryable,
   type Transaction,
 } from "../client.ts";
 import { planGroupsFor } from "../grading/plan.ts";
@@ -40,7 +39,6 @@ import {
   type Topology,
 } from "../schema/agents.ts";
 import { persona } from "../schema/personas.ts";
-import { idempotentOperation } from "../schema/plans.ts";
 import {
   COMPLETED_ENDING_REASONS,
   FAILED_ENDING_REASONS,
@@ -71,7 +69,7 @@ import {
   platformOfConnectionType,
 } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
-import { IdempotencyConflictError, RunWriteRefusedError } from "./errors.ts";
+import { RunWriteRefusedError } from "./errors.ts";
 import {
   requestGradingIn,
   simulationEvidenceReadiness,
@@ -103,7 +101,6 @@ export type NewRun = {
   readonly suiteId: string;
   readonly agentId: string;
   readonly connectionId: string;
-  readonly idempotencyKey: string;
   readonly name?: string | undefined;
   readonly expectedTestVersions?: readonly ExpectedTestVersion[] | undefined;
   /**
@@ -496,53 +493,6 @@ function validateExpectedVersions(
   return entries;
 }
 
-function digestOfStart(input: NewRun): string {
-  const expected = [...(input.expectedTestVersions ?? [])]
-    .map((one) => [one.testId, one.versionId] as const)
-    .sort(([a], [b]) => a.localeCompare(b));
-  return createHash("sha256")
-    .update(JSON.stringify({
-      suite: input.suiteId,
-      agent: input.agentId,
-      connection: input.connectionId,
-      name: input.name?.trim() || null,
-      expected,
-    }))
-    .digest("hex");
-}
-
-function lostToIdempotencyKey(cause: unknown): boolean {
-  const held = cause as { constraint?: unknown; cause?: unknown };
-  if (held.constraint === "idempotent_operation_pk") return true;
-  return (held.cause as { constraint?: unknown } | undefined)?.constraint === "idempotent_operation_pk";
-}
-
-async function originalRunFor(
-  on: Queryable,
-  auth: AuthContext,
-  projectId: string,
-  input: NewRun,
-): Promise<StartedRun | undefined> {
-  const [remembered] = await on
-    .select({ resultId: idempotentOperation.resultId, requestDigest: idempotentOperation.requestDigest })
-    .from(idempotentOperation)
-    .where(and(
-      eq(idempotentOperation.organizationId, auth.organizationId),
-      eq(idempotentOperation.projectId, projectId),
-      eq(idempotentOperation.actorId, auth.userId),
-      eq(idempotentOperation.operation, "start_run"),
-      eq(idempotentOperation.idempotencyKey, input.idempotencyKey.trim()),
-    ))
-    .limit(1);
-  if (remembered === undefined) return undefined;
-  if (remembered.requestDigest !== digestOfStart(input)) {
-    throw new IdempotencyConflictError(input.idempotencyKey, remembered.resultId);
-  }
-  const found = await getRun(auth, remembered.resultId);
-  if (found === undefined) throw new IdempotencyConflictError(input.idempotencyKey, remembered.resultId);
-  return found;
-}
-
 /** Start one complete suite under one exact database lock. */
 export async function startRun(auth: AuthContext, input: NewRun): Promise<StartedRun> {
   authorize(auth, "start_and_cancel_runs", here(auth));
@@ -551,288 +501,266 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
   if (!isId("ste", input.suiteId)) refuseRun("not_admitted", `"${input.suiteId}" is not a test suite id`);
   if (!isId("agt", input.agentId)) refuseRun("connection_not_on_agent", `"${input.agentId}" is not an agent id`);
   if (!isId("con", input.connectionId)) refuseRun("no_such_connection", `"${input.connectionId}" is not a connection id`);
-  const idempotencyKey = input.idempotencyKey.trim();
-  if (idempotencyKey === "") refuseRun("not_admitted", "a run needs an idempotency key");
   const expected = validateExpectedVersions(input.expectedTestVersions);
   const expectedInOrder = expected === undefined
     ? undefined
     : [...expected].sort((a, b) => a.testId.localeCompare(b.testId));
-  const remembered = await originalRunFor(db(), auth, projectId, input);
-  if (remembered !== undefined) return remembered;
 
   const runId = newId("run");
   const at = new Date();
-  let created: Run | undefined;
-  try {
-    created = await db().transaction(async (tx) => {
-      const [suite] = await tx
-        .select({ id: testSuite.id, name: testSuite.name })
-        .from(testSuite)
-        .where(within(auth, testSuite, and(
-          eq(testSuite.id, input.suiteId),
-          eq(testSuite.projectId, projectId),
-          isNull(testSuite.deletedAt),
-        )))
-        .limit(1)
-        .for("update");
-      if (suite === undefined) refuseRun("not_admitted", `there is no active test suite ${input.suiteId} in this project`);
+  return db().transaction(async (tx) => {
+    const [suite] = await tx
+      .select({ id: testSuite.id, name: testSuite.name })
+      .from(testSuite)
+      .where(within(auth, testSuite, and(
+        eq(testSuite.id, input.suiteId),
+        eq(testSuite.projectId, projectId),
+        isNull(testSuite.deletedAt),
+      )))
+      .limit(1)
+      .for("update");
+    if (suite === undefined) refuseRun("not_admitted", `there is no active test suite ${input.suiteId} in this project`);
 
-      const readTestPage = (afterId?: string) => tx
-        .select({ id: test.id, versionId: test.currentVersionId })
-        .from(test)
-        .where(and(
-          eq(test.suiteId, suite.id),
-          eq(test.projectId, projectId),
-          isNull(test.deletedAt),
-          afterId === undefined ? undefined : gt(test.id, afterId),
-        ))
-        .orderBy(asc(test.id))
-        .limit(SIMULATION_INSERT_BATCH)
-        .for("share", { of: test });
-      let currentTests = await readTestPage();
-      if (currentTests.length === 0) refuseRun("not_admitted", `test suite ${suite.id} is empty`);
+    const readTestPage = (afterId?: string) => tx
+      .select({ id: test.id, versionId: test.currentVersionId })
+      .from(test)
+      .where(and(
+        eq(test.suiteId, suite.id),
+        eq(test.projectId, projectId),
+        isNull(test.deletedAt),
+        afterId === undefined ? undefined : gt(test.id, afterId),
+      ))
+      .orderBy(asc(test.id))
+      .limit(SIMULATION_INSERT_BATCH)
+      .for("share", { of: test });
+    let currentTests = await readTestPage();
+    if (currentTests.length === 0) refuseRun("not_admitted", `test suite ${suite.id} is empty`);
 
-      const [reached] = await tx
-        .select({
-          agentId: connection.agentId,
-          // The connection holds no platform of its own: the type answers
-          // where it pins one, else the agent's own binding does.
-          agentPlatform: agent.agentPlatform,
-          connectionType: connection.connectionType,
-          accessVariant: connection.accessVariant,
-          modality: connection.modality,
-          topology: connection.topology,
-          environment: connection.environment,
-          config: connection.config,
-          credentials: connection.credentials,
-        })
-        .from(connection)
-        .innerJoin(agent, eq(connection.agentId, agent.id))
-        .where(within(auth, connection, and(
-          eq(connection.id, input.connectionId),
-          eq(connection.agentId, input.agentId),
-          eq(connection.projectId, projectId),
-          isNull(connection.archivedAt),
-          isNull(agent.archivedAt),
-        )))
-        .limit(1)
-        .for("share");
-      if (reached === undefined) refuseRun("no_such_connection", `there is no active connection ${input.connectionId} on agent ${input.agentId}`);
-      if (!connectionIsConductable(reached.connectionType, reached.accessVariant, reached.modality)) {
-        refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionType, reached.modality));
-      }
-      // A kind whose run start reads the agent's platform carries two demands
-      // that a kind reading nothing does not, and both live here so they are
-      // properties of the write rather than habits of one caller.
-      if (connectionTypeReadsPlatformAtRunStart(reached.connectionType)) {
-        // **Never a silent conduct against an unnamed version.** The run cannot
-        // begin without what the read produced: the one serving version every
-        // request will name and this row will record. The caller does the
-        // reading — it is somebody else's API and this is one transaction
-        // holding a lock — but arriving here without it is a bug in the caller,
-        // not a run to write, and a run written without it would leave a result
-        // no reader could tie back to an agent.
-        if (input.agentVersion === undefined) {
-          throw new Error(
-            `a run over a ${reached.connectionType} connection is conducted ` +
-              `against a named version, so it cannot be started without the ` +
-              `run-start read of the agent's platform`,
-          );
-        }
-        // **The world was read from this exact connection, and it still is.**
-        // The read happened before this transaction, so the connection could
-        // have been edited in between — its agent moved, its address changed,
-        // its key rotated — and the version and tools frozen from the old
-        // target would then be stamped onto a run whose snapshot names the new
-        // one. The `for("share")` above holds the row still for the rest of
-        // this transaction, so the fingerprint taken now is the connection as
-        // it will be written; if it does not match the fingerprint the world
-        // was read at, the connection moved during creation. The fingerprint
-        // is over the identity the world depends on — the config and the
-        // sealed key — never a clock, so an edit inside the same millisecond
-        // is caught like any other. Refuse loudly and write nothing; the
-        // caller reads the connection again and retries.
-        const identityNow = connectionIdentityToken(
-          stringRecordFromRow(
-            reached.config,
-            () =>
-              new Error(
-                `connection ${input.connectionId} holds config in a shape ` +
-                  `Egma never writes`,
-              ),
-          ),
-          reached.credentials,
+    const [reached] = await tx
+      .select({
+        agentId: connection.agentId,
+        // The connection holds no platform of its own: the type answers
+        // where it pins one, else the agent's own binding does.
+        agentPlatform: agent.agentPlatform,
+        connectionType: connection.connectionType,
+        accessVariant: connection.accessVariant,
+        modality: connection.modality,
+        topology: connection.topology,
+        environment: connection.environment,
+        config: connection.config,
+        credentials: connection.credentials,
+      })
+      .from(connection)
+      .innerJoin(agent, eq(connection.agentId, agent.id))
+      .where(within(auth, connection, and(
+        eq(connection.id, input.connectionId),
+        eq(connection.agentId, input.agentId),
+        eq(connection.projectId, projectId),
+        isNull(connection.archivedAt),
+        isNull(agent.archivedAt),
+      )))
+      .limit(1)
+      .for("share");
+    if (reached === undefined) refuseRun("no_such_connection", `there is no active connection ${input.connectionId} on agent ${input.agentId}`);
+    if (!connectionIsConductable(reached.connectionType, reached.accessVariant, reached.modality)) {
+      refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionType, reached.modality));
+    }
+    // A kind whose run start reads the agent's platform carries two demands
+    // that a kind reading nothing does not, and both live here so they are
+    // properties of the write rather than habits of one caller.
+    if (connectionTypeReadsPlatformAtRunStart(reached.connectionType)) {
+      // **Never a silent conduct against an unnamed version.** The run cannot
+      // begin without what the read produced: the one serving version every
+      // request will name and this row will record. The caller does the
+      // reading — it is somebody else's API and this is one transaction
+      // holding a lock — but arriving here without it is a bug in the caller,
+      // not a run to write, and a run written without it would leave a result
+      // no reader could tie back to an agent.
+      if (input.agentVersion === undefined) {
+        throw new Error(
+          `a run over a ${reached.connectionType} connection is conducted ` +
+            `against a named version, so it cannot be started without the ` +
+            `run-start read of the agent's platform`,
         );
-        if (input.conductedConnectionIdentity !== identityNow) {
-          refuseRun(
-            "not_admitted",
-            `connection ${input.connectionId} was edited while Egma was ` +
-              `reading the agent's platform for this run, so the version it ` +
-              `read may not be the one this connection now reaches. Nothing ` +
-              `was started; read the connection again and retry.`,
-          );
-        }
       }
+      // **The world was read from this exact connection, and it still is.**
+      // The read happened before this transaction, so the connection could
+      // have been edited in between — its agent moved, its address changed,
+      // its key rotated — and the version and tools frozen from the old
+      // target would then be stamped onto a run whose snapshot names the new
+      // one. The `for("share")` above holds the row still for the rest of
+      // this transaction, so the fingerprint taken now is the connection as
+      // it will be written; if it does not match the fingerprint the world
+      // was read at, the connection moved during creation. The fingerprint
+      // is over the identity the world depends on — the config and the
+      // sealed key — never a clock, so an edit inside the same millisecond
+      // is caught like any other. Refuse loudly and write nothing; the
+      // caller reads the connection again and retries.
+      const identityNow = connectionIdentityToken(
+        stringRecordFromRow(
+          reached.config,
+          () =>
+            new Error(
+              `connection ${input.connectionId} holds config in a shape ` +
+                `Egma never writes`,
+            ),
+        ),
+        reached.credentials,
+      );
+      if (input.conductedConnectionIdentity !== identityNow) {
+        refuseRun(
+          "not_admitted",
+          `connection ${input.connectionId} was edited while Egma was ` +
+            `reading the agent's platform for this run, so the version it ` +
+            `read may not be the one this connection now reaches. Nothing ` +
+            `was started; read the connection again and retry.`,
+        );
+      }
+    }
 
-      const graderCandidates = await applicableGraders(auth, tx, projectId);
-      const plannedTests: {
-        suiteId: string;
-        testId: string;
-        testVersionId: string;
-        modality: Modality;
-      }[] = [];
-      while (currentTests.length > 0) {
-        for (const current of currentTests) {
-          const expectedCurrent = expectedInOrder?.[plannedTests.length];
-          if (expectedInOrder !== undefined &&
-            (expectedCurrent?.testId !== current.id || expectedCurrent.versionId !== current.versionId)) {
-            refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
-          }
-          plannedTests.push({
-            suiteId: suite.id,
-            testId: current.id,
-            testVersionId: current.versionId,
-            modality: reached.modality as Modality,
-          });
+    const graderCandidates = await applicableGraders(auth, tx, projectId);
+    const plannedTests: {
+      suiteId: string;
+      testId: string;
+      testVersionId: string;
+      modality: Modality;
+    }[] = [];
+    while (currentTests.length > 0) {
+      for (const current of currentTests) {
+        const expectedCurrent = expectedInOrder?.[plannedTests.length];
+        if (expectedInOrder !== undefined &&
+          (expectedCurrent?.testId !== current.id || expectedCurrent.versionId !== current.versionId)) {
+          refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
         }
-        if (currentTests.length < SIMULATION_INSERT_BATCH) break;
-        const afterTestId = currentTests.at(-1)?.id;
-        if (afterTestId === undefined) break;
-        currentTests = await readTestPage(afterTestId);
+        plannedTests.push({
+          suiteId: suite.id,
+          testId: current.id,
+          testVersionId: current.versionId,
+          modality: reached.modality as Modality,
+        });
       }
-      if (expectedInOrder !== undefined && plannedTests.length !== expectedInOrder.length) {
-        refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
-      }
-      const selectedPersonas = await tx.selectDistinct({ id: testPersona.personaId })
-        .from(testPersona)
-        .innerJoin(test, eq(test.currentVersionId, testPersona.testVersionId))
-        .where(and(eq(test.suiteId, suite.id), eq(test.projectId, projectId), isNull(test.deletedAt)))
-        .orderBy(asc(testPersona.personaId));
-      const personaPins = new Map((await resolvePersonaVersions(
-        auth, tx, projectId, selectedPersonas.map((one) => one.id),
-      )).map((pin) => [pin.personaId, pin] as const));
-      const gradingPlan = {
-        capturedAt: at.toISOString(),
-        groups: planGroupsFor(graderCandidates, plannedTests),
-      };
-      const [measured] = await tx
-        .select({ total: count() })
-        .from(test)
-        .innerJoin(testPersona, eq(test.currentVersionId, testPersona.testVersionId))
-        .where(and(
-          eq(test.suiteId, suite.id),
-          eq(test.projectId, projectId),
-          isNull(test.deletedAt),
-        ));
-      const expectedSimulationCount = measured?.total ?? 0;
-      if (expectedSimulationCount <= 0) {
-        refuseRun("not_admitted", `test suite ${suite.id} is empty`);
-      }
+      if (currentTests.length < SIMULATION_INSERT_BATCH) break;
+      const afterTestId = currentTests.at(-1)?.id;
+      if (afterTestId === undefined) break;
+      currentTests = await readTestPage(afterTestId);
+    }
+    if (expectedInOrder !== undefined && plannedTests.length !== expectedInOrder.length) {
+      refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
+    }
+    const selectedPersonas = await tx.selectDistinct({ id: testPersona.personaId })
+      .from(testPersona)
+      .innerJoin(test, eq(test.currentVersionId, testPersona.testVersionId))
+      .where(and(eq(test.suiteId, suite.id), eq(test.projectId, projectId), isNull(test.deletedAt)))
+      .orderBy(asc(testPersona.personaId));
+    const personaPins = new Map((await resolvePersonaVersions(
+      auth, tx, projectId, selectedPersonas.map((one) => one.id),
+    )).map((pin) => [pin.personaId, pin] as const));
+    const gradingPlan = {
+      capturedAt: at.toISOString(),
+      groups: planGroupsFor(graderCandidates, plannedTests),
+    };
+    const [measured] = await tx
+      .select({ total: count() })
+      .from(test)
+      .innerJoin(testPersona, eq(test.currentVersionId, testPersona.testVersionId))
+      .where(and(
+        eq(test.suiteId, suite.id),
+        eq(test.projectId, projectId),
+        isNull(test.deletedAt),
+      ));
+    const expectedSimulationCount = measured?.total ?? 0;
+    if (expectedSimulationCount <= 0) {
+      refuseRun("not_admitted", `test suite ${suite.id} is empty`);
+    }
 
-      const [header] = await tx.insert(run).values({
-        id: runId,
-        organizationId: auth.organizationId,
-        projectId,
-        suiteId: suite.id,
-        agentId: reached.agentId,
-        connectionId: input.connectionId,
-        name: input.name?.trim() || null,
-        status: "pending",
-        triggeredVia: "manual",
-        triggeredBy: auth.userId,
-        connectionSnapshot: {
-          // Derived exactly as a read derives it: the type answers where it
-          // pins one platform, else the agent's own binding does.
-          agentPlatform:
-            platformOfConnectionType(reached.connectionType) ??
-            reached.agentPlatform,
-          connectionType: reached.connectionType,
-          accessVariant: reached.accessVariant,
+    const [header] = await tx.insert(run).values({
+      id: runId,
+      organizationId: auth.organizationId,
+      projectId,
+      suiteId: suite.id,
+      agentId: reached.agentId,
+      connectionId: input.connectionId,
+      name: input.name?.trim() || null,
+      status: "pending",
+      triggeredVia: "manual",
+      triggeredBy: auth.userId,
+      connectionSnapshot: {
+        // Derived exactly as a read derives it: the type answers where it
+        // pins one platform, else the agent's own binding does.
+        agentPlatform:
+          platformOfConnectionType(reached.connectionType) ??
+          reached.agentPlatform,
+        connectionType: reached.connectionType,
+        accessVariant: reached.accessVariant,
+        modality: reached.modality,
+        topology: reached.topology,
+        environment: reached.environment,
+        config: reached.config,
+      },
+      // Read before this transaction opened; written down here so that every
+      // request this run makes names the same version, and a concurrent edit
+      // on the account cannot move what the suite is testing halfway through.
+      ...(input.agentVersion === undefined
+        ? {}
+        : { agentVersion: input.agentVersion }),
+      expectedSimulationCount,
+      gradingPlan,
+      createdAt: at,
+    }).returning(RUN_COLUMNS);
+    if (header === undefined) throw new Error("the run was not written");
+
+    let simulationCount = 0;
+    for (const current of plannedTests) {
+      let personaPosition = 0;
+      let namedPersona = false;
+      while (true) {
+        const personaRows = await tx
+          .select({
+            personaId: testPersona.personaId,
+            position: testPersona.position,
+          })
+          .from(testPersona)
+          .where(and(
+            eq(testPersona.testVersionId, current.testVersionId),
+            gt(testPersona.position, personaPosition),
+          ))
+          .orderBy(asc(testPersona.position))
+          .limit(SIMULATION_INSERT_BATCH);
+        if (personaRows.length === 0) break;
+        namedPersona = true;
+        const pins = personaRows.map((one) => {
+          const pin = personaPins.get(one.personaId);
+          if (pin === undefined) throw new Error(`persona ${one.personaId} was not captured`);
+          return pin;
+        });
+        await tx.insert(simulation).values(pins.map((pin, index) => ({
+          id: newId("sim"),
+          runId,
+          organizationId: auth.organizationId,
+          projectId,
+          agentId: reached.agentId,
+          connectionId: input.connectionId,
+          personaId: pin.personaId,
+          personaVersionId: pin.personaVersionId,
+          personaParameterValues: pin.personaParameterValues,
+          testId: current.testId,
+          testVersionId: current.testVersionId,
+          position: simulationCount + index + 1,
           modality: reached.modality,
-          topology: reached.topology,
-          environment: reached.environment,
-          config: reached.config,
-        },
-        // Read before this transaction opened; written down here so that every
-        // request this run makes names the same version, and a concurrent edit
-        // on the account cannot move what the suite is testing halfway through.
-        ...(input.agentVersion === undefined
-          ? {}
-          : { agentVersion: input.agentVersion }),
-        expectedSimulationCount,
-        gradingPlan,
-        createdAt: at,
-      }).returning(RUN_COLUMNS);
-      if (header === undefined) throw new Error("the run was not written");
-
-      let simulationCount = 0;
-      for (const current of plannedTests) {
-        let personaPosition = 0;
-        let namedPersona = false;
-        while (true) {
-          const personaRows = await tx
-            .select({
-              personaId: testPersona.personaId,
-              position: testPersona.position,
-            })
-            .from(testPersona)
-            .where(and(
-              eq(testPersona.testVersionId, current.testVersionId),
-              gt(testPersona.position, personaPosition),
-            ))
-            .orderBy(asc(testPersona.position))
-            .limit(SIMULATION_INSERT_BATCH);
-          if (personaRows.length === 0) break;
-          namedPersona = true;
-          const pins = personaRows.map((one) => {
-            const pin = personaPins.get(one.personaId);
-            if (pin === undefined) throw new Error(`persona ${one.personaId} was not captured`);
-            return pin;
-          });
-          await tx.insert(simulation).values(pins.map((pin, index) => ({
-            id: newId("sim"),
-            runId,
-            organizationId: auth.organizationId,
-            projectId,
-            agentId: reached.agentId,
-            connectionId: input.connectionId,
-            personaId: pin.personaId,
-            personaVersionId: pin.personaVersionId,
-            personaParameterValues: pin.personaParameterValues,
-            testId: current.testId,
-            testVersionId: current.testVersionId,
-            position: simulationCount + index + 1,
-            modality: reached.modality,
-            status: "queued" as const,
-            createdAt: at,
-          })));
-          simulationCount += pins.length;
-          personaPosition = personaRows.at(-1)?.position ?? personaPosition;
-          if (personaRows.length < SIMULATION_INSERT_BATCH) break;
-        }
-        if (!namedPersona) throw new Error(`test version ${current.testVersionId} names no persona`);
+          status: "queued" as const,
+          createdAt: at,
+        })));
+        simulationCount += pins.length;
+        personaPosition = personaRows.at(-1)?.position ?? personaPosition;
+        if (personaRows.length < SIMULATION_INSERT_BATCH) break;
       }
-      if (simulationCount !== expectedSimulationCount) {
-        throw new Error(`test suite ${suite.id} changed while its run was being planned`);
-      }
-      await tx.insert(idempotentOperation).values({
-        organizationId: auth.organizationId,
-        projectId,
-        actorId: auth.userId,
-        operation: "start_run",
-        idempotencyKey,
-        requestDigest: digestOfStart(input),
-        resultId: runId,
-      });
-      return runFromRow(header, suite.name, false);
-    });
-  } catch (cause) {
-    if (!lostToIdempotencyKey(cause)) throw cause;
-    const winner = await originalRunFor(db(), auth, projectId, input);
-    if (winner === undefined) throw cause;
-    return winner;
-  }
-  return created;
+      if (!namedPersona) throw new Error(`test version ${current.testVersionId} names no persona`);
+    }
+    if (simulationCount !== expectedSimulationCount) {
+      throw new Error(`test suite ${suite.id} changed while its run was being planned`);
+    }
+    return runFromRow(header, suite.name, false);
+  });
 }
 
 /**
@@ -968,19 +896,6 @@ export async function resolveRunStartReach(
     apiKey,
     connectionIdentity: connectionIdentityToken(config, row.credentials),
   };
-}
-
-export async function runAlreadyStartedFor(
-  auth: AuthContext,
-  input: NewRun,
-): Promise<StartedRun | undefined> {
-  // The API asks this before phone readiness so a lost successful response can
-  // be replayed without consulting external state again. It is still a start
-  // operation: a user whose role was reduced to viewer may neither start a new
-  // run nor replay one they started while they had write access.
-  authorize(auth, "start_and_cancel_runs", here(auth));
-  if (auth.projectId === undefined || input.idempotencyKey.trim() === "") return undefined;
-  return originalRunFor(db(), auth, auth.projectId, input);
 }
 
 const RUN_READ_COLUMNS = {

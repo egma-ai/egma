@@ -929,7 +929,6 @@ describe.skipIf(!storage.available)("narrowing a list to one kind of traffic", (
       suiteId: suite.id,
       agentId: agent.id,
       connectionId: agent.connection?.id ?? "",
-      idempotencyKey: newId("run"),
     });
     const simulationPage = await listSimulations(auth, started.id, { limit: 200 });
     const simulations = simulationPage?.items ?? [];

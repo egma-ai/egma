@@ -351,7 +351,6 @@ live("two tests mocking different tools, on one temporary version", () => {
       suiteId: named("EGMA_LIVE_SUITE_ID"),
       agentId: named("EGMA_LIVE_AGENT_ID"),
       connectionId: named("EGMA_LIVE_CONNECTION_ID"),
-      idempotencyKey: `live-remedy-${Date.now()}`,
     });
     expect(started.status, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body["id"]);

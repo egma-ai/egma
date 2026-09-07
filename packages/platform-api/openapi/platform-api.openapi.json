@@ -15383,9 +15383,6 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "idempotencyKey": {
-                    "type": "string"
-                  },
                   "name": {
                     "type": "string"
                   },
@@ -15414,8 +15411,7 @@
                 "required": [
                   "suiteId",
                   "agentId",
-                  "connectionId",
-                  "idempotencyKey"
+                  "connectionId"
                 ],
                 "additionalProperties": false
               }

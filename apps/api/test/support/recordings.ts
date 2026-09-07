@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import {
   claimSimulations,
   completeSimulation,
@@ -417,7 +416,6 @@ export async function aConductedRun(
     suiteId,
     agentId,
     connectionId,
-    idempotencyKey: newId("run"),
     name: options.label ?? "the whole folder",
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);

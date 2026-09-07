@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import { enablePullProductionCalls, getSimulation } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -1224,7 +1223,6 @@ async function aQueuedRunFor(who: Customer): Promise<{
     suiteId,
     agentId: agent.id,
     connectionId: wiring.id,
-    idempotencyKey: newId("run"),
   });
   expect(started.status, JSON.stringify(started.body)).toBe(201);
   const page = await browser(

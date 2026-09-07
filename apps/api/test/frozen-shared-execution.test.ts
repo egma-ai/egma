@@ -87,7 +87,7 @@ it("freezes shared grader and persona selections together while later work recei
 
   async function launch(project: typeof first) {
     const run = await request(project.projectId, "POST", "/v1/runs", {
-      suiteId: project.suiteId, agentId: project.agentId, connectionId: project.connectionId, idempotencyKey: newId("run"),
+      suiteId: project.suiteId, agentId: project.agentId, connectionId: project.connectionId,
       expectedTestVersions: [{ testId: project.testId, versionId: project.testVersionId }],
     });
     const page = await request(project.projectId, "GET", `/v1/runs/${run.id}/simulations`);

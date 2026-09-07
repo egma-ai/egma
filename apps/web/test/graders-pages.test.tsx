@@ -1222,7 +1222,7 @@ describe("the project Graders surface", () => {
       ...standardAnswers(),
       [`GET /v1/grader-library/${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}`]: {
         status: 200,
-        body: EXPECTED_DEFINITION,
+        body: { ...EXPECTED_DEFINITION, definitionVersion: 3, currentDefinitionVersion: 3 },
       },
       "PATCH /v1/graders/grd_expected": { status: 200, body: changed },
     });
@@ -1230,6 +1230,8 @@ describe("the project Graders surface", () => {
     await chooseRowMenuItem("Expected behaviors", "Edit");
 
     const sheet = await screen.findByRole("dialog", { name: "Expected behaviors" });
+    expect(await within(sheet).findByText("Predefined · v3")).toBeTruthy();
+    expect(within(sheet).queryByText("This project's scope, settings, and individual pass threshold.")).toBeNull();
     /* The caption that answered a question nobody asked is gone. */
     expect(within(sheet).queryByText("Fixed by Egma")).toBeNull();
     expect(within(sheet).getByText("Scope")).toBeTruthy();

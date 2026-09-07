@@ -192,7 +192,6 @@ async function seedSimulationNamed(
     suiteId,
     agentId: created.id,
     connectionId: created.connection?.id ?? "",
-    idempotencyKey: newId("run"),
   });
   const page = await listSimulations(auth, started.id, { limit: 1 });
   const simulation = page?.items[0];

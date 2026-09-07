@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import { PUBLISH_OR_BIND_A_VERSION } from "@egma/retell";
 import {
   createPersona,
@@ -697,7 +696,6 @@ describe("a run over a Retell text mode connection", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
     // Retell would not answer, and asking again may well work — so it is not a
     // 422 about the request, and it says nothing was started.
@@ -726,7 +724,6 @@ describe("a run over a Retell text mode connection", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
 
     // A settled fact about the agent, so 422 and not the 503 an unanswered
@@ -755,7 +752,6 @@ describe("a run over a Retell text mode connection", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
     expect(String(refused.body.message)).toContain("custom LLM");
@@ -777,7 +773,6 @@ describe("a run over a Retell text mode connection", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     expect(started.body.agentVersion).toBe(SERVING_VERSION);
@@ -827,7 +822,6 @@ describe("the sentinel Retell key", () => {
         suiteId,
         agentId,
         connectionId,
-        idempotencyKey: newId("run"),
       });
       expect(started.body, JSON.stringify(started.body)).toBeDefined();
 
@@ -863,7 +857,6 @@ describe("the version a run resolved, on the record", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
       agentVersion: SERVING_VERSION,
     });
 
@@ -902,7 +895,6 @@ describe("the version a run resolved, on the record", () => {
         suiteId,
         agentId,
         connectionId,
-        idempotencyKey: newId("run"),
       }),
     ).rejects.toThrow(/without the run-start read of the agent's platform/u);
 
@@ -920,7 +912,6 @@ describe("the version a run resolved, on the record", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
 
     const header = await ask(api.app, "GET", `/v1/runs/${started.id}`, key);
@@ -955,7 +946,6 @@ describe("the version a run resolved, on the record", () => {
         suiteId,
         agentId,
         connectionId,
-        idempotencyKey: newId("run"),
         agentVersion: SERVING_VERSION,
         conductedConnectionIdentity: reach.connectionIdentity,
       }),
@@ -1008,7 +998,6 @@ describe("the version a run resolved, on the record", () => {
         suiteId,
         agentId,
         connectionId,
-        idempotencyKey: newId("run"),
         agentVersion: SERVING_VERSION,
         conductedConnectionIdentity: reach.connectionIdentity,
       }),
@@ -1036,7 +1025,6 @@ describe("the version a run resolved, on the record", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
       agentVersion: SERVING_VERSION,
       conductedConnectionIdentity: reach.connectionIdentity,
     });
@@ -1059,7 +1047,6 @@ describe("what a version-pinned run's landing records", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
       agentVersion: SERVING_VERSION,
     });
 
@@ -1157,7 +1144,6 @@ describe("the work order a version-pinned run hands over", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -1232,7 +1218,6 @@ describe("the work order a version-pinned run hands over", () => {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 

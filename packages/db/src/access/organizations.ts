@@ -1,9 +1,9 @@
 import { db } from "../client.ts";
-import { organization, organizationSettings } from "../schema/tenancy.ts";
+import { organization } from "../schema/tenancy.ts";
 import type { AuthContext } from "./context.ts";
 import { UnprocessableInputError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
-import { theOrganization, within } from "./within.ts";
+import { theOrganization } from "./within.ts";
 
 /** The customer. The only tenancy boundary there is. */
 export type Organization = {
@@ -19,6 +19,13 @@ export type OrganizationSettings = {
   readonly retentionDays: number | null;
   readonly dataResidency: string | null;
   readonly updatedAt: Date;
+};
+
+const SETTINGS_COLUMNS = {
+  organizationId: organization.id,
+  retentionDays: organization.retentionDays,
+  dataResidency: organization.dataResidency,
+  updatedAt: organization.settingsUpdatedAt,
 };
 
 /**
@@ -91,11 +98,12 @@ export async function readOrganizationSettings(
   authorize(auth, "read", here(auth));
 
   const [row] = await db()
-    .select()
-    .from(organizationSettings)
-    .where(within(auth, organizationSettings))
+    .select(SETTINGS_COLUMNS)
+    .from(organization)
+    .where(theOrganization(auth))
     .limit(1);
-  return row;
+  if (row === undefined || row.updatedAt === null) return undefined;
+  return { ...row, updatedAt: row.updatedAt };
 }
 
 export type OrganizationSettingsChanges = {
@@ -104,9 +112,9 @@ export type OrganizationSettingsChanges = {
 };
 
 /**
- * Settings are one row per customer, so writing them is an upsert keyed on the
- * organization from the context. There is no organization to name and therefore
- * none to name wrongly.
+ * Settings live on the caller's organization. Only supplied fields are updated,
+ * so concurrent edits to different settings preserve each other's values.
+ * The settings timestamp leaves the organization's own edit timestamp alone.
  *
  * **Only an `admin` writes them.** Retention is on this row, and retention
  * decides how long a customer's trace data survives — so this is the one
@@ -120,31 +128,22 @@ export async function updateOrganizationSettings(
 ): Promise<OrganizationSettings> {
   authorize(auth, "manage_organization", here(auth));
 
-  const now = new Date();
   const [row] = await db()
-    .insert(organizationSettings)
-    .values({
-      organizationId: auth.organizationId,
-      retentionDays: changes.retentionDays ?? null,
-      dataResidency: changes.dataResidency ?? null,
-      updatedAt: now,
+    .update(organization)
+    .set({
+      ...(changes.retentionDays === undefined
+        ? {}
+        : { retentionDays: changes.retentionDays }),
+      ...(changes.dataResidency === undefined
+        ? {}
+        : { dataResidency: changes.dataResidency }),
+      settingsUpdatedAt: new Date(),
     })
-    .onConflictDoUpdate({
-      target: organizationSettings.organizationId,
-      set: {
-        ...(changes.retentionDays === undefined
-          ? {}
-          : { retentionDays: changes.retentionDays }),
-        ...(changes.dataResidency === undefined
-          ? {}
-          : { dataResidency: changes.dataResidency }),
-        updatedAt: now,
-      },
-    })
-    .returning();
+    .where(theOrganization(auth))
+    .returning(SETTINGS_COLUMNS);
 
-  if (row === undefined) {
+  if (row === undefined || row.updatedAt === null) {
     throw new Error("settings for the caller's organization were not written");
   }
-  return row;
+  return { ...row, updatedAt: row.updatedAt };
 }
