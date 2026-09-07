@@ -34,6 +34,7 @@ from pipecat.frames.frames import TextFrame
 from pipecat.processors.frame_processor import FrameProcessor
 
 from egma_simulator import conductor as conductor_module
+from egma_simulator import speech as speech_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import ConductParameters, VoiceConductor
 from egma_simulator.contract import ERROR
@@ -543,6 +544,78 @@ async def test_every_span_points_at_the_audio_it_names(
         abs(final - first) <= media_frame
         for first, final in zip(first_offsets, final_offsets, strict=True)
     )
+
+
+async def test_a_persona_turn_ends_on_its_words_and_not_on_its_mouths_pad(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A mouth that pads every utterance does not keep the persona talking.
+
+    A real speaking leg closes an utterance with about half a second of
+    quiet, and the transport plays that out like any other audio. Stamped
+    where the transport ran out of audio, the persona's stop lands inside
+    that pad: the turn seeks over half a second of nothing, and the wait
+    for the agent's answer starts half a second after the caller stopped
+    being audible — which reads back as an agent half a second quicker
+    than the caller found it.
+
+    The scripted mouth pads here exactly as a provider's does. What is
+    asserted is what the acceptance is: every transcript boundary within
+    one media frame of the speech a listener can find on the recording,
+    which is where the padded stop cannot be.
+    """
+    opened_unix_nano = 1_800_000_000_000_000_000
+    monkeypatch.setattr(conductor_module, "_now", lambda: opened_unix_nano)
+
+    pad_seconds = 0.5
+
+    def with_a_trailing_pad(text: str, sample_rate_hz: int) -> bytes:
+        return encode_speech(text, sample_rate_hz) + silence(
+            pad_seconds, sample_rate_hz
+        )
+
+    monkeypatch.setattr(speech_module, "encode_speech", with_a_trailing_pad)
+
+    observed = await voice_simulation(
+        tmp_path,
+        scenario="First point.",
+        greeting="Front desk, hello.",
+        replies=["Certainly."],
+        # Long enough that the agent answers after the pad has played out,
+        # so this is the stop stamp under test and not an interruption.
+        answer_delay_seconds=1.0,
+    )
+
+    audio = observed.assembled.audio
+    assert audio is not None
+    recording = (tmp_path / audio["recording"]).read_bytes()
+    _persona_audio, _agent_audio, band = channels_of(recording)
+
+    heard = speech_in_the_recording(recording)
+    spoken = observed.spans
+    assert [speaker for speaker, _began, _ended in heard] == [
+        speaker for speaker, _text, _began, _ended in spoken
+    ]
+
+    # The gate reads a frame at a time and the listener above reads its own
+    # windows, so the two agree to within a frame each. The pad is
+    # twenty-five frames, and no tolerance of this size hides it.
+    media_frame = round(0.02 * band)
+    persona_turns = 0
+    for (speaker, _began, recorded_end), (_who, _text, _from, ended) in zip(
+        heard, spoken, strict=True
+    ):
+        if speaker != "human":
+            continue
+        persona_turns += 1
+        transcript_end = round(
+            (ended - opened_unix_nano) * band / 1_000_000_000
+        )
+        assert abs(recorded_end - transcript_end) <= 2 * media_frame, (
+            f"the persona's turn ends {(transcript_end - recorded_end) / band:.3f}s "
+            "from its own last audible sample"
+        )
+    assert persona_turns
 
 
 async def test_the_recording_is_stamped_from_its_own_first_sample(

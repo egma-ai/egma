@@ -1,6 +1,6 @@
 # The measure catalog
 
-**Catalog version: 8**
+**Catalog version: 9**
 
 Every metric a conversation produces, named once and defined once, so that a
 grader references a known metric instead of guessing a string — and so that the
@@ -108,20 +108,29 @@ own clock — the **persona's POV**, which arrives as the timing spans above. Th
 agent measures it off its own process — the **agent's POV**, which arrives as a
 derivation off the framework's spans or as the block the platform reported. The
 two differ by the VAD's own detection lag at the front and the playback hop at
-the back, so they are two units and never one series.
+the back — half a second to seven tenths per turn on the live rig, constant
+across a call — so they are two units and never one series.
 
 `origin` on every measure says which POV took it: `timed` is the persona's,
 `derived` and `reported` are the agent's. A conversation both POVs measured
 hands back **both series** — the headline, and the other beside it. Nothing is
 averaged across them and nothing is appended.
 
-**Catalog version 8 leads with the agent's POV for `turn_response_latency` and
-`first_response_latency`**, and with the persona's for everything else. The
-version is the switch and there is no flag: a run graded under version 8 was
-graded against the agent's own account of its waits, and the release that
-returns the persona's recording to the front is a catalog version of its own.
-On a production trace the question does not arise — Egma conducted nothing, so
-there is one POV.
+**Catalog version 9 leads with the persona's POV for every measure**, and the
+agent's account rides beside it as the other POV. Version 8 led with the
+agent's for the two response latencies while Egma's own clock was being fixed;
+the fix is in, and the persona's stop is now the last audible sample of its
+speech rather than the last frame the transport played, which is the definition
+above measured rather than approached. Its acceptance is the constant above: a
+recording that differs from the agent's own account by the lag the two clocks
+are known to differ by, and by nothing that grows across a call, is the number
+to lead with.
+
+The version is the switch and there is no flag: a run graded under version 8
+was graded against the agent's own account of its waits, and a run graded under
+version 9 is graded against Egma's own recording. On a production trace the
+question does not arise — Egma conducted nothing, so there is one POV, and it
+is the agent's at both versions.
 
 ## Derived measures: a framework's own spans, read as these numbers
 
