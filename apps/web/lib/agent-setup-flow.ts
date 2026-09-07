@@ -311,14 +311,8 @@ export function stepAfterRetellAgent(
 }
 
 /**
- * Where the answer to the one question leads, or `null` when the flow can save
- * now.
- *
- * **The phone-number chooser appears only when Phone call is picked**, because
- * a voice agent can answer several routed numbers and the flow has to be told
- * which one to dial. A developer who picked Text is never asked for a phone
- * number: the fast lane has no needless steps, and there is nothing honest to
- * ask about a number nothing will dial.
+ * Choose the next setup step, or null when ready to save. Only the phone
+ * connection flow asks which number to dial.
  */
 export function stepAfterRetellLanes(lane: RetellLane): AgentSetupStep | null {
   return lane === "phone" ? "retell-phone" : null;

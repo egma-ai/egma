@@ -6,18 +6,8 @@ import type { Me } from "../lib/me.ts";
 import { AppShell } from "../ui/shell.tsx";
 
 /**
- * The grouped sidebar, drawn.
- *
- * The module test beside this one says what the three groups *are*. This says
- * what a person meets: three labelled groups in one navigation landmark, the
- * row they are on lit and saying so, the same six addresses the flat bar
- * offered, and the same three groups inside the mobile drawer rather than a
- * second, shorter list of where they may go.
- *
- * jsdom loads no stylesheet, so the Ember Wash and the Ember mark are asserted
- * as the mapping that produces them — the class that turns them on is bound to
- * the same `data-active` the row carries. The colours themselves were read back
- * in a real browser, in both themes, at both widths.
+ * Check rendered navigation groups, active state, links, and mobile parity.
+ * Class assertions cover theme mappings; jsdom does not verify computed colors.
  */
 
 const routed = vi.hoisted(() => ({ pathname: "/projects/prj_2/agents" }));
@@ -159,14 +149,8 @@ describe("the grouped sidebar", () => {
   });
 
   /**
-   * **A sectioned navigation is walked by heading.**
-   *
-   * The accessible name above says which group somebody is *in*. This is how
-   * they get to one at all: the heading list is Simulations and Monitoring, and
-   * moving between them is one keystroke rather than six arrow presses. The two
-   * mechanisms are wired to the same element on purpose — one word, said twice,
-   * that cannot come apart. The top cluster is in neither list, because it is
-   * drawn with no word at all: it is where a person already is.
+   * Use visible headings as the accessible names of labeled navigation groups.
+   * The unlabeled top group must add no empty heading.
    */
   it("offers every labelled group as a heading, in the order the bar reads", () => {
     drawShell();
@@ -273,16 +257,8 @@ describe("the grouped sidebar", () => {
   });
 
   /**
-   * **The row moves two properties, and `outline-color` is deliberately not one
-   * of them.**
-   *
-   * `transition-colors` looks like the right class and is not: Tailwind's
-   * colour group sweeps in `outline-color`, this product's focus indicator is
-   * an outline, and the result was a focus ring that faded up from the row's
-   * text colour over 140ms on every Tab step. `DESIGN.md` names keyboard
-   * navigation first among the things not to animate, so the two properties
-   * hover actually changes are named instead. A keyboard pass found this; only
-   * this assertion can keep it found.
+   * Transition only hover background and text colors. Including outline color
+   * would delay the keyboard focus indicator.
    */
   it("moves the hover colours without dragging the focus ring with them", () => {
     drawShell();

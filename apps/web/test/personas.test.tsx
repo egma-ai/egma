@@ -20,25 +20,8 @@ import type {
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
- * The Personas screen, rendered and driven the way somebody with a keyboard
- * drives it.
- *
- * Nothing here asserts that a component exists or that a source file contains
- * a string. Every test puts the API's real answers in front of a real
- * component and reads what the DOM then says — which is the only kind of proof
- * that survives the page being rewritten.
- *
- * **The contract these hold to is the approved boards** (Paper page `03C —
- * Persona rework`, boards 01–06): one address with panels over it, a sectioned
- * form under the star-and-`[optional]` label grammar, Predefined and Custom as
- * square chips, `Fork` and `Delete` in a row's ⋮, the record's own actions in
- * the sheet's ⋮, one item per line when a persona is read, and the open row in
- * the grey soft surface rather than the wash.
- *
- * Three of these exist because ticket 02 shipped the defects they name and had
- * to fix them: a role guessed while the session is in flight, an answer
- * rendered into a project it was not fetched for, and a failed request
- * swallowed. Every list page after that one walks into all three.
+ * Drive persona lists and sheets with stubbed API responses. Cover role
+ * loading, project changes, refused reads, and persona actions through the DOM.
  */
 
 /*
@@ -472,7 +455,7 @@ describe("the Personas list", () => {
       }),
       { key: "Escape" },
     );
-    /* A Predefined persona cannot be deleted, so it is not offered. */
+    /* A Egma-provided persona cannot be deleted, so it is not offered. */
     expect(await rowMenuItems("Everyday caller")).toEqual(["Clone"]);
   });
 
@@ -1019,16 +1002,8 @@ describe("one persona's sheet", () => {
   });
 
   /*
-   * **All three ways out ask the same question.** The boards give this panel a
-   * close control, an outside click and Escape, and a draft that only one of
-   * them protected would be a draft lost by whichever way somebody happened to
-   * reach for. All three land on one `onOpenChange`, which is the gate.
-   *
-   * Escape is proved above and the close control here. **The outside click is
-   * proved in the real browser instead**, in `apps/api/test/browser.test.ts`:
-   * that gesture is Radix's own, dispatched from a document listener that
-   * jsdom's synthetic events never reach, and a test that faked its way past
-   * that would be proving the fake rather than the panel.
+   * All dismissal paths use the draft guard. This file drives Escape and the
+   * close control; apps/api/test/browser.test.ts covers outside-click dismissal.
    */
   it("asks before discarding when the close control is pressed", async () => {
     withClosingSheetAnimation();
@@ -1056,14 +1031,8 @@ describe("one persona's sheet", () => {
   });
 
   /**
-   * **A panel belongs to the project it was opened in.**
-   *
-   * Changing project does not remount this screen — it is the same page with
-   * another id in its address — so a sheet left open would still be holding a
-   * persona the next project has never heard of. Asking for it answers 404 and
-   * fills the panel with "not found" over a list that is perfectly fine, so
-   * the panel is not drawn for another project at all and the request is never
-   * made.
+   * Project changes must close a persona sheet without reading the old
+   * project's persona under the new project ID.
    */
   it("closes the panel when the project changes, and asks the next project for nothing of the last one", async () => {
     const { asked } = ritaOpen({

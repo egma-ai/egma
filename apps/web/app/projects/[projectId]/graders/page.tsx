@@ -133,19 +133,8 @@ export default function GradersPage() {
 }
 
 /**
- * The row's own name, and the thing that opens it.
- *
- * **A grader is read and edited in a sheet, so the row's name is a button
- * rather than a link.** The boards open the sheet from anywhere on the row; a
- * real control carrying the name is what makes that reachable by keyboard, and
- * it takes the product's Ember focus ring from `globals.css` without asking.
- * The name keeps the row's ordinary weight and turns Ember under a pointer,
- * which is the feedback the shared table already gives a row somebody is
- * pointing at.
- *
- * The row as a whole answers the pointer through the shared table's
- * `onRowActivate`; this button stays because it is the keyboard path and the
- * one control the accessibility tree holds for the action.
+ * Keep a real button on the grader name for keyboard access to the sheet;
+ * onRowActivate provides the larger pointer target.
  */
 function RowOpener({
   name,
@@ -175,35 +164,15 @@ function RowOpener({
 }
 
 /**
- * The score a simulation has to reach, as a measure: two places, tabular.
- *
- * **It reads from the lane's left edge, like every other fact in the table.**
- * The column was right-aligned for a morning, and the figures ended up under
- * the tail of a header three times their width — an indent, to an eye that
- * scans this table's five other columns by their shared left edge — welded to
- * the ⋮ lane across a void of spare paper. Right alignment earns its keep when
- * values differ in width; every value here is `N.NN` in tabular numerals, so
- * the digits line up down the column from either edge and the left one is the
- * edge the rest of the table already reads from.
+ * Use left-aligned tabular numerals with two decimal places for grader pass thresholds.
  */
 function PassThreshold({ value }: { readonly value: number }) {
   return <span className="tabular-nums">{value.toFixed(2)}</span>;
 }
 
 /**
- * **The name lane is stated; the facts share what is left.**
- *
- * `ui/data-table.tsx` gives the slack to the columns that ask for no width, so
- * a list that states a width for all but one of them hands that one column
- * every spare pixel. Every fact on a grader is short — a chip, "All", "20%",
- * "0.80" — so the column that took the slack drew a lane of empty paper mid-
- * table, and the measures ended up pushed against the ⋮ lane far to its right.
- *
- * Personas can state five widths because the column it leaves out is
- * Description, which is prose and fills whatever it is given. This list has no
- * such column, so it states only the 260px name lane the boards give every list
- * and lets the five facts divide the rest between them in proportion to what
- * each one has to say.
+ * Fix the name column width and share remaining space among the short fact
+ * columns, avoiding one column that absorbs all unused width.
  */
 function activeColumns(
   mayAuthor: boolean,

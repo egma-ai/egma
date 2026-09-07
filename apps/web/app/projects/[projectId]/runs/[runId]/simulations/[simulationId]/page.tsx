@@ -51,25 +51,10 @@ import {
 } from "../../../../../../../ui/shell.tsx";
 
 /**
- * One simulation's evidence: what happened, how it happened, and the grades
- * produced from it.
- *
- * **The page is reached from its run and is not in the navigation.** A
- * simulation is a thing inside a run, not a product area, and a sidebar entry
- * for it would invite somebody to go looking for a simulation without knowing
- * which run they wanted. The address is project-scoped and stable, so it can be
- * pasted into a ticket and open the same simulation next month.
- *
- * **One read supplies the whole page.** `GET /v1/simulations/{id}` answers the
- * pins, the identities, the frozen plan, the measures, the grades and the
- * transcript together, with the transcript's window worked out on the server
- * from the simulation's own stamps. The only second request this page ever
- * makes is the recording's, and only when there is one to hear — a signed link
- * is short-lived, so carrying one in the page answer would make the address
- * stale a quarter of an hour after it loaded.
- *
- * **The facts stay apart.** Simulation execution, grading progress, individual
- * grade results and the display-only combined score answer different questions.
+ * Open simulation evidence from its run using a project-scoped URL. The
+ * simulation read supplies pins, execution facts, grading, measures, and
+ * transcript; recording links are resolved separately because they expire.
+ * Keep execution, grading progress, individual grades, and combined score distinct.
  */
 export default function SimulationEvidencePage() {
   const { projectId, runId, simulationId } = useParams<{

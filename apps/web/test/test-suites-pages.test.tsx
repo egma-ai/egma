@@ -234,15 +234,8 @@ async function chooseRunTarget(): Promise<void> {
 
 beforeEach(() => {
   /*
-   * `cmdk` measures its list with `ResizeObserver` and scrolls the row the
-   * arrow keys are on into view. jsdom implements neither, and without them the
-   * persona picker's panel throws the moment it opens or a row is picked — the
-   * second one silently, from inside `cmdk`, so the row's click simply did
-   * nothing.
-   *
-   * Stubs rather than polyfills, for the reason `design-system.test.tsx` gives:
-   * nothing here asserts a measurement or a scroll, and real ones would only
-   * let these tests lean on layout jsdom never computes.
+   * Stub ResizeObserver and scrollIntoView for cmdk in jsdom. These tests
+   * exercise selection, not layout measurements or scrolling.
    */
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
     configurable: true,
@@ -1221,18 +1214,7 @@ describe("the suite-first Tests route", () => {
     );
   });
 
-  /**
-   * **The two JSON fields, in a table that has to stay scannable.**
-   *
-   * A mock tool's answer is arbitrary JSON and an env is two nested objects.
-   * Neither fits beside a scenario, so the cell carries one quiet summary and
-   * the writing happens in the smallest dialog that holds an editor, a reason
-   * and two buttons.
-   *
-   * A full Env cell says `View env variables` rather than naming its keys: the
-   * two platform key names are 47 characters of identifier and ran out through
-   * the narrowest lane in the grid (founder, 2026-09-04).
-   */
+  /** Keep JSON summaries in cells and edit full mock-tool/env values in dialogs. */
   it("summarizes mock tools and env in their cells, and offers to fill an empty one", async () => {
     gridAnswers({
       tests: [
@@ -1335,16 +1317,8 @@ describe("the suite-first Tests route", () => {
   });
 
   /**
-   * **An empty JSON cell says how to fill it — quietly in a written row, and
-   * out loud in the row being written.**
-   *
-   * The cells used to be blank until a pointer went over them, so the only
-   * thing saying a mock tool or an env could be written here was the cursor
-   * changing shape. Offering in brand on every row was the other extreme: two
-   * orange lines down a suite of forty tests, in a table whose job is to be
-   * scanned. A written row rests on `None` and offers when it is reached for;
-   * the entry row offers always, because that row is the authoring (founder,
-   * 2026-09-04).
+   * Written rows show None for empty JSON cells; the entry row exposes the
+   * add action without requiring hover.
    */
   it("keeps the add line quiet in a written row and plain in the entry row, and each opens its dialog", async () => {
     gridAnswers({ tests: [testBody({ personas: [PERSONA] })] });
@@ -1994,20 +1968,9 @@ describe("the suite-first Tests route", () => {
     });
 
     /*
-     * …and that answer lands on a cell whose picking is long gone, so the entry
-     * row is free to open its own and be the only one standing.
-     *
-     * **The press above dismissed rather than swapped, and that is this
-     * renderer rather than the product.** In a browser one press on another
-     * trigger closes the open panel and opens that one; jsdom is given the
-     * three events by hand and the click that follows a dismissal does not
-     * reach the trigger, so the swap takes a second press here. What the first
-     * press had to prove — that shutting is what saves, and that the ticks went
-     * with it — is proved above, and that is the defect this test is named for.
-     *
-     * Whose picker is open is read off the trigger, not off the row: the panel
-     * is drawn in a portal now, which is what let the grid keep its sideways
-     * scrolling, so `within(row)` can no longer see it.
+     * This jsdom event sequence needs a second press to open the next picker
+     * after dismissal. Check which picker is open through its trigger because
+     * the panel is portaled outside the row.
      */
     fireEvent.click(entryTrigger);
     expect(screen.getAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);

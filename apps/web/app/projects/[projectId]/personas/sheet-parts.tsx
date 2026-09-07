@@ -7,31 +7,8 @@ import { cn } from "@/lib/utils";
 import { ownerSaid, type Persona } from "../../../../lib/personas.ts";
 
 /**
- * The parts a persona's side sheet and its list are written from.
- *
- * **They are here rather than in `apps/web/ui/` because they are one screen's
- * arrangement, not a shared behaviour.** The sheet itself, its head, its body,
- * its footer and its motion are `components/ui/sheet.tsx`; what is below is how
- * *a persona* fills one: a labelled group, a read pair,
- * and the chip that says which kind of persona a row is.
- *
- * Every measurement is read off page `L-0` of the Paper file (boards `RA4-0`
- * through `S6H-0`) with `get_computed_styles`, and every value is spent as a
- * theme key rather than as a number: `DESIGN.md` keeps the numbers, this file
- * keeps the shapes.
- *
- * Two board values are deliberately not copied literally, both because
- * `DESIGN.md`'s scale decides:
- *
- * - The boards write a sheet's small print at **12px and 13px**. The type scale
- *   starts at 14px and the 12px micro label belongs to letter-spaced capitals
- *   alone, so every one of those is drawn at `text-sm` in the faint colour —
- *   which is the same instruction the developer's own note asked for, "reduce
- *   the size and colour of these texts which are of explanatory nature", inside
- *   the scale the product actually has.
- * - The boards pad a sheet by **28px**. That is off `DESIGN.md`'s spacing list,
- *   and `components/ui/sheet.tsx` already rounds it to the 24px step that is on
- *   it. Nothing here re-pads the panel.
+ * Persona-specific content built from shared sheet primitives and theme
+ * values. Use the design system's type and spacing scale.
  */
 
 /** A labelled group, separated from the previous group by a hairline. */
@@ -64,18 +41,8 @@ export type Read = {
 };
 
 /**
- * A group of facts, as a definition list — **one item per line**.
- *
- * **A definition list because that is what it is**: a screen reader reads each
- * value with the name of the value, which a stack of `<div>`s does not give.
- *
- * The two-column grid these used to sit in is gone by the developer's own
- * reading of the boards — "can you show each item in one line for MODELS as
- * well". A 440px panel gives a pair of columns about 190px each, which is
- * narrower than half the values in it: a model name, a voice id and a sentence
- * of personality all wrapped, and the eye had to find the second column's
- * baseline again on every row. One lane down the sheet reads as a list, which
- * is what it is.
+ * Use a definition list with one fact per line so long model and voice names
+ * remain readable in the narrow sheet.
  */
 export function Reads({ reads }: { readonly reads: readonly Read[] }) {
   return (

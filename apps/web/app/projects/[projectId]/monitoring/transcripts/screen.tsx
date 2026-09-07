@@ -67,43 +67,10 @@ import { monitoringSetupPath } from "../setup-path.ts";
 import { TraceSheet, type OpenTrace } from "./trace-sheet.tsx";
 
 /**
- * **Monitoring**: what this project's agents did in production, newest first.
- *
- * *This project* is read out of the address and sent with the request, so a
- * copied link opens the project it names rather than whichever one the reader's
- * browser happened to be resolved into.
- *
- * **Production and nothing else.** A simulation is read under the run that
- * produced it, beside the frozen test, the persona, the graders and the
- * mock-tools record — drawing it a second time and poorer, in a mixed list,
- * would be a wrong door. So the request narrows to production at the server and
- * the table carries no column saying so: every row here is production by
- * definition, and a column repeating a constant is furniture.
- *
- * The first consumer of the **public v1 contract** rather than of a private one
- * built for it: what a customer integrates against is what egma's own screen is
- * drawn from, so a contract that cannot answer a question a person actually has
- * fails here first, while it is still cheap to change.
- *
- * Three things about the request are the store's discipline showing through,
- * and each is load-bearing:
- *
- * - **A window is always sent.** The read surface refuses a request that names
- *   none, because the store is filed by time and a read that bounded nothing
- *   would be a read of everything. The last day is this page's answer to that,
- *   not the endpoint's default — there is no default, on purpose.
- * - **Paging is by token.** The answer carries where it stopped, and asking for
- *   more means handing that back. An offset would re-sort and re-scan the rows
- *   already read, and would skip or repeat one the moment something arrived
- *   mid-page.
- * - **The chosen window lives in the address**, the same way one transcript's
- *   window does. Somebody who widened to thirty days and reloaded should still
- *   be looking at thirty days, and somebody sending "look at last week" should
- *   be able to send the address they are looking at.
- *
- * Signed in with a browser session like every other page here, on the origin
- * the page was served from. There is no API key in a browser and there never
- * will be.
+ * List this project's production traces newest first through the public API.
+ * Send source=production, projectId, a bounded window, and page tokens. Keep
+ * window selection in the URL; the page supplies the default 24-hour window.
+ * Authenticate requests with the browser session.
  */
 
 type State =
@@ -144,17 +111,8 @@ function traceFreeAddress(address: URL): string {
 }
 
 /**
- * The screen, which is not the route.
- *
- * **It lives beside `page.tsx` rather than inside it**, the way `agents` and
- * `tests` already arrange theirs. Next validates the export list of a route
- * module and refuses one that exports anything but its own reserved fields, so
- * a second entry point for the retired Start-monitoring address cannot live in
- * a page file — and the convention it was breaking is the reason there is a
- * convention.
- *
- * The retired Start-monitoring address now forwards to the Agents-owned setup
- * flow. This screen keeps no second setup panel.
+ * Keep the reusable screen outside the Next route module's restricted exports.
+ * Agent setup is owned by the Agents flow.
  */
 export function TranscriptsScreen({
   projectId,
@@ -422,24 +380,9 @@ export function TranscriptsScreen({
   }
 
   /**
-   * Whether this project has **ever** recorded anything, asked only when the
-   * window on screen holds nothing.
-   *
-   * It is the difference between the two confident sentences a quiet page can
-   * say, and the window alone cannot tell them apart. An empty last hour means
-   * *nothing in this hour* for a project with a week of traffic and *set up your
-   * export* for a project on its first day, and a developer who has just signed
-   * up lands on the default window rather than on the widest — so deciding by
-   * the window alone would put a click between them and the one page written
-   * for them.
-   *
-   * One row is the whole answer, so it asks for one. It is not asked at all
-   * unless the page is empty, and not even then when the window on screen is
-   * already the widest — the list read has just answered the same question.
-   *
-   * `undefined` is still out, `null` is a read that refused, and a number is an
-   * answer. The three are kept apart because `quietState` may never read a
-   * refusal as a zero.
+   * When the selected window is empty, probe one production row in the widest
+   * supported window. This checks recent history, not all-time history.
+   * Keep pending, failed, and zero-result reads distinct.
    */
   const emptyHere = state.status === "loaded" && shownRows.length === 0;
   const alreadyWidest = isWidestWindow(choice ?? DEFAULT_WINDOW);
@@ -488,21 +431,8 @@ export function TranscriptsScreen({
       : probed;
 
   /**
-   * Which of the four quiet states this page is in, or none.
-   *
-   * Nothing at all while either supporting read is still out, and that wait is
-   * deliberate: guessing would put the setup teaching on screen for a moment in
-   * front of somebody whose real trouble is a key that names the organization,
-   * and guidance that flickers between two different instructions is worse than
-   * guidance that arrives a beat late.
-   *
-   * **A read that answered a refusal counts as nothing, never as a zero.** An
-   * `Answer` that is not `ready` is `null` here, and `quietState` reads `null`
-   * as "no answer" — so a failed grader read means this page says one thing
-   * less, rather than announcing that no grader watches production on the
-   * strength of an answer it never got. That is the same rule `ui/page-state`
-   * states between failed and empty, applied to the reads that only decide what
-   * a page says about itself.
+   * Wait for supporting reads before selecting empty-state guidance. A refused
+   * read is unknown, not a zero count.
    */
   const counted = <T,>(answer: Answer<T> | null, count: (value: T) => number) =>
     answer !== null && answer.status === "ready" ? count(answer.value) : null;
@@ -564,21 +494,8 @@ export function TranscriptsScreen({
   }, [legacyAgentId, legacySetup, projectId, replace]);
 
   /**
-   * The one action this screen offers, and the same control wherever it sits.
-   *
-   * **Agents owns setup.** This page only states the user's goal. The address
-   * opens Connect agent on Agents with Monitoring selected, so first setup and
-   * later setup use one provider-specific flow instead of two forms that can
-   * disagree.
-   *
-   * **One page for every role, and the control that changes data is disabled
-   * rather than removed.** Setup requires `configure_monitoring`, which a
-   * viewer does not have. A viewer sees what egma can do here and is told
-   * plainly that this part is not theirs.
-   *
-   * **While the role is unknown there is no control at all.** A disabled one
-   * would have to say why, and every sentence it could say would be a claim
-   * about somebody egma has not identified yet.
+   * Open agent setup with the monitoring goal. Hide the action while role is
+   * unknown, then disable it with a reason when configure_monitoring is unavailable.
    */
   const whyNotMonitor = `Your ${String(role)} role cannot set up monitoring. Ask an organization admin to change your role.`;
   const setUpMonitoring =
@@ -691,11 +608,7 @@ export function TranscriptsScreen({
   );
 }
 
-/**
- * Nothing has ever arrived here, which is the state monitoring exists for — so
- * it is where the one monitoring verb lives (board `JGS-0`). The
- * provider-specific teaching is inside the picker, once.
- */
+/** Offer monitoring setup when the bounded recent-history probe finds no traces. */
 function SetUp({ action }: { readonly action: ReactNode }) {
   return (
     <Empty title={QUIET.setUp.title} lead={QUIET.setUp.lead} action={action} />
@@ -708,22 +621,9 @@ function Nothing() {
 }
 
 /**
- * The columns, in the order they are shown, each beside what fills it.
- *
- * One list rather than a header row and a body row that have to be kept in the
- * same order by hand — a table whose eighth heading names its ninth value is a
- * bug nobody sees in a diff.
- *
- * The order is a judgement about scanning. The agent leads because it is the
- * quickest way to find the family of calls somebody means. The call's time,
- * duration and turn latency follow as one compact timing story, then the exact
- * trace id. The id remains the row's primary control: it opens the sheet and is
- * where focus returns when that sheet closes.
- *
- * The trace-id control carries the project and the window this exchange
- * happened in, taken from the two instants this very row is showing. That is
- * what makes the transcript a place somebody can be sent: the endpoint under
- * it requires both, and this row already knows the answers, so nobody has to.
+ * Define headers and cells together to keep their order aligned. The trace-ID
+ * control opens the sheet and restores focus on close; its detail URL carries
+ * the project and the trace's time window.
  */
 function columnsFor(
   projectId: string,
