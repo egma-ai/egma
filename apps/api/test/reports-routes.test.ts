@@ -1,5 +1,9 @@
 import { newId } from "@egma/ids";
-import { createPersona, getSimulation } from "@egma/db";
+import {
+  createPersona,
+  getSimulation,
+  settleSimulationsPastTheAgentPovBound,
+} from "@egma/db";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
@@ -494,8 +498,22 @@ describe("the lifecycle lands", () => {
       expect(row?.startedAt?.toISOString()).toBe("2026-08-05T09:00:00.000Z");
       expect(row?.endedAt?.toISOString()).toBe("2026-08-05T09:02:10.551Z");
 
-      // The completed landing queued its frozen whole-trace grading plan and
-      // finalized the run header.
+      // **The landing does not queue grading here, and that is the rule.**
+      // This conversation ran over a Retell lane, so a second account of it is
+      // coming — egma pulls Retell's own call record the moment the
+      // conversation ends (ADR-0015 §2) — and grading a conversation before
+      // the account it will be judged on has arrived is grading the wrong
+      // evidence. Everything filed above is egma's own POV, and no Retell
+      // reach is configured in this suite, so the wait can only end on the
+      // 30-second bound. It is asked for here with the bound already spent,
+      // because what this case proves is the landing and not a clock.
+      expect(await gradingJobsFor(simulationId)).toBe(0);
+      await settleSimulationsPastTheAgentPovBound({
+        boundSeconds: 0,
+        withinSeconds: 365 * 24 * 60 * 60,
+      });
+      // The frozen whole-trace grading plan, queued once, and the run header
+      // finalized by the landing itself.
       expect(await gradingJobsFor(simulationId)).toBe(1);
       const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
       expect(header.body.status).toBe("completed");

@@ -3,6 +3,7 @@ import {
   claimGradingJobs,
   finishGradingJob,
   getGradingJobForTrace,
+  settleSimulationsPastTheAgentPovBound,
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
@@ -2735,6 +2736,17 @@ describe("the complete product, walked in order in a second project", () => {
    * deterministic answer this proof needs to read in Chrome.
    */
   async function finishExpectedBehaviorsGrade(traceId: string): Promise<void> {
+    // **Grading waits for the agent's own POV, and no agent runs here.** A
+    // simulator would hold the conversation and the agent's platform would
+    // file its own account of it; this lane has neither, so the wait can only
+    // end on the 30-second bound (ADR-0015 §6). It is asked for with the bound
+    // already spent, because what this journey proves is the pages and not a
+    // clock.
+    await settleSimulationsPastTheAgentPovBound({
+      boundSeconds: 0,
+      withinSeconds: 365 * 24 * 60 * 60,
+    });
+
     await expect
       .poll(
         async () =>
