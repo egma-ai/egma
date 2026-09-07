@@ -717,7 +717,7 @@ export async function editGraderDefinition(
     if (name === "" || !prompt) throw new UnprocessableInputError("a grader needs a name and grading instructions");
     let version = held.currentDefinitionVersion;
     if (prompt !== core.prompt) {
-      await assertGraderSettingsCompatibleOn(tx, definitionId, core.type, core.parameterContract);
+      await assertGraderSettingsCompatibleOn(tx, definitionId, core.type, core.parameterContract, core.parameterContract);
       version += 1;
       await tx.insert(graderDefinitionVersion).values({
         definitionId, version, type: core.type, prompt,

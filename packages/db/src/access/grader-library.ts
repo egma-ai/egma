@@ -7,7 +7,7 @@ import {
   GRADER_DEFINITION_CATALOG,
   type PredefinedGraderDefinition,
 } from "../grader-library/catalog.ts";
-import { defaultGraderParameterValues, validateExecutableGraderParameters, type GraderParameter } from "../grader-library/parameters.ts";
+import { defaultGraderParameterValues, validateExecutableGraderParameters, validateUnchangedParameterUnits, type GraderParameter } from "../grader-library/parameters.ts";
 import {
   snapshotGraderDefinition,
   type GraderDefinitionSnapshot,
@@ -222,6 +222,7 @@ export async function assertGraderSettingsCompatibleOn(
   definitionId: string,
   type: string,
   parameterContract: unknown,
+  currentParameterContract: unknown,
 ): Promise<void> {
   const saved = await on.select({ id: projectGrader.id, parameterValues: projectGrader.parameterValues })
     .from(projectGrader)
@@ -231,6 +232,7 @@ export async function assertGraderSettingsCompatibleOn(
   for (const row of saved) {
     try {
       validateExecutableGraderParameters(type, parameterContract, row.parameterValues);
+      validateUnchangedParameterUnits(currentParameterContract, parameterContract);
     } catch (cause) {
       throw new Error(`grader ${definitionId} cannot publish: saved project settings ${row.id} are incompatible: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
     }
@@ -303,7 +305,7 @@ async function reconcileDefinitions(
     };
     let version = installed.version;
     if (!isDeepStrictEqual(held, wanted)) {
-      await assertGraderSettingsCompatibleOn(on, entry.id, wanted.type, wanted.parameterContract);
+      await assertGraderSettingsCompatibleOn(on, entry.id, wanted.type, wanted.parameterContract, installed.parameterContract);
       version += 1;
       await on.insert(graderDefinitionVersion).values({
         definitionId: entry.id,

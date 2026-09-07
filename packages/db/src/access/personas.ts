@@ -390,12 +390,12 @@ export async function seedPersonaLibraryInternal(
       if (storedIdentity === undefined || storedIdentity.organizationId !== null || storedIdentity.projectId !== null) {
         throw new Error(`fixed Egma-provided persona id ${entry.id} already holds a different identity`);
       }
-      const [installed] = await tx.select({ version: personaVersion.version }).from(personaVersion)
+      const [installed] = await tx.select({ version: personaVersion.version, parameterContract: personaVersion.parameterContract }).from(personaVersion)
         .where(eq(personaVersion.id, storedIdentity.currentVersionId));
       if (installed !== undefined && current.version < installed.version) {
         throw new Error(`persona ${entry.id} cannot publish an earlier core version`);
       }
-      await assertPersonaSettingsCompatibleOn(tx, entry.id, current.parameterContract);
+      await assertPersonaSettingsCompatibleOn(tx, entry.id, current.parameterContract, installed?.parameterContract ?? current.parameterContract);
       const versionInsertions = await tx.insert(personaVersion).values(entry.versions.map((version) => ({
         id: version.id,
         personaId: entry.id,
@@ -713,7 +713,7 @@ export async function editPersona(
       }
       let versionId = current.id;
       if (coreChanged) {
-        await assertPersonaSettingsCompatibleOn(tx, id, current.parameterContract);
+        await assertPersonaSettingsCompatibleOn(tx, id, current.parameterContract, current.parameterContract);
         versionId = newId("prsv");
         await tx
           .insert(personaVersion)
