@@ -15,8 +15,12 @@ import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 import type { Refusal } from "../../../../lib/api.ts";
-import { modalityLabel, type AgentPage } from "../../../../lib/agents.ts";
-import { asListInstant, formatViewerInstant } from "../../../../lib/instants.ts";
+import type { AgentPage } from "../../../../lib/agents.ts";
+import {
+  asListClock,
+  asListInstant,
+  formatViewerInstant,
+} from "../../../../lib/instants.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import {
   platformAnswer,
@@ -47,15 +51,29 @@ function suiteLabel(run: RunRow): string {
   return `${run.suiteName}${run.suiteDeleted ? " (deleted)" : ""}`;
 }
 
+/**
+ * A name wraps inside its own column.
+ *
+ * The shared cell wrapper is `white-space: nowrap`, which makes a long name's
+ * minimum width its whole width and pushes the table past its panel. Zero
+ * width with a full minimum keeps the column off that measurement, so the
+ * requested percentages hold and the name takes a second line instead.
+ */
+const WRAPS = "block w-0 min-w-full whitespace-normal break-words stacked:w-auto stacked:min-w-0";
+
+/** Started names a moment: the date on one line, the clock under it. */
 function StartedAt({ instant }: { readonly instant: string }) {
   return (
     <time
-      className="tabular-nums text-foreground"
+      className="flex flex-col tabular-nums text-foreground"
       dateTime={instant}
       title={formatViewerInstant(instant, "second")}
       suppressHydrationWarning
     >
-      {asListInstant(instant, "minute")}
+      <span suppressHydrationWarning>{asListInstant(instant, "day")}</span>
+      <span className="text-faint" suppressHydrationWarning>
+        {asListClock(instant)}
+      </span>
     </time>
   );
 }
@@ -71,10 +89,13 @@ function columnsFor(
       key: "run",
       header: "Run",
       primary: true,
-      width: "22%",
+      width: "24%",
       cell: (run) => (
         <Link
-          className="font-medium text-foreground no-underline underline-offset-4 pointer-hover:underline pointer-hover:decoration-brand focus-visible:underline"
+          className={cn(
+            WRAPS,
+            "font-medium text-foreground no-underline underline-offset-4 pointer-hover:underline pointer-hover:decoration-brand focus-visible:underline",
+          )}
           href={projectPath(projectId, "runs", run.id)}
         >
           {run.name ?? suiteLabel(run)}
@@ -84,39 +105,35 @@ function columnsFor(
     {
       key: "suite",
       header: "Test suite",
-      width: "16%",
-      cell: (run) => <span className="text-foreground">{suiteLabel(run)}</span>,
+      width: "17%",
+      cell: (run) => (
+        <span className={cn(WRAPS, "text-foreground")}>{suiteLabel(run)}</span>
+      ),
     },
     {
       key: "agent",
       header: "Agent",
-      width: "18%",
+      width: "17%",
       cell: (run) => (
-        <span className="flex min-w-0 flex-col">
-          <span className="truncate text-foreground">
-            {agentNames.get(run.agentId) ?? "Unavailable agent"}
-          </span>
-          <span className="text-faint">{modalityLabel(run.modality)}</span>
+        <span className={cn(WRAPS, "text-foreground")}>
+          {agentNames.get(run.agentId) ?? "Unavailable agent"}
         </span>
       ),
     },
     {
       key: "connection",
       header: "Connection",
-      width: "18%",
+      width: "15%",
       cell: (run) => (
-        <span className="flex min-w-0 flex-col">
-          <span className="truncate text-foreground">
-            {run.connectionName ?? "Unavailable connection"}
-          </span>
-          <span className="text-faint">{run.productLabel}</span>
+        <span className={cn(WRAPS, "text-foreground")}>
+          {run.connectionName ?? "Unavailable connection"}
         </span>
       ),
     },
     {
       key: "started",
       header: "Started",
-      width: "14%",
+      width: "13%",
       cell: (run) =>
         run.startedAt === null ? (
           <span className="text-faint">Not started</span>
@@ -127,7 +144,7 @@ function columnsFor(
     {
       key: "status",
       header: "Status",
-      width: "12%",
+      width: "14%",
       cell: (run) => <RunStatus status={run.status} />,
     },
     {
