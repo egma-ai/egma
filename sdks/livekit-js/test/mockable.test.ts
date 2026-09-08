@@ -61,6 +61,8 @@ class StubRoom extends EventEmitter {
   readonly remoteParticipants = new Map<string, { identity: string }>();
   mockedTools: string[] = [];
   helloErrors: Error[] = [];
+  helloWaiter: Promise<void> | undefined;
+  pendingHellos = 0;
   /** What Egma answers a census with, where a test wants a shape of its own. */
   helloReply: string | undefined = undefined;
   toolError: Error | undefined;
@@ -68,6 +70,14 @@ class StubRoom extends EventEmitter {
   readonly localParticipant = {
     performRpc: vi.fn(async (call: PerformRpcParams) => {
       if (call.method === "egma.hello") {
+        if (this.helloWaiter !== undefined) {
+          this.pendingHellos += 1;
+          try {
+            await this.helloWaiter;
+          } finally {
+            this.pendingHellos -= 1;
+          }
+        }
         const refused = this.helloErrors.shift();
         if (refused !== undefined) throw refused;
         if (this.helloReply !== undefined) return this.helloReply;
@@ -83,6 +93,24 @@ class StubRoom extends EventEmitter {
       throw new Error(`unexpected RPC method: ${call.method}`);
     }),
   };
+
+  arrive(identity: string): void {
+    const participant = { identity };
+    this.remoteParticipants.set(identity, participant);
+    this.emit("participantConnected", participant);
+  }
+
+  depart(identity: string): void {
+    const participant = this.remoteParticipants.get(identity);
+    if (participant === undefined) return;
+    this.remoteParticipants.delete(identity);
+    this.emit("participantDisconnected", participant);
+  }
+
+  disconnect(): void {
+    this.isConnected = false;
+    this.emit("disconnected");
+  }
 }
 
 type StubContext = {
@@ -101,14 +129,19 @@ function context(
   options: {
     connected?: boolean;
     mockedTools?: string[];
-    personaIdentity?: string;
+    personaIdentity?: string | null;
   } = {},
 ): StubContext {
   const room = new StubRoom();
   room.isConnected = options.connected ?? true;
   room.mockedTools = options.mockedTools ?? [];
-  const personaIdentity = options.personaIdentity ?? "egma-persona";
-  room.remoteParticipants.set(personaIdentity, { identity: personaIdentity });
+  const personaIdentity =
+    options.personaIdentity === undefined
+      ? "egma-persona"
+      : options.personaIdentity;
+  if (personaIdentity !== null) {
+    room.remoteParticipants.set(personaIdentity, { identity: personaIdentity });
+  }
   const created: StubContext = {
     job: { room: { name: roomName } },
     room,
@@ -242,6 +275,7 @@ async function run(
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.allSettled(
     contexts
       .splice(0)
@@ -469,6 +503,79 @@ describe("egma.simulation", () => {
     expect(ctx.shutdownCallbacks).toHaveLength(2);
   });
 
+  it("waits for Egma after the old startup deadline", async () => {
+    vi.useFakeTimers();
+    const agent = agentWithTool("check_calendar", async () => "real");
+    const ctx = context("egma-sim-sim_128_late", {
+      mockedTools: ["check_calendar"],
+      personaIdentity: null,
+    });
+    const settled = simulation(agent, asJobContext(ctx), session()).then(
+      () => "completed" as const,
+      (error: unknown) => error,
+    );
+
+    await vi.advanceTimersByTimeAsync(45_001);
+    ctx.room.arrive("egma-persona");
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(settled).resolves.toBe("completed");
+  });
+
+  it("ends the participant wait when the room disconnects", async () => {
+    const agent = agentWithTool("check_calendar", async () => "real");
+    const ctx = context("egma-sim-sim_128_disconnect", {
+      personaIdentity: null,
+    });
+    const waiting = simulation(agent, asJobContext(ctx), session());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    ctx.room.disconnect();
+
+    await expect(waiting).rejects.toThrow(/room disconnected/u);
+    expect(ctx.room.eventNames()).toEqual([]);
+  });
+
+  it("interrupts an in-flight hello when Egma departs", async () => {
+    const agent = agentWithTool("check_calendar", async () => "real");
+    const ctx = context("egma-sim-sim_128_departure");
+    let rejectHello!: (reason: Error) => void;
+    ctx.room.helloWaiter = new Promise((_resolve, reject) => {
+      rejectHello = reject;
+    });
+    const waiting = simulation(agent, asJobContext(ctx), session());
+    await vi.waitFor(() => expect(ctx.room.pendingHellos).toBe(1));
+
+    ctx.room.depart("egma-persona");
+
+    await expect(waiting).rejects.toThrow(/Egma's participant.*disconnected/u);
+    rejectHello(new Error("the departed RPC failed later"));
+    await vi.waitFor(() => expect(ctx.room.pendingHellos).toBe(0));
+    expect(ctx.room.eventNames()).toEqual([]);
+  });
+
+  it.each([1400, 1501, 1502, 1505])(
+    "retries the same census after transient hello failure %i",
+    async (code) => {
+      const agent = agentWithTool("check_calendar", async () => "real");
+      const ctx = context(`egma-sim-sim_128_retry_${code}`, {
+        mockedTools: ["check_calendar"],
+      });
+      ctx.room.helloErrors.push(
+        new RpcError(code, "one hello attempt was lost"),
+      );
+
+      await simulation(agent, asJobContext(ctx), session());
+
+      const calls = ctx.room.localParticipant.performRpc.mock.calls;
+      expect(calls.map(([call]) => call.method)).toEqual([
+        "egma.hello",
+        "egma.hello",
+      ]);
+      expect(calls[0]![0].payload).toBe(calls[1]![0].payload);
+    },
+  );
+
   it("accepts the token-endpoint persona identity but refuses two claimants", async () => {
     const agent = agentWithTool("check_calendar", async () => "real");
     const accepted = context("egma-sim-sim_129", {
@@ -500,6 +607,30 @@ describe("egma.simulation", () => {
     // Not one word on the wire: the census is this agent's whole tool
     // inventory, and it is never sent to somebody who might not be Egma.
     expect(refused.room.localParticipant.performRpc).not.toHaveBeenCalled();
+  });
+
+  it("refuses a second claimant that arrives as the selected persona is returned", async () => {
+    const agent = agentWithTool("check_calendar", async () => "real");
+    const ctx = context("egma-sim-sim_130_race", {
+      mockedTools: ["check_calendar"],
+    });
+    const values = ctx.room.remoteParticipants.values.bind(
+      ctx.room.remoteParticipants,
+    );
+    let queued = false;
+    vi.spyOn(ctx.room.remoteParticipants, "values").mockImplementation(() => {
+      if (!queued) {
+        queued = true;
+        queueMicrotask(() => ctx.room.arrive("egma-persona-sim_130_race"));
+      }
+      return values();
+    });
+
+    await expect(
+      simulation(agent, asJobContext(ctx), session()),
+    ).rejects.toThrow(/another participant answering to Egma's name/u);
+
+    expect(ctx.room.localParticipant.performRpc).not.toHaveBeenCalled();
   });
 
   it("belongs to one LiveKit job per process, and says so twice", async () => {

@@ -54,6 +54,8 @@ from .room import (
     QUOTED_REFUSAL_CHARS,
     JoinedRoom,
     RpcMethod,
+    RpcNotice,
+    RpcRefusalNotice,
     answering,
     chat_room_name_for,
     delete_room,
@@ -164,6 +166,14 @@ than back to ``listening``, so a filler, a tool call and the answer out of
 it stay one turn on this channel as they are on the other one.
 """
 
+AGENT_INITIALIZED_STATES = frozenset({"listening", "thinking", "speaking"})
+"""LiveKit session states that prove the worker finished session startup.
+
+The SDK configuration exchange completes before ``session.start``. The first
+``listening`` update can be overtaken by an immediate greeting, so thinking and
+speaking are equally strong proof that the session can receive input.
+"""
+
 SPOKEN_TRACK_ATTRIBUTE = "lk.transcribed_track_id"
 """The stream attribute that means these words were spoken, not typed.
 
@@ -186,6 +196,228 @@ what is being waited for has already been sent.
 
 class _UnsafeEndpointAddress(OSError):
     """The token endpoint resolved to an address Egma must not reach."""
+
+
+class LiveKitStartup:
+    """Latched configuration and native session readiness for one worker.
+
+    The participant that calls ``egma.hello`` is the worker under test. Native
+    state from another room occupant cannot satisfy its startup.
+    """
+
+    def __init__(self, mock_tools: MockToolSeam | None) -> None:
+        self._mock_tools = mock_tools
+        self._changed = asyncio.Event()
+        self._present: set[str] = set()
+        self._seen: set[str] = set()
+        self._states: dict[str, str] = {}
+        self._audio_identities: set[str] = set()
+        self._reporting_identity: str | None = None
+        self._accepted_identity: str | None = None
+        self._refusal: str | None = None
+        self._registration_failure: str | None = None
+        self._departed: set[str] = set()
+        self._relevant_departure: str | None = None
+
+    @staticmethod
+    def _identity(invocation: Any) -> str:
+        identity = getattr(invocation, "caller_identity", "")
+        return identity if isinstance(identity, str) else ""
+
+    def report_attempted(self, invocation: Any) -> None:
+        identity = self._identity(invocation)
+        if identity:
+            self._reporting_identity = identity
+        self._changed.set()
+
+    def report_accepted(self, invocation: Any) -> None:
+        identity = self._identity(invocation)
+        if identity:
+            self._accepted_identity = identity
+        self._changed.set()
+
+    def report_refused(self, _invocation: Any, _refused: object) -> None:
+        if self._mock_tools is not None:
+            self._refusal = self._mock_tools.why_unreported
+        else:
+            self._refusal = "the agent's Egma configuration was refused"
+        self._changed.set()
+
+    def registration_failed(self, reason: str) -> None:
+        self._registration_failure = reason
+        self._changed.set()
+
+    def participant_seen(
+        self, identity: str, attributes: dict[str, str] | None = None
+    ) -> None:
+        if not identity or identity == PERSONA_IDENTITY:
+            return
+        self._present.add(identity)
+        self._seen.add(identity)
+        if self._relevant_departure != identity:
+            self._departed.discard(identity)
+        if attributes is not None:
+            self.participant_state(identity, attributes.get(AGENT_STATE_ATTRIBUTE))
+        self._changed.set()
+
+    def participant_state(self, identity: str, state: object) -> None:
+        if (
+            not identity
+            or identity == PERSONA_IDENTITY
+            or not isinstance(state, str)
+        ):
+            return
+        self._present.add(identity)
+        self._seen.add(identity)
+        self._states[identity] = state
+        self._changed.set()
+
+    def participant_audio(self, identity: str) -> None:
+        """Record inbound audio under the participant that produced it."""
+        if not identity or identity == PERSONA_IDENTITY:
+            return
+        self._audio_identities.add(identity)
+        self._changed.set()
+
+    def participant_left(self, identity: str) -> None:
+        if not identity or identity == PERSONA_IDENTITY:
+            return
+        if self.is_relevant(identity):
+            self._relevant_departure = identity
+        self._present.discard(identity)
+        self._states.pop(identity, None)
+        self._audio_identities.discard(identity)
+        self._departed.add(identity)
+        self._changed.set()
+
+    def is_relevant(self, identity: str) -> bool:
+        if self._mock_tools is None:
+            return True
+        selected = self._accepted_identity or self._reporting_identity
+        return selected is not None and identity == selected
+
+    @property
+    def ready(self) -> bool:
+        identity = self._accepted_identity
+        if self._mock_tools is None:
+            return any(
+                identity in self._present and state in AGENT_INITIALIZED_STATES
+                for identity, state in self._states.items()
+            )
+        return (
+            identity is not None
+            and identity in self._present
+            and self._states.get(identity) in AGENT_INITIALIZED_STATES
+        )
+
+    def _has_audio(self, room: Any) -> bool:
+        if self._mock_tools is None:
+            return room.carrying_audio.is_set()
+        identity = self._accepted_identity
+        return identity is not None and identity in self._audio_identities
+
+    @property
+    def no_participant_seen(self) -> bool:
+        return not self._seen and self._reporting_identity is None
+
+    async def wait(self, room: Any, *, require_audio: bool = False) -> None:
+        """Wait for startup or an explicit room/configuration failure.
+
+        There is no local deadline. The simulation's outer control cancels this
+        await when its configured duration or cancel directive wins.
+        """
+        while True:
+            refusal = self._refusal
+            identity = self._accepted_identity or self._reporting_identity
+            if self._registration_failure is not None:
+                raise MediaBackendError(self._registration_failure, ending=ERROR)
+            if refusal is not None:
+                raise MediaBackendError(refusal, ending=ERROR)
+            if self._relevant_departure is not None or (
+                identity is not None and identity in self._departed
+            ):
+                raise MediaBackendError(
+                    "the agent disconnected before its LiveKit session finished "
+                    "starting",
+                    ending=ERROR,
+                )
+            if room.failed.is_set():
+                raise MediaBackendError(
+                    f"the livekit server at {self._server(room)} closed the room "
+                    "while the agent's session was starting",
+                    ending=ERROR,
+                )
+            if room.ended.is_set():
+                raise MediaBackendError(
+                    "the agent disconnected before its LiveKit session finished "
+                    "starting",
+                    ending=ERROR,
+                )
+            has_audio = not require_audio or self._has_audio(room)
+            if self.ready and has_audio:
+                return
+
+            self._changed.clear()
+            waiting = [
+                asyncio.ensure_future(self._changed.wait()),
+                asyncio.ensure_future(room.failed.wait()),
+                asyncio.ensure_future(room.ended.wait()),
+            ]
+            if (
+                require_audio
+                and self._mock_tools is None
+                and not room.carrying_audio.is_set()
+            ):
+                waiting.append(asyncio.ensure_future(room.carrying_audio.wait()))
+            try:
+                await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for unfinished in waiting:
+                    if not unfinished.done():
+                        unfinished.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await unfinished
+
+    def duration_failure(self, seconds: float, *, require_audio: bool = False) -> str:
+        """Explain which startup condition was absent at the outer duration."""
+        duration = f"{seconds:g}s"
+        if not self._present and self._reporting_identity is None:
+            return (
+                f"no agent joined before the simulation's configured {duration} "
+                "duration expired"
+            )
+        if self._accepted_identity is None:
+            why = (
+                self._mock_tools.why_unreported
+                if self._mock_tools is not None
+                else "the agent did not complete Egma configuration"
+            )
+            return f"{why}; the configured {duration} simulation duration expired"
+        state = self._states.get(self._accepted_identity)
+        if state not in AGENT_INITIALIZED_STATES:
+            return (
+                "the agent reported to Egma, but its LiveKit session did not publish "
+                "an initialized state before the simulation's configured "
+                f"{duration} duration expired"
+            )
+        if require_audio and not self._has_audio_for_duration():
+            return (
+                "the agent's LiveKit session initialized, but its voice media path "
+                "was not ready before the simulation's configured "
+                f"{duration} duration expired"
+            )
+        return (
+            "LiveKit startup did not finish within the configured "
+            f"{duration} duration"
+        )
+
+    def _has_audio_for_duration(self) -> bool:
+        identity = self._accepted_identity
+        return identity is not None and identity in self._audio_identities
+
+    @staticmethod
+    def _server(room: Any) -> str:
+        return getattr(room, "_url", "configured server")
 
 
 def _public_endpoint_address(raw: object) -> None:
@@ -660,6 +892,7 @@ class RoomLifecycle:
     ) -> None:
         self._settings = settings
         self._mock_tools = mock_tools
+        self._startup = LiveKitStartup(mock_tools)
         self._endpoint_resolver = endpoint_resolver
         self._confirm_remote_end = confirm_remote_end
         self._on_provider_reference = on_provider_reference
@@ -697,6 +930,7 @@ class RoomLifecycle:
         own url, or the one an endpoint's answer named."""
         self._asked_for_a_room = False
         self._offered = False
+        self._offer_failure: str | None = None
 
     @property
     def room_name(self) -> str:
@@ -719,7 +953,7 @@ class RoomLifecycle:
         for a token into it: the bare form, which says voice."""
         return room_name_for(simulation_id)
 
-    def _answer_for_mocked_tools(self) -> None:
+    def _answer_for_mocked_tools(self) -> bool:
         """Register hello and tool RPC as soon as the room joins. dial() retries if
         needed.
         Mark setup complete only after both registrations succeed. Register even with
@@ -727,19 +961,49 @@ class RoomLifecycle:
         Registration failures are logged here; simulation startup still requires hello.
         """
         if self._mock_tools is None or self._room is None or self._offered:
-            return
+            return self._offered or self._mock_tools is None
         try:
-            self._room.register_rpc(HELLO_METHOD, self._mock_tools.hello)
+            self._room.register_rpc(
+                HELLO_METHOD,
+                self._mock_tools.hello,
+                on_attempt=self._startup.report_attempted,
+                on_accepted=self._startup.report_accepted,
+                on_refused=self._startup.report_refused,
+            )
             self._room.register_rpc(TOOL_METHOD, self._mock_tools.tool)
         except Exception as unoffered:
+            self._offer_failure = (
+                f"Egma could not offer its configuration and mock-tool exchange "
+                f"in {self._room_name}: {self._quotable(repr(unoffered))}"
+            )
             logger.error(
-                "Egma could not offer the mock-tool exchange in %s, so every "
-                "tool the agent has will run its own implementation: %s",
+                "Egma could not offer its configuration and mock-tool exchange "
+                "in %s, so SDK setup cannot complete: %s",
                 self._room_name,
                 self._quotable(repr(unoffered)),
             )
-            return
+            return False
         self._offered = True
+        self._offer_failure = None
+        return True
+
+    async def wait_started(self, *, require_audio: bool = False) -> str:
+        """Wait for the SDK exchange and the same participant's native session."""
+        room = self._room
+        if room is None:
+            raise MediaBackendError("an agent was waited for before a room")
+        await self._startup.wait(room, require_audio=require_audio)
+        return self._room_name
+
+    def startup_duration_failure(
+        self, seconds: float, *, require_audio: bool = False
+    ) -> str:
+        if self._startup.no_participant_seen:
+            return (
+                f"{self._nobody_came(seconds)}; the simulation's configured "
+                f"{seconds:g}s duration expired during startup"
+            )
+        return self._startup.duration_failure(seconds, require_audio=require_audio)
 
     async def _way_in(self) -> WayIn:
         """A token and a room, however this connection comes by them.
@@ -781,14 +1045,18 @@ class RoomLifecycle:
         if self._room is None:
             raise MediaBackendError("an agent was requested before a room transport")
         await self._room.wait_connected()
-        self._answer_for_mocked_tools()
+        if not self._answer_for_mocked_tools():
+            self._startup.registration_failed(
+                self._offer_failure
+                or "Egma could not offer its configuration and mock-tool exchange"
+            )
         self._room.note_anybody_already_here()
         if not self._settings.mints_its_own:
             return
         await self._dispatch()
 
     async def _wait_arrivals(self, seconds: float) -> bool:
-        """Whether anybody joined the room inside the budget."""
+        """Whether anybody joined the room inside a legacy caller's budget."""
         room = self._room
         if room is None:
             raise MediaBackendError("an agent was waited for before a room")
@@ -1183,14 +1451,12 @@ class LiveKitRoomBackend(RoomLifecycle):
         way_in = await self._way_in()
         self._server_url = way_in.url
         self._room = self._joined_room(way_in)
+        self._room.watch_startup(self._startup)
         self._room.answer_when_joined(self._answer_for_mocked_tools)
         return self._room.create_transport()
 
     async def wait_answered(self, seconds: float) -> str:
-        """Wait for the agent to turn up and be heard, or say nobody did."""
-        # One deadline for both halves, not one each: the budget is how
-        # long the room may stand empty, and two budgets end up waiting
-        # twice as long as anybody was told.
+        """Keep the bounded arrival and audio contract for non-Egma room users."""
         deadline = asyncio.get_running_loop().time() + seconds
         if not await self._wait_arrivals(seconds):
             raise MediaBackendError(
@@ -1198,18 +1464,6 @@ class LiveKitRoomBackend(RoomLifecycle):
             )
         left = deadline - asyncio.get_running_loop().time()
         if left <= 0 or not await first_of(self._room.carrying_audio, within=left):
-            # An agent that joined and went silent has two shapes, and they
-            # send a developer to different places. One is a worker that
-            # subscribes and never publishes. The other is the Egma SDK
-            # refusing to start a session it could not report — which it
-            # does out loud, in the worker's own log, and which arrives
-            # here as exactly the same silence. The seam knows which:
-            # the SDK's hello comes before the session starts, so a room
-            # with no hello in it is the second shape.
-            if self._mock_tools is not None and not self._mock_tools.agent_reported:
-                raise MediaBackendError(
-                    self._mock_tools.why_unreported, ending=AGENT_NEVER_JOINED
-                )
             raise MediaBackendError(
                 f"an agent joined the room but published no audio within "
                 f"{seconds:.0f}s; check that the worker publishes a track "
@@ -1351,10 +1605,16 @@ class TextRoom:
         about a turn that went wrong; nothing decides on it directly,
         because a state egma has not seen is not a state that did not
         happen."""
+        self._startup: LiveKitStartup | None = None
+        self._event_handlers: list[tuple[str, Callable[..., None]]] = []
 
     @property
     def joined(self) -> bool:
         return self._room is not None
+
+    def watch_startup(self, startup: LiveKitStartup) -> None:
+        """Attach the startup latch before room event handlers are registered."""
+        self._startup = startup
 
     async def join(self) -> None:
         """Enter the room as a participant that publishes nothing."""
@@ -1384,6 +1644,12 @@ class TextRoom:
         # look exactly like a worker that never came.
         for participant in room.remote_participants.values():
             self.arrivals.set()
+            startup = self._startup
+            if startup is not None:
+                startup.participant_seen(
+                    getattr(participant, "identity", ""),
+                    getattr(participant, "attributes", None),
+                )
             for publication in participant.track_publications.values():
                 if getattr(publication, "kind", None) == rtc.TrackKind.KIND_AUDIO:
                     self.audio_published.set()
@@ -1398,12 +1664,24 @@ class TextRoom:
         room.register_text_stream_handler(TRANSCRIPTION_TOPIC, self._agent_said)
 
         @room.on("participant_connected")
-        def _arrived(_participant: Any) -> None:
+        def _arrived(participant: Any) -> None:
             self.arrivals.set()
+            startup = self._startup
+            if startup is not None:
+                startup.participant_seen(
+                    getattr(participant, "identity", ""),
+                    getattr(participant, "attributes", None),
+                )
 
         @room.on("participant_disconnected")
-        def _left(_participant: Any) -> None:
-            if not self._leaving:
+        def _left(participant: Any) -> None:
+            identity = getattr(participant, "identity", "")
+            startup = self._startup
+            if startup is not None:
+                startup.participant_left(identity)
+            if not self._leaving and (
+                startup is None or startup.is_relevant(identity)
+            ):
                 self.ended.set()
 
         @room.on("participant_attributes_changed")
@@ -1448,6 +1726,14 @@ class TextRoom:
             else:
                 self.failed.set()
 
+        self._event_handlers = [
+            ("participant_connected", _arrived),
+            ("participant_disconnected", _left),
+            ("participant_attributes_changed", _stated),
+            ("track_published", _published),
+            ("disconnected", _dropped),
+        ]
+
     async def wait_connected(self) -> None:
         """Joining is what connected it; this is where that is checked."""
         if self._room is None:
@@ -1475,7 +1761,15 @@ class TextRoom:
         if present:
             self.arrivals.set()
 
-    def register_rpc(self, method: str, handler: RpcMethod) -> None:
+    def register_rpc(
+        self,
+        method: str,
+        handler: RpcMethod,
+        *,
+        on_attempt: RpcNotice | None = None,
+        on_accepted: RpcNotice | None = None,
+        on_refused: RpcRefusalNotice | None = None,
+    ) -> None:
         """Offer one mock-tool method on egma's own participant.
 
         The same seam the voice room offers, through the same wrapper: the
@@ -1486,7 +1780,15 @@ class TextRoom:
             raise MediaBackendError(
                 f"{method} was offered before the room was joined", ending=ERROR
             )
-        self._room.local_participant.register_rpc_method(method, answering(handler))
+        self._room.local_participant.register_rpc_method(
+            method,
+            answering(
+                handler,
+                on_attempt=on_attempt,
+                on_accepted=on_accepted,
+                on_refused=on_refused,
+            ),
+        )
 
     async def send(self, text: str) -> None:
         """Type one persona turn into the room."""
@@ -1563,12 +1865,19 @@ class TextRoom:
         room, self._room = self._room, None
         self._leaving = True
         self.ended.set()
-        for reader in list(self._reading):
+        readers = list(self._reading)
+        for reader in readers:
             if not reader.done():
                 reader.cancel()
+        if readers:
+            await asyncio.gather(*readers, return_exceptions=True)
         self._reading.clear()
         if room is None:
             return
+        for event, handler in self._event_handlers:
+            room.off(event, handler)
+        self._event_handlers.clear()
+        room.unregister_text_stream_handler(TRANSCRIPTION_TOPIC)
         try:
             await room.disconnect()
         except Exception as unfinished:
@@ -1614,6 +1923,9 @@ class TextRoom:
         state = changed.get(AGENT_STATE_ATTRIBUTE)
         if state is None:
             return
+        startup = self._startup
+        if startup is not None:
+            startup.participant_state(identity, state)
         self.agent_state = state
         if state in AGENT_FINISHED_STATES:
             # Stamped with the room's stream count, so a landing utterance
@@ -1757,6 +2069,7 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         way_in = await self._way_in()
         self._server_url = way_in.url
         self._room = self._joined_room(way_in)
+        self._room.watch_startup(self._startup)
         await self._room.join()
         # The offer goes on at the join itself, exactly as the voice room
         # makes it on its connect: egma is in the room from this line, and
@@ -1773,20 +2086,6 @@ class LiveKitChatRoomBackend(RoomLifecycle):
             room_name=self._room_name,
             quotable=self._quotable,
         )
-
-    async def wait_arrived(self, seconds: float) -> str:
-        """Wait for the agent's participant, or say nobody came.
-
-        One half here where the voice driver waits for two. A chat agent
-        publishes no audio *by design*, so there is no second signal to
-        wait on — and waiting for one would refuse every correctly
-        integrated worker as a worker that crashed.
-        """
-        if not await self._wait_arrivals(seconds):
-            raise MediaBackendError(
-                self._nobody_came(seconds), ending=AGENT_NEVER_JOINED
-            )
-        return self._room_name
 
     async def wait_greeting(
         self, seconds: float, *, quiet_seconds: float, drain_seconds: float

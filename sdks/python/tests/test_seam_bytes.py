@@ -66,6 +66,10 @@ def test_the_refusal_codes_are_the_contracts():
         assert refusal["code"] in seam.EGMA_REFUSALS
     for code in seam.EGMA_NOT_REACHED:
         assert reserved["from"] <= code <= reserved["to"]
+    assert seam.TRANSIENT_HELLO_FAILURES == {1400, 1501, 1502, 1505}
+    assert seam.TRANSIENT_HELLO_FAILURES.isdisjoint(
+        {seam.UNSUPPORTED_PROTOCOL_VERSION, 1401, 1403, 1404, 1503}
+    )
 
 
 def test_both_caps_are_the_contracts():

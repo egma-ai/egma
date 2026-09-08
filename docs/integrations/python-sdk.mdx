@@ -234,7 +234,7 @@ The SDK follows later `Agent` and `AgentTask` handoffs. Do not add another `simu
 
 A simulation that ran without reaching Egma would have called your real backends everywhere a mock tool was meant to answer, and its record would say nothing about it. A test that isolated nothing must not be allowed to look like one that did. So both halves fail closed.
 
-- **The agent cannot report to Egma** → `simulation` raises `egma.NotReported` and your session never starts. This covers every branch: no Egma participant arrived in the room, two participants claimed to be Egma, the room would not open, or the two halves do not speak the same version of the exchange. The message names the branch and the two things to check — the room and Egma's own side of it, then the package installed here.
+- **The agent cannot report to Egma** → `simulation` raises `egma.NotReported` and your session never starts. This covers every branch: the room ended before Egma arrived, Egma left during setup, two participants claimed to be Egma, the room would not open, or the two halves do not speak the same version of the exchange. The message names the branch and the two things to check — the room and Egma's own side of it, then the package installed here.
 - **Egma's own side saw no report** → Egma ends the simulation with the same finding, in this message:
 
 ```text
@@ -262,13 +262,15 @@ The inert path is not a best-effort claim — it is a construction property with
 | Simulation — tool has no mock | Real tool runs, and the call is on the transcript |
 | Egma not reachable during a call | `ToolError` raised to model; the real tool does not run |
 | Egma explicitly refuses a call | `ToolError` raised to model |
-| Egma never answers the report | `egma.NotReported` raised; the session does not start |
+| The room ends before Egma accepts the report | `egma.NotReported` raised; the session does not start |
 
 ### What a simulation room costs before the greeting
 
 Inside an `egma-sim-` room, and only there, `simulation` connects the job to the room if your entrypoint has not already done so, and then waits for Egma's participant to appear and answer. Your agent's session starts after that.
 
-The wait is bounded at **45 seconds**: the 30 Egma allows itself to reach the room, plus a 15-second margin the SDK chooses for the two parts of Egma's journey that the 30 does not cover: on a connection where Egma asks your own token endpoint for a token, the time spent waiting on that endpoint before Egma starts connecting at all; and, at the far end, the sliver between Egma's participant becoming visible in the room and its two methods answering. It is normally over in well under a second, and it is long because the alternative is worse: a simulation that gave up early is a simulation where every mocked tool ran its real implementation — a real appointment booked, a real card charged. If the wait runs out, `simulation` raises `egma.NotReported` and the session does not start.
+There is no total SDK startup deadline. The SDK waits while the simulation room is active, so a slow token endpoint, cold worker, or late Egma participant does not fail only because it crossed a fixed time allowance. A token request and each hello RPC attempt retain their own transport timeout. The SDK retries only failures that can lose an idempotent hello safely, such as delayed method registration, a connection or response timeout, or a send failure. A permanent refusal, room disconnect, Egma participant departure, or task cancellation ends startup. The session still does not start until Egma has accepted the tool list and the SDK has installed every selected courier.
+
+After your normal `session.start` returns, LiveKit publishes the worker's native agent state, such as `listening`, `thinking`, or `speaking`. Egma waits for that initialized state before it sends the first simulated input. This simulator-side wait is governed by the simulation's configured duration. You do not add another callback or readiness signal.
 
 None of this happens in a production room. It is the reason the room-name check comes first and costs nothing.
 

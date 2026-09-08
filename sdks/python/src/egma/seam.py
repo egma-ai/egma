@@ -55,8 +55,8 @@ margins.
 
 HELLO_TIMEOUT_SECONDS = MAX_ROUND_TRIP_SECONDS + SERVING_MARGIN_SECONDS
 """Hello RPC timeout, shorter than the tool timeout.
-Hello runs before AgentSession.start; a stalled exchange must leave time
-for the agent to join and publish audio within the simulator startup limit.
+Each attempt is bounded by the transport. Startup can retry a lost attempt
+while the room and Egma participant remain active.
 """
 
 MALFORMED_REQUEST = 901
@@ -80,9 +80,16 @@ These codes do not permit fallback to the real tool during a simulation.
 """
 
 EGMA_NOT_LISTENING_YET = frozenset({1400})
-"""Retry an unsupported-method response while the hello startup budget remains.
-The participant can arrive before its RPC methods are registered.
-Once the budget expires, startup fails; the real tool is not a fallback.
+"""The participant can arrive before its RPC methods are registered.
+Retained for callers that need to classify that exact transport response.
+"""
+
+TRANSIENT_HELLO_FAILURES = frozenset({1400, 1501, 1502, 1505})
+"""Hello transport failures that are safe to retry.
+
+Hello is idempotent configuration discovery. A connection timeout, response
+timeout, or send failure can lose one attempt without making setup unsafe to
+repeat. Recipient departure and application refusals are explicit failures.
 """
 
 

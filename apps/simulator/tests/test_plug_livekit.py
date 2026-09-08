@@ -25,11 +25,11 @@ from conftest import (
     assert_one_speaker_to_a_channel,
     speech_in_the_recording,
 )
-from room_stub import AGENT_IDENTITY, RoomStub
+from room_stub import AGENT_IDENTITY, RoomStub, RpcAsk, StubParticipant
 from token_endpoint_stub import serving
 
 from egma_simulator.blob import FilesystemBlobStore
-from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR, contract_dir
+from egma_simulator.contract import ERROR
 from egma_simulator.conversation import (
     Conducted,
     ConversationControls,
@@ -38,8 +38,10 @@ from egma_simulator.media import MediaBackend, MediaBackendError, VoiceMedia
 from egma_simulator.media import livekit_room as livekit_room_module
 from egma_simulator.media import room as room_media
 from egma_simulator.media.livekit_room import (
+    AGENT_STATE_ATTRIBUTE,
     TOKEN_RESPONSE_BYTES,
     LiveKitRoomBackend,
+    LiveKitStartup,
     RoomSettings,
 )
 from egma_simulator.media.room import (
@@ -105,18 +107,6 @@ class LocalEndpointBackend(LiveKitRoomBackend):
         public-address checks.
         """
         del endpoint, named, server_url
-
-
-FAILED_ENDINGS = frozenset(
-    json.loads(
-        (contract_dir() / "schemas" / "simulation-report.v1.schema.json").read_text(
-            encoding="utf-8"
-        )
-    )["$defs"]["failed_facts"]["properties"]["ending"]["enum"]
-)
-"""The endings a failed simulation may honestly claim, read off the
-contract itself rather than spelled again here — a plug that invented a
-variant would be refused at the door, and this says so early."""
 
 
 async def test_room_transport_loss_is_not_remote_participant_departure(
@@ -615,6 +605,11 @@ class ScriptedRtcRoom:
 
         return keep
 
+    def off(self, event: str, handler: Any) -> None:
+        handlers = self.handlers.get(event, [])
+        if handler in handlers:
+            handlers.remove(handler)
+
     def mute(self, participant: Any, publication: Any) -> None:
         for handler in self.handlers["track_muted"]:
             self.mutes_fired += 1
@@ -651,6 +646,92 @@ def a_joined_room() -> AJoinedRoom:
     client._room = ScriptedRtcRoom()
     room._input_drain.watch_mutes()
     return AJoinedRoom(room=room, media=media, client=client)
+
+
+async def test_voice_startup_uses_the_existing_identity_and_its_own_audio():
+    """RTC identity selects the worker while Pipecat labels audio with its SID."""
+    from pipecat.frames.frames import UserAudioRawFrame
+    from pipecat.processors.frame_processor import FrameDirection
+
+    startup = LiveKitStartup(MockToolSeam())
+    room = JoinedRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
+    room.watch_startup(startup)
+    media = room.create_transport()
+    transport = room._transport
+    assert transport is not None
+    worker = StubParticipant(
+        AGENT_IDENTITY,
+        {AGENT_STATE_ATTRIBUTE: "thinking"},
+    )
+    wire = ScriptedRtcRoom()
+    wire.remote_participants[AGENT_IDENTITY] = worker
+    media.input[0]._client._room = wire
+    startup.report_accepted(RpcAsk(payload="{}"))
+
+    connected = transport._event_handlers["on_connected"].handlers[0]
+    await connected(transport)
+    waiting = asyncio.create_task(startup.wait(room, require_audio=True))
+
+    arrival = media.input[1]
+
+    async def discard(*_args: object) -> None:
+        pass
+
+    arrival.push_frame = discard
+    bystander_audio = UserAudioRawFrame(
+        audio=bytes(320),
+        sample_rate=16000,
+        num_channels=1,
+        user_id="PA_bystander",
+    )
+    await arrival.process_frame(bystander_audio, FrameDirection.DOWNSTREAM)
+    await asyncio.sleep(0)
+    assert not waiting.done()
+
+    worker_audio = UserAudioRawFrame(
+        audio=bytes(320),
+        sample_rate=16000,
+        num_channels=1,
+        user_id=worker.sid,
+    )
+    await arrival.process_frame(worker_audio, FrameDirection.DOWNSTREAM)
+    await asyncio.wait_for(waiting, timeout=1)
+    await room.leave()
+
+    assert all(
+        not wire.handlers[event]
+        for event in (
+            "participant_connected",
+            "participant_disconnected",
+            "participant_attributes_changed",
+        )
+    )
+
+
+async def test_voice_startup_fails_when_the_reporting_identity_disconnects():
+    """RTC departure carries identity even though Pipecat events carry the SID."""
+    startup = LiveKitStartup(MockToolSeam())
+    room = JoinedRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
+    room.watch_startup(startup)
+    media = room.create_transport()
+    transport = room._transport
+    assert transport is not None
+    worker = StubParticipant(
+        AGENT_IDENTITY,
+        {AGENT_STATE_ATTRIBUTE: "listening"},
+    )
+    wire = ScriptedRtcRoom()
+    wire.remote_participants[AGENT_IDENTITY] = worker
+    media.input[0]._client._room = wire
+    startup.report_accepted(RpcAsk(payload="{}"))
+
+    connected = transport._event_handlers["on_connected"].handlers[0]
+    await connected(transport)
+    wire.handlers["participant_disconnected"][0](worker)
+
+    with pytest.raises(MediaBackendError, match="agent disconnected"):
+        await asyncio.wait_for(startup.wait(room, require_audio=True), timeout=1)
+    await room.leave()
 
 
 async def test_one_audio_track_reaches_the_persona_exactly_as_it_arrived(
@@ -1932,22 +2013,25 @@ async def test_a_worker_that_never_comes_is_never_the_agent_failing(
     never joined, and the reason is worded for whoever has to go and look
     at their worker.
     """
-    monkeypatch.setattr(livekit_plug, "AGENT_JOIN_SECONDS", 0.05)
     stub = RoomStub(agent_joins=False)
 
     with pytest.raises(PlugError) as never_came:
         await room_walk(
-            tmp_path, stub, monkeypatch, agent_name="front-desk", scenario="One point."
+            tmp_path,
+            stub,
+            monkeypatch,
+            agent_name="front-desk",
+            scenario="One point.",
+            max_duration_seconds=1,
         )
 
     # What the record would carry, asked the way the service asks it: a
     # failed simulation whose ending says nothing was tested, so there is
     # nothing for a grader to judge the agent on.
-    assert failed_ending(never_came.value) == AGENT_NEVER_JOINED
-    assert AGENT_NEVER_JOINED in FAILED_ENDINGS
+    assert failed_ending(never_came.value) == ERROR
     told = str(never_came.value)
-    assert "front-desk" in told, "the name nobody registered has to be on the record"
-    assert "worker" in told
+    assert "no agent named" in told
+    assert "configured 1s duration expired" in told
     # It was asked for before it was given up on, and the room went away.
     assert len(stub.dispatches) == 1
     assert stub.deleted == [stub.rooms[0].name]
@@ -1958,14 +2042,19 @@ async def test_a_worker_that_joins_and_publishes_nothing_never_joined_either(
 ):
     """A participant with no audio is a worker that crashed on its first
     frame. Conducting against it would grade an agent that never spoke."""
-    monkeypatch.setattr(livekit_plug, "AGENT_JOIN_SECONDS", 0.05)
     stub = RoomStub(agent_publishes_audio=False)
 
     with pytest.raises(PlugError) as silent:
-        await room_walk(tmp_path, stub, monkeypatch, scenario="One point.")
+        await room_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=1,
+        )
 
-    assert failed_ending(silent.value) == AGENT_NEVER_JOINED
-    assert "audio" in str(silent.value)
+    assert failed_ending(silent.value) == ERROR
+    assert "voice media path" in str(silent.value)
     assert stub.deleted == [stub.rooms[0].name]
 
 
@@ -1985,9 +2074,15 @@ async def test_a_worker_that_never_reports_to_egma_fails_the_simulation(
     )
 
     with pytest.raises(PlugError) as unreported:
-        await room_walk(tmp_path, stub, monkeypatch, scenario="One point.")
+        await room_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=1,
+        )
 
-    assert failed_ending(unreported.value) == AGENT_NEVER_JOINED
+    assert failed_ending(unreported.value) == ERROR
     said = str(unreported.value)
     assert "did not report to Egma" in said
     assert "egma.hello" in said
@@ -2007,22 +2102,86 @@ async def test_a_worker_the_sdk_would_not_start_says_that_rather_than_no_audio(
     looks exactly like a worker that crashed on its first frame. The seam
     tells them apart: no hello ever arrived, so this is the first.
     """
-    monkeypatch.setattr(livekit_plug, "AGENT_JOIN_SECONDS", 0.05)
     stub = RoomStub(agent_publishes_audio=False, agent_reports=False)
 
     with pytest.raises(PlugError) as unreported:
-        await room_walk(tmp_path, stub, monkeypatch, scenario="One point.")
+        await room_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=1,
+        )
 
-    assert failed_ending(unreported.value) == AGENT_NEVER_JOINED
+    assert failed_ending(unreported.value) == ERROR
     assert "did not report to Egma" in str(unreported.value)
     assert "audio" not in str(unreported.value)
 
 
-def test_the_wait_for_a_worker_is_bounded_and_shorter_than_a_simulation():
-    """The budget itself, pinned where the tests above shorten it: a wait
-    that outran a simulation's duration limit would put ``limit_reached``
-    on a record whose real story is that nothing turned up."""
-    assert 0 < livekit_plug.AGENT_JOIN_SECONDS <= 60
+async def test_voice_startup_waits_for_sdk_setup_after_media_arrives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Audio and participant arrival do not outrank the SDK exchange."""
+    stub = RoomStub(
+        greeting="Front desk.",
+        replies=["Noted."],
+        report_delay_seconds=0.01,
+    )
+
+    conducted, turns, _measures, _assembled = await room_walk(
+        tmp_path, stub, monkeypatch, scenario="One point."
+    )
+
+    assert conducted.status == "completed"
+    assert turns[:2] == [("agent", "Front desk."), ("human", "One point.")]
+
+
+async def test_voice_duration_fails_while_native_session_is_initializing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The voice conductor must not file a completed zero-turn simulation."""
+    stub = RoomStub(release_initial_state=asyncio.Event())
+
+    with pytest.raises(PlugError) as unfinished:
+        await room_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=1,
+        )
+
+    assert failed_ending(unfinished.value) == ERROR
+    assert "did not publish an initialized state" in str(unfinished.value)
+
+
+async def test_voice_cancellation_during_startup_stays_canceled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Cancellation interrupts the shared startup wait and cleans its tasks."""
+    stub = RoomStub(release_initial_state=asyncio.Event())
+    controls = ConversationControls()
+    walking = asyncio.create_task(
+        room_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=2,
+            controls=controls,
+        )
+    )
+
+    await asyncio.wait_for(stub.report_complete.wait(), timeout=1)
+    controls.request_cancel()
+    conducted, turns, _measures, _assembled = await asyncio.wait_for(
+        walking, timeout=1
+    )
+
+    assert conducted.status == "canceled"
+    assert turns == []
+    assert stub.room._state_task is not None
+    assert stub.room._state_task.done()
 
 
 async def test_the_agent_leaving_mid_exchange_is_the_agent_ending_it(
@@ -2242,14 +2401,18 @@ async def test_nothing_a_simulation_produces_carries_the_api_secret(
     the exception under it, and — where there was one — every byte of the
     recording.
     """
-    monkeypatch.setattr(livekit_plug, "AGENT_JOIN_SECONDS", 0.05)
     caplog.set_level(logging.DEBUG)
     stub = RoomStub(greeting="Front desk.", replies=["Noted."], agent_joins=agent_joins)
 
     produced: list[str] = []
     try:
         _conducted, _turns, _measures, assembled = await room_walk(
-            tmp_path, stub, monkeypatch, agent_name="front-desk", scenario="One point."
+            tmp_path,
+            stub,
+            monkeypatch,
+            agent_name="front-desk",
+            scenario="One point.",
+            max_duration_seconds=1,
         )
         recording = (tmp_path / assembled.audio["recording"]).read_bytes()
         produced.append(recording.decode("latin-1"))
@@ -2465,12 +2628,18 @@ def test_the_room_driver_is_behind_the_four_verb_seam():
     """The same four verbs every media driver has, in the same order and
     with the same shapes — except ``dial``, which reaches for nothing here
     because who to reach is the room's own configuration."""
-    for name in ("create_transport", "dial", "wait_answered", "teardown"):
+    for name in ("create_transport", "dial", "wait_started", "teardown"):
         method = getattr(LiveKitRoomBackend, name, None)
         assert method is not None, f"the room driver has no {name}"
         assert inspect.iscoroutinefunction(method), name
         if name == "dial":
             assert taken_by(method) == [("self", inspect.Parameter.empty)]
+            continue
+        if name == "wait_started":
+            assert taken_by(method) == [
+                ("self", inspect.Parameter.empty),
+                ("require_audio", "bool"),
+            ]
             continue
         assert taken_by(method) == taken_by(getattr(MediaBackend, name)), name
 
@@ -3292,7 +3461,6 @@ async def test_the_agent_nobody_dispatched_is_the_endpoints_duty(
     Nothing was tested, so nothing is graded — and the reason says whose
     job the missing half was, because on this shape it was never egma's.
     """
-    monkeypatch.setattr(livekit_plug, "AGENT_JOIN_SECONDS", 0.05)
     stub = RoomStub(agent_joins=False)
 
     with serving() as endpoint:
@@ -3304,17 +3472,13 @@ async def test_the_agent_nobody_dispatched_is_the_endpoints_duty(
                 built_by=livekit_endpoint_spec,
                 token_endpoint=endpoint.url,
                 scenario="One point.",
+                max_duration_seconds=1,
             )
 
-    assert failed_ending(never_came.value) == AGENT_NEVER_JOINED
-    assert AGENT_NEVER_JOINED in FAILED_ENDINGS
+    assert failed_ending(never_came.value) == ERROR
     told = str(never_came.value)
-    assert "token endpoint minted a token" in told
-    assert "nothing dispatched the agent" in told
-    assert "the endpoint's own job" in told
-    # And never the advice from the other shape, which nobody here can act
-    # on: there is no key pair to dispatch with.
-    assert "automatic dispatch" not in told
+    assert "no agent named" in told
+    assert "configured 1s duration expired" in told
 
 
 # -- A room egma cannot delete is left, not deleted --------------------------
@@ -3398,7 +3562,6 @@ async def test_nothing_a_token_endpoint_simulation_produces_carries_the_header(
     and the driver printed out, the refusal and the exception under it,
     and, where there was one, every byte of the recording.
     """
-    monkeypatch.setattr(livekit_plug, "AGENT_JOIN_SECONDS", 0.05)
     caplog.set_level(logging.DEBUG)
     stub = RoomStub(greeting="Front desk.", replies=["Noted."], agent_joins=agent_joins)
 
@@ -3412,6 +3575,7 @@ async def test_nothing_a_token_endpoint_simulation_produces_carries_the_header(
                 built_by=livekit_endpoint_spec,
                 token_endpoint=endpoint.url,
                 scenario="One point.",
+                max_duration_seconds=1,
             )
             recording = (tmp_path / assembled.audio["recording"]).read_bytes()
             produced.append(recording.decode("latin-1"))

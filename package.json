@@ -24,6 +24,7 @@
     "test:sdk:python": "pnpm --filter @egma/sdk-python test",
     "test:sdk:javascript": "pnpm --filter @egma/livekit test",
     "test:fixture": "pnpm --filter @egma/livekit-dumb-agent test",
+    "test:livekit-e2e": "pnpm --filter @egma/livekit-e2e test",
     "test:watch": "vitest"
   },
   "devDependencies": {

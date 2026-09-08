@@ -22,7 +22,7 @@ import asyncio
 import contextlib
 import inspect
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -42,7 +42,7 @@ from livekit.agents.llm import (
     RawFunctionTool,
     is_raw_function_tool,
 )
-from livekit.rtc import RpcError
+from livekit.rtc import ConnectionState, RpcError
 
 from . import export, seam
 from .room import Simulation, simulation_in
@@ -68,42 +68,8 @@ Reject an empty suffix and multiple matches rather than choosing a
 participant that could receive the agent's tool list incorrectly.
 """
 
-EGMA_CONNECT_SECONDS = 30.0
-"""How long egma allows itself to get into the room.
-
-One of egma's own bounds, restated here rather than imported. This
-package is the half a customer installs, so it may not reach back into
-egma's services for a constant — the same reason :mod:`egma.seam` gives
-for writing the exchange twice. The number it restates is
-``CONNECT_SECONDS`` in the simulator's ``media/room.py``, and a
-simulation whose room does not open inside it ends saying so.
-"""
-
-ARRIVAL_MARGIN_SECONDS = 15.0
-"""Extra startup allowance for token acquisition and RPC registration.
-
-Egma can appear in the room before its RPC handlers are registered.
-This margin does not cover a token request and connection that both
-consume their maximum time. Failure to find or contact Egma raises
-``NotReported``; it does not start an unreported simulation.
-"""
-
-STARTUP_SECONDS = EGMA_CONNECT_SECONDS + ARRIVAL_MARGIN_SECONDS
-"""Deadline for finding Egma and deciding whether to retry hello.
-
-Derived from connect allowance plus arrival margin. Connection and
-individual RPC calls use their own timeout behavior, so this is not
-a strict bound on the entire simulation() call. Production rooms
-never enter this wait.
-"""
-
-POLL_SECONDS = 0.25
-"""How long to sleep between looks, when nothing has woken this side.
-
-The room's own arrival event is what makes finding egma prompt; this is
-the floor under it, so a transport that renames that event degrades to
-slow rather than to broken.
-"""
+HELLO_RETRY_SECONDS = 0.25
+"""Pause between retries after a transient hello transport failure."""
 
 RAW_ARGUMENTS = "raw_arguments"
 """The one parameter a raw-schema tool takes: the call's arguments, whole.
@@ -174,11 +140,6 @@ async def simulation(
             named, f"this agent's tools do not fit in one message ({too_much})"
         ) from too_much
 
-    # The one deadline. It starts here rather than at the first wait,
-    # because what it has to cover is egma's own journey into the room and
-    # that began when this job did.
-    deadline = asyncio.get_running_loop().time() + STARTUP_SECONDS
-
     if not ctx.room.isconnected():
         try:
             await ctx.connect()
@@ -187,12 +148,15 @@ async def simulation(
                 named, f"this room could not be connected ({unopened})"
             ) from unopened
 
-    identity = await _egma_in_the_room(ctx.room, deadline, named)
-
-    seat = _Seat(room=ctx.room, identity=identity)
+    startup = _Startup(ctx.room, named)
     try:
-        answered = await _asked_until_egma_is_listening(seat, census, deadline)
+        identity = await _egma_in_the_room(startup)
+        startup.expect(identity)
+        seat = _Seat(room=ctx.room, identity=identity)
+        answered = await _asked_until_egma_is_listening(seat, census, startup)
         mocked = seam.mocked_tools_in(answered)
+    except NotReported:
+        raise
     except RpcError as refused:
         raise _not_reported(
             named, _why_the_hello_was_refused(refused, identity)
@@ -211,6 +175,9 @@ async def simulation(
         # transport exception has no way to know their simulation isolated
         # nothing.
         raise _not_reported(named, f"{type(broke).__name__}: {broke}") from broke
+
+    finally:
+        startup.close()
 
     couriers = _install_couriers(agent, mocked, seat, session)
     _install_handoff_couriers(agent, mocked, seat, session, named)
@@ -506,117 +473,152 @@ def _egma_candidates(room: Any) -> list[str]:
     return sorted(found)
 
 
-def _listen_for_arrivals(room: Any, arrived: asyncio.Event) -> Callable[[], None]:
-    """Wake the search when somebody joins, if this room will say so.
+class _Startup:
+    """Watch the room only for the lifetime of the startup exchange."""
 
-    The waiting below polls whatever happens, so this is what makes it
-    prompt rather than what makes it work: a transport that renamed this
-    event would cost seconds, not correctness.
-    """
-    listen = getattr(room, "on", None)
-    if not callable(listen):
-        return lambda: None
+    def __init__(self, room: Any, simulation: Simulation) -> None:
+        self.room = room
+        self.simulation = simulation
+        self.changed = asyncio.Event()
+        self.ended = asyncio.Event()
+        self.why_ended: str | None = None
+        self.identity: str | None = None
+        self._listeners: list[tuple[str, Callable[..., None]]] = []
+        self._active = True
+        self._listen("participant_connected", self._participant_connected)
+        self._listen("participant_disconnected", self._participant_disconnected)
+        self._listen("connection_state_changed", self._connection_state_changed)
+        if not self.room.isconnected():
+            self._end("the LiveKit room disconnected during startup")
 
-    def woken(*_participant: Any) -> None:
-        arrived.set()
+    def _listen(self, event: str, callback: Callable[..., None]) -> None:
+        listen = getattr(self.room, "on", None)
+        if not callable(listen):
+            raise _not_reported(
+                self.simulation,
+                "this LiveKit room does not expose its startup lifecycle",
+            )
+        try:
+            listen(event, callback)
+        except Exception as cause:
+            self.close()
+            raise _not_reported(
+                self.simulation,
+                f"this LiveKit room could not announce {event} ({cause})",
+            ) from cause
+        self._listeners.append((event, callback))
 
-    try:
-        listen("participant_connected", woken)
-    except Exception:
-        logger.debug(
-            "this room does not announce arrivals, so Egma's participant is "
-            "waited for by looking rather than by being told",
-            exc_info=True,
-        )
-        return lambda: None
+    def _participant_connected(self, participant: Any) -> None:
+        identity = getattr(participant, "identity", None)
+        if (
+            self.identity is not None
+            and isinstance(identity, str)
+            and _answers_to_egmas_name(identity)
+            and identity != self.identity
+        ):
+            self._end("another participant answering to Egma's name joined")
+        self.changed.set()
 
-    def stop() -> None:
-        forget = getattr(room, "off", None)
+    def _participant_disconnected(self, participant: Any) -> None:
+        if getattr(participant, "identity", None) == self.identity:
+            self._end(f"Egma's participant {self.identity!r} disconnected")
+        self.changed.set()
+
+    def _connection_state_changed(self, state: int) -> None:
+        if state == ConnectionState.CONN_DISCONNECTED:
+            self._end("the LiveKit room disconnected during startup")
+
+    def _end(self, why: str) -> None:
+        if not self._active or self.why_ended is not None:
+            return
+        self.why_ended = why
+        self.ended.set()
+        self.changed.set()
+
+    def raise_if_ended(self) -> None:
+        if self.why_ended is not None:
+            raise _not_reported(self.simulation, self.why_ended)
+
+    def expect(self, identity: str) -> None:
+        self.identity = identity
+        candidates = _egma_candidates(self.room)
+        if len(candidates) > 1 and identity in candidates:
+            self._end("another participant answering to Egma's name joined")
+        elif candidates != [identity]:
+            self._end(f"Egma's participant {identity!r} disconnected")
+        self.raise_if_ended()
+
+    async def wait_for_change(self) -> None:
+        await self.changed.wait()
+        self.raise_if_ended()
+
+    async def run(self, operation: Callable[[], Awaitable[Any]]) -> Any:
+        """Stop waiting on one operation when the room startup ends."""
+        self.raise_if_ended()
+        running = asyncio.ensure_future(operation())
+        ending = asyncio.create_task(self.ended.wait())
+        try:
+            await asyncio.wait(
+                (running, ending), return_when=asyncio.FIRST_COMPLETED
+            )
+            self.raise_if_ended()
+            return await running
+        finally:
+            for task in (running, ending):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(running, ending, return_exceptions=True)
+
+    async def pause(self) -> None:
+        await self.run(lambda: asyncio.sleep(HELLO_RETRY_SECONDS))
+
+    def close(self) -> None:
+        self._active = False
+        forget = getattr(self.room, "off", None)
         if callable(forget):
-            with contextlib.suppress(Exception):
-                forget("participant_connected", woken)
+            for event, callback in reversed(self._listeners):
+                with contextlib.suppress(Exception):
+                    forget(event, callback)
+        self._listeners.clear()
 
-    return stop
 
-
-async def _egma_in_the_room(
-    room: Any, deadline: float, simulation: Simulation
-) -> str:
-    """Wait for one Egma participant in a simulation room or raise ``NotReported``.
-
-    Subscribe before reading participants so an arrival cannot be missed
-    between the initial lookup and event registration.
-    """
-    loop = asyncio.get_running_loop()
-    arrived = asyncio.Event()
-    stop_listening = _listen_for_arrivals(room, arrived)
-    try:
-        while True:
-            arrived.clear()
-            found = _egma_candidates(room)
-            if len(found) == 1:
-                return found[0]
-            if len(found) > 1:
-                # Refused rather than resolved. LiveKit makes one identity
-                # unique per room, so an impersonator taking egma's exact
-                # name is evicted by the server; one taking a variant of it
-                # sits quietly beside the real thing, and whichever this
-                # side picked would receive every tool name and schema this
-                # agent has. There is no reading of two claimants that is
-                # safe to act on.
-                raise _not_reported(
-                    simulation,
-                    f"{len(found)} participants in this room answer to Egma's "
-                    f"name ({', '.join(found)}), so which one is Egma is not "
-                    "knowable and this SDK will hand a tool inventory to "
-                    "neither",
-                )
-
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                raise _not_reported(
-                    simulation,
-                    f"no Egma participant joined this room within "
-                    f"{STARTUP_SECONDS:.0f}s; Egma joins as "
-                    f"{EGMA_IDENTITY!r}, or as that name with the simulation "
-                    "after it",
-                )
-
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(
-                    arrived.wait(), min(remaining, POLL_SECONDS)
-                )
-    finally:
-        stop_listening()
+async def _egma_in_the_room(startup: _Startup) -> str:
+    """Wait for exactly one Egma participant until this room ends."""
+    while True:
+        startup.raise_if_ended()
+        startup.changed.clear()
+        found = _egma_candidates(startup.room)
+        if len(found) == 1:
+            return found[0]
+        if len(found) > 1:
+            raise _not_reported(
+                startup.simulation,
+                f"{len(found)} participants in this room answer to Egma's "
+                f"name ({', '.join(found)}), so which one is Egma is not "
+                "knowable and this SDK will hand a tool inventory to neither",
+            )
+        await startup.wait_for_change()
 
 
 async def _asked_until_egma_is_listening(
-    seat: _Seat, census: str, deadline: float
+    seat: _Seat, census: str, startup: _Startup
 ) -> str:
-    """Retry hello while Egma is visible but its RPC handlers are not registered.
-
-    Retry ``UNSUPPORTED_METHOD`` within the startup deadline. Do not retry
-    ``RECIPIENT_NOT_FOUND`` after observing the participant; it has left.
-    Other failures propagate and become ``NotReported``.
-    """
-    loop = asyncio.get_running_loop()
+    """Retry transient hello transport failures while this startup is active."""
     while True:
         try:
-            return await seat.ask(
-                seam.HELLO_METHOD, census, seam.HELLO_TIMEOUT_SECONDS
+            return await startup.run(
+                lambda: seat.ask(
+                    seam.HELLO_METHOD, census, seam.HELLO_TIMEOUT_SECONDS
+                )
             )
         except RpcError as refused:
-            if (
-                refused.code not in seam.EGMA_NOT_LISTENING_YET
-                or loop.time() + POLL_SECONDS >= deadline
-            ):
+            if refused.code not in seam.TRANSIENT_HELLO_FAILURES:
                 raise
             logger.debug(
-                "Egma is in this room and has not registered %s yet; asking "
-                "again",
+                "Egma's %s transport is not ready yet; asking again",
                 seam.HELLO_METHOD,
             )
-            await asyncio.sleep(POLL_SECONDS)
+            await startup.pause()
 
 
 def _this_sdk() -> str:

@@ -817,7 +817,7 @@ async def test_a_hello_egma_refused_leaves_the_agent_wrapping_nothing(
     assert tool_spans(client) == []
 
 
-async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
+async def test_an_exchange_that_cannot_be_offered_fails_startup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
     """Failed RPC registration prevents hello and must fail simulation startup.
@@ -841,11 +841,14 @@ async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
         nobody_can_ask,
     )
 
-    assert terminal_facts(client)["ending"] == "agent_never_joined"
-    assert "did not report to Egma" in terminal_reason(client)
+    assert terminal_facts(client)["ending"] == "error"
+    assert "could not offer its configuration and mock-tool exchange" in (
+        terminal_reason(client)
+    )
     assert tool_spans(client) == []
     assert any(
-        "could not offer the mock-tool exchange" in record.getMessage()
+        "could not offer its configuration and mock-tool exchange"
+        in record.getMessage()
         for record in caplog.records
     )
 

@@ -17,20 +17,10 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from ..contract import AGENT_NEVER_JOINED
 from ..media import MediaBackendError, VoiceMedia
 from ..media.livekit_room import LiveKitRoomBackend, RoomSettings
 from ..mock_tools import MockToolSeam
 from . import PlugError
-
-AGENT_JOIN_SECONDS = 30.0
-"""How long the room may stand empty before nobody coming is the answer.
-
-Long enough for a worker to be woken, given the room, and to publish its
-first audio; short of a simulation's duration limit doing the job
-instead, which would put ``limit_reached`` on a record whose real story is
-that nothing ever turned up.
-"""
 
 
 class LiveKitRoom:
@@ -84,10 +74,6 @@ class LiveKitRoom:
         )
         self._media: VoiceMedia | None = None
         self._reference: str | None = None
-        # Kept as well as handed over, because this plug has to ask one
-        # question of it after the agent is in the room: did the agent's
-        # own side ever say hello.
-        self._mock_tools = mock_tools
 
     @property
     def provider_reference(self) -> str | None:
@@ -126,13 +112,13 @@ class LiveKitRoom:
         """
         try:
             await self._backend.dial()
-            self._reference = await self._backend.wait_answered(AGENT_JOIN_SECONDS)
+            self._reference = await self._backend.wait_started(require_audio=True)
         except MediaBackendError as refused:
             raise PlugError(str(refused), ending=refused.ending) from refused
-        if self._mock_tools is not None and not self._mock_tools.agent_reported:
-            raise PlugError(
-                self._mock_tools.why_unreported, ending=AGENT_NEVER_JOINED
-            )
+
+    def startup_duration_failure(self, seconds: float) -> str:
+        """Explain why startup was still pending when the simulation ended."""
+        return self._backend.startup_duration_failure(seconds, require_audio=True)
 
     async def close(self) -> None:
         """Leave, and delete the room. Safe from every state."""

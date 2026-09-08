@@ -26,6 +26,8 @@ from . import (
 logger = logging.getLogger(__name__)
 
 RpcMethod = Callable[[str], Awaitable[str]]
+RpcNotice = Callable[[Any], None]
+RpcRefusalNotice = Callable[[Any, MockToolRefusal], None]
 
 
 def disconnect_reason_name(reason: object) -> str:
@@ -127,16 +129,29 @@ def persona_name_for(simulation_id: str) -> str:
     return f"{PERSONA_IDENTITY}-{simulation_id}"
 
 
-def answering(handler: RpcMethod) -> Callable[[Any], Awaitable[str]]:
+def answering(
+    handler: RpcMethod,
+    *,
+    on_attempt: RpcNotice | None = None,
+    on_accepted: RpcNotice | None = None,
+    on_refused: RpcRefusalNotice | None = None,
+) -> Callable[[Any], Awaitable[str]]:
     """Turn an Egma mock-tool refusal into LiveKit's typed RPC refusal."""
 
     async def answer(invocation: Any) -> str:
         from livekit import rtc
 
+        if on_attempt is not None:
+            on_attempt(invocation)
         try:
-            return await handler(invocation.payload)
+            response = await handler(invocation.payload)
         except MockToolRefusal as refused:
+            if on_refused is not None:
+                on_refused(invocation, refused)
             raise rtc.RpcError(refused.code, refused.message) from refused
+        if on_accepted is not None:
+            on_accepted(invocation)
+        return response
 
     return answer
 
@@ -830,6 +845,10 @@ class JoinedRoom:
         self.failed = asyncio.Event()
         self._leaving = False
         self._offer: Callable[[], None] | None = None
+        self._startup: Any = None
+        self._startup_room: Any = None
+        self._startup_handlers: list[tuple[str, Callable[..., None]]] = []
+        self._startup_identities: dict[str, str] = {}
 
     @property
     def joined(self) -> bool:
@@ -840,6 +859,10 @@ class JoinedRoom:
         An agent already in the room may send hello as soon as Egma joins.
         """
         self._offer = offer
+
+    def watch_startup(self, startup: Any) -> None:
+        """Attach the startup latch before the transport connects."""
+        self._startup = startup
 
     def create_transport(self) -> VoiceMedia:
         """Create stock LiveKit input and output processors without rates."""
@@ -869,6 +892,10 @@ class JoinedRoom:
             offer = self._offer
             if offer is not None:
                 offer()
+            startup = self._startup
+            raw_room = self._raw_room()
+            if startup is not None and raw_room is not None:
+                self._watch_startup_states(raw_room)
             self._connected.set()
 
         @transport.event_handler("on_before_disconnect")
@@ -891,11 +918,11 @@ class JoinedRoom:
                     await asyncio.shield(self._remote_close)
 
         @transport.event_handler("on_participant_connected")
-        async def _arrived(_transport: object, _participant: str) -> None:
+        async def _arrived(_transport: object, participant: str) -> None:
             self.arrivals.set()
 
         @transport.event_handler("on_first_participant_joined")
-        async def _already_here(_transport: object, _participant: str) -> None:
+        async def _already_here(_transport: object, participant: str) -> None:
             # Also handle participants already present when Egma joins. This event can
             # overlap
             # the arrival callback; both set the same event safely.
@@ -905,6 +932,11 @@ class JoinedRoom:
         async def _left(_transport: object, participant: str) -> None:
             if self._leaving:
                 return
+            startup = self._startup
+            if startup is not None:
+                identity = self._startup_identities.get(participant)
+                if identity is not None and not startup.is_relevant(identity):
+                    return
             try:
                 await input_drain.participant_left(participant, self.ended)
             except Exception:
@@ -932,6 +964,7 @@ class JoinedRoom:
                 if isinstance(frame, InputAudioRawFrame):
                     arrived_now(frame)
                     room.carrying_audio.set()
+                    room._note_startup_audio(getattr(frame, "user_id", ""))
                 await self.push_frame(frame, direction)
 
         return VoiceMedia(
@@ -941,6 +974,70 @@ class JoinedRoom:
             failed=self.failed,
             transport_name=f"livekit server at {self._quotable(self._url)}",
         )
+
+    def _raw_room(self) -> Any:
+        transport = self._transport
+        if transport is None:
+            return None
+        try:
+            return transport._client.room
+        except Exception:
+            return None
+
+    def _watch_startup_states(self, raw_room: Any) -> None:
+        if self._startup_room is raw_room:
+            return
+        self._startup_room = raw_room
+
+        def _remember(participant: Any) -> None:
+            identity = getattr(participant, "identity", "")
+            sid = getattr(participant, "sid", "")
+            if isinstance(sid, str) and isinstance(identity, str) and identity:
+                self._startup_identities[sid] = identity
+            startup = self._startup
+            if startup is not None:
+                startup.participant_seen(
+                    identity,
+                    getattr(participant, "attributes", None),
+                )
+
+        def _forget(participant: Any) -> None:
+            startup = self._startup
+            if startup is not None:
+                startup.participant_left(getattr(participant, "identity", ""))
+
+        def _startup_state(changed: dict[str, str], participant: Any) -> None:
+            startup = self._startup
+            if startup is not None:
+                startup.participant_state(
+                    getattr(participant, "identity", ""),
+                    changed.get("lk.agent.state"),
+                )
+
+        handlers = [
+            ("participant_connected", _remember),
+            ("participant_disconnected", _forget),
+            ("participant_attributes_changed", _startup_state),
+        ]
+        for event, handler in handlers:
+            raw_room.on(event)(handler)
+        self._startup_handlers = handlers
+        for participant in raw_room.remote_participants.values():
+            _remember(participant)
+
+    def _note_startup_audio(self, participant_sid: str) -> None:
+        startup = self._startup
+        identity = self._startup_identities.get(participant_sid)
+        if startup is not None and identity is not None:
+            startup.participant_audio(identity)
+
+    def _detach_startup_states(self) -> None:
+        room, self._startup_room = self._startup_room, None
+        if room is not None:
+            for event, handler in self._startup_handlers:
+                room.off(event, handler)
+        self._startup_handlers.clear()
+        self._startup_identities.clear()
 
     def _room_disconnected(self, reason: object = None) -> None:
         self._disconnect_reason = reason
@@ -1031,7 +1128,15 @@ class JoinedRoom:
         if present:
             self.arrivals.set()
 
-    def register_rpc(self, method: str, handler: RpcMethod) -> None:
+    def register_rpc(
+        self,
+        method: str,
+        handler: RpcMethod,
+        *,
+        on_attempt: RpcNotice | None = None,
+        on_accepted: RpcNotice | None = None,
+        on_refused: RpcRefusalNotice | None = None,
+    ) -> None:
         if self._transport is None:
             raise MediaBackendError(
                 f"{method} was offered before the room transport existed",
@@ -1041,7 +1146,13 @@ class JoinedRoom:
         # local participant. This one access is pinned in uv.lock and covered
         # by the room mock-tool tests.
         self._transport._client.room.local_participant.register_rpc_method(
-            method, answering(handler)
+            method,
+            answering(
+                handler,
+                on_attempt=on_attempt,
+                on_accepted=on_accepted,
+                on_refused=on_refused,
+            ),
         )
 
     async def leave(self) -> None:
@@ -1051,6 +1162,7 @@ class JoinedRoom:
         self._leaving = True
         self.ended.set()
         await self._cancel_remote_close()
+        self._detach_startup_states()
         if input_drain is not None:
             await input_drain.cancel()
         if transport is not None:

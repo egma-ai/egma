@@ -13,14 +13,11 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from ..contract import AGENT_NEVER_JOINED
 from ..media import MediaBackendError
 from ..media.livekit_room import AgentTurn, LiveKitChatRoomBackend
 from ..mock_tools import MockToolSeam
 from . import AgentReply, PlugError
-from .livekit import AGENT_JOIN_SECONDS, build_driver, read_connection
-
-# Share the voice connection's agent-join budget.
+from .livekit import build_driver, read_connection
 
 GREETING_SECONDS = 8.0
 """Time allowed for an optional greeting. If no greeting arrives, the persona speaks
@@ -97,8 +94,6 @@ class LiveKitChat:
             on_provider_reference=on_provider_reference,
         )
         self._reference: str | None = None
-        # Retain the seam to verify hello after the agent joins.
-        self._mock_tools = mock_tools
 
     @property
     def provider_reference(self) -> str | None:
@@ -117,11 +112,7 @@ class LiveKitChat:
         try:
             await self._backend.open_room()
             await self._backend.dial()
-            self._reference = await self._backend.wait_arrived(AGENT_JOIN_SECONDS)
-            if self._mock_tools is not None and not self._mock_tools.agent_reported:
-                raise PlugError(
-                    self._mock_tools.why_unreported, ending=AGENT_NEVER_JOINED
-                )
+            self._reference = await self._backend.wait_started()
             greeting = await self._backend.wait_greeting(
                 GREETING_SECONDS,
                 quiet_seconds=TURN_QUIET_SECONDS,
@@ -131,6 +122,10 @@ class LiveKitChat:
             raise PlugError(str(refused), ending=refused.ending) from refused
         _typing_or_nothing(greeting)
         return greeting.text
+
+    def startup_duration_failure(self, seconds: float) -> str:
+        """Explain why startup was still pending when the simulation ended."""
+        return self._backend.startup_duration_failure(seconds)
 
     async def deliver(self, text: str) -> AgentReply:
         """Type the persona's turn in, and read the agent's answer back."""

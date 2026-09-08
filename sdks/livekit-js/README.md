@@ -83,6 +83,8 @@ Keep the `await simulation(...)` call before this start call. Turn off any separ
 
 If the worker cannot complete the handshake with egma, `simulation` throws `NotReported`. Fix the setup before starting the session. If a mocked tool cannot reach egma during a simulation, that tool errors instead of calling the real backend.
 
+`simulation` has no total startup deadline. It waits for Egma to join and accept the tool configuration while the simulation room stays active. A room disconnect or Egma participant departure stops the wait. Each RPC attempt keeps its own transport timeout, and transient registration or delivery failures are retried with the same configuration.
+
 ### B. Production monitoring
 
 Call `monitor(ctx)` at the start of the job entrypoint, before `ctx.connect` and `session.start`:
