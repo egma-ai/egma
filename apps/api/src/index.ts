@@ -1,3 +1,4 @@
+import { createVoiceFleetReadiness } from "./voice-fleet-readiness.ts";
 import {
   connect,
   connectClickHouse,
@@ -17,6 +18,7 @@ import { platformEvent } from "./platform-log.ts";
 import { buildApi } from "./server.ts";
 import { startRateCardInitialization } from "./rate-card.ts";
 import {
+  createVoiceFleetWake,
   createVoiceFleetReconciler,
   type VoiceFleetReconcileResult,
 } from "./voice-fleet.ts";
@@ -93,23 +95,32 @@ const running: Config = cloudBilling === undefined
 // the claim door and the write that stores a usage record — start reaching it.
 installBillingPlugIn(running.billing);
 
+const voiceFleetReadiness =
+  config.voiceFleet === undefined
+    ? undefined
+    : createVoiceFleetReadiness({
+        taskDefinition: config.voiceFleet.taskDefinition,
+      });
+
 let reconcileVoiceFleet:
   | (() => Promise<VoiceFleetReconcileResult>)
   | undefined;
 const wakeVoiceFleet = config.voiceFleet === undefined
   ? undefined
-  : () => {
-      void reconcileVoiceFleet?.().catch((err: unknown) => {
+  : createVoiceFleetWake({
+      reconcile: () => reconcileVoiceFleet?.(),
+      failed: (err) => {
         app.log.error(
           { err },
-          "voice fleet reconciliation failed; queued work will retry on the next sweep",
+          "voice fleet reconciliation failed; the sweep will retry",
         );
-      });
-    };
+      },
+    });
 
 const { app } = buildApi({
   config: running,
   traceStoreReady: () => traceSchema.state === "ready",
+  ...(voiceFleetReadiness === undefined ? {} : { voiceFleetReadiness }),
   ...(wakeVoiceFleet === undefined ? {} : { wakeVoiceFleet }),
   ...(cloudBilling === undefined ? {} : { billingRoutes: cloudBilling.routes }),
   ...(cloudBilling?.webhookRoutes === undefined
@@ -121,8 +132,15 @@ if (config.voiceFleet !== undefined) {
   // The AWS package is absent from the self-hosted boot path. Merely having
   // ordinary AWS credentials in the environment cannot select this adapter.
   const { awsVoiceFleet } = await import("./voice-fleet-aws.ts");
+  const fleet = awsVoiceFleet(config.voiceFleet);
   const reconciler = createVoiceFleetReconciler({
-    fleet: awsVoiceFleet(config.voiceFleet),
+    fleet: {
+      launchTasks: (request) => fleet.launchTasks(request),
+      listTasks: async () => {
+        const tasks = await fleet.listTasks();
+        return voiceFleetReadiness?.observeTasks(tasks) ?? tasks;
+      },
+    },
     estimateDemand: () => estimateVoiceSimulationDemand({
       caps: config.simulationConcurrencyCaps,
     }),

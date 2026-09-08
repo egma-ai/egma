@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator
 import pytest
 from aiohttp import web
 
-from egma_simulator.client import ControlPlaneClient
+from egma_simulator.client import ClaimFailure, ControlPlaneClient
 
 
 @pytest.fixture
@@ -81,3 +81,44 @@ async def test_a_claim_can_select_a_modality_and_reads_the_server_claim_time():
     assert bodies[0]["modalities"] == ["voice"]
     assert answer.document == {"simulation_id": "sim-voice"}
     assert answer.claimed_at.isoformat() == "2026-09-08T01:02:03+00:00"
+
+
+async def test_a_hosted_claim_carries_its_exact_fleet_identity(recording_control_plane):
+    base_url, bodies = recording_control_plane
+    fleet = {
+        "taskArn": "arn:aws:ecs:us-east-1:123456789012:task/egma/task-id",
+        "taskDefinition": (
+            "arn:aws:ecs:us-east-1:123456789012:task-definition/egma-voice:7"
+        ),
+    }
+
+    async with ControlPlaneClient(
+        base_url, claim_wait_seconds=7.0, fleet=fleet
+    ) as client:
+        await client.claim("voice-one-shot", 1, ("voice",))
+
+    assert bodies[0]["fleet"] == fleet
+
+
+async def test_retirement_requires_an_empty_claim_answer():
+    answers = iter(({"specs": [], "retire": True}, {"specs": [{}], "retire": True}))
+
+    async def claim(_request: web.Request) -> web.Response:
+        return web.json_response(next(answers))
+
+    app = web.Application()
+    app.router.add_post("/v1/claims", claim)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    try:
+        async with ControlPlaneClient(
+            f"http://127.0.0.1:{runner.addresses[0][1]}", claim_wait_seconds=1
+        ) as client:
+            assert await client.claim("voice-standby", 1) == []
+            assert client.retire_requested
+            with pytest.raises(ClaimFailure, match="cannot retire"):
+                await client.claim("voice-standby", 1)
+    finally:
+        await runner.cleanup()

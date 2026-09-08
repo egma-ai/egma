@@ -22,6 +22,7 @@ from .client import ClaimedSpec, ClaimFailure, ControlPlaneClient, HeartbeatFail
 from .config import MediaSettings, SimulatorConfig
 from .contract import ContractViolation
 from .conversation import Conducted, ConversationControls, conduct
+from .fleet import FleetMetadataFailure, fleet_identity_for
 from .model import build_model_client
 from .persona import Persona
 from .pipeline import Assembled, assemble
@@ -569,10 +570,24 @@ class SimulatorService:
         records what a disappearing simulator means.
         """
         config = self._config
+        metadata_uri = os.environ.get("ECS_CONTAINER_METADATA_URI_V4")
+        try:
+            identity = await fleet_identity_for(config.mode, metadata_uri)
+        except FleetMetadataFailure as error:
+            log_event(
+                logger,
+                logging.ERROR,
+                "egma.service.fleet_metadata_failed",
+                "hosted simulator could not read its ECS task identity",
+                attributes={"error.type": type(error).__name__},
+            )
+            raise
+        fleet = None if identity is None else identity.document()
         async with ControlPlaneClient(
             config.control_plane_url,
             claim_wait_seconds=config.claim_wait_seconds,
             service_token=config.service_token,
+            fleet=fleet,
         ) as client:
             executor = AsyncioExecutor(
                 config.capacity,
@@ -679,6 +694,14 @@ class SimulatorService:
                     continue
                 self._last_claim_failure = None
                 self._accept(specs, executor)
+                if client.retire_requested:
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        "egma.service.retired",
+                        "hosted simulator retired before claiming work",
+                    )
+                    return
                 if specs or self._config.mode == "one-shot":
                     return
 

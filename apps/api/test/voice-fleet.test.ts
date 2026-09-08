@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createVoiceFleetWake,
   createVoiceFleetReconciler,
   type VoiceFleet,
   type VoiceFleetTask,
@@ -227,5 +228,37 @@ describe("the voice fleet reconciler", () => {
       { count: 2, mode: "standby" },
       { count: 2, mode: "standby" },
     ]);
+  });
+});
+
+describe("the voice fleet wake-up", () => {
+  it("keeps a wake that arrives while a reconciliation fails", async () => {
+    let rejectFirst!: (error: Error) => void;
+    const first = new Promise<void>((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+    let finishSecond!: () => void;
+    const secondFinished = new Promise<void>((resolve) => {
+      finishSecond = resolve;
+    });
+    let calls = 0;
+    const failures: unknown[] = [];
+    const wake = createVoiceFleetWake({
+      reconcile: () => {
+        calls += 1;
+        if (calls === 1) return first;
+        finishSecond();
+        return Promise.resolve();
+      },
+      failed: (error) => failures.push(error),
+    });
+
+    wake();
+    wake();
+    rejectFirst(new Error("ECS list failed"));
+    await secondFinished;
+
+    expect(calls).toBe(2);
+    expect(failures).toHaveLength(1);
   });
 });
