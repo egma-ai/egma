@@ -89,6 +89,40 @@ describe("the voice fleet reconciler", () => {
     expect(fleet.launches).toHaveLength(2);
   });
 
+  it("replaces standbys that are conducting active simulations", async () => {
+    const fleet = fakeFleet([
+      { id: "standby-1", mode: "standby" },
+      { id: "standby-2", mode: "standby" },
+    ]);
+    const launcher = createVoiceFleetReconciler({
+      fleet,
+      estimateDemand: async () => ({ active: 2, admissibleQueued: 0 }),
+      log,
+    });
+
+    await launcher.reconcile();
+
+    expect(fleet.launches).toEqual([{ count: 2, mode: "standby" }]);
+  });
+
+  it("launches nothing when all desired tasks already exist, whatever their modes", async () => {
+    const fleet = fakeFleet(
+      Array.from({ length: 102 }, (_, index) => ({
+        id: `task-${index}`,
+        mode: "one-shot" as const,
+      })),
+    );
+    const launcher = createVoiceFleetReconciler({
+      fleet,
+      estimateDemand: async () => ({ active: 0, admissibleQueued: 100 }),
+      log,
+    });
+
+    await launcher.reconcile();
+
+    expect(fleet.launches).toEqual([]);
+  });
+
   it("retries failed launches after a capped backoff and leaves demand untouched", async () => {
     let now = 1_000;
     const fleet = fakeFleet();
@@ -109,6 +143,48 @@ describe("the voice fleet reconciler", () => {
     const retry = await launcher.reconcile();
 
     expect(retry.launched).toEqual({ "one-shot": 1, standby: 2 });
+  });
+
+  it("keeps successful task identities when a later launch chunk fails", async () => {
+    let now = 1_000;
+    const launches: number[] = [];
+    let first = true;
+    const fleet: VoiceFleet = {
+      async listTasks() { return []; },
+      async launchTasks({ count, mode }) {
+        launches.push(count);
+        if (first && mode === "one-shot") {
+          first = false;
+          return {
+            tasks: Array.from({ length: 10 }, (_, index) => ({
+              id: `arn:successful:${index}`,
+              mode,
+            })),
+            failures: [{ reason: "run_task_failed", detail: "throttled" }],
+          };
+        }
+        return {
+          tasks: Array.from({ length: count }, (_, index) => ({
+            id: `arn:retry:${mode}:${index}`,
+            mode,
+          })),
+          failures: [],
+        };
+      },
+    };
+    const launcher = createVoiceFleetReconciler({
+      fleet,
+      estimateDemand: async () => ({ active: 0, admissibleQueued: 20 }),
+      log,
+      now: () => now,
+      initialBackoffMilliseconds: 100,
+    });
+
+    await launcher.reconcile();
+    now += 100;
+    await launcher.reconcile();
+
+    expect(launches).toEqual([20, 2, 10]);
   });
 
   it("skips an overlapping trigger while the first reconciliation is reading demand", async () => {

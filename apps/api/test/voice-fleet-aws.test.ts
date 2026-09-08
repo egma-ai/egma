@@ -31,9 +31,12 @@ describe("the AWS voice fleet", () => {
         return {
           tasks: command.input.tasks?.map((taskArn) => ({
             taskArn,
-            tags: taskArn === "arn:running"
-              ? [{ key: "egma:simulator-mode", value: "standby" }]
-              : [],
+            lastStatus: taskArn === "arn:pending:100" ? "STOPPED" : "RUNNING",
+            overrides: taskArn === "arn:running" ? {
+              containerOverrides: [{
+                environment: [{ name: "EGMA_SIMULATOR_MODE", value: "standby" }],
+              }],
+            } : undefined,
           })),
         };
       }
@@ -43,7 +46,7 @@ describe("the AWS voice fleet", () => {
 
     const tasks = await fleet.listTasks();
 
-    expect(tasks).toHaveLength(102);
+    expect(tasks).toHaveLength(101);
     expect(tasks.at(-1)).toEqual({ id: "arn:running", mode: "standby" });
     expect(send.mock.calls.filter(([command]) => command instanceof ListTasksCommand)).toHaveLength(3);
     const describes = send.mock.calls.filter(([command]) => command instanceof DescribeTasksCommand);
@@ -76,5 +79,27 @@ describe("the AWS voice fleet", () => {
       name: "EGMA_SIMULATOR_MODE",
       value: "standby",
     });
+  });
+
+  it("returns earlier task identities when a later run request throws", async () => {
+    let request = 0;
+    const send = vi.fn(async (command: unknown) => {
+      if (!(command instanceof RunTaskCommand)) throw new Error("unexpected command");
+      request += 1;
+      if (request === 2) throw new Error("throttled");
+      return {
+        tasks: Array.from({ length: command.input.count ?? 0 }, (_, index) => ({
+          taskArn: `arn:first:${index}`,
+        })),
+      };
+    });
+    const fleet = awsVoiceFleet(settings, { send } as never);
+
+    const result = await fleet.launchTasks({ count: 20, mode: "one-shot" });
+
+    expect(result.tasks).toHaveLength(10);
+    expect(result.failures).toEqual([
+      { reason: "run_task_failed", detail: "throttled" },
+    ]);
   });
 });
