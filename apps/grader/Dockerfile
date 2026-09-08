@@ -31,6 +31,11 @@ COPY apps/grader apps/grader
 RUN pnpm --filter @egma/ee --if-present build \
     && pnpm exec tsc -b packages/ids packages/provider-credentials packages/db packages/ingestion apps/grader
 
+# Supabase publishes this root. Cloud tasks opt into it with
+# NODE_EXTRA_CA_CERTS; self-hosted images keep their existing trust settings.
+# SHA-256: 700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7
+COPY certificates/supabase-root-2021-ca.crt /etc/ssl/certs/supabase-root-2021-ca.crt
+
 ENV NODE_ENV=production
 
 # No EXPOSE, and there never will be one: the service claims its work rather

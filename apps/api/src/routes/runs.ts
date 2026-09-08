@@ -105,6 +105,8 @@ export type RunRoutesOptions = {
    * and a phone run reaches no platform here at all.
    */
   readonly retellFetch?: typeof fetch | undefined;
+  /** Wake hosted voice compute after a run has become claimable. */
+  readonly wakeVoiceFleet?: (() => void) | undefined;
 };
 
 type Body = Record<string, unknown>;
@@ -553,6 +555,10 @@ export async function runRoutes(
       if (world.kind === "in-use") {
         return sendRefusal(reply, "mock_tools_agent_in_use", world.reason);
       }
+
+      // The run and any mocked world it needs are ready before compute wakes.
+      // This is only a wake-up; the claim transaction still assigns work.
+      options.wakeVoiceFleet?.();
 
       const described = await headerOf(
         acting.auth,

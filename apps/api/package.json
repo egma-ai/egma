@@ -9,9 +9,11 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@aws-sdk/client-ecs": "^3.1127.0",
     "@aws-sdk/client-s3": "^3.1116.0",
     "@egma/db": "workspace:*",
     "@egma/ids": "workspace:*",
+    "@egma/ingestion": "workspace:*",
     "@egma/metrics": "workspace:*",
     "@egma/platform-api": "workspace:*",
     "@egma/provider-credentials": "workspace:*",
@@ -28,8 +30,7 @@
     "fastify": "^5.12.1",
     "nodemailer": "^9.0.3",
     "posthog-node": "^5.49.1",
-    "protobufjs": "^8.7.1",
-    "@egma/ingestion": "workspace:*"
+    "protobufjs": "^8.7.1"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.1"

@@ -42,6 +42,16 @@ const DEFAULT_PERSONA_MODELS: PersonaModels = {
   },
 };
 
+const EVERYDAY_CALLER_V1_MODELS: PersonaModels = {
+  ...DEFAULT_PERSONA_MODELS,
+  tts: {
+    provider: "cartesia",
+    model: "sonic-3.5",
+    voiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+    speed: 1,
+  },
+};
+
 type Provisioned = {
   readonly auth: AuthContext;
   readonly projectId: string;
@@ -152,7 +162,7 @@ describe("the Predefined persona", () => {
     expect(persona).toMatchObject({
       owner: "egma",
       projectId: null,
-      version: 1,
+      version: 2,
       identityName: "Alex Morgan",
       personality:
         "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
@@ -234,7 +244,7 @@ describe("forking a persona", () => {
     expect(edited?.settings?.models).toEqual(source.settings!.models);
     expect(
       (await getPersona(acme.auth, EGMA_PROVIDED_PERSONAS.defaultPersona))?.version,
-    ).toBe(1);
+    ).toBe(2);
   });
 
   it("copies the source version that wins the source-row lock", async () => {
@@ -310,16 +320,23 @@ describe("forking a persona", () => {
 describe("catalog integrity", () => {
   it("carries an identity name and one complete models value in every fixed version", () => {
     expect(PERSONA_LIBRARY_CATALOG).toHaveLength(1);
-    const version = PERSONA_LIBRARY_CATALOG[0]?.versions[0];
-    expect(version).toMatchObject({
+    const versions = PERSONA_LIBRARY_CATALOG[0]?.versions;
+    expect(versions).toHaveLength(2);
+    expect(versions?.[0]).toMatchObject({
       id: "prsv_01M0E4J0BBE1FVDVTZ1BSS5C97",
       version: 1,
+      identityName: "Alex Morgan",
+      parameterContract: personaParameterContract(EVERYDAY_CALLER_V1_MODELS),
+    });
+    expect(versions?.[1]).toMatchObject({
+      id: "prsv_01M2B0K7W8N9Q3R4T5V6X7Y8Z9",
+      version: 2,
       identityName: "Alex Morgan",
       parameterContract: personaParameterContract(DEFAULT_PERSONA_MODELS),
     });
     // Never the team's word for them: an agent asking who is calling has to
     // hear a person, not a shelf label.
-    expect(version?.identityName).not.toBe(PERSONA_LIBRARY_CATALOG[0]?.name);
+    expect(versions?.[1]?.identityName).not.toBe(PERSONA_LIBRARY_CATALOG[0]?.name);
   });
 
   it("refuses changed content under a fixed catalog version id at the database", async () => {
@@ -338,7 +355,8 @@ describe("catalog integrity", () => {
   it("adds a new immutable catalog version without changing an existing fork", async () => {
     const entry = PERSONA_LIBRARY_CATALOG[0];
     const v1 = entry?.versions[0];
-    if (entry === undefined || v1 === undefined) {
+    const v2 = entry?.versions[1];
+    if (entry === undefined || v1 === undefined || v2 === undefined) {
       throw new Error("the Predefined persona catalog entry is incomplete");
     }
     const fork = await forkPersona(
@@ -347,25 +365,25 @@ describe("catalog integrity", () => {
     );
     if (fork === undefined) throw new Error("the fork is missing");
 
-    const v2 = {
-      ...v1,
+    const v3 = {
+      ...v2,
       id: "prsv_01M0E4J0BBE1FVDVTZ1BSS5C98",
-      version: 2,
+      version: 3,
       personality: "Stays calm and asks one clear question.",
-      parameterContract: v1.parameterContract,
-      createdAt: new Date("2026-08-20T00:00:00.000Z"),
+      parameterContract: v2.parameterContract,
+      createdAt: new Date("2026-09-09T00:00:00.000Z"),
     } as const;
 
     expect(
       await seedPersonaLibrary([
-        { ...entry, versions: [...entry.versions, v2] },
+        { ...entry, versions: [...entry.versions, v3] },
       ]),
     ).toEqual([
       {
         id: entry.id,
         name: entry.name,
-        version: 2,
-        versionId: v2.id,
+        version: 3,
+        versionId: v3.id,
       },
     ]);
     expect(await getPersonaVersion(acme.auth, v1.id)).toMatchObject({

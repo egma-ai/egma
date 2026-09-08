@@ -113,6 +113,9 @@ const INSTANCE_SCOPED: ReadonlyMap<string, string> = new Map([
 const WORK_DISPATCHING = [
   "claimGradingJobs",
   "claimSimulations",
+  // Fleet sizing returns deployment-wide counts under configured caps. It
+  // accepts no customer selector and returns no simulation or customer data.
+  "estimateVoiceSimulationDemand",
   "recordSimulationHeartbeat",
   "resolveSimulationStanding",
   "sweepOrphanedSimulations",

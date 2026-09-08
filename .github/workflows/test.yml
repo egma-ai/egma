@@ -347,14 +347,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read
-      id-token: write
+      actions: write
     env:
-      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-      DEPLOY_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-      REGISTRY: ${{ vars.ECR_REGISTRY }}
-      INSTANCE: ${{ vars.PLATFORM_INSTANCE_ID }}
       REPLACE_PRODUCTION: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy }}
+      CLOUD_REPOSITORY: egma-ai/egma-cloud
+      DEPLOYMENT_HEALTH_URL: ${{ vars.DEPLOYMENT_HEALTH_URL || 'https://app.egma.ai/health' }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -407,7 +404,7 @@ jobs:
               apps/api/*|apps/grader/*|apps/simulator/*|packages/*|ee/*) platform=true ;;
               docker-compose.yml|docker-compose.managed.yml|.env.example) platform=true ;;
               pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) platform=true ;;
-              .github/workflows/test.yml) platform=true ;;
+              certificates/*|.github/ecr-image-exists.sh|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) platform=true ;;
               apps/web/*|tools/*) web=true ;;
             esac
           done <<< "$changed"
@@ -423,104 +420,111 @@ jobs:
 
       - name: Check the platform deployment is configured
         if: steps.decide.outputs.platform == 'true'
+        env:
+          CLOUD_RELEASE_TOKEN: ${{ secrets.EGMA_CLOUD_RELEASE_TOKEN }}
         run: |
           missing=""
-          required="DEPLOY_ROLE REGISTRY"
           if [ "$REPLACE_PRODUCTION" = "true" ]; then
-            required="$required INSTANCE"
+            [ -n "$CLOUD_RELEASE_TOKEN" ] || missing="$missing EGMA_CLOUD_RELEASE_TOKEN"
+            [ -n "$DEPLOYMENT_HEALTH_URL" ] || missing="$missing DEPLOYMENT_HEALTH_URL"
           fi
-          for v in $required; do
-            [ -n "${!v}" ] || missing="$missing $v"
-          done
           if [ -n "$missing" ]; then
             echo "Set these repository variables before deploying:$missing" >&2
-            echo "AWS_DEPLOY_ROLE_ARN is the role this workflow assumes." >&2
-            echo "ECR_REGISTRY is <account>.dkr.ecr.<region>.amazonaws.com." >&2
-            echo "PLATFORM_INSTANCE_ID is the box to restart." >&2
             exit 1
           fi
+          if [ "$REPLACE_PRODUCTION" = "true" ]; then
+            curl -fsS --max-time 20 \
+              -H "Authorization: Bearer $CLOUD_RELEASE_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$CLOUD_REPOSITORY/actions/workflows/infrastructure.yml" >/dev/null || {
+                echo "Configure the cloud workflow and EGMA_CLOUD_RELEASE_TOKEN with egma-cloud Contents:write and Actions:read before deployment." >&2
+                exit 1
+              }
+          fi
 
-      - name: Take a short-lived AWS credential
+      - name: Publish the immutable native images
         if: steps.decide.outputs.platform == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          token=$(curl -sS \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')
-          creds=$(aws sts assume-role-with-web-identity \
-            --role-arn "$DEPLOY_ROLE" \
-            --role-session-name "deploy-${GITHUB_RUN_ID}" \
-            --web-identity-token "$token" \
-            --duration-seconds 3600 \
-            --query Credentials --output json)
-          python3 - "$creds" >> "$GITHUB_ENV" <<'PY'
-          import json, sys
-          c = json.loads(sys.argv[1])
-          print(f"AWS_ACCESS_KEY_ID={c['AccessKeyId']}")
-          print(f"AWS_SECRET_ACCESS_KEY={c['SecretAccessKey']}")
-          print(f"AWS_SESSION_TOKEN={c['SessionToken']}")
-          PY
-          echo "::add-mask::$(echo "$creds" | python3 -c 'import json,sys; print(json.load(sys.stdin)["SecretAccessKey"])')"
-          echo "::add-mask::$(echo "$creds" | python3 -c 'import json,sys; print(json.load(sys.stdin)["SessionToken"])')"
-
-      - name: Build and push the three images
-        if: steps.decide.outputs.platform == 'true'
-        run: |
-          set -euo pipefail
-          aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin "$REGISTRY"
-          for app in api simulator grader; do
-            echo "::group::$app"
-            image="$REGISTRY/egma/$app"
-            tags=(-t "$image:$GITHUB_SHA")
-            if [ "$REPLACE_PRODUCTION" = "true" ]; then
-              tags+=(-t "$image:latest")
-            fi
-            docker build -f "apps/$app/Dockerfile" "${tags[@]}" .
-            push_log="$RUNNER_TEMP/$app-push.log"
-            docker push "$image:$GITHUB_SHA" 2>&1 | tee "$push_log"
-            digest=$(sed -n 's/.*digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' "$push_log" | tail -1)
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
-              echo "Could not read the $app image digest from docker push." >&2
-              exit 1
-            }
-            printf -- '- `%s@%s`\n' "$image" "$digest" >> "$GITHUB_STEP_SUMMARY"
-            if [ "$REPLACE_PRODUCTION" = "true" ]; then
-              docker push "$image:latest"
-            fi
-            echo "::endgroup::"
+          started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          title="Build platform images $GITHUB_SHA from $GITHUB_RUN_ID"
+          gh workflow run build-platform-images.yml --ref main \
+            -f "public_sha=$GITHUB_SHA" -f "source_run_id=$GITHUB_RUN_ID"
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id=$(gh run list --workflow build-platform-images.yml \
+              --event workflow_dispatch --limit 20 \
+              --json databaseId,createdAt,displayTitle \
+              --jq "[.[] | select(.createdAt >= \"$started\" and .displayTitle == \"$title\")][0].databaseId // empty")
+            [ -n "$run_id" ] && break
+            sleep 2
           done
+          [ -n "$run_id" ] || { echo "The image publication run did not appear." >&2; exit 1; }
+          gh run watch "$run_id" --exit-status
 
-      - name: Replace what is running, and wait for its health checks
+      - name: Ask the cloud repository to deploy this release
+        if: steps.decide.outputs.platform == 'true' && env.REPLACE_PRODUCTION == 'true'
+        env:
+          CLOUD_RELEASE_TOKEN: ${{ secrets.EGMA_CLOUD_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          title="Release $GITHUB_SHA from $GITHUB_RUN_ID"
+          payload=$(jq -cn \
+            --arg sha "$GITHUB_SHA" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            '{event_type:"public-release",client_payload:{sha:$sha,source_repository:$repository,source_run_id:$run_id}}')
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $CLOUD_RELEASE_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$CLOUD_REPOSITORY/dispatches" \
+            -d "$payload"
+          run_id=""
+          for _ in $(seq 1 30); do
+            runs=$(curl -fsS \
+              -H "Authorization: Bearer $CLOUD_RELEASE_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$CLOUD_REPOSITORY/actions/workflows/infrastructure.yml/runs?event=repository_dispatch&per_page=20")
+            run_id=$(jq -r --arg title "$title" --arg started "$started" \
+              '[.workflow_runs[] | select(.display_title == $title and .created_at >= $started)][0].id // empty' <<<"$runs")
+            [ -n "$run_id" ] && break
+            sleep 2
+          done
+          [ -n "$run_id" ] || { echo "The cloud release run did not appear." >&2; exit 1; }
+          for _ in $(seq 1 540); do
+            run=$(curl -fsS \
+              -H "Authorization: Bearer $CLOUD_RELEASE_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$CLOUD_REPOSITORY/actions/runs/$run_id")
+            status=$(jq -r '.status' <<<"$run")
+            if [ "$status" = "completed" ]; then
+              conclusion=$(jq -r '.conclusion' <<<"$run")
+              [ "$conclusion" = "success" ] || { echo "Cloud release ended with $conclusion." >&2; exit 1; }
+              break
+            fi
+            sleep 10
+          done
+          [ "${status:-}" = "completed" ] || { echo "Cloud release did not finish within 90 minutes." >&2; exit 1; }
+
+      - name: Wait for this exact release identity
         if: steps.decide.outputs.platform == 'true' && env.REPLACE_PRODUCTION == 'true'
         run: |
           set -euo pipefail
-          ACCOUNT="${REGISTRY%%.*}"
-          command_id=$(aws ssm send-command \
-            --instance-ids "$INSTANCE" \
-            --document-name AWS-RunShellScript \
-            --comment "deploy $GITHUB_SHA" \
-            --parameters commands="aws s3 sync s3://egma-deploy-${ACCOUNT}/deployment /opt/egma/deployment --delete && bash /opt/egma/deployment/deploy.sh $GITHUB_SHA" \
-            --query Command.CommandId --output text)
-          echo "SSM command: $command_id"
-          for _ in $(seq 1 120); do
-            status=$(aws ssm get-command-invocation \
-              --command-id "$command_id" --instance-id "$INSTANCE" \
-              --query Status --output text 2>/dev/null || echo Pending)
-            case "$status" in
-              Success|Failed|Cancelled|TimedOut|Undeliverable|Terminated) break ;;
-            esac
+          for _ in $(seq 1 540); do
+            identity=$(curl -fsS "$DEPLOYMENT_HEALTH_URL" 2>/dev/null || true)
+            if jq -e --arg sha "$GITHUB_SHA" \
+              '.status == "ok" and .releaseSha == $sha' <<<"$identity" >/dev/null 2>&1; then
+              echo "Deployment reports release $GITHUB_SHA."
+              exit 0
+            fi
             sleep 10
           done
-          aws ssm get-command-invocation \
-            --command-id "$command_id" --instance-id "$INSTANCE" \
-            --query '[Status,StandardOutputContent,StandardErrorContent]' \
-            --output text
-          status=$(aws ssm get-command-invocation \
-            --command-id "$command_id" --instance-id "$INSTANCE" \
-            --query Status --output text)
-          [ "$status" = "Success" ] || { echo "Deployment failed: $status" >&2; exit 1; }
+          echo "Deployment did not report release $GITHUB_SHA within 90 minutes." >&2
+          exit 1
 
       - name: Yield when a newer merge owns the web deployment
         id: yield
@@ -541,7 +545,7 @@ jobs:
               apps/api/*|apps/grader/*|apps/simulator/*|packages/*|ee/*) deployable=true ;;
               docker-compose.yml|docker-compose.managed.yml|.env.example) deployable=true ;;
               pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) deployable=true ;;
-              .github/workflows/test.yml) deployable=true ;;
+              certificates/*|.github/ecr-image-exists.sh|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) deployable=true ;;
               apps/web/*|tools/*) deployable=true ;;
             esac
           done <<< "$(git diff --name-only "${{ github.sha }}" "$head")"

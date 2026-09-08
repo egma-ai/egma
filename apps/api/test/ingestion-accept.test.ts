@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer as createProxy, request } from "node:http";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
@@ -11,6 +11,7 @@ import type { NewSpan } from "@egma/db";
 import {
   acceptEvidenceForProjects,
   IngestionUnavailableError,
+  pendingObjectStore,
   stagedEvidence,
   type EvidenceGroup,
 } from "@egma/ingestion";
@@ -55,12 +56,18 @@ if (!storage.available) {
  */
 async function aStoreThatNeverAnswers(): Promise<{
   readonly store: IngestionStore;
+  readonly connected: Promise<void>;
   readonly close: () => void;
 }> {
+  let sawConnection: () => void = () => undefined;
+  const connected = new Promise<void>((resolve) => {
+    sawConnection = resolve;
+  });
   const held: Server = createServer((socket) => {
     // Accepted and then ignored, deliberately. The socket is kept so the
     // client sees an open connection rather than a reset.
     socket.on("error", () => undefined);
+    sawConnection();
   });
   await new Promise<void>((listening) => {
     held.listen(0, "127.0.0.1", listening);
@@ -77,6 +84,7 @@ async function aStoreThatNeverAnswers(): Promise<{
       accessKeyId: "SENTINEL-silent-store-key-id",
       secretAccessKey: "SENTINEL-silent-store-secret",
     },
+    connected,
     close: () => {
       held.close();
       held.unref();
@@ -485,8 +493,8 @@ describe.skipIf(!storage.available)("evidence at the acceptance boundary", () =>
 });
 
 /**
- * Reuse one local log across two instances to test retryable refusal, restart
- * upload, and deduplication of a client retry after a storage outage.
+ * Lose one task's local log before its replacement starts, then prove that a
+ * sender retry is the recovery path and still creates one customer record.
  */
 describe.skipIf(!storage.available)("an object store that has gone quiet", () => {
   const running = storage as Extract<ObjectStorage, { available: true }>;
@@ -507,6 +515,7 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
       ingestStore: silent.store,
       ingestionLogDirectory: logDirectory,
       ingestionRequestTimeoutMilliseconds: 700,
+      ingestionShutdownTimeoutMilliseconds: 100,
     });
     acme = await signUp(api.app, "ada@acme.example", "Acme");
     secret = await mintKey(api.app, acme.cookie, "the outbound agent", acme.projectId);
@@ -519,7 +528,7 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
     rmSync(logDirectory, { recursive: true, force: true });
   });
 
-  it("answers 503, keeps the staged evidence, and lands it once on the next start", async () => {
+  it("answers 503, loses unacknowledged ephemeral staging, and accepts the sender retry once", async () => {
     const body = jsonExport([
       jsonSpan({
         traceId: "ee55ee55ee55ee55ee55ee55ee55ee55",
@@ -527,7 +536,7 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
       }),
     ]);
 
-    const refused = await api.app.inject({
+    const answering = api.app.inject({
       method: "POST",
       url: OTLP_TRACES_PATH,
       headers: {
@@ -536,38 +545,43 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
       },
       payload: body,
     });
+    await silent.connected;
+    const stoppingAt = Date.now();
+    const closing = api.app.close();
+    const overlappingClose = api.app.close();
+    const refused = await answering;
     // Not a rejection: an exporter stops resending what it is told was
     // rejected, and this evidence is still on its way.
     expect(refused.statusCode).toBe(503);
-    expect(refused.json()).toMatchObject({
+    const refusal = refused.json() as { code: number; message: string };
+    expect(refusal).toMatchObject({
       code: 14,
       message: expect.stringContaining("send it again"),
     });
+    expect(refusal.message).not.toContain("recover");
     expect(await pendingSegments(running.ingestStore)).toHaveLength(0);
 
-    // The process stops with the record staged and starts again against a
-    // store that answers — the same local log, and nothing in it discarded.
-    await api.app.close();
+    // A Fargate replacement does not have the old task's ephemeral disk. Lose
+    // that directory before the next instance starts, as the deployment does.
+    await Promise.all([closing, overlappingClose]);
+    expect(Date.now() - stoppingAt).toBeLessThan(1_000);
+    rmSync(logDirectory, { recursive: true, force: true });
+    mkdirSync(logDirectory, { recursive: true });
     restarted = buildApi({
       config: {
         ...api.config,
         ingestion: { ...api.config.ingestion, store: running.ingestStore },
       },
       retellProductionIngestionIntervalMilliseconds: 60 * 60_000,
-      // The recovered segment is left in the bucket to be looked at, which is
-      // this file's claim; that it is then drained is the drain suite's.
+      // The retried segment is left in the bucket for this file to inspect.
       drainsPendingEvidence: false,
     });
     await restarted.app.ready();
 
-    await expect
-      .poll(async () => (await pendingSegments(running.ingestStore)).length, {
-        timeout: 10_000,
-      })
-      .toBe(1);
+    expect(await pendingSegments(running.ingestStore)).toHaveLength(0);
 
-    // And the client's retry, which meets evidence already on its way. One
-    // immutable identity, so the two are a replay of each other.
+    // The sender retry is the recovery path. It becomes durable before the
+    // answer and drains into one customer record.
     const retried = await restarted.app.inject({
       method: "POST",
       url: OTLP_TRACES_PATH,
@@ -583,7 +597,7 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
       .poll(async () => (await pendingSegments(running.ingestStore)).length, {
         timeout: 10_000,
       })
-      .toBe(2);
+      .toBe(1);
     await drainPendingEvidence(running.ingestStore);
 
     const traceStore = api.traceStore;
@@ -598,6 +612,68 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
         "where trace_id = 'ee55ee55ee55ee55ee55ee55ee55ee55'",
     );
     expect(Number(turns?.n)).toBe(1);
+  });
+});
+
+describe.skipIf(!storage.available)("planned ingestion shutdown", () => {
+  const running = storage as Extract<ObjectStorage, { available: true }>;
+
+  let refusing: RefusingStore;
+  let api: TestApi;
+  let acme: Customer;
+
+  beforeAll(async () => {
+    refusing = await aStoreRefusingOnePut(running.ingestStore);
+    api = await createApi("ingestion_shutdown", {
+      ingestStore: refusing.store,
+      ingestionFlushMilliseconds: 100,
+      ingestionRequestTimeoutMilliseconds: 1_000,
+      ingestionShutdownTimeoutMilliseconds: 500,
+    });
+    acme = await signUp(api.app, "ida@acme.example", "Acme");
+  });
+
+  afterAll(async () => {
+    refusing?.stopRefusing();
+    await api?.app.close();
+    for (const segment of await pendingSegments(running.ingestStore)) {
+      if (segment.records.some((record) => record.span_id === "9d9d9d9d00000001")) {
+        await pendingObjectStore(running.ingestStore).delete(segment.key);
+      }
+    }
+    await api?.close();
+    refusing?.close();
+  });
+
+  it("retries staged evidence inside the shutdown window before closing its ephemeral log", async () => {
+    refusing.refuseEveryPutAfter(0);
+
+    await expect(
+      acceptEvidenceForProjects([
+        {
+          auth: {
+            userId: acme.userId,
+            organizationId: acme.organizationId,
+            projectId: acme.projectId,
+            role: "member",
+            via: "api_key",
+          },
+          spans: [aSpanOf("9d9d9d9d00000001")],
+        },
+      ]),
+    ).rejects.toBeInstanceOf(IngestionUnavailableError);
+    expect(await pendingSegments(running.ingestStore)).toHaveLength(0);
+
+    refusing.stopRefusing();
+    await api.app.close();
+
+    const [landed] = await pendingSegments(running.ingestStore);
+    expect(landed?.records.map((record) => record.span_id)).toEqual([
+      "9d9d9d9d00000001",
+    ]);
+    if (landed !== undefined) {
+      await pendingObjectStore(running.ingestStore).delete(landed.key);
+    }
   });
 });
 
@@ -636,12 +712,16 @@ describe.skipIf(!storage.available)("a store that refuses one project's segment"
       // Long enough that the refused segment is still staged when the
       // assertions read it, and short enough that the retry below is prompt.
       ingestionRequestTimeoutMilliseconds: 2_000,
+      ingestionShutdownTimeoutMilliseconds: 500,
     });
     acme = await signUp(api.app, "ada@acme.example", "Acme");
     globex = await signUp(api.app, "grace@globex.example", "Globex");
   });
 
   afterAll(async () => {
+    refusing?.stopRefusing();
+    await api?.app.close();
+    await drainPendingEvidence(running.ingestStore);
     await api?.close();
     refusing?.close();
   });
@@ -711,11 +791,15 @@ describe.skipIf(!storage.available)("a store that keeps refusing", () => {
       ingestStore: refusing.store,
       ingestionFlushMilliseconds: 100,
       ingestionRequestTimeoutMilliseconds: 1_000,
+      ingestionShutdownTimeoutMilliseconds: 500,
     });
     acme = await signUp(api.app, "ada@acme.example", "Acme");
   });
 
   afterAll(async () => {
+    refusing?.stopRefusing();
+    await api?.app.close();
+    await drainPendingEvidence(running.ingestStore);
     await api?.close();
     refusing?.close();
   });

@@ -14,6 +14,8 @@ export type Config = {
   readonly claimant: string;
   /** How many conversations this copy grades at once. */
   readonly capacity: number;
+  /** Optional platform-wide limit across every grader copy. */
+  readonly concurrencyCap: number | undefined;
   /** How often it says it is still alive while it holds one. */
   readonly heartbeatSeconds: number;
   /** How long its claim survives its silence. */
@@ -75,6 +77,19 @@ function positiveWholeNumber(name: string, fallback: number): number {
   return value;
 }
 
+function optionalPositiveWholeNumber(name: string): number | undefined {
+  const written = process.env[name]?.trim();
+  if (written === undefined || written === "") return undefined;
+
+  const value = Number(written);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(
+      `${name} is a positive whole number, and "${written}" is not`,
+    );
+  }
+  return value;
+}
+
 function logLevel(): LogLevel {
   const written = process.env["EGMA_GRADER_LOG_LEVEL"]?.trim().toUpperCase();
   if (written === undefined || written === "") return "INFO";
@@ -112,6 +127,9 @@ export function loadConfig(): Config {
     claimant:
       claimant === undefined || claimant === "" ? defaultClaimant() : claimant,
     capacity: positiveWholeNumber("EGMA_GRADER_CAPACITY", DEFAULT_CAPACITY),
+    concurrencyCap: optionalPositiveWholeNumber(
+      "EGMA_GRADING_CONCURRENCY_CAP",
+    ),
     heartbeatSeconds: positiveWholeNumber(
       "EGMA_GRADER_HEARTBEAT_SECONDS",
       DEFAULT_HEARTBEAT_SECONDS,
