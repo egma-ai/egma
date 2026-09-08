@@ -12,6 +12,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: Replace production and ship the web after publishing the images
+        required: true
+        type: boolean
+        default: true
 
 concurrency:
   # A newer push makes an older pull-request run pointless. Main is different:
@@ -348,6 +354,7 @@ jobs:
       DEPLOY_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
       REGISTRY: ${{ vars.ECR_REGISTRY }}
       INSTANCE: ${{ vars.PLATFORM_INSTANCE_ID }}
+      REPLACE_PRODUCTION: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -363,8 +370,13 @@ jobs:
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "platform=true" >> "$GITHUB_OUTPUT"
-            echo "web=true" >> "$GITHUB_OUTPUT"
-            echo "Dispatched by hand: the whole deployment runs."
+            if [ "$REPLACE_PRODUCTION" = "true" ]; then
+              echo "web=true" >> "$GITHUB_OUTPUT"
+              echo "Dispatched by hand: the whole deployment runs."
+            else
+              echo "web=false" >> "$GITHUB_OUTPUT"
+              echo "Dispatched by hand: build and publish the exact image tags only."
+            fi
             exit 0
           fi
           base=$(curl -fsS \
@@ -413,7 +425,11 @@ jobs:
         if: steps.decide.outputs.platform == 'true'
         run: |
           missing=""
-          for v in DEPLOY_ROLE REGISTRY INSTANCE; do
+          required="DEPLOY_ROLE REGISTRY"
+          if [ "$REPLACE_PRODUCTION" = "true" ]; then
+            required="$required INSTANCE"
+          fi
+          for v in $required; do
             [ -n "${!v}" ] || missing="$missing $v"
           done
           if [ -n "$missing" ]; then
@@ -456,16 +472,28 @@ jobs:
             | docker login --username AWS --password-stdin "$REGISTRY"
           for app in api simulator grader; do
             echo "::group::$app"
-            docker build -f "apps/$app/Dockerfile" \
-              -t "$REGISTRY/egma/$app:$GITHUB_SHA" \
-              -t "$REGISTRY/egma/$app:latest" .
-            docker push "$REGISTRY/egma/$app:$GITHUB_SHA"
-            docker push "$REGISTRY/egma/$app:latest"
+            image="$REGISTRY/egma/$app"
+            tags=(-t "$image:$GITHUB_SHA")
+            if [ "$REPLACE_PRODUCTION" = "true" ]; then
+              tags+=(-t "$image:latest")
+            fi
+            docker build -f "apps/$app/Dockerfile" "${tags[@]}" .
+            push_log="$RUNNER_TEMP/$app-push.log"
+            docker push "$image:$GITHUB_SHA" 2>&1 | tee "$push_log"
+            digest=$(sed -n 's/.*digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' "$push_log" | tail -1)
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+              echo "Could not read the $app image digest from docker push." >&2
+              exit 1
+            }
+            printf -- '- `%s@%s`\n' "$image" "$digest" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$REPLACE_PRODUCTION" = "true" ]; then
+              docker push "$image:latest"
+            fi
             echo "::endgroup::"
           done
 
       - name: Replace what is running, and wait for its health checks
-        if: steps.decide.outputs.platform == 'true'
+        if: steps.decide.outputs.platform == 'true' && env.REPLACE_PRODUCTION == 'true'
         run: |
           set -euo pipefail
           ACCOUNT="${REGISTRY%%.*}"
@@ -496,7 +524,9 @@ jobs:
 
       - name: Yield when a newer merge owns the web deployment
         id: yield
-        if: steps.decide.outputs.platform == 'true' || steps.decide.outputs.web == 'true'
+        if: >-
+          env.REPLACE_PRODUCTION == 'true' &&
+          (steps.decide.outputs.platform == 'true' || steps.decide.outputs.web == 'true')
         run: |
           set -euo pipefail
           git fetch --quiet origin main
@@ -525,6 +555,7 @@ jobs:
 
       - name: Tell Vercel to ship
         if: >-
+          env.REPLACE_PRODUCTION == 'true' &&
           (steps.decide.outputs.platform == 'true' || steps.decide.outputs.web == 'true') &&
           steps.yield.outputs.fire == 'true'
         env:
