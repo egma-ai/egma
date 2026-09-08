@@ -112,6 +112,8 @@ export type ServerOptions = {
    * This option cannot enable draining for a role that does not support it.
    */
   readonly drainsPendingEvidence?: boolean;
+  /** Test seam for the API's 120-second evidence-upload shutdown window. */
+  readonly ingestionShutdownTimeoutMilliseconds?: number;
   /**
    * Whether the trace store's schema has finished being applied.
    *
@@ -634,16 +636,24 @@ export function buildApi(options: ServerOptions): Api {
       });
     }
   });
+  // Fastify runs this before it waits for active requests and closes sockets.
+  // That starts the evidence deadline at shutdown initiation, stops new
+  // acceptance, and lets an in-flight request receive its durable success or
+  // retryable failure inside the same task-stop window.
+  app.addHook("preClose", async () => {
+    await closeAcceptance({
+      ...(options.ingestionShutdownTimeoutMilliseconds === undefined
+        ? {}
+        : { timeoutMilliseconds: options.ingestionShutdownTimeoutMilliseconds }),
+    });
+  });
   app.addHook("onClose", async () => {
     // Awaited, so closing drains any tick in flight: whoever closes the app
     // and then the stores knows the sweep holds no connection to them.
     await orphanSweep?.stop();
     await retellProductionIngestion?.stop();
-    // Acceptance before the drainer, so nothing new is uploaded into a bucket
-    // nobody is reading; and neither uploads nor drains anything on the way
-    // out. What is staged is on the disk with its checksums and what is pending
-    // is in the bucket, and the next start is what moves both.
-    await closeAcceptance();
+    // The drainer stays alive through the earlier acceptance shutdown, so a
+    // segment uploaded during that window can still be consumed in process.
     await drainer?.stop();
     // Last, so the claim is given up only once this process has stopped
     // draining. Postgres would drop it with the connection anyway; releasing it

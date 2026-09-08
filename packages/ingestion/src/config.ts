@@ -199,8 +199,8 @@ const DEFAULT_INGEST_REGION = "us-east-1";
 
 /**
  * Where staged evidence waits, on the named volume the deployment gives the
- * api service. It is the one path in this file that must be writable and must
- * survive a container replacement: what is in it is evidence that has been
- * accepted and is not durable yet.
+ * API service. It must be writable. In a Fargate task it is ephemeral staging:
+ * only an S3-confirmed upload is acknowledged, and sender retries recover any
+ * evidence that disappears with the task.
  */
 const DEFAULT_INGESTION_LOG_DIR = "/var/lib/egma/ingestion";
