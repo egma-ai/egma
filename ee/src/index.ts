@@ -1,7 +1,7 @@
 /**
  * `@egma/ee` — Egma's commercially licensed code.
  *
- * Everything here is under `ee/LICENSE`, not the repository's Apache License.
+ * Everything here is under `ee/LICENSE`, not the repository's MIT license.
  * The root `LICENSE` says so, and `AGENTS.md` beside this file says what stays
  * out of open code paths.
  *
