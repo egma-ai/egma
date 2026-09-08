@@ -36,7 +36,21 @@ export type EgmaProvidedPersona = {
   readonly versions: readonly EgmaProvidedPersonaVersion[];
 };
 
-const SHELF_PERSONA_CONTRACT = personaParameterContract({
+const EVERYDAY_CALLER_V1_CONTRACT = personaParameterContract({
+  ...RECOMMENDED_PERSONA_MODELS,
+  llm: {
+    provider: "openai",
+    model: "gpt-5.6-terra",
+  },
+  tts: {
+    provider: "cartesia",
+    model: "sonic-3.5",
+    voiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+    speed: 1,
+  },
+});
+
+const EVERYDAY_CALLER_V2_CONTRACT = personaParameterContract({
   ...RECOMMENDED_PERSONA_MODELS,
   llm: {
     provider: "openai",
@@ -68,8 +82,18 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
         personality:
           "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
         language: "en-US",
-        parameterContract: SHELF_PERSONA_CONTRACT,
+        parameterContract: EVERYDAY_CALLER_V1_CONTRACT,
         createdAt: new Date("2026-08-19T23:09:01.674Z"),
+      },
+      {
+        id: "prsv_01M2B0K7W8N9Q3R4T5V6X7Y8Z9",
+        version: 2,
+        identityName: "Alex Morgan",
+        personality:
+          "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
+        language: "en-US",
+        parameterContract: EVERYDAY_CALLER_V2_CONTRACT,
+        createdAt: new Date("2026-09-08T00:00:00.000Z"),
       },
     ],
   },

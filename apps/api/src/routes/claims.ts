@@ -27,6 +27,7 @@ import {
   type ProviderCatalogEntry,
   type Run,
   type SimulationClaim,
+  type SimulationConcurrencyCaps,
   type TestEnv,
   type TestMockTool,
   type MockToolVariable,
@@ -83,6 +84,8 @@ export type ClaimRoutesOptions = {
    * organization for each claim batch. The open adapter always says yes.
    */
   readonly entitlements: EntitlementSource;
+  /** Optional deployment caps enforced in the claim transaction. */
+  readonly caps?: SimulationConcurrencyCaps | undefined;
   /** Test seam for Retell's read-only dispatch preflight. */
   readonly retellFetch?: typeof fetch | undefined;
 };
@@ -342,6 +345,7 @@ type ClaimAsk = {
   readonly capacity: number;
   /** Seconds this request may be held; already bounded by the cap. */
   readonly holdSeconds: number;
+  readonly modalities?: readonly ("voice" | "chat")[] | undefined;
 };
 
 /**
@@ -412,6 +416,24 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
     };
   }
 
+  const offeredModalities = body.modalities;
+  let modalities: readonly ("voice" | "chat")[] | undefined;
+  if (offeredModalities !== undefined) {
+    if (
+      !Array.isArray(offeredModalities) ||
+      offeredModalities.length === 0 ||
+      !offeredModalities.every(
+        (modality) => modality === "voice" || modality === "chat",
+      )
+    ) {
+      return {
+        refusal:
+          "modalities must be a non-empty list containing voice, chat, or both; leave it out to claim either",
+      };
+    }
+    modalities = [...new Set(offeredModalities)];
+  }
+
   return {
     claimant: claimant.trim(),
     capacity: Math.min(capacity, LARGEST_CLAIM_CAPACITY),
@@ -419,6 +441,7 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
       wait === undefined ? DEFAULT_HOLD_SECONDS : wait,
       LONGEST_HOLD_SECONDS,
     ),
+    ...(modalities === undefined ? {} : { modalities }),
   };
 }
 
@@ -652,8 +675,8 @@ export async function claimRoutes(
 
   /**
    * Claim up to `capacity` queued simulations, held open while the queue is
-   * empty, answering `{ specs: [...] }` — possibly empty, which is what a
-   * quiet queue looks like and what the client asks again after.
+   * empty, answering specs plus their server claim instants. Both may be
+   * empty, which is what a quiet queue looks like and what the client asks again after.
    */
   app.post(CLAIMS_PATH, async (request, reply) => {
     const ask = claimAsk((request.body ?? {}) as Body);
@@ -681,6 +704,8 @@ export async function claimRoutes(
       let claims = await claimSimulations({
         claimant: ask.claimant,
         capacity: ask.capacity,
+        modalities: ask.modalities,
+        caps: options.caps,
       });
       while (claims.length === 0 && !gone && Date.now() < holdDeadline) {
         await sleep(
@@ -690,6 +715,8 @@ export async function claimRoutes(
         claims = await claimSimulations({
           claimant: ask.claimant,
           capacity: ask.capacity,
+          modalities: ask.modalities,
+          caps: options.caps,
         });
       }
 
@@ -741,13 +768,27 @@ export async function claimRoutes(
           // withheld here: it is unbuildable, and the assembly below says so
           // in the sentence a person reads. Naming no provider leaves this
           // question about the ones that can be read.
-          return version === undefined
-            ? []
-            : providersNeededBy(personaModelsOfParameters(claim.personaParameterValues), claim.modality);
+          if (version === undefined) return [];
+          try {
+            return providersNeededBy(
+              personaModelsOfParameters(
+                validatePersonaParameterValues(
+                  version.parameterContract,
+                  claim.personaParameterValues,
+                ),
+              ),
+              claim.modality,
+            );
+          } catch {
+            // Assembly below owns this row's failure. A malformed frozen
+            // persona must not prevent valid claims beside it from dispatching.
+            return [];
+          }
         },
       );
 
       const specs: Record<string, unknown>[] = [];
+      const claimedAt: Record<string, string> = {};
       // One read of each run, however many of its conversations this batch
       // took. Lives exactly as long as this response.
       const runs = new Map<string, Run | undefined>();
@@ -944,6 +985,7 @@ export async function claimRoutes(
           continue;
         }
         specs.push(spec);
+        claimedAt[claim.id] = claim.claimedAt.toISOString();
         request.log.info(
           platformEvent(
             "egma.simulation.dispatched",
@@ -956,7 +998,7 @@ export async function claimRoutes(
         );
       }
 
-      return await reply.send({ specs });
+      return await reply.send({ specs, claimed_at: claimedAt });
     } finally {
       // Taken back off rather than left behind: a keep-alive socket outlives
       // this request, and a listener per claim would pile up for as long as

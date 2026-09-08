@@ -26,7 +26,7 @@ async def test_a_claim_waits_and_is_answered_the_moment_a_spec_arrives(workbench
 
         # An empty queue holds the request open, then answers with nothing.
         answer = await claim()
-        assert answer == {"specs": []}
+        assert answer == {"specs": [], "claimed_at": {}}
 
         # A spec arriving mid-hold is granted without waiting out the hold.
         pending = asyncio.create_task(claim())
@@ -34,6 +34,7 @@ async def test_a_claim_waits_and_is_answered_the_moment_a_spec_arrives(workbench
         await workbench.offer(scripted_spec("sim-wb-arrival"))
         answer = await asyncio.wait_for(pending, timeout=2)
         assert [spec["simulation_id"] for spec in answer["specs"]] == ["sim-wb-arrival"]
+        assert answer["claimed_at"]["sim-wb-arrival"].endswith("Z")
 
 
 async def test_a_claim_never_grants_more_than_the_declared_capacity(workbench):
