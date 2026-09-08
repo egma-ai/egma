@@ -56,7 +56,10 @@ def parse_manifest(raw: str, expected_digest: str | None = None) -> dict:
 
 def native_descriptors(index: dict) -> dict[str, dict]:
     index_type = index.get("mediaType")
-    child_type = {OCI_INDEX: OCI_MANIFEST, DOCKER_INDEX: DOCKER_MANIFEST}.get(index_type)
+    child_type = {
+        OCI_INDEX: OCI_MANIFEST,
+        DOCKER_INDEX: DOCKER_MANIFEST,
+    }.get(index_type)
     if child_type is None:
         fail("tag does not contain a supported multi-platform image index")
     descriptors = index.get("manifests")
@@ -82,7 +85,9 @@ def verify_native_index(index: dict) -> None:
         fail("native image index must contain exactly linux/amd64 and linux/arm64")
 
 
-def verify_child(raw: str, digest: str, expected_config: str, index_digest: str | None) -> None:
+def verify_child(
+    raw: str, digest: str, expected_config: str, index_digest: str | None
+) -> None:
     child = parse_manifest(raw, digest)
     if child.get("mediaType") != OCI_MANIFEST:
         fail("child is not an OCI image manifest")
@@ -118,7 +123,9 @@ def verify_simulator_index(index: dict, fetch_child) -> None:
         has_index = INDEX_DIGEST in annotations
         has_image = IMAGE_DIGEST in annotations
         if has_index == has_image:
-            fail(f"simulator descriptor for {name} must have exactly one SOCI cross-link")
+            fail(
+                f"simulator descriptor for {name} must have exactly one SOCI cross-link"
+            )
         if has_index:
             target = images
             linked = annotations[INDEX_DIGEST]
@@ -167,7 +174,10 @@ def ecr_manifest(repository: str, image_id: str) -> tuple[str, str]:
 
 def main() -> int:
     if len(sys.argv) != 2 or not re.fullmatch(r"[0-9a-f]{40}", sys.argv[1]):
-        print("usage: verify-platform-images.py <40-character release SHA>", file=sys.stderr)
+        print(
+            "usage: verify-platform-images.py <40-character release SHA>",
+            file=sys.stderr,
+        )
         return 2
     release_sha = sys.argv[1]
     try:
@@ -176,7 +186,12 @@ def main() -> int:
             raw, digest = ecr_manifest(repository, release_sha)
             index = parse_manifest(raw, digest)
             if app == "simulator":
-                verify_simulator_index(index, lambda child: ecr_manifest(repository, child)[0])
+                verify_simulator_index(
+                    index,
+                    lambda child, repository=repository: ecr_manifest(
+                        repository, child
+                    )[0],
+                )
             else:
                 verify_native_index(index)
             print(f"{app}:{release_sha} digest {digest} passed manifest verification.")

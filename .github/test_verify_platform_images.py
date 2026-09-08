@@ -1,5 +1,5 @@
-import importlib.util
 import hashlib
+import importlib.util
 import json
 import pathlib
 import unittest
@@ -15,7 +15,9 @@ FIXTURES = pathlib.Path(__file__).with_name("fixtures")
 class PlatformImageVerifierTest(unittest.TestCase):
     def setUp(self) -> None:
         self.index = json.loads((FIXTURES / "simulator-soci-manifest.json").read_text())
-        responses = json.loads((FIXTURES / "simulator-soci-children-response.json").read_text())
+        responses = json.loads(
+            (FIXTURES / "simulator-soci-children-response.json").read_text()
+        )
         responses["images"] += json.loads(
             (FIXTURES / "simulator-image-children-response.json").read_text()
         )["images"]
@@ -48,7 +50,9 @@ class PlatformImageVerifierTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.verify(wrong_platform)
         wrong_link = json.loads(json.dumps(self.index))
-        wrong_link["manifests"][0]["annotations"][VERIFY.INDEX_DIGEST] = "sha256:" + "0" * 64
+        wrong_link["manifests"][0]["annotations"][VERIFY.INDEX_DIGEST] = (
+            "sha256:" + "0" * 64
+        )
         with self.assertRaises(ValueError):
             self.verify(wrong_link)
 
