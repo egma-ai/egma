@@ -1,0 +1,15 @@
+{
+    "images": [
+        {
+            "registryId": "599151709955",
+            "repositoryName": "egma/api",
+            "imageId": {
+                "imageDigest": "sha256:87d66f96b319dfbcfaae2c2d4cff5a39fff58f466340872c5fa18578ea054a08",
+                "imageTag": "29f06a444d3e6fe89c371977cfa15c719025816c"
+            },
+            "imageManifest": "{\n  \"schemaVersion\": 2,\n  \"mediaType\": \"application/vnd.docker.distribution.manifest.list.v2+json\",\n  \"manifests\": [\n    {\n      \"mediaType\": \"application/vnd.docker.distribution.manifest.v2+json\",\n      \"digest\": \"sha256:8cee161977f3909da918a045d0efb918af7e98a0f4208f1be9ca6e1ff038cb07\",\n      \"size\": 6990,\n      \"platform\": {\n        \"architecture\": \"amd64\",\n        \"os\": \"linux\"\n      }\n    },\n    {\n      \"mediaType\": \"application/vnd.docker.distribution.manifest.v2+json\",\n      \"digest\": \"sha256:dd08e526f322d8b46ea41b4d784bc2985f22f336cace5aa9b2f1a943cb0692c5\",\n      \"size\": 6990,\n      \"platform\": {\n        \"architecture\": \"arm64\",\n        \"os\": \"linux\"\n      }\n    }\n  ]\n}",
+            "imageManifestMediaType": "application/vnd.docker.distribution.manifest.list.v2+json"
+        }
+    ],
+    "failures": []
+}
