@@ -65,7 +65,10 @@ export type PendingObjectStore = {
     segment: SealedSegment,
     options?: { readonly signal?: AbortSignal },
   ): Promise<"created" | "present">;
-  read(key: string): Promise<Uint8Array>;
+  read(
+    key: string,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<Uint8Array>;
   /** Every pending object, following every listing page. */
   list(): Promise<readonly PendingObject[]>;
   delete(key: string): Promise<void>;
@@ -83,6 +86,44 @@ function isPreconditionFailure(error: unknown): boolean {
     held?.name === "PreconditionFailed" ||
     held?.$metadata?.httpStatusCode === 412
   );
+}
+
+type ObjectBody = {
+  transformToByteArray(): Promise<Uint8Array>;
+  destroy?: (cause?: Error) => void;
+  cancel?: (cause?: unknown) => Promise<void>;
+};
+
+/**
+ * Consume a GET body under the same deadline as its request. The SDK resolves
+ * `send()` when headers arrive, before a stalled body is complete, so the body
+ * needs its own abort listener.
+ */
+async function readBody(
+  body: ObjectBody,
+  signal: AbortSignal | undefined,
+): Promise<Uint8Array> {
+  if (signal === undefined) return await body.transformToByteArray();
+  signal.throwIfAborted();
+
+  return await new Promise<Uint8Array>((resolve, reject) => {
+    const finished = body.transformToByteArray();
+
+    const abort = (): void => {
+      const cause =
+        signal.reason instanceof Error
+          ? signal.reason
+          : new DOMException("The object read was aborted", "AbortError");
+      body.destroy?.(cause);
+      void body.cancel?.(cause).catch(() => undefined);
+      reject(cause);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+
+    void finished.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", abort);
+    });
+  });
 }
 
 export function pendingObjectStore(
@@ -125,14 +166,20 @@ export function pendingObjectStore(
         }),
   });
 
-  const read = async (key: string): Promise<Uint8Array> => {
+  const read = async (
+    key: string,
+    requestOptions: { readonly signal?: AbortSignal } = {},
+  ): Promise<Uint8Array> => {
     const found = await client.send(
       new GetObjectCommand({ Bucket: store.bucket, Key: key }),
+      requestOptions.signal === undefined
+        ? undefined
+        : { abortSignal: requestOptions.signal },
     );
     if (found.Body === undefined) {
       throw new Error(`the ingestion bucket answered ${key} with no body`);
     }
-    return await found.Body.transformToByteArray();
+    return await readBody(found.Body, requestOptions.signal);
   };
 
   return {
@@ -160,7 +207,7 @@ export function pendingObjectStore(
       } catch (error) {
         if (!isPreconditionFailure(error)) throw error;
 
-        const alreadyThere = await read(segment.key);
+        const alreadyThere = await read(segment.key, requestOptions);
         if (Buffer.from(alreadyThere).equals(Buffer.from(segment.body))) {
           return "present";
         }
