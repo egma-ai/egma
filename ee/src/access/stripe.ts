@@ -48,6 +48,7 @@ export async function accountForBillingAction(
 /** Customer creation and unlinked-fault recovery share this organization lock. */
 export async function resolveStripeCustomer(
   auth: AuthContext,
+  read: () => Promise<readonly string[]>,
   create: () => Promise<string>,
 ): Promise<string> {
   authorize(auth, "manage_organization", {
@@ -62,13 +63,23 @@ export async function resolveStripeCustomer(
       .select({
         id: cloudBillingAccount.id,
         customerId: cloudBillingAccount.stripeCustomerId,
+        failedAt: cloudBillingAccount.stripeFailedAt,
       })
       .from(cloudBillingAccount)
       .where(within(auth, cloudBillingAccount));
     if (account === undefined)
       throw new Error("Stripe customer creation has no billing account");
     if (account.customerId !== null) return account.customerId;
-    const customerId = await create();
+    const ids = await read();
+    if (ids.length > 1 || ids.some((id) => id.trim() === ""))
+      throw new Error(
+        "Stripe customer identity needs reconciliation before linking",
+      );
+    if (ids.length === 0 && account.failedAt !== null)
+      throw new Error(
+        "The previous Stripe customer creation is still being recovered. Try again later.",
+      );
+    const customerId = ids[0] ?? (await create());
     if (customerId.trim() === "")
       throw new Error("Stripe returned an empty customer identity");
     await tx

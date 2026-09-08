@@ -16,6 +16,19 @@ function instant(seconds: number): Date {
   return new Date(seconds * 1_000);
 }
 
+/** Use the full customer list; metadata search results can lag behind creation. */
+export async function stripeCustomerIds(
+  gateway: StripeGateway,
+  organizationId: string,
+): Promise<string[]> {
+  const ids: string[] = [];
+  for await (const customer of gateway.api.customers.list({ limit: 100 })) {
+    if (customer.metadata.egma_organization_id === organizationId)
+      ids.push(customer.id);
+  }
+  return ids;
+}
+
 /** Customer-scoped reads include ended subscriptions and follow every page. */
 export async function relevantSubscriptions(
   gateway: StripeGateway,

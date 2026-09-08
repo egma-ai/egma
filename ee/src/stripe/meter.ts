@@ -5,7 +5,11 @@ import {
 } from "../access/index.ts";
 import { previousHour, type MeteredHour } from "./facts.ts";
 import { refreshStripePaymentsReady, type StripeGateway } from "./gateway.ts";
-import { currentStripeCustomer, stripeMeterPeriods } from "./periods.ts";
+import {
+  currentStripeCustomer,
+  stripeMeterPeriods,
+  stripeCustomerIds,
+} from "./periods.ts";
 import { recoverLateUsage } from "./late-invoice.ts";
 
 export const METER_EVENT_NAMES = {
@@ -52,14 +56,7 @@ export async function reportOverageOwed(
     laterInvoices: 0,
   };
   await recoverUnlinkedStripeAccounts(
-    async ({ organizationId }) => {
-      const ids: string[] = [];
-      for await (const customer of gateway.api.customers.list({ limit: 100 })) {
-        if (customer.metadata.egma_organization_id === organizationId)
-          ids.push(customer.id);
-      }
-      return ids;
-    },
+    ({ organizationId }) => stripeCustomerIds(gateway, organizationId),
     ({ organizationId }, err) => {
       report.failed += 1;
       log.error(

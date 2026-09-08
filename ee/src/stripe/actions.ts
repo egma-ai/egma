@@ -12,6 +12,7 @@ import {
 import { stripeAttemptKey, stripeCustomerKey } from "../idempotency.ts";
 import { centsFromMicros, isPaying } from "./facts.ts";
 import { isEgmaStripeFailure, type StripeGateway } from "./gateway.ts";
+import { stripeCustomerIds } from "./periods.ts";
 
 /**
  * The four things an organization admin does with Stripe: buy credit, move to
@@ -113,16 +114,7 @@ async function returnUrl(
   return `${base.replace(/\/+$/, "")}/projects/${encodeURIComponent(projectId)}/settings/billing`;
 }
 
-/**
- * The Stripe customer this organization's money moves through, made if it has
- * none.
- *
- * Created under a key derived from the organization, so two requests inside
- * Stripe's idempotency window resolve to one customer rather than two — and
- * the row is claimed with an update that names the null it fills, so even
- * outside that window the account cannot end up pointing at one customer while
- * an invoice is raised against another.
- */
+/** Resolve an existing customer under the organization lock before creating one. */
 async function customerFor(
   gateway: StripeGateway,
   auth: AuthContext,
@@ -131,19 +123,23 @@ async function customerFor(
   const held = actor.account.stripeCustomerId;
   if (held !== null) return held;
 
-  return resolveStripeCustomer(auth, async () => {
-    const customer = await gateway.api.customers.create(
-      {
-        // Egma's own name for this customer, so a Stripe dashboard row can be
-        // traced back to an organization without a second lookup. The person's
-        // own name and address are collected by Checkout, which is where Stripe
-        // Tax needs them.
-        metadata: { egma_organization_id: auth.organizationId },
-      },
-      { idempotencyKey: stripeCustomerKey(auth.organizationId) },
-    );
-    return customer.id;
-  });
+  return resolveStripeCustomer(
+    auth,
+    () => stripeCustomerIds(gateway, auth.organizationId),
+    async () => {
+      const customer = await gateway.api.customers.create(
+        {
+          // Egma's own name for this customer, so a Stripe dashboard row can be
+          // traced back to an organization without a second lookup. The person's
+          // own name and address are collected by Checkout, which is where Stripe
+          // Tax needs them.
+          metadata: { egma_organization_id: auth.organizationId },
+        },
+        { idempotencyKey: stripeCustomerKey(auth.organizationId) },
+      );
+      return customer.id;
+    },
+  );
 }
 
 /** A Stripe-hosted page for the browser to follow. */

@@ -11,6 +11,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   applyStripeEvent,
   recoverUnlinkedStripeAccounts,
+  resolveStripeCustomer,
 } from "../src/access/stripe.ts";
 import { seedCloudPlans } from "../src/access/plans.ts";
 import {
@@ -266,6 +267,56 @@ async function conversation(
 }
 
 describe("durable period meter progress", () => {
+  it("links an earlier successful customer create instead of creating again after the retry window", async () => {
+    await database.sql(
+      "update cloud_billing_account set stripe_customer_id = null, stripe_failed_at = $2 where organization_id = $1",
+      [acme.organizationId, new Date("2026-01-01T00:00:00Z")],
+    );
+    let creates = 0;
+    const create = async () => {
+      creates += 1;
+      return "cus_should_not_be_created";
+    };
+    await expect(
+      resolveStripeCustomer(sessionOf(acme), async () => [], create),
+    ).rejects.toThrow("still being recovered");
+    await expect(
+      resolveStripeCustomer(
+        sessionOf(acme),
+        async () => ["cus_one", "cus_two"],
+        create,
+      ),
+    ).rejects.toThrow("identity");
+    expect(
+      await resolveStripeCustomer(
+        sessionOf(acme),
+        async () => [acme.customerId],
+        create,
+      ),
+    ).toBe(acme.customerId);
+    expect(creates).toBe(0);
+  });
+  it("creates a first customer only after reading that no matching customer exists", async () => {
+    await database.sql(
+      "update cloud_billing_account set stripe_customer_id = null, stripe_failed_at = null where organization_id = $1",
+      [acme.organizationId],
+    );
+    const order: string[] = [];
+    expect(
+      await resolveStripeCustomer(
+        sessionOf(acme),
+        async () => {
+          order.push("read");
+          return [];
+        },
+        async () => {
+          order.push("create");
+          return acme.customerId;
+        },
+      ),
+    ).toBe(acme.customerId);
+    expect(order).toEqual(["read", "create"]);
+  });
   it("recovers a failed unlinked customer only from a successful customer read, then reconciles before clearing", async () => {
     await database.sql(
       "update cloud_plan set stripe_payments_ready = true where code = 'hobby'",
