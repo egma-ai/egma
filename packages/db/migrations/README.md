@@ -5,6 +5,14 @@
 PostgreSQL and ClickHouse each start from one `0000_baseline.sql` file. New
 migrations start at `0001`.
 
+Each baseline creates the complete current schema in an empty database. The
+stores use different SQL dialects, so each has its own file. PostgreSQL's
+Drizzle snapshot and journal describe that same baseline.
+
+During this pre-launch baseline reset, rebuild disposable development databases
+that used a different baseline. The application does not convert or erase an
+existing database, and its migration checksum checks remain enabled.
+
 Every migration ledger starts at this exact baseline. A build refuses unknown
 rows without that marker. With it, an older build may ignore rows appended by a
 newer build so a normal additive rollback can still boot.
@@ -78,10 +86,9 @@ rollback to keep bootable, so until it launches:
   contract is what a launched product needs and is more machinery than this one
   is paying for.
 
-What does **not** change: existing data is still carried across by an explicit
-backfill wherever a backfill can carry it. A development database somebody has
-to rebuild by hand is a real cost before launch as well as after it, and a
-migration that drops data it could have kept is a migration to send back.
+Keep the baseline as a direct definition of the current schema. Historical
+backfills and temporary compatibility columns do not belong in it. Tests must
+cover fresh creation, the current constraints, concurrent startup and replay.
 
 A destructive migration says so in its own header and points at this section.
 When Egma launches, this section goes and the rule above stands on its own.
