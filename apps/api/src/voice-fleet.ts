@@ -1,5 +1,14 @@
 export type VoiceTaskMode = "one-shot" | "standby";
 
+export type AwsVoiceFleetSettings = {
+  readonly kind: "aws-ecs";
+  readonly cluster: string;
+  readonly taskDefinition: string;
+  readonly containerName: string;
+  readonly subnets: readonly string[];
+  readonly securityGroups: readonly string[];
+};
+
 export type VoiceFleetTask = {
   readonly id: string;
   readonly mode: VoiceTaskMode;
@@ -145,17 +154,28 @@ export function createVoiceFleetReconciler(
         for (const task of recent) tasks.set(task.id, task);
         for (const task of listed) tasks.set(task.id, task);
 
-        const desired = {
-          "one-shot": demand.active + demand.admissibleQueued,
-          standby: standbyTarget,
-        } as const;
+        const desiredWork = demand.active + demand.admissibleQueued;
+        const desiredTotal = desiredWork + standbyTarget;
         const present = { "one-shot": 0, standby: 0 };
         for (const task of tasks.values()) present[task.mode] += 1;
+        const presentTotal = present["one-shot"] + present.standby;
+        const missingTotal = Math.max(0, desiredTotal - presentTotal);
+        // A standby keeps its launch mode after it claims. Active simulations
+        // may therefore occupy the standby-labelled tasks; subtract them when
+        // deciding how much waiting capacity remains. This is only launch
+        // arithmetic and never binds an active row to a particular task.
+        const waitingStandbys = Math.max(0, present.standby - demand.active);
+        const missingStandbys = Math.max(0, standbyTarget - waitingStandbys);
+        const standbyLaunches = Math.min(missingTotal, missingStandbys);
+        const desired = {
+          "one-shot": present["one-shot"] + missingTotal - standbyLaunches,
+          standby: present.standby + standbyLaunches,
+        } as const;
         const launched = { "one-shot": 0, standby: 0 };
         const failures: VoiceFleetLaunchFailure[] = [];
 
         for (const mode of ["one-shot", "standby"] as const) {
-          const missing = Math.max(0, desired[mode] - present[mode]);
+          const missing = desired[mode] - present[mode];
           if (missing === 0) continue;
           try {
             const result = await options.fleet.launchTasks({ count: missing, mode });

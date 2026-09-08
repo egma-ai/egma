@@ -56,6 +56,8 @@ export type OrphanSweepOptions = {
   readonly settleAgentPovBound?: () => Promise<
     readonly SimulationPastTheAgentPovBound[]
   >;
+  /** Reconcile hosted voice compute on the same cadence. */
+  readonly wakeVoiceFleet?: (() => void) | undefined;
 };
 
 export type OrphanSweep = {
@@ -138,6 +140,7 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
     } finally {
       sweeping = false;
     }
+    options.wakeVoiceFleet?.();
   };
 
   // Kept so `stop` can wait a started tick out. `tick` settles rather than

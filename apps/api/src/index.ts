@@ -8,6 +8,7 @@ import {
   runClickHouseMigrations,
   runMigrations,
   seedPersonaLibrary,
+  estimateVoiceSimulationDemand,
 } from "@egma/db";
 
 import { loadCloudBilling, type StoppableJob } from "./billing.ts";
@@ -15,6 +16,10 @@ import { loadConfig, type Config } from "./config.ts";
 import { platformEvent } from "./platform-log.ts";
 import { buildApi } from "./server.ts";
 import { startRateCardInitialization } from "./rate-card.ts";
+import {
+  createVoiceFleetReconciler,
+  type VoiceFleetReconcileResult,
+} from "./voice-fleet.ts";
 
 const config = loadConfig();
 
@@ -88,14 +93,43 @@ const running: Config = cloudBilling === undefined
 // the claim door and the write that stores a usage record — start reaching it.
 installBillingPlugIn(running.billing);
 
+let reconcileVoiceFleet:
+  | (() => Promise<VoiceFleetReconcileResult>)
+  | undefined;
+const wakeVoiceFleet = config.voiceFleet === undefined
+  ? undefined
+  : () => {
+      void reconcileVoiceFleet?.().catch((err: unknown) => {
+        app.log.error(
+          { err },
+          "voice fleet reconciliation failed; queued work will retry on the next sweep",
+        );
+      });
+    };
+
 const { app } = buildApi({
   config: running,
   traceStoreReady: () => traceSchema.state === "ready",
+  ...(wakeVoiceFleet === undefined ? {} : { wakeVoiceFleet }),
   ...(cloudBilling === undefined ? {} : { billingRoutes: cloudBilling.routes }),
   ...(cloudBilling?.webhookRoutes === undefined
     ? {}
     : { billingWebhookRoutes: cloudBilling.webhookRoutes }),
 });
+
+if (config.voiceFleet !== undefined) {
+  // The AWS package is absent from the self-hosted boot path. Merely having
+  // ordinary AWS credentials in the environment cannot select this adapter.
+  const { awsVoiceFleet } = await import("./voice-fleet-aws.ts");
+  const reconciler = createVoiceFleetReconciler({
+    fleet: awsVoiceFleet(config.voiceFleet),
+    estimateDemand: () => estimateVoiceSimulationDemand({
+      caps: config.simulationConcurrencyCaps,
+    }),
+    log: app.log,
+  });
+  reconcileVoiceFleet = reconciler.reconcile;
+}
 
 /** The longest this process waits between attempts on the trace-store schema. */
 const TRACE_SCHEMA_BACKOFF_CAP_MILLISECONDS = 5 * 60_000;

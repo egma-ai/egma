@@ -137,6 +137,36 @@ async function anOrphan(
 }
 
 describe("the standing sweep", () => {
+  it("wakes the voice fleet after a run is ready", async () => {
+    let wakes = 0;
+    const made = await anOrphan("voice-fleet-run-trigger", {
+      orphanSweepIntervalMilliseconds: 60 * 60_000,
+      wakeVoiceFleet: () => { wakes += 1; },
+    });
+    api = made.api;
+
+    expect(wakes).toBe(1);
+  });
+
+  it("wakes the voice fleet on each completed sweep tick", async () => {
+    let wakes = 0;
+    const sweep = startOrphanSweep({
+      log: capturingLog(),
+      intervalMilliseconds: 20,
+      sweep: async () => [],
+      settleAgentPovBound: async () => [],
+      wakeVoiceFleet: () => { wakes += 1; },
+    });
+    try {
+      await vi.waitFor(() => expect(wakes).toBeGreaterThan(1), {
+        timeout: 1_000,
+        interval: 10,
+      });
+    } finally {
+      await sweep.stop();
+    }
+  });
+
   it("runs with the server, so an orphan lands without anybody asking", async () => {
     const { ada, key, runId, simulationId, api: running } = await anOrphan(
       "sweep_wired",

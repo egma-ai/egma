@@ -11,19 +11,11 @@ import type {
   VoiceFleetLaunchFailure,
   VoiceFleetTask,
   VoiceTaskMode,
+  AwsVoiceFleetSettings,
 } from "./voice-fleet.ts";
-
-export type AwsVoiceFleetSettings = {
-  readonly cluster: string;
-  readonly taskDefinition: string;
-  readonly containerName: string;
-  readonly subnets: readonly string[];
-  readonly securityGroups: readonly string[];
-};
 
 type EcsSender = Pick<ECSClient, "send">;
 
-const TASK_MODE_TAG = "egma:simulator-mode";
 const MODE_ENVIRONMENT = "EGMA_SIMULATOR_MODE";
 const LIST_STATUSES = ["PENDING", "RUNNING"] as const;
 const DESCRIBE_BATCH = 100;
@@ -38,7 +30,6 @@ function batches<T>(values: readonly T[], size: number): T[][] {
 }
 
 function modeOf(task: {
-  tags?: readonly { key?: string | undefined; value?: string | undefined }[] | undefined;
   overrides?: {
     containerOverrides?: readonly {
       environment?: readonly {
@@ -48,13 +39,15 @@ function modeOf(task: {
     }[] | undefined;
   } | undefined;
 }): VoiceTaskMode {
-  const tagged = task.tags?.find((tag) => tag.key === TASK_MODE_TAG)?.value;
   const environment = task.overrides?.containerOverrides
     ?.flatMap((container) => container.environment ?? [])
     .find((entry) => entry.name === MODE_ENVIRONMENT)?.value;
-  return tagged === "standby" || environment === "standby"
-    ? "standby"
-    : "one-shot";
+  return environment === "standby" ? "standby" : "one-shot";
+}
+
+function taskFamily(taskDefinition: string): string {
+  const afterSlash = taskDefinition.slice(taskDefinition.lastIndexOf("/") + 1);
+  return afterSlash.replace(/:\d+$/u, "");
 }
 
 /** ECS implementation loaded only when the hosted launcher setting names it. */
@@ -71,7 +64,7 @@ export function awsVoiceFleet(
           const page = await client.send(
             new ListTasksCommand({
               cluster: settings.cluster,
-              family: settings.taskDefinition,
+              family: taskFamily(settings.taskDefinition),
               desiredStatus,
               ...(nextToken === undefined ? {} : { nextToken }),
             }),
@@ -88,11 +81,13 @@ export function awsVoiceFleet(
           new DescribeTasksCommand({
             cluster: settings.cluster,
             tasks: taskArns,
-            include: ["TAGS"],
           }),
         );
         for (const task of described.tasks ?? []) {
-          if (task.taskArn !== undefined) {
+          if (
+            task.taskArn !== undefined &&
+            ["PROVISIONING", "PENDING", "RUNNING"].includes(task.lastStatus ?? "")
+          ) {
             found.push({ id: task.taskArn, mode: modeOf(task) });
           }
         }
@@ -104,8 +99,8 @@ export function awsVoiceFleet(
       const tasks: VoiceFleetTask[] = [];
       const failures: VoiceFleetLaunchFailure[] = [];
       for (const chunk of batches(Array.from({ length: count }, (_, i) => i), RUN_BATCH)) {
-        const launched = await client.send(
-          new RunTaskCommand({
+        try {
+          const launched = await client.send(new RunTaskCommand({
             cluster: settings.cluster,
             taskDefinition: settings.taskDefinition,
             count: chunk.length,
@@ -126,17 +121,22 @@ export function awsVoiceFleet(
                 },
               ],
             },
-            tags: [{ key: TASK_MODE_TAG, value: mode }],
-          }),
-        );
-        for (const task of launched.tasks ?? []) {
-          if (task.taskArn !== undefined) tasks.push({ id: task.taskArn, mode });
-        }
-        for (const failure of launched.failures ?? []) {
+          }));
+          for (const task of launched.tasks ?? []) {
+            if (task.taskArn !== undefined) tasks.push({ id: task.taskArn, mode });
+          }
+          for (const failure of launched.failures ?? []) {
+            failures.push({
+              reason: failure.reason ?? "unknown",
+              ...(failure.detail === undefined ? {} : { detail: failure.detail }),
+            });
+          }
+        } catch (err) {
           failures.push({
-            reason: failure.reason ?? "unknown",
-            ...(failure.detail === undefined ? {} : { detail: failure.detail }),
+            reason: "run_task_failed",
+            detail: err instanceof Error ? err.message : String(err),
           });
+          break;
         }
       }
       return { tasks, failures };
