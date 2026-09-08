@@ -86,8 +86,14 @@ def verify_native_index(index: dict) -> None:
 
 
 def verify_child(
-    raw: str, digest: str, expected_config: str, index_digest: str | None
+    raw: str,
+    digest: str,
+    expected_size: int,
+    expected_config: str,
+    index_digest: str | None,
 ) -> None:
+    if len(raw.encode()) != expected_size:
+        fail(f"manifest size mismatch for {digest}")
     child = parse_manifest(raw, digest)
     if child.get("mediaType") != OCI_MANIFEST:
         fail("child is not an OCI image manifest")
@@ -149,8 +155,20 @@ def verify_simulator_index(index: dict, fetch_child) -> None:
             fail(f"image-to-SOCI cross-link is wrong for {name}")
         if soci[name]["annotations"][IMAGE_DIGEST] != image_digest:
             fail(f"SOCI-to-image cross-link is wrong for {name}")
-        verify_child(fetch_child(image_digest), image_digest, OCI_CONFIG, soci_digest)
-        verify_child(fetch_child(soci_digest), soci_digest, SOCI_V2, None)
+        verify_child(
+            fetch_child(image_digest),
+            image_digest,
+            images[name].get("size"),
+            OCI_CONFIG,
+            soci_digest,
+        )
+        verify_child(
+            fetch_child(soci_digest),
+            soci_digest,
+            soci[name].get("size"),
+            SOCI_V2,
+            None,
+        )
 
 
 def ecr_manifest(repository: str, image_id: str) -> tuple[str, str]:

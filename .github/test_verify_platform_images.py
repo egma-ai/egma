@@ -63,10 +63,16 @@ class PlatformImageVerifierTest(unittest.TestCase):
         raw = json.dumps(wrong_type, separators=(",", ":"))
         digest = "sha256:" + hashlib.sha256(raw.encode()).hexdigest()
         with self.assertRaisesRegex(ValueError, "wrong config media type"):
-            VERIFY.verify_child(raw, digest, VERIFY.SOCI_V2, None)
+            VERIFY.verify_child(raw, digest, len(raw.encode()), VERIFY.SOCI_V2, None)
         children = {**self.children, soci_digest: self.children[soci_digest] + " "}
         with self.assertRaises(ValueError):
             self.verify(children=children)
+
+    def test_rejects_wrong_child_size(self) -> None:
+        wrong_size = json.loads(json.dumps(self.index))
+        wrong_size["manifests"][0]["size"] += 1
+        with self.assertRaisesRegex(ValueError, "manifest size mismatch"):
+            self.verify(wrong_size)
 
     def test_plain_images_require_exact_native_platforms(self) -> None:
         plain = {
