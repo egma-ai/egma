@@ -5,6 +5,7 @@ Egma is an open-source platform for testing voice agents and monitoring them in 
 
 [Docs](https://docs.egma.ai) · [Egma Cloud](https://app.egma.ai) · [Discord (invite coming soon)](https://example.com/egma-discord-placeholder)
 
+
 ## 🧩 Core features
 
 
@@ -14,6 +15,7 @@ Egma is an open-source platform for testing voice agents and monitoring them in 
 - **Customize your tests.** Choose from supported models and customize your caller personas. Set grading instructions and pass thresholds for the behavior you want to test.
 
 Egma supports LiveKit (JS/TS) and Retell. Contact us on Discord to request another platform or feature.
+
 
 ## 🚀 Get started
 
@@ -32,6 +34,7 @@ For Egma Cloud, [create an account](https://app.egma.ai) and use the prompt abov
 To self-host, follow the [self-hosting guide](https://docs.egma.ai/self-hosting)
 and include your instance's URL in the prompt. Allow extra time for installation
 and the first build.
+
 
 ## 🖥️ Self-hosting
 
@@ -56,12 +59,14 @@ Open [localhost:3101](http://localhost:3101) and create your account.
 See the [self-hosting guide](https://docs.egma.ai/self-hosting) for connecting
 your agent, server setup, and troubleshooting.
 
+
 ## 🧭 Where we're headed
 
 
 Egma supports testing and production monitoring today. We plan to add automatic
 fixes: Egma would use a production failure to propose a change to your voice
 agent's harness, test it, and open a pull request for you to review.
+
 
 ## 💬 Help and feedback
 
