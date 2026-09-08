@@ -1,12 +1,12 @@
 # Egma
----
+
 
 Egma is an open-source platform for testing voice agents and monitoring them in production.
 
 [Docs](https://docs.egma.ai) · [Egma Cloud](https://app.egma.ai) · [Discord (invite coming soon)](https://example.com/egma-discord-placeholder)
 
 ## 🧩 Core features
----
+
 
 - **Test before you ship.** Build regression suites with simulated voice and text conversations and mocked tool responses. Keep tests in your agent's repository and run them with the Egma CLI or a coding agent.
 - **Monitor production.** Review real conversations, tool calls, and metrics. Use graders to check your agent's behavior and investigate failures.
@@ -16,7 +16,7 @@ Egma is an open-source platform for testing voice agents and monitoring them in 
 Egma supports LiveKit (JS/TS) and Retell. Contact us on Discord to request another platform or feature.
 
 ## 🚀 Get started
----
+
 
 Run your first voice simulation in as little as five minutes.
 
@@ -34,7 +34,7 @@ and include your instance's URL in the prompt. Allow extra time for installation
 and the first build.
 
 ## 🖥️ Self-hosting
----
+
 
 Run Egma on your own machine
 
@@ -57,20 +57,19 @@ See the [self-hosting guide](https://docs.egma.ai/self-hosting) for connecting
 your agent, server setup, and troubleshooting.
 
 ## 🧭 Where we're headed
----
+
 
 Egma supports testing and production monitoring today. We plan to add automatic
 fixes: Egma would use a production failure to propose a change to your voice
 agent's harness, test it, and open a pull request for you to review.
 
 ## 💬 Help and feedback
----
+
 
 Read the [docs](https://docs.egma.ai) or [open a GitHub issue](https://github.com/egma-ai/egma/issues). The [Discord invite](https://example.com/egma-discord-placeholder) is coming soon.
 
 ## ⚖️ License
 
----
 
 This repository is MIT licensed, except for the `ee` folders. See
 [LICENSE](LICENSE) for more details.
