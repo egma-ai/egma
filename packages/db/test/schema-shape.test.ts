@@ -64,27 +64,14 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   retell_call_retry: "rcr",
   // One immutable price on the rate card. Provider usage lives in ClickHouse.
   rate_card: "rat",
-  // Egma Cloud's own four. They are in this tree because one schema serves
-  // every deployment — a self-hoster carries them empty — and they follow the
-  // same rules as everything above: a prefixed identity, typed columns and
-  // Egma's usual checks. `cloud_stripe_event` is the one exception and it is
-  // named below: its identity is Stripe's, not Egma's.
+  // Cloud account and money rows have their own prefixed identities.
   cloud_plan: "cpl",
   cloud_billing_account: "cba",
   cloud_ledger_entry: "cle",
 };
 
-/**
- * The one table whose identity another system mints.
- *
- * `cloud_stripe_event` holds one row per Stripe webhook event Egma has already
- * applied, and its primary key is Stripe's own `evt_...`. That is the whole
- * mechanism: a redelivery inserts nothing. Minting an Egma identifier beside
- * it would let one event be applied under two names, which is exactly the
- * failure the table exists to prevent — so it carries no `idText` column and
- * pins no prefix, and this is where that is said out loud.
- */
-const TABLES_WITH_ANOTHER_SYSTEMS_IDENTITY = ["cloud_stripe_event"];
+/** Meter progress is identified by its organization, subscription, period and channel. */
+const TABLES_WITH_COMPOSITE_IDENTITY = ["cloud_meter_period"];
 
 const declaredTables = (Object.values(schema) as unknown[])
   .filter((value): value is PgTable => is(value, PgTable))
@@ -133,11 +120,11 @@ afterAll(async () => {
 /** Every table the migrations build, named once for the two checks below. */
 const EVERY_TABLE = [
   ...Object.keys(TABLE_PREFIX),
-  ...TABLES_WITH_ANOTHER_SYSTEMS_IDENTITY,
+  ...TABLES_WITH_COMPOSITE_IDENTITY,
 ].sort();
 
-describe("the tables this pass builds", () => {
-  it("are the identity and tenancy tables, and only those", async () => {
+describe("the migrated tables", () => {
+  it("contain exactly the declared product and billing state", async () => {
     const { rows } = await database.sql<{ tablename: string }>(
       "select tablename from pg_tables where schemaname = 'public' order by tablename",
     );
@@ -156,6 +143,36 @@ describe("the tables this pass builds", () => {
       expect(table.columns.map((column) => column.name).sort()).toEqual(live);
     }
   });
+
+  it("has no Postgres provider-request or processed Stripe-event history", () => {
+    for (const name of ["usage_record", "cloud_stripe_event"]) {
+      expect(declaredTables.some((table) => table.name === name), name).toBe(false);
+      expect(columns.some((column) => column.table_name === name), name).toBe(false);
+    }
+  });
+
+  it("identifies meter progress by its organization, subscription, period and channel", async () => {
+    const identity = [
+      "organization_id",
+      "stripe_subscription_id",
+      "period_started_at",
+      "period_ends_at",
+      "channel",
+    ];
+    expect(
+      getTableConfig(schema.cloudMeterPeriod).primaryKeys.map((key) =>
+        key.columns.map((column) => column.name),
+      ),
+    ).toEqual([identity]);
+    const { rows } = await database.sql<{ definition: string }>(
+      `select pg_get_constraintdef(oid) as definition
+         from pg_constraint
+        where conrelid = 'cloud_meter_period'::regclass and contype = 'p'`,
+    );
+    expect(rows).toEqual([
+      { definition: `PRIMARY KEY (${identity.join(", ")})` },
+    ]);
+  });
 });
 
 describe("every identifier column", () => {
@@ -165,18 +182,9 @@ describe("every identifier column", () => {
       .map((column) => ({ table: table.name, column: column.name })),
   );
 
-  it("exists on every table but the one whose identity is Stripe's", () => {
+  it("exists on every table, including organization-owned meter progress", () => {
     expect(declaredIdentifierColumns.length).toBeGreaterThan(0);
     for (const table of declaredTables) {
-      if (TABLES_WITH_ANOTHER_SYSTEMS_IDENTITY.includes(table.name)) {
-        expect(
-          declaredIdentifierColumns.some(
-            (column) => column.table === table.name,
-          ),
-          `${table.name} mints no identifier of its own`,
-        ).toBe(false);
-        continue;
-      }
       expect(
         declaredIdentifierColumns.some((column) => column.table === table.name),
       ).toBe(true);
@@ -601,12 +609,14 @@ describe("every enumerated value", () => {
       { table: "monitoring_state", column: "scan_kind" },
       { table: "rate_card", column: "usage_type" },
       { table: "rate_card", column: "unit" },
-      { table: "usage_record", column: "work_kind" },
-      { table: "usage_record", column: "provider" },
-      { table: "usage_record", column: "operation" },
-      { table: "usage_record", column: "unit" },
-      { table: "usage_record", column: "measurement" },
-      { table: "usage_record", column: "payment_source" },
+      { table: "cloud_plan", column: "code" },
+      { table: "cloud_billing_account", column: "plan_code" },
+      { table: "cloud_billing_account", column: "stripe_subscription_status" },
+      { table: "cloud_ledger_entry", column: "kind" },
+      { table: "cloud_ledger_entry", column: "reference_kind" },
+      { table: "cloud_meter_period", column: "channel" },
+      { table: "cloud_meter_period", column: "state" },
+      { table: "cloud_meter_period", column: "last_outcome" },
     ];
 
     const { rows } = await database.sql<{
