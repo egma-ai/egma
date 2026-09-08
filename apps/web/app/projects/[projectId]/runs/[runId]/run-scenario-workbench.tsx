@@ -1,9 +1,9 @@
 "use client";
 
 import { getSimulation, regradeSimulation } from "@egma/platform-api/client";
-import { ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon, RefreshCwIcon } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -71,7 +71,7 @@ import {
   useSimulationEvidenceRecording,
   waitingForSimulationTranscript,
 } from "../../../../../ui/simulation-evidence.tsx";
-import { Actions, SearchField } from "../../../../../ui/section.tsx";
+import { Actions } from "../../../../../ui/section.tsx";
 import { useShellSession } from "../../../../../ui/shell.tsx";
 
 type MoreSimulations = {
@@ -396,11 +396,12 @@ function GraderResultCard({
   const behaviorRows = expectedBehaviorGrader
     ? expectedBehaviorResults(evidence, row.grade)
     : [];
-  const behaviorRowsHaveWrittenResults = behaviorRows.some(({ assertion }) =>
-    assertion !== null &&
-    ((typeof assertion.rationale === "string" && assertion.rationale.trim() !== "") ||
-      (typeof assertion.error === "string" && assertion.error.trim() !== "")),
-  );
+  /*
+   * The table is this grader's evidence, so it replaces the written finding.
+   * An errored grader has no table to read: its content is the error itself.
+   */
+  const showsBehaviorTable =
+    behaviorRows.length > 0 && row.grade?.result !== "errored";
   const frozenDefinition = row.plan ?? row.grade ?? row.history[0];
   const definitionHref = frozenDefinition === undefined
     ? null
@@ -455,28 +456,16 @@ function GraderResultCard({
           </span>
         </header>
 
+        {/* An opened section shows its evidence and nothing about itself. */}
         <CollapsibleContent className="border-t border-border">
-          {frozenDefinition === undefined ? null : (
-            <p className="m-0 px-5 pt-3 text-sm tabular-nums text-faint max-[40rem]:px-4">
-              {`v${String(frozenDefinition.graderDefinitionVersion)}`}
-            </p>
-          )}
-
-          {row.grade === null && !(expectedBehaviorGrader && behaviorRows.length > 0) ? (
+          {row.grade === null && !showsBehaviorTable ? (
             <p className="m-0 px-5 py-4 text-sm text-muted-foreground max-[40rem]:px-4">
               {stillGrading
                 ? "Waiting for this grader to return a result."
                 : "No result is available for this grader."}
             </p>
-          ) : expectedBehaviorGrader && behaviorRows.length > 0 ? (
+          ) : showsBehaviorTable ? (
             <>
-              {!behaviorRowsHaveWrittenResults &&
-              typeof row.grade?.details.rationale === "string" &&
-              row.grade.details.rationale.trim() !== "" ? (
-                <p className="m-0 border-b border-border px-5 py-3 text-sm wrap-anywhere text-muted-foreground max-[40rem]:px-4">
-                  {row.grade.details.rationale}
-                </p>
-              ) : null}
               <TablePanel className="stacked:overflow-visible border-0">
                 <Table className="stacked:block" aria-label={`${row.name} results`}>
                   <TableHeader className="stacked:sr-only">
@@ -536,6 +525,11 @@ function GraderResultCard({
                     : "No result is available for this grader."
                   : findingOf(row.grade)}
               </p>
+              {row.grade?.details.errorCode === "provider_key_unavailable" ? (
+                <div className="mt-3">
+                  <WorkRefusalActions code="provider_key_unavailable" projectId={evidence.projectId} />
+                </div>
+              ) : null}
             </div>
           )}
           <EarlierGrades grades={row.history} />
@@ -546,50 +540,85 @@ function GraderResultCard({
 }
 
 /**
- * The line the grader sections stand under, and how many of them passed.
+ * The line the grader sections stand under, with the regrade control on it.
  *
- * The count is the same one the summary bar reports, and it is per grader:
- * ADR-0017 stands, so nothing here folds the graders into one verdict. While
- * grading is in flight there is no count to report yet.
+ * The line carries no count: the summary bar above it already says how many
+ * graders passed, and ADR-0017 stands, so nothing here folds the graders into
+ * one verdict. Regrade sits on this line because it is grading work.
  */
-function GradersLine({
-  evidence,
-  stillGrading,
-}: {
-  readonly evidence: SimulationEvidence;
-  readonly stillGrading: boolean;
-}) {
-  const tally = evidenceGradeTally(evidence);
-  const counted = !stillGrading && tally.selected > 0;
+function GradersLine({ regrade }: { readonly regrade: RegradeRequest }) {
   return (
-    <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-3">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
       <h3 className="m-0 text-base font-medium text-foreground">Graders</h3>
-      <span className="text-sm tabular-nums text-faint">
-        {counted ? (
-          `${String(tally.passed)}/${String(tally.selected)} passed`
-        ) : (
-          <>
-            <span aria-hidden="true">—</span>
-            <span className="sr-only">
-              {stillGrading ? "Grading" : "No graders were selected"}
-            </span>
-          </>
-        )}
-      </span>
+      <RegradeAction request={regrade} />
     </div>
   );
 }
 
-function ResultSummary({ evidence }: { readonly evidence: SimulationEvidence }) {
+/**
+ * The panel while the conversation has not happened yet.
+ *
+ * There is no evidence to show, so the panel says which of the two waits this
+ * is instead of drawing empty facts. The mark breathes on the status square's
+ * own keyframe, so one motion means "still going" everywhere.
+ */
+function WaitingForSimulation({
+  status,
+}: {
+  readonly status: SimulationStatusWord;
+}) {
+  const running = status === "running";
+  return (
+    <div
+      className="flex min-h-full min-w-0 flex-col items-center justify-center gap-3 px-5 py-16 text-center max-[40rem]:px-4"
+      role="status"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        className="size-14 [[data-theme=dark]_&]:invert"
+        data-slot="waiting-mark"
+        data-motion="pulse"
+        src="/brand/egma-mark-light.svg"
+        alt=""
+        width={56}
+        height={56}
+      />
+      <p className="m-0 text-base font-medium text-foreground">
+        {running ? "Running" : "Queued"}
+      </p>
+      <p className="m-0 max-w-[48ch] text-sm text-faint">
+        {running
+          ? "The conversation is happening now. Results appear here when it ends."
+          : "Waiting for a simulator to start."}
+      </p>
+    </div>
+  );
+}
+
+function ResultSummary({
+  evidence,
+  regrade,
+}: {
+  readonly evidence: SimulationEvidence;
+  readonly regrade: RegradeRequest;
+}) {
   const rows = graderRows(evidence);
   const stillGrading =
     evidence.gradingState === "pending" || evidence.gradingState === "running";
 
+  if (
+    ["queued", "claimed", "running"].includes(evidence.status) &&
+    evidence.grades.length === 0
+  ) {
+    return <WaitingForSimulation status={evidence.status} />;
+  }
+
   if (evidence.gradingState === "not_requested") {
     return (
       <div className="flex min-w-0 flex-col gap-4">
-        <ResultNotice evidence={evidence} />
         <SimulationFacts evidence={evidence} />
+        <ResultNotice evidence={evidence} />
+        <GradersLine regrade={regrade} />
         <div className="border border-border bg-surface p-5 max-[40rem]:p-4">
           <h3 className="m-0 text-base font-medium text-foreground">
             No grading was requested
@@ -605,8 +634,9 @@ function ResultSummary({ evidence }: { readonly evidence: SimulationEvidence }) 
   if (rows.length === 0) {
     return (
       <div className="flex min-w-0 flex-col gap-4">
-        <ResultNotice evidence={evidence} />
         <SimulationFacts evidence={evidence} />
+        <ResultNotice evidence={evidence} />
+        <GradersLine regrade={regrade} />
         <div className="border border-border bg-surface p-5 max-[40rem]:p-4">
           <h3 className="m-0 text-base font-medium text-foreground">
             {stillGrading ? "Graders are preparing" : "No grades are available"}
@@ -627,9 +657,9 @@ function ResultSummary({ evidence }: { readonly evidence: SimulationEvidence }) 
       role="region"
       aria-label="Grader results"
     >
-      <ResultNotice evidence={evidence} />
       <SimulationFacts evidence={evidence} />
-      <GradersLine evidence={evidence} stillGrading={stillGrading} />
+      <ResultNotice evidence={evidence} />
+      <GradersLine regrade={regrade} />
       {rows.map((row) => (
         <GraderResultCard
           evidence={evidence}
@@ -686,9 +716,9 @@ function TranscriptAndAudio({
  * The regrade request, its refusals and its confirmation, held in one place.
  *
  * The control and the notices sit in two different parts of the panel — the
- * button at the end of the tab rail, the notices under it where both tabs can
- * see them — so the state machine lives here and each part reads it. There is
- * one dialog, and it is rendered with the notices.
+ * button on the Graders line, the notices under the tab rail where both tabs
+ * can see them — so the state machine lives here and each part reads it. There
+ * is one dialog, and it is rendered with the notices.
  */
 function useRegradeRequest({
   evidence,
@@ -753,18 +783,34 @@ function useRegradeRequest({
 
 type RegradeRequest = ReturnType<typeof useRegradeRequest>;
 
-/** The control itself, sized for the rail it stands at the end of. */
+/**
+ * The control itself: one small square beside the word `Graders`.
+ *
+ * It answers only when there is grading work to redo — the conversation
+ * finished and no grader is running — and it says what it does in its label,
+ * because the icon is the whole of what is drawn.
+ */
 function RegradeAction({ request }: { readonly request: RegradeRequest }) {
   if (!request.mayRegrade) return null;
+  const { evidence } = request;
+  const gradingBusy =
+    evidence.gradingState === "pending" || evidence.gradingState === "running";
   return (
     <Button
+      className={cn(
+        "size-5.5 min-h-0 border-border text-muted-foreground",
+        "pointer-coarse:size-(--tap-target)",
+        "disabled:opacity-100 disabled:text-faint",
+      )}
       type="button"
-      variant="secondary"
-      size="sm"
-      disabled={request.working}
+      variant="ghost"
+      size="icon"
+      aria-label="Regrade this simulation"
+      title="Regrade this simulation"
+      disabled={request.working || evidence.status !== "completed" || gradingBusy}
       onClick={request.ask}
     >
-      Regrade
+      <RefreshCwIcon className="size-3.25" aria-hidden="true" />
     </Button>
   );
 }
@@ -833,6 +879,18 @@ function RegradeNotices({ request }: { readonly request: RegradeRequest }) {
   );
 }
 
+/**
+ * The rail tab's own bottom line.
+ *
+ * The chosen tab keeps the shared two-pixel Ember edge. The other draws a
+ * single neutral pixel on the same baseline, which is what the row's own
+ * hairline used to do for both of them.
+ */
+const RAIL_TAB = cn(
+  "data-[state=inactive]:after:bg-border",
+  "group-data-[orientation=horizontal]/tabs:data-[state=inactive]:after:h-px",
+);
+
 function EvidenceDetail({
   evidence,
   onReload,
@@ -848,25 +906,27 @@ function EvidenceDetail({
         className="min-h-0 flex-1 gap-0 overflow-hidden"
       >
         {/*
-          One row carries the hairline the rail tabs sit on, so the chosen
-          tab's Ember line still meets it. Regrade stands at the far end of
-          that row: it acts on the selected simulation, not on one tab.
+          The row draws no hairline of its own. Each tab carries its own line
+          instead — two pixels of Ember under the chosen one, one neutral pixel
+          under the other — so the pair reads as a rail without a rule running
+          past both of them.
         */}
-        <div className="flex min-w-0 flex-none items-center justify-between gap-3 border-b border-border px-5 max-[40rem]:px-4">
+        <div className="flex min-w-0 flex-none items-center px-5 max-[40rem]:px-4">
           <TabsList variant="line" className="min-w-0">
-            <TabsTrigger value="results">Results summary</TabsTrigger>
-            <TabsTrigger value="transcript">
+            <TabsTrigger className={RAIL_TAB} value="results">
+              Results summary
+            </TabsTrigger>
+            <TabsTrigger className={RAIL_TAB} value="transcript">
               {evidence.modality === "voice" ? "Transcript & audio" : "Transcript"}
             </TabsTrigger>
           </TabsList>
-          <RegradeAction request={regradeRequest} />
         </div>
         <RegradeNotices request={regradeRequest} />
         <TabsContent
           value="results"
           className="min-h-0 overflow-y-auto p-5 max-[40rem]:p-4"
         >
-          <ResultSummary evidence={evidence} />
+          <ResultSummary evidence={evidence} regrade={regradeRequest} />
         </TabsContent>
         <TabsContent
           value="transcript"
@@ -897,29 +957,10 @@ export function RunScenarioWorkbench({
   readonly onExecutionFailureVisible: (simulationId: string) => void;
   readonly more?: MoreSimulations;
 }) {
-  const [query, setQuery] = useState("");
-
-  const visibleRows = useMemo(() => {
-    const asked = query.trim().toLocaleLowerCase();
-    if (asked === "") return rows;
-    return rows.filter((row) =>
-      [row.testName ?? "", row.personaName]
-        .join(" ")
-        .toLocaleLowerCase()
-        .includes(asked),
-    );
-  }, [query, rows]);
-
   useEffect(() => {
-    setQuery("");
-  }, [projectId, runId]);
-
-  useEffect(() => {
-    if (selectedId !== null && visibleRows.some((row) => row.id === selectedId)) {
-      return;
-    }
-    onSelect(visibleRows[0]?.id ?? selectedId ?? rows[0]?.id ?? null);
-  }, [onSelect, rows, selectedId, visibleRows]);
+    if (selectedId !== null && rows.some((row) => row.id === selectedId)) return;
+    onSelect(rows[0]?.id ?? selectedId ?? null);
+  }, [onSelect, rows, selectedId]);
 
   const selected = rows.find((row) => row.id === selectedId) ?? rows[0] ?? null;
   const evidenceProject = selected === null ? null : projectId;
@@ -971,9 +1012,6 @@ export function RunScenarioWorkbench({
           endedAt: evidenceForDisplay.endedAt,
         };
 
-  const selectedSquare =
-    displayedSelected === null ? null : simulationSquare(displayedSelected);
-
   useEffect(() => {
     if (evidenceAnswer?.status === "signed-out") window.location.replace("/sign-in");
   }, [evidenceAnswer]);
@@ -1012,37 +1050,29 @@ export function RunScenarioWorkbench({
       aria-label="Run simulations workbench"
     >
       <aside className="flex min-h-0 min-w-0 flex-col border-r border-border max-[900px]:border-r-0 max-[900px]:border-b" aria-label="Simulations in this run">
-        <header className="border-b border-border p-4">
-          <div className="mb-3 flex items-baseline justify-between gap-3">
-            <h2 className="m-0 text-base font-medium text-foreground">Simulations</h2>
-            <span className="text-sm tabular-nums text-muted-foreground">
-              {String(total)} {total === 1 ? "simulation" : "simulations"}
+        {/*
+          The head is the panel's own 56px bar, so its hairline meets the
+          selected simulation's heading across the fold. The count is a quiet
+          annotation on the word rather than a fact of its own at the far end.
+        */}
+        <header className="flex min-h-(--topbar-height) items-center border-b border-border px-4">
+          <h2 className="m-0 text-base font-medium text-foreground">
+            Simulations{" "}
+            <span className="text-sm font-normal tabular-nums text-faint">
+              <span aria-hidden="true">·</span> {String(total)}
             </span>
-          </div>
-          <SearchField
-            className="w-full [&_input]:w-full"
-            aria-label="Search simulations"
-            placeholder="Search simulations"
-            value={query}
-            onChange={(event) => setQuery(event.currentTarget.value)}
-          />
+          </h2>
         </header>
-        {visibleRows.length === 0 ? (
-          <p className="m-0 p-4 text-sm text-muted-foreground">
-            No simulation matches this search.
-          </p>
-        ) : (
-          <ol className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-0 max-[900px]:max-h-80 max-[900px]:flex-none">
-            {visibleRows.map((row) => (
-              <SimulationChoice
-                key={row.id}
-                row={row.id === displayedSelected?.id ? displayedSelected : row}
-                selected={row.id === selected?.id}
-                onSelect={() => onSelect(row.id)}
-              />
-            ))}
-          </ol>
-        )}
+        <ol className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-0 max-[900px]:max-h-80 max-[900px]:flex-none">
+          {rows.map((row) => (
+            <SimulationChoice
+              key={row.id}
+              row={row.id === displayedSelected?.id ? displayedSelected : row}
+              selected={row.id === selected?.id}
+              onSelect={() => onSelect(row.id)}
+            />
+          ))}
+        </ol>
         {more === undefined ? null : (
           <div className="flex items-center justify-between gap-3 border-t border-border p-3">
             <span className="text-sm text-muted-foreground">{more.note}</span>
@@ -1060,29 +1090,19 @@ export function RunScenarioWorkbench({
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background max-[900px]:overflow-visible">
-        {displayedSelected === null || selectedSquare === null ? null : (
+        {displayedSelected === null ? null : (
           <header
-            className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-border bg-surface p-5 max-[40rem]:p-4"
+            className="flex min-h-(--topbar-height) min-w-0 items-center border-b border-border bg-surface px-5 max-[40rem]:px-4"
             data-slot="selected-simulation-header"
           >
             {/*
-              The same square and word as this simulation's row in the list.
-              The square is decoration beside the name and stays out of the
-              heading's own name, which is the test.
+              The test's name and nothing else. The square and the state word
+              are on this simulation's row in the list, one column to the left,
+              and the row is where the reader chose it.
             */}
-            <h2 className="m-0 flex min-w-0 items-center gap-2 text-lg font-medium text-foreground">
-              <StateMark
-                kind={selectedSquare.kind}
-                filled
-                pulse={selectedSquare.pulse}
-              />
-              <span className="min-w-0 wrap-anywhere">
-                {displayedSelected.testName ?? "No stored test"}
-              </span>
+            <h2 className="m-0 min-w-0 text-base font-medium wrap-anywhere text-foreground">
+              {displayedSelected.testName ?? "No stored test"}
             </h2>
-            <span className="text-sm text-muted-foreground">
-              {selectedSquare.word}
-            </span>
           </header>
         )}
 

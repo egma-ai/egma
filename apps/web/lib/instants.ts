@@ -128,6 +128,21 @@ export function asListInstant(
   return `${part("month")} ${part("day")}, ${part("year")} · ${part("hour")}:${part("minute")}:${part("second")}`;
 }
 
+/**
+ * The clock alone, in 24-hour form, for a column that stacks time under date.
+ *
+ * It reads the same `listFormatterFor` parts the date line above it uses, so
+ * both lines name one moment in the viewer's zone.
+ */
+export function asListClock(instant: string): string {
+  const at = Date.parse(instant);
+  if (Number.isNaN(at)) return instant;
+  const parts = listFormatterFor("minute").formatToParts(new Date(at));
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((one) => one.type === type)?.value ?? "";
+  return `${part("hour")}:${part("minute")}`;
+}
+
 /** A compact call-overview moment: the year is already present in the list. */
 export function asCallOverviewInstant(instant: string): string {
   const at = Date.parse(instant);

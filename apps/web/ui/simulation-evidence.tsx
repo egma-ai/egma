@@ -152,14 +152,14 @@ const EMPTY_STATE_LEAD = "m-0 mt-1 max-w-[62ch] text-sm text-muted-foreground";
 const SUMMARY_CELL = "flex min-w-0 items-center justify-between gap-3 px-5 py-3";
 
 /**
- * Metrics and counts read straight in the mono face, on tabular figures.
+ * Summary values read in the product's own sans face, on tabular figures.
  *
- * `WV-0` writes the summary values in mono; `DESIGN.md` asks every
- * metric, date, duration and score for tabular numerals. Both together are
- * what stops "1m 04s" and "11m 40s" sitting at two widths in one strip.
+ * The figures still line up column by column, which is what stops "1m 04s" and
+ * "11m 40s" sitting at two widths in one strip. Mono stays where it names a
+ * thing rather than counts one: tool names and transcript timestamps.
  */
 const SUMMARY_VALUE =
-  "whitespace-nowrap font-mono text-base font-normal text-foreground tabular-nums";
+  "whitespace-nowrap text-base font-normal text-foreground tabular-nums";
 
 /**
  * The name of one fact, quiet, beside its value.

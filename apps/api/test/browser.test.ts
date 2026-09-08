@@ -3562,7 +3562,14 @@ describe("the complete product, walked in order in a second project", () => {
       expect(await summary.innerText()).not.toContain("Total avg score");
 
       const grades = results.getByRole("region", { name: "Grader results" });
-      expect(await grades.innerText()).toMatch(/Graders\s+1\/1 passed/u);
+      // The Graders line names the sections and counts nothing: the summary
+      // bar above it already says how many passed.
+      expect(await grades.getByRole("heading", { name: "Graders" }).count()).toBe(1);
+      expect(await grades.innerText()).not.toMatch(/Graders\s+1\/1 passed/u);
+      // Regrade is one small square on that line, with its label written out.
+      expect(
+        await results.getByRole("button", { name: "Regrade this simulation" }).count(),
+      ).toBe(1);
       const expected = grades.getByRole("region", {
         name: "Expected behaviors",
       });
@@ -3575,7 +3582,9 @@ describe("the complete product, walked in order in a second project", () => {
         await expected.getByRole("table", { name: "Expected behaviors results" }).count(),
       ).toBe(0);
       await expected.getByRole("button", { name: "Expected behaviors" }).click();
-      expect(await expected.innerText()).toContain("v1");
+      // An opened section is its evidence and nothing about itself: the table,
+      // with no frozen-version line above it.
+      expect(await expected.innerText()).not.toMatch(/^\s*v1\s*$/mu);
       expect(
         await expected
           .getByRole("table", { name: "Expected behaviors results" })

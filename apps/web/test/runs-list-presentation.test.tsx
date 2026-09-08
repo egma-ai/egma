@@ -239,28 +239,39 @@ describe("runs list presentation", () => {
     expect(within(table).queryByText("Total avg score")).toBeNull();
     expect(within(table).queryByText("Combined score")).toBeNull();
     expect(within(table).getByText("Front desk")).toBeTruthy();
-    expect(within(table).getByText("Chat")).toBeTruthy();
     expect(within(table).getByText("Staging chat key")).toBeTruthy();
-    expect(within(table).getByText("Retell chat")).toBeTruthy();
     /*
-     * Started names a moment, not a day, so the clock is part of the column.
-     * The zone is the viewer's, so the shape is pinned and the exact instant
-     * stays on the element: the title keeps seconds, the text stops at the
-     * minute.
+     * The Agent and Connection columns name one thing each. The run carries a
+     * modality and a product label, and neither belongs under the name: the
+     * type line was dropped from both columns on 2026-09-07.
      */
-    const started = within(table).getByText(/^Aug 25, 2026, \d{2}:\d{2}$/u);
-    expect(started.getAttribute("datetime")).toBe("2026-08-25T18:00:01.000Z");
-    expect(started.getAttribute("title")).toMatch(
+    expect(within(table).queryByText("Chat")).toBeNull();
+    expect(within(table).queryByText("Voice")).toBeNull();
+    expect(within(table).queryByText("Retell chat")).toBeNull();
+    /*
+     * Started names a moment, not a day, so the clock is part of the column —
+     * on its own line, under the date, in faint ink. The zone is the viewer's,
+     * so the shape is pinned and the exact instant stays on the element: the
+     * title keeps seconds, the two lines stop at the minute.
+     */
+    const startedDate = within(table).getByText(/^Aug \d{1,2}, 2026$/u);
+    expect(startedDate.textContent).not.toMatch(/\d{2}:\d{2}/u);
+    const started = startedDate.closest("time");
+    expect(started).toBeTruthy();
+    expect(started?.getAttribute("datetime")).toBe("2026-08-25T18:00:01.000Z");
+    expect(started?.getAttribute("title")).toMatch(
       /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /u,
     );
+    const clock = within(started as HTMLElement).getByText(/^\d{2}:\d{2}$/u);
+    expect(clock.className).toContain("text-faint");
     const headerCells = within(table).getAllByRole("columnheader");
     expect(headerCells.slice(0, 6).map((header) => header.style.width)).toEqual([
-      "22%",
-      "16%",
-      "18%",
-      "18%",
+      "24%",
+      "17%",
+      "17%",
+      "15%",
+      "13%",
       "14%",
-      "12%",
     ]);
     expect(table.parentElement?.parentElement?.parentElement?.className).toContain(
       "[--row-min-height:56px]",
