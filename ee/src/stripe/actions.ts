@@ -5,7 +5,7 @@ import type Stripe from "stripe";
 
 import {
   accountForBillingAction,
-  recordStripeCustomer,
+  resolveStripeCustomer,
   recordStripeOperationFailure,
   type BillingActor,
 } from "../access/index.ts";
@@ -131,17 +131,19 @@ async function customerFor(
   const held = actor.account.stripeCustomerId;
   if (held !== null) return held;
 
-  const customer = await gateway.api.customers.create(
-    {
-      // Egma's own name for this customer, so a Stripe dashboard row can be
-      // traced back to an organization without a second lookup. The person's
-      // own name and address are collected by Checkout, which is where Stripe
-      // Tax needs them.
-      metadata: { egma_organization_id: auth.organizationId },
-    },
-    { idempotencyKey: stripeCustomerKey(auth.organizationId) },
-  );
-  return recordStripeCustomer(auth, customer.id);
+  return resolveStripeCustomer(auth, async () => {
+    const customer = await gateway.api.customers.create(
+      {
+        // Egma's own name for this customer, so a Stripe dashboard row can be
+        // traced back to an organization without a second lookup. The person's
+        // own name and address are collected by Checkout, which is where Stripe
+        // Tax needs them.
+        metadata: { egma_organization_id: auth.organizationId },
+      },
+      { idempotencyKey: stripeCustomerKey(auth.organizationId) },
+    );
+    return customer.id;
+  });
 }
 
 /** A Stripe-hosted page for the browser to follow. */
@@ -238,8 +240,8 @@ export class BillingStateError extends Error {
  *
  * `subscription` mode with three items: the monthly fee, and the two metered
  * prices whose first tier is the included allowance at nothing and whose
- * second prices every minute past it. Proration is on, so an upgrade takes
- * effect at once and the customer pays for the part of the month they get.
+ * second prices every minute past it. A new subscription starts a full paid
+ * month immediately.
  */
 export async function openUpgradeCheckout(
   gateway: StripeGateway,
@@ -277,7 +279,6 @@ export async function openUpgradeCheckout(
             egma_organization_id: auth.organizationId,
             egma_plan: "pro",
           },
-          proration_behavior: "create_prorations",
         },
         metadata: { egma_organization_id: auth.organizationId },
         success_url: `${returnTo}?plan=pro`,

@@ -30,6 +30,7 @@ import {
   cloudBillingPlugIn,
   isSandboxKey,
   openCreditCheckout,
+  openUpgradeCheckout,
   scheduleDowngrade,
   setUpStripe,
   stripeGateway,
@@ -645,6 +646,30 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     ).toBe(30000000);
   }, 660000);
 
+  it("opens the real product Upgrade Checkout with all three prices", async () => {
+    const page = await openUpgradeCheckout(
+      gateway,
+      contextFor(paying, "admin"),
+    );
+    expect(page.url).toMatch(/^https:\/\/checkout\.stripe\.com\//);
+    const sessions = await stripe.checkout.sessions.list({
+      customer: payingCustomerId,
+      status: "open",
+      limit: 100,
+    });
+    const session = sessions.data.find((one) => one.mode === "subscription");
+    if (session === undefined)
+      throw new Error("Upgrade did not create a real subscription Checkout");
+    const lines = await stripe.checkout.sessions.listLineItems(session.id, {
+      limit: 100,
+    });
+    const prices = await proPrices();
+    expect(lines.data.map((line) => line.price?.id).sort()).toEqual(
+      [prices.fee, prices.webCall, prices.phone].sort(),
+    );
+    await stripe.checkout.sessions.expire(session.id);
+  }, 120_000);
+
   it("moves to Pro, and Stripe's own event sets the plan and the month", async () => {
     const prices = await proPrices();
     const subscription = await stripe.subscriptions.create({
@@ -712,32 +737,24 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     // documentation, so the preview is polled — and a poll that runs out is a
     // failure, not a pass.
     const until = Date.now() + METER_TIMEOUT_MS;
-    let line: Stripe.InvoiceLineItem | undefined;
+    let lines: Stripe.InvoiceLineItem[] = [];
     for (;;) {
       const preview = await stripe.invoices.createPreview({
         customer: payingCustomerId,
         subscription: subscriptionId,
       });
-      line = preview.lines.data.find(
-        (one) =>
-          priceIdOf(one) === plan.stripeWebCallMeterPriceId && one.amount > 0,
+      lines = preview.lines.data.filter(
+        (one) => priceIdOf(one) === plan.stripeWebCallMeterPriceId,
       );
-      if (line !== undefined) break;
-      if (Date.now() > until) break;
-      await rest(5_000);
+      if (lines.some((one) => one.subtotal > 0) || Date.now() > until) break;
+      await rest(5000);
     }
-
-    expect(
-      line,
-      `Stripe's preview carried no priced ${METER_EVENT_NAMES.web_call_minutes} ` +
-        `line within ${METER_TIMEOUT_MS / 1_000}s`,
-    ).toBeDefined();
-    // The allowance is the first tier at nothing and the rest is the second
-    // tier at the plan row's price, so the line is exactly the overage.
-    expect(line?.amount).toBe(expectedCents);
-    expect(Number(String(line?.quantity_decimal))).toBe(
-      plan.webCallMinutesAllowance + overageMinutes,
+    expect(lines.reduce((total, line) => total + line.subtotal, 0)).toBe(
+      expectedCents,
     );
+    expect(
+      lines.reduce((total, line) => total + Number(line.quantity_decimal), 0),
+    ).toBe(plan.webCallMinutesAllowance + overageMinutes);
 
     const fractionalId = randomUUID();
     await stripe.billing.meterEvents.create(
@@ -826,11 +843,24 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     expect(originalWeb.reduce((total, line) => total + line.subtotal, 0)).toBe(
       401,
     );
+    await stripe.subscriptions.update(subscriptionId, {
+      default_payment_method: payingPaymentMethodId,
+    });
+    await stripe.customers.update(payingCustomerId, {
+      invoice_settings: { default_payment_method: "" },
+    });
+    const customerWithNoDefault =
+      await stripe.customers.retrieve(payingCustomerId);
+    if (customerWithNoDefault.deleted)
+      throw new Error("paying customer disappeared");
+    expect(
+      customerWithNoDefault.invoice_settings.default_payment_method,
+    ).toBeNull();
     const start = new Date(period.periodStartedAt.getTime() + 3 * 3600000);
     await conversation(paying, {
       connectionType: "livekit_room",
-      seconds: 5401.5 * 60,
-      endedAt: new Date(start.getTime() + 5401.5 * 60000),
+      seconds: 5500.5 * 60,
+      endedAt: new Date(start.getTime() + 5500.5 * 60000),
     });
     const runRecovery = async (using: StripeGateway, when: Date) => {
       let posted = false;
@@ -886,7 +916,8 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
         later.push(invoice);
     }
     expect(later).toHaveLength(1);
-    expect(later[0]?.subtotal).toBe(1);
+    expect(later[0]?.subtotal).toBe(100);
+    expect(later[0]?.default_payment_method).toBe(payingPaymentMethodId);
     expect(later[0]?.automatic_tax.enabled).toBe(true);
     const lines = await stripe.invoices.listLineItems(later[0]!.id);
     expect(lines.data).toHaveLength(1);
@@ -894,13 +925,18 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
       start: period.periodStartedAt.getTime() / 1000,
       end: period.periodEndsAt.getTime() / 1000,
     });
-    // Stripe may carry an amount below its card minimum in customer balance.
+    await stripe.testHelpers.testClocks.advance(payingClockId, {
+      frozen_time: daysOn(32) + 7200,
+    });
+    await whenReady(payingClockId);
+    const collected = await stripe.invoices.retrieve(later[0]!.id);
+    expect(collected.status).toBe("paid");
+    expect(collected.amount_paid).toBeGreaterThanOrEqual(100);
     console.info("Late invoice proof", {
-      id: later[0]?.id,
-      status: later[0]?.status,
-      subtotal: later[0]?.subtotal,
-      amountDue: later[0]?.amount_due,
-      endingBalance: later[0]?.ending_balance,
+      id: collected.id,
+      status: collected.status,
+      subtotal: collected.subtotal,
+      amountPaid: collected.amount_paid,
     });
   }, 240_000);
 

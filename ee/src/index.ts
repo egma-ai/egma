@@ -131,7 +131,7 @@ export {
   type BillingLedgerPage,
   type SettledUsage,
   openBillingAccount,
-  recordStripeCustomer,
+  resolveStripeCustomer,
   recordStripePlanObjects,
   readBillingOverview,
   readEntitlementFacts,

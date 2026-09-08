@@ -1,10 +1,43 @@
 import { describe, expect, it } from "vitest";
 
 import { minuteValueAdded } from "../src/stripe/facts.ts";
-import { periodOverageCents } from "../src/stripe/late-facts.ts";
+import {
+  periodOverageCents,
+  latePaymentDefaults,
+} from "../src/stripe/late-facts.ts";
 import { creditAmountRefusal } from "../src/stripe/actions.ts";
 
 describe("per-second usage sent to minute meters", () => {
+  it("uses the current customer card or the original subscription card without inventing a payment method", () => {
+    const subscriptionOnly = {
+      customerPaymentMethod: null,
+      subscriptionPaymentMethod: "pm_subscription",
+      customerSource: null,
+      subscriptionSource: null,
+    };
+    expect(latePaymentDefaults(subscriptionOnly)).toEqual({
+      default_payment_method: "pm_subscription",
+    });
+    expect(
+      latePaymentDefaults({
+        ...subscriptionOnly,
+        customerPaymentMethod: "pm_current",
+      }),
+    ).toEqual({ default_payment_method: "pm_current" });
+    expect(
+      latePaymentDefaults({
+        ...subscriptionOnly,
+        subscriptionPaymentMethod: null,
+        subscriptionSource: "src_saved",
+      }),
+    ).toEqual({ default_source: "src_saved" });
+    expect(
+      latePaymentDefaults({
+        ...subscriptionOnly,
+        subscriptionPaymentMethod: null,
+      }),
+    ).toBeUndefined();
+  });
   it("rejects sub-cent credit purchases before rounding can change their paid amount", () => {
     expect(creditAmountRefusal(5_000_001)).toContain("whole cents");
     expect(creditAmountRefusal(5_010_000)).toBeUndefined();

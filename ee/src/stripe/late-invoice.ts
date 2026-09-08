@@ -9,6 +9,7 @@ import type { MeteredHour } from "./facts.ts";
 import type { StripeGateway } from "./gateway.ts";
 import {
   periodOverageCents,
+  latePaymentDefaults,
   type FinalizedPeriodEvidence,
   type PendingLateInvoice,
 } from "./late-facts.ts";
@@ -249,7 +250,6 @@ export async function recoverLateUsage(
     item = await gateway.api.invoiceItems.retrieve(pending.invoiceItemId);
   else {
     for await (const candidate of gateway.api.invoiceItems.list({
-      customer: account.stripeCustomerId,
       invoice: invoice.id,
       limit: 100,
     })) {
@@ -318,12 +318,37 @@ export async function recoverLateUsage(
     throw new Error(
       "later invoice item no longer matches its frozen obligation",
     );
-  if (invoice.status === "draft")
+  if (invoice.status === "draft") {
+    if (
+      invoice.default_payment_method === null &&
+      invoice.default_source === null
+    ) {
+      const [customer, subscription] = await Promise.all([
+        gateway.api.customers.retrieve(account.stripeCustomerId),
+        gateway.api.subscriptions.retrieve(period.stripeSubscriptionId),
+      ]);
+      if (
+        customer.deleted ||
+        idOf(subscription.customer) !== account.stripeCustomerId
+      )
+        throw new Error("the original subscription payment identity changed");
+      const payment = latePaymentDefaults({
+        customerPaymentMethod: idOf(
+          customer.invoice_settings.default_payment_method,
+        ),
+        subscriptionPaymentMethod: idOf(subscription.default_payment_method),
+        customerSource: idOf(customer.default_source),
+        subscriptionSource: idOf(subscription.default_source),
+      });
+      if (payment !== undefined)
+        invoice = await gateway.api.invoices.update(invoice.id, payment);
+    }
     invoice = await gateway.api.invoices.finalizeInvoice(
       invoice.id,
       { auto_advance: true },
       { idempotencyKey: `egma-late-finalize:${pending.identifier}` },
     );
+  }
   // Re-read the durable invoice even after a successful finalization response.
   invoice = await gateway.api.invoices.retrieve(invoice.id);
   verifyInvoice(invoice, account, expected);

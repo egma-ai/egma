@@ -180,6 +180,7 @@ const BILLING_PORTS = [
 const STRIPE_FACTS = [
   "applyStripeEvent",
   "visitMeterAccounts",
+  "recoverUnlinkedStripeAccounts",
   "markStripeCustomerFailed",
 ];
 

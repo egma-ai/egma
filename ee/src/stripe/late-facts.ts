@@ -38,3 +38,18 @@ export type PendingLateInvoice = {
   readonly itemCreateStartedAt: Date | null;
   readonly invoiceItemId: string | null;
 };
+
+export function latePaymentDefaults(facts: {
+  customerPaymentMethod: string | null;
+  subscriptionPaymentMethod: string | null;
+  customerSource: string | null;
+  subscriptionSource: string | null;
+}):
+  | { default_payment_method: string }
+  | { default_source: string }
+  | undefined {
+  const method = facts.customerPaymentMethod ?? facts.subscriptionPaymentMethod;
+  if (method !== null) return { default_payment_method: method };
+  const source = facts.customerSource ?? facts.subscriptionSource;
+  return source === null ? undefined : { default_source: source };
+}

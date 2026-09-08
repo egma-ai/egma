@@ -6,7 +6,7 @@ import {
   type AuthContext,
   type Queryable,
 } from "@egma/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, isNotNull, sql } from "drizzle-orm";
 
 import { purchasedCreditKey } from "../idempotency.ts";
 import {
@@ -45,49 +45,114 @@ export async function accountForBillingAction(
   return { account, plan, pro };
 }
 
-/**
- * Remember the Stripe customer this organization's money moves through.
- *
- * **Written once and never overwritten.** The update names the null it is
- * filling, so two admins pressing Buy credit together cannot leave the account
- * pointing at one customer while an invoice is raised against another: the
- * first write wins and the second reads the winner back. Stripe's own
- * idempotency key on the create is the other half — inside Stripe's window
- * both requests resolve to one customer, so the loser usually has nothing to
- * throw away.
- */
-export async function recordStripeCustomer(
+/** Customer creation and unlinked-fault recovery share this organization lock. */
+export async function resolveStripeCustomer(
   auth: AuthContext,
-  customerId: string,
+  create: () => Promise<string>,
 ): Promise<string> {
   authorize(auth, "manage_organization", {
     organizationId: auth.organizationId,
     projectId: auth.projectId,
   });
-  const [claimed] = await fencedDatabase()
-    .update(cloudBillingAccount)
-    .set({ stripeCustomerId: customerId, updatedAt: new Date() })
+  return fencedDatabase().transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`egma:stripe-customer:${auth.organizationId}`}::text, 0))`,
+    );
+    const [account] = await tx
+      .select({
+        id: cloudBillingAccount.id,
+        customerId: cloudBillingAccount.stripeCustomerId,
+      })
+      .from(cloudBillingAccount)
+      .where(within(auth, cloudBillingAccount));
+    if (account === undefined)
+      throw new Error("Stripe customer creation has no billing account");
+    if (account.customerId !== null) return account.customerId;
+    const customerId = await create();
+    if (customerId.trim() === "")
+      throw new Error("Stripe returned an empty customer identity");
+    await tx
+      .update(cloudBillingAccount)
+      .set({ stripeCustomerId: customerId, updatedAt: new Date() })
+      .where(eq(cloudBillingAccount.id, account.id));
+    return customerId;
+  });
+}
+
+/** The timer repairs a failed customer link from actual customer identities, never by creating paid state. */
+type UnlinkedStripeAccount = { readonly organizationId: string };
+export async function recoverUnlinkedStripeAccounts(
+  read: (account: UnlinkedStripeAccount) => Promise<readonly string[]>,
+  failed: (account: UnlinkedStripeAccount, fault: unknown) => void,
+): Promise<void> {
+  const accounts = await fencedDatabase()
+    .select({ organizationId: cloudBillingAccount.organizationId })
+    .from(cloudBillingAccount)
+    .innerJoin(cloudPlan, eq(cloudPlan.code, "hobby"))
     .where(
       and(
-        within(auth, cloudBillingAccount),
-        sql`${cloudBillingAccount.stripeCustomerId} is null`,
+        isNull(cloudBillingAccount.stripeCustomerId),
+        isNotNull(cloudBillingAccount.stripeFailedAt),
+        eq(cloudPlan.stripePaymentsReady, true),
       ),
-    )
-    .returning({ customerId: cloudBillingAccount.stripeCustomerId });
-  if (claimed?.customerId != null) return claimed.customerId;
-
-  const [held] = await fencedDatabase()
-    .select({ customerId: cloudBillingAccount.stripeCustomerId })
-    .from(cloudBillingAccount)
-    .where(within(auth, cloudBillingAccount))
-    .limit(1);
-  if (held?.customerId == null) {
-    throw new Error(
-      `the billing account for ${auth.organizationId} took neither the ` +
-        "Stripe customer offered to it nor held one already",
     );
+  for (const { organizationId } of accounts) {
+    try {
+      await fencedDatabase().transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`egma:stripe-customer:${organizationId}`}::text, 0))`,
+        );
+        const [account] = await tx
+          .select()
+          .from(cloudBillingAccount)
+          .where(eq(cloudBillingAccount.organizationId, organizationId));
+        if (
+          account === undefined ||
+          account.stripeCustomerId !== null ||
+          account.stripeFailedAt === null
+        )
+          return;
+        const ids = await read({ organizationId });
+        if (ids.length > 1 || ids.some((id) => id.trim() === ""))
+          throw new Error(
+            "Stripe customer identity needs reconciliation before linking",
+          );
+        const customerId = ids[0];
+        if (customerId !== undefined) {
+          await tx
+            .update(cloudBillingAccount)
+            .set({ stripeCustomerId: customerId, updatedAt: new Date() })
+            .where(
+              and(
+                eq(cloudBillingAccount.id, account.id),
+                isNull(cloudBillingAccount.stripeCustomerId),
+              ),
+            );
+          return;
+        }
+        if (
+          account.planCode !== "hobby" ||
+          account.stripeSubscriptionId !== null
+        )
+          throw new Error("an unlinked account retains subscription evidence");
+        await tx
+          .update(cloudBillingAccount)
+          .set({ stripeFailedAt: null, updatedAt: new Date() })
+          .where(
+            and(
+              eq(cloudBillingAccount.id, account.id),
+              isNull(cloudBillingAccount.stripeCustomerId),
+              eq(
+                cloudBillingAccount.stripeFailureVersion,
+                account.stripeFailureVersion,
+              ),
+            ),
+          );
+      });
+    } catch (fault) {
+      failed({ organizationId }, fault);
+    }
   }
-  return held.customerId;
 }
 
 /** Credit uses its session key; subscriptions refresh inside one customer lock. */

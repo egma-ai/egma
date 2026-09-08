@@ -1,6 +1,7 @@
 import {
   MOST_HOURS_CAUGHT_UP_AT_ONCE,
   visitMeterAccounts,
+  recoverUnlinkedStripeAccounts,
 } from "../access/index.ts";
 import { previousHour, type MeteredHour } from "./facts.ts";
 import { refreshStripePaymentsReady, type StripeGateway } from "./gateway.ts";
@@ -50,6 +51,23 @@ export async function reportOverageOwed(
     unresolved: 0,
     laterInvoices: 0,
   };
+  await recoverUnlinkedStripeAccounts(
+    async ({ organizationId }) => {
+      const ids: string[] = [];
+      for await (const customer of gateway.api.customers.list({ limit: 100 })) {
+        if (customer.metadata.egma_organization_id === organizationId)
+          ids.push(customer.id);
+      }
+      return ids;
+    },
+    ({ organizationId }, err) => {
+      report.failed += 1;
+      log.error(
+        { organizationId, err },
+        "Stripe customer-link recovery remains pending",
+      );
+    },
+  );
   await visitMeterAccounts(
     async (account, progress) => {
       const version = await progress.failureVersion();

@@ -8,7 +8,10 @@ import {
   type AuthContext,
 } from "@egma/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { applyStripeEvent } from "../src/access/stripe.ts";
+import {
+  applyStripeEvent,
+  recoverUnlinkedStripeAccounts,
+} from "../src/access/stripe.ts";
 import { seedCloudPlans } from "../src/access/plans.ts";
 import {
   visitMeterAccounts,
@@ -93,6 +96,10 @@ beforeEach(async () => {
     "update cloud_billing_account set stripe_failed_at = null, stripe_failure_version = 0, plan_code = 'hobby'",
   );
   await database.sql("delete from simulation where position >= 501");
+  await database.sql(
+    "update cloud_billing_account set stripe_customer_id = $2 where organization_id = $1",
+    [acme.organizationId, acme.customerId],
+  );
 });
 async function visit(
   body: (progress: MeterProgress) => Promise<void>,
@@ -259,6 +266,96 @@ async function conversation(
 }
 
 describe("durable period meter progress", () => {
+  it("recovers a failed unlinked customer only from a successful customer read, then reconciles before clearing", async () => {
+    await database.sql(
+      "update cloud_plan set stripe_payments_ready = true where code = 'hobby'",
+    );
+    await database.sql(
+      "update cloud_billing_account set stripe_customer_id = null, stripe_subscription_id = null, stripe_failed_at = $2, stripe_failure_version = 3 where organization_id = $1",
+      [acme.organizationId, AT],
+    );
+    const failures: unknown[] = [];
+    await recoverUnlinkedStripeAccounts(
+      async () => {
+        throw new Error("Stripe unavailable");
+      },
+      (_, fault) => failures.push(fault),
+    );
+    expect(failures).toHaveLength(1);
+    await recoverUnlinkedStripeAccounts(
+      async ({ organizationId: org }) => {
+        expect(org).toBe(acme.organizationId);
+        return [acme.customerId];
+      },
+      (_, fault) => {
+        throw fault;
+      },
+    );
+    const linked = await database.sql(
+      "select stripe_customer_id, stripe_failed_at, plan_code from cloud_billing_account where organization_id = $1",
+      [acme.organizationId],
+    );
+    expect(linked.rows[0]).toMatchObject({
+      stripe_customer_id: acme.customerId,
+      plan_code: "hobby",
+    });
+    expect(linked.rows[0]?.stripe_failed_at).not.toBeNull();
+    await visit(async (progress) => {
+      const version = await progress.failureVersion();
+      await progress.reconcile(
+        async () => ({
+          credits: [],
+          subscription: {
+            subscriptionId: null,
+            status: null,
+            periodAnchor: null,
+            periodStartedAt: null,
+            periodEndsAt: null,
+            hobbyStartedAt: null,
+          },
+        }),
+        AT,
+      );
+      expect(await progress.recovered(version, latest, AT)).toBe(true);
+    });
+  });
+  it("clears an unlinked Hobby fault after proving no customer, but keeps concurrent faults and ambiguous identities", async () => {
+    await database.sql(
+      "update cloud_plan set stripe_payments_ready = true where code = 'hobby'",
+    );
+    await database.sql(
+      "update cloud_billing_account set stripe_customer_id = null, stripe_subscription_id = null, stripe_failed_at = $2, stripe_failure_version = 1 where organization_id = $1",
+      [acme.organizationId, AT],
+    );
+    const fail = (_: { organizationId: string }, fault: unknown) => {
+      throw fault;
+    };
+    await recoverUnlinkedStripeAccounts(async () => {
+      await database.sql(
+        "update cloud_billing_account set stripe_failure_version = stripe_failure_version + 1 where organization_id = $1",
+        [acme.organizationId],
+      );
+      return [];
+    }, fail);
+    let state = await database.sql(
+      "select stripe_failed_at from cloud_billing_account where organization_id = $1",
+      [acme.organizationId],
+    );
+    expect(state.rows[0]?.stripe_failed_at).not.toBeNull();
+    await expect(
+      recoverUnlinkedStripeAccounts(async () => ["cus_one", "cus_two"], fail),
+    ).rejects.toThrow("identity");
+    await recoverUnlinkedStripeAccounts(async () => [], fail);
+    state = await database.sql(
+      "select stripe_failed_at, stripe_customer_id, plan_code from cloud_billing_account where organization_id = $1",
+      [acme.organizationId],
+    );
+    expect(state.rows[0]).toMatchObject({
+      stripe_failed_at: null,
+      stripe_customer_id: null,
+      plan_code: "hobby",
+    });
+  });
   it("freezes and resumes later invoice obligations using the original allowance and cumulative currency rounding", async () => {
     const closed = {
       ...period,
@@ -701,6 +798,10 @@ describe("durable period meter progress", () => {
       ).rejects.toThrow("collection objects");
       await progress.finish(first, "accepted", AT);
       await database.sql("delete from simulation where position >= 501");
+      await database.sql(
+        "update cloud_billing_account set stripe_customer_id = $2 where organization_id = $1",
+        [acme.organizationId, acme.customerId],
+      );
       await expect(progress.next(period, latest, AT)).rejects.toThrow(
         "nondecreasing",
       );
