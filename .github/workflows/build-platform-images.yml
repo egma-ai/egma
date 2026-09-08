@@ -200,7 +200,7 @@ jobs:
 
             if [ "$app" = simulator ]; then
               skopeo copy --all "docker://$repo:raw-$GITHUB_SHA" "oci-archive:$work/simulator.tar"
-              soci convert --standalone "$work/simulator.tar" "$work/simulator-soci.tar"
+              soci convert --standalone --all-platforms "$work/simulator.tar" "$work/simulator-soci.tar"
               skopeo copy --all "oci-archive:$work/simulator-soci.tar" "docker://$repo:$GITHUB_SHA"
             else
               docker buildx imagetools create --tag "$repo:$GITHUB_SHA" "$repo:raw-$GITHUB_SHA"
@@ -218,13 +218,16 @@ jobs:
             manifest="$(jq -r '.images[0].imageManifest' <<<"$response")"
             digest="$(jq -r '.images[0].imageId.imageDigest' <<<"$response")"
             jq -e '
-              [.manifests[] | select(.platform != null) |
+              [.manifests[] | select(
+                .artifactType == null and .platform.os == "linux") |
                 (.platform.os + "/" + .platform.architecture)] | sort ==
               ["linux/amd64", "linux/arm64"]' <<<"$manifest" >/dev/null
             if [ "$app" = simulator ]; then
               jq -e '
                 [.manifests[] | select(.artifactType ==
-                  "application/vnd.amazon.soci.index.v2+json")] | length == 2' <<<"$manifest" >/dev/null
+                  "application/vnd.amazon.soci.index.v2+json") |
+                  (.platform.os + "/" + .platform.architecture)] | sort ==
+                ["linux/amd64", "linux/arm64"]' <<<"$manifest" >/dev/null
             fi
             echo "$app:$GITHUB_SHA digest $digest contains native linux/amd64 and linux/arm64 images."
           done
