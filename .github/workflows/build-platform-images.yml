@@ -1,4 +1,5 @@
 name: Build platform images
+run-name: Build platform images ${{ inputs.public_sha || github.sha }} from ${{ inputs.source_run_id || github.event.pull_request.number || 'manual' }}
 
 # Pull requests prove each Dockerfile on native AMD64 and ARM64 runners without
 # receiving AWS credentials. A manual main run publishes immutable commit tags.
@@ -17,6 +18,15 @@ on:
       - pnpm-workspace.yaml
       - tsconfig.base.json
   workflow_dispatch:
+    inputs:
+      public_sha:
+        description: Exact public commit to publish; defaults to this run's commit
+        required: false
+        type: string
+      source_run_id:
+        description: Calling test workflow run used to identify this publication
+        required: false
+        type: string
 
 concurrency:
   group: build-platform-images-${{ github.ref }}
@@ -76,9 +86,24 @@ jobs:
     name: Require main for publication
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.release.outputs.sha }}
     steps:
       - name: Refuse publication from any other ref
         run: test "$GITHUB_REF" = refs/heads/main
+
+      - name: Select one immutable public commit
+        id: release
+        env:
+          REQUESTED_SHA: ${{ inputs.public_sha }}
+        run: |
+          set -euo pipefail
+          sha="${REQUESTED_SHA:-$GITHUB_SHA}"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "public_sha must be one full lowercase commit SHA." >&2
+            exit 1
+          }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
   build:
     name: Publish native ${{ matrix.app }} (${{ matrix.arch }})
@@ -114,8 +139,11 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
       REGISTRY: ${{ vars.ECR_REGISTRY }}
       DEPLOY_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      RELEASE_SHA: ${{ needs.authorize-publish.outputs.release_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
 
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.0
         with:
@@ -142,13 +170,13 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          image="$REGISTRY/egma/$APP:$GITHUB_SHA-$ARCH"
+          image="$REGISTRY/egma/$APP:$RELEASE_SHA-$ARCH"
           docker build --pull -f "apps/$APP/Dockerfile" -t "$image" .
           docker push "$image"
 
   publish:
     name: Publish immutable multi-architecture tags
-    needs: build
+    needs: [authorize-publish, build]
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -159,6 +187,7 @@ jobs:
       REGISTRY: ${{ vars.ECR_REGISTRY }}
       DEPLOY_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
       SOCI_VERSION: 0.15.0
+      RELEASE_SHA: ${{ needs.authorize-publish.outputs.release_sha }}
     steps:
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.0
         with:
@@ -194,16 +223,16 @@ jobs:
           for app in api grader simulator; do
             repo="$REGISTRY/egma/$app"
             docker buildx imagetools create \
-              --tag "$repo:raw-$GITHUB_SHA" \
-              "$repo:$GITHUB_SHA-amd64" \
-              "$repo:$GITHUB_SHA-arm64"
+              --tag "$repo:raw-$RELEASE_SHA" \
+              "$repo:$RELEASE_SHA-amd64" \
+              "$repo:$RELEASE_SHA-arm64"
 
             if [ "$app" = simulator ]; then
-              skopeo copy --all "docker://$repo:raw-$GITHUB_SHA" "oci-archive:$work/simulator.tar"
+              skopeo copy --all "docker://$repo:raw-$RELEASE_SHA" "oci-archive:$work/simulator.tar"
               soci convert --standalone --all-platforms "$work/simulator.tar" "$work/simulator-soci.tar"
-              skopeo copy --all "oci-archive:$work/simulator-soci.tar" "docker://$repo:$GITHUB_SHA"
+              skopeo copy --all "oci-archive:$work/simulator-soci.tar" "docker://$repo:$RELEASE_SHA"
             else
-              docker buildx imagetools create --tag "$repo:$GITHUB_SHA" "$repo:raw-$GITHUB_SHA"
+              docker buildx imagetools create --tag "$repo:$RELEASE_SHA" "$repo:raw-$RELEASE_SHA"
             fi
           done
 
@@ -213,7 +242,7 @@ jobs:
           for app in api grader simulator; do
             response="$(aws ecr batch-get-image \
               --repository-name "egma/$app" \
-              --image-ids "imageTag=$GITHUB_SHA" \
+              --image-ids "imageTag=$RELEASE_SHA" \
               --output json)"
             manifest="$(jq -r '.images[0].imageManifest' <<<"$response")"
             digest="$(jq -r '.images[0].imageId.imageDigest' <<<"$response")"
@@ -229,6 +258,6 @@ jobs:
                   (.platform.os + "/" + .platform.architecture)] | sort ==
                 ["linux/amd64", "linux/arm64"]' <<<"$manifest" >/dev/null
             fi
-            echo "$app:$GITHUB_SHA digest $digest contains native linux/amd64 and linux/arm64 images."
+            echo "$app:$RELEASE_SHA digest $digest contains native linux/amd64 and linux/arm64 images."
           done
-          echo "simulator:$GITHUB_SHA contains both SOCI index manifest v2 artifacts."
+          echo "simulator:$RELEASE_SHA contains both SOCI index manifest v2 artifacts."

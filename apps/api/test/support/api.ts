@@ -104,6 +104,7 @@ export type TestApiOptions = {
   readonly rateLimit?: RateLimit;
   /** A sweep cadence short enough to observe, for the tests about the sweep. */
   readonly orphanSweepIntervalMilliseconds?: number;
+  readonly wakeVoiceFleet?: ServerOptions["wakeVoiceFleet"];
   /** Where Retell answers. A test stands a Retell-shaped server on loopback. */
   readonly retellReach?: ServerOptions["retellReach"];
   /**
@@ -355,6 +356,9 @@ export async function createApi(
           orphanSweepIntervalMilliseconds:
             options.orphanSweepIntervalMilliseconds,
         }),
+    ...(options.wakeVoiceFleet === undefined
+      ? {}
+      : { wakeVoiceFleet: options.wakeVoiceFleet }),
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),

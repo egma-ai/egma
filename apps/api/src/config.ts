@@ -14,6 +14,7 @@ import type { SmtpSettings } from "./auth/email.ts";
 import { loadIngestionSettings, type IngestionSettings } from "@egma/ingestion";
 export type { IngestionSettings } from "@egma/ingestion";
 import type { BlobStore } from "./recordings/signed-link.ts";
+import type { AwsVoiceFleetSettings } from "./voice-fleet.ts";
 
 /** The one deployment-owned route used for phone simulations. */
 export type CarrierRoute = {
@@ -131,6 +132,10 @@ export type Config = {
   readonly providerCredentials: ProviderCredentialSource;
   /** Optional deployment-wide voice and speech-provider concurrency caps. */
   readonly simulationConcurrencyCaps: SimulationConcurrencyCaps;
+  /** Hosted voice compute. Unset self-hosts never import the AWS adapter. */
+  readonly voiceFleet: AwsVoiceFleetSettings | undefined;
+  /** Immutable public commit running in this task, exposed by `/health`. */
+  readonly releaseSha: string | undefined;
   /**
    * The billing plug-in this deployment runs on: an entitlement source and a
    * usage sink, chosen once from the settings below.
@@ -273,6 +278,59 @@ function simulationConcurrencyCaps(
     ...(voice === undefined ? {} : { voice }),
     speechProviders: caps,
   };
+}
+
+function jsonStringList(environment: NodeJS.ProcessEnv, name: string): string[] {
+  const raw = environment[name]?.trim();
+  if (!raw) throw new Error(`${name} is required by EGMA_VOICE_FLEET_LAUNCHER`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`${name} must be a JSON array of non-empty strings`);
+  }
+  if (
+    !Array.isArray(parsed) || parsed.length === 0 ||
+    parsed.some((value) => typeof value !== "string" || value.trim() === "")
+  ) {
+    throw new Error(`${name} must be a non-empty JSON array of non-empty strings`);
+  }
+  return parsed.map((value) => value.trim());
+}
+
+function voiceFleetSettings(
+  environment: NodeJS.ProcessEnv,
+): AwsVoiceFleetSettings | undefined {
+  const kind = environment.EGMA_VOICE_FLEET_LAUNCHER?.trim();
+  if (!kind) return undefined;
+  if (kind !== "aws-ecs") {
+    throw new Error(`EGMA_VOICE_FLEET_LAUNCHER does not support ${kind}`);
+  }
+  const required = (name: string): string => {
+    const value = environment[name]?.trim();
+    if (!value) throw new Error(`${name} is required by EGMA_VOICE_FLEET_LAUNCHER`);
+    return value;
+  };
+  return {
+    kind,
+    cluster: required("EGMA_VOICE_FLEET_CLUSTER"),
+    taskDefinition: required("EGMA_VOICE_FLEET_TASK_DEFINITION"),
+    containerName: "simulator",
+    subnets: jsonStringList(environment, "EGMA_VOICE_FLEET_SUBNETS"),
+    securityGroups: jsonStringList(
+      environment,
+      "EGMA_VOICE_FLEET_SECURITY_GROUPS",
+    ),
+  };
+}
+
+function releaseSha(environment: NodeJS.ProcessEnv): string | undefined {
+  const value = environment.EGMA_RELEASE_SHA?.trim();
+  if (!value) return undefined;
+  if (!/^[0-9a-f]{40}$/u.test(value)) {
+    throw new Error("EGMA_RELEASE_SHA must be a 40-character lowercase commit SHA");
+  }
+  return value;
 }
 
 /**
@@ -461,6 +519,8 @@ export function loadConfig(
     simulatorServiceToken,
     providerCredentials: providerCredentialSource(environment),
     simulationConcurrencyCaps: simulationConcurrencyCaps(environment),
+    voiceFleet: voiceFleetSettings(environment),
+    releaseSha: releaseSha(environment),
     // The open plug-in, always, and the one setting that can replace it. A
     // deployment that named a Stripe secret has the cloud adapter installed
     // over this at boot; see `billing.ts` and `index.ts`.

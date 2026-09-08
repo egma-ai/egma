@@ -123,6 +123,8 @@ export type ServerOptions = {
    * for a suite that migrated its own store before building the API.
    */
   readonly traceStoreReady?: (() => boolean) | undefined;
+  /** Hosted-only wake-up shared by run creation and the standing sweep. */
+  readonly wakeVoiceFleet?: (() => void) | undefined;
   /**
    * The Billing section's reads, on a deployment whose settings selected the
    * cloud adapter. Absent on every other deployment, and absent is the
@@ -332,6 +334,9 @@ export function buildApi(options: ServerOptions): Api {
 
     return reply.code(ready ? 200 : 503).send({
       status: ready ? "ok" : "unavailable",
+      ...(config.releaseSha === undefined
+        ? {}
+        : { releaseSha: config.releaseSha }),
       role,
       postgres,
       clickhouse,
@@ -473,6 +478,9 @@ export function buildApi(options: ServerOptions): Api {
     baseUrl: config.baseUrl,
     carrierRoute: config.carrierRoute,
     blob: config.blob,
+    ...(options.wakeVoiceFleet === undefined
+      ? {}
+      : { wakeVoiceFleet: options.wakeVoiceFleet }),
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),
@@ -614,6 +622,9 @@ export function buildApi(options: ServerOptions): Api {
     }
     orphanSweep = startOrphanSweep({
       log: app.log,
+      ...(options.wakeVoiceFleet === undefined
+        ? {}
+        : { wakeVoiceFleet: options.wakeVoiceFleet }),
       ...(options.orphanSweepIntervalMilliseconds === undefined
         ? {}
         : { intervalMilliseconds: options.orphanSweepIntervalMilliseconds }),

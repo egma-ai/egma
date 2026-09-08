@@ -33,6 +33,7 @@ export type PlatformApiRoutesOptions = {
   readonly blob: Config["blob"];
   readonly retellFetch?: RetellFetch | undefined;
   readonly retellReach?: RetellReach | undefined;
+  readonly wakeVoiceFleet?: (() => void) | undefined;
 };
 
 type ValidationIssue = {
@@ -119,6 +120,9 @@ export async function platformApiRoutes(
     ...credentialed,
     baseUrl: options.baseUrl,
     carrierRoute: options.carrierRoute,
+    ...(options.wakeVoiceFleet === undefined
+      ? {}
+      : { wakeVoiceFleet: options.wakeVoiceFleet }),
     // The one Retell seam the run start needs, for everything it reads or
     // writes at creation: the version-pinning run-start read both Retell lanes
     // do, and the mocked-world build a web-call connection with the switch on

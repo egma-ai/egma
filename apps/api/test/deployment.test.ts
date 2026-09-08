@@ -35,7 +35,13 @@ const READ = /environment(?:\.|\[")(EGMA_[A-Z0-9_]+)/gu;
  * `EGMA_API_ORIGIN` is the web application's build argument rather than a
  * runtime variable of this process, and lives in that service's `build.args`.
  */
-const NOT_A_RUNTIME_VARIABLE = new Set<string>([]);
+const NOT_A_RUNTIME_VARIABLE = new Set<string>([
+  // The cloud task definition injects these. Passing them through the
+  // self-hosted Compose service would let stray AWS settings select hosted
+  // behavior on a deployment that has no launcher role or task family.
+  "EGMA_RELEASE_SHA",
+  "EGMA_VOICE_FLEET_LAUNCHER",
+]);
 
 function everyFileUnder(directory: string): string[] {
   const found: string[] = [];
@@ -85,6 +91,8 @@ describe("the API's deployment story", () => {
       "EGMA_OPENAI_API_KEY",
       "EGMA_CARTESIA_API_KEY",
       "EGMA_DEEPGRAM_API_KEY",
+      "EGMA_VOICE_SIMULATION_CONCURRENCY_CAP",
+      "EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS",
       "EGMA_PHONE_TRUNK_ADDRESS",
       "EGMA_PHONE_SOURCE_NUMBER",
       "EGMA_PHONE_TRUNK_USERNAME",

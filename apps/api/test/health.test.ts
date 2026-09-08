@@ -191,6 +191,52 @@ describe("configuration", () => {
     })).toThrow(/EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS/);
   });
 
+  it("loads the AWS voice fleet only when complete hosted settings name it", () => {
+    expect(loadConfig(enough).voiceFleet).toBeUndefined();
+    expect(loadConfig({
+      ...enough,
+      EGMA_VOICE_FLEET_LAUNCHER: "aws-ecs",
+      EGMA_VOICE_FLEET_CLUSTER: "egma-production",
+      EGMA_VOICE_FLEET_TASK_DEFINITION: "egma-voice",
+      EGMA_VOICE_FLEET_SUBNETS: '["subnet-a","subnet-b"]',
+      EGMA_VOICE_FLEET_SECURITY_GROUPS: '["sg-egma"]',
+    }).voiceFleet).toEqual({
+      kind: "aws-ecs",
+      cluster: "egma-production",
+      taskDefinition: "egma-voice",
+      containerName: "simulator",
+      subnets: ["subnet-a", "subnet-b"],
+      securityGroups: ["sg-egma"],
+    });
+  });
+
+  it("rejects incomplete or malformed AWS voice fleet settings", () => {
+    expect(() => loadConfig({
+      ...enough,
+      EGMA_VOICE_FLEET_LAUNCHER: "aws-ecs",
+    })).toThrow("EGMA_VOICE_FLEET_CLUSTER");
+    expect(() => loadConfig({
+      ...enough,
+      EGMA_VOICE_FLEET_LAUNCHER: "aws-ecs",
+      EGMA_VOICE_FLEET_CLUSTER: "egma-production",
+      EGMA_VOICE_FLEET_TASK_DEFINITION: "egma-voice",
+      EGMA_VOICE_FLEET_SUBNETS: "subnet-a,subnet-b",
+      EGMA_VOICE_FLEET_SECURITY_GROUPS: '["sg-egma"]',
+    })).toThrow("EGMA_VOICE_FLEET_SUBNETS must be a JSON array");
+  });
+
+  it("accepts only an immutable commit as the release identity", () => {
+    expect(loadConfig(enough).releaseSha).toBeUndefined();
+    expect(loadConfig({
+      ...enough,
+      EGMA_RELEASE_SHA: "a".repeat(40),
+    }).releaseSha).toBe("a".repeat(40));
+    expect(() => loadConfig({
+      ...enough,
+      EGMA_RELEASE_SHA: "latest",
+    })).toThrow("EGMA_RELEASE_SHA");
+  });
+
   it("serves the pages from the instance's own origin, and no egma-run one", () => {
     expect(loadConfig(enough).baseUrl).toBe("http://localhost:3101");
     expect(
@@ -551,13 +597,14 @@ describe("the API once it has booted", () => {
       config: storage.available
         ? {
             ...base,
+            releaseSha: "a".repeat(40),
             ingestion: {
               ...base.ingestion,
               store: storage.ingestStore,
               logDirectory,
             },
           }
-        : base,
+        : { ...base, releaseSha: "a".repeat(40) },
     }).app;
     await app.ready();
   });
@@ -583,6 +630,7 @@ describe("the API once it has booted", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       status: "ok",
+      releaseSha: "a".repeat(40),
       role: "all",
       postgres: "reachable",
       clickhouse: "reachable",
