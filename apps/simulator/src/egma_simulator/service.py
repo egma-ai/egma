@@ -220,7 +220,6 @@ class RunningSimulation:
 
     async def _conduct_and_report(self) -> None:
         reporter = self._reporter
-        reporter.running()
         self._spans.opened()
         log_event(
             logger,
@@ -258,6 +257,9 @@ class RunningSimulation:
                 scenario_instructions=self._spec.scenario_instructions,
                 model=model,
             )
+            # Preparing clients and validating configuration is not execution.
+            # Dialing and the normal wait for an answer begin with conducting.
+            reporter.running()
             try:
                 # Which of the two conductors this simulation gets was
                 # decided by assembly, from the spec alone. Both answer
@@ -274,6 +276,7 @@ class RunningSimulation:
                         on_measured=self._on_measured,
                         on_answered=self._on_answered,
                         on_provider_usage=self._on_provider_usage,
+                        on_execution_ended=reporter.execution_ended,
                     )
                 else:
                     assert assembled.plug is not None
@@ -286,6 +289,7 @@ class RunningSimulation:
                         on_timing=self._on_timing,
                         on_answered=self._on_answered,
                         on_provider_usage=self._on_provider_usage,
+                        on_execution_ended=reporter.execution_ended,
                         controls=self._controls,
                         name=f"sim:{self.simulation_id}",
                     )
@@ -316,6 +320,9 @@ class RunningSimulation:
             self._spans.abort()
             raise
         except Exception as fault:
+            # Construction/open faults may precede the conductor callback.
+            # A cleanup fault must preserve the already captured execution end.
+            reporter.execution_ended()
             reason = self._secrets.redact(f"{type(fault).__name__}: {fault}")
             # Which failed ending this is belongs to whoever raised: a
             # phone that rang out is not the same record as a simulator

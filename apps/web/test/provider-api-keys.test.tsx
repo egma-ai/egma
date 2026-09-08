@@ -164,10 +164,15 @@ it("retains a replacement draft on a stale-write refusal and never overwrites a 
   fireEvent.click(
     await screen.findByRole("button", { name: "Discard changes" }),
   );
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Manage OpenAI key" }),
+    ),
+  );
   fireEvent.click(
     await screen.findByRole("button", { name: "Manage OpenAI key" }),
   );
-  fireEvent.change(screen.getByLabelText("New API key*"), {
+  fireEvent.change(await screen.findByLabelText("New API key*"), {
     target: { value: "fake-replacement" },
   });
   failedWrite = false;

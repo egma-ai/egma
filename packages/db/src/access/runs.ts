@@ -188,6 +188,7 @@ export type Simulation = {
   readonly cancelRequestedAt: Date | null;
   readonly startedAt: Date | null;
   readonly endedAt: Date | null;
+  readonly executionEndedAt: Date | null;
   readonly recordingReference: string | null;
   readonly turnCount: number | null;
   readonly providerReference: string | null;
@@ -265,6 +266,7 @@ const SIMULATION_COLUMNS = {
   cancelRequestedAt: simulation.cancelRequestedAt,
   startedAt: simulation.startedAt,
   endedAt: simulation.endedAt,
+  executionEndedAt: simulation.executionEndedAt,
   recordingReference: simulation.recordingReference,
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
@@ -332,6 +334,14 @@ function summaryFactsWrite(facts: SimulationSummaryFacts): Record<string, unknow
   }
   if (facts.startedAt !== undefined) write.startedAt = facts.startedAt;
   if (facts.endedAt !== undefined) write.endedAt = facts.endedAt;
+  if (
+    facts.startedAt !== undefined && facts.endedAt !== undefined &&
+    Number.isFinite(facts.startedAt.getTime()) &&
+    Number.isFinite(facts.endedAt.getTime()) &&
+    facts.endedAt >= facts.startedAt
+  ) {
+    write.executionEndedAt = facts.endedAt;
+  }
   return write;
 }
 
@@ -2426,10 +2436,21 @@ async function landSimulation(
   },
 ): Promise<Simulation | undefined> {
   const now = new Date();
+  const write = { ...landing.write };
+  // Failed assembly can report required wire times without ever conducting.
+  // Only a recorded running transition establishes an execution interval.
+  if (write.startedAt instanceof Date) {
+    write.startedAt = sql`case when ${simulation.startedAt} is not null
+      then ${write.startedAt}::timestamptz else null end`;
+  }
+  if (write.executionEndedAt instanceof Date) {
+    write.executionEndedAt = sql`case when ${simulation.startedAt} is not null
+      then ${write.executionEndedAt}::timestamptz else null end`;
+  }
   return db().transaction(async (tx) => {
     const [row] = await tx
       .update(simulation)
-      .set({ endedAt: now, ...landing.write, heartbeatAt: now })
+      .set({ endedAt: now, ...write, heartbeatAt: now })
       .where(
         within(
           auth,
@@ -2685,6 +2706,55 @@ export async function markSimulationCanceled(
     write: { status: "canceled", ...summaryFactsWrite(facts) },
     onlyWhere: isNotNull(simulation.cancelRequestedAt),
   });
+}
+
+/** Retain a late worker's start or measured end once without reopening an orphan. */
+export async function recordOrphanedSimulationExecution(
+  auth: AuthContext,
+  id: string,
+  claimant: string,
+  claimedAt: Date,
+  facts: SimulationSummaryFacts & { readonly startedAt: Date },
+): Promise<Simulation | undefined> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  if (auth.via !== "simulator") {
+    throw new Error("Only the simulator may report an orphaned simulation's measured execution.");
+  }
+  const write: Record<string, unknown> = facts.endedAt === undefined
+    ? { startedAt: facts.startedAt }
+    : summaryFactsWrite(facts);
+  if (
+    !Number.isFinite(facts.startedAt.getTime()) ||
+    (facts.endedAt !== undefined && write.executionEndedAt === undefined)
+  ) {
+    throw new Error("Measured execution requires a finite end at or after its start.");
+  }
+  // The sweep's end remains the lifecycle closure. Only the actual interval
+  // and report facts are recovered; run events and grading are unchanged.
+  delete write.endedAt;
+  const [row] = await db()
+    .update(simulation)
+    .set(write)
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          eq(simulation.id, id),
+          eq(simulation.status, "failed"),
+          eq(simulation.endingReason, "orphaned"),
+          eq(simulation.claimedBy, validClaimant(claimant)),
+          eq(simulation.claimedAt, claimedAt),
+          facts.endedAt === undefined
+            ? isNull(simulation.startedAt)
+            : isNotNull(simulation.startedAt),
+          isNull(simulation.executionEndedAt),
+          inActingProject(auth, simulation),
+        ),
+      ),
+    )
+    .returning(SIMULATION_COLUMNS);
+  return row === undefined ? undefined : simulationFromRow(row);
 }
 
 /**

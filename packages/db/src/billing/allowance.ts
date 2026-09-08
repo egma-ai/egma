@@ -84,7 +84,7 @@ const SECONDS_IN_A_MINUTE = 60;
  *
  * **Persona-connected time, from execution start to execution end**, which is
  * exactly the span the simulation row already stamps: the simulator writes
- * `started_at` when it begins conducting and `ended_at` when it stops. A
+ * `started_at` when it begins conducting and `execution_ended_at` when it stops. A
  * simulation the agent never answered needs no special case, because that span
  * already covers the wait — the platform bounds it at thirty seconds for a
  * room and sixty for a ring, so a misconfigured connection costs seconds and
@@ -105,13 +105,13 @@ const SECONDS_IN_A_MINUTE = 60;
  */
 export function billableSecondsOf(simulation: {
   readonly startedAt: Date | null;
-  readonly endedAt: Date | null;
+  readonly executionEndedAt: Date | null;
 }): number {
-  const { startedAt, endedAt } = simulation;
-  if (startedAt === null || endedAt === null) return 0;
+  const { startedAt, executionEndedAt } = simulation;
+  if (startedAt === null || executionEndedAt === null) return 0;
   const elapsed = Math.max(
     0,
-    (endedAt.getTime() - startedAt.getTime()) / 1_000,
+    (executionEndedAt.getTime() - startedAt.getTime()) / 1_000,
   );
   return Math.max(SHORTEST_BILLABLE_SECONDS, Math.ceil(elapsed));
 }
@@ -137,7 +137,7 @@ export function allowanceUsedBy(simulation: {
   readonly modality: Modality;
   readonly connectionType: ConnectionType;
   readonly startedAt: Date | null;
-  readonly endedAt: Date | null;
+  readonly executionEndedAt: Date | null;
 }): { readonly kind: AllowanceKind; readonly used: number } {
   const kind = allowanceKindOf(simulation);
   if (kind === "chat_simulations") {

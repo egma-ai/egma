@@ -60,6 +60,7 @@ from .conversation import (
     Conducted,
     ConversationControls,
     Ending,
+    OnExecutionEnded,
     duration_limit_reached,
     turn_limit_reached,
 )
@@ -1162,6 +1163,7 @@ class VoiceConductor:
         on_measured: OnMeasured,
         on_answered: OnAnswered | None = None,
         on_provider_usage: OnProviderUsage | None = None,
+        on_execution_ended: OnExecutionEnded | None = None,
     ) -> Conducted:
         self._persona = persona
         self._max_turns = max_turns
@@ -1181,6 +1183,10 @@ class VoiceConductor:
         except _Stopped:
             pass
         finally:
+            # The loop has finished the exchange, including queued speech.
+            # Recording upload and connection teardown are not call duration.
+            if on_execution_ended is not None:
+                on_execution_ended()
             watchdog.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await watchdog

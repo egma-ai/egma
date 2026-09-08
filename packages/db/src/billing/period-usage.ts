@@ -56,10 +56,10 @@ export type AllowanceTotals = {
  * The floor is read from the constant rather than typed again.
  */
 const countedSeconds = sql`sum(
-  case when ${simulation.endedAt} is null then 0
+  case when ${simulation.executionEndedAt} is null then 0
   else greatest(
     ${SHORTEST_BILLABLE_SECONDS},
-    ceil(extract(epoch from (${simulation.endedAt} - ${simulation.startedAt})))
+    ceil(extract(epoch from (${simulation.executionEndedAt} - ${simulation.startedAt})))
   ) end
 )`;
 

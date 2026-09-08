@@ -313,8 +313,26 @@ $$;
 CREATE FUNCTION public.guard_simulation_lifecycle() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+DECLARE
+    measured record;
 BEGIN
 	IF OLD.status IN ('completed', 'failed', 'canceled') THEN
+        IF OLD.status = 'failed' AND OLD.ending_reason = 'orphaned'
+           AND OLD.execution_ended_at IS NULL THEN
+            measured := OLD;
+            IF OLD.started_at IS NULL AND NEW.started_at IS NOT NULL
+               AND NEW.execution_ended_at IS NULL THEN
+                measured.started_at := NEW.started_at;
+                IF NEW IS NOT DISTINCT FROM measured THEN RETURN NEW; END IF;
+            ELSIF OLD.started_at IS NOT NULL AND NEW.execution_ended_at IS NOT NULL THEN
+                measured.started_at := NEW.started_at;
+                measured.execution_ended_at := NEW.execution_ended_at;
+                measured.recording_reference := NEW.recording_reference;
+                measured.turn_count := NEW.turn_count;
+                measured.provider_reference := NEW.provider_reference;
+                IF NEW IS NOT DISTINCT FROM measured THEN RETURN NEW; END IF;
+            END IF;
+        END IF;
 		RAISE EXCEPTION 'simulation % is %, and a terminal simulation is written once',
 			OLD.id, OLD.status;
 	END IF;
@@ -1247,6 +1265,7 @@ CREATE TABLE public.simulation (
     execution_failure text,
     persona_parameter_values jsonb NOT NULL,
     connection_type text NOT NULL,
+    execution_ended_at timestamp with time zone,
     CONSTRAINT simulation_audio_facts_are_voice_facts CHECK (((modality = 'voice'::text) OR (recording_reference IS NULL))),
     CONSTRAINT simulation_canceled_shape CHECK (((status <> 'canceled'::text) OR ((ended_at IS NOT NULL) AND (cancel_requested_at IS NOT NULL)))),
     CONSTRAINT simulation_claim_columns_agree CHECK ((((claimed_at IS NULL) = (claimed_by IS NULL)) AND ((claimed_at IS NULL) = (heartbeat_at IS NULL)))),
@@ -1262,6 +1281,7 @@ END),
     CONSTRAINT simulation_ending_reason_allowed CHECK (((ending_reason IS NULL) OR (ending_reason = ANY (ARRAY['persona_concluded'::text, 'agent_ended'::text, 'limit_reached'::text, 'agent_never_joined'::text, 'not_answered'::text, 'capacity'::text, 'simulator_error'::text, 'orphaned'::text, 'dispatch_failed'::text, 'provider_key_unavailable'::text])))),
     CONSTRAINT simulation_execution_failure_agrees CHECK (((execution_failure IS NULL) OR (status = 'failed'::text))),
     CONSTRAINT simulation_execution_failure_not_blank CHECK (((execution_failure IS NULL) OR (btrim(execution_failure) <> ''::text))),
+    CONSTRAINT simulation_execution_end_is_measured CHECK ((execution_ended_at IS NULL) OR ((started_at IS NOT NULL) AND (ended_at IS NOT NULL) AND (execution_ended_at >= started_at))),
     CONSTRAINT simulation_failed_shape CHECK (((status <> 'failed'::text) OR (ended_at IS NOT NULL))),
     CONSTRAINT simulation_id_prefix CHECK ((id ~ '^sim_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
     CONSTRAINT simulation_modality_allowed CHECK ((modality = ANY (ARRAY['voice'::text, 'chat'::text]))),

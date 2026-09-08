@@ -85,6 +85,7 @@ const WORK_DISPATCHING = [
   "claimGradingJobs",
   "claimSimulations",
   "recordSimulationHeartbeat",
+  "recordOrphanedSimulationExecution",
   "resolveSimulationStanding",
   // The mock endpoint's own context, derived the same way and for the same
   // reason: the caller is the customer's agent platform, holding no credential

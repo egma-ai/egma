@@ -168,9 +168,9 @@ function describedMeasures(
   detail: TraceDetail | undefined,
 ): Record<string, unknown> {
   const measures: Record<string, unknown> = {};
-  if (simulation.startedAt !== null && simulation.endedAt !== null) {
+  if (simulation.startedAt !== null && simulation.executionEndedAt !== null) {
     measures.durationMs =
-      simulation.endedAt.getTime() - simulation.startedAt.getTime();
+      simulation.executionEndedAt.getTime() - simulation.startedAt.getTime();
   }
   if (simulation.turnCount !== null) measures.turnCount = simulation.turnCount;
   if (detail !== undefined) {

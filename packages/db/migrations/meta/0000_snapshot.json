@@ -4365,6 +4365,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "execution_ended_at": {
+          "name": "execution_ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "recording_reference": {
           "name": "recording_reference",
           "type": "text",
@@ -4741,6 +4747,10 @@
         "simulation_failed_shape": {
           "name": "simulation_failed_shape",
           "value": "\"simulation\".\"status\" <> 'failed' or \"simulation\".\"ended_at\" is not null"
+        },
+        "simulation_execution_end_is_measured": {
+          "name": "simulation_execution_end_is_measured",
+          "value": "\"simulation\".\"execution_ended_at\" is null or (\n        \"simulation\".\"started_at\" is not null and \"simulation\".\"ended_at\" is not null\n        and \"simulation\".\"execution_ended_at\" >= \"simulation\".\"started_at\")"
         },
         "simulation_canceled_shape": {
           "name": "simulation_canceled_shape",

@@ -5,6 +5,7 @@ import {
   createTest,
   createTestSuite,
   startRun,
+  recordOrphanedSimulationExecution,
   type AuthContext,
 } from "@egma/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -232,23 +233,27 @@ async function conversation(
     readonly connectionType: "livekit_room" | "phone_number";
     readonly endedAt: Date;
     readonly seconds: number;
+    readonly unreported?: boolean;
   },
-): Promise<void> {
+): Promise<string> {
   const run = await seedRun(who);
   position += 1;
+  const id = newId("sim");
   await database.sql(
     `insert into simulation
        (id, run_id, organization_id, project_id, agent_id, connection_id,
         persona_id, persona_version_id, test_id, test_version_id,
         position, modality, connection_type, status, ending_reason,
-        started_at, ended_at, persona_parameter_values)
+        started_at, ended_at, execution_ended_at, claimed_by, claimed_at, heartbeat_at, persona_parameter_values)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'voice', $12,
-             'completed', 'persona_concluded',
+             case when $15 then 'failed' else 'completed' end,
+             case when $15 then 'orphaned' else 'persona_concluded' end,
              $13::timestamptz - make_interval(secs => $14::double precision),
-             $13::timestamptz,
+             $13::timestamptz, case when $15 then null else $13::timestamptz end,
+             'simulator-meter', $13::timestamptz, $13::timestamptz,
              (select persona_parameter_values from simulation where run_id = $2 limit 1))`,
     [
-      newId("sim"),
+      id,
       run.runId,
       who.organizationId,
       who.projectId,
@@ -262,11 +267,47 @@ async function conversation(
       lane.connectionType,
       lane.endedAt,
       lane.seconds,
+      lane.unreported ?? false,
     ],
   );
+  return id;
 }
 
 describe("durable period meter progress", () => {
+  it("ignores orphan detection time and meters a late measured interval once in its start period", async () => {
+    const detectedAt = new Date("2026-09-20T13:40:00Z");
+    const id = await conversation(acme, {
+      connectionType: "livekit_room", endedAt: detectedAt, seconds: 311, unreported: true,
+    });
+    await visit(async (progress) => {
+      expect(await progress.next(period, latest, AT)).toEqual({ kind: "advanced" });
+    });
+    expect(Number((await row())?.last_observed_seconds)).toBe(0);
+    const facts = {
+      startedAt: new Date("2026-09-20T13:34:49Z"),
+      endedAt: new Date("2026-09-20T13:36:38Z"),
+    };
+    const auth = { ...sessionOf(acme), via: "simulator" as const };
+    expect(await recordOrphanedSimulationExecution(auth, id, "wrong-claim", detectedAt, facts)).toBeUndefined();
+    expect(await recordOrphanedSimulationExecution(auth, id, "simulator-meter", START, facts)).toBeUndefined();
+    expect(await recordOrphanedSimulationExecution(auth, id, "simulator-meter", detectedAt, facts)).toBeDefined();
+    await visit(async (progress) => {
+      const send = pending(await progress.next(period, latest, AT));
+      expect(send.seconds).toBe(109);
+      expect(send.value).toBe("1.816666666667");
+      expect(send.timestamp).toEqual(new Date("2026-09-20T14:00:00Z"));
+      await progress.finish(send, "accepted", AT);
+    });
+    expect(await recordOrphanedSimulationExecution(auth, id, "simulator-meter", detectedAt, {
+      ...facts, endedAt: detectedAt,
+    })).toBeUndefined();
+    await visit(async (progress) => {
+      expect(await progress.next(period, latest, AT)).toEqual({ kind: "advanced" });
+    });
+    expect(Number((await row())?.accepted_seconds)).toBe(109);
+    expect((await row())?.period_started_at).toEqual(START);
+  });
+
   it("links an earlier successful customer create instead of creating again after the retry window", async () => {
     await database.sql(
       "update cloud_billing_account set stripe_customer_id = null, stripe_failed_at = $2 where organization_id = $1",

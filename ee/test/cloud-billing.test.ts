@@ -247,11 +247,12 @@ async function conversations(
        (id, run_id, organization_id, project_id, agent_id, connection_id,
         persona_id, persona_version_id, test_id, test_version_id,
         position, modality, connection_type, status, ending_reason,
-        started_at, ended_at, persona_parameter_values)
+        started_at, ended_at, execution_ended_at, persona_parameter_values)
      select
        'sim_' || upper(substr(md5(random()::text || n::text || clock_timestamp()::text), 1, 26)),
        $1, $2, $3, $4, $5, $6, $7, $8, $9,
        n, $10, $11, 'completed', 'persona_concluded', $12::timestamptz,
+       $12::timestamptz + make_interval(secs => $13::double precision),
        $12::timestamptz + make_interval(secs => $13::double precision),
        (select persona_parameter_values from simulation where run_id = $1 limit 1)
      from generate_series($14::int, $14::int + $15::int - 1) as n`,

@@ -371,6 +371,8 @@ export const simulation = pgTable(
     cancelRequestedAt: moment("cancel_requested_at"),
     startedAt: moment("started_at"),
     endedAt: moment("ended_at"),
+    /** Measured worker end; absent when only the platform knows work stopped. */
+    executionEndedAt: moment("execution_ended_at"),
     /** The dual-channel recording's reference in the blob store, voice only. */
     recordingReference: text("recording_reference"),
     /**
@@ -467,6 +469,12 @@ export const simulation = pgTable(
     check(
       "simulation_failed_shape",
       sql`${table.status} <> 'failed' or ${table.endedAt} is not null`,
+    ),
+    check(
+      "simulation_execution_end_is_measured",
+      sql`${table.executionEndedAt} is null or (
+        ${table.startedAt} is not null and ${table.endedAt} is not null
+        and ${table.executionEndedAt} >= ${table.startedAt})`,
     ),
     // A canceled row always records the intent it honored, whether it was
     // still queued or already claimed when the intent arrived.

@@ -239,9 +239,9 @@ async function conversation(
        (id, run_id, organization_id, project_id, agent_id, connection_id,
         persona_id, persona_version_id, test_id, test_version_id,
         position, modality, connection_type, status, ending_reason,
-        started_at, ended_at, claimed_by, claimed_at, heartbeat_at, persona_parameter_values)
+        started_at, ended_at, execution_ended_at, claimed_by, claimed_at, heartbeat_at, persona_parameter_values)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-             $16, $17, $18, $19, $19,
+             $16, $17, $17, $18, $19, $19,
              (select persona_parameter_values from simulation where run_id = $2 limit 1))`,
     [
       newId("sim"),
@@ -363,9 +363,9 @@ describe("what one organization used this period", () => {
       modality: Modality;
       connection_type: ConnectionType;
       started_at: Date | null;
-      ended_at: Date | null;
+      execution_ended_at: Date | null;
     }>(
-      `select modality, connection_type, started_at, ended_at
+      `select modality, connection_type, started_at, execution_ended_at
          from simulation
         where organization_id = $1 and started_at >= $2 and started_at < $3`,
       [acme.organizationId, PERIOD_STARTED, PERIOD_RESETS],
@@ -378,7 +378,7 @@ describe("what one organization used this period", () => {
         modality: row.modality,
         connectionType: row.connection_type,
         startedAt: row.started_at,
-        endedAt: row.ended_at,
+        executionEndedAt: row.execution_ended_at,
       });
       if (kind === "chat_simulations") {
         folded.chat_simulations += 1;
@@ -386,7 +386,7 @@ describe("what one organization used this period", () => {
       }
       const seconds = billableSecondsOf({
         startedAt: row.started_at,
-        endedAt: row.ended_at,
+        executionEndedAt: row.execution_ended_at,
       });
       if (kind === "phone_minutes") phoneSeconds += seconds;
       else webCallSeconds += seconds;

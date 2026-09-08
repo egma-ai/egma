@@ -81,9 +81,9 @@ describe("which allowance a conversation is counted against", () => {
 });
 
 describe("how many seconds one conversation counts", () => {
-  const at = (seconds: number): { startedAt: Date; endedAt: Date } => ({
+  const at = (seconds: number): { startedAt: Date; executionEndedAt: Date } => ({
     startedAt: new Date("2026-09-07T10:00:00.000Z"),
-    endedAt: new Date(
+    executionEndedAt: new Date(
       new Date("2026-09-07T10:00:00.000Z").getTime() + seconds * 1_000,
     ),
   });
@@ -108,14 +108,14 @@ describe("how many seconds one conversation counts", () => {
   }
 
   it("counts nothing for a conversation that never began", () => {
-    expect(billableSecondsOf({ startedAt: null, endedAt: null })).toBe(0);
+    expect(billableSecondsOf({ startedAt: null, executionEndedAt: null })).toBe(0);
   });
 
   it("counts nothing for a conversation still running", () => {
     expect(
       billableSecondsOf({
         startedAt: new Date("2026-09-07T10:00:00.000Z"),
-        endedAt: null,
+        executionEndedAt: null,
       }),
     ).toBe(0);
   });
@@ -138,7 +138,7 @@ describe("how many seconds one conversation counts", () => {
 describe("how much of an allowance one conversation used", () => {
   const span = {
     startedAt: new Date("2026-09-07T10:00:00.000Z"),
-    endedAt: new Date("2026-09-07T10:01:30.000Z"),
+    executionEndedAt: new Date("2026-09-07T10:01:30.000Z"),
   };
 
   it("counts a chat as one simulation at its start, not its length", () => {
@@ -157,7 +157,7 @@ describe("how much of an allowance one conversation used", () => {
         modality: "chat",
         connectionType: "retell_chat_api",
         startedAt: null,
-        endedAt: null,
+        executionEndedAt: null,
       }),
     ).toEqual({ kind: "chat_simulations", used: 0 });
   });

@@ -92,6 +92,7 @@ class Reporter:
         them is one number about the whole simulation, which is why it rides
         the terminal transition instead of being asked of the trace store."""
         self.started_at: str | None = None
+        self.ended_at: str | None = None
         self._queue: asyncio.Queue[tuple[Destination, bytes]] = asyncio.Queue()
         self._sender: asyncio.Task | None = None
         self.abandoned = False
@@ -281,11 +282,16 @@ class Reporter:
             }
         )
 
+    def execution_ended(self) -> None:
+        """Freeze execution time before cleanup or evidence delivery can wait."""
+        if self.ended_at is None:
+            self.ended_at = moment()
+
     def _terminal_facts(self, ending: str) -> dict:
         facts = {
             "ending": ending,
             "started_at": self.started_at,
-            "ended_at": moment(),
+            "ended_at": self.ended_at,
             "turn_count": self.turn_count,
             "audio": self.audio,
             "provider_reference": self.provider_reference,
@@ -305,6 +311,11 @@ class Reporter:
         )
 
     def failed(self, ending: str, reason: str) -> None:
+        facts = self._terminal_facts(ending)
+        if self.started_at is None:
+            # Setup failed before conducting: no running event, and the
+            # required terminal interval records exactly zero execution.
+            facts["started_at"] = self.ended_at
         self._enqueue(
             {
                 "kind": "status",
@@ -312,7 +323,7 @@ class Reporter:
                 "at": moment(),
                 "status": "failed",
                 "reason": reason,
-                "facts": self._terminal_facts(ending),
+                "facts": facts,
             }
         )
 

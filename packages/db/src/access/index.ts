@@ -382,6 +382,7 @@ export {
   readQueuedWorkProviders,
   readRunWorkBlock,
   recordSimulationHeartbeat,
+  recordOrphanedSimulationExecution,
   releaseSimulationClaim,
   resolveRunStartReach,
   resolveSimulationConnection,

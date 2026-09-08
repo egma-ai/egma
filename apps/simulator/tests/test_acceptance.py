@@ -572,11 +572,10 @@ async def test_a_plug_refusal_is_an_honest_failure_on_the_record(
 
     records = await workbench.wait_for(has_terminal("sim-misconfigured-001"))
 
-    assert status_events_for(records, "sim-misconfigured-001") == [
-        "running",
-        "failed",
-    ]
+    # Config validation failed before conducting, so no execution started.
+    assert status_events_for(records, "sim-misconfigured-001") == ["failed"]
     terminal = terminal_event_for(records, "sim-misconfigured-001")
+    assert terminal["facts"]["started_at"] == terminal["facts"]["ended_at"]
     assert terminal["facts"]["ending"] == "error"
     assert terminal["facts"]["turn_count"] == 0
     assert "repliez" in terminal["reason"]

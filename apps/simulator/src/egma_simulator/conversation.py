@@ -39,6 +39,9 @@ the seam the conversation already has. A voice simulation's legs report through
 Pipecat instead, and both end up as the same span.
 """
 
+OnExecutionEnded = Callable[[], None]
+"""The conversation stopped, before connection cleanup or evidence delivery."""
+
 OnAnswered = Callable[[], Awaitable[None]]
 """Boundary after a nonterminal agent answer, including an empty answer or greeting.
 The final answer is reported with the completed simulation instead.
@@ -168,6 +171,7 @@ async def conduct(
     name: str,
     on_answered: OnAnswered | None = None,
     on_provider_usage: OnProviderUsage | None = None,
+    on_execution_ended: OnExecutionEnded | None = None,
 ) -> Conducted:
     """Hold one simulation's conversation, turn by turn, and say how it went."""
     loop = asyncio.get_running_loop()
@@ -295,6 +299,8 @@ async def conduct(
             )
         return ended(duration_limit_reached(max_duration_seconds))
     finally:
+        if on_execution_ended is not None:
+            on_execution_ended()
         watchdog.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await watchdog

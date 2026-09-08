@@ -433,11 +433,11 @@ async function conversation(
        (id, run_id, organization_id, project_id, agent_id, connection_id,
         persona_id, persona_version_id, test_id, test_version_id,
         position, modality, connection_type, status, ending_reason,
-        started_at, ended_at, persona_parameter_values)
+        started_at, ended_at, execution_ended_at, persona_parameter_values)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'voice', $12,
              'completed', 'persona_concluded',
              $13::timestamptz - make_interval(secs => $14::double precision),
-             $13::timestamptz,
+             $13::timestamptz, $13::timestamptz,
              (select persona_parameter_values from simulation where run_id = $2 limit 1))`,
     [
       newId("sim"),

@@ -1,4 +1,4 @@
-import { createPersona, getSimulation } from "@egma/db";
+import { createPersona, getSimulation, readUsageThisPeriod, sweepOrphanedSimulations } from "@egma/db";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
@@ -495,7 +495,7 @@ describe("the lifecycle lands", () => {
     },
   );
 
-  it("declines reported moments that cannot be true, and lands on its own stamps", async () => {
+  it("closes the lifecycle without measured duration when reported moments cannot be true", async () => {
     const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
       "reports_skewed_clock",
     );
@@ -516,15 +516,108 @@ describe("the lifecycle lands", () => {
 
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.status).toBe("completed");
-    // The server's own stamps stand for both moments: a coherent interval,
-    // inside this test's own wall clock — never the reported 2026-08-05 pair.
+    // Closure is recorded; an unprovable interval cannot become usage.
     expect(row?.startedAt?.getTime()).toBeGreaterThanOrEqual(before.getTime());
     expect(row?.endedAt?.getTime()).toBeGreaterThanOrEqual(
       row?.startedAt?.getTime() ?? Number.POSITIVE_INFINITY,
     );
+    expect(row?.executionEndedAt).toBeNull();
+    const detail = await ask(api.app, "GET", `/v1/simulations/${simulationId}`, key);
+    expect((detail.body.measures as Record<string, unknown>).durationMs).toBeUndefined();
     // The facts the pair rode in with still land whole.
     expect(row?.turnCount).toBe(14);
     expect(row?.providerReference).toBe("chat_5d1f9a3b7c");
+  });
+
+  it("counts only a late worker's measured voice interval after an orphan sweep", async () => {
+    const { ada, key, agentId, versionId } = await aCustomerReadyToRun(
+      "reports_orphan_voice_time",
+      { carrierRoute: PHONE_IS_SET_UP },
+    );
+    const attached = await ask(api.app, "POST", `/v1/agents/${agentId}/connections`, key, {
+      agentPlatform: null,
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+15551234567" },
+    });
+    expect(attached.statusCode, JSON.stringify(attached.body)).toBe(201);
+    const connectionId = (attached.body.connection as { id: string }).id;
+    const { runId, simulationId } = await aRunningSimulation(key, connectionId, versionId);
+    const startedAt = new Date(Date.now() - 311_000);
+    const endedAt = new Date(startedAt.getTime() + 109_000);
+    await api.database.sql(
+      "update organization set created_at = $2 where id = $1",
+      [contextFor(ada, "member").organizationId, new Date(startedAt.getTime() - 86_400_000)],
+    );
+    await api.database.sql(
+      "update simulation set started_at = $2, heartbeat_at = $2 where id = $1",
+      [simulationId, startedAt],
+    );
+    await sweepOrphanedSimulations();
+    const auth = contextFor(ada, "member");
+    const closed = await getSimulation(auth, simulationId);
+    expect(closed?.endingReason).toBe("orphaned");
+    expect((await readUsageThisPeriod(auth)).used.phone_minutes).toBe(0);
+    const unknown = await ask(api.app, "GET", `/v1/simulations/${simulationId}`, key);
+    expect((unknown.body.measures as Record<string, unknown>).durationMs).toBeUndefined();
+    await expect(api.database.sql(
+      "update simulation set status = 'completed', ending_reason = 'agent_ended', execution_ended_at = $2 where id = $1",
+      [simulationId, endedAt],
+    )).rejects.toThrow(/terminal simulation is written once/);
+
+    const late = [runningEvent(), terminalEvent("completed", "agent_ended", {
+      started_at: startedAt.toISOString(),
+      ended_at: endedAt.toISOString(),
+      audio: { recording: `${simulationId}/dual-channel.wav` },
+      provider_reference: "CA_late_voice",
+    })];
+    const accepted = await report(simulationId, late);
+    expect(accepted.statusCode, JSON.stringify(accepted.body)).toBe(200);
+    expect((await readUsageThisPeriod(auth)).used.phone_minutes).toBe(109 / 60);
+    const recovered = await getSimulation(auth, simulationId);
+    expect(recovered?.status).toBe("failed");
+    expect(recovered?.endingReason).toBe("orphaned");
+    expect(recovered?.endedAt).toEqual(closed?.endedAt);
+    expect(recovered?.executionEndedAt).toEqual(endedAt);
+    expect(recovered?.recordingReference).toBe(`${simulationId}/dual-channel.wav`);
+    expect(await gradingJobsFor(simulationId)).toBe(0);
+    const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
+    expect(header.body.failedCount).toBe(1);
+    const detail = await ask(api.app, "GET", `/v1/simulations/${simulationId}`, key);
+    expect((detail.body.measures as Record<string, unknown>).durationMs).toBe(109_000);
+
+    expect((await report(simulationId, late)).statusCode).toBe(200);
+    expect((await report(simulationId, [terminalEvent("completed", "agent_ended", {
+      started_at: startedAt.toISOString(),
+      ended_at: new Date(endedAt.getTime() + 60_000).toISOString(),
+    })])).statusCode).toBe(200);
+    expect((await readUsageThisPeriod(auth)).used.phone_minutes).toBe(109 / 60);
+    expect(await gradingJobsFor(simulationId)).toBe(0);
+    await expect(api.database.sql(
+      "update simulation set execution_ended_at = $2 where id = $1",
+      [simulationId, new Date(endedAt.getTime() + 60_000)],
+    )).rejects.toThrow(/terminal simulation is written once/);
+  });
+
+  it("requires a preceding running report to recover an orphan whose start never arrived", async () => {
+    const { ada, key, connectionId, versionId } = await aCustomerReadyToRun("reports_orphan_start");
+    const { simulationId } = await aClaimedSimulation(key, connectionId, versionId);
+    await api.database.sql("update simulation set heartbeat_at = now() - interval '10 minutes' where id = $1", [simulationId]);
+    await sweepOrphanedSimulations();
+    const terminal = terminalEvent("failed", "error");
+    expect((await report(simulationId, [terminal, runningEvent()])).statusCode).toBe(200);
+    const auth = contextFor(ada, "member");
+    expect((await getSimulation(auth, simulationId))?.executionEndedAt).toBeNull();
+    // The worker WAL sends these as separate documents. Its start proof must
+    // survive between requests without changing the failed lifecycle state.
+    expect((await report(simulationId, [runningEvent()])).statusCode).toBe(200);
+    expect((await getSimulation(auth, simulationId))?.executionEndedAt).toBeNull();
+    expect((await report(simulationId, [terminal])).statusCode).toBe(200);
+    const recovered = await getSimulation(auth, simulationId);
+    expect(recovered?.status).toBe("failed");
+    expect(recovered?.endingReason).toBe("orphaned");
+    expect(recovered?.executionEndedAt?.toISOString()).toBe("2026-08-05T09:02:10.551Z");
   });
 
   it("lands a voice conversation's recording reference", async () => {
@@ -563,6 +656,7 @@ describe("the lifecycle lands", () => {
     expect(row?.recordingReference).toBe(`${simulationId}/dual-channel.wav`);
     expect(row?.turnCount).toBe(22);
     expect(row?.providerReference).toBe("CA7e2b9c1d4f6a8e0b");
+    expect(row?.executionEndedAt?.toISOString()).toBe("2026-08-05T09:02:10.551Z");
   });
 
   it("refuses recording facts for a chat conversation", async () => {
@@ -667,6 +761,9 @@ describe("the lifecycle lands", () => {
     expect(row?.status).toBe("failed");
     expect(row?.endingReason).toBe("agent_never_joined");
     expect(row?.turnCount).toBe(0);
+    expect(row?.startedAt).toBeNull();
+    expect(row?.executionEndedAt).toBeNull();
+    expect((await readUsageThisPeriod(contextFor(ada, "member"))).used.chat_simulations).toBe(0);
   });
 
   it("lands a canceled conversation once cancellation was actually requested", async () => {
