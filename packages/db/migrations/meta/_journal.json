@@ -5,85 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1787675631313,
-      "tag": "0000_baseline",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1787726983377,
-      "tag": "0001_persona_rework",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1787961265658,
-      "tag": "0002_retell_lanes",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1787961288915,
-      "tag": "0003_retell_mock_tools",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1787988393813,
-      "tag": "0004_drop_grader_output_contract",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1787993150870,
-      "tag": "0005_simulation_execution_failure",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1788222232543,
-      "tag": "0006_archived_agents_release_pull",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1788480128555,
-      "tag": "0007_test_owned_mock_tools",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1788766834112,
-      "tag": "0008_model_settings_and_versioning",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1788807573269,
-      "tag": "0009_simplify_control_plane_tables",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "7",
-      "when": 1788813142624,
-      "tag": "0010_livekit_room_reference",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "7",
       "when": 1788822388137,
-      "tag": "0011_billing",
+      "tag": "0000_baseline",
       "breakpoints": true
     }
   ]

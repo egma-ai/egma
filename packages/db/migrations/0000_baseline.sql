@@ -1,879 +1,144 @@
--- CURRENT PRE-PRODUCTION BASELINE.
--- Creates only the current PostgreSQL schema and current catalog rows. It has
--- no rename, backfill, or compatibility steps.
-CREATE EXTENSION IF NOT EXISTS citext;
---> statement-breakpoint
-CREATE TABLE "account" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"user_id" text COLLATE "C" NOT NULL,
-	"account_id" text NOT NULL,
-	"provider_id" text NOT NULL,
-	"access_token" text,
-	"refresh_token" text,
-	"id_token" text,
-	"access_token_expires_at" timestamp with time zone,
-	"refresh_token_expires_at" timestamp with time zone,
-	"scope" text,
-	"password" text,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "account_id_prefix" CHECK ("account"."id" ~ '^acc_[0-9A-HJKMNP-TV-Z]{26}$')
-);
---> statement-breakpoint
-CREATE TABLE "session" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"user_id" text COLLATE "C" NOT NULL,
-	"token" text NOT NULL,
-	"expires_at" timestamp with time zone NOT NULL,
-	"ip_address" text,
-	"user_agent" text,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "session_token_unique" UNIQUE("token"),
-	CONSTRAINT "session_id_prefix" CHECK ("session"."id" ~ '^ses_[0-9A-HJKMNP-TV-Z]{26}$')
-);
---> statement-breakpoint
-CREATE TABLE "user" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"email" "citext" NOT NULL,
-	"name" text,
-	"image" text,
-	"email_verified" boolean DEFAULT false NOT NULL,
-	"external_identity_provider" text,
-	"external_identity_id" text,
-	"deactivated_at" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "user_email_unique" UNIQUE("email"),
-	CONSTRAINT "user_external_identity_unique" UNIQUE("external_identity_provider","external_identity_id"),
-	CONSTRAINT "user_id_prefix" CHECK ("user"."id" ~ '^usr_[0-9A-HJKMNP-TV-Z]{26}$')
-);
---> statement-breakpoint
-CREATE TABLE "verification" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"identifier" text NOT NULL,
-	"value" text NOT NULL,
-	"expires_at" timestamp with time zone NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "verification_id_prefix" CHECK ("verification"."id" ~ '^vrf_[0-9A-HJKMNP-TV-Z]{26}$')
-);
---> statement-breakpoint
-CREATE TABLE "api_key" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C",
-	"scope" text NOT NULL,
-	"hash" text NOT NULL,
-	"prefix" text NOT NULL,
-	"display_suffix" text NOT NULL,
-	"name" text,
-	"last_used_at" timestamp with time zone,
-	"revoked_at" timestamp with time zone,
-	"created_by_user_id" text COLLATE "C" NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "api_key_hash_unique" UNIQUE("hash"),
-	CONSTRAINT "api_key_id_prefix" CHECK ("api_key"."id" ~ '^key_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "api_key_scope_allowed" CHECK ("api_key"."scope" in ('organization', 'project')),
-	CONSTRAINT "api_key_project_scope_agrees" CHECK (("api_key"."scope" = 'project') = ("api_key"."project_id" is not null))
-);
---> statement-breakpoint
-CREATE TABLE "invitation" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"email" "citext" NOT NULL,
-	"role" text NOT NULL,
-	"token_hash" text NOT NULL,
-	"expires_at" timestamp with time zone NOT NULL,
-	"accepted_at" timestamp with time zone,
-	"created_by" text COLLATE "C",
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "invitation_token_hash_unique" UNIQUE("token_hash"),
-	CONSTRAINT "invitation_id_prefix" CHECK ("invitation"."id" ~ '^inv_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "invitation_role_allowed" CHECK ("invitation"."role" in ('admin', 'member', 'viewer'))
-);
---> statement-breakpoint
-CREATE TABLE "membership" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"user_id" text COLLATE "C" NOT NULL,
-	"role" text NOT NULL,
-	"created_by" text COLLATE "C",
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "membership_user_id_unique" UNIQUE("user_id"),
-	CONSTRAINT "membership_organization_id_user_id_unique" UNIQUE("organization_id","user_id"),
-	CONSTRAINT "membership_id_prefix" CHECK ("membership"."id" ~ '^mbr_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "membership_role_allowed" CHECK ("membership"."role" in ('admin', 'member', 'viewer'))
-);
---> statement-breakpoint
-CREATE TABLE "organization" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"name" text NOT NULL,
-	"slug" text NOT NULL,
-	"external_identity_provider" text,
-	"external_identity_id" text,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "organization_slug_unique" UNIQUE("slug"),
-	CONSTRAINT "organization_external_identity_unique" UNIQUE("external_identity_provider","external_identity_id"),
-	CONSTRAINT "organization_id_prefix" CHECK ("organization"."id" ~ '^org_[0-9A-HJKMNP-TV-Z]{26}$')
-);
---> statement-breakpoint
-CREATE TABLE "organization_settings" (
-	"organization_id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"retention_days" integer,
-	"data_residency" text,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "organization_settings_organization_id_prefix" CHECK ("organization_settings"."organization_id" ~ '^org_[0-9A-HJKMNP-TV-Z]{26}$')
-);
---> statement-breakpoint
-CREATE TABLE "project" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"name" text NOT NULL,
-	"slug" text NOT NULL,
-	"description" text,
-	"revision" text COLLATE "C" NOT NULL,
-	"default_persona_id" text COLLATE "C" DEFAULT 'prs_01M0E4EVJ6ECGVJEA4NSBTC0CC' NOT NULL,
-	"deleted_at" timestamp with time zone,
-	"created_by" text COLLATE "C",
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "project_organization_id_slug_unique" UNIQUE("organization_id","slug"),
-	CONSTRAINT "project_id_organization_id_unique" UNIQUE("id","organization_id"),
-	CONSTRAINT "project_id_prefix" CHECK ("project"."id" ~ '^prj_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "project_revision_prefix" CHECK ("project"."revision" ~ '^rev_[0-9A-HJKMNP-TV-Z]{26}$')
-);
---> statement-breakpoint
-CREATE TABLE "device_code" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"device_code" text NOT NULL,
-	"user_code" text NOT NULL,
-	"user_id" text COLLATE "C",
-	"client_id" text,
-	"scope" text,
-	"status" text NOT NULL,
-	"organization_id" text COLLATE "C",
-	"project_id" text COLLATE "C",
-	"expires_at" timestamp with time zone NOT NULL,
-	"last_polled_at" timestamp with time zone,
-	"polling_interval" integer,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "device_code_device_code_unique" UNIQUE("device_code"),
-	CONSTRAINT "device_code_user_code_unique" UNIQUE("user_code"),
-	CONSTRAINT "device_code_id_prefix" CHECK ("device_code"."id" ~ '^dvc_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "device_code_status_allowed" CHECK ("device_code"."status" in ('pending', 'approved', 'denied')),
-	CONSTRAINT "device_code_authorized_for_agrees" CHECK (("device_code"."organization_id" is null) = ("device_code"."project_id" is null))
-);
---> statement-breakpoint
-CREATE TABLE "persona" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C",
-	"project_id" text COLLATE "C",
-	"name" text NOT NULL,
-	"description" text,
-	"current_version_id" text COLLATE "C" NOT NULL,
-	"revision" text NOT NULL,
-	"archived_at" timestamp with time zone,
-	"created_by" text COLLATE "C",
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "persona_id_prefix" CHECK ("persona"."id" ~ '^prs_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "persona_tenancy_is_whole_or_egmas" CHECK (("persona"."organization_id" is null) = ("persona"."project_id" is null)),
-	CONSTRAINT "persona_egma_provided_is_active" CHECK ("persona"."organization_id" is not null or "persona"."archived_at" is null)
-);
---> statement-breakpoint
-CREATE TABLE "persona_version" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"persona_id" text COLLATE "C" NOT NULL,
-	"version" integer NOT NULL,
-	"traits" jsonb NOT NULL,
-	"models" jsonb NOT NULL,
-	"created_by" text COLLATE "C",
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "persona_version_persona_id_version_unique" UNIQUE("persona_id","version"),
-	CONSTRAINT "persona_version_id_persona_id_unique" UNIQUE("id","persona_id"),
-	CONSTRAINT "persona_version_id_prefix" CHECK ("persona_version"."id" ~ '^prsv_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "persona_version_traits_valid" CHECK (
-        jsonb_typeof("persona_version"."traits") is not distinct from 'object'
-        and ("persona_version"."traits" - array[
-          'personality', 'language', 'accent', 'backgroundNoise'
-        ]::text[]) is not distinct from '{}'::jsonb
-        and jsonb_typeof("persona_version"."traits"->'personality') is not distinct from 'string'
-        and nullif(btrim("persona_version"."traits"->>'personality'), '') is not null
-        and jsonb_typeof("persona_version"."traits"->'language') is not distinct from 'string'
-        and nullif(btrim("persona_version"."traits"->>'language'), '') is not null
-        and (
-          not ("persona_version"."traits" ? 'accent')
-          or (
-            jsonb_typeof("persona_version"."traits"->'accent') is not distinct from 'string'
-            and nullif(btrim("persona_version"."traits"->>'accent'), '') is not null
-          )
-        )
-        and (
-          not ("persona_version"."traits" ? 'backgroundNoise')
-          or (
-            jsonb_typeof("persona_version"."traits"->'backgroundNoise') is not distinct from 'string'
-            and nullif(btrim("persona_version"."traits"->>'backgroundNoise'), '') is not null
-          )
-        )
-      ),
-	CONSTRAINT "persona_version_models_valid" CHECK (
-        jsonb_typeof("persona_version"."models") is not distinct from 'object'
-        and ("persona_version"."models" - array['llm', 'stt', 'tts']::text[])
-          is not distinct from '{}'::jsonb
-        and jsonb_typeof("persona_version"."models"->'llm') is not distinct from 'object'
-        and (("persona_version"."models"->'llm') - array['provider', 'model']::text[])
-          is not distinct from '{}'::jsonb
-        and jsonb_typeof("persona_version"."models"->'llm'->'provider') is not distinct from 'string'
-        and nullif(btrim("persona_version"."models"->'llm'->>'provider'), '') is not null
-        and jsonb_typeof("persona_version"."models"->'llm'->'model') is not distinct from 'string'
-        and nullif(btrim("persona_version"."models"->'llm'->>'model'), '') is not null
-        and jsonb_typeof("persona_version"."models"->'stt') is not distinct from 'object'
-        and (("persona_version"."models"->'stt') - array['provider', 'model']::text[])
-          is not distinct from '{}'::jsonb
-        and jsonb_typeof("persona_version"."models"->'stt'->'provider') is not distinct from 'string'
-        and nullif(btrim("persona_version"."models"->'stt'->>'provider'), '') is not null
-        and jsonb_typeof("persona_version"."models"->'stt'->'model') is not distinct from 'string'
-        and nullif(btrim("persona_version"."models"->'stt'->>'model'), '') is not null
-        and jsonb_typeof("persona_version"."models"->'tts') is not distinct from 'object'
-        and (("persona_version"."models"->'tts') - array[
-          'provider', 'model', 'voiceId', 'speed'
-        ]::text[]) is not distinct from '{}'::jsonb
-        and jsonb_typeof("persona_version"."models"->'tts'->'provider') is not distinct from 'string'
-        and nullif(btrim("persona_version"."models"->'tts'->>'provider'), '') is not null
-        and jsonb_typeof("persona_version"."models"->'tts'->'model') is not distinct from 'string'
-        and nullif(btrim("persona_version"."models"->'tts'->>'model'), '') is not null
-        and jsonb_typeof("persona_version"."models"->'tts'->'voiceId') is not distinct from 'string'
-        and nullif(btrim("persona_version"."models"->'tts'->>'voiceId'), '') is not null
-        and jsonb_path_exists(
-          "persona_version"."models",
-          '$.tts.speed ? (@.type() == "number" && @ >= 0.6 && @ <= 1.5)'::jsonpath
-        )
-      )
-);
---> statement-breakpoint
-CREATE TABLE "agent" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"name" text NOT NULL,
-	"agent_platform" text NOT NULL,
-	"platform_agent_id" text,
-	"monitoring_api_key" text,
-	"monitoring_api_key_hint" text,
-	"pull_production_calls" boolean DEFAULT false NOT NULL,
-	"archived_at" timestamp with time zone,
-	"created_by" text COLLATE "C",
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "agent_id_project_id_unique" UNIQUE("id","project_id"),
-	CONSTRAINT "agent_id_prefix" CHECK ("agent"."id" ~ '^agt_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "agent_platform_allowed" CHECK ("agent"."agent_platform" in ('retell', 'livekit')),
-	CONSTRAINT "agent_monitoring_key_hint_agrees" CHECK (("agent"."monitoring_api_key" is null) = ("agent"."monitoring_api_key_hint" is null)),
-	CONSTRAINT "agent_monitoring_key_needs_platform" CHECK ("agent"."monitoring_api_key" is null or "agent"."agent_platform" is not null),
-	CONSTRAINT "agent_pull_needs_binding" CHECK ("agent"."pull_production_calls" = false or ("agent"."agent_platform" is not null and "agent"."platform_agent_id" is not null and "agent"."monitoring_api_key" is not null))
-);
---> statement-breakpoint
-CREATE TABLE "connection" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"agent_id" text COLLATE "C" NOT NULL,
-	"name" text NOT NULL,
-	"connection_type" text NOT NULL,
-	"modality" text NOT NULL,
-	"topology" text NOT NULL,
-	"access_variant" text NOT NULL,
-	"environment" text,
-	"config" jsonb NOT NULL,
-	"credentials" text,
-	"credentials_hint" text,
-	"archived_at" timestamp with time zone,
-	"created_by" text COLLATE "C",
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "connection_id_agent_id_unique" UNIQUE("id","agent_id"),
-	CONSTRAINT "connection_id_prefix" CHECK ("connection"."id" ~ '^con_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "connection_type_allowed" CHECK ("connection"."connection_type" in ('retell_chat_api', 'phone_number', 'livekit_room')),
-	CONSTRAINT "connection_access_variant_allowed" CHECK ("connection"."access_variant" in ('retell_chat_api.api_key', 'phone_number.public_e164', 'livekit_room.project_credentials', 'livekit_room.customer_token_endpoint')),
-	CONSTRAINT "connection_modality_allowed" CHECK ("connection"."modality" in ('voice', 'chat')),
-	CONSTRAINT "connection_topology_allowed" CHECK ("connection"."topology" in ('agent-dials-out', 'hosted-broker', 'egma-dials-in')),
-	CONSTRAINT "connection_credentials_hint_agrees" CHECK (("connection"."credentials" is null) = ("connection"."credentials_hint" is null))
-);
---> statement-breakpoint
-CREATE TABLE "monitoring_state" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"agent_id" text COLLATE "C" NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"scan_kind" text,
-	"scan_from" timestamp with time zone,
-	"scan_through" timestamp with time zone,
-	"pagination_key" text,
-	"pagination_trail" text DEFAULT '[]' NOT NULL,
-	"completed_through" timestamp with time zone,
-	"next_poll_at" timestamp with time zone NOT NULL,
-	"regular_floor_at" timestamp with time zone,
-	"import_generation" integer DEFAULT 1 NOT NULL,
-	"lease_owner" text,
-	"lease_expires_at" timestamp with time zone,
-	"consecutive_failures" integer DEFAULT 0 NOT NULL,
-	"failure_started_at" timestamp with time zone,
-	"last_error_kind" text,
-	"last_error_at" timestamp with time zone,
-	"last_success_at" timestamp with time zone,
-	"last_received_at" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "monitoring_state_agent_unique" UNIQUE("agent_id"),
-	CONSTRAINT "monitoring_state_id_prefix" CHECK ("monitoring_state"."id" ~ '^mst_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "monitoring_state_scan_kind_allowed" CHECK ("monitoring_state"."scan_kind" in ('historical_import', 'regular')),
-	CONSTRAINT "monitoring_state_scan_agrees" CHECK (("monitoring_state"."scan_kind" is null and "monitoring_state"."scan_from" is null and "monitoring_state"."scan_through" is null and "monitoring_state"."pagination_key" is null) or ("monitoring_state"."scan_kind" is not null and "monitoring_state"."scan_from" is not null and "monitoring_state"."scan_through" is not null)),
-	CONSTRAINT "monitoring_state_lease_agrees" CHECK (("monitoring_state"."lease_owner" is null) = ("monitoring_state"."lease_expires_at" is null))
-);
---> statement-breakpoint
-CREATE TABLE "retell_call_retry" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"agent_id" text COLLATE "C" NOT NULL,
-	"provider_call_id" text NOT NULL,
-	"error_kind" text NOT NULL,
-	"attempts" smallint DEFAULT 1 NOT NULL,
-	"last_attempt_at" timestamp with time zone NOT NULL,
-	"next_attempt_at" timestamp with time zone,
-	"expires_at" timestamp with time zone,
-	"import_generation" integer DEFAULT 1 NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "retell_call_retry_project_call_unique" UNIQUE("project_id","provider_call_id"),
-	CONSTRAINT "retell_call_retry_id_prefix" CHECK ("retell_call_retry"."id" ~ '^rcr_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "retell_call_retry_one_schedule" CHECK (("retell_call_retry"."next_attempt_at" is null) <> ("retell_call_retry"."expires_at" is null)),
-	CONSTRAINT "retell_call_retry_attempts_bounded" CHECK ("retell_call_retry"."attempts" between 1 and 4)
-);
---> statement-breakpoint
-CREATE TABLE "grader_definition" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C",
-	"name" text NOT NULL,
-	"description" text,
-	"scope_editable" boolean NOT NULL,
-	"current_definition_version" integer DEFAULT 1 NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "grader_definition_id_prefix" CHECK ("grader_definition"."id" ~ '^grl_[0-9A-HJKMNP-TV-Z]{26}$')
-);
---> statement-breakpoint
-CREATE TABLE "grader_definition_version" (
-	"definition_id" text COLLATE "C" NOT NULL,
-	"version" integer NOT NULL,
-	"type" text NOT NULL,
-	"prompt" text,
-	"parameter_contract" jsonb NOT NULL,
-	"output_contract" jsonb,
-	"modalities" jsonb NOT NULL,
-	"judge_model" jsonb,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "grader_definition_version_definition_id_version_pk" PRIMARY KEY("definition_id","version"),
-	CONSTRAINT "grader_definition_version_definition_id_prefix" CHECK ("grader_definition_version"."definition_id" ~ '^grl_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "grader_definition_version_version_is_positive" CHECK ("grader_definition_version"."version" >= 1),
-	CONSTRAINT "grader_definition_version_type_allowed" CHECK ("grader_definition_version"."type" in ('llm_as_judge', 'code')),
-	CONSTRAINT "grader_definition_version_modalities_allowed" CHECK ("grader_definition_version"."modalities" in (
-        '["chat"]'::jsonb,
-        '["voice"]'::jsonb,
-        '["chat", "voice"]'::jsonb,
-        '["voice", "chat"]'::jsonb
-      ))
-);
---> statement-breakpoint
-CREATE TABLE "project_grader" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"grader_definition_id" text COLLATE "C" NOT NULL,
-	"scope" jsonb NOT NULL,
-	"parameter_values" jsonb NOT NULL,
-	"pass_threshold" double precision NOT NULL,
-	"archived_at" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "project_grader_id_prefix" CHECK ("project_grader"."id" ~ '^grd_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "project_grader_scope_is_closed_object" CHECK (jsonb_typeof("project_grader"."scope") is not distinct from 'object'
-        and ("project_grader"."scope" - array['simulations', 'production']::text[])
-          is not distinct from '{}'::jsonb
-        and "project_grader"."scope" ?& array['simulations', 'production']::text[]
-        and jsonb_typeof("project_grader"."scope"->'simulations') is not distinct from 'array'
-        and (
-          "project_grader"."scope"->'production' = 'null'::jsonb
-          or jsonb_typeof("project_grader"."scope"->'production') is not distinct from 'object'
-        )),
-	CONSTRAINT "project_grader_pass_threshold_is_normalized" CHECK ("project_grader"."pass_threshold" between 0 and 1)
-);
---> statement-breakpoint
-CREATE TABLE "mock_tool" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"tool_name" text NOT NULL,
-	"answer" jsonb NOT NULL,
-	"delay_milliseconds" integer DEFAULT 0 NOT NULL,
-	"deleted_at" timestamp with time zone,
-	"created_by" text COLLATE "C",
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "mock_tool_id_project_id_unique" UNIQUE("id","project_id"),
-	CONSTRAINT "mock_tool_id_prefix" CHECK ("mock_tool"."id" ~ '^mck_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "mock_tool_delay_within_budget" CHECK ("mock_tool"."delay_milliseconds" between 0 and 30000)
-);
---> statement-breakpoint
-CREATE TABLE "mock_tool_agent" (
-	"mock_tool_id" text COLLATE "C" NOT NULL,
-	"agent_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"position" integer NOT NULL,
-	CONSTRAINT "mock_tool_agent_pk" PRIMARY KEY("mock_tool_id","agent_id"),
-	CONSTRAINT "mock_tool_agent_mock_tool_id_position_unique" UNIQUE("mock_tool_id","position"),
-	CONSTRAINT "mock_tool_agent_mock_tool_id_prefix" CHECK ("mock_tool_agent"."mock_tool_id" ~ '^mck_[0-9A-HJKMNP-TV-Z]{26}$')
-);
---> statement-breakpoint
-CREATE TABLE "test" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"suite_id" text COLLATE "C" NOT NULL,
-	"name" text NOT NULL,
-	"description" text,
-	"current_version_id" text COLLATE "C" NOT NULL,
-	"revision" text COLLATE "C" NOT NULL,
-	"deleted_at" timestamp with time zone,
-	"created_by" text COLLATE "C",
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "test_id_project_id_unique" UNIQUE("id","project_id"),
-	CONSTRAINT "test_id_prefix" CHECK ("test"."id" ~ '^tst_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "test_revision_prefix" CHECK ("test"."revision" ~ '^rev_[0-9A-HJKMNP-TV-Z]{26}$')
-);
---> statement-breakpoint
-CREATE TABLE "test_persona" (
-	"test_version_id" text COLLATE "C" NOT NULL,
-	"persona_id" text COLLATE "C" NOT NULL,
-	"position" integer NOT NULL,
-	CONSTRAINT "test_persona_pk" PRIMARY KEY("test_version_id","persona_id"),
-	CONSTRAINT "test_persona_version_id_position_unique" UNIQUE("test_version_id","position"),
-	CONSTRAINT "test_persona_test_version_id_prefix" CHECK ("test_persona"."test_version_id" ~ '^tstv_[0-9A-HJKMNP-TV-Z]{26}$')
-);
---> statement-breakpoint
-CREATE TABLE "test_suite" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"name" text NOT NULL,
-	"deleted_at" timestamp with time zone,
-	"created_by" text COLLATE "C",
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "test_suite_id_project_id_unique" UNIQUE("id","project_id"),
-	CONSTRAINT "test_suite_id_prefix" CHECK ("test_suite"."id" ~ '^ste_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "test_suite_name_is_not_blank" CHECK (btrim("test_suite"."name") <> '')
-);
---> statement-breakpoint
-CREATE TABLE "test_version" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"test_id" text COLLATE "C" NOT NULL,
-	"version" integer NOT NULL,
-	"content" jsonb NOT NULL,
-	"created_by" text COLLATE "C",
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "test_version_test_id_version_unique" UNIQUE("test_id","version"),
-	CONSTRAINT "test_version_id_test_id_unique" UNIQUE("id","test_id"),
-	CONSTRAINT "test_version_id_prefix" CHECK ("test_version"."id" ~ '^tstv_[0-9A-HJKMNP-TV-Z]{26}$')
-);
---> statement-breakpoint
-CREATE TABLE "run" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"suite_id" text COLLATE "C" NOT NULL,
-	"agent_id" text COLLATE "C" NOT NULL,
-	"connection_id" text COLLATE "C" NOT NULL,
-	"name" text,
-	"status" text NOT NULL,
-	"triggered_via" text NOT NULL,
-	"triggered_by" text COLLATE "C",
-	"connection_snapshot" jsonb NOT NULL,
-	"mock_tool_snapshot" jsonb NOT NULL,
-	"expected_simulation_count" integer NOT NULL,
-	"completed_count" integer,
-	"failed_count" integer,
-	"canceled_count" integer,
-	"started_at" timestamp with time zone,
-	"finished_at" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "run_id_project_id_unique" UNIQUE("id","project_id"),
-	CONSTRAINT "run_id_prefix" CHECK ("run"."id" ~ '^run_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "run_status_allowed" CHECK ("run"."status" in ('pending', 'running', 'completed', 'canceled')),
-	CONSTRAINT "run_triggered_via_allowed" CHECK ("run"."triggered_via" in ('manual')),
-	CONSTRAINT "run_expects_at_least_one_simulation" CHECK ("run"."expected_simulation_count" > 0),
-	CONSTRAINT "run_counts_written_together" CHECK ((("run"."completed_count" is null) = ("run"."failed_count" is null))
-        and (("run"."failed_count" is null) = ("run"."canceled_count" is null))
-        and (("run"."canceled_count" is null) = ("run"."finished_at" is null))),
-	CONSTRAINT "run_counts_are_counts" CHECK (("run"."completed_count" is null)
-        or ("run"."completed_count" >= 0 and "run"."failed_count" >= 0
-          and "run"."canceled_count" >= 0)),
-	CONSTRAINT "run_finished_is_terminal" CHECK ("run"."finished_at" is null or "run"."status" in ('completed', 'canceled')),
-	CONSTRAINT "run_completed_is_finished" CHECK ("run"."status" <> 'completed' or "run"."finished_at" is not null),
-	CONSTRAINT "run_started_when_left_pending" CHECK (case
-        when "run"."status" = 'pending' then "run"."started_at" is null
-        when "run"."status" in ('running', 'completed') then "run"."started_at" is not null
-        else true
-      end)
-);
---> statement-breakpoint
-CREATE TABLE "run_event" (
-	"run_id" text COLLATE "C" NOT NULL,
-	"seq" integer NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"kind" text NOT NULL,
-	"simulation_id" text COLLATE "C",
-	"status" text NOT NULL,
-	"reason" text,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "run_event_pk" PRIMARY KEY("run_id","seq"),
-	CONSTRAINT "run_event_run_id_prefix" CHECK ("run_event"."run_id" ~ '^run_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "run_event_kind_allowed" CHECK ("run_event"."kind" in ('run', 'simulation')),
-	CONSTRAINT "run_event_seq_counts_from_one" CHECK ("run_event"."seq" >= 1),
-	CONSTRAINT "run_event_run_shape" CHECK ("run_event"."kind" <> 'run'
-        or ("run_event"."simulation_id" is null
-          and "run_event"."reason" is null
-          and "run_event"."status" in ('pending', 'running', 'completed', 'canceled'))),
-	CONSTRAINT "run_event_simulation_shape" CHECK ("run_event"."kind" <> 'simulation'
-        or ("run_event"."simulation_id" is not null
-          and "run_event"."status" in ('queued', 'claimed', 'running', 'completed', 'failed', 'canceled'))),
-	CONSTRAINT "run_event_reason_agrees" CHECK ("run_event"."reason" is null
-        or ("run_event"."status" = 'completed' and "run_event"."reason" in ('persona_concluded', 'agent_ended', 'limit_reached'))
-        or ("run_event"."status" = 'failed' and "run_event"."reason" in ('agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed')))
-);
---> statement-breakpoint
-CREATE TABLE "simulation" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"run_id" text COLLATE "C" NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"agent_id" text COLLATE "C" NOT NULL,
-	"connection_id" text COLLATE "C" NOT NULL,
-	"persona_id" text COLLATE "C" NOT NULL,
-	"persona_version_id" text COLLATE "C" NOT NULL,
-	"test_id" text COLLATE "C" NOT NULL,
-	"test_version_id" text COLLATE "C" NOT NULL,
-	"position" integer NOT NULL,
-	"modality" text NOT NULL,
-	"status" text NOT NULL,
-	"ending_reason" text,
-	"claimed_by" text,
-	"claimed_at" timestamp with time zone,
-	"heartbeat_at" timestamp with time zone,
-	"cancel_requested_at" timestamp with time zone,
-	"started_at" timestamp with time zone,
-	"ended_at" timestamp with time zone,
-	"recording_reference" text,
-	"turn_count" integer,
-	"provider_reference" text,
-	"mock_tool_coverage" jsonb,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "simulation_run_id_position_unique" UNIQUE("run_id","position"),
-	CONSTRAINT "simulation_id_project_id_unique" UNIQUE("id","project_id"),
-	CONSTRAINT "simulation_id_run_id_unique" UNIQUE("id","run_id"),
-	CONSTRAINT "simulation_id_prefix" CHECK ("simulation"."id" ~ '^sim_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "simulation_status_allowed" CHECK ("simulation"."status" in ('queued', 'claimed', 'running', 'completed', 'failed', 'canceled')),
-	CONSTRAINT "simulation_modality_allowed" CHECK ("simulation"."modality" in ('voice', 'chat')),
-	CONSTRAINT "simulation_position_counts_from_one" CHECK ("simulation"."position" >= 1),
-	CONSTRAINT "simulation_ending_reason_allowed" CHECK ("simulation"."ending_reason" is null or "simulation"."ending_reason" in ('persona_concluded', 'agent_ended', 'limit_reached', 'agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed')),
-	CONSTRAINT "simulation_ending_reason_agrees" CHECK (case "simulation"."status"
-        when 'completed' then "simulation"."ending_reason" in ('persona_concluded', 'agent_ended', 'limit_reached')
-        when 'failed' then "simulation"."ending_reason" in ('agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed')
-        else "simulation"."ending_reason" is null
-      end),
-	CONSTRAINT "simulation_claim_columns_agree" CHECK ((("simulation"."claimed_at" is null) = ("simulation"."claimed_by" is null))
-        and (("simulation"."claimed_at" is null) = ("simulation"."heartbeat_at" is null))),
-	CONSTRAINT "simulation_queued_shape" CHECK ("simulation"."status" <> 'queued'
-        or ("simulation"."claimed_at" is null and "simulation"."started_at" is null
-          and "simulation"."ended_at" is null and "simulation"."cancel_requested_at" is null)),
-	CONSTRAINT "simulation_claimed_shape" CHECK ("simulation"."status" <> 'claimed'
-        or ("simulation"."claimed_at" is not null and "simulation"."started_at" is null
-          and "simulation"."ended_at" is null)),
-	CONSTRAINT "simulation_running_shape" CHECK ("simulation"."status" <> 'running'
-        or ("simulation"."claimed_at" is not null and "simulation"."started_at" is not null
-          and "simulation"."ended_at" is null)),
-	CONSTRAINT "simulation_completed_shape" CHECK ("simulation"."status" <> 'completed'
-        or ("simulation"."started_at" is not null and "simulation"."ended_at" is not null)),
-	CONSTRAINT "simulation_failed_shape" CHECK ("simulation"."status" <> 'failed' or "simulation"."ended_at" is not null),
-	CONSTRAINT "simulation_canceled_shape" CHECK ("simulation"."status" <> 'canceled'
-        or ("simulation"."ended_at" is not null and "simulation"."cancel_requested_at" is not null)),
-	CONSTRAINT "simulation_report_only_when_ended" CHECK ("simulation"."ended_at" is not null
-        or "simulation"."recording_reference" is null),
-	CONSTRAINT "simulation_summary_facts_only_when_ended" CHECK ("simulation"."ended_at" is not null
-        or ("simulation"."turn_count" is null and "simulation"."provider_reference" is null)),
-	CONSTRAINT "simulation_turn_count_is_a_count" CHECK ("simulation"."turn_count" is null or "simulation"."turn_count" >= 0),
-	CONSTRAINT "simulation_mock_tool_coverage_only_when_ended" CHECK ("simulation"."ended_at" is not null or "simulation"."mock_tool_coverage" is null),
-	CONSTRAINT "simulation_audio_facts_are_voice_facts" CHECK ("simulation"."modality" = 'voice'
-        or "simulation"."recording_reference" is null)
-);
---> statement-breakpoint
-CREATE TABLE "grading_plan" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"run_id" text COLLATE "C" NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"state" text NOT NULL,
-	"captured_at" timestamp with time zone NOT NULL,
-	"groups" jsonb NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "grading_plan_run_id_unique" UNIQUE("run_id"),
-	CONSTRAINT "grading_plan_id_prefix" CHECK ("grading_plan"."id" ~ '^gpl_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "grading_plan_state_allowed" CHECK ("grading_plan"."state" in ('run_start')),
-	CONSTRAINT "grading_plan_groups_are_a_list" CHECK (jsonb_typeof("grading_plan"."groups") = 'array')
-);
---> statement-breakpoint
-CREATE TABLE "idempotent_operation" (
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"actor_id" text COLLATE "C" NOT NULL,
-	"operation" text NOT NULL,
-	"idempotency_key" text NOT NULL,
-	"request_digest" text NOT NULL,
-	"result_id" text COLLATE "C" NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "idempotent_operation_pk" PRIMARY KEY("organization_id","project_id","actor_id","operation","idempotency_key"),
-	CONSTRAINT "idempotent_operation_organization_id_prefix" CHECK ("idempotent_operation"."organization_id" ~ '^org_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "idempotent_operation_allowed" CHECK ("idempotent_operation"."operation" in ('start_run')),
-	CONSTRAINT "idempotent_operation_key_is_not_empty" CHECK (length("idempotent_operation"."idempotency_key") > 0)
-);
---> statement-breakpoint
-CREATE TABLE "grading_job" (
-	"id" text COLLATE "C" PRIMARY KEY NOT NULL,
-	"organization_id" text COLLATE "C" NOT NULL,
-	"project_id" text COLLATE "C" NOT NULL,
-	"source" text NOT NULL,
-	"simulation_id" text COLLATE "C",
-	"trace_id" text NOT NULL,
-	"trace_started_at" timestamp with time zone NOT NULL,
-	"run_id" text COLLATE "C",
-	"entries" jsonb NOT NULL,
-	"status" text NOT NULL,
-	"claimed_by" text,
-	"claimed_at" timestamp with time zone,
-	"heartbeat_at" timestamp with time zone,
-	"sequence_base" integer DEFAULT 0 NOT NULL,
-	"attempts" integer DEFAULT 0 NOT NULL,
-	"last_error" text,
-	"finished_at" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "grading_job_simulation_id_unique" UNIQUE("simulation_id"),
-	CONSTRAINT "grading_job_project_id_trace_id_unique" UNIQUE("project_id","trace_id"),
-	CONSTRAINT "grading_job_id_prefix" CHECK ("grading_job"."id" ~ '^gjb_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "grading_job_status_allowed" CHECK ("grading_job"."status" in ('pending', 'claimed', 'abandoned')),
-	CONSTRAINT "grading_job_source_allowed" CHECK ("grading_job"."source" in ('simulation', 'production')),
-	CONSTRAINT "grading_job_source_names_its_control_record" CHECK (case "grading_job"."source"
-        when 'simulation' then "grading_job"."simulation_id" is not null and "grading_job"."run_id" is not null
-        when 'production' then "grading_job"."simulation_id" is null and "grading_job"."run_id" is null
-        else false
-      end),
-	CONSTRAINT "grading_job_entries_are_a_nonempty_list" CHECK (jsonb_typeof("grading_job"."entries") = 'array'
-        and jsonb_array_length("grading_job"."entries") > 0),
-	CONSTRAINT "grading_job_claim_columns_agree" CHECK ((("grading_job"."claimed_at" is null) = ("grading_job"."claimed_by" is null))
-        and (("grading_job"."claimed_at" is null) = ("grading_job"."heartbeat_at" is null))),
-	CONSTRAINT "grading_job_pending_shape" CHECK ("grading_job"."status" <> 'pending'
-        or ("grading_job"."claimed_at" is null and "grading_job"."finished_at" is null)),
-	CONSTRAINT "grading_job_claimed_shape" CHECK ("grading_job"."status" <> 'claimed'
-        or ("grading_job"."claimed_at" is not null and "grading_job"."finished_at" is null)),
-	CONSTRAINT "grading_job_abandoned_shape" CHECK (("grading_job"."status" = 'abandoned') = ("grading_job"."finished_at" is not null)),
-	CONSTRAINT "grading_job_sequence_base_is_counted" CHECK ("grading_job"."sequence_base" >= 0),
-	CONSTRAINT "grading_job_attempts_are_counted" CHECK ("grading_job"."attempts" >= 0)
-);
---> statement-breakpoint
-ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "api_key" ADD CONSTRAINT "api_key_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "api_key" ADD CONSTRAINT "api_key_created_by_user_id_user_id_fk" FOREIGN KEY ("created_by_user_id") REFERENCES "public"."user"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "api_key" ADD CONSTRAINT "api_key_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "invitation" ADD CONSTRAINT "invitation_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "invitation" ADD CONSTRAINT "invitation_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "membership" ADD CONSTRAINT "membership_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "membership" ADD CONSTRAINT "membership_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "membership" ADD CONSTRAINT "membership_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "organization_settings" ADD CONSTRAINT "organization_settings_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "project" ADD CONSTRAINT "project_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "project" ADD CONSTRAINT "project_default_persona_id_persona_id_fk" FOREIGN KEY ("default_persona_id") REFERENCES "public"."persona"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "project" ADD CONSTRAINT "project_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "device_code" ADD CONSTRAINT "device_code_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "device_code" ADD CONSTRAINT "device_code_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "device_code" ADD CONSTRAINT "device_code_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "persona" ADD CONSTRAINT "persona_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "persona" ADD CONSTRAINT "persona_current_version_id_persona_version_id_fk" FOREIGN KEY ("current_version_id") REFERENCES "public"."persona_version"("id") ON DELETE no action ON UPDATE no action DEFERRABLE INITIALLY DEFERRED;--> statement-breakpoint
-ALTER TABLE "persona" ADD CONSTRAINT "persona_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "persona" ADD CONSTRAINT "persona_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "persona_version" ADD CONSTRAINT "persona_version_persona_id_persona_id_fk" FOREIGN KEY ("persona_id") REFERENCES "public"."persona"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "persona_version" ADD CONSTRAINT "persona_version_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "agent" ADD CONSTRAINT "agent_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "agent" ADD CONSTRAINT "agent_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "agent" ADD CONSTRAINT "agent_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "connection" ADD CONSTRAINT "connection_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "connection" ADD CONSTRAINT "connection_agent_id_agent_id_fk" FOREIGN KEY ("agent_id") REFERENCES "public"."agent"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "connection" ADD CONSTRAINT "connection_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "connection" ADD CONSTRAINT "connection_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "connection" ADD CONSTRAINT "connection_agent_project_fk" FOREIGN KEY ("agent_id","project_id") REFERENCES "public"."agent"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "monitoring_state" ADD CONSTRAINT "monitoring_state_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "monitoring_state" ADD CONSTRAINT "monitoring_state_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "monitoring_state" ADD CONSTRAINT "monitoring_state_agent_project_fk" FOREIGN KEY ("agent_id","project_id") REFERENCES "public"."agent"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "retell_call_retry" ADD CONSTRAINT "retell_call_retry_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "retell_call_retry" ADD CONSTRAINT "retell_call_retry_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "retell_call_retry" ADD CONSTRAINT "retell_call_retry_agent_project_fk" FOREIGN KEY ("agent_id","project_id") REFERENCES "public"."agent"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "grader_definition" ADD CONSTRAINT "grader_definition_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "grader_definition" ADD CONSTRAINT "grader_definition_current_version_fk" FOREIGN KEY ("id","current_definition_version") REFERENCES "public"."grader_definition_version"("definition_id","version") ON DELETE no action ON UPDATE no action DEFERRABLE INITIALLY DEFERRED;--> statement-breakpoint
-ALTER TABLE "grader_definition_version" ADD CONSTRAINT "grader_definition_version_definition_id_grader_definition_id_fk" FOREIGN KEY ("definition_id") REFERENCES "public"."grader_definition"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "project_grader" ADD CONSTRAINT "project_grader_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "project_grader" ADD CONSTRAINT "project_grader_grader_definition_id_grader_definition_id_fk" FOREIGN KEY ("grader_definition_id") REFERENCES "public"."grader_definition"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "project_grader" ADD CONSTRAINT "project_grader_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mock_tool" ADD CONSTRAINT "mock_tool_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mock_tool" ADD CONSTRAINT "mock_tool_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mock_tool" ADD CONSTRAINT "mock_tool_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mock_tool_agent" ADD CONSTRAINT "mock_tool_agent_mock_tool_id_mock_tool_id_fk" FOREIGN KEY ("mock_tool_id") REFERENCES "public"."mock_tool"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mock_tool_agent" ADD CONSTRAINT "mock_tool_agent_agent_id_agent_id_fk" FOREIGN KEY ("agent_id") REFERENCES "public"."agent"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mock_tool_agent" ADD CONSTRAINT "mock_tool_agent_mock_tool_project_fk" FOREIGN KEY ("mock_tool_id","project_id") REFERENCES "public"."mock_tool"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mock_tool_agent" ADD CONSTRAINT "mock_tool_agent_agent_project_fk" FOREIGN KEY ("agent_id","project_id") REFERENCES "public"."agent"("id","project_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "test" ADD CONSTRAINT "test_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "test" ADD CONSTRAINT "test_current_version_id_test_version_id_fk" FOREIGN KEY ("current_version_id") REFERENCES "public"."test_version"("id") ON DELETE no action ON UPDATE no action DEFERRABLE INITIALLY DEFERRED;--> statement-breakpoint
-ALTER TABLE "test" ADD CONSTRAINT "test_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "test" ADD CONSTRAINT "test_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "test" ADD CONSTRAINT "test_suite_project_fk" FOREIGN KEY ("suite_id","project_id") REFERENCES "public"."test_suite"("id","project_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "test_persona" ADD CONSTRAINT "test_persona_test_version_id_test_version_id_fk" FOREIGN KEY ("test_version_id") REFERENCES "public"."test_version"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "test_persona" ADD CONSTRAINT "test_persona_persona_id_persona_id_fk" FOREIGN KEY ("persona_id") REFERENCES "public"."persona"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "test_suite" ADD CONSTRAINT "test_suite_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "test_suite" ADD CONSTRAINT "test_suite_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "test_suite" ADD CONSTRAINT "test_suite_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "test_version" ADD CONSTRAINT "test_version_test_id_test_id_fk" FOREIGN KEY ("test_id") REFERENCES "public"."test"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "test_version" ADD CONSTRAINT "test_version_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "run" ADD CONSTRAINT "run_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "run" ADD CONSTRAINT "run_triggered_by_user_id_fk" FOREIGN KEY ("triggered_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "run" ADD CONSTRAINT "run_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "run" ADD CONSTRAINT "run_suite_project_fk" FOREIGN KEY ("suite_id","project_id") REFERENCES "public"."test_suite"("id","project_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "run" ADD CONSTRAINT "run_agent_project_fk" FOREIGN KEY ("agent_id","project_id") REFERENCES "public"."agent"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "run" ADD CONSTRAINT "run_connection_agent_fk" FOREIGN KEY ("connection_id","agent_id") REFERENCES "public"."connection"("id","agent_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "run_event" ADD CONSTRAINT "run_event_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "run_event" ADD CONSTRAINT "run_event_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "run_event" ADD CONSTRAINT "run_event_run_project_fk" FOREIGN KEY ("run_id","project_id") REFERENCES "public"."run"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "run_event" ADD CONSTRAINT "run_event_simulation_run_fk" FOREIGN KEY ("simulation_id","run_id") REFERENCES "public"."simulation"("id","run_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_agent_project_fk" FOREIGN KEY ("agent_id","project_id") REFERENCES "public"."agent"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_connection_agent_fk" FOREIGN KEY ("connection_id","agent_id") REFERENCES "public"."connection"("id","agent_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_run_project_fk" FOREIGN KEY ("run_id","project_id") REFERENCES "public"."run"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_persona_version_persona_fk" FOREIGN KEY ("persona_version_id","persona_id") REFERENCES "public"."persona_version"("id","persona_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_test_version_test_fk" FOREIGN KEY ("test_version_id","test_id") REFERENCES "public"."test_version"("id","test_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_test_project_fk" FOREIGN KEY ("test_id","project_id") REFERENCES "public"."test"("id","project_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "grading_plan" ADD CONSTRAINT "grading_plan_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "grading_plan" ADD CONSTRAINT "grading_plan_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "grading_plan" ADD CONSTRAINT "grading_plan_run_project_fk" FOREIGN KEY ("run_id","project_id") REFERENCES "public"."run"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "idempotent_operation" ADD CONSTRAINT "idempotent_operation_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "idempotent_operation" ADD CONSTRAINT "idempotent_operation_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "idempotent_operation" ADD CONSTRAINT "idempotent_operation_actor_fk" FOREIGN KEY ("actor_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "grading_job" ADD CONSTRAINT "grading_job_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "grading_job" ADD CONSTRAINT "grading_job_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "grading_job" ADD CONSTRAINT "grading_job_simulation_project_fk" FOREIGN KEY ("simulation_id","project_id") REFERENCES "public"."simulation"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "account_user_id_idx" ON "account" USING btree ("user_id");--> statement-breakpoint
-CREATE INDEX "session_user_id_idx" ON "session" USING btree ("user_id");--> statement-breakpoint
-CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");--> statement-breakpoint
-CREATE INDEX "api_key_organization_id_idx" ON "api_key" USING btree ("organization_id");--> statement-breakpoint
-CREATE INDEX "invitation_organization_id_idx" ON "invitation" USING btree ("organization_id");--> statement-breakpoint
-CREATE INDEX "membership_organization_id_idx" ON "membership" USING btree ("organization_id");--> statement-breakpoint
-CREATE INDEX "project_organization_id_idx" ON "project" USING btree ("organization_id") WHERE "project"."deleted_at" is null;--> statement-breakpoint
-CREATE INDEX "device_code_expires_at_idx" ON "device_code" USING btree ("expires_at");--> statement-breakpoint
-CREATE UNIQUE INDEX "persona_egma_provided_name_unique" ON "persona" USING btree ("name") WHERE "persona"."organization_id" is null;--> statement-breakpoint
-CREATE INDEX "persona_organization_id_project_id_idx" ON "persona" USING btree ("organization_id","project_id") WHERE "persona"."archived_at" is null;--> statement-breakpoint
-CREATE UNIQUE INDEX "agent_project_id_name_unique" ON "agent" USING btree ("project_id","name") WHERE "agent"."archived_at" is null;--> statement-breakpoint
-CREATE INDEX "agent_organization_id_project_id_idx" ON "agent" USING btree ("organization_id","project_id") WHERE "agent"."archived_at" is null;--> statement-breakpoint
-CREATE UNIQUE INDEX "agent_pulled_platform_agent_unique" ON "agent" USING btree ("project_id","agent_platform","platform_agent_id") WHERE "agent"."pull_production_calls";--> statement-breakpoint
-CREATE UNIQUE INDEX "connection_agent_id_name_unique" ON "connection" USING btree ("agent_id","name") WHERE "connection"."archived_at" is null;--> statement-breakpoint
-CREATE INDEX "connection_agent_id_idx" ON "connection" USING btree ("agent_id") WHERE "connection"."archived_at" is null;--> statement-breakpoint
-CREATE INDEX "monitoring_state_due_idx" ON "monitoring_state" USING btree ("next_poll_at","lease_expires_at");--> statement-breakpoint
-CREATE INDEX "monitoring_state_project_idx" ON "monitoring_state" USING btree ("project_id");--> statement-breakpoint
-CREATE INDEX "retell_call_retry_due_idx" ON "retell_call_retry" USING btree ("agent_id","next_attempt_at") WHERE "retell_call_retry"."next_attempt_at" is not null;--> statement-breakpoint
-CREATE UNIQUE INDEX "grader_definition_predefined_name_unique" ON "grader_definition" USING btree ("name") WHERE "grader_definition"."organization_id" is null;--> statement-breakpoint
-CREATE INDEX "grader_definition_organization_id_idx" ON "grader_definition" USING btree ("organization_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "project_grader_active_definition_unique" ON "project_grader" USING btree ("project_id","grader_definition_id") WHERE "project_grader"."archived_at" is null;--> statement-breakpoint
-CREATE INDEX "project_grader_organization_id_project_id_idx" ON "project_grader" USING btree ("organization_id","project_id") WHERE "project_grader"."archived_at" is null;--> statement-breakpoint
-CREATE INDEX "project_grader_definition_id_idx" ON "project_grader" USING btree ("grader_definition_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "mock_tool_project_id_tool_name_unique" ON "mock_tool" USING btree ("project_id","tool_name") WHERE "mock_tool"."deleted_at" is null;--> statement-breakpoint
-CREATE INDEX "mock_tool_organization_id_project_id_idx" ON "mock_tool" USING btree ("organization_id","project_id") WHERE "mock_tool"."deleted_at" is null;--> statement-breakpoint
-CREATE INDEX "mock_tool_agent_agent_id_idx" ON "mock_tool_agent" USING btree ("agent_id");--> statement-breakpoint
-CREATE INDEX "test_organization_id_project_id_idx" ON "test" USING btree ("organization_id","project_id") WHERE "test"."deleted_at" is null;--> statement-breakpoint
-CREATE INDEX "test_suite_id_id_idx" ON "test" USING btree ("suite_id","id") WHERE "test"."deleted_at" is null;--> statement-breakpoint
-CREATE INDEX "test_persona_persona_id_idx" ON "test_persona" USING btree ("persona_id");--> statement-breakpoint
-CREATE INDEX "test_suite_organization_id_project_id_idx" ON "test_suite" USING btree ("organization_id","project_id") WHERE "test_suite"."deleted_at" is null;--> statement-breakpoint
-CREATE INDEX "run_organization_id_id_idx" ON "run" USING btree ("organization_id","id");--> statement-breakpoint
-CREATE INDEX "run_organization_id_project_id_id_idx" ON "run" USING btree ("organization_id","project_id","id");--> statement-breakpoint
-CREATE INDEX "run_agent_id_idx" ON "run" USING btree ("agent_id");--> statement-breakpoint
-CREATE INDEX "run_suite_id_idx" ON "run" USING btree ("suite_id");--> statement-breakpoint
-CREATE INDEX "simulation_run_id_idx" ON "simulation" USING btree ("run_id");--> statement-breakpoint
-CREATE INDEX "simulation_queued_idx" ON "simulation" USING btree ("organization_id","id") WHERE "simulation"."status" = 'queued';--> statement-breakpoint
-CREATE INDEX "simulation_heartbeat_idx" ON "simulation" USING btree ("organization_id","heartbeat_at") WHERE "simulation"."status" in ('claimed', 'running');--> statement-breakpoint
-CREATE INDEX "simulation_persona_version_id_idx" ON "simulation" USING btree ("persona_version_id");--> statement-breakpoint
-CREATE INDEX "simulation_persona_id_idx" ON "simulation" USING btree ("persona_id");--> statement-breakpoint
-CREATE INDEX "simulation_test_version_id_idx" ON "simulation" USING btree ("test_version_id");--> statement-breakpoint
-CREATE INDEX "simulation_test_id_idx" ON "simulation" USING btree ("test_id");--> statement-breakpoint
-CREATE INDEX "grading_plan_organization_id_project_id_idx" ON "grading_plan" USING btree ("organization_id","project_id");--> statement-breakpoint
-CREATE INDEX "grading_job_outstanding_idx" ON "grading_job" USING btree ("id") WHERE "grading_job"."status" in ('pending', 'claimed');--> statement-breakpoint
-CREATE INDEX "grading_job_organization_id_project_id_idx" ON "grading_job" USING btree ("organization_id","project_id");
+-- Fresh Postgres schema, including the named checks, functions and triggers.
+CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
+SET LOCAL search_path = public, pg_catalog;
+SET LOCAL check_function_bodies = false;
 
--- Current database behavior that Drizzle does not model.
-CREATE OR REPLACE FUNCTION public.guard_default_persona_archive()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
+--
+-- Name: egma_parameter_values_valid(jsonb, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.egma_parameter_values_valid(parameters jsonb, contract jsonb) RETURNS boolean
+    LANGUAGE plpgsql IMMUTABLE
+    AS $_$
+DECLARE item jsonb; candidate jsonb; key_name text; seen text[] := '{}';
 BEGIN
-	IF OLD.archived_at IS NULL
-		AND NEW.archived_at IS NOT NULL THEN
-		-- Use the same key as the project pointer guard. Whichever write takes
-		-- it first commits before the other checks, so two stale writers cannot
-		-- each approve half of an archived-default state.
-		PERFORM pg_advisory_xact_lock(
-			hashtextextended('egma:default-persona:' || NEW.id, 0)
-		);
-	END IF;
-
-	IF OLD.archived_at IS NULL
-		AND NEW.archived_at IS NOT NULL
-		AND EXISTS (
-			SELECT 1 FROM project target
-			WHERE target.default_persona_id = NEW.id
-		)
-	THEN
-		RAISE foreign_key_violation USING
-			CONSTRAINT = 'project_default_persona_availability',
-			MESSAGE = 'a project default persona cannot be archived before its pointer moves';
-	END IF;
-	RETURN NEW;
+  IF jsonb_typeof(parameters) IS DISTINCT FROM 'object'
+     OR jsonb_typeof(contract) IS DISTINCT FROM 'array' THEN RETURN false; END IF;
+  FOR item IN SELECT value FROM jsonb_array_elements(contract) LOOP
+    IF jsonb_typeof(item) IS DISTINCT FROM 'object'
+       OR NOT item ?& ARRAY['key','label','valueType','defaultValue','unit','minimum','maximum']
+       OR item - ARRAY['key','label','valueType','defaultValue','unit','minimum','maximum'] <> '{}'::jsonb
+       OR jsonb_typeof(item->'key') IS DISTINCT FROM 'string'
+       OR (item->>'key') !~ '^[a-z][a-z0-9]*(_[a-z0-9]+)*$'
+       OR jsonb_typeof(item->'label') IS DISTINCT FROM 'string'
+       OR btrim(item->>'label') = ''
+       OR (item->>'valueType') IS NULL
+       OR (item->>'valueType') NOT IN ('string','number','integer') THEN RETURN false; END IF;
+    key_name := item->>'key';
+    IF key_name = ANY(seen) OR NOT parameters ? key_name THEN RETURN false; END IF;
+    seen := array_append(seen, key_name);
+    IF item->>'valueType' = 'string' THEN
+      IF item->'minimum' <> 'null'::jsonb OR item->'maximum' <> 'null'::jsonb
+         OR item->'unit' <> 'null'::jsonb THEN RETURN false; END IF;
+    ELSE
+      IF (item->'minimum' <> 'null'::jsonb AND jsonb_typeof(item->'minimum') <> 'number')
+         OR (item->'maximum' <> 'null'::jsonb AND jsonb_typeof(item->'maximum') <> 'number')
+         OR (item->'unit' <> 'null'::jsonb AND
+             (jsonb_typeof(item->'unit') <> 'string' OR btrim(item->>'unit') = '')) THEN RETURN false; END IF;
+      IF (item->>'minimum')::numeric > (item->>'maximum')::numeric THEN RETURN false; END IF;
+      IF item->>'valueType' = 'integer' AND
+         (trunc((item->>'minimum')::numeric) <> (item->>'minimum')::numeric OR
+          trunc((item->>'maximum')::numeric) <> (item->>'maximum')::numeric) THEN RETURN false; END IF;
+    END IF;
+    FOREACH candidate IN ARRAY ARRAY[parameters->key_name, item->'defaultValue'] LOOP
+      IF item->>'valueType' = 'string' THEN
+        IF jsonb_typeof(candidate) IS DISTINCT FROM 'string'
+           OR btrim(candidate#>>'{}') = '' THEN RETURN false; END IF;
+      ELSE
+        IF jsonb_typeof(candidate) IS DISTINCT FROM 'number' THEN RETURN false; END IF;
+        IF item->>'valueType' = 'integer' AND
+           trunc((candidate#>>'{}')::numeric) <> (candidate#>>'{}')::numeric THEN RETURN false; END IF;
+        IF (candidate#>>'{}')::numeric < (item->>'minimum')::numeric OR
+           (candidate#>>'{}')::numeric > (item->>'maximum')::numeric THEN RETURN false; END IF;
+      END IF;
+    END LOOP;
+  END LOOP;
+  RETURN parameters - seen = '{}'::jsonb;
 END;
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.guard_grader_definition_version_immutable()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
+$_$;
+
+
+--
+-- Name: guard_definition_parameter_contract(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_definition_parameter_contract() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE defaults jsonb;
+BEGIN
+  IF jsonb_typeof(NEW.parameter_contract) IS DISTINCT FROM 'array' THEN
+    RAISE check_violation USING MESSAGE = 'a parameter contract must be a list';
+  END IF;
+  SELECT coalesce(jsonb_object_agg(field->>'key', field->'defaultValue'), '{}'::jsonb)
+    INTO defaults FROM jsonb_array_elements(NEW.parameter_contract) field;
+  IF NOT egma_parameter_values_valid(defaults, NEW.parameter_contract) THEN
+    RAISE check_violation USING MESSAGE = 'a parameter contract has invalid fields or defaults';
+  END IF;
+  IF TG_TABLE_NAME = 'persona_definition_version' AND
+     NOT persona_parameters_valid(defaults, NEW.parameter_contract) THEN
+    RAISE check_violation USING MESSAGE = 'a persona contract must declare complete model, voice and speed settings';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: guard_grader_definition_ownership_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_grader_definition_ownership_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF NEW.organization_id IS DISTINCT FROM OLD.organization_id OR NEW.project_id IS DISTINCT FROM OLD.project_id THEN
+    RAISE check_violation USING MESSAGE = 'grader definition ownership is immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: guard_grader_definition_version_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_grader_definition_version_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 BEGIN
   RAISE EXCEPTION 'grader definition versions are immutable';
 END;
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.guard_persona_ownership_immutable()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
+$$;
+
+
+--
+-- Name: guard_grading_job_selection_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_grading_job_selection_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF ROW(NEW.organization_id, NEW.project_id, NEW.source, NEW.simulation_id, NEW.trace_id,
+         NEW.trace_started_at, NEW.run_id, NEW.entries) IS DISTINCT FROM
+     ROW(OLD.organization_id, OLD.project_id, OLD.source, OLD.simulation_id, OLD.trace_id,
+         OLD.trace_started_at, OLD.run_id, OLD.entries) THEN
+    RAISE check_violation USING MESSAGE = 'a grading job selection is immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: guard_persona_ownership_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_persona_ownership_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 BEGIN
 	IF NEW.organization_id IS DISTINCT FROM OLD.organization_id
 		OR NEW.project_id IS DISTINCT FROM OLD.project_id
@@ -882,69 +147,141 @@ BEGIN
 	END IF;
 	RETURN NEW;
 END;
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.guard_persona_version_semantics_immutable()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
-BEGIN
-	IF NEW.persona_id IS DISTINCT FROM OLD.persona_id
-		OR NEW.version IS DISTINCT FROM OLD.version
-		OR NEW.traits IS DISTINCT FROM OLD.traits
-		OR NEW.models IS DISTINCT FROM OLD.models
-	THEN
-		RAISE check_violation USING
-			CONSTRAINT = 'persona_version_semantics_immutable',
-			MESSAGE = 'a persona version''s authored content cannot change; mint a new version';
-	END IF;
-	RETURN NEW;
-END;
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.guard_project_default_persona_availability()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
-BEGIN
-    IF NEW.default_persona_id IS NOT NULL THEN
-		-- The reverse archive guard takes this exact lock before it checks the
-		-- project table. This makes choosing a default and archiving that same
-		-- persona one ordered decision even though they update different rows.
-		PERFORM pg_advisory_xact_lock(
-			hashtextextended('egma:default-persona:' || NEW.default_persona_id, 0)
-		);
-	END IF;
+$$;
 
-	IF NEW.default_persona_id IS NOT NULL
-		AND NOT persona_is_active_default_for_project(NEW.default_persona_id, NEW.id)
-	THEN
-		RAISE foreign_key_violation USING
-			CONSTRAINT = 'project_default_persona_availability',
-			MESSAGE = 'the default persona is not available to this project';
-	END IF;
-	RETURN NEW;
+
+--
+-- Name: guard_persona_version_semantics_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_persona_version_semantics_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF NEW.persona_id IS DISTINCT FROM OLD.persona_id OR NEW.version IS DISTINCT FROM OLD.version
+     OR NEW.identity_name IS DISTINCT FROM OLD.identity_name OR NEW.personality IS DISTINCT FROM OLD.personality
+     OR NEW.language IS DISTINCT FROM OLD.language OR NEW.parameter_contract IS DISTINCT FROM OLD.parameter_contract THEN
+    RAISE check_violation USING CONSTRAINT = 'persona_version_semantics_immutable', MESSAGE = 'a persona core version cannot change';
+  END IF;
+  RETURN NEW;
 END;
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.guard_run_event_append_only()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
+$$;
+
+
+--
+-- Name: guard_project_grader_definition_ownership(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_project_grader_definition_ownership() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE held grader_definition; core grader_definition_version;
+BEGIN
+  IF TG_OP = 'UPDATE' AND (NEW.organization_id IS DISTINCT FROM OLD.organization_id
+     OR NEW.project_id IS DISTINCT FROM OLD.project_id OR NEW.grader_definition_id IS DISTINCT FROM OLD.grader_definition_id) THEN
+    RAISE check_violation USING MESSAGE = 'project grader ownership is immutable';
+  END IF;
+  SELECT * INTO held FROM grader_definition WHERE id = NEW.grader_definition_id FOR SHARE;
+  IF NOT FOUND OR (held.organization_id IS NOT NULL AND
+     (held.organization_id IS DISTINCT FROM NEW.organization_id OR held.project_id IS DISTINCT FROM NEW.project_id)) THEN
+    RAISE foreign_key_violation USING MESSAGE = 'grader definition is not available in this project';
+  END IF;
+  SELECT * INTO STRICT core FROM grader_definition_version
+    WHERE definition_id = held.id AND version = held.current_definition_version;
+  IF NOT egma_parameter_values_valid(NEW.parameter_values, core.parameter_contract)
+     OR (core.type = 'llm_as_judge' AND NOT NEW.parameter_values ?& ARRAY['llm_provider','llm_model']) THEN
+    RAISE check_violation USING MESSAGE = 'grader settings are invalid';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: guard_project_persona(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_project_persona() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE held persona_definition; contract jsonb;
+BEGIN
+  IF TG_OP = 'UPDATE' AND (NEW.organization_id IS DISTINCT FROM OLD.organization_id
+     OR NEW.project_id IS DISTINCT FROM OLD.project_id OR NEW.persona_definition_id IS DISTINCT FROM OLD.persona_definition_id) THEN
+    RAISE check_violation USING MESSAGE = 'project persona ownership cannot change';
+  END IF;
+  SELECT * INTO held FROM persona_definition WHERE id = NEW.persona_definition_id FOR SHARE;
+  IF NOT FOUND OR (held.organization_id IS NOT NULL AND
+     (held.organization_id IS DISTINCT FROM NEW.organization_id OR held.project_id IS DISTINCT FROM NEW.project_id)) THEN
+    RAISE foreign_key_violation USING MESSAGE = 'persona is not available to this project';
+  END IF;
+  SELECT parameter_contract INTO STRICT contract FROM persona_definition_version WHERE id = held.current_version_id;
+  IF NOT persona_parameters_valid(NEW.parameter_values, contract) THEN
+    RAISE check_violation USING MESSAGE = 'persona settings are invalid';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: guard_run_event_append_only(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_run_event_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 BEGIN
   RAISE EXCEPTION 'event % of run % is written once, and what happened cannot be rewritten',
     OLD.seq, OLD.run_id;
 END
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.guard_run_lifecycle()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
+$$;
+
+
+--
+-- Name: guard_run_grading_plan(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_run_grading_plan() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.grading_plan IS DISTINCT FROM OLD.grading_plan THEN
+    RAISE check_violation USING MESSAGE = 'a run grading plan is immutable';
+  END IF;
+  IF jsonb_typeof(NEW.grading_plan) IS DISTINCT FROM 'object'
+     OR NEW.grading_plan - ARRAY['capturedAt','groups'] <> '{}'::jsonb
+     OR jsonb_typeof(NEW.grading_plan->'groups') IS DISTINCT FROM 'array'
+     OR jsonb_typeof(NEW.grading_plan->'capturedAt') IS DISTINCT FROM 'string'
+     OR btrim(NEW.grading_plan->>'capturedAt') = '' THEN
+    RAISE check_violation USING MESSAGE = 'a run grading plan needs capture time and groups';
+  END IF;
+  PERFORM (NEW.grading_plan->>'capturedAt')::timestamptz;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: guard_run_lifecycle(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_run_lifecycle() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 BEGIN
   -- The counts and finished_at land together, once; after that the header is
-  -- frozen and a retry is a new run.
+  -- frozen and a retry is a new run. The one carve-out below is the cleanup
+  -- bookkeeping, which is about somebody's Retell account rather than about
+  -- this run's numbers.
   IF OLD.finished_at IS NOT NULL THEN
+    IF (NEW.temp_mock_agent_version_cleanup IS DISTINCT FROM OLD.temp_mock_agent_version_cleanup
+        OR NEW.mock_metadata IS DISTINCT FROM OLD.mock_metadata)
+       AND (to_jsonb(NEW) - 'temp_mock_agent_version_cleanup' - 'mock_metadata')
+         = (to_jsonb(OLD) - 'temp_mock_agent_version_cleanup' - 'mock_metadata')
+    THEN
+      RETURN NEW;
+    END IF;
     RAISE EXCEPTION 'run % is finished, and a finished run''s header is written once',
       OLD.id;
   END IF;
@@ -966,12 +303,16 @@ BEGIN
 
   RAISE EXCEPTION 'run % may not move from % to %', OLD.id, OLD.status, NEW.status;
 END
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.guard_simulation_lifecycle()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
+$$;
+
+
+--
+-- Name: guard_simulation_lifecycle(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_simulation_lifecycle() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 BEGIN
 	IF OLD.status IN ('completed', 'failed', 'canceled') THEN
 		RAISE EXCEPTION 'simulation % is %, and a terminal simulation is written once',
@@ -992,12 +333,16 @@ BEGIN
 	RAISE EXCEPTION 'simulation % may not move from % to %',
 		OLD.id, OLD.status, NEW.status;
 END
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.guard_simulation_persona_availability()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
+$$;
+
+
+--
+-- Name: guard_simulation_persona_availability(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_simulation_persona_availability() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 BEGIN
 	IF NOT persona_is_available_to_project(NEW.persona_id, NEW.project_id)
 	THEN
@@ -1007,12 +352,41 @@ BEGIN
 	END IF;
 	RETURN NEW;
 END;
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.guard_test_ownership_immutable()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
+$$;
+
+
+--
+-- Name: guard_simulation_persona_parameters(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_simulation_persona_parameters() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE contract jsonb;
+BEGIN
+  IF TG_OP = 'UPDATE' AND (NEW.persona_id IS DISTINCT FROM OLD.persona_id
+     OR NEW.persona_version_id IS DISTINCT FROM OLD.persona_version_id
+     OR NEW.persona_parameter_values IS DISTINCT FROM OLD.persona_parameter_values) THEN
+    RAISE check_violation USING MESSAGE = 'a simulation persona selection is immutable';
+  END IF;
+  SELECT parameter_contract INTO contract FROM persona_definition_version
+    WHERE id = NEW.persona_version_id AND persona_id = NEW.persona_id;
+  IF NOT FOUND THEN RAISE foreign_key_violation USING MESSAGE = 'simulation persona version does not belong to the selected persona'; END IF;
+  IF NOT persona_parameters_valid(NEW.persona_parameter_values, contract) THEN
+    RAISE check_violation USING MESSAGE = 'simulation persona settings are invalid';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: guard_test_ownership_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_test_ownership_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 BEGIN
 	IF NEW.organization_id IS DISTINCT FROM OLD.organization_id
 		OR NEW.project_id IS DISTINCT FROM OLD.project_id
@@ -1021,12 +395,16 @@ BEGIN
 	END IF;
 	RETURN NEW;
 END;
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.guard_test_persona_availability()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
+$$;
+
+
+--
+-- Name: guard_test_persona_availability(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_test_persona_availability() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 DECLARE
 	target_project_id text;
 BEGIN
@@ -1046,12 +424,16 @@ BEGIN
 	END IF;
 	RETURN NEW;
 END;
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.guard_test_suite_membership()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
+$$;
+
+
+--
+-- Name: guard_test_suite_membership(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_test_suite_membership() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 BEGIN
 	IF NEW.suite_id IS DISTINCT FROM OLD.suite_id THEN
 		RAISE EXCEPTION 'test % belongs to suite % for life', OLD.id, OLD.suite_id
@@ -1059,12 +441,16 @@ BEGIN
 	END IF;
 	RETURN NEW;
 END;
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.guard_test_version_test_immutable()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
+$$;
+
+
+--
+-- Name: guard_test_version_test_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_test_version_test_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 BEGIN
 	IF NEW.test_id IS DISTINCT FROM OLD.test_id
 	THEN
@@ -1072,80 +458,2583 @@ BEGIN
 	END IF;
 	RETURN NEW;
 END;
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.persona_is_active_default_for_project(wanted_persona_id text, wanted_project_id text)
- RETURNS boolean
- LANGUAGE sql
-AS $function$
-	SELECT EXISTS (
-		SELECT 1
-		FROM persona p
-		WHERE p.id = wanted_persona_id
-			AND p.archived_at IS NULL
-			AND (
-				p.project_id = wanted_project_id
-				OR (p.organization_id IS NULL AND p.project_id IS NULL)
-			)
-	);
-$function$;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION public.persona_is_available_to_project(wanted_persona_id text, wanted_project_id text)
- RETURNS boolean
- LANGUAGE sql
- STABLE
-AS $function$
-	SELECT EXISTS (
-		SELECT 1
-		FROM persona p
-		WHERE p.id = wanted_persona_id
-			AND (
-				p.project_id = wanted_project_id
-				OR (p.organization_id IS NULL AND p.project_id IS NULL)
-			)
-	);
-$function$;
---> statement-breakpoint
+$$;
 
--- Triggers for the current schema.
-CREATE TRIGGER grader_definition_version_is_immutable BEFORE UPDATE ON grader_definition_version FOR EACH ROW EXECUTE FUNCTION guard_grader_definition_version_immutable();
---> statement-breakpoint
-CREATE TRIGGER persona_default_archive_guard BEFORE UPDATE OF archived_at ON persona FOR EACH ROW EXECUTE FUNCTION guard_default_persona_archive();
---> statement-breakpoint
-CREATE TRIGGER persona_ownership_immutable_guard BEFORE UPDATE OF organization_id, project_id ON persona FOR EACH ROW EXECUTE FUNCTION guard_persona_ownership_immutable();
---> statement-breakpoint
-CREATE TRIGGER persona_version_semantics_immutable_guard BEFORE UPDATE OF persona_id, version, traits, models ON persona_version FOR EACH ROW EXECUTE FUNCTION guard_persona_version_semantics_immutable();
---> statement-breakpoint
-CREATE TRIGGER project_default_persona_availability_insert_guard BEFORE INSERT ON project FOR EACH ROW EXECUTE FUNCTION guard_project_default_persona_availability();
---> statement-breakpoint
-CREATE TRIGGER project_default_persona_availability_update_guard BEFORE UPDATE OF default_persona_id ON project FOR EACH ROW EXECUTE FUNCTION guard_project_default_persona_availability();
---> statement-breakpoint
-CREATE TRIGGER run_lifecycle_guard BEFORE UPDATE ON run FOR EACH ROW EXECUTE FUNCTION guard_run_lifecycle();
---> statement-breakpoint
-CREATE TRIGGER run_event_append_only_guard BEFORE UPDATE ON run_event FOR EACH ROW EXECUTE FUNCTION guard_run_event_append_only();
---> statement-breakpoint
-CREATE TRIGGER simulation_lifecycle_guard BEFORE UPDATE ON simulation FOR EACH ROW EXECUTE FUNCTION guard_simulation_lifecycle();
---> statement-breakpoint
-CREATE TRIGGER simulation_persona_availability_insert_guard BEFORE INSERT ON simulation FOR EACH ROW EXECUTE FUNCTION guard_simulation_persona_availability();
---> statement-breakpoint
-CREATE TRIGGER simulation_persona_availability_update_guard BEFORE UPDATE OF persona_id, project_id ON simulation FOR EACH ROW EXECUTE FUNCTION guard_simulation_persona_availability();
---> statement-breakpoint
-CREATE TRIGGER test_ownership_immutable_guard BEFORE UPDATE OF organization_id, project_id ON test FOR EACH ROW EXECUTE FUNCTION guard_test_ownership_immutable();
---> statement-breakpoint
-CREATE TRIGGER test_suite_membership_immutable BEFORE UPDATE OF suite_id ON test FOR EACH ROW EXECUTE FUNCTION guard_test_suite_membership();
---> statement-breakpoint
-CREATE TRIGGER test_persona_availability_insert_guard BEFORE INSERT ON test_persona FOR EACH ROW EXECUTE FUNCTION guard_test_persona_availability();
---> statement-breakpoint
-CREATE TRIGGER test_persona_availability_update_guard BEFORE UPDATE OF test_version_id, persona_id ON test_persona FOR EACH ROW EXECUTE FUNCTION guard_test_persona_availability();
---> statement-breakpoint
-CREATE TRIGGER test_version_test_immutable_guard BEFORE UPDATE OF test_id ON test_version FOR EACH ROW EXECUTE FUNCTION guard_test_version_test_immutable();
---> statement-breakpoint
 
--- Current Egma-provided persona catalog. Startup seeding reconciles this
--- fixed row with the TypeScript catalog before a project is created.
-INSERT INTO persona (id, organization_id, project_id, name, description, current_version_id, revision, archived_at, created_by, created_at, updated_at)
-VALUES ('prs_01M0E4EVJ6ECGVJEA4NSBTC0CC', NULL, NULL, 'Default Persona', 'Regular conversationalist persona', 'prsv_01M0E4J0BBE1FVDVTZ1BSS5C97', 'rev_01M0E4EVJ6ECGVJEA4NSBTC0CD', NULL, NULL, '2026-08-19T23:09:01.674Z'::timestamptz, '2026-08-19T23:09:01.674Z'::timestamptz);
---> statement-breakpoint
-INSERT INTO persona_version (id, persona_id, version, traits, models, created_by, created_at)
-VALUES ('prsv_01M0E4J0BBE1FVDVTZ1BSS5C97', 'prs_01M0E4EVJ6ECGVJEA4NSBTC0CC', 1, '{"accent":"Neutral American English.","language":"en-US","personality":"Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.","backgroundNoise":"None."}'::jsonb, '{"llm":{"model":"gpt-5.6-terra","provider":"openai"},"stt":{"model":"gpt-live-transcribe","provider":"openai"},"tts":{"model":"sonic-3.5","speed":1,"voiceId":"5ee9feff-1265-424a-9d7f-8e4d431a12c7","provider":"cartesia"}}'::jsonb, NULL, '2026-08-19T23:09:01.674Z'::timestamptz);
---> statement-breakpoint
+--
+-- Name: persona_is_available_to_project(text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.persona_is_available_to_project(wanted_persona_id text, wanted_project_id text) RETURNS boolean
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM persona_definition p JOIN project target ON target.id = wanted_project_id
+    WHERE p.id = wanted_persona_id AND
+      ((p.organization_id IS NULL AND p.project_id IS NULL) OR
+       (p.project_id = target.id AND p.organization_id = target.organization_id)));
+$$;
+
+
+--
+-- Name: persona_parameters_valid(jsonb, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.persona_parameters_valid(parameters jsonb, contract jsonb) RETURNS boolean
+    LANGUAGE plpgsql IMMUTABLE
+    AS $$
+DECLARE field text;
+BEGIN
+  IF NOT egma_parameter_values_valid(parameters, contract)
+     OR parameters - ARRAY['llm_provider','llm_model','stt_provider','stt_model','tts_provider','tts_model','tts_voice_id','tts_speed'] <> '{}'::jsonb
+     OR NOT parameters ?& ARRAY['llm_provider','llm_model','stt_provider','stt_model','tts_provider','tts_model','tts_voice_id','tts_speed'] THEN RETURN false; END IF;
+  FOREACH field IN ARRAY ARRAY['llm_provider','llm_model','stt_provider','stt_model','tts_provider','tts_model','tts_voice_id'] LOOP
+    IF jsonb_typeof(parameters->field) IS DISTINCT FROM 'string' OR btrim(parameters->>field) = '' THEN RETURN false; END IF;
+  END LOOP;
+  IF jsonb_typeof(parameters->'tts_speed') IS DISTINCT FROM 'number' THEN RETURN false; END IF;
+  RETURN (parameters->>'tts_speed')::numeric BETWEEN 0.6 AND 1.5;
+END;
+$$;
+
+
+
+
+--
+-- Name: account; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.account (
+    id text NOT NULL COLLATE pg_catalog."C",
+    user_id text NOT NULL COLLATE pg_catalog."C",
+    account_id text NOT NULL,
+    provider_id text NOT NULL,
+    access_token text,
+    refresh_token text,
+    id_token text,
+    access_token_expires_at timestamp with time zone,
+    refresh_token_expires_at timestamp with time zone,
+    scope text,
+    password text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT account_id_prefix CHECK ((id ~ '^acc_[0-9A-HJKMNP-TV-Z]{26}$'::text))
+);
+
+
+--
+-- Name: agent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.agent (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    project_id text NOT NULL COLLATE pg_catalog."C",
+    name text NOT NULL,
+    agent_platform text NOT NULL,
+    platform_agent_id text,
+    monitoring_api_key text,
+    monitoring_api_key_hint text,
+    pull_production_calls boolean DEFAULT false NOT NULL,
+    archived_at timestamp with time zone,
+    created_by text COLLATE pg_catalog."C",
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT agent_archived_releases_pull CHECK (((pull_production_calls = false) OR (archived_at IS NULL))),
+    CONSTRAINT agent_id_prefix CHECK ((id ~ '^agt_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT agent_monitoring_key_hint_agrees CHECK (((monitoring_api_key IS NULL) = (monitoring_api_key_hint IS NULL))),
+    CONSTRAINT agent_monitoring_key_needs_platform CHECK (((monitoring_api_key IS NULL) OR (agent_platform IS NOT NULL))),
+    CONSTRAINT agent_platform_allowed CHECK ((agent_platform = ANY (ARRAY['retell'::text, 'livekit'::text]))),
+    CONSTRAINT agent_pull_needs_binding CHECK (((pull_production_calls = false) OR ((agent_platform IS NOT NULL) AND (platform_agent_id IS NOT NULL) AND (monitoring_api_key IS NOT NULL))))
+);
+
+
+--
+-- Name: api_key; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.api_key (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    project_id text COLLATE pg_catalog."C",
+    scope text NOT NULL,
+    hash text NOT NULL,
+    prefix text NOT NULL,
+    display_suffix text NOT NULL,
+    name text,
+    last_used_at timestamp with time zone,
+    revoked_at timestamp with time zone,
+    created_by_user_id text NOT NULL COLLATE pg_catalog."C",
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT api_key_id_prefix CHECK ((id ~ '^key_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT api_key_project_scope_agrees CHECK (((scope = 'project'::text) = (project_id IS NOT NULL))),
+    CONSTRAINT api_key_scope_allowed CHECK ((scope = ANY (ARRAY['organization'::text, 'project'::text])))
+);
+
+
+--
+-- Name: cloud_billing_account; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.cloud_billing_account (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    plan_code text NOT NULL,
+    period_anchor timestamp with time zone NOT NULL,
+    stripe_customer_id text,
+    stripe_subscription_id text,
+    stripe_subscription_status text,
+    stripe_subscription_refreshed_at timestamp with time zone,
+    stripe_period_started_at timestamp with time zone,
+    stripe_period_ends_at timestamp with time zone,
+    stripe_failed_at timestamp with time zone,
+    stripe_failure_version bigint DEFAULT 0 NOT NULL,
+    activated_at timestamp with time zone NOT NULL,
+    inference_settled_through timestamp with time zone,
+    settlement_failed_at timestamp with time zone,
+    balance_micros bigint DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT cloud_billing_account_id_prefix CHECK ((id ~ '^cba_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT cloud_billing_account_plan_code_allowed CHECK ((plan_code = ANY (ARRAY['hobby'::text, 'pro'::text]))),
+    CONSTRAINT cloud_billing_account_stripe_failure_version_is_exact CHECK (((stripe_failure_version >= 0) AND (stripe_failure_version <= '9007199254740991'::bigint))),
+    CONSTRAINT cloud_billing_account_subscription_needs_a_customer CHECK (((stripe_subscription_id IS NULL) OR (stripe_customer_id IS NOT NULL))),
+    CONSTRAINT cloud_billing_account_subscription_status_allowed CHECK (((stripe_subscription_status IS NULL) OR (stripe_subscription_status = ANY (ARRAY['trialing'::text, 'active'::text, 'past_due'::text, 'canceled'::text, 'unpaid'::text, 'incomplete'::text, 'incomplete_expired'::text, 'paused'::text])))),
+    CONSTRAINT cloud_billing_account_subscription_status_needs_a_subscription CHECK (((stripe_subscription_status IS NULL) OR (stripe_subscription_id IS NOT NULL)))
+);
+
+
+--
+-- Name: cloud_ledger_entry; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.cloud_ledger_entry (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    kind text NOT NULL,
+    amount_micros bigint NOT NULL,
+    reference_kind text NOT NULL,
+    reference_id text NOT NULL,
+    interval_started_at timestamp with time zone,
+    interval_ended_at timestamp with time zone,
+    idempotency_key text NOT NULL,
+    occurred_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT cloud_ledger_entry_id_prefix CHECK ((id ~ '^cle_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT cloud_ledger_entry_idempotency_key_is_not_blank CHECK ((btrim(idempotency_key) <> ''::text)),
+    CONSTRAINT cloud_ledger_entry_interval_matches_kind CHECK (
+CASE
+    WHEN (kind = 'inference_charge'::text) THEN ((interval_started_at IS NOT NULL) AND (interval_ended_at IS NOT NULL) AND (interval_started_at < interval_ended_at))
+    ELSE ((interval_started_at IS NULL) AND (interval_ended_at IS NULL))
+END),
+    CONSTRAINT cloud_ledger_entry_kind_allowed CHECK ((kind = ANY (ARRAY['welcome_credit'::text, 'purchased_credit'::text, 'inference_charge'::text, 'correction'::text]))),
+    CONSTRAINT cloud_ledger_entry_kind_names_its_cause CHECK (
+CASE kind
+    WHEN 'welcome_credit'::text THEN (reference_kind = 'organization'::text)
+    WHEN 'purchased_credit'::text THEN (reference_kind = 'checkout_session'::text)
+    WHEN 'inference_charge'::text THEN (reference_kind = 'settlement_interval'::text)
+    ELSE true
+END),
+    CONSTRAINT cloud_ledger_entry_reference_id_is_not_blank CHECK ((btrim(reference_id) <> ''::text)),
+    CONSTRAINT cloud_ledger_entry_reference_kind_allowed CHECK ((reference_kind = ANY (ARRAY['organization'::text, 'settlement_interval'::text, 'checkout_session'::text, 'operator'::text]))),
+    CONSTRAINT cloud_ledger_entry_sign_follows_its_kind CHECK (
+CASE kind
+    WHEN 'welcome_credit'::text THEN (amount_micros > 0)
+    WHEN 'purchased_credit'::text THEN (amount_micros > 0)
+    WHEN 'inference_charge'::text THEN (amount_micros < 0)
+    ELSE (amount_micros <> 0)
+END)
+);
+
+
+--
+-- Name: cloud_meter_period; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.cloud_meter_period (
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    stripe_subscription_id text NOT NULL,
+    period_started_at timestamp with time zone NOT NULL,
+    period_ends_at timestamp with time zone NOT NULL,
+    channel text NOT NULL,
+    stripe_customer_id text NOT NULL,
+    meter_id text NOT NULL,
+    event_name text NOT NULL,
+    price_id text NOT NULL,
+    invoice_id text,
+    observed_through_hour timestamp with time zone,
+    accepted_seconds bigint DEFAULT 0 NOT NULL,
+    uncertain_seconds bigint DEFAULT 0 NOT NULL,
+    last_observed_seconds bigint DEFAULT 0 NOT NULL,
+    pending_identifier text,
+    pending_seconds bigint,
+    pending_value numeric(30,12),
+    pending_timestamp timestamp with time zone,
+    pending_hour timestamp with time zone,
+    pending_first_sent_at timestamp with time zone,
+    late_invoiced_cents bigint DEFAULT 0 NOT NULL,
+    late_observed_seconds bigint DEFAULT 0 NOT NULL,
+    late_pending_identifier text,
+    late_pending_through_seconds bigint,
+    late_pending_amount_cents bigint,
+    late_invoice_create_started_at timestamp with time zone,
+    late_invoice_id text,
+    late_item_create_started_at timestamp with time zone,
+    late_invoice_item_id text,
+    state text DEFAULT 'open'::text NOT NULL,
+    last_outcome text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT cloud_meter_period_bounds CHECK ((period_ends_at > period_started_at)),
+    CONSTRAINT cloud_meter_period_channel_allowed CHECK ((channel = ANY (ARRAY['web_call_minutes'::text, 'phone_minutes'::text]))),
+    CONSTRAINT cloud_meter_period_customer_not_blank CHECK ((btrim(stripe_customer_id) <> ''::text)),
+    CONSTRAINT cloud_meter_period_event_not_blank CHECK ((btrim(event_name) <> ''::text)),
+    CONSTRAINT cloud_meter_period_late_counted CHECK (late_invoiced_cents BETWEEN 0 AND 9007199254740991 AND late_observed_seconds BETWEEN 0 AND 9007199254740991),
+    CONSTRAINT cloud_meter_period_late_pending_complete CHECK (((num_nonnulls(late_pending_identifier, late_pending_through_seconds, late_pending_amount_cents) = ANY (ARRAY[0, 3])) AND ((late_pending_identifier IS NOT NULL) OR (num_nonnulls(late_invoice_create_started_at, late_invoice_id, late_item_create_started_at, late_invoice_item_id) = 0)))),
+    CONSTRAINT cloud_meter_period_late_pending_valid CHECK (((late_pending_identifier IS NULL) OR ((btrim(late_pending_identifier) <> ''::text) AND ((late_pending_through_seconds >= 1) AND (late_pending_through_seconds <= '9007199254740991'::bigint)) AND ((late_pending_amount_cents >= 1) AND (late_pending_amount_cents <= '9007199254740991'::bigint)) AND ((late_invoice_id IS NULL) OR ((late_invoice_create_started_at IS NOT NULL) AND (btrim(late_invoice_id) <> ''::text))) AND ((late_item_create_started_at IS NULL) OR (late_invoice_id IS NOT NULL)) AND ((late_invoice_item_id IS NULL) OR ((late_item_create_started_at IS NOT NULL) AND (btrim(late_invoice_item_id) <> ''::text)))))),
+    CONSTRAINT cloud_meter_period_meter_not_blank CHECK ((btrim(meter_id) <> ''::text)),
+    CONSTRAINT cloud_meter_period_outcome_allowed CHECK (((last_outcome IS NULL) OR (last_outcome = ANY (ARRAY['accepted'::text, 'duplicate'::text, 'uncertain'::text, 'invoice_closed'::text, 'timestamp_expired'::text])))),
+    CONSTRAINT cloud_meter_period_pending_complete CHECK ((num_nonnulls(pending_identifier, pending_seconds, pending_value, pending_timestamp, pending_hour, pending_first_sent_at) = ANY (ARRAY[0, 6]))),
+    CONSTRAINT cloud_meter_period_pending_valid CHECK (((pending_identifier IS NULL) OR ((btrim(pending_identifier) <> ''::text) AND ((pending_seconds >= 1) AND (pending_seconds <= '9007199254740991'::bigint)) AND (pending_value > (0)::numeric) AND (pending_timestamp >= period_started_at) AND (pending_timestamp < period_ends_at)))),
+    CONSTRAINT cloud_meter_period_price_not_blank CHECK ((btrim(price_id) <> ''::text)),
+    CONSTRAINT cloud_meter_period_seconds_counted CHECK (accepted_seconds BETWEEN 0 AND 9007199254740991 AND uncertain_seconds BETWEEN 0 AND 9007199254740991 AND last_observed_seconds BETWEEN 0 AND 9007199254740991),
+    CONSTRAINT cloud_meter_period_state_allowed CHECK ((state = ANY (ARRAY['open'::text, 'needs_attention'::text, 'closed'::text]))),
+    CONSTRAINT cloud_meter_period_subscription_not_blank CHECK ((btrim(stripe_subscription_id) <> ''::text))
+);
+
+
+--
+-- Name: cloud_plan; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.cloud_plan (
+    id text NOT NULL COLLATE pg_catalog."C",
+    code text NOT NULL,
+    name text NOT NULL,
+    fee_micros bigint NOT NULL,
+    chat_simulations_allowance bigint,
+    web_call_minutes_allowance bigint,
+    phone_minutes_allowance bigint,
+    web_call_overage_micros_per_minute bigint NOT NULL,
+    phone_overage_micros_per_minute bigint NOT NULL,
+    stripe_product_id text,
+    stripe_fee_price_id text,
+    stripe_web_call_meter_price_id text,
+    stripe_phone_meter_price_id text,
+    stripe_web_call_meter_id text,
+    stripe_phone_meter_id text,
+    billing_activated_at timestamp with time zone,
+    stripe_payments_ready boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT cloud_plan_allowances_are_not_negative CHECK (((COALESCE(chat_simulations_allowance, (0)::bigint) >= 0) AND (COALESCE(web_call_minutes_allowance, (0)::bigint) >= 0) AND (COALESCE(phone_minutes_allowance, (0)::bigint) >= 0))),
+    CONSTRAINT cloud_plan_code_allowed CHECK ((code = ANY (ARRAY['hobby'::text, 'pro'::text]))),
+    CONSTRAINT cloud_plan_fee_is_not_negative CHECK ((fee_micros >= 0)),
+    CONSTRAINT cloud_plan_id_prefix CHECK ((id ~ '^cpl_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT cloud_plan_name_is_not_blank CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT cloud_plan_overage_prices_are_not_negative CHECK (((web_call_overage_micros_per_minute >= 0) AND (phone_overage_micros_per_minute >= 0)))
+);
+
+
+--
+-- Name: connection; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.connection (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    project_id text NOT NULL COLLATE pg_catalog."C",
+    agent_id text NOT NULL COLLATE pg_catalog."C",
+    name text NOT NULL,
+    connection_type text NOT NULL,
+    modality text NOT NULL,
+    topology text NOT NULL,
+    access_variant text NOT NULL,
+    environment text,
+    config jsonb NOT NULL,
+    credentials text,
+    credentials_hint text,
+    archived_at timestamp with time zone,
+    created_by text COLLATE pg_catalog."C",
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT connection_access_variant_allowed CHECK ((access_variant = ANY (ARRAY['retell_chat_api.api_key'::text, 'retell_text_mode.api_key'::text, 'retell_web_call.api_key'::text, 'phone_number.public_e164'::text, 'livekit_room.project_credentials'::text, 'livekit_room.customer_token_endpoint'::text]))),
+    CONSTRAINT connection_credentials_hint_agrees CHECK (((credentials IS NULL) = (credentials_hint IS NULL))),
+    CONSTRAINT connection_id_prefix CHECK ((id ~ '^con_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT connection_modality_allowed CHECK ((modality = ANY (ARRAY['voice'::text, 'chat'::text]))),
+    CONSTRAINT connection_topology_allowed CHECK ((topology = ANY (ARRAY['agent-dials-out'::text, 'hosted-broker'::text, 'egma-dials-in'::text]))),
+    CONSTRAINT connection_type_allowed CHECK ((connection_type = ANY (ARRAY['retell_chat_api'::text, 'retell_text_mode'::text, 'retell_web_call'::text, 'phone_number'::text, 'livekit_room'::text])))
+);
+
+
+--
+-- Name: device_code; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.device_code (
+    id text NOT NULL COLLATE pg_catalog."C",
+    device_code text NOT NULL,
+    user_code text NOT NULL,
+    user_id text COLLATE pg_catalog."C",
+    client_id text,
+    scope text,
+    status text NOT NULL,
+    organization_id text COLLATE pg_catalog."C",
+    project_id text COLLATE pg_catalog."C",
+    expires_at timestamp with time zone NOT NULL,
+    last_polled_at timestamp with time zone,
+    polling_interval integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT device_code_authorized_for_agrees CHECK (((organization_id IS NULL) = (project_id IS NULL))),
+    CONSTRAINT device_code_id_prefix CHECK ((id ~ '^dvc_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT device_code_status_allowed CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'denied'::text])))
+);
+
+
+--
+-- Name: grader_definition; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.grader_definition (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text COLLATE pg_catalog."C",
+    name text NOT NULL,
+    description text,
+    scope_editable boolean NOT NULL,
+    current_definition_version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    project_id text COLLATE pg_catalog."C",
+    CONSTRAINT grader_definition_id_prefix CHECK ((id ~ '^grl_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT grader_definition_ownership_pair CHECK (((organization_id IS NULL) = (project_id IS NULL)))
+);
+
+
+--
+-- Name: grader_definition_version; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.grader_definition_version (
+    definition_id text NOT NULL COLLATE pg_catalog."C",
+    version integer NOT NULL,
+    type text NOT NULL,
+    prompt text,
+    parameter_contract jsonb NOT NULL,
+    modalities jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT grader_definition_version_definition_id_prefix CHECK ((definition_id ~ '^grl_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT grader_definition_version_modalities_allowed CHECK ((modalities = ANY (ARRAY['["chat"]'::jsonb, '["voice"]'::jsonb, '["chat", "voice"]'::jsonb, '["voice", "chat"]'::jsonb]))),
+    CONSTRAINT grader_definition_version_type_allowed CHECK ((type = ANY (ARRAY['llm_as_judge'::text, 'code'::text]))),
+    CONSTRAINT grader_definition_version_version_is_positive CHECK ((version >= 1))
+);
+
+
+--
+-- Name: grading_job; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.grading_job (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    project_id text NOT NULL COLLATE pg_catalog."C",
+    source text NOT NULL,
+    simulation_id text COLLATE pg_catalog."C",
+    trace_id text NOT NULL,
+    trace_started_at timestamp with time zone NOT NULL,
+    run_id text COLLATE pg_catalog."C",
+    entries jsonb NOT NULL,
+    status text NOT NULL,
+    claimed_by text,
+    claimed_at timestamp with time zone,
+    heartbeat_at timestamp with time zone,
+    sequence_base integer DEFAULT 0 NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    last_error text,
+    finished_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT grading_job_abandoned_shape CHECK (((status = 'abandoned'::text) = (finished_at IS NOT NULL))),
+    CONSTRAINT grading_job_attempts_are_counted CHECK ((attempts >= 0)),
+    CONSTRAINT grading_job_claim_columns_agree CHECK ((((claimed_at IS NULL) = (claimed_by IS NULL)) AND ((claimed_at IS NULL) = (heartbeat_at IS NULL)))),
+    CONSTRAINT grading_job_claimed_shape CHECK (((status <> 'claimed'::text) OR ((claimed_at IS NOT NULL) AND (finished_at IS NULL)))),
+    CONSTRAINT grading_job_entries_are_a_nonempty_list CHECK (((jsonb_typeof(entries) = 'array'::text) AND (jsonb_array_length(entries) > 0))),
+    CONSTRAINT grading_job_id_prefix CHECK ((id ~ '^gjb_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT grading_job_pending_shape CHECK (((status <> 'pending'::text) OR ((claimed_at IS NULL) AND (finished_at IS NULL)))),
+    CONSTRAINT grading_job_sequence_base_is_counted CHECK ((sequence_base >= 0)),
+    CONSTRAINT grading_job_source_allowed CHECK ((source = ANY (ARRAY['simulation'::text, 'production'::text]))),
+    CONSTRAINT grading_job_source_names_its_control_record CHECK (
+CASE source
+    WHEN 'simulation'::text THEN ((simulation_id IS NOT NULL) AND (run_id IS NOT NULL))
+    WHEN 'production'::text THEN ((simulation_id IS NULL) AND (run_id IS NULL))
+    ELSE false
+END),
+    CONSTRAINT grading_job_status_allowed CHECK ((status = ANY (ARRAY['pending'::text, 'claimed'::text, 'abandoned'::text])))
+);
+
+
+--
+-- Name: invitation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.invitation (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    email public.citext NOT NULL,
+    role text NOT NULL,
+    token_hash text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    accepted_at timestamp with time zone,
+    created_by text COLLATE pg_catalog."C",
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT invitation_id_prefix CHECK ((id ~ '^inv_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT invitation_role_allowed CHECK ((role = ANY (ARRAY['admin'::text, 'member'::text, 'viewer'::text])))
+);
+
+
+--
+-- Name: membership; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.membership (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    user_id text NOT NULL COLLATE pg_catalog."C",
+    role text NOT NULL,
+    created_by text COLLATE pg_catalog."C",
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT membership_id_prefix CHECK ((id ~ '^mbr_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT membership_role_allowed CHECK ((role = ANY (ARRAY['admin'::text, 'member'::text, 'viewer'::text])))
+);
+
+
+--
+-- Name: monitoring_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.monitoring_state (
+    id text NOT NULL COLLATE pg_catalog."C",
+    agent_id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    project_id text NOT NULL COLLATE pg_catalog."C",
+    scan_kind text,
+    scan_from timestamp with time zone,
+    scan_through timestamp with time zone,
+    pagination_key text,
+    pagination_trail text DEFAULT '[]'::text NOT NULL,
+    completed_through timestamp with time zone,
+    next_poll_at timestamp with time zone NOT NULL,
+    regular_floor_at timestamp with time zone,
+    import_generation integer DEFAULT 1 NOT NULL,
+    lease_owner text,
+    lease_expires_at timestamp with time zone,
+    consecutive_failures integer DEFAULT 0 NOT NULL,
+    failure_started_at timestamp with time zone,
+    last_error_kind text,
+    last_error_at timestamp with time zone,
+    last_success_at timestamp with time zone,
+    last_received_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT monitoring_state_id_prefix CHECK ((id ~ '^mst_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT monitoring_state_lease_agrees CHECK (((lease_owner IS NULL) = (lease_expires_at IS NULL))),
+    CONSTRAINT monitoring_state_scan_agrees CHECK ((((scan_kind IS NULL) AND (scan_from IS NULL) AND (scan_through IS NULL) AND (pagination_key IS NULL)) OR ((scan_kind IS NOT NULL) AND (scan_from IS NOT NULL) AND (scan_through IS NOT NULL)))),
+    CONSTRAINT monitoring_state_scan_kind_allowed CHECK ((scan_kind = ANY (ARRAY['historical_import'::text, 'regular'::text])))
+);
+
+
+--
+-- Name: organization; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.organization (
+    id text NOT NULL COLLATE pg_catalog."C",
+    name text NOT NULL,
+    slug text NOT NULL,
+    external_identity_provider text,
+    external_identity_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    retention_days integer,
+    data_residency text,
+    settings_updated_at timestamp with time zone,
+    CONSTRAINT organization_id_prefix CHECK ((id ~ '^org_[0-9A-HJKMNP-TV-Z]{26}$'::text))
+);
+
+
+--
+-- Name: persona_definition; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.persona_definition (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text COLLATE pg_catalog."C",
+    project_id text COLLATE pg_catalog."C",
+    name text NOT NULL,
+    description text,
+    current_version_id text NOT NULL COLLATE pg_catalog."C",
+    archived_at timestamp with time zone,
+    created_by text COLLATE pg_catalog."C",
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT persona_egma_provided_is_active CHECK (((organization_id IS NOT NULL) OR (archived_at IS NULL))),
+    CONSTRAINT persona_id_prefix CHECK ((id ~ '^prs_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT persona_tenancy_is_whole_or_egmas CHECK (((organization_id IS NULL) = (project_id IS NULL)))
+);
+
+
+--
+-- Name: persona_definition_version; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.persona_definition_version (
+    id text NOT NULL COLLATE pg_catalog."C",
+    persona_id text NOT NULL COLLATE pg_catalog."C",
+    version integer NOT NULL,
+    created_by text COLLATE pg_catalog."C",
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    identity_name text NOT NULL,
+    personality text NOT NULL,
+    language text NOT NULL,
+    parameter_contract jsonb NOT NULL,
+    CONSTRAINT persona_definition_version_parameter_contract_is_array CHECK ((jsonb_typeof(parameter_contract) = 'array'::text)),
+    CONSTRAINT persona_version_id_prefix CHECK ((id ~ '^prsv_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT persona_version_identity_name_stated CHECK ((btrim(identity_name) <> ''::text)),
+    CONSTRAINT persona_version_language_stated CHECK ((btrim(language) <> ''::text)),
+    CONSTRAINT persona_version_personality_stated CHECK ((btrim(personality) <> ''::text))
+);
+
+
+--
+-- Name: project; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.project (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    name text NOT NULL,
+    slug text NOT NULL,
+    description text,
+    revision text NOT NULL COLLATE pg_catalog."C",
+    deleted_at timestamp with time zone,
+    created_by text COLLATE pg_catalog."C",
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT project_id_prefix CHECK ((id ~ '^prj_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT project_revision_prefix CHECK ((revision ~ '^rev_[0-9A-HJKMNP-TV-Z]{26}$'::text))
+);
+
+
+--
+-- Name: project_grader; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.project_grader (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    project_id text NOT NULL COLLATE pg_catalog."C",
+    grader_definition_id text NOT NULL COLLATE pg_catalog."C",
+    scope jsonb NOT NULL,
+    parameter_values jsonb NOT NULL,
+    pass_threshold double precision NOT NULL,
+    archived_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT project_grader_id_prefix CHECK ((id ~ '^grd_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT project_grader_pass_threshold_is_normalized CHECK (((pass_threshold >= (0)::double precision) AND (pass_threshold <= (1)::double precision))),
+    CONSTRAINT project_grader_scope_is_closed_object CHECK (((NOT (jsonb_typeof(scope) IS DISTINCT FROM 'object'::text)) AND (NOT ((scope - ARRAY['simulations'::text, 'production'::text]) IS DISTINCT FROM '{}'::jsonb)) AND (scope ?& ARRAY['simulations'::text, 'production'::text]) AND (NOT (jsonb_typeof((scope -> 'simulations'::text)) IS DISTINCT FROM 'array'::text)) AND (((scope -> 'production'::text) = 'null'::jsonb) OR (NOT (jsonb_typeof((scope -> 'production'::text)) IS DISTINCT FROM 'object'::text)))))
+);
+
+
+--
+-- Name: project_persona; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.project_persona (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    project_id text NOT NULL COLLATE pg_catalog."C",
+    persona_definition_id text NOT NULL COLLATE pg_catalog."C",
+    parameter_values jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT project_persona_id_prefix CHECK ((id ~ '^ppr_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT project_persona_parameters_are_object CHECK ((jsonb_typeof(parameter_values) = 'object'::text))
+);
+
+
+--
+-- Name: rate_card; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.rate_card (
+    id text NOT NULL COLLATE pg_catalog."C",
+    provider text NOT NULL,
+    model text NOT NULL,
+    usage_type text NOT NULL,
+    unit text NOT NULL,
+    usd_per_million numeric(24,12) NOT NULL,
+    effective_from timestamp with time zone NOT NULL,
+    source text NOT NULL,
+    read_at text NOT NULL,
+    note text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT rate_card_id_prefix CHECK ((id ~ '^rat_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT rate_card_price_is_not_negative CHECK ((usd_per_million >= (0)::numeric)),
+    CONSTRAINT rate_card_unit_allowed CHECK ((unit = ANY (ARRAY['tokens'::text, 'seconds'::text, 'characters'::text]))),
+    CONSTRAINT rate_card_usage_type_allowed CHECK ((usage_type = ANY (ARRAY['input_tokens'::text, 'cached_input_tokens'::text, 'output_tokens'::text, 'audio_input_tokens'::text, 'text_input_tokens'::text, 'audio_seconds'::text, 'characters'::text])))
+);
+
+
+--
+-- Name: retell_call_retry; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.retell_call_retry (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    project_id text NOT NULL COLLATE pg_catalog."C",
+    agent_id text NOT NULL COLLATE pg_catalog."C",
+    provider_call_id text NOT NULL,
+    error_kind text NOT NULL,
+    attempts smallint DEFAULT 1 NOT NULL,
+    last_attempt_at timestamp with time zone NOT NULL,
+    next_attempt_at timestamp with time zone,
+    expires_at timestamp with time zone,
+    import_generation integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT retell_call_retry_attempts_bounded CHECK (((attempts >= 1) AND (attempts <= 4))),
+    CONSTRAINT retell_call_retry_id_prefix CHECK ((id ~ '^rcr_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT retell_call_retry_one_schedule CHECK (((next_attempt_at IS NULL) <> (expires_at IS NULL)))
+);
+
+
+--
+-- Name: run; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.run (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    project_id text NOT NULL COLLATE pg_catalog."C",
+    suite_id text NOT NULL COLLATE pg_catalog."C",
+    agent_id text NOT NULL COLLATE pg_catalog."C",
+    connection_id text NOT NULL COLLATE pg_catalog."C",
+    name text,
+    status text NOT NULL,
+    triggered_via text NOT NULL,
+    triggered_by text COLLATE pg_catalog."C",
+    connection_snapshot jsonb NOT NULL,
+    expected_simulation_count integer NOT NULL,
+    completed_count integer,
+    failed_count integer,
+    canceled_count integer,
+    started_at timestamp with time zone,
+    finished_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    agent_version integer,
+    temp_mock_agent_version integer,
+    temp_mock_agent_version_cleanup boolean,
+    mock_metadata jsonb,
+    grading_plan jsonb NOT NULL,
+    CONSTRAINT run_agent_version_is_a_version CHECK (((agent_version IS NULL) OR (agent_version >= 0))),
+    CONSTRAINT run_completed_is_finished CHECK (((status <> 'completed'::text) OR (finished_at IS NOT NULL))),
+    CONSTRAINT run_counts_are_counts CHECK (((completed_count IS NULL) OR ((completed_count >= 0) AND (failed_count >= 0) AND (canceled_count >= 0)))),
+    CONSTRAINT run_counts_written_together CHECK ((((completed_count IS NULL) = (failed_count IS NULL)) AND ((failed_count IS NULL) = (canceled_count IS NULL)) AND ((canceled_count IS NULL) = (finished_at IS NULL)))),
+    CONSTRAINT run_expects_at_least_one_simulation CHECK ((expected_simulation_count > 0)),
+    CONSTRAINT run_finished_is_terminal CHECK (((finished_at IS NULL) OR (status = ANY (ARRAY['completed'::text, 'canceled'::text])))),
+    CONSTRAINT run_id_prefix CHECK ((id ~ '^run_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT run_started_when_left_pending CHECK (
+CASE
+    WHEN (status = 'pending'::text) THEN (started_at IS NULL)
+    WHEN (status = ANY (ARRAY['running'::text, 'completed'::text])) THEN (started_at IS NOT NULL)
+    ELSE true
+END),
+    CONSTRAINT run_status_allowed CHECK ((status = ANY (ARRAY['pending'::text, 'running'::text, 'completed'::text, 'canceled'::text]))),
+    CONSTRAINT run_temp_mock_agent_version_is_a_version CHECK (((temp_mock_agent_version IS NULL) OR (temp_mock_agent_version >= 0))),
+    CONSTRAINT run_temp_mock_agent_version_owes_cleanup CHECK (((temp_mock_agent_version IS NULL) OR (temp_mock_agent_version_cleanup IS NOT NULL))),
+    CONSTRAINT run_triggered_via_allowed CHECK ((triggered_via = 'manual'::text))
+);
+
+
+--
+-- Name: run_event; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.run_event (
+    run_id text NOT NULL COLLATE pg_catalog."C",
+    seq integer NOT NULL,
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    project_id text NOT NULL COLLATE pg_catalog."C",
+    kind text NOT NULL,
+    simulation_id text COLLATE pg_catalog."C",
+    status text NOT NULL,
+    reason text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT run_event_kind_allowed CHECK ((kind = ANY (ARRAY['run'::text, 'simulation'::text]))),
+    CONSTRAINT run_event_reason_agrees CHECK (((reason IS NULL) OR ((status = 'completed'::text) AND (reason = ANY (ARRAY['persona_concluded'::text, 'agent_ended'::text, 'limit_reached'::text]))) OR ((status = 'failed'::text) AND (reason = ANY (ARRAY['agent_never_joined'::text, 'not_answered'::text, 'capacity'::text, 'simulator_error'::text, 'orphaned'::text, 'dispatch_failed'::text]))))),
+    CONSTRAINT run_event_run_id_prefix CHECK ((run_id ~ '^run_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT run_event_run_shape CHECK (((kind <> 'run'::text) OR ((simulation_id IS NULL) AND (reason IS NULL) AND (status = ANY (ARRAY['pending'::text, 'running'::text, 'completed'::text, 'canceled'::text]))))),
+    CONSTRAINT run_event_seq_counts_from_one CHECK ((seq >= 1)),
+    CONSTRAINT run_event_simulation_shape CHECK (((kind <> 'simulation'::text) OR ((simulation_id IS NOT NULL) AND (status = ANY (ARRAY['queued'::text, 'claimed'::text, 'running'::text, 'completed'::text, 'failed'::text, 'canceled'::text])))))
+);
+
+
+--
+-- Name: session; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.session (
+    id text NOT NULL COLLATE pg_catalog."C",
+    user_id text NOT NULL COLLATE pg_catalog."C",
+    token text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    ip_address text,
+    user_agent text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT session_id_prefix CHECK ((id ~ '^ses_[0-9A-HJKMNP-TV-Z]{26}$'::text))
+);
+
+
+--
+-- Name: simulation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.simulation (
+    id text NOT NULL COLLATE pg_catalog."C",
+    run_id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    project_id text NOT NULL COLLATE pg_catalog."C",
+    agent_id text NOT NULL COLLATE pg_catalog."C",
+    connection_id text NOT NULL COLLATE pg_catalog."C",
+    persona_id text NOT NULL COLLATE pg_catalog."C",
+    persona_version_id text NOT NULL COLLATE pg_catalog."C",
+    test_id text NOT NULL COLLATE pg_catalog."C",
+    test_version_id text NOT NULL COLLATE pg_catalog."C",
+    "position" integer NOT NULL,
+    modality text NOT NULL,
+    status text NOT NULL,
+    ending_reason text,
+    claimed_by text,
+    claimed_at timestamp with time zone,
+    heartbeat_at timestamp with time zone,
+    cancel_requested_at timestamp with time zone,
+    started_at timestamp with time zone,
+    ended_at timestamp with time zone,
+    recording_reference text,
+    turn_count integer,
+    provider_reference text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    execution_failure text,
+    persona_parameter_values jsonb NOT NULL,
+    connection_type text NOT NULL,
+    CONSTRAINT simulation_audio_facts_are_voice_facts CHECK (((modality = 'voice'::text) OR (recording_reference IS NULL))),
+    CONSTRAINT simulation_canceled_shape CHECK (((status <> 'canceled'::text) OR ((ended_at IS NOT NULL) AND (cancel_requested_at IS NOT NULL)))),
+    CONSTRAINT simulation_claim_columns_agree CHECK ((((claimed_at IS NULL) = (claimed_by IS NULL)) AND ((claimed_at IS NULL) = (heartbeat_at IS NULL)))),
+    CONSTRAINT simulation_claimed_shape CHECK (((status <> 'claimed'::text) OR ((claimed_at IS NOT NULL) AND (started_at IS NULL) AND (ended_at IS NULL)))),
+    CONSTRAINT simulation_completed_shape CHECK (((status <> 'completed'::text) OR ((started_at IS NOT NULL) AND (ended_at IS NOT NULL)))),
+    CONSTRAINT simulation_connection_type_allowed CHECK ((connection_type = ANY (ARRAY['retell_chat_api'::text, 'retell_text_mode'::text, 'retell_web_call'::text, 'phone_number'::text, 'livekit_room'::text]))),
+    CONSTRAINT simulation_ending_reason_agrees CHECK (
+CASE status
+    WHEN 'completed'::text THEN (ending_reason = ANY (ARRAY['persona_concluded'::text, 'agent_ended'::text, 'limit_reached'::text]))
+    WHEN 'failed'::text THEN (ending_reason = ANY (ARRAY['agent_never_joined'::text, 'not_answered'::text, 'capacity'::text, 'simulator_error'::text, 'orphaned'::text, 'dispatch_failed'::text]))
+    ELSE (ending_reason IS NULL)
+END),
+    CONSTRAINT simulation_ending_reason_allowed CHECK (((ending_reason IS NULL) OR (ending_reason = ANY (ARRAY['persona_concluded'::text, 'agent_ended'::text, 'limit_reached'::text, 'agent_never_joined'::text, 'not_answered'::text, 'capacity'::text, 'simulator_error'::text, 'orphaned'::text, 'dispatch_failed'::text])))),
+    CONSTRAINT simulation_execution_failure_agrees CHECK (((execution_failure IS NULL) OR (status = 'failed'::text))),
+    CONSTRAINT simulation_execution_failure_not_blank CHECK (((execution_failure IS NULL) OR (btrim(execution_failure) <> ''::text))),
+    CONSTRAINT simulation_failed_shape CHECK (((status <> 'failed'::text) OR (ended_at IS NOT NULL))),
+    CONSTRAINT simulation_id_prefix CHECK ((id ~ '^sim_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT simulation_modality_allowed CHECK ((modality = ANY (ARRAY['voice'::text, 'chat'::text]))),
+    CONSTRAINT simulation_position_counts_from_one CHECK (("position" >= 1)),
+    CONSTRAINT simulation_provider_reference_after_claim CHECK (((status <> 'queued'::text) OR (provider_reference IS NULL))),
+    CONSTRAINT simulation_queued_shape CHECK (((status <> 'queued'::text) OR ((claimed_at IS NULL) AND (started_at IS NULL) AND (ended_at IS NULL) AND (cancel_requested_at IS NULL)))),
+    CONSTRAINT simulation_report_only_when_ended CHECK (((ended_at IS NOT NULL) OR (recording_reference IS NULL))),
+    CONSTRAINT simulation_running_shape CHECK (((status <> 'running'::text) OR ((claimed_at IS NOT NULL) AND (started_at IS NOT NULL) AND (ended_at IS NULL)))),
+    CONSTRAINT simulation_status_allowed CHECK ((status = ANY (ARRAY['queued'::text, 'claimed'::text, 'running'::text, 'completed'::text, 'failed'::text, 'canceled'::text]))),
+    CONSTRAINT simulation_summary_facts_only_when_ended CHECK (((ended_at IS NOT NULL) OR (turn_count IS NULL))),
+    CONSTRAINT simulation_turn_count_is_a_count CHECK (((turn_count IS NULL) OR (turn_count >= 0)))
+);
+
+
+--
+-- Name: test; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.test (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    project_id text NOT NULL COLLATE pg_catalog."C",
+    suite_id text NOT NULL COLLATE pg_catalog."C",
+    name text NOT NULL,
+    description text,
+    current_version_id text NOT NULL COLLATE pg_catalog."C",
+    revision text NOT NULL COLLATE pg_catalog."C",
+    deleted_at timestamp with time zone,
+    created_by text COLLATE pg_catalog."C",
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT test_id_prefix CHECK ((id ~ '^tst_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT test_revision_prefix CHECK ((revision ~ '^rev_[0-9A-HJKMNP-TV-Z]{26}$'::text))
+);
+
+
+--
+-- Name: test_persona; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.test_persona (
+    test_version_id text NOT NULL COLLATE pg_catalog."C",
+    persona_id text NOT NULL COLLATE pg_catalog."C",
+    "position" integer NOT NULL,
+    CONSTRAINT test_persona_test_version_id_prefix CHECK ((test_version_id ~ '^tstv_[0-9A-HJKMNP-TV-Z]{26}$'::text))
+);
+
+
+--
+-- Name: test_suite; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.test_suite (
+    id text NOT NULL COLLATE pg_catalog."C",
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    project_id text NOT NULL COLLATE pg_catalog."C",
+    name text NOT NULL,
+    deleted_at timestamp with time zone,
+    created_by text COLLATE pg_catalog."C",
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT test_suite_id_prefix CHECK ((id ~ '^ste_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
+    CONSTRAINT test_suite_name_is_not_blank CHECK ((btrim(name) <> ''::text))
+);
+
+
+--
+-- Name: test_version; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.test_version (
+    id text NOT NULL COLLATE pg_catalog."C",
+    test_id text NOT NULL COLLATE pg_catalog."C",
+    version integer NOT NULL,
+    content jsonb NOT NULL,
+    created_by text COLLATE pg_catalog."C",
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    mock_tools jsonb,
+    env jsonb,
+    CONSTRAINT test_version_id_prefix CHECK ((id ~ '^tstv_[0-9A-HJKMNP-TV-Z]{26}$'::text))
+);
+
+
+--
+-- Name: user; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."user" (
+    id text NOT NULL COLLATE pg_catalog."C",
+    email public.citext NOT NULL,
+    name text,
+    image text,
+    email_verified boolean DEFAULT false NOT NULL,
+    external_identity_provider text,
+    external_identity_id text,
+    deactivated_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT user_id_prefix CHECK ((id ~ '^usr_[0-9A-HJKMNP-TV-Z]{26}$'::text))
+);
+
+
+--
+-- Name: verification; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.verification (
+    id text NOT NULL COLLATE pg_catalog."C",
+    identifier text NOT NULL,
+    value text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT verification_id_prefix CHECK ((id ~ '^vrf_[0-9A-HJKMNP-TV-Z]{26}$'::text))
+);
+
+
+--
+-- Name: account account_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.account
+    ADD CONSTRAINT account_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: agent agent_id_project_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent
+    ADD CONSTRAINT agent_id_project_id_unique UNIQUE (id, project_id);
+
+
+--
+-- Name: agent agent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent
+    ADD CONSTRAINT agent_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: api_key api_key_hash_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.api_key
+    ADD CONSTRAINT api_key_hash_unique UNIQUE (hash);
+
+
+--
+-- Name: api_key api_key_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.api_key
+    ADD CONSTRAINT api_key_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: cloud_billing_account cloud_billing_account_organization_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_billing_account
+    ADD CONSTRAINT cloud_billing_account_organization_unique UNIQUE (organization_id);
+
+
+--
+-- Name: cloud_billing_account cloud_billing_account_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_billing_account
+    ADD CONSTRAINT cloud_billing_account_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: cloud_billing_account cloud_billing_account_stripe_customer_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_billing_account
+    ADD CONSTRAINT cloud_billing_account_stripe_customer_unique UNIQUE (stripe_customer_id);
+
+
+--
+-- Name: cloud_billing_account cloud_billing_account_stripe_subscription_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_billing_account
+    ADD CONSTRAINT cloud_billing_account_stripe_subscription_unique UNIQUE (stripe_subscription_id);
+
+
+--
+-- Name: cloud_ledger_entry cloud_ledger_entry_idempotency_key_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_ledger_entry
+    ADD CONSTRAINT cloud_ledger_entry_idempotency_key_unique UNIQUE (idempotency_key);
+
+
+--
+-- Name: cloud_ledger_entry cloud_ledger_entry_organization_interval_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_ledger_entry
+    ADD CONSTRAINT cloud_ledger_entry_organization_interval_unique UNIQUE (organization_id, interval_started_at, interval_ended_at);
+
+
+--
+-- Name: cloud_ledger_entry cloud_ledger_entry_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_ledger_entry
+    ADD CONSTRAINT cloud_ledger_entry_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: cloud_meter_period cloud_meter_period_pk; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_meter_period
+    ADD CONSTRAINT cloud_meter_period_pk PRIMARY KEY (organization_id, stripe_subscription_id, period_started_at, period_ends_at, channel);
+
+
+--
+-- Name: cloud_plan cloud_plan_code_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_plan
+    ADD CONSTRAINT cloud_plan_code_unique UNIQUE (code);
+
+
+--
+-- Name: cloud_plan cloud_plan_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_plan
+    ADD CONSTRAINT cloud_plan_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: connection connection_id_agent_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.connection
+    ADD CONSTRAINT connection_id_agent_id_unique UNIQUE (id, agent_id);
+
+
+--
+-- Name: connection connection_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.connection
+    ADD CONSTRAINT connection_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: device_code device_code_device_code_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_code
+    ADD CONSTRAINT device_code_device_code_unique UNIQUE (device_code);
+
+
+--
+-- Name: device_code device_code_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_code
+    ADD CONSTRAINT device_code_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: device_code device_code_user_code_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_code
+    ADD CONSTRAINT device_code_user_code_unique UNIQUE (user_code);
+
+
+--
+-- Name: grader_definition grader_definition_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grader_definition
+    ADD CONSTRAINT grader_definition_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: grader_definition_version grader_definition_version_definition_id_version_pk; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grader_definition_version
+    ADD CONSTRAINT grader_definition_version_definition_id_version_pk PRIMARY KEY (definition_id, version);
+
+
+--
+-- Name: grading_job grading_job_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grading_job
+    ADD CONSTRAINT grading_job_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: grading_job grading_job_project_id_trace_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grading_job
+    ADD CONSTRAINT grading_job_project_id_trace_id_unique UNIQUE (project_id, trace_id);
+
+
+--
+-- Name: grading_job grading_job_simulation_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grading_job
+    ADD CONSTRAINT grading_job_simulation_id_unique UNIQUE (simulation_id);
+
+
+--
+-- Name: invitation invitation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invitation
+    ADD CONSTRAINT invitation_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: invitation invitation_token_hash_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invitation
+    ADD CONSTRAINT invitation_token_hash_unique UNIQUE (token_hash);
+
+
+--
+-- Name: membership membership_organization_id_user_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership
+    ADD CONSTRAINT membership_organization_id_user_id_unique UNIQUE (organization_id, user_id);
+
+
+--
+-- Name: membership membership_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership
+    ADD CONSTRAINT membership_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: membership membership_user_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership
+    ADD CONSTRAINT membership_user_id_unique UNIQUE (user_id);
+
+
+--
+-- Name: monitoring_state monitoring_state_agent_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.monitoring_state
+    ADD CONSTRAINT monitoring_state_agent_unique UNIQUE (agent_id);
+
+
+--
+-- Name: monitoring_state monitoring_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.monitoring_state
+    ADD CONSTRAINT monitoring_state_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: organization organization_external_identity_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization
+    ADD CONSTRAINT organization_external_identity_unique UNIQUE (external_identity_provider, external_identity_id);
+
+
+--
+-- Name: organization organization_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization
+    ADD CONSTRAINT organization_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: organization organization_slug_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization
+    ADD CONSTRAINT organization_slug_unique UNIQUE (slug);
+
+
+--
+-- Name: persona_definition persona_definition_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.persona_definition
+    ADD CONSTRAINT persona_definition_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: persona_definition_version persona_definition_version_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.persona_definition_version
+    ADD CONSTRAINT persona_definition_version_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: persona_definition_version persona_version_id_persona_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.persona_definition_version
+    ADD CONSTRAINT persona_version_id_persona_id_unique UNIQUE (id, persona_id);
+
+
+--
+-- Name: persona_definition_version persona_version_persona_id_version_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.persona_definition_version
+    ADD CONSTRAINT persona_version_persona_id_version_unique UNIQUE (persona_id, version);
+
+
+--
+-- Name: project_grader project_grader_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project_grader
+    ADD CONSTRAINT project_grader_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: project project_id_organization_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project
+    ADD CONSTRAINT project_id_organization_id_unique UNIQUE (id, organization_id);
+
+
+--
+-- Name: project project_organization_id_slug_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project
+    ADD CONSTRAINT project_organization_id_slug_unique UNIQUE (organization_id, slug);
+
+
+--
+-- Name: project_persona project_persona_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project_persona
+    ADD CONSTRAINT project_persona_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: project_persona project_persona_project_definition_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project_persona
+    ADD CONSTRAINT project_persona_project_definition_unique UNIQUE (project_id, persona_definition_id);
+
+
+--
+-- Name: project project_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project
+    ADD CONSTRAINT project_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: rate_card rate_card_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.rate_card
+    ADD CONSTRAINT rate_card_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: rate_card rate_card_price_identity_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.rate_card
+    ADD CONSTRAINT rate_card_price_identity_unique UNIQUE (provider, model, usage_type, effective_from);
+
+
+--
+-- Name: retell_call_retry retell_call_retry_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.retell_call_retry
+    ADD CONSTRAINT retell_call_retry_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: retell_call_retry retell_call_retry_project_call_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.retell_call_retry
+    ADD CONSTRAINT retell_call_retry_project_call_unique UNIQUE (project_id, provider_call_id);
+
+
+--
+-- Name: run_event run_event_pk; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run_event
+    ADD CONSTRAINT run_event_pk PRIMARY KEY (run_id, seq);
+
+
+--
+-- Name: run run_id_project_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run
+    ADD CONSTRAINT run_id_project_id_unique UNIQUE (id, project_id);
+
+
+--
+-- Name: run run_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run
+    ADD CONSTRAINT run_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: session session_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.session
+    ADD CONSTRAINT session_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: session session_token_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.session
+    ADD CONSTRAINT session_token_unique UNIQUE (token);
+
+
+--
+-- Name: simulation simulation_id_project_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.simulation
+    ADD CONSTRAINT simulation_id_project_id_unique UNIQUE (id, project_id);
+
+
+--
+-- Name: simulation simulation_id_run_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.simulation
+    ADD CONSTRAINT simulation_id_run_id_unique UNIQUE (id, run_id);
+
+
+--
+-- Name: simulation simulation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.simulation
+    ADD CONSTRAINT simulation_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: simulation simulation_run_id_position_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.simulation
+    ADD CONSTRAINT simulation_run_id_position_unique UNIQUE (run_id, "position");
+
+
+--
+-- Name: test test_id_project_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test
+    ADD CONSTRAINT test_id_project_id_unique UNIQUE (id, project_id);
+
+
+--
+-- Name: test_persona test_persona_pk; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_persona
+    ADD CONSTRAINT test_persona_pk PRIMARY KEY (test_version_id, persona_id);
+
+
+--
+-- Name: test_persona test_persona_version_id_position_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_persona
+    ADD CONSTRAINT test_persona_version_id_position_unique UNIQUE (test_version_id, "position");
+
+
+--
+-- Name: test test_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test
+    ADD CONSTRAINT test_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: test_suite test_suite_id_project_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_suite
+    ADD CONSTRAINT test_suite_id_project_id_unique UNIQUE (id, project_id);
+
+
+--
+-- Name: test_suite test_suite_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_suite
+    ADD CONSTRAINT test_suite_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: test_version test_version_id_test_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_version
+    ADD CONSTRAINT test_version_id_test_id_unique UNIQUE (id, test_id);
+
+
+--
+-- Name: test_version test_version_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_version
+    ADD CONSTRAINT test_version_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: test_version test_version_test_id_version_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_version
+    ADD CONSTRAINT test_version_test_id_version_unique UNIQUE (test_id, version);
+
+
+--
+-- Name: user user_email_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."user"
+    ADD CONSTRAINT user_email_unique UNIQUE (email);
+
+
+--
+-- Name: user user_external_identity_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."user"
+    ADD CONSTRAINT user_external_identity_unique UNIQUE (external_identity_provider, external_identity_id);
+
+
+--
+-- Name: user user_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."user"
+    ADD CONSTRAINT user_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: verification verification_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.verification
+    ADD CONSTRAINT verification_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: account_user_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX account_user_id_idx ON public.account USING btree (user_id);
+
+
+--
+-- Name: agent_organization_id_project_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_organization_id_project_id_idx ON public.agent USING btree (organization_id, project_id) WHERE (archived_at IS NULL);
+
+
+--
+-- Name: agent_project_id_name_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX agent_project_id_name_unique ON public.agent USING btree (project_id, name) WHERE (archived_at IS NULL);
+
+
+--
+-- Name: agent_pulled_platform_agent_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX agent_pulled_platform_agent_unique ON public.agent USING btree (project_id, agent_platform, platform_agent_id) WHERE pull_production_calls;
+
+
+--
+-- Name: api_key_organization_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX api_key_organization_id_idx ON public.api_key USING btree (organization_id);
+
+
+--
+-- Name: cloud_ledger_entry_organization_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX cloud_ledger_entry_organization_idx ON public.cloud_ledger_entry USING btree (organization_id, id);
+
+
+--
+-- Name: connection_agent_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX connection_agent_id_idx ON public.connection USING btree (agent_id) WHERE (archived_at IS NULL);
+
+
+--
+-- Name: connection_agent_id_name_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX connection_agent_id_name_unique ON public.connection USING btree (agent_id, name) WHERE (archived_at IS NULL);
+
+
+--
+-- Name: device_code_expires_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_code_expires_at_idx ON public.device_code USING btree (expires_at);
+
+
+--
+-- Name: grader_definition_organization_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX grader_definition_organization_id_idx ON public.grader_definition USING btree (organization_id);
+
+
+--
+-- Name: grader_definition_predefined_name_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX grader_definition_predefined_name_unique ON public.grader_definition USING btree (name) WHERE (organization_id IS NULL);
+
+
+--
+-- Name: grading_job_organization_id_project_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX grading_job_organization_id_project_id_idx ON public.grading_job USING btree (organization_id, project_id);
+
+
+--
+-- Name: grading_job_outstanding_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX grading_job_outstanding_idx ON public.grading_job USING btree (id) WHERE (status = ANY (ARRAY['pending'::text, 'claimed'::text]));
+
+
+--
+-- Name: invitation_organization_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX invitation_organization_id_idx ON public.invitation USING btree (organization_id);
+
+
+--
+-- Name: membership_organization_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX membership_organization_id_idx ON public.membership USING btree (organization_id);
+
+
+--
+-- Name: monitoring_state_due_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX monitoring_state_due_idx ON public.monitoring_state USING btree (next_poll_at, lease_expires_at);
+
+
+--
+-- Name: monitoring_state_project_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX monitoring_state_project_idx ON public.monitoring_state USING btree (project_id);
+
+
+--
+-- Name: persona_egma_provided_name_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX persona_egma_provided_name_unique ON public.persona_definition USING btree (name) WHERE (organization_id IS NULL);
+
+
+--
+-- Name: persona_organization_id_project_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX persona_organization_id_project_id_idx ON public.persona_definition USING btree (organization_id, project_id) WHERE (archived_at IS NULL);
+
+
+--
+-- Name: project_grader_active_definition_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX project_grader_active_definition_unique ON public.project_grader USING btree (project_id, grader_definition_id) WHERE (archived_at IS NULL);
+
+
+--
+-- Name: project_grader_definition_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX project_grader_definition_id_idx ON public.project_grader USING btree (grader_definition_id);
+
+
+--
+-- Name: project_grader_organization_id_project_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX project_grader_organization_id_project_id_idx ON public.project_grader USING btree (organization_id, project_id) WHERE (archived_at IS NULL);
+
+
+--
+-- Name: project_organization_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX project_organization_id_idx ON public.project USING btree (organization_id) WHERE (deleted_at IS NULL);
+
+
+--
+-- Name: rate_card_effective_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX rate_card_effective_idx ON public.rate_card USING btree (provider, model, effective_from);
+
+
+--
+-- Name: retell_call_retry_due_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX retell_call_retry_due_idx ON public.retell_call_retry USING btree (agent_id, next_attempt_at) WHERE (next_attempt_at IS NOT NULL);
+
+
+--
+-- Name: run_agent_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX run_agent_id_idx ON public.run USING btree (agent_id);
+
+
+--
+-- Name: run_mock_tools_cleanup_owed_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX run_mock_tools_cleanup_owed_idx ON public.run USING btree (organization_id, agent_id) WHERE (temp_mock_agent_version_cleanup = false);
+
+
+--
+-- Name: run_organization_id_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX run_organization_id_id_idx ON public.run USING btree (organization_id, id);
+
+
+--
+-- Name: run_organization_id_project_id_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX run_organization_id_project_id_id_idx ON public.run USING btree (organization_id, project_id, id);
+
+
+--
+-- Name: run_suite_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX run_suite_id_idx ON public.run USING btree (suite_id);
+
+
+--
+-- Name: session_user_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX session_user_id_idx ON public.session USING btree (user_id);
+
+
+--
+-- Name: simulation_heartbeat_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX simulation_heartbeat_idx ON public.simulation USING btree (organization_id, heartbeat_at) WHERE (status = ANY (ARRAY['claimed'::text, 'running'::text]));
+
+
+--
+-- Name: simulation_organization_id_started_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX simulation_organization_id_started_at_idx ON public.simulation USING btree (organization_id, started_at);
+
+
+--
+-- Name: simulation_persona_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX simulation_persona_id_idx ON public.simulation USING btree (persona_id);
+
+
+--
+-- Name: simulation_persona_version_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX simulation_persona_version_id_idx ON public.simulation USING btree (persona_version_id);
+
+
+--
+-- Name: simulation_queued_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX simulation_queued_idx ON public.simulation USING btree (organization_id, id) WHERE (status = 'queued'::text);
+
+
+--
+-- Name: simulation_run_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX simulation_run_id_idx ON public.simulation USING btree (run_id);
+
+
+--
+-- Name: simulation_test_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX simulation_test_id_idx ON public.simulation USING btree (test_id);
+
+
+--
+-- Name: simulation_test_version_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX simulation_test_version_id_idx ON public.simulation USING btree (test_version_id);
+
+
+--
+-- Name: test_organization_id_project_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX test_organization_id_project_id_idx ON public.test USING btree (organization_id, project_id) WHERE (deleted_at IS NULL);
+
+
+--
+-- Name: test_persona_persona_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX test_persona_persona_id_idx ON public.test_persona USING btree (persona_id);
+
+
+--
+-- Name: test_suite_id_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX test_suite_id_id_idx ON public.test USING btree (suite_id, id) WHERE (deleted_at IS NULL);
+
+
+--
+-- Name: test_suite_organization_id_project_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX test_suite_organization_id_project_id_idx ON public.test_suite USING btree (organization_id, project_id) WHERE (deleted_at IS NULL);
+
+
+--
+-- Name: verification_identifier_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX verification_identifier_idx ON public.verification USING btree (identifier);
+
+
+--
+-- Name: grader_definition grader_definition_ownership_immutable_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER grader_definition_ownership_immutable_guard BEFORE UPDATE OF organization_id, project_id ON public.grader_definition FOR EACH ROW EXECUTE FUNCTION public.guard_grader_definition_ownership_immutable();
+
+
+--
+-- Name: grader_definition_version grader_definition_parameter_contract_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER grader_definition_parameter_contract_guard BEFORE INSERT ON public.grader_definition_version FOR EACH ROW EXECUTE FUNCTION public.guard_definition_parameter_contract();
+
+
+--
+-- Name: grader_definition_version grader_definition_version_is_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER grader_definition_version_is_immutable BEFORE UPDATE ON public.grader_definition_version FOR EACH ROW EXECUTE FUNCTION public.guard_grader_definition_version_immutable();
+
+
+--
+-- Name: grading_job grading_job_selection_immutable_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER grading_job_selection_immutable_guard BEFORE UPDATE ON public.grading_job FOR EACH ROW EXECUTE FUNCTION public.guard_grading_job_selection_immutable();
+
+
+--
+-- Name: persona_definition_version persona_definition_parameter_contract_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER persona_definition_parameter_contract_guard BEFORE INSERT ON public.persona_definition_version FOR EACH ROW EXECUTE FUNCTION public.guard_definition_parameter_contract();
+
+
+--
+-- Name: persona_definition persona_ownership_immutable_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER persona_ownership_immutable_guard BEFORE UPDATE OF organization_id, project_id ON public.persona_definition FOR EACH ROW EXECUTE FUNCTION public.guard_persona_ownership_immutable();
+
+
+--
+-- Name: persona_definition_version persona_version_semantics_immutable_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER persona_version_semantics_immutable_guard BEFORE UPDATE ON public.persona_definition_version FOR EACH ROW EXECUTE FUNCTION public.guard_persona_version_semantics_immutable();
+
+
+--
+-- Name: project_grader project_grader_definition_ownership_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER project_grader_definition_ownership_guard BEFORE INSERT OR UPDATE ON public.project_grader FOR EACH ROW EXECUTE FUNCTION public.guard_project_grader_definition_ownership();
+
+
+--
+-- Name: project_persona project_persona_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER project_persona_guard BEFORE INSERT OR UPDATE ON public.project_persona FOR EACH ROW EXECUTE FUNCTION public.guard_project_persona();
+
+
+--
+-- Name: run_event run_event_append_only_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER run_event_append_only_guard BEFORE UPDATE ON public.run_event FOR EACH ROW EXECUTE FUNCTION public.guard_run_event_append_only();
+
+
+--
+-- Name: run run_grading_plan_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER run_grading_plan_guard BEFORE INSERT OR UPDATE OF grading_plan ON public.run FOR EACH ROW EXECUTE FUNCTION public.guard_run_grading_plan();
+
+
+--
+-- Name: run run_lifecycle_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER run_lifecycle_guard BEFORE UPDATE ON public.run FOR EACH ROW EXECUTE FUNCTION public.guard_run_lifecycle();
+
+
+--
+-- Name: simulation simulation_lifecycle_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER simulation_lifecycle_guard BEFORE UPDATE ON public.simulation FOR EACH ROW EXECUTE FUNCTION public.guard_simulation_lifecycle();
+
+
+--
+-- Name: simulation simulation_persona_availability_insert_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER simulation_persona_availability_insert_guard BEFORE INSERT ON public.simulation FOR EACH ROW EXECUTE FUNCTION public.guard_simulation_persona_availability();
+
+
+--
+-- Name: simulation simulation_persona_availability_update_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER simulation_persona_availability_update_guard BEFORE UPDATE OF persona_id, project_id ON public.simulation FOR EACH ROW EXECUTE FUNCTION public.guard_simulation_persona_availability();
+
+
+--
+-- Name: simulation simulation_persona_parameters_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER simulation_persona_parameters_guard BEFORE INSERT OR UPDATE OF persona_id, persona_version_id, persona_parameter_values ON public.simulation FOR EACH ROW EXECUTE FUNCTION public.guard_simulation_persona_parameters();
+
+
+--
+-- Name: test test_ownership_immutable_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER test_ownership_immutable_guard BEFORE UPDATE OF organization_id, project_id ON public.test FOR EACH ROW EXECUTE FUNCTION public.guard_test_ownership_immutable();
+
+
+--
+-- Name: test_persona test_persona_availability_insert_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER test_persona_availability_insert_guard BEFORE INSERT ON public.test_persona FOR EACH ROW EXECUTE FUNCTION public.guard_test_persona_availability();
+
+
+--
+-- Name: test_persona test_persona_availability_update_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER test_persona_availability_update_guard BEFORE UPDATE OF test_version_id, persona_id ON public.test_persona FOR EACH ROW EXECUTE FUNCTION public.guard_test_persona_availability();
+
+
+--
+-- Name: test test_suite_membership_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER test_suite_membership_immutable BEFORE UPDATE OF suite_id ON public.test FOR EACH ROW EXECUTE FUNCTION public.guard_test_suite_membership();
+
+
+--
+-- Name: test_version test_version_test_immutable_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER test_version_test_immutable_guard BEFORE UPDATE OF test_id ON public.test_version FOR EACH ROW EXECUTE FUNCTION public.guard_test_version_test_immutable();
+
+
+--
+-- Name: account account_user_id_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.account
+    ADD CONSTRAINT account_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES public."user"(id) ON DELETE CASCADE;
+
+
+--
+-- Name: agent agent_created_by_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent
+    ADD CONSTRAINT agent_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES public."user"(id) ON DELETE SET NULL;
+
+
+--
+-- Name: agent agent_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent
+    ADD CONSTRAINT agent_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: agent agent_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent
+    ADD CONSTRAINT agent_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: api_key api_key_created_by_user_id_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.api_key
+    ADD CONSTRAINT api_key_created_by_user_id_user_id_fk FOREIGN KEY (created_by_user_id) REFERENCES public."user"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: api_key api_key_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.api_key
+    ADD CONSTRAINT api_key_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: api_key api_key_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.api_key
+    ADD CONSTRAINT api_key_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: cloud_billing_account cloud_billing_account_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_billing_account
+    ADD CONSTRAINT cloud_billing_account_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cloud_billing_account cloud_billing_account_plan_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_billing_account
+    ADD CONSTRAINT cloud_billing_account_plan_fk FOREIGN KEY (plan_code) REFERENCES public.cloud_plan(code);
+
+
+--
+-- Name: cloud_ledger_entry cloud_ledger_entry_account_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_ledger_entry
+    ADD CONSTRAINT cloud_ledger_entry_account_fk FOREIGN KEY (organization_id) REFERENCES public.cloud_billing_account(organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: cloud_meter_period cloud_meter_period_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cloud_meter_period
+    ADD CONSTRAINT cloud_meter_period_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: connection connection_agent_id_agent_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.connection
+    ADD CONSTRAINT connection_agent_id_agent_id_fk FOREIGN KEY (agent_id) REFERENCES public.agent(id) ON DELETE CASCADE;
+
+
+--
+-- Name: connection connection_agent_project_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.connection
+    ADD CONSTRAINT connection_agent_project_fk FOREIGN KEY (agent_id, project_id) REFERENCES public.agent(id, project_id) ON DELETE CASCADE;
+
+
+--
+-- Name: connection connection_created_by_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.connection
+    ADD CONSTRAINT connection_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES public."user"(id) ON DELETE SET NULL;
+
+
+--
+-- Name: connection connection_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.connection
+    ADD CONSTRAINT connection_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: connection connection_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.connection
+    ADD CONSTRAINT connection_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: device_code device_code_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_code
+    ADD CONSTRAINT device_code_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: device_code device_code_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_code
+    ADD CONSTRAINT device_code_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: device_code device_code_user_id_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_code
+    ADD CONSTRAINT device_code_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES public."user"(id) ON DELETE CASCADE;
+
+
+--
+-- Name: grader_definition grader_definition_current_version_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grader_definition
+    ADD CONSTRAINT grader_definition_current_version_fk FOREIGN KEY (id, current_definition_version) REFERENCES public.grader_definition_version(definition_id, version) DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: grader_definition grader_definition_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grader_definition
+    ADD CONSTRAINT grader_definition_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: grader_definition grader_definition_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grader_definition
+    ADD CONSTRAINT grader_definition_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: grader_definition_version grader_definition_version_definition_id_grader_definition_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grader_definition_version
+    ADD CONSTRAINT grader_definition_version_definition_id_grader_definition_id_fk FOREIGN KEY (definition_id) REFERENCES public.grader_definition(id) ON DELETE CASCADE;
+
+
+--
+-- Name: grading_job grading_job_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grading_job
+    ADD CONSTRAINT grading_job_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: grading_job grading_job_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grading_job
+    ADD CONSTRAINT grading_job_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: grading_job grading_job_simulation_project_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grading_job
+    ADD CONSTRAINT grading_job_simulation_project_fk FOREIGN KEY (simulation_id, project_id) REFERENCES public.simulation(id, project_id) ON DELETE CASCADE;
+
+
+--
+-- Name: invitation invitation_created_by_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invitation
+    ADD CONSTRAINT invitation_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES public."user"(id) ON DELETE SET NULL;
+
+
+--
+-- Name: invitation invitation_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invitation
+    ADD CONSTRAINT invitation_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: membership membership_created_by_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership
+    ADD CONSTRAINT membership_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES public."user"(id) ON DELETE SET NULL;
+
+
+--
+-- Name: membership membership_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership
+    ADD CONSTRAINT membership_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: membership membership_user_id_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership
+    ADD CONSTRAINT membership_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES public."user"(id) ON DELETE CASCADE;
+
+
+--
+-- Name: monitoring_state monitoring_state_agent_project_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.monitoring_state
+    ADD CONSTRAINT monitoring_state_agent_project_fk FOREIGN KEY (agent_id, project_id) REFERENCES public.agent(id, project_id) ON DELETE CASCADE;
+
+
+--
+-- Name: monitoring_state monitoring_state_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.monitoring_state
+    ADD CONSTRAINT monitoring_state_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: monitoring_state monitoring_state_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.monitoring_state
+    ADD CONSTRAINT monitoring_state_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: persona_definition persona_definition_created_by_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.persona_definition
+    ADD CONSTRAINT persona_definition_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES public."user"(id) ON DELETE SET NULL;
+
+
+--
+-- Name: persona_definition persona_definition_current_version_id_persona_definition_versio; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.persona_definition
+    ADD CONSTRAINT persona_definition_current_version_id_persona_definition_versio FOREIGN KEY (current_version_id) REFERENCES public.persona_definition_version(id) DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: persona_definition persona_definition_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.persona_definition
+    ADD CONSTRAINT persona_definition_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: persona_definition_version persona_definition_version_created_by_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.persona_definition_version
+    ADD CONSTRAINT persona_definition_version_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES public."user"(id) ON DELETE SET NULL;
+
+
+--
+-- Name: persona_definition_version persona_definition_version_persona_id_persona_definition_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.persona_definition_version
+    ADD CONSTRAINT persona_definition_version_persona_id_persona_definition_id_fk FOREIGN KEY (persona_id) REFERENCES public.persona_definition(id) ON DELETE CASCADE;
+
+
+--
+-- Name: persona_definition persona_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.persona_definition
+    ADD CONSTRAINT persona_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: project project_created_by_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project
+    ADD CONSTRAINT project_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES public."user"(id) ON DELETE SET NULL;
+
+
+--
+-- Name: project_grader project_grader_grader_definition_id_grader_definition_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project_grader
+    ADD CONSTRAINT project_grader_grader_definition_id_grader_definition_id_fk FOREIGN KEY (grader_definition_id) REFERENCES public.grader_definition(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: project_grader project_grader_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project_grader
+    ADD CONSTRAINT project_grader_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: project_grader project_grader_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project_grader
+    ADD CONSTRAINT project_grader_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: project project_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project
+    ADD CONSTRAINT project_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: project_persona project_persona_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project_persona
+    ADD CONSTRAINT project_persona_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: project_persona project_persona_persona_definition_id_persona_definition_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project_persona
+    ADD CONSTRAINT project_persona_persona_definition_id_persona_definition_id_fk FOREIGN KEY (persona_definition_id) REFERENCES public.persona_definition(id);
+
+
+--
+-- Name: project_persona project_persona_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.project_persona
+    ADD CONSTRAINT project_persona_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: retell_call_retry retell_call_retry_agent_project_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.retell_call_retry
+    ADD CONSTRAINT retell_call_retry_agent_project_fk FOREIGN KEY (agent_id, project_id) REFERENCES public.agent(id, project_id) ON DELETE CASCADE;
+
+
+--
+-- Name: retell_call_retry retell_call_retry_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.retell_call_retry
+    ADD CONSTRAINT retell_call_retry_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: retell_call_retry retell_call_retry_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.retell_call_retry
+    ADD CONSTRAINT retell_call_retry_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: run run_agent_project_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run
+    ADD CONSTRAINT run_agent_project_fk FOREIGN KEY (agent_id, project_id) REFERENCES public.agent(id, project_id) ON DELETE CASCADE;
+
+
+--
+-- Name: run run_connection_agent_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run
+    ADD CONSTRAINT run_connection_agent_fk FOREIGN KEY (connection_id, agent_id) REFERENCES public.connection(id, agent_id) ON DELETE CASCADE;
+
+
+--
+-- Name: run_event run_event_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run_event
+    ADD CONSTRAINT run_event_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: run_event run_event_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run_event
+    ADD CONSTRAINT run_event_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: run_event run_event_run_project_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run_event
+    ADD CONSTRAINT run_event_run_project_fk FOREIGN KEY (run_id, project_id) REFERENCES public.run(id, project_id) ON DELETE CASCADE;
+
+
+--
+-- Name: run_event run_event_simulation_run_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run_event
+    ADD CONSTRAINT run_event_simulation_run_fk FOREIGN KEY (simulation_id, run_id) REFERENCES public.simulation(id, run_id) ON DELETE CASCADE;
+
+
+--
+-- Name: run run_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run
+    ADD CONSTRAINT run_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: run run_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run
+    ADD CONSTRAINT run_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: run run_suite_project_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run
+    ADD CONSTRAINT run_suite_project_fk FOREIGN KEY (suite_id, project_id) REFERENCES public.test_suite(id, project_id);
+
+
+--
+-- Name: run run_triggered_by_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run
+    ADD CONSTRAINT run_triggered_by_user_id_fk FOREIGN KEY (triggered_by) REFERENCES public."user"(id) ON DELETE SET NULL;
+
+
+--
+-- Name: session session_user_id_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.session
+    ADD CONSTRAINT session_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES public."user"(id) ON DELETE CASCADE;
+
+
+--
+-- Name: simulation simulation_agent_project_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.simulation
+    ADD CONSTRAINT simulation_agent_project_fk FOREIGN KEY (agent_id, project_id) REFERENCES public.agent(id, project_id) ON DELETE CASCADE;
+
+
+--
+-- Name: simulation simulation_connection_agent_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.simulation
+    ADD CONSTRAINT simulation_connection_agent_fk FOREIGN KEY (connection_id, agent_id) REFERENCES public.connection(id, agent_id) ON DELETE CASCADE;
+
+
+--
+-- Name: simulation simulation_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.simulation
+    ADD CONSTRAINT simulation_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: simulation simulation_persona_version_persona_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.simulation
+    ADD CONSTRAINT simulation_persona_version_persona_fk FOREIGN KEY (persona_version_id, persona_id) REFERENCES public.persona_definition_version(id, persona_id);
+
+
+--
+-- Name: simulation simulation_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.simulation
+    ADD CONSTRAINT simulation_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: simulation simulation_run_project_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.simulation
+    ADD CONSTRAINT simulation_run_project_fk FOREIGN KEY (run_id, project_id) REFERENCES public.run(id, project_id) ON DELETE CASCADE;
+
+
+--
+-- Name: simulation simulation_test_project_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.simulation
+    ADD CONSTRAINT simulation_test_project_fk FOREIGN KEY (test_id, project_id) REFERENCES public.test(id, project_id);
+
+
+--
+-- Name: simulation simulation_test_version_test_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.simulation
+    ADD CONSTRAINT simulation_test_version_test_fk FOREIGN KEY (test_version_id, test_id) REFERENCES public.test_version(id, test_id);
+
+
+--
+-- Name: test test_created_by_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test
+    ADD CONSTRAINT test_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES public."user"(id) ON DELETE SET NULL;
+
+
+--
+-- Name: test test_current_version_id_test_version_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test
+    ADD CONSTRAINT test_current_version_id_test_version_id_fk FOREIGN KEY (current_version_id) REFERENCES public.test_version(id) DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: test test_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test
+    ADD CONSTRAINT test_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: test_persona test_persona_persona_id_persona_definition_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_persona
+    ADD CONSTRAINT test_persona_persona_id_persona_definition_id_fk FOREIGN KEY (persona_id) REFERENCES public.persona_definition(id);
+
+
+--
+-- Name: test_persona test_persona_test_version_id_test_version_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_persona
+    ADD CONSTRAINT test_persona_test_version_id_test_version_id_fk FOREIGN KEY (test_version_id) REFERENCES public.test_version(id) ON DELETE CASCADE;
+
+
+--
+-- Name: test test_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test
+    ADD CONSTRAINT test_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: test_suite test_suite_created_by_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_suite
+    ADD CONSTRAINT test_suite_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES public."user"(id) ON DELETE SET NULL;
+
+
+--
+-- Name: test_suite test_suite_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_suite
+    ADD CONSTRAINT test_suite_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
+
+
+--
+-- Name: test test_suite_project_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test
+    ADD CONSTRAINT test_suite_project_fk FOREIGN KEY (suite_id, project_id) REFERENCES public.test_suite(id, project_id);
+
+
+--
+-- Name: test_suite test_suite_project_organization_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_suite
+    ADD CONSTRAINT test_suite_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: test_version test_version_created_by_user_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_version
+    ADD CONSTRAINT test_version_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES public."user"(id) ON DELETE SET NULL;
+
+
+--
+-- Name: test_version test_version_test_id_test_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_version
+    ADD CONSTRAINT test_version_test_id_test_id_fk FOREIGN KEY (test_id) REFERENCES public.test(id) ON DELETE CASCADE;

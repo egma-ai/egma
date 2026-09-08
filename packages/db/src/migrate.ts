@@ -98,15 +98,7 @@ export function pendingMigrations(
     }
   }
 
-  // An older additive build must still boot after a newer build has appended
-  // migrations. The exact first file proves that the ledger belongs to this
-  // migration epoch; without it, unknown rows are a different history rather
-  // than future rows that a rollback may safely ignore.
-  const baseline = migrations[0];
-  const hasExactBaseline =
-    baseline !== undefined &&
-    alreadyApplied.get(baseline.name) === baseline.hash;
-  if (unsupported.length > 0 && !hasExactBaseline) {
+  if (unsupported.length > 0) {
     throw new Error(
       `database records migrations that this build does not contain: ${unsupported.join(", ")}; ` +
         "recreate the database before running this build",
