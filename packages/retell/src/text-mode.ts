@@ -44,7 +44,7 @@ export const WIRE = {
   mockToolName: "tool_name",
   /** How a native mock is matched: by name, whatever the arguments were. */
   mockToolMatch: "input_match_rule",
-  matchAnything: "any",
+  matchAnything: { type: "any" },
   /** The value the tool is given, JSON-encoded and untagged. */
   mockToolOutput: "output",
   /** Whether the call succeeded — how Retell is told to serve a failure. */

@@ -288,13 +288,13 @@ describe("one text-mode exchange", () => {
     expect(seen[0]?.body[WIRE.mockTools]).toEqual([
       {
         [WIRE.mockToolName]: "check_availability",
-        [WIRE.mockToolMatch]: WIRE.matchAnything,
+        input_match_rule: { type: "any" },
         [WIRE.mockToolOutput]: JSON.stringify({ slots: ["14:00"] }),
         [WIRE.mockToolResult]: true,
       },
       {
         [WIRE.mockToolName]: "charge_card",
-        [WIRE.mockToolMatch]: WIRE.matchAnything,
+        input_match_rule: { type: "any" },
         [WIRE.mockToolOutput]: JSON.stringify("card declined"),
         [WIRE.mockToolResult]: false,
       },
