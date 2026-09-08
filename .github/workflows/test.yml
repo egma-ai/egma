@@ -461,7 +461,7 @@ jobs:
               docker-compose.yml|docker-compose.managed.yml|.env.example) platform=true ;;
               pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) platform=true ;;
               certificates/*|.github/ecr-image-exists.sh|.github/verify-platform-images.py|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) platform=true ;;
-              apps/web/*|tools/*) web=true ;;
+              apps/web/*|tools/*|.github/deploy_vercel.py) web=true ;;
             esac
           done <<< "$changed"
           echo "platform=$platform" >> "$GITHUB_OUTPUT"
@@ -474,14 +474,26 @@ jobs:
             echo "Nothing here deploys."
           fi
 
+      - name: Mint a short-lived cloud release token
+        id: cloud-token
+        if: steps.decide.outputs.platform == 'true' && env.REPLACE_PRODUCTION == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.EGMA_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.EGMA_RELEASE_APP_PRIVATE_KEY }}
+          owner: egma-ai
+          repositories: egma-cloud
+          permission-actions: read
+          permission-contents: write
+
       - name: Check the platform deployment is configured
         if: steps.decide.outputs.platform == 'true'
         env:
-          CLOUD_RELEASE_TOKEN: ${{ secrets.EGMA_CLOUD_RELEASE_TOKEN }}
+          CLOUD_RELEASE_TOKEN: ${{ steps.cloud-token.outputs.token }}
         run: |
           missing=""
           if [ "$REPLACE_PRODUCTION" = "true" ]; then
-            [ -n "$CLOUD_RELEASE_TOKEN" ] || missing="$missing EGMA_CLOUD_RELEASE_TOKEN"
+            [ -n "$CLOUD_RELEASE_TOKEN" ] || missing="$missing release GitHub App credentials"
             [ -n "$DEPLOYMENT_HEALTH_URL" ] || missing="$missing DEPLOYMENT_HEALTH_URL"
           fi
           if [ -n "$missing" ]; then
@@ -493,10 +505,25 @@ jobs:
               -H "Authorization: Bearer $CLOUD_RELEASE_TOKEN" \
               -H "Accept: application/vnd.github+json" \
               "https://api.github.com/repos/$CLOUD_REPOSITORY/actions/workflows/infrastructure.yml" >/dev/null || {
-                echo "Configure the cloud workflow and EGMA_CLOUD_RELEASE_TOKEN with egma-cloud Contents:write and Actions:read before deployment." >&2
+                echo "Install the release GitHub App on egma-cloud with Contents:write and Actions:read before deployment." >&2
                 exit 1
               }
           fi
+
+      - name: Check the Vercel deployment is configured
+        if: >-
+          env.REPLACE_PRODUCTION == 'true' &&
+          (steps.decide.outputs.web == 'true' || steps.decide.outputs.platform == 'true')
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          VERCEL_GITHUB_REPO_ID: ${{ vars.VERCEL_GITHUB_REPO_ID }}
+        run: |
+          set -euo pipefail
+          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID VERCEL_GITHUB_REPO_ID; do
+            [ -n "${!name}" ] || { echo "$name is required for the gated production deployment." >&2; exit 1; }
+          done
 
       - name: Publish the immutable native images
         if: steps.decide.outputs.platform == 'true'
@@ -523,7 +550,7 @@ jobs:
       - name: Ask the cloud repository to deploy this release
         if: steps.decide.outputs.platform == 'true' && env.REPLACE_PRODUCTION == 'true'
         env:
-          CLOUD_RELEASE_TOKEN: ${{ secrets.EGMA_CLOUD_RELEASE_TOKEN }}
+          CLOUD_RELEASE_TOKEN: ${{ steps.cloud-token.outputs.token }}
         run: |
           set -euo pipefail
           started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -602,7 +629,7 @@ jobs:
               docker-compose.yml|docker-compose.managed.yml|.env.example) deployable=true ;;
               pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) deployable=true ;;
               certificates/*|.github/ecr-image-exists.sh|.github/verify-platform-images.py|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) deployable=true ;;
-              apps/web/*|tools/*) deployable=true ;;
+              apps/web/*|tools/*|.github/deploy_vercel.py) deployable=true ;;
             esac
           done <<< "$(git diff --name-only "${{ github.sha }}" "$head")"
           if [ "$deployable" = "true" ]; then
@@ -613,18 +640,16 @@ jobs:
             echo "fire=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Tell Vercel to ship
+      - name: Deploy this exact commit to Vercel production
         if: >-
           env.REPLACE_PRODUCTION == 'true' &&
           (steps.decide.outputs.platform == 'true' || steps.decide.outputs.web == 'true') &&
           steps.yield.outputs.fire == 'true'
         env:
-          HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          VERCEL_GITHUB_REPO_ID: ${{ vars.VERCEL_GITHUB_REPO_ID }}
         run: |
           set -euo pipefail
-          if [ -z "$HOOK" ]; then
-            echo "VERCEL_DEPLOY_HOOK_URL is not set, so the web cannot deploy." >&2
-            exit 1
-          fi
-          curl -fsS -X POST "$HOOK" >/dev/null
-          echo "Vercel told to ship the web application."
+          python3 .github/deploy_vercel.py
