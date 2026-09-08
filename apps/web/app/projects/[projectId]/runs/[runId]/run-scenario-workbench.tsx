@@ -55,6 +55,7 @@ import { projectPath } from "../../../../../lib/project-context.ts";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Problem, Refused } from "../../../../../ui/form.tsx";
+import { WorkRefusalActions } from "../../../../../ui/work-refusal-actions.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import {
   StateMark,
@@ -304,9 +305,11 @@ function EarlierGrades({ grades }: { readonly grades: readonly EvidenceGrade[] }
 function ExecutionFailureNotice({
   reason,
   executionFailure,
+  projectId,
 }: {
   readonly reason: string | null;
   readonly executionFailure: string | null | undefined;
+  readonly projectId: string;
 }) {
   return (
     <div
@@ -320,6 +323,9 @@ function ExecutionFailureNotice({
         {executionFailureMessage(reason, executionFailure)} This is an execution
         problem, not a failed grade.
       </p>
+      {reason === "provider_key_unavailable" ? (
+        <div className="mt-3"><WorkRefusalActions code={reason} projectId={projectId} /></div>
+      ) : null}
     </div>
   );
 }
@@ -328,6 +334,7 @@ function ResultNotice({ evidence }: { readonly evidence: SimulationEvidence }) {
   if (evidence.status === "failed") {
     return (
       <ExecutionFailureNotice
+        projectId={evidence.projectId}
         reason={evidence.reason}
         executionFailure={evidence.executionFailure}
       />
@@ -518,6 +525,11 @@ function GraderResultCard({
                     : "No result is available for this grader."
                   : findingOf(row.grade)}
               </p>
+              {row.grade?.details.errorCode === "provider_key_unavailable" ? (
+                <div className="mt-3">
+                  <WorkRefusalActions code="provider_key_unavailable" projectId={evidence.projectId} />
+                </div>
+              ) : null}
             </div>
           )}
           <EarlierGrades grades={row.history} />
@@ -820,7 +832,10 @@ function RegradeNotices({ request }: { readonly request: RegradeRequest }) {
           aria-label="Simulation actions"
         >
           {refused === null ? null : (
-            <Refused message={regradeRefusalMessage(refused)} />
+            <Refused
+              message={regradeRefusalMessage(refused)}
+              action={<WorkRefusalActions code={refused.error} projectId={evidence.projectId} />}
+            />
           )}
           {asked === null ? null : (
             <Problem>
@@ -1094,6 +1109,7 @@ export function RunScenarioWorkbench({
         {selectedFailureBeforeEvidence === null ? null : (
           <div className="px-5 pt-5 max-[40rem]:px-4 max-[40rem]:pt-4">
             <ExecutionFailureNotice
+              projectId={projectId}
               reason={selectedFailureBeforeEvidence.reason}
               executionFailure={selectedFailureBeforeEvidence.executionFailure}
             />

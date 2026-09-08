@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "provider": "openai",
+      "model": "gpt-live-transcribe",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "prices": {
+        "audio_seconds": { "unit": "minute", "usdPerMillion": "17000.00" }
+      }
+    }
+  ]
+}

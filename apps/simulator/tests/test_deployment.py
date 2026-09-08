@@ -311,6 +311,13 @@ MAY_BE_ABSENT = {
     # an invitation hands its link back to whoever sent it.
     "EGMA_SMTP_URL": "optional by design",
     "EGMA_MAIL_FROM": "optional by design",
+    # Billing, where absent means no billing and says so: with no secret key
+    # the product is the product, no `ee/` code is loaded, and the Billing
+    # section is not drawn. The key without the webhook secret mounts no
+    # webhook route, by name in the environment reference, so an empty one is
+    # never a payment door somebody could post to.
+    "EGMA_STRIPE_SECRET_KEY": "optional by design: absent means no billing",
+    "EGMA_STRIPE_WEBHOOK_SECRET": "optional by design: absent means no webhook route",
     # Telemetry about egma itself, where empty is not hollow but the promise:
     # one flag, off by default, and a deployment that sets nothing sends
     # nothing anywhere. The moment the flag says on, the two required values

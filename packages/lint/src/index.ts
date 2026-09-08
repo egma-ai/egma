@@ -27,6 +27,7 @@ export const RULE_NAMES = [
   "every-exported-call-carries-an-auth-context",
   "only-the-seam-knows-the-auth-provider",
   "no-private-package-in-a-published-one",
+  "only-a-fenced-home-holds-the-query-interface",
 ] as const;
 
 export type RuleName = (typeof RULE_NAMES)[number];
@@ -42,6 +43,39 @@ const MEMBERSHIP_RESOLVER = "packages/db/src/access/memberships.ts";
 
 /** Everything the module offers the rest of the codebase. */
 const ACCESS_SURFACE = "packages/db/src/access/index.ts";
+
+/**
+ * The second fenced home of the data-access boundary: the commercially
+ * licensed package.
+ *
+ * **It is a second home and not a hole in the first.** `ee/` holds the cloud
+ * billing tables' reads and writes, because no shared code may read a `cloud_`
+ * table and putting them in `packages/db/src/access/` would put them in every
+ * self-hoster's build. So the same rules follow them here: nothing outside
+ * `ee/src/access/` reaches the query interface, every exported call on the
+ * surface below takes an `AuthContext` first apart from a named list narrower
+ * than the shared module's, and no file in `ee/` may hold a datastore driver —
+ * that rule already covers this package, because the driver rule names one
+ * directory and this is not it.
+ */
+const EE_MODULE = "ee/src/";
+const EE_ACCESS_MODULE = "ee/src/access/";
+const EE_ACCESS_SURFACE = "ee/src/access/index.ts";
+
+/**
+ * The one export that hands the query interface out of `packages/db`, and the
+ * only directories allowed to take it.
+ *
+ * The Postgres pool is private to `packages/db/src` and `db()` is not on the
+ * package's entry point, so `ee/` — a separate package — could not otherwise
+ * reach a database at all. `fencedDatabase` is that one door, named so a
+ * reader of an import list can see it being opened, and this rule is what
+ * keeps it from being opened anywhere else. Without the rule the export would
+ * be exactly the loophole the boundary exists to prevent: any package could
+ * take the pool and write its own untenanted query.
+ */
+const QUERY_INTERFACE_EXPORT = "fencedDatabase";
+const FENCED_HOMES = [DATA_ACCESS_MODULE, EE_ACCESS_MODULE];
 
 /** The type every exported call that touches a customer's data begins with. */
 const AUTH_CONTEXT = "AuthContext";
@@ -115,6 +149,39 @@ const WORK_DISPATCHING = [
 const DEPLOYMENT_CONFIGURING = [
   "reconcileGraderCatalog",
   "seedPersonaLibrary",
+  // The cloud plan rows, written from the shipped file on boot exactly as the
+  // rate card and the persona shelf are. It takes the parsed file and no
+  // customer identifier, and it can write nothing but the two plan rows.
+  "seedCloudPlans",
+  // The Stripe product, prices and meters a plan is sold through, written onto
+  // that plan's row by the setup that created them in Stripe. Added on
+  // 2026-09-07 with the Stripe adapter, deliberately and after the rule
+  // stopped the build. It is the plan seed's shape one step later in the same
+  // lifecycle: a product, a price and a meter belong to the deployment's
+  // Stripe account rather than to anybody on it, so there is no customer to
+  // name and the rule below still refuses this name the day somebody gives it
+  // one. It can write nothing but the six Stripe columns of one plan row.
+  "recordStripePlanObjects",
+  "setStripePaymentsReady",
+];
+
+/** Trusted billing hooks and collectors use organization IDs resolved by the product. */
+const BILLING_PORTS = [
+  "openBillingAccount",
+  "readEntitlementFacts",
+  "createBillingAccount",
+  "activateBilling",
+  "settleInference",
+  "settleInferenceForOrganization",
+  "markInferenceSettlementFailed",
+];
+
+/** Verified webhook facts and the timer's customer-wide Stripe sweep. */
+const STRIPE_FACTS = [
+  "applyStripeEvent",
+  "visitMeterAccounts",
+  "recoverUnlinkedStripeAccounts",
+  "markStripeCustomerFailed",
 ];
 
 /**
@@ -398,23 +465,23 @@ function workspaceNameOf(specifier: string): string | undefined {
 }
 
 /**
- * Every workspace package marked `private`, read from the manifests rather than
- * listed here. A list would be one more thing to keep, and what it would be
- * forgotten about is whether a package is safe to ship.
+ * Read workspace packages from pnpm-workspace.yaml. A glob names a directory
+ * of packages; a plain entry such as ee names one package.
  */
-/**
- * Read workspace roots from pnpm-workspace.yaml so added package groups are
- * covered. Use each glob's leading directory and inspect its direct package
- * manifests.
- */
-async function workspaceRootsIn(root: string): Promise<string[]> {
+type WorkspaceEntry = {
+  readonly where: string;
+  /** Whether the entry names a directory of packages rather than one package. */
+  readonly holdsMany: boolean;
+};
+
+async function workspaceEntriesIn(root: string): Promise<WorkspaceEntry[]> {
   let file: string;
   try {
     file = await readFile(path.join(root, "pnpm-workspace.yaml"), "utf8");
   } catch {
     return [];
   }
-  const roots = new Set<string>();
+  const entries = new Map<string, WorkspaceEntry>();
   let inPackages = false;
   for (const line of file.split("\n")) {
     if (/^packages:/.test(line)) {
@@ -424,34 +491,52 @@ async function workspaceRootsIn(root: string): Promise<string[]> {
     if (inPackages && /^\S/.test(line)) break;
     const entry = /^\s+-\s*['"]?([^'"\s]+)/.exec(line);
     if (inPackages && entry?.[1] !== undefined) {
-      const first = entry[1].split("/")[0];
-      if (first !== undefined && first !== "" && first !== ".") roots.add(first);
+      const written = entry[1];
+      const first = written.split("/")[0];
+      if (first === undefined || first === "" || first === ".") continue;
+      const holdsMany = written.includes("*");
+      const held = entries.get(first);
+      // A repository listing both `ee` and `ee/*` means both, so a directory
+      // named once as a package and once as a container is read both ways.
+      entries.set(first, {
+        where: first,
+        holdsMany: holdsMany || held?.holdsMany === true,
+      });
+      if (!holdsMany && held?.holdsMany === true) {
+        entries.set(first, { where: first, holdsMany: true });
+      }
     }
   }
-  return [...roots];
+  return [...entries.values()];
 }
 
 async function privateWorkspacePackagesIn(root: string): Promise<Set<string>> {
   const held = new Set<string>();
-  for (const where of await workspaceRootsIn(root)) {
+  const take = async (directory: string): Promise<void> => {
+    try {
+      const manifest = JSON.parse(
+        await readFile(path.join(directory, "package.json"), "utf8"),
+      ) as { name?: unknown; private?: unknown };
+      if (manifest.private === true && typeof manifest.name === "string") {
+        held.add(manifest.name);
+      }
+    } catch {
+      // A directory with no readable manifest is not a workspace package.
+    }
+  };
+
+  for (const { where, holdsMany } of await workspaceEntriesIn(root)) {
+    if (!holdsMany) {
+      await take(path.join(root, where));
+      continue;
+    }
     let entries: string[];
     try {
       entries = await readdir(path.join(root, where));
     } catch {
       continue;
     }
-    for (const entry of entries) {
-      try {
-        const manifest = JSON.parse(
-          await readFile(path.join(root, where, entry, "package.json"), "utf8"),
-        ) as { name?: unknown; private?: unknown };
-        if (manifest.private === true && typeof manifest.name === "string") {
-          held.add(manifest.name);
-        }
-      } catch {
-        // A directory with no readable manifest is not a workspace package.
-      }
-    }
+    for (const entry of entries) await take(path.join(root, where, entry));
   }
   return held;
 }
@@ -464,11 +549,23 @@ function isAuthProvider(specifier: string): boolean {
 
 function resolvedInsideModule(file: string, specifier: string): boolean {
   if (specifier.startsWith("@egma/db/")) return true;
-  if (!specifier.startsWith(".")) return false;
-  const target = path.posix.normalize(
+  return resolvedInside(file, specifier, DATA_ACCESS_MODULE);
+}
+
+/** Where a relative import lands, repository-relative, or nothing. */
+function resolvedTarget(file: string, specifier: string): string | undefined {
+  if (!specifier.startsWith(".")) return undefined;
+  return path.posix.normalize(
     path.posix.join(path.posix.dirname(file), specifier),
   );
-  return target.startsWith(DATA_ACCESS_MODULE);
+}
+
+function resolvedInside(
+  file: string,
+  specifier: string,
+  where: string,
+): boolean {
+  return resolvedTarget(file, specifier)?.startsWith(where) === true;
 }
 
 function isSchemaModule(file: string, specifier: string): boolean {
@@ -545,8 +642,15 @@ function answerAsWritten(
  * is no call shape that lets a caller supply their own tenancy filter — or
  * none.
  */
-async function checkExportedCallShapes(root: string): Promise<Violation[]> {
-  const surface = path.join(root, ACCESS_SURFACE);
+async function checkExportedCallShapes(
+  root: string,
+  which: string = ACCESS_SURFACE,
+): Promise<Violation[]> {
+  const surface = path.join(root, which);
+  // The second fenced home's own narrower exemption list, and it is the only
+  // surface that may use it.
+  const billingPorts =
+    which === EE_ACCESS_SURFACE ? [...BILLING_PORTS, ...STRIPE_FACTS] : [];
   let source: string;
   try {
     source = await readFile(surface, "utf8");
@@ -598,7 +702,8 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
         CONTEXT_ESTABLISHING.includes(name) ||
         instanceScopedReturn !== undefined ||
         WORK_DISPATCHING.includes(name) ||
-        DEPLOYMENT_CONFIGURING.includes(name);
+        DEPLOYMENT_CONFIGURING.includes(name) ||
+        billingPorts.includes(name);
       if (!exempt && firstType !== AUTH_CONTEXT) {
         violations.push({
           file,
@@ -641,7 +746,8 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
 
       if (
         WORK_DISPATCHING.includes(name) ||
-        DEPLOYMENT_CONFIGURING.includes(name)
+        DEPLOYMENT_CONFIGURING.includes(name) ||
+        (which === EE_ACCESS_SURFACE && STRIPE_FACTS.includes(name))
       ) {
         for (const parameter of declaration.parameters) {
           const written = asWritten(declaring, parameter);
@@ -680,7 +786,10 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
 
 /** Every violation in the tree rooted at `root`, in file order. */
 export async function check(root: string): Promise<Violation[]> {
-  const violations: Violation[] = await checkExportedCallShapes(root);
+  const violations: Violation[] = [
+    ...(await checkExportedCallShapes(root)),
+    ...(await checkExportedCallShapes(root, EE_ACCESS_SURFACE)),
+  ];
   const privateWorkspacePackages = await privateWorkspacePackagesIn(root);
   const bundledWorkspacePackages = await bundledWorkspacePackagesIn(root);
 
@@ -692,8 +801,47 @@ export async function check(root: string): Promise<Violation[]> {
     const insideModule = file.startsWith(DATA_ACCESS_MODULE);
     const insidePackage = file.startsWith(DATA_ACCESS_PACKAGE);
     const bypassesDeliberately = DELIBERATE_BYPASSES.includes(file);
+    const insideAFencedHome = FENCED_HOMES.some((home) => file.startsWith(home));
 
     for (const record of imports) {
+      if (
+        record.named.includes(QUERY_INTERFACE_EXPORT) &&
+        !insideAFencedHome
+      ) {
+        violations.push({
+          file,
+          line: record.line,
+          rule: "only-a-fenced-home-holds-the-query-interface",
+          detail:
+            `imports ${QUERY_INTERFACE_EXPORT}, which hands out the query ` +
+            `interface the pool sits behind. Only ${FENCED_HOMES.join(" and ")} ` +
+            `may hold one: every read and write goes through a function there ` +
+            `that takes an AuthContext and injects the tenancy predicates ` +
+            `itself. Import "@egma/db" and use what it exports.`,
+        });
+      }
+
+      // The second fenced home has one way in, exactly as the first does.
+      // Inside `ee/src/access/` a file reaches its neighbours freely; outside
+      // it, `ee/` sees the surface and nothing else.
+      if (
+        file.startsWith(EE_MODULE) &&
+        !file.startsWith(EE_ACCESS_MODULE) &&
+        resolvedInside(file, record.specifier, EE_ACCESS_MODULE) &&
+        resolvedTarget(file, record.specifier) !== EE_ACCESS_SURFACE
+      ) {
+        violations.push({
+          file,
+          line: record.line,
+          rule: "no-reaching-into-the-data-access-module",
+          detail:
+            `reaches inside the cloud data-access module with ` +
+            `"${record.specifier}". Import "./access/index.ts" and use what ` +
+            `it exports: the surface is where every export is held to taking ` +
+            `an AuthContext, and a file that goes around it is a read nobody ` +
+            `checked.`,
+        });
+      }
       if (
         PUBLISHED_PACKAGES.some((where) => file.startsWith(where)) &&
         privateWorkspacePackages.has(workspaceNameOf(record.specifier) ?? "") &&

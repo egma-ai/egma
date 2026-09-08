@@ -129,6 +129,7 @@ const TRACE_DETAIL = {
   ],
   simulationId: null,
   gradingState: "not_requested",
+  workBlock: null,
   grades: [],
   gradeHistory: [],
   combinedScore: null,
@@ -536,6 +537,21 @@ describe("what the Monitoring list shows", () => {
    * exchange happened in — which is what makes one transcript a link somebody
   * can send.
   */
+  it("shows the funding action in a pending production trace sheet", async () => {
+    stub({ rows: [ONE_ROW], detail: { ...TRACE_DETAIL, gradingState: "pending",
+      workBlock: { error: "providers_unfunded", message: "The inference balance is $0.00." },
+    } });
+    render(<MonitoringTranscriptsPage />);
+    const table = await screen.findByRole("table", { name: LIST.tableLabel });
+    fireEvent.click(within(table).getByRole("button", { name: FACTS.traceId }));
+    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
+    expect(await within(sheet).findByText("Grading is waiting. The inference balance is $0.00.")).toBeTruthy();
+    expect(within(sheet).getByRole("link", { name: "Add credits" }).getAttribute("href"))
+      .toBe("/projects/prj_2/settings/billing");
+    expect(within(sheet).getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_2/settings/provider-api-keys");
+  });
+
   it("opens one continuous trace sheet from the row", async () => {
     const startedAt = new Date(Date.now() - 5 * 60_000).toISOString();
     const { asked } = stub({

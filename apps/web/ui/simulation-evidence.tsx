@@ -2167,6 +2167,7 @@ function GraderGroup({
         <div className="flex min-w-0 flex-col gap-4 bg-background p-5 max-[40rem]:p-4">
           <GradeDetails
             grade={grade}
+            projectId={evidence.projectId}
             assertionName={(assertion) => assertionName(assertion, expected)}
             renderCitations={(assertion) => {
               const citedTurns = citedTurnPositions(

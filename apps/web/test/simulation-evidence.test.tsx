@@ -150,6 +150,7 @@ function grade(overrides: Record<string, unknown> = {}) {
 
 function evidence(overrides: Record<string, unknown> = {}) {
   return {
+    workBlock: null,
     id: "sim_1",
     projectId: "prj_1",
     runId: "run_1",
@@ -308,6 +309,28 @@ describe("one simulation's grades", () => {
     ).toBeTruthy();
     expect(screen.getByText(/execution problem, not a failed grade/iu)).toBeTruthy();
     expect(screen.queryByText("simulator_error")).toBeNull();
+  });
+
+  it("offers key repair for a proven simulation credential failure", async () => {
+    page({ read: evidence({ status: "failed", reason: "provider_key_unavailable",
+      executionFailure: "The saved OpenAI key cannot be used.", gradingPlan: null, transcript: null,
+    }) });
+    render(<SimulationEvidencePage />);
+    expect(await screen.findByText("The saved OpenAI key cannot be used.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/provider-api-keys");
+    expect(screen.queryByRole("link", { name: "Add credits" })).toBeNull();
+  });
+
+  it("offers key repair beside a grader's typed customer-key error", async () => {
+    page({ read: evidence({ gradingState: "error", grades: [grade({ score: null, result: "errored",
+      details: { errorCode: "provider_key_unavailable", error: "The saved OpenAI key cannot be used." },
+    })], gradeHistory: [], combinedScore: null }) });
+    render(<SimulationEvidencePage />);
+    expect(await screen.findByText("The saved OpenAI key cannot be used.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/provider-api-keys");
+    expect(screen.queryByRole("link", { name: "Add credits" })).toBeNull();
   });
 
   it("counts the graders that passed without creating an overall pass or fail", async () => {
@@ -584,6 +607,43 @@ describe("one simulation's grades", () => {
     const summary = screen.getByRole("region", { name: "Simulation summary" });
     expect(within(summary).getByText("0/1 · 1 errored")).toBeTruthy();
     expect(within(summary).queryByText("Not available")).toBeNull();
+  });
+
+  it("shows the current funding block for a queued simulation", async () => {
+    page({ read: evidence({
+      status: "queued",
+      workBlock: { error: "providers_unfunded", message: "The inference balance is $0.00." },
+    }) });
+    render(<SimulationEvidencePage />);
+    const refusal = await screen.findByText("This simulation is waiting. The inference balance is $0.00.");
+    const alert = within(refusal.closest('[role="alert"]') as HTMLElement);
+    expect(alert.getByRole("link", { name: "Add credits" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/billing");
+    expect(alert.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/provider-api-keys");
+  });
+
+  it("keeps a regrade funding refusal distinct from missing evidence and offers both funding paths", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/v1/simulations/sim_1": { status: 200, body: evidence() },
+      "/v1/simulations/sim_1/regrade": {
+        status: 422,
+        body: { error: "providers_unfunded", message: "The inference balance is $0.00." },
+      },
+    });
+    render(<SimulationEvidencePage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Regrade" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Regrade simulation" }));
+    const refusal = await screen.findByText("The inference balance is $0.00.");
+    const alert = within(refusal.closest('[role="alert"]') as HTMLElement);
+    expect(alert.getByRole("link", { name: "Add credits" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/billing");
+    expect(alert.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/provider-api-keys");
+    expect(screen.queryByText(/did not finish with gradeable evidence/iu)).toBeNull();
+    expect(screen.queryByText(/queued for a whole-simulation regrade/iu)).toBeNull();
   });
 
   it("regrades the whole simulation and keeps the action from viewers", async () => {
@@ -1844,4 +1904,12 @@ describe("recording evidence", () => {
       screen.getByText("No audio recording is available for this trace."),
     ).toBeTruthy();
   });
+});
+
+it("keeps simulation evidence free of billing reads and cost elements", async () => {
+  page();
+  render(<SimulationEvidencePage />);
+  expect(await screen.findByText("You are all set for Tuesday.")).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Cost" })).toBeNull();
+  expect(sent.some((request) => request.path.includes("/usage") || request.path.includes("/billing"))).toBe(false);
 });

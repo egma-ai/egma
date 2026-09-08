@@ -2,7 +2,8 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { loadConfig } from "../src/config.ts";
 
 /**
  * Check environment names against the operator reference, Compose, and README.
@@ -130,11 +131,8 @@ describe("the grader's place in the deployment", () => {
     expect(block).toContain("CLICKHOUSE_URL:");
   });
 
-  /** The grader reads the shared provider bundle. It no longer opens model
-   * credentials stored in Postgres, so the connection encryption key must not
-   * cross this container boundary.
-   */
-  it("is handed the provider credential inputs, and no encryption key", async () => {
+  /** The grader opens organization keys and also uses deployment provider keys. */
+  it("is handed provider inputs and the same key used to seal organization credentials", async () => {
     const block = serviceBlock(await read("docker-compose.yml"), "grader");
     expect(block).toBeDefined();
     expect(block).toContain("EGMA_OPENAI_API_KEY:");
@@ -142,7 +140,7 @@ describe("the grader's place in the deployment", () => {
     expect(block).toContain("EGMA_CARTESIA_API_KEY:");
     expect(block).toContain("EGMA_PROVIDER_CREDENTIALS_SECRET_ID:");
     expect(block).toContain("EGMA_PROVIDER_CREDENTIALS_REGION:");
-    expect(block).not.toContain("EGMA_ENCRYPTION_KEY:");
+    expect(block).toContain("EGMA_ENCRYPTION_KEY:");
   });
 
   it("has no healthcheck, because nothing listens for one to reach", async () => {
@@ -179,4 +177,21 @@ describe("the API process", () => {
     await walk(source);
     expect(offending).toEqual([]);
   });
+});
+
+
+it("keeps the grader WAL on its own volume when the shared environment names the API log", () => {
+  vi.stubEnv("DATABASE_URL", "postgres://unused");
+  vi.stubEnv("CLICKHOUSE_URL", "http://unused:8123");
+  vi.stubEnv("EGMA_INGEST_ENDPOINT", "");
+  vi.stubEnv("EGMA_INGESTION_LOG_DIR", "/a/host/path/for/the/api");
+  vi.stubEnv("EGMA_GRADER_INGESTION_LOG_DIR", "");
+  vi.stubEnv("EGMA_ROLE", "drain");
+  try {
+    expect(loadConfig().ingestion).toMatchObject({
+      role: "ingest", logDirectory: "/var/lib/egma/grader-ingestion",
+    });
+    vi.stubEnv("EGMA_GRADER_INGESTION_LOG_DIR", "/mounted/grader/log");
+    expect(loadConfig().ingestion.logDirectory).toBe("/mounted/grader/log");
+  } finally { vi.unstubAllEnvs(); }
 });

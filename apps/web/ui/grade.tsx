@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 
 import { humanizeIdentifier } from "../lib/transcripts.ts";
 import { shownScore, StateMark } from "./run-status.tsx";
+import { WorkRefusalActions } from "./work-refusal-actions.tsx";
 
 export type DisplayGrade = GetTraceResponse["grades"][number];
 export type DisplayGradeAssertion = NonNullable<
@@ -87,10 +88,12 @@ export function gradeSummary({
 /** Rationale and nested assertion evidence shared by both trace surfaces. */
 export function GradeDetails({
   grade,
+  projectId,
   assertionName = (assertion) => humanizeIdentifier(assertion.key),
   renderCitations,
 }: {
   readonly grade: DisplayGrade;
+  readonly projectId: string;
   readonly assertionName?: (
     assertion: DisplayGradeAssertion,
     at: number,
@@ -121,6 +124,9 @@ export function GradeDetails({
       ) : null}
       {typeof error === "string" && error.trim() !== "" ? (
         <p className="m-0 text-sm wrap-anywhere text-failure">{error}</p>
+      ) : null}
+      {grade.details.errorCode === "provider_key_unavailable" ? (
+        <WorkRefusalActions code="provider_key_unavailable" projectId={projectId} />
       ) : null}
       {assertions.length === 0 ? null : (
         <div className="border-t border-border pt-3">

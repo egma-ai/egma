@@ -27,6 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Actions } from "../../../../../../../ui/section.tsx";
 import { Problem, Refused } from "../../../../../../../ui/form.tsx";
+import { WorkRefusalActions } from "../../../../../../../ui/work-refusal-actions.tsx";
 import { Dialog } from "../../../../../../../ui/dialog.tsx";
 import {
   Failure,
@@ -292,7 +293,10 @@ function EvidenceView({
       />
       <PageBody>
         {refused === null ? null : (
-          <Refused message={regradeRefusalMessage(refused)} />
+          <Refused
+            message={regradeRefusalMessage(refused)}
+            action={<WorkRefusalActions code={refused.error} projectId={projectId} />}
+          />
         )}
 
         {asked === null ? null : (
@@ -309,7 +313,19 @@ function EvidenceView({
           </Problem>
         )}
 
-        {read.status !== "failed" ? null : (
+        {read.workBlock === null ? null : (
+          <Refused
+            message={`This simulation is waiting. ${read.workBlock.message}`}
+            action={<WorkRefusalActions code={read.workBlock.error} projectId={projectId} />}
+          />
+        )}
+
+        {read.status === "failed" && read.reason === "provider_key_unavailable" ? (
+          <Refused
+            message={executionFailureMessage(read.reason, read.executionFailure)}
+            action={<WorkRefusalActions code={read.reason} projectId={projectId} />}
+          />
+        ) : read.status !== "failed" ? null : (
           <Problem>
             <span className="block">
               {executionFailureMessage(read.reason, read.executionFailure)}
@@ -325,6 +341,7 @@ function EvidenceView({
           evidence={read}
           recording={recording}
         />
+
 
       </PageBody>
 

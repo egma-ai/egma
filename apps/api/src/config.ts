@@ -1,3 +1,4 @@
+import { openBillingPlugIn, type BillingPlugIn } from "@egma/db";
 import {
   providerCredentialSource,
   type ProviderCredentialSource,
@@ -5,7 +6,8 @@ import {
 
 import { SERVICE_TOKEN_PREFIX } from "./auth/service-token.ts";
 import type { SmtpSettings } from "./auth/email.ts";
-import type { IngestionStore } from "./ingestion/object-store.ts";
+import { loadIngestionSettings, type IngestionSettings } from "@egma/ingestion";
+export type { IngestionSettings } from "@egma/ingestion";
 import type { BlobStore } from "./recordings/signed-link.ts";
 
 /** The one deployment-owned route used for phone simulations. */
@@ -57,33 +59,6 @@ const E164 = /^\+[1-9]\d{1,14}$/u;
  * drains and never accepts.
  */
 export type DeploymentRole = "all" | "ingest" | "drain";
-
-/**
- * Durable-ingestion settings. Defaults are starting values, not measured
- * capacity or a guarantee of end-to-end visibility time.
- */
-export type IngestionSettings = {
-  readonly role: DeploymentRole;
-  /**
-   * The ingestion bucket, or `undefined` on a deployment that has named no
-   * endpoint. Naming the endpoint is what selects it, the way naming the
-   * browser's address selects the recording store above.
-   */
-  readonly store: IngestionStore | undefined;
-  /** Where the local write-ahead log lives. A writable directory, on a volume. */
-  readonly logDirectory: string;
-  readonly logMaxBytes: number;
-  readonly logMaxRecords: number;
-  /** How long the oldest staged record waits for company before its segment seals. */
-  readonly flushMilliseconds: number;
-  /** Uncompressed NDJSON bytes, under the trace store's own insert bound. */
-  readonly segmentMaxBytes: number;
-  readonly segmentMaxRecords: number;
-  /** Past this, a request is answered retryably with its staged record retained. */
-  readonly requestTimeoutMilliseconds: number;
-  /** How often the whole pending prefix is listed, restart scan aside. */
-  readonly scanIntervalMilliseconds: number;
-};
 
 export type Config = {
   readonly databaseUrl: string;
@@ -150,6 +125,40 @@ export type Config = {
    */
   readonly providerCredentials: ProviderCredentialSource;
   /**
+   * The billing plug-in this deployment runs on: an entitlement source and a
+   * usage sink, chosen once from the settings below.
+   *
+   * **Absent billing is the default and is not a special case.** With no Stripe
+   * secret named, the plug-in is the open one — every allowance unlimited,
+   * every usage record discarded — and the product is exactly the product. A
+   * self-hoster who names the same secret gets the same billing, which is what
+   * makes billing a hosted service rather than a cloud-only feature (ADR-0024).
+   * Nothing about the choice derives from whether this deployment is the cloud.
+   */
+  readonly billing: BillingPlugIn;
+  /**
+   * `EGMA_STRIPE_SECRET_KEY`, as the deployment named it, or `undefined`.
+   *
+   * **It is a setting and never a mode.** Its presence is what selects the
+   * cloud adapter, and the selection itself happens in `billing.ts` beside
+   * this file, because the adapter lives in the commercially licensed package
+   * and loading it is a dynamic import taken only when this is set. Reading
+   * the setting here rather than there keeps every deployment value in one
+   * place.
+   */
+  readonly stripeSecretKey: string | undefined;
+  /**
+   * `EGMA_STRIPE_WEBHOOK_SECRET`, as the deployment named it, or `undefined`.
+   *
+   * **What proves a delivery came from Stripe.** A webhook carries no cookie
+   * and no key: anybody can post to the endpoint, and only Stripe can sign a
+   * body against this secret. Absent, the endpoint is not mounted at all —
+   * an endpoint that could not check a signature would be one anybody could
+   * post a payment to. The buttons still work without it; Stripe's answers
+   * land the day it is set.
+   */
+  readonly stripeWebhookSecret: string | undefined;
+  /**
    * The deployment's phone carrier route, read from the process environment.
    *
    * All four values are one credential bundle. Empty is ordinary and means
@@ -195,179 +204,6 @@ function flag(
   if (["1", "true", "yes", "on"].includes(raw)) return true;
   if (["0", "false", "no", "off"].includes(raw)) return false;
   throw new Error(`${name} is not a yes or a no: ${environment[name]}`);
-}
-
-/** Which halves of ingestion this process serves. See `DeploymentRole`. */
-function deploymentRole(environment: NodeJS.ProcessEnv): DeploymentRole {
-  const raw = environment.EGMA_ROLE?.trim();
-  if (raw === undefined || raw === "") return "all";
-  if (raw === "all" || raw === "ingest" || raw === "drain") return raw;
-  throw new Error("EGMA_ROLE must be all, ingest or drain, not " + raw);
-}
-
-/**
- * One ingestion bound, as a positive whole number.
- *
- * Refused by name rather than coerced, because every one of these is a bound
- * that decides what happens under load: a zero or a stray unit suffix would
- * turn a bound into a refusal of everything, at the moment there is most
- * traffic to refuse.
- */
-function bound(
-  environment: NodeJS.ProcessEnv,
-  name: string,
-  fallback: number,
-): number {
-  const raw = environment[name]?.trim();
-  if (raw === undefined || raw === "") return fallback;
-  const held = Number(raw);
-  if (!Number.isInteger(held) || held <= 0) {
-    throw new Error(`${name} is not a positive whole number: ${raw}`);
-  }
-  return held;
-}
-
-/**
- * Configure the ingestion bucket using an endpoint this API can reach and
- * a separate ingestion credential. If an endpoint is set, require both key
- * fields. This address serves server traffic, unlike EGMA_BLOB_PUBLIC_URL.
- */
-function ingestionStore(
-  environment: NodeJS.ProcessEnv,
-): IngestionStore | undefined {
-  const endpoint = environment.EGMA_INGEST_ENDPOINT?.trim() || "";
-  if (endpoint === "") return undefined;
-
-  let parsed: URL;
-  try {
-    parsed = new URL(endpoint);
-  } catch {
-    throw new Error(
-      `EGMA_INGEST_ENDPOINT is not a URL: ${endpoint}. It is the address this ` +
-        "container reaches the ingestion bucket at, and on the bundled " +
-        "deployment it looks like http://minio:9000.",
-    );
-  }
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new Error(
-      `EGMA_INGEST_ENDPOINT speaks ${parsed.protocol} and Egma reaches an ` +
-        "object store over http: or https:",
-    );
-  }
-  // Scheme, host and port, and nothing after them — the narrowing the recording
-  // store's address makes, for a reason of its own. A credential in this URL
-  // would be a second place a credential lives, silently outranking the pair
-  // below; a path would be read as part of the bucket's address by one client
-  // and dropped by another, and a segment written under one reading would be
-  // invisible to a listing made under the other.
-  if (
-    parsed.username !== "" ||
-    parsed.password !== "" ||
-    (parsed.pathname !== "" && parsed.pathname !== "/") ||
-    parsed.search !== "" ||
-    parsed.hash !== ""
-  ) {
-    throw new Error(
-      `EGMA_INGEST_ENDPOINT must be only the address Egma reaches the ` +
-        `ingestion store at — scheme, host and port, nothing else — and this ` +
-        `one carries more. Set it to ${parsed.origin}, and set the credential ` +
-        `in EGMA_INGEST_ACCESS_KEY_ID and EGMA_INGEST_SECRET_ACCESS_KEY rather ` +
-        `than in the address.`,
-    );
-  }
-
-  const accessKeyId = environment.EGMA_INGEST_ACCESS_KEY_ID?.trim() || "";
-  const secretAccessKey = environment.EGMA_INGEST_SECRET_ACCESS_KEY?.trim() || "";
-  const missing = [
-    accessKeyId === "" ? "EGMA_INGEST_ACCESS_KEY_ID" : "",
-    secretAccessKey === "" ? "EGMA_INGEST_SECRET_ACCESS_KEY" : "",
-  ].filter((name) => name !== "");
-  if (missing.length > 0) {
-    throw new Error(
-      `EGMA_INGEST_ENDPOINT names an ingestion store and this deployment is ` +
-        `missing ${missing.join(" and ")}. Both halves are one credential, and ` +
-        "it is its own — never the recording store's read pair and never the " +
-        "simulator's write pair. It is confined to this bucket's pending " +
-        "prefix, so one workload cannot read, delete or expire the other's " +
-        "objects.",
-    );
-  }
-
-  const bucket = environment.EGMA_INGEST_BUCKET?.trim() || DEFAULT_INGEST_BUCKET;
-  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(bucket)) {
-    throw new Error(
-      `EGMA_INGEST_BUCKET must be a bucket name — lower case, 3 to 63 ` +
-        `characters, letters, digits, dots and hyphens, and no separator; ` +
-        `got ${bucket}`,
-    );
-  }
-
-  return {
-    endpoint: parsed.origin,
-    bucket,
-    region: ingestRegion(environment, parsed),
-    accessKeyId,
-    secretAccessKey,
-  };
-}
-
-/**
- * Require an explicit ingestion region for .amazonaws.com endpoints.
- * Other endpoints use the configured region or the MinIO-compatible default.
- */
-function ingestRegion(environment: NodeJS.ProcessEnv, address: URL): string {
-  const named = environment.EGMA_INGEST_REGION?.trim() || "";
-  if (named !== "") return named;
-
-  if (address.hostname.endsWith(".amazonaws.com")) {
-    throw new Error(
-      `EGMA_INGEST_ENDPOINT points at ${address.hostname}, which is Amazon's ` +
-        "own S3, and no EGMA_INGEST_REGION was set. A signature carries the " +
-        "region and S3 refuses one signed for another, so Egma would sign " +
-        "every segment for us-east-1 and every acceptance would fail. Set " +
-        "EGMA_INGEST_REGION to the ingestion bucket's region.",
-    );
-  }
-  return DEFAULT_INGEST_REGION;
-}
-
-/** Everything the durable ingestion path is told. See `IngestionSettings`. */
-function ingestionSettings(
-  environment: NodeJS.ProcessEnv,
-): IngestionSettings {
-  return {
-    role: deploymentRole(environment),
-    store: ingestionStore(environment),
-    logDirectory:
-      environment.EGMA_INGESTION_LOG_DIR?.trim() || DEFAULT_INGESTION_LOG_DIR,
-    logMaxBytes: bound(environment, "EGMA_INGESTION_LOG_MAX_BYTES", 536_870_912),
-    logMaxRecords: bound(environment, "EGMA_INGESTION_LOG_MAX_RECORDS", 200_000),
-    flushMilliseconds: bound(
-      environment,
-      "EGMA_INGESTION_FLUSH_MILLISECONDS",
-      500,
-    ),
-    segmentMaxBytes: bound(
-      environment,
-      "EGMA_INGESTION_SEGMENT_MAX_BYTES",
-      8_388_608,
-    ),
-    segmentMaxRecords: bound(
-      environment,
-      "EGMA_INGESTION_SEGMENT_MAX_RECORDS",
-      5_000,
-    ),
-    requestTimeoutMilliseconds: bound(
-      environment,
-      "EGMA_INGESTION_REQUEST_TIMEOUT_MILLISECONDS",
-      10_000,
-    ),
-    scanIntervalMilliseconds: bound(
-      environment,
-      "EGMA_INGESTION_SCAN_INTERVAL_MILLISECONDS",
-      30_000,
-    ),
-  };
 }
 
 /**
@@ -555,9 +391,16 @@ export function loadConfig(
     rateLimitPerMinute,
     simulatorServiceToken,
     providerCredentials: providerCredentialSource(environment),
+    // The open plug-in, always, and the one setting that can replace it. A
+    // deployment that named a Stripe secret has the cloud adapter installed
+    // over this at boot; see `billing.ts` and `index.ts`.
+    billing: openBillingPlugIn(),
+    stripeSecretKey: environment.EGMA_STRIPE_SECRET_KEY?.trim() || undefined,
+    stripeWebhookSecret:
+      environment.EGMA_STRIPE_WEBHOOK_SECRET?.trim() || undefined,
     carrierRoute: carrierRoute(environment),
     blob: blobStore(environment, parsedBaseUrl),
-    ingestion: ingestionSettings(environment),
+    ingestion: loadIngestionSettings(environment),
   };
 }
 
@@ -762,16 +605,3 @@ const DEFAULT_BLOB_BUCKET = "egma-recordings";
 /** What a store that ignores regions is signed for. See `blobRegion`. */
 const DEFAULT_BLOB_REGION = "us-east-1";
 
-/** The second bucket on the same store, created beside the recordings one. */
-const DEFAULT_INGEST_BUCKET = "egma-ingestion";
-
-/** What a store that ignores regions is signed for. See `ingestRegion`. */
-const DEFAULT_INGEST_REGION = "us-east-1";
-
-/**
- * Where staged evidence waits, on the named volume the deployment gives the
- * api service. It is the one path in this file that must be writable and must
- * survive a container replacement: what is in it is evidence that has been
- * accepted and is not durable yet.
- */
-const DEFAULT_INGESTION_LOG_DIR = "/var/lib/egma/ingestion";

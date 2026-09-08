@@ -177,6 +177,7 @@ const GRADE: Grade = {
 /** The whole answer, with a case naming only the part it is about. */
 function detail(over: Partial<Detail> = {}): Detail {
   return {
+    workBlock: null,
     trace: TRACE,
     turns: [HUMAN_TURN, AGENT_TURN],
     spans: [OUTSIDE_STEP],
@@ -617,6 +618,34 @@ describe("what egma made of the exchange", () => {
     const grades = screen.getByLabelText("Grades");
     expect(within(grades).getByText("errored")).toBeTruthy();
     expect(grades.textContent).toContain("The model did not return a valid score.");
+  });
+
+  it("offers credits and provider keys for blocked production grading", async () => {
+    stub({ status: 200, body: detail({
+      gradingState: "pending", grades: [], gradeHistory: [], combinedScore: null,
+      workBlock: { error: "providers_unfunded", message: "The inference balance is $0.00." },
+    }) });
+    await open();
+    await settled();
+    const message = screen.getByText("Grading is waiting. The inference balance is $0.00.");
+    const block = within(message.closest('[role="alert"]') as HTMLElement);
+    expect(block.getByRole("link", { name: "Add credits" }).getAttribute("href"))
+      .toBe("/projects/prj_2/settings/billing");
+    expect(block.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_2/settings/provider-api-keys");
+  });
+
+  it("offers provider key repair for a typed grader credential error", async () => {
+    const error: Grade = { ...GRADE, score: null, result: "errored", details: {
+      error: "The saved OpenAI key cannot be used.", errorCode: "provider_key_unavailable", provider: "openai",
+    } };
+    stub({ status: 200, body: detail({ gradingState: "error", grades: [error], gradeHistory: [], combinedScore: null }) });
+    await open();
+    await settled();
+    expect(screen.getByText("The saved OpenAI key cannot be used.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_2/settings/provider-api-keys");
+    expect(screen.queryByRole("link", { name: "Add credits" })).toBeNull();
   });
 
   it("shows a waiting state before grades arrive", async () => {

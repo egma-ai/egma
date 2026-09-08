@@ -243,6 +243,23 @@ services:
       EGMA_PHONE_SOURCE_NUMBER: ${EGMA_PHONE_SOURCE_NUMBER:-}
       EGMA_PHONE_TRUNK_USERNAME: ${EGMA_PHONE_TRUNK_USERNAME:-}
       EGMA_PHONE_TRUNK_PASSWORD: ${EGMA_PHONE_TRUNK_PASSWORD:-}
+      # What selects a billing adapter. Empty on every deployment that does not
+      # charge anybody, which is every deployment today: the product then runs
+      # on the open plug-in — every allowance unlimited, every usage record
+      # discarded — and measures what it spends all the same. Nothing here
+      # derives from whether this deployment is the hosted one; a self-hoster
+      # who sets the same secret gets the same billing.
+      EGMA_STRIPE_SECRET_KEY: ${EGMA_STRIPE_SECRET_KEY:-}
+      # What proves a webhook came from Stripe. A delivery carries no cookie
+      # and no key: anybody can post to the endpoint, and only Stripe can sign
+      # a body against this secret. Empty means the endpoint is not mounted at
+      # all — one that could not check a signature would be one anybody could
+      # post a payment to. The buttons still work without it.
+      EGMA_STRIPE_WEBHOOK_SECRET: ${EGMA_STRIPE_WEBHOOK_SECRET:-}
+      # Stripe's client-side key, which is public by design. Nothing reads it
+      # yet: every payment happens on a Stripe-hosted page that needs no key of
+      # Egma's in the browser. It is here so a deployment answers all three
+      # Stripe settings in one place.
       # Egma platform telemetry, behind one flag that defaults to off — see
       # .env.example. Deliberately not the trace store: what customers send
       # through the OTLP door is their data in ClickHouse. This process sends
@@ -487,6 +504,14 @@ services:
       # This copy's own name for itself, in claims and in its log. Unset is
       # fine and usual — it names itself after its host and process, which is
       # what tells two copies apart.
+      # Paid attempts first enter this worker's own recoverable log and shared bucket.
+      EGMA_INGEST_ENDPOINT: ${EGMA_INGEST_ENDPOINT:-http://minio:9000}
+      EGMA_INGEST_BUCKET: ${EGMA_INGEST_BUCKET:-egma-ingestion}
+      EGMA_INGEST_REGION: ${EGMA_INGEST_REGION:-${EGMA_S3_REGION:-}}
+      EGMA_INGEST_ACCESS_KEY_ID: ${EGMA_INGEST_ACCESS_KEY_ID:-${EGMA_S3_INGEST_ACCESS_KEY_ID:-}}
+      EGMA_INGEST_SECRET_ACCESS_KEY: ${EGMA_INGEST_SECRET_ACCESS_KEY:-${EGMA_S3_INGEST_SECRET_ACCESS_KEY:-}}
+      EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:?no default — egma self-host up generates it in .egma-platform/platform.env; back it up with Postgres}
+      EGMA_GRADER_INGESTION_LOG_DIR: /var/lib/egma/grader-ingestion
       EGMA_GRADER_CLAIMANT: ${EGMA_GRADER_CLAIMANT:-}
       # How many conversations one copy judges at once. It claims only what it
       # has room for, so a burst of finished simulations degrades to a queue
@@ -514,6 +539,12 @@ services:
       EGMA_CARTESIA_API_KEY: ${EGMA_CARTESIA_API_KEY:-}
       EGMA_PROVIDER_CREDENTIALS_SECRET_ID: ${EGMA_PROVIDER_CREDENTIALS_SECRET_ID:-}
       EGMA_PROVIDER_CREDENTIALS_REGION: ${EGMA_PROVIDER_CREDENTIALS_REGION:-}
+      # The same setting the api reads, for the same reason and from the same
+      # .env value. A grading job's only spend is the judge's model usage, so
+      # the claim asks the deployment whether Egma's key may fund it before it
+      # hands one out. Empty is every deployment that does not charge anybody:
+      # nothing is imported and every claim is funded.
+      EGMA_STRIPE_SECRET_KEY: ${EGMA_STRIPE_SECRET_KEY:-}
       # Egma platform telemetry, behind one flag that defaults to off. One
       # value in .env reaches this container and the api's alike — see the api
       # service.
@@ -521,6 +552,8 @@ services:
       EGMA_TELEMETRY_OTLP_ENDPOINT: ${EGMA_TELEMETRY_OTLP_ENDPOINT:-}
       EGMA_POSTHOG_KEY: ${EGMA_POSTHOG_KEY:-}
       EGMA_POSTHOG_HOST: ${EGMA_POSTHOG_HOST:-}
+    volumes:
+      - grader-ingestion:/var/lib/egma/grader-ingestion
     depends_on:
       api:
         condition: service_healthy
@@ -673,3 +706,5 @@ volumes:
   # than a loss; `docker compose down -v` deletes it, and doing that with a
   # backlog in it throws away evidence Egma answered success to.
   api-ingestion:
+  # Each grader keeps its own recoverable paid-attempt log.
+  grader-ingestion:

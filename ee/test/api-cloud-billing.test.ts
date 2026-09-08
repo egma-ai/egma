@@ -1,0 +1,646 @@
+import { traceIdOfSimulation } from "@egma/simulation-contract";
+import { newId } from "@egma/ids";
+import { allowancePeriodAt, createPersona, claimGradingJobs, releaseGradingJob, requestGrading, installBillingPlugIn, openBillingPlugIn } from "@egma/db";
+import {
+  activateBilling,
+  billingRoutes,
+  cloudBillingPlugIn,
+  seedCloudPlans,
+} from "@egma/ee";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { CLAIMS_PATH } from "../../apps/api/src/routes/claims.ts";
+import { createApi, type TestApi } from "../../apps/api/test/support/api.ts";
+import {
+  contextFor,
+  mintKey,
+  NEUTRAL_PERSON,
+  projectKeyFor,
+  request as ask,
+  signUp,
+  type Customer,
+} from "../../apps/api/test/support/traces.ts";
+
+/**
+ * Egma Cloud's billing, over the API's own HTTP surface.
+ *
+ * **The adapter is selected by constructing it, never through the
+ * environment.** A test that set a Stripe secret would be a test about
+ * `process.env`; what matters here is what the deployment does once the cloud
+ * plug-in is in place, so the plug-in is built and installed and its routes are
+ * mounted, which is exactly what the entry point does when the secret is set.
+ *
+ * **No Stripe is called and none is faked.** A Pro subscription enters this
+ * file as the two columns Egma keeps from one; a purchased credit enters it as
+ * the ledger row the webhook would have written. What is under test is what
+ * Egma does with those facts.
+ *
+ * **Two organizations throughout**, because the first question any of this has
+ * to answer correctly is whose plan, whose allowance and whose money.
+ */
+
+let api: TestApi;
+
+afterEach(async () => {
+  await api?.close();
+});
+
+/** Acme was created on the 15th, so its month turns over on the 15th. */
+const ANCHOR = new Date("2026-01-15T08:00:00.000Z");
+const PERIOD = allowancePeriodAt(ANCHOR, new Date());
+/** An hour into the period, so it is inside it whenever this suite runs. */
+const INSIDE = new Date(PERIOD.startedAt.getTime() + 3_600_000);
+
+/** $5.00 in micro-dollars, as the shipped plan file states it. */
+const WELCOME_CREDIT_MICROS = 5_000_000;
+
+const RETELL_CHAT_FETCH: typeof fetch = async () =>
+  new Response(
+    JSON.stringify({
+      items: [
+        {
+          agent_id: "agent_in_retell_1",
+          agent_name: "Front desk",
+          channel: "chat",
+        },
+      ],
+      has_more: false,
+    }),
+    { status: 200 },
+  );
+
+/** An instance standing in for a deployment that named a Stripe secret. */
+async function aBillingDeployment(label: string): Promise<void> {
+  api = await createApi(label, {
+    traceStore: true,
+    retellFetch: RETELL_CHAT_FETCH,
+    billing: cloudBillingPlugIn(),
+    installBilling: true,
+    billingRoutes,
+  });
+  // The plan rows the entry point writes on boot, from the file in `ee/`.
+  await seedCloudPlans();
+  await api.database.sql("update cloud_plan set stripe_payments_ready = true where code = 'hobby'");
+  await activateBilling(ANCHOR);
+}
+
+type Seeded = {
+  readonly customer: Customer;
+  readonly key: string;
+  readonly organizationKey: string;
+  readonly runId: string;
+  readonly agentId: string;
+  readonly connectionId: string;
+  readonly personaId: string;
+  readonly personaVersionId: string;
+  readonly testId: string;
+  readonly testVersionId: string;
+  readonly suiteId: string;
+};
+
+async function aCustomerWithARun(
+  email: string,
+  organizationName: string,
+): Promise<Seeded> {
+  const customer = await signUp(api.app, email, organizationName);
+  // Before anything asks a money question: the account is opened at the first
+  // one and freezes this instant as the customer's reset day, exactly as it
+  // does for a real organization whose creation date never moves again.
+  await api.database.sql(
+    "update organization set created_at = $2 where id = $1",
+    [customer.organizationId, ANCHOR],
+  );
+  await api.database.sql("update cloud_billing_account set period_anchor = $2, activated_at = $2 where organization_id = $1", [customer.organizationId, ANCHOR]);
+  const key = await projectKeyFor(api.app, customer);
+  await createPersona(contextFor(customer, "member"), {
+    name: "Impatient Rita",
+    ...NEUTRAL_PERSON,
+  });
+
+  const registered = await ask(api.app, "POST", "/v1/agents", key, {
+    agentPlatform: "retell",
+    name: "Front desk",
+    connection: {
+      agentPlatform: "retell",
+      connectionType: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
+      modality: "chat",
+      config: { retellAgentId: "agent_in_retell_1" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    },
+  });
+  expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
+  const agentId = (registered.body.agent as { id: string }).id;
+  const connectionId = (registered.body.connection as { id: string }).id;
+
+  const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
+    name: "Appointment changes",
+  });
+  expect(suite.statusCode, JSON.stringify(suite.body)).toBe(201);
+  const pushed = await ask(api.app, "POST", "/v1/tests", key, {
+    name: "Reschedules a booked appointment",
+    scenario: "Their cleaning has to move to any afternoon next week.",
+    expectedBehaviors: ["confirms the new time back before finishing"],
+    suiteId: String(suite.body.id),
+    personas: ["Impatient Rita"],
+  });
+  expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
+
+  const started = await ask(api.app, "POST", "/v1/runs", key, {
+    suiteId: String(suite.body.id),
+    agentId,
+    connectionId,
+  });
+  expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
+
+  const { rows } = await api.database.sql<{
+    persona_id: string;
+    persona_version_id: string;
+    test_id: string;
+    test_version_id: string;
+  }>(
+    `select persona_id, persona_version_id, test_id, test_version_id
+       from simulation where run_id = $1 limit 1`,
+    [String(started.body.id)],
+  );
+  const pins = rows[0];
+  if (pins === undefined) throw new Error("the run has no simulation");
+
+  return {
+    customer,
+    key,
+    organizationKey: await mintKey(api.app, customer.cookie, "Organization billing"),
+    runId: String(started.body.id),
+    agentId,
+    connectionId,
+    personaId: pins.persona_id,
+    personaVersionId: pins.persona_version_id,
+    testId: pins.test_id,
+    testVersionId: pins.test_version_id,
+    suiteId: String(suite.body.id),
+  };
+}
+
+let position = 1_000;
+
+/** Chat conversations this customer has already run this period. */
+async function chatConversations(
+  seeded: Seeded,
+  count: number,
+): Promise<void> {
+  const from = position + 1;
+  position += count;
+  await api.database.sql(
+    `insert into simulation
+       (id, run_id, organization_id, project_id, agent_id, connection_id,
+        persona_id, persona_version_id, persona_parameter_values, test_id, test_version_id,
+        position, modality, connection_type, status, ending_reason,
+        started_at, ended_at)
+     select
+       ids.id,
+       $1, $2, $3, $4, $5, $6, $7,
+       (select persona_parameter_values from simulation where run_id = $1 order by position limit 1),
+       $8, $9, $11::int + ids.n - 1, 'chat', 'retell_chat_api', 'completed', 'persona_concluded',
+       $10::timestamptz, $10::timestamptz + interval '30 seconds'
+     from unnest($12::text[]) with ordinality as ids(id, n)`,
+    [
+      seeded.runId,
+      seeded.customer.organizationId,
+      seeded.customer.projectId,
+      seeded.agentId,
+      seeded.connectionId,
+      seeded.personaId,
+      seeded.personaVersionId,
+      seeded.testId,
+      seeded.testVersionId,
+      INSIDE,
+      from,
+      Array.from({ length: count }, () => newId("sim")),
+    ],
+  );
+}
+
+type BillingAnswer = {
+  plan: {
+    code: string;
+    name: string;
+    feeMicros: number;
+    allowances: { kind: string; unit: string; allowed: number | null }[];
+  };
+  balanceMicros: number;
+  scheduledDowngradeAt: string | null;
+  periodStartedAt: string;
+  resetsAt: string;
+  mayManageBilling: boolean;
+  ledger: { entries: { kind: string; amountMicros: number }[]; nextCursor: string | null };
+};
+
+describe("what the Billing section reads", () => {
+  it("gives an admin the plan, its allowances and the balance", async () => {
+    await aBillingDeployment("cloud_billing_admin");
+    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+
+    const answer = await ask(
+      api.app,
+      "GET",
+      "/api/organization/billing",
+      acme.organizationKey,
+    );
+    expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
+    const read = answer.body as unknown as BillingAnswer;
+
+    // Every organization starts on Hobby with its welcome credit, and nobody
+    // was asked for a card.
+    expect(read.plan.code).toBe("hobby");
+    expect(read.plan.name).toBe("Hobby");
+    expect(read.plan.feeMicros).toBe(0);
+    expect(read.balanceMicros).toBe(WELCOME_CREDIT_MICROS);
+    expect(read.scheduledDowngradeAt).toBeNull();
+    expect(read.mayManageBilling).toBe(true);
+    expect(read.plan.allowances).toEqual([
+      { kind: "chat_simulations", unit: "simulations", allowed: 500, used: 0, overageMicrosPerMinute: 0 },
+      { kind: "web_call_minutes", unit: "minutes", allowed: 500, used: 0, overageMicrosPerMinute: 0 },
+      { kind: "phone_minutes", unit: "minutes", allowed: 500, used: 0, overageMicrosPerMinute: 0 },
+    ]);
+    // The month is the organization's own, counted from the day it was made.
+    expect(read.periodStartedAt).toBe(PERIOD.startedAt.toISOString());
+    expect(read.resetsAt).toBe(PERIOD.resetsAt.toISOString());
+  });
+
+  it("reads the saved scheduled end without requiring Stripe for the overview", async () => {
+    await aBillingDeployment("cloud_billing_scheduled_end");
+    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+    await api.database.sql(
+      "update cloud_billing_account set plan_code = 'pro', stripe_cancel_at = $2 where organization_id = $1",
+      [acme.customer.organizationId, PERIOD.resetsAt],
+    );
+    const answer = await ask(api.app, "GET", "/api/organization/billing", acme.organizationKey);
+    expect(answer.statusCode).toBe(200);
+    const read = answer.body as unknown as BillingAnswer;
+    expect(read.scheduledDowngradeAt).toBe(PERIOD.resetsAt.toISOString());
+    expect(read.balanceMicros).toBe(WELCOME_CREDIT_MICROS);
+    expect(read.ledger.entries).toHaveLength(1);
+  });
+
+  it("reads the account the credential names, and no other", async () => {
+    await aBillingDeployment("cloud_billing_two_customers");
+    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+    const globex = await aCustomerWithARun("gil@globex.example", "Globex");
+
+    // The row a Stripe subscription would have written, seeded directly.
+    await api.database.sql(
+      `update cloud_billing_account
+         set plan_code = 'pro', stripe_customer_id = 'cus_seeded',
+             stripe_subscription_id = 'sub_seeded',
+             stripe_subscription_status = 'active'
+       where organization_id = $1`,
+      [globex.customer.organizationId],
+    );
+
+    const theirs = await ask(
+      api.app,
+      "GET",
+      "/api/organization/billing",
+      acme.organizationKey,
+    );
+    const ours = await ask(
+      api.app,
+      "GET",
+      "/api/organization/billing",
+      globex.organizationKey,
+    );
+    expect((theirs.body as unknown as BillingAnswer).plan.code).toBe("hobby");
+    expect((ours.body as unknown as BillingAnswer).plan.code).toBe("pro");
+    // Pro's chat is unlimited, which the answer says as an absence rather than
+    // as a zero.
+    expect(
+      (ours.body as unknown as BillingAnswer).plan.allowances[0]?.allowed,
+    ).toBeNull();
+  });
+
+  it("refuses organization billing reads from a project API key even when its owner is an admin", async () => {
+    await aBillingDeployment("cloud_billing_project_scope");
+    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+    for (const route of ["/api/organization/billing", "/api/organization/billing/ledger"]) {
+      const refused = await ask(api.app, "GET", route, acme.key);
+      expect(refused.statusCode, JSON.stringify(refused.body)).toBe(403);
+      const allowed = await ask(api.app, "GET", route, acme.organizationKey);
+      expect(allowed.statusCode, JSON.stringify(allowed.body)).toBe(200);
+    }
+  });
+
+  it("gives a member the plan, balance and ledger", async () => {
+    await aBillingDeployment("cloud_billing_member");
+    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+
+    await api.database.sql(
+      "update membership set role = 'member' where user_id = $1",
+      [acme.customer.userId],
+    );
+    const asMember = await mintKey(api.app, acme.customer.cookie, "Acme");
+    const answer = await ask(
+      api.app,
+      "GET",
+      "/api/organization/billing",
+      asMember,
+    );
+    expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
+    const read = answer.body as unknown as BillingAnswer;
+    expect(read.balanceMicros).toBe(WELCOME_CREDIT_MICROS);
+    expect(read.mayManageBilling).toBe(false);
+    expect(read.ledger.entries).toMatchObject([{ kind: "welcome_credit", amountMicros: 5000000 }]);
+    const invalidCursor = await ask(api.app, "GET", "/api/organization/billing/ledger?cursor=broken", asMember);
+    expect(invalidCursor.statusCode).toBe(400);
+    expect(invalidCursor.body).toMatchObject({
+      error: "invalid_request",
+      message: "The billing history cursor is invalid. Reload the page to load billing history again.",
+    });
+  });
+
+  it("refuses a request with no credential", async () => {
+    await aBillingDeployment("cloud_billing_uncredentialed");
+    const response = await api.app.inject({
+      method: "GET",
+      url: "/api/organization/billing",
+    });
+    expect(response.statusCode).toBe(401);
+  });
+});
+
+describe("starting a run an organization cannot pay for", () => {
+  it("is refused, naming the spent allowance and its reset date", async () => {
+    await aBillingDeployment("cloud_billing_run_start");
+    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+    const globex = await aCustomerWithARun("gil@globex.example", "Globex");
+
+    // Five hundred is the number the Hobby row publishes, so five hundred is
+    // what this spends.
+    await chatConversations(acme, 500);
+
+    const refused = await ask(api.app, "POST", "/v1/runs", acme.key, {
+      suiteId: acme.suiteId,
+      agentId: acme.agentId,
+      connectionId: acme.connectionId,
+    });
+    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+    expect(refused.body).toMatchObject({ error: "allowance_spent" });
+    const message = String(
+      (refused.body as { message?: unknown }).message ?? "",
+    );
+    expect(message).toContain("500");
+    expect(message).toContain("Hobby");
+    expect(message).toContain("Settings → Usage and billing");
+
+    // And the other customer's month is its own.
+    const admitted = await ask(api.app, "POST", "/v1/runs", globex.key, {
+      suiteId: globex.suiteId,
+      agentId: globex.agentId,
+      connectionId: globex.connectionId,
+    });
+    expect(admitted.statusCode, JSON.stringify(admitted.body)).toBe(201);
+  });
+
+  it("is refused when Egma's key cannot pay for the providers it needs", async () => {
+    await aBillingDeployment("cloud_billing_run_start_funding");
+    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+
+    // The balance spent, as a correction an operator would write.
+    await spendTheBalance(acme);
+
+    const refused = await ask(api.app, "POST", "/v1/runs", acme.key, {
+      suiteId: acme.suiteId,
+      agentId: acme.agentId,
+      connectionId: acme.connectionId,
+    });
+    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+    expect(refused.body).toMatchObject({ error: "providers_unfunded" });
+    const message = String(
+      (refused.body as { message?: unknown }).message ?? "",
+    );
+    // A chat conversation needs its persona's LLM and nothing else.
+    expect(message).toContain("openai");
+    expect(message).toContain("$0.00");
+    expect(message).toContain("Settings → Usage and billing");
+
+    // Nothing was written: one run in this project, the one the fixture made.
+    const { rows } = await api.database.sql<{ started: string }>(
+      "select count(*)::text as started from run where project_id = $1",
+      [acme.customer.projectId],
+    );
+    expect(rows[0]?.started).toBe("1");
+  });
+});
+
+/** This customer's welcome credit spent, as an operator's correction. */
+async function spendTheBalance(seeded: Seeded): Promise<void> {
+  await api.database.sql(
+    `insert into cloud_ledger_entry
+       (id, organization_id, kind, amount_micros, reference_kind,
+        reference_id, idempotency_key, occurred_at)
+     values ($1, $2, 'correction', $3, 'operator', 'this-test',
+             'this-test-spends-' || $2, now())`,
+    [newId("cle"), seeded.customer.organizationId, -WELCOME_CREDIT_MICROS],
+  );
+  await api.database.sql(
+    "update cloud_billing_account set balance_micros = 0 where organization_id = $1",
+    [seeded.customer.organizationId],
+  );
+}
+
+it("keeps billing absent on OSS and removes the run billing surface", async () => {
+  api = await createApi("billing_absent", { retellFetch: RETELL_CHAT_FETCH });
+  const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+  const hold = await ask(api.app, "GET", `/api/runs/${acme.runId}/billing-hold`, acme.key);
+  expect(hold.statusCode).toBe(404);
+  expect((await ask(api.app, "GET", "/api/organization/billing", acme.key)).statusCode).toBe(404);
+  await chatConversations(acme, 500);
+  const started = await ask(api.app, "POST", "/v1/runs", acme.key, { suiteId: acme.suiteId, agentId: acme.agentId, connectionId: acme.connectionId });
+  expect(started.statusCode).toBe(201);
+});
+
+describe("what the claim door does when a customer's month is spent", () => {
+  it("leaves the conversation queued and never stops one already running", async () => {
+    await aBillingDeployment("cloud_billing_claim");
+    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+    await chatConversations(acme, 500);
+
+    // One conversation of this run is already being conducted. Billing must
+    // never reach it: a claimed simulation finishes.
+    const running = newId("sim");
+    await api.database.sql(
+      `insert into simulation
+         (id, run_id, organization_id, project_id, agent_id, connection_id,
+          persona_id, persona_version_id, persona_parameter_values, test_id, test_version_id,
+          position, modality, connection_type, status,
+          claimed_by, claimed_at, heartbeat_at, started_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8,
+               (select persona_parameter_values from simulation where run_id = $2 order by position limit 1),
+               $9, $10, 9001, 'chat',
+               'retell_chat_api', 'running', 'the-simulator', now(), now(),
+               now())`,
+      [
+        running,
+        acme.runId,
+        acme.customer.organizationId,
+        acme.customer.projectId,
+        acme.agentId,
+        acme.connectionId,
+        acme.personaId,
+        acme.personaVersionId,
+        acme.testId,
+        acme.testVersionId,
+      ],
+    );
+
+    const claimed = await api.app.inject({
+      method: "POST",
+      url: CLAIMS_PATH,
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: {
+        contract_versions: [5],
+        claimant: "sim-1",
+        capacity: 10,
+        wait_seconds: 0,
+      },
+    });
+    expect(claimed.statusCode, claimed.body).toBe(200);
+    const handed = (claimed.json() as { specs: unknown[] }).specs;
+    expect(handed).toEqual([]);
+
+    // Back on the queue, not failed: nothing is wrong with it.
+    const { rows } = await api.database.sql<{ status: string }>(
+      "select status from simulation where run_id = $1 and position < 9000 and position >= 1 order by position limit 1",
+      [acme.runId],
+    );
+    expect(rows[0]?.status).toBe("queued");
+
+    // And the one already being conducted is exactly where it was.
+    const { rows: live } = await api.database.sql<{ status: string }>(
+      "select status from simulation where id = $1",
+      [running],
+    );
+    expect(live[0]?.status).toBe("running");
+    const pendingRun = await ask(api.app, "GET", `/v1/runs/${acme.runId}`, acme.key);
+    expect(pendingRun.body).toMatchObject({ workBlock: { error: "allowance_spent" } });
+    const activeSimulation = await ask(api.app, "GET", `/v1/simulations/${running}`, acme.key);
+    expect(activeSimulation.body).toMatchObject({ workBlock: null });
+  });
+
+  it("leaves it queued when Egma's key cannot pay for its providers", async () => {
+    await aBillingDeployment("cloud_billing_claim_funding");
+    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+    // The allowance is untouched. What is spent is the balance, so the door
+    // refuses for the other of the two reasons.
+    await spendTheBalance(acme);
+
+    const claimed = await api.app.inject({
+      method: "POST",
+      url: CLAIMS_PATH,
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: {
+        contract_versions: [5],
+        claimant: "sim-1",
+        capacity: 10,
+        wait_seconds: 0,
+      },
+    });
+    expect(claimed.statusCode, claimed.body).toBe(200);
+    expect(
+      (claimed.json() as { specs: unknown[] }).specs,
+    ).toEqual([]);
+
+    const { rows } = await api.database.sql<{ status: string }>(
+      "select status from simulation where run_id = $1",
+      [acme.runId],
+    );
+    expect(rows.map((row) => row.status)).toEqual(["queued"]);
+    const pending = await ask(api.app, "GET", `/v1/runs/${acme.runId}`, acme.key);
+    expect(pending.body).toMatchObject({ workBlock: { error: "providers_unfunded" } });
+    const restore = installBillingPlugIn({
+      ...openBillingPlugIn(),
+      entitlements: {
+        mayStart: async () => ({ allowed: true }),
+        mayPlatformKeyFund: async () => { throw new Error("Billing is unavailable"); },
+      },
+    });
+    try {
+      const outage = await ask(api.app, "GET", `/v1/runs/${acme.runId}`, acme.key);
+      expect(outage.body).toMatchObject({ workBlock: null });
+    } finally {
+      restore();
+    }
+  });
+});
+
+
+async function completedSimulation(seeded: Seeded): Promise<string> {
+  await api.database.sql("update simulation set status = 'claimed', claimed_by = 'simulator', claimed_at = now(), heartbeat_at = now() where run_id = $1", [seeded.runId]);
+  await api.database.sql("update simulation set status = 'running', started_at = now() where run_id = $1", [seeded.runId]);
+  const { rows } = await api.database.sql<{ id: string }>(
+    "update simulation set status = 'completed', started_at = now(), ended_at = now(), ending_reason = 'persona_concluded' where run_id = $1 returning id", [seeded.runId],
+  );
+  if (!rows[0]) throw new Error("Missing simulation");
+  return rows[0].id;
+}
+
+it("refuses unfunded regrades for both session and API key before queueing", async () => {
+  await aBillingDeployment("regrade_billing_refusal");
+  const acme = await aCustomerWithARun("regrade@acme.example", "Acme");
+  const id = await completedSimulation(acme);
+  await spendTheBalance(acme);
+  const path = `/v1/simulations/${id}/regrade?project=${acme.customer.projectId}`;
+  const keyRefusal = await ask(api.app, "POST", path, acme.key);
+  expect(keyRefusal.statusCode).toBe(422);
+  expect(keyRefusal.body).toMatchObject({ error: "providers_unfunded" });
+  const session = await api.app.inject({ method: "POST", url: path, headers: { cookie: acme.customer.cookie, origin: api.config.baseUrl } });
+  expect(session.statusCode, session.body).toBe(422);
+  expect(session.json()).toMatchObject({ error: "providers_unfunded" });
+  expect(await claimGradingJobs({ claimant: "grader", capacity: 10 })).toEqual([]);
+});
+
+it("finishes an admitted simulation regrade and its retries after the balance falls", async () => {
+  await aBillingDeployment("regrade_billing_admitted");
+  const acme = await aCustomerWithARun("regrade@acme.example", "Acme");
+  const id = await completedSimulation(acme);
+  const path = `/v1/simulations/${id}/regrade?project=${acme.customer.projectId}`;
+  expect((await ask(api.app, "POST", path, acme.key)).statusCode).toBe(200);
+  await spendTheBalance(acme);
+  const [first] = await claimGradingJobs({ claimant: "grader", capacity: 10 });
+  expect(first?.simulationId).toBe(id);
+  if (!first) throw new Error("Missing grading claim");
+  await releaseGradingJob(first.auth, first.id, "grader", "retry the obtained work");
+  const [retry] = await claimGradingJobs({ claimant: "grader", capacity: 10 });
+  expect(retry?.id).toBe(first.id);
+  expect(retry?.attempts).toBe(2);
+});
+
+it("finishes automatic simulation grading at zero and admits regrades during a billing outage", async () => {
+  await aBillingDeployment("automatic_grading_billing");
+  const acme = await aCustomerWithARun("automatic@acme.example", "Acme");
+  const id = await completedSimulation(acme);
+  const traceId = traceIdOfSimulation(id);
+  if (!traceId) throw new Error("Missing trace");
+  await spendTheBalance(acme);
+  await requestGrading(contextFor(acme.customer, "member"), { source: "simulation", traceId,
+    traceStartedAt: new Date(), runId: acme.runId, endsTrace: true, evidenceReady: true, modality: "chat" });
+  const [initial] = await claimGradingJobs({ claimant: "grader", capacity: 10 });
+  expect(initial?.simulationId).toBe(id);
+  if (!initial) throw new Error("Missing initial grading claim");
+  await releaseGradingJob(initial.auth, initial.id, "grader", "retry automatic grading");
+  const [second] = await claimGradingJobs({ claimant: "grader", capacity: 10 });
+  expect(second?.id).toBe(initial.id);
+  if (!second) throw new Error("Missing retry");
+  await releaseGradingJob(second.auth, second.id, "grader", "retry again");
+  const [third] = await claimGradingJobs({ claimant: "grader", capacity: 10 });
+  if (!third) throw new Error("Missing final attempt");
+  await releaseGradingJob(third.auth, third.id, "grader", "no result before exhaustion");
+  expect((await ask(api.app, "POST", `/v1/simulations/${id}/regrade`, acme.key)).statusCode).toBe(422);
+  expect(await claimGradingJobs({ claimant: "grader", capacity: 10 })).toEqual([]);
+  const restore = installBillingPlugIn({ ...openBillingPlugIn(), entitlements: {
+    mayStart: () => Promise.resolve({ allowed: true }),
+    mayPlatformKeyFund: () => Promise.reject(new Error("billing unavailable")),
+  } });
+  try {
+    expect((await ask(api.app, "POST", `/v1/simulations/${id}/regrade`, acme.key)).statusCode).toBe(200);
+  } finally { restore(); }
+});

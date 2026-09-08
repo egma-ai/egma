@@ -11,6 +11,12 @@ permission level from the key. The web app uses its session cookie on the same
 
 API keys also authenticate OTLP trace ingest at `POST /v1/traces`, so the same credential that calls the REST API is the one your voice agent's OpenTelemetry exporter uses.
 
+A project key cannot read organization-wide member lists, provider-key metadata,
+usage or billing, or manage the organization, its members or its projects. It
+can create, list and revoke keys only within its own project and its creator's
+current role. Browser sessions keep the person's organization permissions when
+a project is selected.
+
 ## Key Format
 
 Every Egma API key begins with the prefix `egma_sk_` followed by 43 characters of base64url-encoded random data:
@@ -44,7 +50,9 @@ curl -X POST http://localhost:3100/v1/keys \
 
 <ParamField body="projectId" type="string">
   Scopes this key to a single project. Required for trace ingest — a key with
-  no project cannot file spans. Optional for keys that only call REST endpoints.
+  no project cannot file spans. When a project key creates another key, this
+  field is required and must match the caller's project. Browser sessions and
+  organization keys may omit it for organization-wide access.
 </ParamField>
 
 ### Response
@@ -172,7 +180,8 @@ curl http://localhost:3100/v1/keys \
 
 <Note>
   The list response never includes the `secret` field — only the `looksLike`
-  hint. Admins see every key in the organization; other roles see only the keys
+  hint. Project keys see only their project's keys. Within the credential's
+  scope, admins see every key; other roles see only the keys
   they created.
 </Note>
 

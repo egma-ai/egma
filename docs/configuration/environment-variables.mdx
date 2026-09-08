@@ -40,8 +40,9 @@ internal values to `.env`. A new encryption key cannot open credentials sealed
 by the old key.
 
 <ParamField path="EGMA_ENCRYPTION_KEY" type="string" required>
-  A generated 32-byte hex key. It seals connection credentials stored in
-  Postgres. Back up the generated platform file with the database. The sealed
+  A generated 32-byte hex key. It seals connection and organization provider
+  credentials stored in Postgres. The API and grader use the same key. Back up
+  the generated platform file with the database. The sealed
   values cannot be recovered without this key.
 </ParamField>
 
@@ -386,6 +387,7 @@ The bundled stack uses MinIO and does not need them in `.env`.
 | `EGMA_GRADER_LEASE_SECONDS` | Claim lease; default 120 |
 | `EGMA_GRADER_SWEEP_SECONDS` | Backstop queue scan; default 30 |
 | `EGMA_GRADER_LOG_LEVEL` | Grader log level; default `INFO` |
+| `EGMA_GRADER_INGESTION_LOG_DIR` | Persistent paid-usage log; default `/var/lib/egma/grader-ingestion`. Mount a separate writable volume here. The grader does not use the API ingestion log directory. |
 
 ### Egma platform telemetry
 
@@ -417,6 +419,10 @@ Project persona settings choose the LLM, speech-to-text, text-to-speech, and voi
 Project grader settings choose the LLM used for grading. The variables below
 supply only the credentials needed to call those providers.
 
+Keys saved under [Settings → Provider API Keys](/configuration/provider-api-keys)
+take precedence for their organization. The deployment credentials below supply
+providers without an organization key.
+
 Put one current key per selected provider in `.env`, then run
 `egma self-host up` so the containers receive the changed environment.
 
@@ -443,7 +449,7 @@ Set both or neither:
 <ParamField path="EGMA_PROVIDER_CREDENTIALS_SECRET_ID" type="string">
   The secret ID or ARN. The secret JSON uses `openai_api_key`,
   `deepgram_api_key`, and `cartesia_api_key`. The API and grader fetch its
-  current value for each work item.
+  current value when a work item needs a provider without an organization key.
 </ParamField>
 
 <ParamField path="EGMA_PROVIDER_CREDENTIALS_REGION" type="string">
@@ -491,6 +497,97 @@ bundle is a configuration error.
 
 Wrap a credential containing `$` in single quotes in `.env` so Compose keeps
 it literal.
+
+---
+
+## Optional billing
+
+<ParamField path="EGMA_STRIPE_SECRET_KEY" type="string">
+  The Stripe secret key that selects a billing adapter. Leave it empty unless
+  you charge the people who use your deployment.
+</ParamField>
+
+<ParamField path="EGMA_STRIPE_WEBHOOK_SECRET" type="string">
+  The signing secret of the Stripe webhook endpoint you point at
+  `/api/billing/stripe/webhook`. Paid billing actions become available only
+  after this signing secret is configured.
+</ParamField>
+
+Egma measures every provider request and counts every chat simulation,
+web-call minute and phone minute on every deployment, whoever pays. Charging
+for them is separate, and it is off unless this key is set: with no key, plans
+and limits do not exist, every allowance is unlimited, and the usage page shows
+you your own numbers.
+
+Setting it turns on plans, monthly allowances and a prepaid inference balance
+for every organization on the deployment. Each organization starts on the free
+Hobby plan and receives a one-time welcome credit. When billing is healthy,
+new work pauses if a Hobby allowance is spent or a required provider must use
+the deployment's key and the inference balance is exhausted. A saved organization
+key funds its provider independently. Pro voice usage can continue past its
+included minutes at the overage rate. Already admitted work finishes, and
+billing failures do not stop customer jobs. **Settings → Usage and billing**
+shows usage, the balance and payment actions; refusal messages link to the
+setting that can resolve the block.
+
+Nothing about that is Egma Cloud's alone. The same key gives the same billing
+on any deployment, which is what makes it a hosted service rather than a
+cloud-only feature.
+
+### Setting Stripe up
+
+Two steps, in this order.
+
+First, create the Stripe objects your deployment sells the paid plan through:
+
+```bash
+DATABASE_URL=... EGMA_STRIPE_SECRET_KEY=... \
+  pnpm --filter @egma/ee stripe:setup
+```
+
+It finds every object before it makes one, so it is safe to run again. It
+creates two billing meters, the paid product, its monthly fee price and two
+tiered metered prices whose first tier is the included allowance and whose
+second is the overage price, and it writes their identifiers onto the plan row.
+It refuses a live key unless you set `EGMA_STRIPE_SETUP_ALLOW_LIVE=1`.
+
+Supply your business address and it also sets your Stripe Tax head office,
+which is what activates Stripe Tax. Either the whole address as JSON in
+`EGMA_STRIPE_HEAD_OFFICE`, or the separate variables
+`EGMA_STRIPE_HEAD_OFFICE_LINE1`, `…_LINE2`, `…_CITY`, `…_STATE`,
+`…_POSTAL_CODE` and `…_COUNTRY`. Without an address the command says so and
+does everything else. These are read by the command only and are not
+deployment settings.
+
+Second, add a webhook endpoint in Stripe pointing at
+`https://your-deployment/api/billing/stripe/webhook`, subscribed to
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+`customer.subscription.created`, `customer.subscription.updated` and
+`customer.subscription.deleted`. Put its signing secret in
+`EGMA_STRIPE_WEBHOOK_SECRET` and restart. Until you do, the endpoint answers
+404 and no payment reaches a balance.
+
+### Updating pricing
+
+Edit plan fees, allowances and overage rates in `ee/src/plans.json`, then deploy
+the updated configuration. The API loads plan values at startup and retries a
+failed initialization; it does not rewrite them on each settlement interval.
+Direct database edits are not the pricing workflow.
+
+After changing a Pro fee, included voice allowance or overage rate, rerun
+`pnpm --filter @egma/ee stripe:setup` from that release with the deployment's
+`DATABASE_URL` and `EGMA_STRIPE_SECRET_KEY`. The command creates changed Stripe
+prices, moves their lookup keys and saves the identifiers used by new Pro
+Checkouts. A plan deployment alone does not update those Stripe prices.
+
+The setup command does not update existing subscriptions. Their invoices keep
+the prices they already use, while Egma's plan display reads the deployed plan
+values. Applying a changed plan to existing subscribers therefore needs a
+separate rollout decision; rerunning setup does not complete that change.
+
+Model rates are in `packages/db/src/models/rate-card.json`. Add a new entry with
+a new effective date and deploy it. Keep prior entries: stored usage keeps its
+original price references. Model rate changes do not require Stripe setup.
 
 ---
 

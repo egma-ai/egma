@@ -1,0 +1,20 @@
+{
+  "entries": [
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "prices": { "input_tokens": { "unit": "token", "usdPerMillion": "0.15" } }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "prices": { "input_tokens": { "unit": "token", "usdPerMillion": "0.25" } }
+    }
+  ]
+}

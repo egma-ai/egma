@@ -54,6 +54,16 @@ export function inActingProject(
     : eq(table.projectId, auth.projectId);
 }
 
+/** A project API key cannot list organization-wide or other-project records. */
+export function inCredentialProject(
+  auth: AuthContext,
+  projectId: AnyPgColumn,
+): SQL | undefined {
+  return auth.via === "api_key" && auth.projectId !== undefined
+    ? eq(projectId, auth.projectId)
+    : undefined;
+}
+
 /** The caller's own customer row. */
 export function theOrganization(auth: AuthContext): SQL {
   return eq(organization.id, auth.organizationId);

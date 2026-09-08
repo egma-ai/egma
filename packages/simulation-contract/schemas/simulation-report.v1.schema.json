@@ -167,7 +167,7 @@
         "ending": {
           "description": "How the simulation ended. `agent_never_joined`: the way in opened but no agent turned up, so nothing was tested. `not_answered`: the simulator reached out and nothing picked up, so nothing was tested. `error`: the simulator hit a fault it could not conduct through.",
           "type": "string",
-          "enum": ["agent_never_joined", "not_answered", "error"]
+          "enum": ["agent_never_joined", "not_answered", "error", "provider_key_unavailable"]
         },
         "started_at": {
           "description": "When the simulator began conducting this simulation — the moment the `running` transition reported.",

@@ -1,5 +1,6 @@
 import {
   appendSpans,
+  priceUsageSpans,
   committedSpans,
   AGENT_PLATFORMS,
   projectOfOrganizationState,
@@ -22,9 +23,9 @@ import {
   type IngestionDefect,
   type IngestionLog,
 } from "./defects.ts";
-import type { PendingObjectStore } from "./object-store.ts";
-import { contentHashOf, spanFor, type IngestionRecord } from "./record.ts";
-import { segmentIdIn, type SegmentScope } from "./segment.ts";
+import type { PendingObjectStore } from "@egma/ingestion";
+import { contentHashOf, recordFor, spanFor, type IngestionRecord } from "@egma/ingestion";
+import { segmentIdIn, type SegmentScope } from "@egma/ingestion";
 import { verifiedSegment, type VerifiedSegment } from "./verify.ts";
 
 const meter = openTelemetryMetrics.getMeter("@egma/api/ingestion-drainer");
@@ -404,7 +405,7 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
   }
 
   const auth = authFor(segment.scope);
-  const spans: readonly NewSpan[] = segment.records.map(spanFor);
+  let spans: readonly NewSpan[] = segment.records.map(spanFor);
 
   // The header binds a project to an organization and the checksum covers that
   // binding, so nothing can have edited it — but a pair that was never real, and
@@ -442,6 +443,20 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     );
   }
 
+  let usagePending = false;
+  try {
+    spans = await priceUsageSpans(auth, spans);
+    segment = { ...segment, records: spans.map(recordFor) };
+  } catch (cause) {
+    // Billing must not hold the conversation. Retain the complete durable
+    // object, while ordinary evidence and its grading handoff continue.
+    waitAndTryAgain(cause, "usage pricing did not finish; its accepted evidence remains pending");
+    usagePending = true;
+    spans = spans.filter((span) => span.usage === undefined);
+    if (spans.length === 0) return false;
+    segment = { ...segment, records: spans.map(recordFor) };
+  }
+
   let authoritative: ReadonlySet<string>;
   try {
     authoritative = await refuseConflictingEvidence(auth, segment);
@@ -474,7 +489,7 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     // blocks under the same deduplication token, and the token would then
     // suppress the very rows the replay existed to write. Identity is what makes
     // the repeat free; the token only makes it cheap.
-    await appendSpans(auth, insertable, { segmentId: segment.segmentId });
+    await appendSpans(auth, insertable, { segmentId: usagePending ? `${segment.segmentId}:conversation` : segment.segmentId });
   } catch (cause) {
     if (cause instanceof TraceStoreRefusedError) {
       // Rows the store has looked at and will refuse forever. Retained rather
@@ -501,6 +516,8 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     // repeated forever.
     return classify(cause, "a drained segment's handoffs did not finish");
   }
+
+  if (usagePending) return false;
 
   try {
     await store.delete(key);

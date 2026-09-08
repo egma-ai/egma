@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 
@@ -41,7 +41,7 @@ const ME: Me = {
 
 type Stub =
   | { readonly status: number; readonly body: unknown }
-  | { readonly deferred: Promise<Response> }
+  | { readonly deferred: Promise<Response>; readonly onRequest?: () => void }
   | "never";
 type Sent = {
   readonly path: string;
@@ -73,7 +73,10 @@ function answers(stubs: Record<string, Stub | readonly Stub[]>): void {
         ? (held[Math.min(turn, held.length - 1)] ?? "never")
         : held;
       if (answer === "never") return new Promise<Response>(() => undefined);
-      if ("deferred" in answer) return answer.deferred;
+      if ("deferred" in answer) {
+        answer.onRequest?.();
+        return answer.deferred;
+      }
       return new Response(answer.status === 204 ? null : JSON.stringify(answer.body), {
         status: answer.status,
         headers: { "content-type": "application/json" },
@@ -126,6 +129,7 @@ function runHeader(overrides: Record<string, unknown> = {}) {
 
 function runDetail(overrides: Record<string, unknown> = {}) {
   return {
+    workBlock: null,
     ...runHeader(),
     eventThrough: 0,
     connectionSnapshot: {
@@ -450,6 +454,7 @@ describe("one run after suites", () => {
     render(<RunDetailPage />);
 
     const title = await screen.findByRole("heading", { name: "Release check" });
+    expect(sent.some((request) => request.path.includes("/billing-hold"))).toBe(false);
     const navigation = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(title.closest("nav")).toBe(navigation);
     expect(
@@ -732,6 +737,132 @@ describe("one run after suites", () => {
         /later tool calls or conversation turns may be absent/iu,
       ),
     ).toBeTruthy();
+  });
+
+  it("clears a queued work block after funding recovers without a run event", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const waiting = runDetail({
+      status: "running", gradableCount: 0, gradedCount: 0,
+      workBlock: { error: "providers_unfunded", message: "The inference balance is $0.00." },
+    });
+    answers({
+      ...detailStubs(waiting),
+      "/v1/runs/run_1": [
+        { status: 200, body: waiting },
+        { status: 200, body: { ...waiting, workBlock: null } },
+      ],
+    });
+    render(<RunDetailPage />);
+    expect(await screen.findByText("Queued simulations are waiting. The inference balance is $0.00.")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByText("Queued simulations are waiting. The inference balance is $0.00.")).toBeNull();
+    }, { timeout: 3500 });
+  });
+
+  it("explains why queued simulations are waiting and links to the plan", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(detailStubs(runDetail({
+      status: "running",
+      workBlock: { error: "allowance_spent", message: "The Hobby phone allowance is used." },
+    })));
+    render(<RunDetailPage />);
+    const refusal = await screen.findByText("Queued simulations are waiting. The Hobby phone allowance is used.");
+    const alert = within(refusal.closest('[role="alert"]') as HTMLElement);
+    expect(alert.getByRole("link", { name: "Usage and billing" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/billing");
+    expect(alert.queryByRole("link", { name: "Add credits" })).toBeNull();
+  });
+
+  it("links a failed simulation in the run to provider key repair", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const failure = { status: "failed", reason: "provider_key_unavailable",
+      executionFailure: "The saved OpenAI key cannot be used." };
+    answers(detailStubs(runDetail(), undefined, [{ status: 200, body: simulationEvidence(failure) }]));
+    render(<RunDetailPage />);
+    expect(await screen.findByText(/The saved OpenAI key cannot be used./u)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/provider-api-keys");
+    expect(screen.queryByRole("link", { name: "Add credits" })).toBeNull();
+  });
+
+  it.each([
+    {
+      name: "repairs a customer-key grader error",
+      details: {
+        errorCode: "provider_key_unavailable",
+        provider: "openai",
+        error: "The saved OpenAI key cannot be used.",
+      },
+      offersKeyRepair: true,
+    },
+    {
+      name: "keeps ordinary grader errors distinct",
+      details: { provider: "openai", error: "OpenAI took too long to reply." },
+      offersKeyRepair: false,
+    },
+  ])("$name", async ({ details, offersKeyRepair }) => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const evidence = simulationEvidence();
+    answers(detailStubs(
+      runDetail(),
+      {
+        status: 200,
+        body: {
+          simulations: [simulation({
+            gradingState: "error",
+            gradeTally: { passed: 0, failed: 0, errored: 1, selected: 1 },
+            combinedScore: null,
+          })],
+          nextPageToken: null,
+        },
+      },
+      {
+        status: 200,
+        body: simulationEvidence({
+          gradingState: "error",
+          combinedScore: null,
+          grades: evidence.grades.map((grade) => ({
+            ...grade,
+            score: null,
+            result: "errored",
+            details,
+          })),
+        }),
+      },
+    ));
+    render(<RunDetailPage />);
+
+    expect(await screen.findByText(details.error)).toBeTruthy();
+    const grader = within(screen.getByRole("region", { name: "Expected behaviors" }));
+    if (offersKeyRepair) {
+      expect(grader.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+        .toBe("/projects/prj_1/settings/provider-api-keys");
+    } else {
+      expect(grader.queryByRole("link", { name: "Manage provider API keys" })).toBeNull();
+    }
+    expect(screen.queryByRole("link", { name: "Add credits" })).toBeNull();
+  });
+
+  it("offers funding actions when a regrade from the run is refused", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers({
+      ...detailStubs(runDetail(), undefined, [{ status: 200, body: simulationEvidence() }]),
+      "/v1/simulations/sim_1/regrade": {
+        status: 422,
+        body: { error: "providers_unfunded", message: "The inference balance is $0.00." },
+      },
+    });
+    render(<RunDetailPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Regrade this simulation" }));
+    const dialog = screen.getByRole("dialog", { name: "Regrade “Books service”?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Regrade simulation" }));
+    const refusal = await screen.findByText("The inference balance is $0.00.");
+    const alert = within(refusal.closest('[role="alert"]') as HTMLElement);
+    expect(alert.getByRole("link", { name: "Add credits" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/billing");
+    expect(alert.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/provider-api-keys");
+    expect(screen.queryByText(/queued for a whole-simulation regrade/iu)).toBeNull();
   });
 
   it("keeps the compact p90 summary, grade history, and regrade in the run", async () => {
@@ -1912,6 +2043,10 @@ describe("one run after suites", () => {
     const late = new Promise<Response>((resolve) => {
       answerLate = resolve;
     });
+    let requestStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      requestStarted = resolve;
+    });
     const activeRun = runDetail({
       status: "running",
       finishedAt: null,
@@ -1952,55 +2087,42 @@ describe("one run after suites", () => {
         },
         "never",
       ),
-      "/v1/runs/run_1/events": [
-        {
-          status: 200,
-          body: {
-            events: [],
-            next: 0,
-            caughtUp: true,
-            done: false,
-          },
-        },
-        { deferred: late },
-      ],
+      "/v1/runs/run_1/events": { deferred: late, onRequest: requestStarted },
     });
     const view = render(<RunDetailPage />);
 
-    await waitFor(
-      () => {
-        expect(
-          sent.filter((request) => request.path === "/v1/runs/run_1/events"),
-        ).toHaveLength(2);
-      },
-      { timeout: 4000 },
-    );
+    // Leave while a real feed read is pending, independently of either poll timer.
+    await started;
+    expect(sent.filter((request) => request.path === "/v1/runs/run_1/events"))
+      .toHaveLength(1);
     view.unmount();
-    answerLate(
-      new Response(
-        JSON.stringify({
-          events: [
-            {
-              seq: 1,
-              at: "2026-08-21T10:01:00.000Z",
-              kind: "simulation",
-              simulationId: "sim_2",
-              testName: "Reschedules service",
-              personaName: "Patient caller",
-              status: "failed",
-              reason: "simulator_error",
-              executionFailure:
-                "LiveKit refused the room because the token had expired.",
-            },
-          ],
-          next: 1,
-          caughtUp: true,
-          done: false,
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      ),
-    );
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await act(async () => {
+      answerLate(
+        new Response(
+          JSON.stringify({
+            events: [
+              {
+                seq: 1,
+                at: "2026-08-21T10:01:00.000Z",
+                kind: "simulation",
+                simulationId: "sim_2",
+                testName: "Reschedules service",
+                personaName: "Patient caller",
+                status: "failed",
+                reason: "simulator_error",
+                executionFailure:
+                  "LiveKit refused the room because the token had expired.",
+              },
+            ],
+            next: 1,
+            caughtUp: true,
+            done: false,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+      await late;
+    });
 
     expect(notify).not.toHaveBeenCalled();
   });

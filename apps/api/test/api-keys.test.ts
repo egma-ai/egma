@@ -683,6 +683,92 @@ describe("a request carrying a key", () => {
 });
 
 describe("the project a key acts in", () => {
+  it("lists and revokes only keys inside the project and the creator's role", async () => {
+    api = await createApi("keys_project_visibility");
+    const ada = await signUp("ada@acme.example", "Acme");
+    const mia = await colleagueOf(ada, "mia@acme.example", "member");
+    const outbound = await createProject(contextFor(ada, "admin"), { name: "Outbound" });
+    const mine = await mint(ada, { projectId: ada.projectId });
+    const organization = await mint(ada);
+    const otherProject = await mint(ada, { projectId: outbound.id });
+    const member = await mint(mia, { projectId: ada.projectId });
+    const listedBy = async (secret: string) => {
+      const response = await api.app.inject({ method: "GET", url: "/v1/keys", headers: withKey(secret) });
+      expect(response.statusCode, response.body).toBe(200);
+      return (response.json() as { keys: { id: string }[] }).keys.map((key) => key.id).sort();
+    };
+    expect(await listedBy(mine.secret)).toEqual([mine.id, member.id].sort());
+    expect(await listedBy(member.secret)).toEqual([member.id]);
+    expect(await listedBy(organization.secret)).toEqual([mine.id, organization.id, otherProject.id, member.id].sort());
+
+    for (const [secret, id] of [[mine.secret, organization.id], [mine.secret, otherProject.id], [member.secret, mine.id]] as const) {
+      const response = await api.app.inject({ method: "POST", url: `/v1/keys/${id}/revoke`, headers: withKey(secret) });
+      expect(response.statusCode, response.body).toBe(404);
+    }
+    const ownProjectKeys = await api.app.inject({ method: "POST", url: `/v1/keys/${member.id}/revoke`, headers: withKey(mine.secret) });
+    expect(ownProjectKeys.statusCode, ownProjectKeys.body).toBe(200);
+
+    const projects = await api.app.inject({ method: "GET", url: "/v1/projects", headers: withKey(mine.secret) });
+    expect(projects.statusCode, projects.body).toBe(200);
+    expect((projects.json() as { projects: { id: string }[] }).projects.map((project) => project.id)).toEqual([ada.projectId]);
+    const outside = await api.app.inject({ method: "GET", url: `/v1/projects/${outbound.id}`, headers: withKey(mine.secret) });
+    expect(outside.statusCode, outside.body).toBe(404);
+    const browser = await api.app.inject({ method: "GET", url: "/v1/projects", headers: { cookie: ada.cookie } });
+    expect((browser.json() as { projects: { id: string }[] }).projects.map((project) => project.id).sort()).toEqual([ada.projectId, outbound.id].sort());
+  });
+
+  it("keeps a project key below organization authority even when its creator is an admin", async () => {
+    api = await createApi("keys_project_ceiling");
+    const ada = await signUp("ada@acme.example", "Acme");
+    const mia = await colleagueOf(ada, "mia@acme.example", "member");
+    const outbound = await createProject(contextFor(ada, "admin"), { name: "Outbound" });
+    const minted = await mint(ada, { projectId: ada.projectId });
+    expect(minted.status).toBe(201);
+    const headers = withKey(minted.secret);
+
+    const saved = await api.app.inject({
+      method: "PUT", url: "/v1/provider-keys/openai", headers: { cookie: ada.cookie },
+      payload: { key: "test-organization-provider-ABCD", expectedRevision: null },
+    });
+    expect(saved.statusCode, saved.body).toBe(200);
+    const { credential } = saved.json() as { credential: { revision: string } };
+
+    const refused = [
+      await api.app.inject({ method: "PATCH", url: "/v1/organization", headers, payload: { name: "Changed by project key" } }),
+      await api.app.inject({ method: "PUT", url: "/v1/provider-keys/openai", headers, payload: { key: "test-replacement-provider-WXYZ", expectedRevision: credential.revision } }),
+      await api.app.inject({ method: "DELETE", url: "/v1/provider-keys/openai", headers, payload: { expectedRevision: credential.revision } }),
+      await api.app.inject({ method: "POST", url: "/v1/projects", headers, payload: { name: "Broader project" } }),
+      await api.app.inject({ method: "POST", url: "/v1/invitations", headers, payload: { email: "outsider@acme.example", role: "admin" } }),
+      await api.app.inject({ method: "POST", url: `/v1/members/${mia.userId}/role`, headers, payload: { role: "admin" } }),
+      await api.app.inject({ method: "POST", url: `/v1/members/${mia.userId}/remove`, headers }),
+      await api.app.inject({ method: "POST", url: `/v1/members/${mia.userId}/deactivate`, headers }),
+      await api.app.inject({ method: "POST", url: "/v1/keys", headers, payload: { name: "Organization escape" } }),
+      await api.app.inject({ method: "POST", url: "/v1/keys", headers, payload: { projectId: outbound.id } }),
+    ];
+    for (const response of refused) {
+      expect(response.statusCode, response.body).toBe(403);
+      expect(response.json()).toMatchObject({ error: "not_permitted" });
+    }
+
+    for (const url of ["/v1/members", "/v1/invitations", "/v1/provider-keys", "/api/organization/usage"]) {
+      const response = await api.app.inject({ method: "GET", url, headers });
+      expect(response.statusCode, `${url}: ${response.body}`).toBe(403);
+    }
+    const identity = await api.app.inject({ method: "GET", url: "/v1/organization", headers });
+    expect(identity.statusCode, identity.body).toBe(200);
+    expect(identity.json()).toMatchObject({ name: "Acme", mayManageOrganization: false });
+
+    const sameProject = await api.app.inject({ method: "POST", url: "/v1/keys", headers, payload: { projectId: ada.projectId } });
+    expect(sameProject.statusCode, sameProject.body).toBe(201);
+    const createdAgent = await api.app.inject({ method: "POST", url: "/v1/agents", headers, payload: { name: "Project agent", agentPlatform: "livekit" } });
+    expect(createdAgent.statusCode, createdAgent.body).toBe(201);
+
+    const browserRename = await api.app.inject({ method: "PATCH", url: "/v1/organization", headers: { cookie: ada.cookie }, payload: { name: "Browser admin changed it" } });
+    expect(browserRename.statusCode, browserRename.body).toBe(200);
+    const browserRemove = await api.app.inject({ method: "DELETE", url: "/v1/provider-keys/openai", headers: { cookie: ada.cookie }, payload: { expectedRevision: credential.revision } });
+    expect(browserRemove.statusCode, browserRemove.body).toBe(200);
+  });
+
   /**
    * A key is for one project or for the whole customer, and those are two
    * different things rather than one thing with a default.

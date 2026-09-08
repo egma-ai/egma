@@ -15,7 +15,7 @@ import { authorize, here } from "./permissions.ts";
  * of insertProject and isProjectOfOrganization inside functions, after module evaluation.
  */
 import { insertProject } from "./provisioning.ts";
-import { theProject, within } from "./within.ts";
+import { inCredentialProject, theProject, within } from "./within.ts";
 
 /**
  * A product area inside a customer: a permission scope and a query filter,
@@ -72,7 +72,10 @@ export async function listProjects(
   return db()
     .select(COLUMNS)
     .from(project)
-    .where(within(auth, project, notDeleted))
+    .where(within(auth, project, and(
+      notDeleted,
+      inCredentialProject(auth, project.id),
+    )))
     .orderBy(project.id);
 }
 

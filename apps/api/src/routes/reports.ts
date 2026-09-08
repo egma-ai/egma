@@ -2,6 +2,7 @@ import {
   completeSimulation,
   failSimulation,
   markSimulationCanceled,
+  recordOrphanedSimulationExecution,
   resolveSimulationStanding,
   registerSimulationProviderReference,
   startSimulation,
@@ -76,6 +77,7 @@ export function reportPathFor(simulationId: string): string {
 
 /** One status event, after the contract check has vouched for its shape. */
 type StatusEvent = {
+  readonly at: string;
   readonly status: "running" | "completed" | "failed" | "canceled";
   readonly reason: string | null;
   readonly facts?: {
@@ -111,12 +113,13 @@ const FAILED_ENDING_OF: Record<
   agent_never_joined: "agent_never_joined",
   not_answered: "not_answered",
   error: "simulator_error",
+  provider_key_unavailable: "provider_key_unavailable",
 };
 
 /**
  * Use reported execution times only when coherent. A reversed interval
- * returns undefined so storage uses server timestamps and the route logs
- * the rejected pair without discarding the lifecycle report.
+ * returns undefined so storage can close the lifecycle without inventing
+ * measured execution time or discarding the other report facts.
  */
 function reportedMoments(facts: {
   readonly started_at: string;
@@ -124,7 +127,7 @@ function reportedMoments(facts: {
 }): { readonly startedAt: Date; readonly endedAt: Date } | undefined {
   const startedAt = new Date(facts.started_at);
   const endedAt = new Date(facts.ended_at);
-  if (endedAt.getTime() < startedAt.getTime()) return undefined;
+  if (!Number.isFinite(startedAt.getTime()) || !Number.isFinite(endedAt.getTime()) || endedAt < startedAt) return undefined;
   return { startedAt, endedAt };
 }
 
@@ -140,7 +143,7 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
     ...(facts.audio === null
       ? {}
       : { recordingReference: facts.audio.recording }),
-    // Absent when incoherent, so the landing's own stamps stand for both.
+    // Incoherent times leave measured execution unknown.
     ...(reportedMoments(facts) ?? {}),
   };
 }
@@ -394,7 +397,7 @@ async function applyStatusEvent(
   }
 
   return event.status === "running"
-    ? applyRunning(reply, standing)
+    ? applyRunning(reply, standing, event)
     : applyTerminal(reply, standing, event);
 }
 
@@ -407,10 +410,14 @@ async function applyStatusEvent(
 async function applyRunning(
   reply: FastifyReply,
   standing: SimulationStanding,
+  event: StatusEvent,
 ): Promise<FastifyReply | Applied> {
   // The duplicate the at-least-once client is owed: already running is what
   // this event says, so it is absorbed rather than refused.
   if (standing.status === "running") return absorbed("running");
+  if (standing.status === "failed" && standing.endingReason === "orphaned") {
+    return recoverOrphanedStart(reply, standing, event);
+  }
 
   if (standing.status === "claimed" && standing.claimedBy !== null) {
     const started = await startSimulation(
@@ -424,6 +431,7 @@ async function applyRunning(
     // and answer as the first read would have, one race later.
     const since = await resolveSimulationStanding(standing.id);
     if (since?.status === "running") return absorbed("running");
+    if (since?.status === "failed" && since.endingReason === "orphaned") return recoverOrphanedStart(reply, since, event);
     return refusedByTheRecord(reply, since ?? standing, "running");
   }
 
@@ -443,6 +451,9 @@ async function applyTerminal(
   standing: SimulationStanding,
   event: StatusEvent,
 ): Promise<FastifyReply | Applied> {
+  if (standing.status === "failed" && standing.endingReason === "orphaned") {
+    return recoverOrphanedFacts(reply, standing, event);
+  }
   // A terminal row answers from what it already says: the matching resend
   // is absorbed, anything else is a document trying to rewrite the record.
   if (
@@ -471,8 +482,7 @@ async function applyTerminal(
     );
   }
 
-  // Said out loud when the reported pair cannot be believed: the landing
-  // below will stand on its own stamps, and the record of why is this line.
+  // Lifecycle closure can be recorded even when measured time is unknown.
   if (reportedMoments(facts) === undefined) {
     reply.log.warn(
       {
@@ -481,7 +491,7 @@ async function applyTerminal(
         reportedEndedAt: facts.ended_at,
       },
       `simulation ${standing.id} reported ended_at before started_at; ` +
-        `landing with the server's own stamps for both moments`,
+        `recording lifecycle closure without measured execution time`,
     );
   }
 
@@ -492,6 +502,9 @@ async function applyTerminal(
   // request and the row now says what this document says — absorbed — or
   // the record genuinely disagrees, and the freshest reading names how.
   const since = await resolveSimulationStanding(standing.id);
+  if (since?.status === "failed" && since.endingReason === "orphaned") {
+    return recoverOrphanedFacts(reply, since, event);
+  }
   if (since !== undefined && matchesTerminalRow(event, since)) {
     return absorbed(since.status);
   }
@@ -527,6 +540,45 @@ async function applyTerminal(
     );
   }
   return refusedByTheRecord(reply, since ?? standing, event.status);
+}
+
+/** A separate late running document retains proof needed by its terminal report. */
+async function recoverOrphanedStart(
+  reply: FastifyReply,
+  standing: SimulationStanding,
+  event: StatusEvent,
+): Promise<FastifyReply | Applied> {
+  if (standing.claimedBy === null || standing.claimedAt === null) {
+    return refusedByTheRecord(reply, standing, event.status);
+  }
+  await recordOrphanedSimulationExecution(
+    standing.auth, standing.id, standing.claimedBy, standing.claimedAt,
+    { startedAt: new Date(event.at) },
+  );
+  return absorbed("failed");
+}
+
+/** Late facts can establish measured usage, but cannot undo an orphan sweep. */
+async function recoverOrphanedFacts(
+  reply: FastifyReply,
+  standing: SimulationStanding,
+  event: StatusEvent,
+): Promise<FastifyReply | Applied> {
+  const facts = event.facts;
+  if (facts === undefined || standing.claimedBy === null || standing.claimedAt === null) {
+    return refusedByTheRecord(reply, standing, event.status);
+  }
+  if (facts.audio !== null && standing.modality === "chat") {
+    return unprocessable(reply, "A chat has no recording. Send audio: null with its terminal facts.");
+  }
+  const moments = reportedMoments(facts);
+  if (moments !== undefined) {
+    await recordOrphanedSimulationExecution(
+      standing.auth, standing.id, standing.claimedBy, standing.claimedAt,
+      { ...summaryFactsOf(event), ...moments },
+    );
+  }
+  return absorbed("failed");
 }
 
 /** The landing itself, chosen by the event's status. */

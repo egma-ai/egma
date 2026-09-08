@@ -1,12 +1,15 @@
+import { openAcceptance, closeAcceptance } from "@egma/ingestion";
 import {
   connect,
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  installBillingPlugIn,
 } from "@egma/db";
 import { providerCredentialSource } from "@egma/provider-credentials";
 
 import { loadConfig } from "./config.ts";
+import { loadCloudBilling } from "./billing.ts";
 import { makeLog, platformEvent } from "./log.ts";
 import { startService } from "./service.ts";
 
@@ -14,12 +17,43 @@ import { startService } from "./service.ts";
  * Start after the API has applied migrations; this service does not migrate.
  * Resolve deployment provider keys once per claimed job only if a frozen
  * grader definition needs a model. Code-only grading needs no provider key.
+
  */
 const config = loadConfig();
 const log = makeLog(config.logLevel, config.claimant);
 
-connect({ databaseUrl: config.databaseUrl });
+connect({
+  databaseUrl: config.databaseUrl,
+  ...(config.encryptionKey === undefined
+    ? {}
+    : { encryptionKey: config.encryptionKey }),
+});
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
+
+if (config.ingestion.store !== undefined) {
+  try {
+    openAcceptance({ settings: config.ingestion, log });
+  } catch (cause) {
+    log.error(
+      { err: cause },
+      "usage recovery log could not open; grading continues and direct usage writes remain available",
+    );
+  }
+}
+
+const cloud = await loadCloudBilling(config);
+if (cloud !== undefined) {
+  installBillingPlugIn(cloud.plugIn);
+  log.info(
+    platformEvent("egma.billing.installed", {
+      plans: cloud.seededPlans.join(","),
+      // What loading it charged: the stored usage records a failed usage sink
+      // never charged. Zero on every ordinary boot.
+      caughtUp: cloud.caughtUp.charged,
+    }),
+    "the cloud billing adapter is installed",
+  );
+}
 
 const service = startService({
   config,
@@ -39,6 +73,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 }
 
 await service.finished;
+await closeAcceptance();
 await disconnect();
 await disconnectClickHouse();
 log.info(platformEvent("egma.service.stopped"), "grader service stopped");

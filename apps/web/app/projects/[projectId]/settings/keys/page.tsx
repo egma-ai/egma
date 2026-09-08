@@ -308,10 +308,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
 
   return (
     <ProductPage viewport>
-      <PageHeader
-        title="API keys"
-        lead="What a terminal or a script authenticates to Egma with."
-      />
+      <PageHeader title="API keys" />
       <PageBody>
         <SettingsLayout projectId={projectId} current="keys">
           {refused === null ? null : <Refused message={refused.message} />}

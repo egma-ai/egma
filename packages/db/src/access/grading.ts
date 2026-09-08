@@ -16,7 +16,10 @@ import {
   type SQL,
 } from "drizzle-orm";
 
+import { FundingRefusedError } from "./errors.ts";
+import { billing } from "../billing/ports.ts";
 import { traceStore } from "../clickhouse/client.ts";
+import { graderModelOfParameters } from "../grader-library/parameters.ts";
 import { db, listen, type Listening, type Queryable } from "../client.ts";
 import { combinedGradeScore } from "../grading/results.ts";
 import type { PlanGroup } from "../grading/plan.ts";
@@ -534,6 +537,7 @@ export async function traceEvidenceStartedAt(
                and started_at >= {from:DateTime64(6, 'UTC')}
                and started_at < {to:DateTime64(6, 'UTC')}
                and (${input.runId === undefined ? "1" : "run_id = {run_id:String}"})
+               and kind != 'provider_usage'
                and (${input.emitter === undefined ? "1" : "emitter = {emitter:String}"})
                and (${input.requireAgentCompletion === true ? AGENT_EVIDENCE_COMPLETE_SQL : "1"})
              order by started_at
@@ -654,6 +658,7 @@ function simulationTracesIn(
 ): ReadonlyMap<string, DrainedSimulationTrace> {
   const traces = new Map<string, DrainedSimulationTrace>();
   for (const span of spans) {
+    if (span.kind === "provider_usage" || span.usage !== undefined) continue;
     if (span.source !== "simulation") continue;
     const simulationId = simulationIdOfTrace(span.traceId);
     if (simulationId === undefined) continue;
@@ -929,6 +934,7 @@ function completedProductionTracesIn(
 ): readonly CompletedProductionTrace[] {
   const completed = new Map<string, CompletedProductionTrace>();
   for (const span of spans) {
+    if (span.kind === "provider_usage" || span.usage !== undefined) continue;
     const modality = supportedProductionEndModality(span);
     if (modality === undefined) continue;
     const held = completed.get(span.traceId);
@@ -999,6 +1005,50 @@ export async function recordProductionTraces(
   }
 }
 
+/**
+ * Which of these customers Egma's own key may fund a judge for.
+ *
+ * **Once per organization, never once per job, and never a network call.** A
+ * grading job's only spend is model usage — the judge's — so the question the
+ * deployment is asked is the funding one, with the providers a judge can run
+ * on in this release. The allowance question is not asked here: a grading job
+ * is not a chat simulation, a web-call minute or a phone minute, and the three
+ * allowances are what a plan limits.
+ *
+ * On a deployment with no billing this is one resolved promise per customer
+ * and every one of them is funded.
+ */
+function providersForGrading(entries: readonly FrozenGradingEntry[]): readonly string[] {
+  return [...new Set(entries.filter((entry) => entry.definition.type === "llm_as_judge")
+    .map((entry) => graderModelOfParameters(entry.parameterValues).provider))];
+}
+
+async function gradingHeldForFunding(
+  jobs: readonly Pick<GradingJob, "id" | "organizationId" | "entries">[],
+): Promise<ReadonlySet<string>> {
+  const funded = new Set<string>();
+  const grouped = new Map<string, { id: string; providers: readonly string[] }[]>();
+  for (const job of jobs) {
+    const providers = providersForGrading(job.entries);
+    if (providers.length === 0) { funded.add(job.id); continue; }
+    const group = grouped.get(job.organizationId) ?? [];
+    group.push({ id: job.id, providers });
+    grouped.set(job.organizationId, group);
+  }
+  await Promise.all([...grouped].map(async ([organizationId, group]) => {
+    const decision = await billing().entitlements.mayPlatformKeyFund({
+      organizationId,
+      providers: [...new Set(group.flatMap((job) => job.providers))],
+    });
+    for (const job of group) {
+      if (decision.funded || !job.providers.some((provider) => decision.providers.includes(provider))) {
+        funded.add(job.id);
+      }
+    }
+  }));
+  return funded;
+}
+
 export async function claimGradingJobs(
   request: GradingClaimRequest,
 ): Promise<readonly GradingClaim[]> {
@@ -1067,7 +1117,35 @@ export async function claimGradingJobs(
       .returning(JOB_COLUMNS);
   });
 
-  return rows.map((row) => {
+  const funded = await gradingHeldForFunding(
+    rows.filter((row) => row.source === "production"),
+  );
+  const isFunded = (row: (typeof rows)[number]) => row.source === "simulation" || funded.has(row.id);
+  const unfunded = rows.filter((row) => !isFunded(row));
+  if (unfunded.length > 0) {
+    // **Left unclaimed rather than failed.** Nothing is wrong with this work:
+    // the customer's inference balance cannot pay the judge, and it runs when
+    // credit arrives or a key is added. So the lease is given straight back
+    // and the attempt is uncounted — a job nobody could start is not a job
+    // that failed three times.
+    await db()
+      .update(gradingJob)
+      .set({
+        status: "pending",
+        claimedBy: null,
+        claimedAt: null,
+        heartbeatAt: null,
+        attempts: sql`greatest(${gradingJob.attempts} - 1, 0)`,
+      })
+      .where(
+        inArray(
+          gradingJob.id,
+          unfunded.map((row) => row.id),
+        ),
+      );
+  }
+
+  return rows.filter(isFunded).map((row) => {
     const job = jobFromRow(row);
     if (
       job.status !== "claimed" ||
@@ -1227,6 +1305,7 @@ export type TraceGrading = {
   readonly history: readonly NamedRecordedGrade[];
   readonly current: readonly NamedCurrentGrade[];
   readonly combinedScore: number | null;
+  readonly workBlock: { readonly error: "providers_unfunded"; readonly message: string } | null;
 };
 
 export type TraceGradingRef = {
@@ -1283,11 +1362,24 @@ export async function readTraceGrading(
   const grades = await readTraceGrades(auth, ref);
   const job = await jobForTrace(db(), auth, ref.traceId);
 
+  let workBlock: TraceGrading["workBlock"] = null;
+  if (ref.source === "production" && entries !== undefined && entries.length > 0 && job?.status === "pending") {
+    try {
+      const providers = providersForGrading(job.entries);
+      if (providers.length > 0) {
+        const funding = await billing().entitlements.mayPlatformKeyFund({ organizationId: auth.organizationId, providers });
+        if (!funding.funded) workBlock = { error: "providers_unfunded", message: funding.message };
+      }
+    } catch (fault) {
+      console.error("Billing status could not be read; customer work continues", fault);
+    }
+  }
+
   // A production trace can be visible before its explicit end/evidence-ready
   // handshake freezes selection. That is pending, not an empty decision.
   if (entries === undefined) {
     if (ref.source === "simulation") return undefined;
-    return { state: "pending", history: [], current: [], combinedScore: null };
+    return { workBlock, state: "pending", history: [], current: [], combinedScore: null };
   }
 
   const names = await namesFor(
@@ -1307,17 +1399,18 @@ export async function readTraceGrading(
   const current = grades.current.map(named);
 
   if (entries.length === 0) {
-    return { state: "not_requested", history, current, combinedScore: null };
+    return { workBlock, state: "not_requested", history, current, combinedScore: null };
   }
   if (job?.status === "claimed") {
-    return { state: "running", history, current, combinedScore: null };
+    return { workBlock, state: "running", history, current, combinedScore: null };
   }
   if (job?.status === "pending") {
-    return { state: "pending", history, current, combinedScore: null };
+    return { workBlock, state: "pending", history, current, combinedScore: null };
   }
   const terminal = allEntriesHaveResults(entries, grades.current);
   if (!terminal.complete) {
     return {
+      workBlock,
       state: job?.status === "abandoned" ? "error" : "pending",
       history,
       current,
@@ -1325,9 +1418,10 @@ export async function readTraceGrading(
     };
   }
   if (terminal.errored) {
-    return { state: "error", history, current, combinedScore: null };
+    return { workBlock, state: "error", history, current, combinedScore: null };
   }
   return {
+    workBlock,
     state: "complete",
     history,
     current,
@@ -1710,6 +1804,11 @@ export async function regradeTrace(
         });
         if (!readiness.ready) return { kind: "waiting", for: "evidence" };
       }
+    }
+    const providers = providersForGrading(entries);
+    if (providers.length > 0) {
+      const funding = await billing().entitlements.mayPlatformKeyFund({ organizationId: auth.organizationId, providers });
+      if (!funding.funded) throw new FundingRefusedError(funding.message);
     }
     if (existing !== undefined) {
       const prior = await readTraceGrades(auth, ref);

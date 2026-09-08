@@ -24,6 +24,7 @@ export {
   ProjectOutsideOrganizationError,
   ProjectSlugTakenError,
   RunWriteRefusedError,
+  FundingRefusedError,
   TestMovedOnError,
   TraceStoreRefusedError,
   UnprocessableInputError,
@@ -378,7 +379,10 @@ export {
   listRuns,
   listSimulations,
   markSimulationCanceled,
+  readQueuedWorkProviders,
+  readRunWorkBlock,
   recordSimulationHeartbeat,
+  recordOrphanedSimulationExecution,
   releaseSimulationClaim,
   resolveRunStartReach,
   resolveSimulationConnection,
@@ -399,6 +403,7 @@ export {
   sweepOrphanedSimulations,
   type CompletedEndingReason,
   type ConductedSimulation,
+  type RunWorkBlock,
   type ConnectionSnapshot,
   type FailedEndingReason,
   type ExpectedTestVersion,
@@ -505,3 +510,39 @@ export {
   openDrainOwnership,
   type DrainOwnership,
 } from "./drain-ownership.ts";
+
+/**
+ * Usage records: what Egma's provider requests cost, measured where they are
+ * made and priced where they are stored. And the platform usage a month is
+ * counted in, which is a different question about the same conversations —
+ * money for the first two, allowances for the third.
+ *
+ * The first two take the context the work already runs under — a simulation's
+ * claim, or a grading claim — so the organization and the project are stamped
+ * from the row that authorised the work and never from anything a measurement
+ * claimed. `readUsageThisPeriod` takes an ordinary one: it is a read anybody in
+ * the organization may make, because a run that paused for money has to explain
+ * itself to whoever started it. The boot upsert that fills the rate card is not
+ * here: it names no customer and configures the deployment, so it sits beside
+ * the persona shelf's seed.
+ */
+export {
+  readOrganizationUsage,
+  priceUsageSpans,
+  readUsageThisPeriod,
+  recordProviderUsage,
+  type NewUsageRecord,
+  type RecordedProviderUsage,
+  type OrganizationUsage,
+  type ProviderUsageEvidence,
+  type UsageByModel,
+  type UsageIdentity,
+  type UsageQuantities,
+} from "./usage.ts";
+export type {
+  UsageMeasurement,
+  UsagePaymentSource,
+  UsageWorkKind,
+} from "../schema/billing.ts";
+
+export {createProviderFundingReceipt, readProviderFundingReceipt, readProviderKeys, putProviderKey, deleteProviderKey, resolveProviderKeysForWork, ProviderKeyUnavailableError, type ProviderKeyEntry} from './provider-keys.ts';

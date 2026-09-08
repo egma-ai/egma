@@ -16,6 +16,7 @@ const simulation: Simulation = {
   claimedBy: null, claimedAt: null, heartbeatAt: null,
   cancelRequestedAt: null, startedAt: new Date("2026-09-07T18:34:57Z"),
   endedAt: new Date("2026-09-07T18:38:43Z"), recordingReference: null,
+  executionEndedAt: new Date("2026-09-07T18:38:43Z"),
   turnCount: 2, providerReference: "call_fixture",
   createdAt: new Date("2026-09-07T18:34:57Z"),
 };

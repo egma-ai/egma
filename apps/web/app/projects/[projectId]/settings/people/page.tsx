@@ -374,10 +374,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
 
   return (
     <ProductPage viewport>
-      <PageHeader
-        title="People"
-        lead="Everybody in this organization, and what each of them may do."
-      />
+      <PageHeader title="People" />
       <PageBody>
         <SettingsLayout projectId={projectId} current="people">
           {refused === null ? null : <Refused message={refused.message} />}

@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import {
   DECISIONS,
   type Judge,
   type JudgeAnswer,
   type JudgeQuestion,
+  type JudgeUsageSink,
   type ResolvedJudge,
 } from "./contract.ts";
 import { asJudgeReads } from "./input.ts";
@@ -68,7 +70,8 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       ],
     });
 
-    const said = await withRetries(async () => {
+    const said = await withRetries(async (httpAttempt) => {
+      const attemptId = randomUUID();
       const response = await fetch(OPENAI_CHAT_COMPLETIONS, {
         method: "POST",
         headers: {
@@ -83,12 +86,25 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       if (!response.ok) {
         // Include up to 200 characters of the provider's error response.
         throw new JudgeRefused(
-          `the judge model answered ${response.status}: ${(await response.text()).slice(0, 200)}`,
+          `the judge model answered ${response.status}: ${(await response.text()).replaceAll(judge.key, "[redacted]").slice(0, 200)}`,
           retryable(response.status),
+          response.status,
         );
       }
 
-      return response.json() as Promise<unknown>;
+      const answered = (await response.json()) as unknown;
+      // Reported here rather than after the answer is parsed, because this is
+      // the moment the provider billed: a body that turns out to be unreadable
+      // was still generated and still cost money, and a spend record that
+      // depended on Egma liking the answer would under-count exactly the calls
+      // worth looking at.
+      try {
+        await report(judge.usage, httpAttempt, attemptId, answered);
+      } catch (cause) {
+        // A paid reply remains the reply even if every accounting store fails.
+        console.error("judge usage could not be retained; this accounting failure will not purchase another model response", cause);
+      }
+      return answered;
     });
 
     return answerOf(said, question);
@@ -98,10 +114,12 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
 /** A judge call that did not produce an answer, and whether asking again helps. */
 export class JudgeRefused extends Error {
   readonly retryable: boolean;
+  readonly status: number | undefined;
 
-  constructor(message: string, retryable: boolean) {
+  constructor(message: string, retryable: boolean, status?: number) {
     super(message);
     this.retryable = retryable;
+    this.status = status;
   }
 }
 
@@ -110,12 +128,14 @@ function retryable(status: number): boolean {
   return status === 408 || status === 409 || status === 429 || status >= 500;
 }
 
-async function withRetries<T>(attempt: () => Promise<T>): Promise<T> {
+async function withRetries<T>(
+  attempt: (httpAttempt: number) => Promise<T>,
+): Promise<T> {
   let waited = FIRST_BACKOFF_MILLISECONDS;
 
   for (let made = 1; ; made += 1) {
     try {
-      return await attempt();
+      return await attempt(made);
     } catch (error) {
       const worthRetrying =
         error instanceof JudgeRefused ? error.retryable : true;
@@ -125,6 +145,69 @@ async function withRetries<T>(attempt: () => Promise<T>): Promise<T> {
       waited *= 2;
     }
   }
+}
+
+/**
+ * What one answered request consumed, handed to whoever is collecting.
+ *
+ * **The cached half of the prompt is separated here, once.** OpenAI's
+ * `prompt_tokens` includes the tokens it served from its cache, and the cached
+ * rate is a tenth of the uncached one on the models Egma grades with — so a
+ * record that carried the gross figure and rated it at the uncached price
+ * would overcharge every grading call whose prompt repeated. The provider's own
+ * object rides along verbatim, so a mistake here can be re-rated later rather
+ * than re-measured.
+ *
+ * A body with no `usage` reports nothing. That is not a silent loss: it means
+ * the provider said nothing about what it consumed, and inventing a number
+ * would be worse than the gap.
+ */
+async function report(
+  sink: JudgeUsageSink | undefined,
+  httpAttempt: number,
+  attemptId: string,
+  said: unknown,
+): Promise<void> {
+  if (sink === undefined) return;
+  const body = typeof said === "object" && said !== null
+    ? (said as Record<string, unknown>)
+    : {};
+  const usage = body["usage"];
+  if (typeof usage !== "object" || usage === null || Array.isArray(usage)) {
+    return;
+  }
+  const counted = usage as Record<string, unknown>;
+  const promptTokens = numberIn(counted, "prompt_tokens");
+  const details = counted["prompt_tokens_details"];
+  const cached =
+    typeof details === "object" && details !== null
+      ? numberIn(details as Record<string, unknown>, "cached_tokens")
+      : 0;
+  const completionTokens = numberIn(counted, "completion_tokens");
+
+  const quantities: Record<string, number> = {};
+  const uncached = Math.max(promptTokens - cached, 0);
+  if (uncached > 0) quantities["input_tokens"] = uncached;
+  if (cached > 0) quantities["cached_input_tokens"] = cached;
+  if (completionTokens > 0) quantities["output_tokens"] = completionTokens;
+  if (Object.keys(quantities).length === 0) return;
+
+  const id = body["id"];
+  await sink({
+    attemptId,
+    occurredAt: new Date(),
+    httpAttempt,
+    providerRef: typeof id === "string" && id !== "" ? id : undefined,
+    quantities,
+    rawUsage: counted,
+  });
+}
+
+function numberIn(held: Record<string, unknown>, key: string): number {
+  const value = held[key];
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : 0;
 }
 
 /** The question, as the words after the system prompt. */
@@ -188,4 +271,3 @@ function contentOf(said: unknown): string {
   }
   return content;
 }
-

@@ -15,10 +15,19 @@ import { describe, expect, it } from "vitest";
  * Opening and closing the connections, and asking whether they are there. Two
  * stores, one module: the ClickHouse client is as private as the pool, and what
  * is exported for it is the same three verbs and no more.
+ *
+ * `fencedDatabase` is the seventh, and it is the one door out of the pool.
+ * `ee/` is a separate package holding the cloud billing tables' reads and
+ * writes — they cannot live here, because no shared code may read a `cloud_`
+ * table — so it needs a query interface and this is the only way it gets one.
+ * What keeps that from being a loophole is a build rule rather than this list:
+ * `only-a-fenced-home-holds-the-query-interface` fails the build for any file
+ * outside `packages/db/src/` or `ee/src/access/` that imports it.
  */
 const CONNECTION = [
   "connect",
   "disconnect",
+  "fencedDatabase",
   "ping",
   "connectClickHouse",
   "disconnectClickHouse",
@@ -76,6 +85,7 @@ const WORK_DISPATCHING = [
   "claimGradingJobs",
   "claimSimulations",
   "recordSimulationHeartbeat",
+  "recordOrphanedSimulationExecution",
   "resolveSimulationStanding",
   // The mock endpoint's own context, derived the same way and for the same
   // reason: the caller is the customer's agent platform, holding no credential
@@ -107,6 +117,12 @@ const WORK_DISPATCHING = [
  * append-only; regrading retains their history.
  */
 const CONTEXT_REQUIRING = [
+  "readProviderKeys",
+  "putProviderKey",
+  "deleteProviderKey",
+  "resolveProviderKeysForWork",
+  "createProviderFundingReceipt",
+  "readProviderFundingReceipt",
   "cloneGraderInProject",
   "editGraderDefinition",
   "usePersona",
@@ -229,6 +245,17 @@ const CONTEXT_REQUIRING = [
   "readTrace",
   "readTraceGrades",
   "readTraceGrading",
+  // One conversation's spend, by provider and model — what the simulation
+  // page shows on every deployment. A read like any other: it is answered
+  // inside the context's own project and returns no provider credential.
+  "readOrganizationUsage",
+  "priceUsageSpans",
+  "readUsageThisPeriod",
+  // The measured provider requests of one piece of work, priced at the write
+  // against the rate card. It takes the context the work already runs under —
+  // a simulation's claim or a grading claim — so the organization and the
+  // project come off the row that authorised the work.
+  "recordProviderUsage",
   "reconcileGraderCatalog",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
@@ -261,6 +288,8 @@ const CONTEXT_REQUIRING = [
   "requestGrading",
   "releaseMonitoringLease",
   "releaseGradingJob",
+  "readQueuedWorkProviders",
+  "readRunWorkBlock",
   "releaseSimulationClaim",
   "removeMember",
   // Archive's other half, for an agent and for one way of reaching it. They
@@ -382,6 +411,86 @@ const THE_GRADER_LIBRARY = [
   "PREDEFINED_GRADERS",
 ];
 
+/**
+ * The rate card: the vocabulary its file is written in, its coverage rule, and
+ * the boot upsert that writes it.
+ *
+ * The vocabulary and the coverage rule reach no store and name no customer —
+ * a catalog and a parsed file go in, and the usage types Egma measures come
+ * out — and they cross the boundary because the ingest, the grader and the
+ * tests all have to write the same words. `upsertRateCard` is the deployment
+ * configuring itself, exactly as the persona shelf's seed is: no user, no
+ * customer, and an insert that writes only what a release added.
+ */
+const THE_RATE_CARD = [
+  "USAGE_TYPES",
+  "USAGE_UNITS",
+  "billableUsageTypesOf",
+  "catalogModelsMissingAPrice",
+  "isUsageType",
+  "readRateCard",
+  "unitOfQuantities",
+  "unitOfUsageType",
+  "upsertRateCard",
+];
+
+/**
+ * What a month of platform usage is: the three allowances, which one a
+ * conversation is counted against, how many seconds it counts, when the month
+ * turns over — and the same arithmetic written once in SQL.
+ *
+ * None of it reaches a store and none of it names a customer. The pure half
+ * takes a simulation row's own frozen facts and answers a quantity; the SQL
+ * half hands back predicates and aggregate expressions, and whoever runs them
+ * supplies the tenancy and the connection. It crosses the boundary because the
+ * page that shows a month, the read that sums it and the adapter that limits
+ * it have to be counting the same thing — and a second copy of the aggregate
+ * is a second answer a customer would find before a test did.
+ */
+const THE_ALLOWANCES = [
+  "ALLOWANCE_KINDS",
+  "ALLOWANCE_UNITS",
+  "SHORTEST_BILLABLE_SECONDS",
+  "allowanceKindOf",
+  "allowanceKindsAmong",
+  "allowancePeriodAt",
+  "allowanceTotalsSelection",
+  "allowanceUsedBy",
+  "begunInThePeriod",
+  "billableSecondsOf",
+  "minutesFromSeconds",
+  "organizationInThePeriod",
+  "periodAt",
+  "periodUsageFrom",
+  // The voice-seconds columns of a period read, narrowed by a predicate, so
+  // the hourly meter job in `ee/` counts an hour with the same expressions the
+  // settings page counts a month with. A selection, not a query: it reaches no
+  // store on its own.
+  "voiceSecondsSelection",
+];
+
+/**
+ * The two ports billing plugs into, the adapters a deployment with no billing
+ * runs on, the plain function of settings that selects between them, and the
+ * contract every adapter of either port is held to.
+ *
+ * None of them takes an `AuthContext` and none of them reaches a store: they
+ * are interfaces and the answers "yes, unlimited" and "discard". What does
+ * reach a store — a run start, a claim, a usage write — asks them from inside
+ * this package, so `billing()` itself is deliberately not on this list: a
+ * caller who could fetch the plug-in could ask it anything from anywhere.
+ */
+const THE_BILLING_SEAM = [
+  "billingIsConfigured",
+  "discardingUsageSink",
+  "entitlementSourceContract",
+  "installBillingPlugIn",
+  "faultTolerantEntitlements",
+  "openBillingPlugIn",
+  "openEntitlementSource",
+  "usageSinkContract",
+];
+
 const THE_PERSONA_LIBRARY = [
   "PERSONA_PARAMETER_CONTRACT",
   "defaultPersonaParameterValues",
@@ -409,6 +518,7 @@ const THE_MODELS = [
   "catalogEntry",
   "isModelProvider",
   "personaModelsFromRow",
+  "providersNeededBy",
   "sameGraderModel",
   "samePersonaModels",
   "validGraderModel",
@@ -469,6 +579,8 @@ const VALUES = [
   // four codes between them, and a sentence apiece — which is why the reason
   // travels as a value rather than being read back out of the prose.
   "RunWriteRefusedError",
+  "FundingRefusedError",
+  "ProviderKeyUnavailableError",
   // An edit refused because somebody moved the test since it was written. It
   // carries both versions and the test's identity, because the caller's next
   // move is to go and read the test as it now stands.
@@ -606,6 +718,7 @@ const THE_EVIDENCE_RULES = [
   "refuseOversizeRecord",
   "refuseUnstorableInstant",
   "spanContentHash",
+  "providerUsageSpan",
 ];
 
 describe("the data-access module's surface", () => {
@@ -613,6 +726,9 @@ describe("the data-access module's surface", () => {
     expect(Object.keys(dataAccess).sort()).toEqual(
       [
         ...THE_EVIDENCE_RULES,
+        // Deployment settlement reads an explicitly named account, outside user API scope.
+        "readPlatformUsageTotal",
+        "listCustomerFundedProviders",
         ...CONNECTION,
         ...MIGRATIONS,
         ...IDENTITY,
@@ -632,6 +748,9 @@ describe("the data-access module's surface", () => {
         ...THE_MOCKED_WORLD,
         ...THE_GRADER_LIBRARY,
         ...THE_PERSONA_LIBRARY,
+        ...THE_RATE_CARD,
+        ...THE_ALLOWANCES,
+        ...THE_BILLING_SEAM,
         ...THE_MODELS,
       ].sort(),
     );

@@ -1,3 +1,4 @@
+import { loadIngestionSettings } from "@egma/ingestion";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -808,11 +809,15 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       });
       grader = startService({
         config: {
+          ingestion: loadIngestionSettings({}, { role: "ingest" }),
           databaseUrl: "",
           clickhouseUrl: "",
           // Both stores are already connected by the instance this process
           // shares.
           claimant: "walking-grader-1",
+          // This instance is the deployment everybody runs: no Stripe secret,
+          // so no billing adapter and every claim funded.
+          stripeSecretKey: undefined,
           capacity: 4,
           heartbeatSeconds: 1,
           leaseSeconds: 3_600,

@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import type { Answer } from "../lib/api.ts";
 
@@ -39,10 +45,7 @@ export function confirmUnsavedNavigation(): boolean {
 }
 
 function protectUnload(event: BeforeUnloadEvent): void {
-  if (
-    protectedDrafts === 0 ||
-    (confirmedThisTurn && busyDrafts === 0)
-  ) {
+  if (protectedDrafts === 0 || (confirmedThisTurn && busyDrafts === 0)) {
     return;
   }
   event.preventDefault();
@@ -72,20 +75,25 @@ function beginProtectingDraft(busy: boolean): () => void {
 export function useOrganizationRead<T>(read: () => Promise<Answer<T>>): {
   readonly answer: Answer<T> | null;
   readonly reload: () => void;
+  readonly refresh: () => void;
 } {
   const [answer, setAnswer] = useState<Answer<T> | null>(null);
-  const [attempt, setAttempt] = useState(0);
+  const [attempt, setAttempt] = useState({ number: 0, quiet: false });
   const readNow = useRef(read);
   readNow.current = read;
 
   const reload = useCallback(() => {
     setAnswer(null);
-    setAttempt((one) => one + 1);
+    setAttempt((one) => ({ number: one.number + 1, quiet: false }));
+  }, []);
+
+  const refresh = useCallback(() => {
+    setAttempt((one) => ({ number: one.number + 1, quiet: true }));
   }, []);
 
   useEffect(() => {
     let current = true;
-    setAnswer(null);
+    if (!attempt.quiet) setAnswer(null);
 
     void readNow.current().then((next) => {
       if (current) setAnswer(next);
@@ -96,7 +104,7 @@ export function useOrganizationRead<T>(read: () => Promise<Answer<T>>): {
     };
   }, [attempt]);
 
-  return { answer, reload };
+  return { answer, reload, refresh };
 }
 
 /**
@@ -104,10 +112,7 @@ export function useOrganizationRead<T>(read: () => Promise<Answer<T>>): {
  * navigation dialog. Busy writes block guarded navigation while their result
  * is unknown. Callers disable protection after successful save or discard.
  */
-export function useUnsavedChanges(
-  unsaved: boolean,
-  busy = false,
-): DraftState {
+export function useUnsavedChanges(unsaved: boolean, busy = false): DraftState {
   // Install the capture listener before the browser paints the changed field.
   // A quick click on a breadcrumb must not fit between a draft becoming dirty
   // and its protection becoming active.

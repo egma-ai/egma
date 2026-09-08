@@ -93,7 +93,7 @@ export async function membershipsOf(
 export async function listMembers(
   auth: AuthContext,
 ): Promise<readonly Member[]> {
-  authorize(auth, "read", here(auth));
+  authorize(auth, "read_organization", here(auth));
 
   return db()
     .select(MEMBER_COLUMNS)
@@ -211,6 +211,7 @@ export async function changeRole(
   userId: string,
   role: Role,
 ): Promise<Member | undefined> {
+  authorize(auth, "manage_members", here(auth));
   const existing = await memberOf(auth, userId);
   if (existing === undefined) return undefined;
   if (existing.role === role) return existing;
@@ -242,6 +243,7 @@ export async function removeMember(
   auth: AuthContext,
   userId: string,
 ): Promise<RemovedMember | undefined> {
+  authorize(auth, "manage_members", here(auth));
   const existing = await memberOf(auth, userId);
   if (existing === undefined) return undefined;
 
@@ -272,6 +274,7 @@ export async function deactivateUser(
   auth: AuthContext,
   userId: string,
 ): Promise<Member | undefined> {
+  authorize(auth, "manage_members", here(auth));
   const existing = await memberOf(auth, userId);
   if (existing === undefined) return undefined;
   if (existing.deactivatedAt !== null) return existing;

@@ -13,11 +13,11 @@ import {
   IngestionUnavailableError,
   stagedEvidence,
   type EvidenceGroup,
-} from "../src/ingestion/accept.ts";
+} from "@egma/ingestion";
 import { buildApi } from "../src/server.ts";
-import type { IngestionStore } from "../src/ingestion/object-store.ts";
-import { RECORD_FORMAT_VERSION } from "../src/ingestion/record.ts";
-import { PENDING_PREFIX } from "../src/ingestion/segment.ts";
+import type { IngestionStore } from "@egma/ingestion";
+import { RECORD_FORMAT_VERSION } from "@egma/ingestion";
+import { PENDING_PREFIX } from "@egma/ingestion";
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {

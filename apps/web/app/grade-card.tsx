@@ -16,9 +16,11 @@ type Grade = GetTraceResponse["grades"][number];
 /** One current or earlier result from one project grader. */
 export function GradeCard({
   grade,
+  projectId,
   historical = false,
 }: {
   readonly grade: Grade;
+  readonly projectId: string;
   readonly historical?: boolean;
 }) {
   const resultTone = gradeResultTone(grade.result);
@@ -58,7 +60,7 @@ export function GradeCard({
         </div>
       </dl>
       <div className="mt-4">
-        <GradeDetails grade={grade} />
+        <GradeDetails grade={grade} projectId={projectId} />
       </div>
     </article>
   );

@@ -23,6 +23,9 @@
     },
     {
       "path": "../../packages/simulation-contract"
+    },
+    {
+      "path": "../../packages/ingestion"
     }
   ]
 }

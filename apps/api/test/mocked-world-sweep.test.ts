@@ -233,8 +233,8 @@ async function seedRun(
     `insert into simulation
        (id, run_id, organization_id, project_id, agent_id, connection_id,
         persona_id, persona_version_id, test_id, test_version_id,
-        position, modality, status, persona_parameter_values)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,'voice','queued',$11::jsonb)`,
+        position, modality, connection_type, status, persona_parameter_values)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,'voice','retell_web_call','queued',$11::jsonb)`,
     [
       simulationId,
       runId,

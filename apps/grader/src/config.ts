@@ -1,3 +1,4 @@
+import { loadIngestionSettings, type IngestionSettings } from "@egma/ingestion";
 import { hostname } from "node:os";
 
 /**
@@ -6,6 +7,8 @@ import { hostname } from "node:os";
  */
 export type Config = {
   readonly databaseUrl: string;
+  readonly encryptionKey?: string | undefined;
+  readonly ingestion: IngestionSettings;
   readonly clickhouseUrl: string;
   /** This copy's own name for itself, in claims and in the log. */
   readonly claimant: string;
@@ -17,6 +20,17 @@ export type Config = {
   readonly leaseSeconds: number;
   /** The backstop, for a notification nothing was listening for. */
   readonly sweepSeconds: number;
+  /**
+   * `EGMA_STRIPE_SECRET_KEY`, as the deployment named it, or `undefined`.
+   *
+   * **A setting and never a mode**, read here beside every other deployment
+   * value rather than off the process where it is used. Its presence selects
+   * the cloud billing adapter, which this service asks at its own claim: a
+   * grading job's only spend is the judge's model usage, so the claim asks
+   * whether Egma's key may fund it before it hands a job out. Empty is every
+   * deployment that charges nobody, and nothing is imported at all.
+   */
+  readonly stripeSecretKey: string | undefined;
   readonly logLevel: LogLevel;
 };
 
@@ -54,7 +68,9 @@ function positiveWholeNumber(name: string, fallback: number): number {
 
   const value = Number(written);
   if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`${name} is a positive whole number, and "${written}" is not`);
+    throw new Error(
+      `${name} is a positive whole number, and "${written}" is not`,
+    );
   }
   return value;
 }
@@ -82,8 +98,19 @@ export function loadConfig(): Config {
 
   const config: Config = {
     databaseUrl: required("DATABASE_URL"),
+    encryptionKey: process.env["EGMA_ENCRYPTION_KEY"]?.trim() || undefined,
+    ingestion: loadIngestionSettings(
+      {
+        ...process.env,
+        EGMA_INGESTION_LOG_DIR:
+          process.env["EGMA_GRADER_INGESTION_LOG_DIR"]?.trim() ||
+          "/var/lib/egma/grader-ingestion",
+      },
+      { role: "ingest" },
+    ),
     clickhouseUrl: required("CLICKHOUSE_URL"),
-    claimant: claimant === undefined || claimant === "" ? defaultClaimant() : claimant,
+    claimant:
+      claimant === undefined || claimant === "" ? defaultClaimant() : claimant,
     capacity: positiveWholeNumber("EGMA_GRADER_CAPACITY", DEFAULT_CAPACITY),
     heartbeatSeconds: positiveWholeNumber(
       "EGMA_GRADER_HEARTBEAT_SECONDS",
@@ -97,6 +124,7 @@ export function loadConfig(): Config {
       "EGMA_GRADER_SWEEP_SECONDS",
       DEFAULT_SWEEP_SECONDS,
     ),
+    stripeSecretKey: process.env["EGMA_STRIPE_SECRET_KEY"]?.trim() || undefined,
     logLevel: logLevel(),
   };
 

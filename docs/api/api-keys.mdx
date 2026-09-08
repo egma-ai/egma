@@ -6,7 +6,9 @@ description: "Create API keys for programmatic access, list your active keys, an
 
 API keys let you authenticate programmatically against Egma's API — from CI pipelines, agent SDKs, telemetry exporters, and automation scripts. Each key is scoped to either your whole organization or to a single project. Keys inherit the role of the user who minted them, so a `viewer`'s key reads but cannot write.
 
-Every role may mint and revoke their own keys. Admins can see and revoke all keys in the organization.
+Every role may mint and revoke their own keys within the credential's scope. Admins can see and revoke other members' keys within that same scope.
+
+A project key can access only its project. It cannot read organization-wide member lists, provider-key metadata, usage or billing, change organization settings, manage members or projects, or create a key for the organization or another project. It can create another key for the same project. The organization's name remains readable. Use a browser session or an organization key with the required role for organization-wide operations.
 
 ---
 
@@ -21,7 +23,7 @@ Mints a new API key. Copy the `secret` field immediately — it is shown exactly
 </ParamField>
 
 <ParamField body="projectId" type="string">
-  Scope the key to a specific project. Omit to create an organization-scoped key for permitted organization-wide reads and management operations. Customer OTLP production ingest requires a `prj_` identifier and rejects an organization-scoped key.
+  Scope the key to a specific project. When authenticating with a project key, this field is required and must name that same project. A browser session or organization key may omit it to create an organization-scoped key. Customer OTLP production ingest requires a `prj_` identifier and rejects an organization-scoped key.
 </ParamField>
 
 Returns `201 Created` with the new key object including the plaintext secret.
@@ -92,7 +94,7 @@ curl -X POST https://your-egma-instance/v1/keys \
 
 ## List keys
 
-Returns all API keys you are allowed to see. Admins see every key in the organization. All other roles see only the keys they minted. Secrets are never included in list responses.
+Returns all API keys you are allowed to see. A project key sees keys for its project only. Within that scope, admins see every key and other roles see only the keys they minted. Browser sessions and organization keys can list across the organization. Secrets are never included in list responses.
 
 **`GET /v1/keys`**
 
@@ -109,7 +111,7 @@ curl https://your-egma-instance/v1/keys \
 
 ## Revoke a key
 
-Permanently deactivates a key. The key stops working on the very next request — there is no grace period. You can revoke your own keys. Admins can revoke any key in the organization.
+Permanently deactivates a key. The key stops working on the very next request — there is no grace period. You can revoke your own keys within your credential's scope. Admins can revoke other members' keys within that scope. A project key cannot revoke an organization key or another project's key; those requests return `404`.
 
 **`POST /v1/keys/:apiKeyId/revoke`**
 

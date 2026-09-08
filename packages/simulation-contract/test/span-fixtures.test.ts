@@ -32,6 +32,7 @@ const CONVERSATION_SPAN_NAMES = [
   "human_turn",
   "agent_turn",
   "tool_call",
+  "provider_usage",
 ] as const;
 
 /**
@@ -45,6 +46,13 @@ const MEASURE_SPAN_NAMES = MEASURE_CATALOG.filter(
 
 const SPAN_ATTRIBUTE_KEYS = [
   "egma.turn.text",
+  "egma.usage.provider",
+  "egma.usage.model",
+  "egma.usage.operation",
+  "egma.usage.measurement",
+  "egma.usage.provider_ref",
+  "egma.usage.quantities",
+  "egma.usage.raw",
   "egma.tool.name",
   "egma.tool.arguments",
   "egma.tool.result",
@@ -339,6 +347,65 @@ describe("the golden span fixtures", () => {
         instant: true,
       },
     ]);
+  });
+
+  it("say what one provider request measured, in the unit that provider bills", () => {
+    const usage = valid
+      .flatMap((fixture) => spansOf(fixture))
+      .filter((span) => span.name === "provider_usage");
+    expect(usage.length).toBeGreaterThan(0);
+
+    const units = new Set<string>();
+    for (const span of usage) {
+      // The provider, the model and the protocol are all three named: a price
+      // is per model, and the same model can be reached over two protocols.
+      expect(attributeOf(span.attributes, "egma.usage.provider")).toBeTruthy();
+      expect(attributeOf(span.attributes, "egma.usage.model")).toBeTruthy();
+      expect(attributeOf(span.attributes, "egma.usage.operation")).toBeTruthy();
+      // Whether the number is the provider's own or Egma's count of what it
+      // sent. The two are different facts and the record keeps which.
+      expect(
+        ["provider_reported", "client_measured"].includes(
+          attributeOf(span.attributes, "egma.usage.measurement") ?? "",
+        ),
+        `${span.spanId} says how it was measured`,
+      ).toBe(true);
+
+      const quantities = JSON.parse(
+        attributeOf(span.attributes, "egma.usage.quantities") ?? "null",
+      ) as Record<string, number> | null;
+      expect(quantities, `${span.spanId} measured something`).toBeTypeOf(
+        "object",
+      );
+      const measured = Object.entries(quantities ?? {});
+      expect(measured.length).toBeGreaterThan(0);
+      for (const [type, quantity] of measured) {
+        expect(quantity, `${span.spanId} ${type}`).toBeTypeOf("number");
+        units.add(type);
+      }
+
+      // The record's occurrence is the span's own instant, so the span is the
+      // moment the provider answered rather than an interval.
+      expect(span.endTimeUnixNano).toBe(span.startTimeUnixNano);
+
+      // A provider-reported quantity carries the provider's own object; a
+      // client-measured one has none, because the provider said nothing.
+      const raw = attributeOf(span.attributes, "egma.usage.raw");
+      if (
+        attributeOf(span.attributes, "egma.usage.measurement") ===
+        "provider_reported"
+      ) {
+        expect(raw, `${span.spanId} keeps the provider's usage object`).toBeTypeOf(
+          "string",
+        );
+      }
+    }
+
+    // All three legs are shown, so the fixtures cover the three units a
+    // provider bills Egma in rather than only the one that is easiest.
+    expect(units).toContain("input_tokens");
+    expect(units).toContain("audio_seconds");
+    expect(units).toContain("characters");
   });
 
   it("show a voice flush whose turns genuinely overlap, because the shape has to permit it", () => {

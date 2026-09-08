@@ -18,7 +18,9 @@ export type SettingsSection =
   | "project"
   | "organization"
   | "people"
-  | "keys";
+  | "keys"
+  | "provider-api-keys"
+  | "billing";
 
 type Item = {
   readonly id: SettingsSection;
@@ -32,9 +34,15 @@ const PROJECT_SETTINGS: readonly Item[] = [
 ];
 
 const ORGANIZATION_SETTINGS: readonly Item[] = [
+  { id: "billing", label: "Usage and billing", rest: ["billing"] },
   { id: "organization", label: "Organization", rest: ["organization"] },
   { id: "people", label: "People", rest: ["people"] },
   { id: "keys", label: "API keys", rest: ["keys"] },
+  {
+    id: "provider-api-keys",
+    label: "Provider API Keys",
+    rest: ["provider-api-keys"],
+  },
 ];
 
 /** Where one Settings page lives, for anything that links to it. */
@@ -193,7 +201,10 @@ export function SettingsTabs<Value extends string>({
   readonly id: string;
   readonly label: string;
   readonly value: Value;
-  readonly options: readonly { readonly value: Value; readonly label: string }[];
+  readonly options: readonly {
+    readonly value: Value;
+    readonly label: string;
+  }[];
   readonly onChange: (value: Value) => void;
 }) {
   return (

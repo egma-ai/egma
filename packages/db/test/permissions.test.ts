@@ -37,6 +37,7 @@ import {
  */
 const THE_TABLE: Readonly<Record<string, readonly Role[]>> = {
   "read": ["viewer", "member", "admin"],
+  "read_organization": ["viewer", "member", "admin"],
   "author_definitions": ["member", "admin"],
   "configure_agents": ["member", "admin"],
   "configure_monitoring": ["member", "admin"],
@@ -351,8 +352,8 @@ describe("the organization an action names", () => {
   });
 });
 
-describe("the project an action names", () => {
-  it("is accepted and changes no answer, because every member holds their role on every project", () => {
+describe("a browser session's selected project", () => {
+  it("does not narrow the person's organization role", () => {
     for (const role of ROLES) {
       for (const action of ACTIONS) {
         const here = permits(at(role), action, {
@@ -369,16 +370,10 @@ describe("the project an action names", () => {
     }
   });
 
-  it("is not consulted at all, which is what a project-level grant will change", () => {
-    // Naming a project of another customer's alongside the caller's own
-    // organization changes nothing, because the project is read by nothing.
-    // Whether that pairing is real is the database's question, answered by the
-    // composite foreign key and by the predicates the data-access module
-    // injects — not by a permission.
-    //
-    // The argument being on the call from the first commit is what keeps
-    // project-level grants a change to one function body rather than an audit
-    // of every call site in the product.
+  it("still leaves project ownership checks to the data-access predicates", () => {
+    // A session's selected project is navigation context. Its role is shared
+    // across the organization; the data layer verifies that a project belongs
+    // to that organization. Project API keys have a separate scope ceiling.
     for (const role of ROLES) {
       for (const action of ACTIONS) {
         expect(

@@ -2907,6 +2907,37 @@ describe("the suite-first Tests route", () => {
       .toBe(false);
   });
 
+  it.each([
+    { error: "providers_unfunded", message: "The inference balance is $0.00.", actions: ["Add credits", "Manage provider API keys"] },
+    { error: "allowance_spent", message: "The Hobby phone allowance resets on Oct 7, 2026.", actions: ["Usage and billing"] },
+    { error: "provider_key_unavailable", message: "The saved OpenAI key cannot be used.", actions: ["Manage provider API keys"] },
+    { error: "unprocessable", message: "Choose an active connection.", actions: [] },
+  ])("offers the right next step for a $error run refusal and keeps the draft", async ({ error, message, actions }) => {
+    routed.pathname = "/projects/prj_1/runs/new";
+    routed.params = { projectId: "prj_1" };
+    runBuilderAnswers({ started: { status: 422, body: { error, message } } });
+    render(<NewRunPage />);
+    await chooseRunTarget();
+    fireEvent.change(screen.getByLabelText("Run name [optional]"), {
+      target: { value: "Morning check" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    const refusal = await screen.findByText(message);
+    const alert = within(refusal.closest('[role="alert"]') as HTMLElement);
+    expect(alert.queryAllByRole("link").map((link) => link.textContent)).toEqual(actions);
+    for (const link of alert.queryAllByRole("link")) {
+      expect(link.getAttribute("href")).toBe(
+        link.textContent === "Manage provider API keys"
+          ? "/projects/prj_1/settings/provider-api-keys"
+          : "/projects/prj_1/settings/billing",
+      );
+    }
+    expect((screen.getByLabelText("Test suite *") as HTMLSelectElement).value).toBe("ste_1");
+    expect((screen.getByLabelText("Connection *") as HTMLSelectElement).value).toBe("con_1");
+    expect((screen.getByLabelText("Run name [optional]") as HTMLInputElement).value).toBe("Morning check");
+    expect(routed.push).not.toHaveBeenCalled();
+  });
+
   it("keeps the chosen inputs after a failed start and sends each later attempt", async () => {
     routed.pathname = "/projects/prj_1/runs/new";
     routed.params = { projectId: "prj_1" };

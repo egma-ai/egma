@@ -30,6 +30,177 @@ export type TraceSpan = {
     spans: Array<TraceSpan>;
 };
 
+export type ListProviderKeysData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/provider-keys';
+};
+
+export type ListProviderKeysErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type ListProviderKeysError = ListProviderKeysErrors[keyof ListProviderKeysErrors];
+
+export type ListProviderKeysResponses = {
+    /**
+     * Supported providers and masked credential metadata.
+     */
+    200: {
+        providers: Array<{
+            provider: 'openai' | 'deepgram' | 'cartesia';
+            label: string;
+            credential: {
+                hint: string;
+                revision: string;
+                updatedAt: string;
+            } | null;
+        }>;
+        mayManageProviderKeys: boolean;
+    };
+};
+
+export type ListProviderKeysResponse = ListProviderKeysResponses[keyof ListProviderKeysResponses];
+
+export type DeleteProviderKeyData = {
+    body: {
+        expectedRevision: string;
+    };
+    path: {
+        provider: 'openai' | 'deepgram' | 'cartesia';
+    };
+    query?: never;
+    url: '/v1/provider-keys/{provider}';
+};
+
+export type DeleteProviderKeyErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type DeleteProviderKeyError = DeleteProviderKeyErrors[keyof DeleteProviderKeyErrors];
+
+export type DeleteProviderKeyResponses = {
+    /**
+     * The provider with no saved credential.
+     */
+    200: {
+        provider: 'openai' | 'deepgram' | 'cartesia';
+        label: string;
+        credential: {
+            hint: string;
+            revision: string;
+            updatedAt: string;
+        } | null;
+    };
+};
+
+export type DeleteProviderKeyResponse = DeleteProviderKeyResponses[keyof DeleteProviderKeyResponses];
+
+export type PutProviderKeyData = {
+    body: {
+        key: string;
+        expectedRevision: string | null;
+    };
+    path: {
+        provider: 'openai' | 'deepgram' | 'cartesia';
+    };
+    query?: never;
+    url: '/v1/provider-keys/{provider}';
+};
+
+export type PutProviderKeyErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type PutProviderKeyError = PutProviderKeyErrors[keyof PutProviderKeyErrors];
+
+export type PutProviderKeyResponses = {
+    /**
+     * The saved credential metadata. Secret values are never returned.
+     */
+    200: {
+        provider: 'openai' | 'deepgram' | 'cartesia';
+        label: string;
+        credential: {
+            hint: string;
+            revision: string;
+            updatedAt: string;
+        } | null;
+    };
+};
+
+export type PutProviderKeyResponse = PutProviderKeyResponses[keyof PutProviderKeyResponses];
+
 export type DiscoverAgentsData = {
     body: {
         agentPlatform: 'retell';
@@ -4387,6 +4558,10 @@ export type GetRunResponses = {
         startedAt: string | null;
         finishedAt: string | null;
         eventThrough: number;
+        workBlock: {
+            error: 'allowance_spent' | 'providers_unfunded';
+            message: string;
+        } | null;
         tempMockAgentVersion: number | null;
         tempMockAgentVersionCleanup: boolean | null;
         mockMetadata: {
@@ -4486,7 +4661,7 @@ export type ListRunSimulationsResponses = {
                 errored: number;
                 selected: number;
             } | null;
-            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
+            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | 'provider_key_unavailable' | null;
             executionFailure: string | null;
             startedAt: string | null;
             endedAt: string | null;
@@ -4558,7 +4733,7 @@ export type ListRunEventsResponses = {
             testName: string | null;
             personaName: string | null;
             status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
-            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
+            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | 'provider_key_unavailable' | null;
             executionFailure: string | null;
         }>;
         next: number;
@@ -4706,6 +4881,10 @@ export type GetSimulationResponses = {
         runName: string | null;
         position: number;
         status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
+        workBlock: {
+            error: 'allowance_spent' | 'providers_unfunded';
+            message: string;
+        } | null;
         gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error' | null;
         grades: Array<{
             projectGraderId: string;
@@ -6014,6 +6193,10 @@ export type GetTraceResponses = {
         }>;
         simulationId: string | null;
         gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error';
+        workBlock: {
+            error: 'allowance_spent' | 'providers_unfunded';
+            message: string;
+        } | null;
         grades: Array<{
             projectGraderId: string;
             graderDefinitionId: string;

@@ -29,6 +29,7 @@ from .reporting import Reporter
 from .spans import SpanEmitter, trace_id_for
 from .spec import SimulationSpec
 from .speech import SpeechProviders
+from .usage import ProviderUsage
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +220,6 @@ class RunningSimulation:
 
     async def _conduct_and_report(self) -> None:
         reporter = self._reporter
-        reporter.running()
         self._spans.opened()
         log_event(
             logger,
@@ -257,6 +257,9 @@ class RunningSimulation:
                 scenario_instructions=self._spec.scenario_instructions,
                 model=model,
             )
+            # Preparing clients and validating configuration is not execution.
+            # Dialing and the normal wait for an answer begin with conducting.
+            reporter.running()
             try:
                 # Which of the two conductors this simulation gets was
                 # decided by assembly, from the spec alone. Both answer
@@ -272,6 +275,8 @@ class RunningSimulation:
                         on_utterance=self._on_utterance,
                         on_measured=self._on_measured,
                         on_answered=self._on_answered,
+                        on_provider_usage=self._on_provider_usage,
+                        on_execution_ended=reporter.execution_ended,
                     )
                 else:
                     assert assembled.plug is not None
@@ -283,6 +288,8 @@ class RunningSimulation:
                         on_turn=self._on_turn,
                         on_timing=self._on_timing,
                         on_answered=self._on_answered,
+                        on_provider_usage=self._on_provider_usage,
+                        on_execution_ended=reporter.execution_ended,
                         controls=self._controls,
                         name=f"sim:{self.simulation_id}",
                     )
@@ -295,13 +302,9 @@ class RunningSimulation:
                 # Conducting closed the pipeline on its way out, whatever
                 # happened, so whatever was recorded is measured by now.
                 recording = assembled.recording
-                reporter.audio = (
-                    None if recording is None else recording.as_report()
-                )
+                reporter.audio = None if recording is None else recording.as_report()
                 if recording is not None:
-                    self._spans.recording(
-                        started_unix_nano=recording.started_unix_nano
-                    )
+                    self._spans.recording(started_unix_nano=recording.started_unix_nano)
                 # The same moment for the same reason: the conversation is
                 # over, so every call a platform has reported is settled.
                 # Drained before anything is sealed, so a call reported in
@@ -317,6 +320,9 @@ class RunningSimulation:
             self._spans.abort()
             raise
         except Exception as fault:
+            # Construction/open faults may precede the conductor callback.
+            # A cleanup fault must preserve the already captured execution end.
+            reporter.execution_ended()
             reason = self._secrets.redact(f"{type(fault).__name__}: {fault}")
             # Which failed ending this is belongs to whoever raised: a
             # phone that rang out is not the same record as a simulator
@@ -443,6 +449,25 @@ class RunningSimulation:
                 answer=call.answer,
                 at_unix_nano=call.at_unix_nano,
             )
+
+    async def _on_provider_usage(self, usage: ProviderUsage) -> None:
+        """One provider request this simulation made, onto the record.
+
+        Authored as its own span, so it rides the write-ahead log and the one
+        ordered sender the transcript rides — which is what puts every bill on
+        the wire before the terminal report, and what makes a resend of this
+        flush collapse rather than charge twice.
+        """
+        selected = (self._spec.models.llm, self._spec.models.stt, self._spec.models.tts)
+        funding_receipt = next(
+            (
+                model.funding_receipt
+                for model in selected
+                if model.provider == usage.provider
+            ),
+            None,
+        )
+        self._spans.provider_usage(usage, funding_receipt)
 
     async def _on_timing(self, measure: str, milliseconds: float) -> None:
         self._spans.measure(measure, milliseconds)

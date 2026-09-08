@@ -18,7 +18,9 @@ from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, is_given
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 from .client import UNREACHABLE
+from .provider_keys import ProviderKeyUnavailable
 from .redaction import REDACTED
+from .usage import ProviderUsage, llm_usage
 
 if TYPE_CHECKING:
     from .spec import SimulationSpec
@@ -72,6 +74,15 @@ class PersonaReply:
     text: str
     concluded: bool
     tool_calls: tuple[PersonaToolCall, ...] = ()
+    usage: ProviderUsage | None = None
+    """What the provider says this reply consumed, where it says anything.
+
+    It rides the reply because this is the one moment both facts exist
+    together: the body that carried the words is the body that carried the
+    bill, and reading one without keeping the other means measuring the call
+    again later or not at all. `None` on the scripted client, which spends
+    nothing.
+    """
 
     @property
     def requests_end_call(self) -> bool:
@@ -150,9 +161,11 @@ class OpenAICompatibleModel:
         model_name: str,
         reasoning_effort: str | None = None,
         timeout_seconds: float = MODEL_TIMEOUT_SECONDS,
+        customer_funded: bool = False,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
+        self._customer_funded = customer_funded
         self._model_name = model_name
         self._reasoning_effort = reasoning_effort
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
@@ -220,6 +233,8 @@ class OpenAICompatibleModel:
                 timeout=self._timeout,
             ) as response:
                 if response.status != 200:
+                    if self._customer_funded and response.status in (401, 403):
+                        raise ProviderKeyUnavailable("openai")
                     raise ModelFailure(
                         f"the model answered {response.status}: "
                         f"{self._provider_detail(await response.text())}"
@@ -262,7 +277,15 @@ class OpenAICompatibleModel:
             text = GOODBYE
         if not text:
             raise ModelFailure("the model's answer had no words to speak")
-        return PersonaReply(text=text, concluded=False, tool_calls=tool_calls)
+        return PersonaReply(
+            text=text,
+            concluded=False,
+            tool_calls=tool_calls,
+            # Kept from the body Egma already has in hand. The pinned catalog
+            # model names it rather than the dated variant the provider says it
+            # served, because the rate card is keyed by the catalog.
+            usage=llm_usage(body, selection_model=self._model_name),
+        )
 
     def _tool_calls_from(self, written: object) -> tuple[PersonaToolCall, ...]:
         """Decode provider tool JSON; Pipecat executes the typed call later."""
@@ -342,4 +365,5 @@ def build_model_client(
         api_key=selected.key,
         model_name=selected.model,
         reasoning_effort=selected.reasoning_effort,
+        customer_funded=selected.funding_receipt is not None,
     )

@@ -7,6 +7,7 @@ import { memberOperations } from "./operations/members.ts";
 import { monitoringOperations } from "./operations/monitoring.ts";
 import { organizationOperations } from "./operations/organization.ts";
 import { personaOperations } from "./operations/personas.ts";
+import { providerKeyOperations } from './operations/provider-keys.ts';
 import { projectOperations } from "./operations/projects.ts";
 import { recordingOperations } from "./operations/recordings.ts";
 import { repositoryOperations } from "./operations/repository.ts";
@@ -42,7 +43,10 @@ export { testSuiteOperations } from "./operations/test-suites.ts";
 export { testOperations } from "./operations/tests.ts";
 export { traceReadOperations } from "./operations/trace-reads.ts";
 
+export { providerKeyOperations } from './operations/provider-keys.ts';
+
 export const platformOperations = {
+  ...providerKeyOperations,
   ...agentOperations,
   ...apiKeyOperations,
   ...graderLibraryOperations,

@@ -238,6 +238,10 @@ async function insertSimulation(
     test_version_id: testVersionId,
     position: 1,
     modality: "chat",
+    // The lane, frozen at execution beside the modality. The fixture's one
+    // connection is a Retell chat connection, so every conversation it writes
+    // is one — and the column is required, so a raw insert has to say so.
+    connection_type: "retell_chat_api",
     status,
     ...shapeOf(status),
     ...overrides,

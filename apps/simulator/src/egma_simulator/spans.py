@@ -36,6 +36,7 @@ from .telemetry import (
     tracer,
 )
 from .telemetry import flush as flush_provider
+from .usage import ProviderUsage, as_json
 
 SERVICE_NAME = telemetry.SERVICE_NAME
 SIMULATION_ID_ATTRIBUTE = telemetry.SIMULATION_ID_ATTRIBUTE
@@ -58,6 +59,25 @@ TURN_PLATFORM_NOTES_ATTRIBUTE = "egma.turn.platform_notes"
 """Non-speech platform notes, stored as an ordered JSON array beside turn text.
 Omit when empty; do not add them to the transcript the persona reads.
 """
+PROVIDER_USAGE_SPAN = "provider_usage"
+"""One provider request Egma made, and what it consumed.
+
+The bill rides the span path because the span path already promises the three
+things a bill needs: ordered delivery, arrival ahead of the terminal report,
+and byte-identical resends. The span id frozen into those bytes *is* the
+record's identity on the platform's side — so a replayed flush collapses onto
+one row, while a conversation conducted again receives new span ids and is
+correctly charged again.
+"""
+
+USAGE_PROVIDER_ATTRIBUTE = "egma.usage.provider"
+USAGE_MODEL_ATTRIBUTE = "egma.usage.model"
+USAGE_OPERATION_ATTRIBUTE = "egma.usage.operation"
+USAGE_MEASUREMENT_ATTRIBUTE = "egma.usage.measurement"
+USAGE_PROVIDER_REF_ATTRIBUTE = "egma.usage.provider_ref"
+USAGE_QUANTITIES_ATTRIBUTE = "egma.usage.quantities"
+USAGE_RAW_ATTRIBUTE = "egma.usage.raw"
+
 TOOL_NAME_ATTRIBUTE = "egma.tool.name"
 TOOL_ARGUMENTS_ATTRIBUTE = "egma.tool.arguments"
 TOOL_RESULT_ATTRIBUTE = "egma.tool.result"
@@ -250,6 +270,45 @@ class SpanEmitter:
             attributes=attributes,
         )
 
+    def provider_usage(
+        self, usage: ProviderUsage, funding_receipt: str | None = None
+    ) -> None:
+        """One provider request's bill, as the instant the provider answered.
+
+        Zero duration, deliberately. How long a request took is a timing fact
+        and Pipecat's own service spans already carry it; a second interval
+        here would be a second answer to one question. What this span is for is
+        the *quantity*, and the moment it was incurred — which is what decides
+        the price it is rated at.
+
+        A request that consumed nothing is not written: a bill for nothing is
+        a row a reader learns nothing from.
+        """
+        if not usage.measured_anything:
+            return
+        attributes: dict[str, str | bool] = {
+            USAGE_PROVIDER_ATTRIBUTE: usage.provider,
+            USAGE_MODEL_ATTRIBUTE: usage.model,
+            USAGE_OPERATION_ATTRIBUTE: usage.operation,
+            USAGE_MEASUREMENT_ATTRIBUTE: usage.measurement,
+            USAGE_QUANTITIES_ATTRIBUTE: as_json(usage.quantities),
+        }
+        if funding_receipt:
+            attributes["egma.usage.funding_receipt"] = funding_receipt
+        if usage.provider_ref:
+            attributes[USAGE_PROVIDER_REF_ATTRIBUTE] = usage.provider_ref
+        if usage.raw:
+            # The provider's own object, whole. Absent where the provider
+            # returned none, rather than an empty object pretending it did.
+            attributes[USAGE_RAW_ATTRIBUTE] = as_json(usage.raw)
+        now = self._clock()
+        self._author(
+            PROVIDER_USAGE_SPAN,
+            started_unix_nano=now,
+            ended_unix_nano=now,
+            attributes=attributes,
+        )
+
     def measure(self, measure: str, milliseconds: float) -> None:
         """One measurement, as the span whose duration *is* the number.
 
@@ -261,8 +320,7 @@ class SpanEmitter:
         ended = self._clock()
         self._author(
             measure,
-            started_unix_nano=ended
-            - int(milliseconds * _NANOSECONDS_PER_MILLISECOND),
+            started_unix_nano=ended - int(milliseconds * _NANOSECONDS_PER_MILLISECOND),
             ended_unix_nano=ended,
         )
 

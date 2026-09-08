@@ -167,6 +167,7 @@ test that calls a real provider.
 | `EGMA_GRADER_LEASE_SECONDS` | `120` | Time before a silent claim can be recovered. |
 | `EGMA_GRADER_SWEEP_SECONDS` | `30` | Backstop interval for missed notifications. |
 | `EGMA_GRADER_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARN`, or `ERROR`. |
+| `EGMA_GRADER_INGESTION_LOG_DIR` | `/var/lib/egma/grader-ingestion` | Persistent local log for paid judge usage. Mount a separate writable volume here; the grader does not use the API ingestion log directory. |
 
 Provider credential configuration is shared with the other agent services. A
 missing credential for a selected model fails the whole job before any grader

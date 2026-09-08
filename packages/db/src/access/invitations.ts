@@ -60,6 +60,7 @@ export async function createInvitation(
   auth: AuthContext,
   input: NewInvitation,
 ): Promise<Invitation> {
+  authorize(auth, "manage_members", here(auth));
   const alreadyIn = await organizationOfEmail(input.email);
   if (alreadyIn !== null) {
     throw new AlreadyBelongsToAnOrganizationError(
@@ -95,7 +96,7 @@ export async function createInvitation(
 export async function listPendingInvitations(
   auth: AuthContext,
 ): Promise<readonly Invitation[]> {
-  authorize(auth, "read", here(auth));
+  authorize(auth, "read_organization", here(auth));
 
   return db()
     .select(COLUMNS)

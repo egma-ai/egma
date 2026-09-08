@@ -53,6 +53,9 @@ export const CODES = {
    */
   persona_name_ambiguous: 422,
   unprocessable: 422,
+  /** Known billing limits have different remedies from an invalid run. */
+  providers_unfunded: 422,
+  allowance_spent: 422,
   credential_required: 422,
   credential_forbidden: 422,
   credential_choice_required: 422,

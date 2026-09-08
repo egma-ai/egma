@@ -210,10 +210,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
 
   return (
     <ProductPage viewport>
-      <PageHeader
-        title="Project"
-        lead="What this product area is called, and what it is for."
-      />
+      <PageHeader title="Project" />
       <PageBody>
         <SettingsLayout projectId={projectId} current="project">
           {/* One form needs no extra section heading beneath the page title. */}

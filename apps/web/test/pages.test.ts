@@ -524,6 +524,14 @@ describe("the pages", () => {
     expect(rewrites).toContain("/v1/:path*");
   });
 
+  it("forwards usage reads, ledger pages, and billing actions to the API", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    expect(rewrites).toContain('source: "/api/organization/:path*"');
+    expect(rewrites).toContain('destination: `${api}/api/organization/:path*`');
+    expect(rewrites).toContain('source: "/api/billing/:path*"');
+    expect(rewrites).toContain('destination: `${api}/api/billing/:path*`');
+  });
+
   it("reaches persona form metadata through the versioned platform rewrite", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
 

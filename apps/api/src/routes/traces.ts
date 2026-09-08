@@ -3,8 +3,10 @@ import { gunzipSync } from "node:zlib";
 import {
   authorize,
   NotPermittedError,
+  providerUsageSpan,
   resolveSimulationByProviderReference,
   resolveSimulationStanding,
+  type AuthContext,
   type SimulationStanding,
 } from "@egma/db";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
@@ -14,7 +16,7 @@ import { requesterOf } from "../http/credentialed.ts";
 import {
   IngestionUnavailableError,
   type EvidenceGroup,
-} from "../ingestion/accept.ts";
+} from "@egma/ingestion";
 import {
   attributionOf,
   fileSimulationEvidence,
@@ -49,6 +51,7 @@ import {
   SIMULATION_ID_ATTRIBUTE,
   type NormalisationBudget,
 } from "../otlp/normalise.ts";
+import { providerUsageIn } from "../otlp/provider-usage.ts";
 import {
   EXPORT_TRACE_SERVICE_RESPONSE,
   RPC_STATUS_MESSAGE,
@@ -408,14 +411,32 @@ async function simulatorExport(
     count: 0,
     firstReason: "",
   };
+  // Held rather than passed straight through, because the bills this flush
+  // carried are read off the same gathering, from the resources themselves.
+  const gathered = gatheredBySimulation(resources, (resourceSpans) =>
+    targets.get(simulationNamedBy(resourceSpans)),
+  );
   const filings = normalisedFilings(
-    gatheredBySimulation(resources, (resourceSpans) =>
-      targets.get(simulationNamedBy(resourceSpans)),
-    ),
+    gathered,
     "egma-runtime",
     rejected,
     budgetForOneRequest(),
   );
+
+  const unreadableBills: string[] = [];
+  const usageBySimulation = new Map<string, ReadonlyMap<string, ReturnType<typeof providerUsageSpan>>>();
+  for (const one of gathered) {
+    const usage = providerUsageIn(one.resources, () => ({ simulationId: one.standing.id, runId: one.standing.runId,auth:one.standing.auth,claimedAt:one.standing.claimedAt }));
+    unreadableBills.push(...usage.skipped);
+    usageBySimulation.set(one.standing.id, new Map(usage.records.map((record) => {
+      const span = providerUsageSpan(record);
+      return [span.spanId.toLowerCase(), span];
+    })));
+  }
+  const measuredFilings = filings.map((filing) => ({ ...filing, spans: filing.spans.map((span) => {
+    const measured = usageBySimulation.get(filing.standing.id)?.get(span.spanId.toLowerCase());
+    return measured ? { ...span, kind: "provider_usage", usage: measured.usage } : span;
+  }) }));
 
   // Every filing in one call, and one answer for all of them: a batch naming
   // several projects gets a segment each, and it is a success only once every
@@ -425,10 +446,20 @@ async function simulatorExport(
   // which stable span identity makes a no-op rather than a duplicate.
   let accepted;
   try {
-    accepted = await fileSimulationEvidence(filings);
+    accepted = await fileSimulationEvidence(measuredFilings);
   } catch (cause) {
     if (!(cause instanceof IngestionUnavailableError)) throw cause;
     return unavailable(request, reply, encoding, cause);
+  }
+
+  if (unreadableBills.length > 0) {
+    // Whoever reads this deployment's log is who can fix an emitter. The
+    // sender is told nothing: every span in this flush is stored, and telling
+    // an exporter otherwise would cost it the conversation.
+    request.log.warn(
+      { unreadableBills },
+      "spans landed whole, but Egma could not read what they say they cost",
+    );
   }
 
   // One truthful answer: the normaliser's rejects plus the records acceptance

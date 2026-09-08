@@ -62,7 +62,16 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // budget, and then the identity-only marker that stops the overlap starting
   // a second one. It holds no provider document and expires by itself.
   retell_call_retry: "rcr",
+  // One immutable price on the rate card. Provider usage lives in ClickHouse.
+  rate_card: "rat",
+  // Cloud account and money rows have their own prefixed identities.
+  cloud_plan: "cpl",
+  cloud_billing_account: "cba",
+  cloud_ledger_entry: "cle",
 };
+
+/** Meter progress is identified by its organization, subscription, period and channel. */
+const TABLES_WITH_COMPOSITE_IDENTITY = ["cloud_meter_period", "provider_key"];
 
 const declaredTables = (Object.values(schema) as unknown[])
   .filter((value): value is PgTable => is(value, PgTable))
@@ -108,19 +117,23 @@ afterAll(async () => {
   await database.drop();
 });
 
-describe("the tables this pass builds", () => {
-  it("are the identity and tenancy tables, and only those", async () => {
+/** Every table the migrations build, named once for the two checks below. */
+const EVERY_TABLE = [
+  ...Object.keys(TABLE_PREFIX),
+  ...TABLES_WITH_COMPOSITE_IDENTITY,
+].sort();
+
+describe("the migrated tables", () => {
+  it("contain exactly the declared product and billing state", async () => {
     const { rows } = await database.sql<{ tablename: string }>(
       "select tablename from pg_tables where schemaname = 'public' order by tablename",
     );
-    expect(rows.map((row) => row.tablename)).toEqual(
-      Object.keys(TABLE_PREFIX).sort(),
-    );
+    expect(rows.map((row) => row.tablename)).toEqual(EVERY_TABLE);
   });
 
   it("match the schema the application queries through", () => {
     const declared = declaredTables.map((table) => table.name).sort();
-    expect(declared).toEqual(Object.keys(TABLE_PREFIX).sort());
+    expect(declared).toEqual(EVERY_TABLE);
 
     for (const table of declaredTables) {
       const live = columns
@@ -129,6 +142,36 @@ describe("the tables this pass builds", () => {
         .sort();
       expect(table.columns.map((column) => column.name).sort()).toEqual(live);
     }
+  });
+
+  it("has no Postgres provider-request or processed Stripe-event history", () => {
+    for (const name of ["usage_record", "cloud_stripe_event"]) {
+      expect(declaredTables.some((table) => table.name === name), name).toBe(false);
+      expect(columns.some((column) => column.table_name === name), name).toBe(false);
+    }
+  });
+
+  it("identifies meter progress by its organization, subscription, period and channel", async () => {
+    const identity = [
+      "organization_id",
+      "stripe_subscription_id",
+      "period_started_at",
+      "period_ends_at",
+      "channel",
+    ];
+    expect(
+      getTableConfig(schema.cloudMeterPeriod).primaryKeys.map((key) =>
+        key.columns.map((column) => column.name),
+      ),
+    ).toEqual([identity]);
+    const { rows } = await database.sql<{ definition: string }>(
+      `select pg_get_constraintdef(oid) as definition
+         from pg_constraint
+        where conrelid = 'cloud_meter_period'::regclass and contype = 'p'`,
+    );
+    expect(rows).toEqual([
+      { definition: `PRIMARY KEY (${identity.join(", ")})` },
+    ]);
   });
 });
 
@@ -139,7 +182,7 @@ describe("every identifier column", () => {
       .map((column) => ({ table: table.name, column: column.name })),
   );
 
-  it("exists on every table", () => {
+  it("exists on every table, including organization-owned meter progress", () => {
     expect(declaredIdentifierColumns.length).toBeGreaterThan(0);
     for (const table of declaredTables) {
       expect(
@@ -208,6 +251,7 @@ describe("every table", () => {
     // live policy without creating a grader-definition version.
     project: 1,
     test: 1,
+    provider_key: 1,
   };
 
   it("pins a prefix that is one of the ones egma mints", () => {
@@ -564,6 +608,16 @@ describe("every enumerated value", () => {
       { table: "simulation", column: "modality" },
       { table: "run_event", column: "kind" },
       { table: "monitoring_state", column: "scan_kind" },
+      { table: "rate_card", column: "usage_type" },
+      { table: "rate_card", column: "unit" },
+      { table: "cloud_plan", column: "code" },
+      { table: "cloud_billing_account", column: "plan_code" },
+      { table: "cloud_billing_account", column: "stripe_subscription_status" },
+      { table: "cloud_ledger_entry", column: "kind" },
+      { table: "cloud_ledger_entry", column: "reference_kind" },
+      { table: "cloud_meter_period", column: "channel" },
+      { table: "cloud_meter_period", column: "state" },
+      { table: "cloud_meter_period", column: "last_outcome" },
     ];
 
     const { rows } = await database.sql<{

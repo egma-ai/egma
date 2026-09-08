@@ -2,10 +2,15 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import {
   claimSimulations,
+  resolveProviderKeysForWork,
+  createProviderFundingReceipt,
+  ProviderKeyUnavailableError,
   catalogEntry,
+  isModelProvider,
   connectionTypeBranchesMockDraft,
   connectionTypeUsesPlatformCarrier,
   failSimulationDispatch,
+  failSimulation,
   getPersonaVersion,
   personaModelsOfParameters,
   validatePersonaParameterValues,
@@ -13,9 +18,12 @@ import {
   getSimulationExecutionEvidence,
   LANES_SERVING_MOCK_TOOLS,
   markSimulationCanceled,
+  providersNeededBy,
   releaseSimulationClaim,
   resolveSimulationConnection,
+  type EntitlementSource,
   type PersonaModels,
+  type PersonaVersion,
   type ProviderCatalogEntry,
   type Run,
   type SimulationClaim,
@@ -33,6 +41,7 @@ import { specComplaints } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 
 import { acceptsServiceToken } from "../auth/service-token.ts";
+import { claimsWithheldByEntitlement } from "../claim-entitlement.ts";
 import type { CarrierRoute } from "../config.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
 import { mockToolBase } from "./mock-endpoint.ts";
@@ -69,6 +78,11 @@ export type ClaimRoutesOptions = {
   readonly providerCredentials: ProviderCredentialSource;
   /** Complete phone route, or absent when phone simulations are unavailable. */
   readonly carrierRoute: CarrierRoute | undefined;
+  /**
+   * Whether the deployment lets a customer's work begin, asked once per
+   * organization for each claim batch. The open adapter always says yes.
+   */
+  readonly entitlements: EntitlementSource;
   /** Test seam for Retell's read-only dispatch preflight. */
   readonly retellFetch?: typeof fetch | undefined;
 };
@@ -144,6 +158,7 @@ async function modelsBlock(
   modality: SimulationClaim["modality"],
   models: PersonaModels,
   source: ProviderCredentialSource,
+  claim: SimulationClaim,
 ): Promise<Record<string, unknown>> {
   const entryFor = <Job extends "llm" | "stt" | "tts">(
     job: Job,
@@ -163,14 +178,45 @@ async function modelsBlock(
     stt: entryFor("stt", models.stt),
     tts: entryFor("tts", models.tts),
   };
-  const credentials = await source.load();
-  const keyFor = (
-    provider: PersonaModels["llm"]["provider"],
-  ): string => credentialFor(credentials, provider);
+  const needed = providersNeededBy(models, modality).map((provider) => {
+    if (!isModelProvider(provider))
+      throw new Error("The selected model provider is not supported.");
+    return provider;
+  });
+  const customer = await resolveProviderKeysForWork(claim.auth, needed);
+  const deployment = needed.some((provider) => customer[provider] === undefined)
+    ? await source.load()
+    : {};
+  const credentials = {
+    ...deployment,
+    ...Object.fromEntries(
+      Object.entries(customer).map(([provider, value]) => [
+        provider,
+        value.key,
+      ]),
+    ),
+  };
+  const receiptFor = (provider: PersonaModels["llm"]["provider"]) => {
+    const held = customer[provider];
+    return held === undefined
+      ? {}
+      : {
+          funding_receipt: createProviderFundingReceipt(claim.auth, {
+            simulationId: claim.id,
+            claimedAt: claim.claimedAt,
+            provider,
+            credentialRef: held.credentialRef,
+          }),
+        };
+  };
+  const keyFor = (provider: PersonaModels["llm"]["provider"]): string =>
+    credentialFor(credentials, provider);
   const speechKey = (
     provider: PersonaModels["llm"]["provider"],
   ): Record<string, string> =>
-    modality === "voice" ? { key: keyFor(provider) } : {};
+    modality === "voice"
+      ? { key: keyFor(provider), ...receiptFor(provider) }
+      : {};
 
   return {
     llm: {
@@ -181,6 +227,7 @@ async function modelsBlock(
         ? {}
         : { reasoning_effort: entries.llm.reasoningEffort }),
       key: keyFor(models.llm.provider),
+      ...receiptFor(models.llm.provider),
     },
     stt: {
       provider: models.stt.provider,
@@ -383,6 +430,12 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
 async function assembledSpec(
   claim: SimulationClaim,
   /**
+   * The pinned persona version, already read once for this claim batch when
+   * the deployment was asked whether the work may go on. Handed in rather than
+   * read again: the row is frozen, so a second read returns the same thing.
+   */
+  personaVersion: PersonaVersion | undefined,
+  /**
    * Cache run reads within this claim request to avoid rereading a shared run
    * for each simulation. Run IDs are deployment-unique; each initial read uses
    * the claim's stored scope. Do not retain the cache across requests.
@@ -397,13 +450,9 @@ async function assembledSpec(
   responseDeadline = Date.now() + CLAIM_RESPONSE_MILLISECONDS,
 ): Promise<
   | Record<string, unknown>
-  | { readonly unbuildable: string }
+  | { readonly unbuildable: string; readonly providerKeyUnavailable?: boolean }
   | { readonly retryable: string }
 > {
-  const personaVersion = await getPersonaVersion(
-    claim.auth,
-    claim.personaVersionId,
-  );
   if (personaVersion === undefined) {
     return { unbuildable: "its pinned persona version could not be read" };
   }
@@ -487,8 +536,11 @@ async function assembledSpec(
       claim.modality,
       personaModelsOfParameters(validatePersonaParameterValues(personaVersion.parameterContract, claim.personaParameterValues)),
       providerCredentials,
+      claim,
     );
   } catch (fault) {
+    if (fault instanceof ProviderKeyUnavailableError)
+      return { unbuildable: fault.message, providerKeyUnavailable: true };
     if (fault instanceof ProviderCredentialSourceUnavailableError) {
       return {
         retryable:
@@ -641,6 +693,60 @@ export async function claimRoutes(
         });
       }
 
+      // **The deployment is asked whether this work may go on — once per
+      // organization, for the whole batch.** It happens here rather than
+      // inside the claim because the claim is one transaction across every
+      // customer's queue and this is a question about one customer at a time;
+      // and it happens after that transaction has committed, so nothing here
+      // holds a lock, waits on another claimant, or changes how many
+      // conversations run at once. A deployment with no billing withholds
+      // nothing and this is one resolved promise per customer in the batch.
+      // The persona version each conversation is pinned to, read once for the
+      // batch and used twice: to say which providers this customer's work
+      // needs before the deployment is asked whether Egma's key may fund
+      // them, and again by the assembly below. Keyed by the version rather
+      // than by the conversation, because a run of fifty conversations
+      // usually shares two or three — so this is fewer reads than the
+      // assembly alone used to make, not more.
+      const personaVersions = new Map<
+        string,
+        Promise<PersonaVersion | undefined>
+      >();
+      const pinnedPersona = (
+        claim: SimulationClaim,
+      ): Promise<PersonaVersion | undefined> => {
+        const key = `${claim.organizationId}:${claim.personaVersionId}`;
+        let reading = personaVersions.get(key);
+        if (reading === undefined) {
+          reading = getPersonaVersion(claim.auth, claim.personaVersionId);
+          personaVersions.set(key, reading);
+        }
+        return reading;
+      };
+      const pinned = new Map(
+        await Promise.all(
+          claims.map(
+            async (claim) =>
+              [claim.id, await pinnedPersona(claim)] as const,
+          ),
+        ),
+      );
+
+      const withheld = await claimsWithheldByEntitlement(
+        options.entitlements,
+        claims,
+        (claim) => {
+          const version = pinned.get(claim.id);
+          // A conversation whose pinned version cannot be read is not
+          // withheld here: it is unbuildable, and the assembly below says so
+          // in the sentence a person reads. Naming no provider leaves this
+          // question about the ones that can be read.
+          return version === undefined
+            ? []
+            : providersNeededBy(personaModelsOfParameters(claim.personaParameterValues), claim.modality);
+        },
+      );
+
       const specs: Record<string, unknown>[] = [];
       // One read of each run, however many of its conversations this batch
       // took. Lives exactly as long as this response.
@@ -654,25 +760,30 @@ export async function claimRoutes(
       // times or break the route's sub-30-second response promise.
       const assembled = await Promise.all(
         claims.map((claim) =>
-          assembledSpec(
-            claim,
-            runs,
-            retellTargets,
-            options.providerCredentials,
-            options.carrierRoute,
-            options.baseUrl,
-            options.retellFetch,
-            responseDeadline,
-          ).catch(
-            (
-              _fault: unknown,
-            ): { readonly unbuildable: string } => ({
-              // This broad catch can hold dependency or credential errors.
-              // Unlike a simulator report, it has no secret-redaction seam,
-              // so the retained customer-facing sentence stays generic.
-              unbuildable: "an internal error prevented Egma from building its simulation spec",
-            }),
-          ),
+          // A withheld conversation is never assembled: it is going back on
+          // the queue, and building a work order for it would read a
+          // customer's credentials to make a document nobody will receive.
+          withheld.has(claim.id)
+            ? Promise.resolve({ withheld: true } as const)
+            : assembledSpec(
+                claim,
+                pinned.get(claim.id),
+                runs,
+                retellTargets,
+                options.providerCredentials,
+                options.carrierRoute,
+                options.baseUrl,
+                options.retellFetch,
+                responseDeadline,
+              ).catch(
+                (_fault: unknown): { readonly unbuildable: string } => ({
+                  // This broad catch can hold dependency or credential errors.
+                  // Unlike a simulator report, it has no secret-redaction seam,
+                  // so the retained customer-facing sentence stays generic.
+                  unbuildable:
+                    "an internal error prevented Egma from building its simulation spec",
+                }),
+              ),
         ),
       );
       for (const [index, claim] of claims.entries()) {
@@ -684,6 +795,58 @@ export async function claimRoutes(
         // claim beside it from a simulator standing ready to conduct them.
         const spec = assembled[index];
         if (spec === undefined) continue;
+        if ("withheld" in spec) {
+          // **Back on the queue, and never failed.** Nothing is wrong with
+          // this conversation: the customer's allowance for its kind of work
+          // is spent, or Egma's key has no balance left to fund the providers
+          // it needs. It runs when the month resets, the plan changes, credit
+          // arrives or a key is added. The lease goes back the same way a provider
+          // outage's does — and, exactly as there, a cancel that landed while
+          // the question was in flight is honored here rather than left for
+          // the orphan sweep to misname.
+          const kept = withheld.get(claim.id);
+          request.log.info(
+            platformEvent(
+              "egma.simulation.dispatch.withheld",
+              "simulation dispatch was withheld by the entitlement source",
+              {
+                "egma.simulation_id": claim.id,
+                "egma.run_id": claim.runId,
+                "egma.withheld_by": kept?.held ?? "",
+                "egma.allowance":
+                  kept?.held === "allowance" ? kept.allowance : "",
+                "egma.providers":
+                  kept?.held === "funding" ? kept.providers.join(",") : "",
+              },
+            ),
+          );
+          const released = await releaseSimulationClaim(
+            claim.auth,
+            claim.id,
+            claim.claimedBy,
+          );
+          if (!released) {
+            const canceled = await markSimulationCanceled(
+              claim.auth,
+              claim.id,
+              claim.claimedBy,
+            );
+            if (canceled === undefined) {
+              request.log.error(
+                platformEvent(
+                  "egma.simulation.claim.release_failed",
+                  "simulation claim could not be released or canceled",
+                  {
+                    "egma.simulation_id": claim.id,
+                    "egma.run_id": claim.runId,
+                    "error.type": "simulation_claim_release_failed",
+                  },
+                ),
+              );
+            }
+          }
+          continue;
+        }
         if ("retryable" in spec) {
           // A provider outage says nothing about the customer or their agent.
           // Give this lease back instead of minting a terminal error; a later
@@ -734,9 +897,8 @@ export async function claimRoutes(
           continue;
         }
         if ("unbuildable" in spec) {
-          // Mark an unbuildable claim failed with dispatch_failed and continue the
-          // batch. Do not send an invalid spec or wait for orphan cleanup. No grading
-          // is requested for this execution failure.
+          // Land the preflight failure now and continue the batch. No grading
+          // is requested for a simulation that could not start.
           request.log.error(
             platformEvent(
               "egma.simulation.dispatch.failed",
@@ -748,11 +910,19 @@ export async function claimRoutes(
               },
             ),
           );
-          await failSimulationDispatch(
-            claim.auth,
-            claim.id,
-            claim.claimedBy,
-            `Egma could not dispatch this simulation: ${spec.unbuildable}`,
+          await (
+            "providerKeyUnavailable" in spec &&
+            spec.providerKeyUnavailable === true
+              ? failSimulation(claim.auth, claim.id, claim.claimedBy, {
+                  reason: "provider_key_unavailable",
+                  message: String(spec.unbuildable),
+                })
+              : failSimulationDispatch(
+                  claim.auth,
+                  claim.id,
+                  claim.claimedBy,
+                  `Egma could not dispatch this simulation: ${spec.unbuildable}`,
+                )
           ).catch((fault: unknown) => {
             // The one place left where the sweep is the backstop: a row so
             // broken even its landing throws stays claimed until swept, and

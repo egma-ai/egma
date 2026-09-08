@@ -3,15 +3,18 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  installBillingPlugIn,
   reconcileGraderCatalog,
   runClickHouseMigrations,
   runMigrations,
   seedPersonaLibrary,
 } from "@egma/db";
 
-import { loadConfig } from "./config.ts";
+import { loadCloudBilling, type StoppableJob } from "./billing.ts";
+import { loadConfig, type Config } from "./config.ts";
 import { platformEvent } from "./platform-log.ts";
 import { buildApi } from "./server.ts";
+import { startRateCardInitialization } from "./rate-card.ts";
 
 const config = loadConfig();
 
@@ -66,9 +69,32 @@ const personaShelf = await seedPersonaLibrary();
 // release that changed nothing writes nothing at all — not even `updated_at`.
 const graderCatalog = await reconcileGraderCatalog();
 
+// The billing adapter this deployment's settings select.
+//
+// With no Stripe secret named this is `undefined`, nothing is imported, and
+// the product runs on the open plug-in — every allowance unlimited, every
+// usage record discarded. That is the deployment every self-hoster runs and it
+// is not a special case. With one named, the commercially licensed package is
+// loaded here, once, and its plan rows are written before the first request:
+// an allowance cannot be answered against a plan nobody wrote.
+const cloudBilling = await loadCloudBilling(config);
+
+const running: Config = cloudBilling === undefined
+  ? config
+  : { ...config, billing: cloudBilling.plugIn };
+
+// The billing plug-in, put in place for the whole process before the first
+// request. This is where the seams inside the data-access module — run start,
+// the claim door and the write that stores a usage record — start reaching it.
+installBillingPlugIn(running.billing);
+
 const { app } = buildApi({
-  config,
+  config: running,
   traceStoreReady: () => traceSchema.state === "ready",
+  ...(cloudBilling === undefined ? {} : { billingRoutes: cloudBilling.routes }),
+  ...(cloudBilling?.webhookRoutes === undefined
+    ? {}
+    : { billingWebhookRoutes: cloudBilling.webhookRoutes }),
 });
 
 /** The longest this process waits between attempts on the trace-store schema. */
@@ -129,6 +155,28 @@ if (graderCatalog.definitions.length > 0) {
     "Predefined graders were written to the library",
   );
 }
+if (cloudBilling !== undefined && cloudBilling.seededPlans.length > 0) {
+  // A plan is a price somebody set. Saying which rows this boot wrote is what
+  // makes a pricing change readable in a deployment log rather than only in a
+  // file's history.
+  app.log.info(
+    { plans: cloudBilling.seededPlans },
+    "Cloud plan rows were written from the shipped file",
+  );
+}
+if (cloudBilling !== undefined && cloudBilling.caughtUp.charged > 0) {
+  // A usage sink may fail without failing the write that stored the record,
+  // and a resend cannot replace the lost delivery — so the plug-in charges
+  // what it finds uncharged when it loads. Every row here is money this
+  // deployment would otherwise never have collected.
+  app.log.warn(
+    {
+      charged: cloudBilling.caughtUp.charged,
+      amountMicros: cloudBilling.caughtUp.amountMicros,
+    },
+    "Inference charges that reached no sink were caught up at boot",
+  );
+}
 if (graderCatalog.projectGraders.length > 0) {
   // The projects, never anything a customer wrote: what is worth saying is
   // that projects which lacked their protected Expected behaviors policy now
@@ -147,9 +195,34 @@ app.log.info(
     : "schema migrations applied",
 );
 
+/**
+ * The hourly job that tells Stripe what each Pro organization's month has
+ * used.
+ *
+ * **In this process, on a deployment that bills, and nowhere else.** It is
+ * started with the cloud plug-in and it is the only scheduled work billing
+ * adds: the allowances are enforced from Postgres on every request, and this
+ * only reports minutes so Stripe can price the tiers and put the overage on
+ * the invoice. A Stripe that is unreachable delays a bill and stops no work.
+ *
+ * It runs once when this process starts serving, for the hour that has just
+ * closed — so a deployment that was restarting on the hour still reports it —
+ * and then on the hour.
+ * Every event carries an identifier made of the meter, the organization and
+ * the hour, so a repeat is refused by Stripe rather than counted twice.
+ *
+ * The `ingest` role does not run it, for the reason it skips the trace-store
+ * schema: a process that only accepts evidence has no business reporting
+ * somebody's month.
+ */
+let meterJob: StoppableJob | undefined;
+let rateCardJob: StoppableJob | undefined;
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     stopping = true;
+    meterJob?.stop();
+    rateCardJob?.stop();
     void (async () => {
       await app.close();
       await disconnect();
@@ -165,3 +238,10 @@ app.log.info(
     "server.port": config.port,
   }),
 );
+
+// Started once the process is serving: it is neither a gate on serving nor
+// something a request waits for.
+rateCardJob = startRateCardInitialization(app.log, running.billing.pricingUnavailable);
+if (cloudBilling !== undefined && config.ingestion.role !== "ingest") {
+  meterJob = cloudBilling.startMeterJob(app.log);
+}

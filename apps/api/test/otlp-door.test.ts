@@ -5,7 +5,7 @@ import {
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import type { IngestionStore } from "../src/ingestion/object-store.ts";
+import type { IngestionStore } from "@egma/ingestion";
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import {
   EXPORT_TRACE_SERVICE_REQUEST,

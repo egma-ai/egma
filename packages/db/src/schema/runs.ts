@@ -12,7 +12,7 @@ import {
   unique,
 } from "drizzle-orm/pg-core";
 
-import { agent, connection, MODALITIES } from "./agents.ts";
+import { agent, connection, CONNECTION_TYPES, MODALITIES } from "./agents.ts";
 import type { PersonaParameterValues } from "../persona-library/parameters.ts";
 import type { FrozenRunGradingPlan } from "../grading/plan.ts";
 import { personaVersion } from "./personas.ts";
@@ -85,6 +85,7 @@ export const FAILED_ENDING_REASONS = [
   "simulator_error",
   "orphaned",
   "dispatch_failed",
+  "provider_key_unavailable",
 ] as const;
 
 export const SIMULATION_ENDING_REASONS = [
@@ -321,6 +322,24 @@ export const simulation = pgTable(
      * join the connection table. It rejects recordings on non-voice simulations.
      */
     modality: text("modality").notNull(),
+    /**
+     * The connection's type as it was at execution, copied here for the
+     * modality's own reason one step further on: **what a conversation cost in
+     * platform terms has to be answerable from this row alone.**
+     *
+     * The three allowances a plan is measured in — chat simulations, web-call
+     * minutes, phone minutes — are exactly this column and the one above it,
+     * and nothing else. Reaching the connection for it instead would make a
+     * month's usage a join against a row the customer can edit or archive
+     * after the conversation happened, so a connection moved from a phone
+     * number to a web call would silently move last month's minutes with it.
+     * The fact rides here, frozen at execution, like the modality beside it.
+     *
+     * It is a shared column and not a `cloud_` one on purpose: which lane a
+     * conversation ran over is a product fact every deployment records, and a
+     * self-hoster reads their own minutes from it.
+     */
+    connectionType: text("connection_type").notNull(),
     status: text("status").notNull(),
     /**
      * How it ended: a completed-class reason for a conversation, a
@@ -352,6 +371,8 @@ export const simulation = pgTable(
     cancelRequestedAt: moment("cancel_requested_at"),
     startedAt: moment("started_at"),
     endedAt: moment("ended_at"),
+    /** Measured worker end; absent when only the platform knows work stopped. */
+    executionEndedAt: moment("execution_ended_at"),
     /** The dual-channel recording's reference in the blob store, voice only. */
     recordingReference: text("recording_reference"),
     /**
@@ -376,6 +397,9 @@ export const simulation = pgTable(
     prefixCheck("simulation_id_prefix", table.id, "sim"),
     oneOf("simulation_status_allowed", table.status, [...SIMULATION_STATUSES]),
     oneOf("simulation_modality_allowed", table.modality, [...MODALITIES]),
+    oneOf("simulation_connection_type_allowed", table.connectionType, [
+      ...CONNECTION_TYPES,
+    ]),
     check(
       "simulation_position_counts_from_one",
       sql`${table.position} >= 1`,
@@ -445,6 +469,12 @@ export const simulation = pgTable(
     check(
       "simulation_failed_shape",
       sql`${table.status} <> 'failed' or ${table.endedAt} is not null`,
+    ),
+    check(
+      "simulation_execution_end_is_measured",
+      sql`${table.executionEndedAt} is null or (
+        ${table.startedAt} is not null and ${table.endedAt} is not null
+        and ${table.executionEndedAt} >= ${table.startedAt})`,
     ),
     // A canceled row always records the intent it honored, whether it was
     // still queued or already claimed when the intent arrived.
@@ -561,6 +591,16 @@ export const simulation = pgTable(
     // whole history is read across every version its runs pinned.
     index("simulation_test_version_id_idx").on(table.testVersionId),
     index("simulation_test_id_idx").on(table.testId),
+    // What one organization executed in one period, which is the shape the
+    // usage read asks in: this customer's conversations that began inside the
+    // period's two instants. It is on `started_at` rather than `created_at`
+    // because a period counts what ran in it, and a conversation queued in one
+    // month can begin in the next. Rows that never began are skipped by the
+    // range predicate itself, so the index needs no `where` of its own.
+    index("simulation_organization_id_started_at_idx").on(
+      table.organizationId,
+      table.startedAt,
+    ),
   ],
 );
 

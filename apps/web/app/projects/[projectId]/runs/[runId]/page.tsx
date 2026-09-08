@@ -28,6 +28,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Actions } from "../../../../../ui/section.tsx";
 import { Refused } from "../../../../../ui/form.tsx";
+import { WorkRefusalActions } from "../../../../../ui/work-refusal-actions.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
   Empty,
@@ -456,12 +457,14 @@ function RunDetailView({
   }, [run, stillMoving, follow, refreshRun, refreshLoadedSimulationPages]);
 
   /*
-   * The numbered feed ends with execution. Grades can settle afterwards and do
-   * not create feed events, so keep the run and its first bounded row page fresh
-   * until every gradable simulation has a terminal grading state.
+   * Billing can resume queued work without a run event. Grades can also settle
+   * after execution, so refresh while either execution or grading can change.
    */
   useEffect(() => {
-    if (run === null || run.gradedCount >= run.gradableCount) return undefined;
+    if (run === null || (
+      run.status !== "pending" && run.status !== "running" &&
+      run.gradedCount >= run.gradableCount
+    )) return undefined;
     const timer = setInterval(() => {
       refreshRun();
       void refreshLoadedSimulationPages();
@@ -638,6 +641,13 @@ function RunDetailView({
       <PageBody>
         <div className="min-w-0 min-[901px]:flex min-[901px]:h-full min-[901px]:min-h-0 min-[901px]:flex-col">
           {refused === null ? null : <Refused message={refused.message} />}
+
+          {run === null || run.workBlock === null ? null : (
+            <Refused
+              message={`Queued simulations are waiting. ${run.workBlock.message}`}
+              action={<WorkRefusalActions code={run.workBlock.error} projectId={projectId} />}
+            />
+          )}
 
           <section
             className="min-w-0 min-[901px]:flex min-[901px]:min-h-0 min-[901px]:flex-1 min-[901px]:flex-col"

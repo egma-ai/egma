@@ -389,6 +389,7 @@ export async function traceReadRoutes(
           ? simulationIdOfTrace(traceId) ?? null
           : null,
       ...describedTraceGrading(grading),
+      workBlock: grading?.workBlock ?? null,
     });
   });
 

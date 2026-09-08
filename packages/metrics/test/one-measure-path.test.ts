@@ -143,9 +143,26 @@ describe("turning a measurement into milliseconds", () => {
    */
   const A_SPAN_DURATION_FOR_DISPLAY = "apps/web/lib/transcripts.ts";
 
+  /**
+   * The other exclusion: money.
+   *
+   * Every amount in this product is counted in millionths of a US dollar, and
+   * this file turns that into dollars for a person to read, or a typed
+   * dollar amount back into the unit the ledger holds. A million there is a
+   * price, not a nanosecond, and no measure is anywhere near it. Named here for
+   * the same reason as the one above: so a fourth site has to be argued for.
+   */
+  const MONEY_IN_MILLIONTHS_OF_A_DOLLAR = [
+    "apps/web/lib/billing.ts",
+  ];
+
   it("happens in the module, and nowhere else that could make a measure", async () => {
     expect(await filesMatching(A_PLAIN_MILLION)).toEqual(
-      [THE_MODULE, A_SPAN_DURATION_FOR_DISPLAY].sort(),
+      [
+        THE_MODULE,
+        A_SPAN_DURATION_FOR_DISPLAY,
+        ...MONEY_IN_MILLIONTHS_OF_A_DOLLAR,
+      ].sort(),
     );
   });
 

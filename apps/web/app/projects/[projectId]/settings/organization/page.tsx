@@ -150,10 +150,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
 
   return (
     <ProductPage viewport>
-      <PageHeader
-        title="Organization"
-        lead="The customer every project below belongs to."
-      />
+      <PageHeader title="Organization" />
       <PageBody>
         <SettingsLayout projectId={projectId} current="organization">
           {/* One form, and the title bar has already named the page. */}

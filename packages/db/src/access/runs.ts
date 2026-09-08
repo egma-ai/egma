@@ -26,7 +26,12 @@ import {
   db,
   dedicatedConnection,
   type Transaction,
+  type Queryable,
 } from "../client.ts";
+import { allowanceKindOf } from "../billing/allowance.ts";
+import { billing } from "../billing/ports.ts";
+import { personaModelsOfParameters } from "../persona-library/parameters.ts";
+import { providersNeededBy } from "../models/selections.ts";
 import { planGroupsFor } from "../grading/plan.ts";
 import {
   agent,
@@ -183,6 +188,7 @@ export type Simulation = {
   readonly cancelRequestedAt: Date | null;
   readonly startedAt: Date | null;
   readonly endedAt: Date | null;
+  readonly executionEndedAt: Date | null;
   readonly recordingReference: string | null;
   readonly turnCount: number | null;
   readonly providerReference: string | null;
@@ -260,6 +266,7 @@ const SIMULATION_COLUMNS = {
   cancelRequestedAt: simulation.cancelRequestedAt,
   startedAt: simulation.startedAt,
   endedAt: simulation.endedAt,
+  executionEndedAt: simulation.executionEndedAt,
   recordingReference: simulation.recordingReference,
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
@@ -327,6 +334,14 @@ function summaryFactsWrite(facts: SimulationSummaryFacts): Record<string, unknow
   }
   if (facts.startedAt !== undefined) write.startedAt = facts.startedAt;
   if (facts.endedAt !== undefined) write.endedAt = facts.endedAt;
+  if (
+    facts.startedAt !== undefined && facts.endedAt !== undefined &&
+    Number.isFinite(facts.startedAt.getTime()) &&
+    Number.isFinite(facts.endedAt.getTime()) &&
+    facts.endedAt >= facts.startedAt
+  ) {
+    write.executionEndedAt = facts.endedAt;
+  }
   return write;
 }
 
@@ -570,6 +585,19 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
     if (!connectionIsConductable(reached.connectionType, reached.accessVariant, reached.modality)) {
       refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionType, reached.modality));
     }
+    const decision = await billing().entitlements.mayStart({
+      organizationId: auth.organizationId,
+      allowances: [allowanceKindOf({
+        modality: reached.modality as Modality,
+        connectionType: reached.connectionType as ConnectionType,
+      })],
+    });
+    if (!decision.allowed) {
+      const said = decision.refusals.map((refusal) => refusal.message.trim())
+        .filter((message) => message !== "").join(" ");
+      refuseRun("allowance_spent", said ||
+        "This organization cannot start this kind of work right now. Check its plan and usage under Settings.");
+    }
     // A kind whose run start reads the agent's platform carries two demands
     // that a kind reading nothing does not, and both live here so they are
     // properties of the write rather than habits of one caller.
@@ -742,6 +770,7 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           testVersionId: current.testVersionId,
           position: simulationCount + index + 1,
           modality: reached.modality,
+          connectionType: reached.connectionType,
           status: "queued" as const,
           createdAt: at,
         })));
@@ -753,6 +782,17 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
     }
     if (simulationCount !== expectedSimulationCount) {
       throw new Error(`test suite ${suite.id} changed while its run was being planned`);
+    }
+    const needed = await queuedWorkProvidersOn(tx, auth, runId);
+    if (needed.length > 0) {
+      const funding = await billing().entitlements.mayPlatformKeyFund({
+        organizationId: auth.organizationId,
+        providers: needed,
+      });
+      if (!funding.funded) {
+        refuseRun("providers_unfunded", funding.message.trim() ||
+          `Egma's provider keys cannot fund ${funding.providers.join(", ")} for this organization. Add inference credit under Settings, or use your own provider keys.`);
+      }
     }
     return runFromRow(header, suite.name, false, reached.name);
   });
@@ -1622,6 +1662,7 @@ export type SimulationClaim = {
   readonly testId: string;
   readonly testVersionId: string;
   readonly modality: Modality;
+  readonly connectionType: ConnectionType;
   readonly claimedBy: string;
   readonly claimedAt: Date;
   /**
@@ -1646,6 +1687,7 @@ const SIMULATION_CLAIM_COLUMNS = {
   testId: simulation.testId,
   testVersionId: simulation.testVersionId,
   modality: simulation.modality,
+  connectionType: simulation.connectionType,
   claimedBy: simulation.claimedBy,
   claimedAt: simulation.claimedAt,
 } as const;
@@ -1788,6 +1830,7 @@ export async function claimSimulations(
       testId: row.testId,
       testVersionId: row.testVersionId,
       modality: row.modality as Modality,
+      connectionType: row.connectionType as ConnectionType,
       claimedBy: row.claimedBy ?? claimant,
       claimedAt: row.claimedAt ?? now,
       auth: conductingContext(row.organizationId, row.projectId),
@@ -1818,6 +1861,7 @@ export async function resolveSimulationStanding(
       endingReason: simulation.endingReason,
       executionFailure: simulation.executionFailure,
       claimedBy: simulation.claimedBy,
+      claimedAt: simulation.claimedAt,
       cancelRequestedAt: simulation.cancelRequestedAt,
     })
     .from(simulation)
@@ -1837,6 +1881,7 @@ export async function resolveSimulationStanding(
     endingReason: row.endingReason as SimulationEndingReason | null,
     executionFailure: row.executionFailure,
     claimedBy: row.claimedBy,
+    claimedAt: row.claimedAt,
     cancelRequestedAt: row.cancelRequestedAt,
     auth: conductingContext(row.organizationId, row.projectId),
   };
@@ -1906,6 +1951,7 @@ export async function resolveSimulationByProviderReference(
       endingReason: simulation.endingReason,
       executionFailure: simulation.executionFailure,
       claimedBy: simulation.claimedBy,
+      claimedAt: simulation.claimedAt,
       cancelRequestedAt: simulation.cancelRequestedAt,
     })
     .from(simulation)
@@ -1935,6 +1981,7 @@ export async function resolveSimulationByProviderReference(
     endingReason: row.endingReason as SimulationEndingReason | null,
     executionFailure: row.executionFailure,
     claimedBy: row.claimedBy,
+    claimedAt: row.claimedAt,
     cancelRequestedAt: row.cancelRequestedAt,
     auth: conductingContext(row.organizationId, row.projectId),
   };
@@ -2185,6 +2232,7 @@ export type SimulationStanding = {
   readonly executionFailure: string | null;
   /** The row's conductor — the claimant whose word the row takes. */
   readonly claimedBy: string | null;
+  readonly claimedAt: Date | null;
   readonly cancelRequestedAt: Date | null;
   /**
    * Narrowed to this simulation's own organization and project, built here
@@ -2388,10 +2436,21 @@ async function landSimulation(
   },
 ): Promise<Simulation | undefined> {
   const now = new Date();
+  const write = { ...landing.write };
+  // Failed assembly can report required wire times without ever conducting.
+  // Only a recorded running transition establishes an execution interval.
+  if (write.startedAt instanceof Date) {
+    write.startedAt = sql`case when ${simulation.startedAt} is not null
+      then ${write.startedAt}::timestamptz else null end`;
+  }
+  if (write.executionEndedAt instanceof Date) {
+    write.executionEndedAt = sql`case when ${simulation.startedAt} is not null
+      then ${write.executionEndedAt}::timestamptz else null end`;
+  }
   return db().transaction(async (tx) => {
     const [row] = await tx
       .update(simulation)
-      .set({ endedAt: now, ...landing.write, heartbeatAt: now })
+      .set({ endedAt: now, ...write, heartbeatAt: now })
       .where(
         within(
           auth,
@@ -2647,6 +2706,55 @@ export async function markSimulationCanceled(
     write: { status: "canceled", ...summaryFactsWrite(facts) },
     onlyWhere: isNotNull(simulation.cancelRequestedAt),
   });
+}
+
+/** Retain a late worker's start or measured end once without reopening an orphan. */
+export async function recordOrphanedSimulationExecution(
+  auth: AuthContext,
+  id: string,
+  claimant: string,
+  claimedAt: Date,
+  facts: SimulationSummaryFacts & { readonly startedAt: Date },
+): Promise<Simulation | undefined> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  if (auth.via !== "simulator") {
+    throw new Error("Only the simulator may report an orphaned simulation's measured execution.");
+  }
+  const write: Record<string, unknown> = facts.endedAt === undefined
+    ? { startedAt: facts.startedAt }
+    : summaryFactsWrite(facts);
+  if (
+    !Number.isFinite(facts.startedAt.getTime()) ||
+    (facts.endedAt !== undefined && write.executionEndedAt === undefined)
+  ) {
+    throw new Error("Measured execution requires a finite end at or after its start.");
+  }
+  // The sweep's end remains the lifecycle closure. Only the actual interval
+  // and report facts are recovered; run events and grading are unchanged.
+  delete write.endedAt;
+  const [row] = await db()
+    .update(simulation)
+    .set(write)
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          eq(simulation.id, id),
+          eq(simulation.status, "failed"),
+          eq(simulation.endingReason, "orphaned"),
+          eq(simulation.claimedBy, validClaimant(claimant)),
+          eq(simulation.claimedAt, claimedAt),
+          facts.endedAt === undefined
+            ? isNull(simulation.startedAt)
+            : isNotNull(simulation.startedAt),
+          isNull(simulation.executionEndedAt),
+          inActingProject(auth, simulation),
+        ),
+      ),
+    )
+    .returning(SIMULATION_COLUMNS);
+  return row === undefined ? undefined : simulationFromRow(row);
 }
 
 /**
@@ -2944,4 +3052,73 @@ export async function stopWorkOverConnections(
     }
   }
   return canceledRunCount;
+}
+
+/** Providers required by the frozen project settings of a run's queued work. */
+export async function readQueuedWorkProviders(
+  auth: AuthContext,
+  runId: string,
+): Promise<readonly string[]> {
+  authorize(auth, "read", here(auth));
+  return queuedWorkProvidersOn(db(), auth, runId);
+}
+
+async function queuedWorkProvidersOn(
+  on: Queryable,
+  auth: AuthContext,
+  runId: string,
+): Promise<readonly string[]> {
+  return (await queuedWorkRequirementsOn(on, auth, runId)).providers;
+}
+
+async function queuedWorkRequirementsOn(on: Queryable, auth: AuthContext, runId: string, simulationId?: string) {
+  const rows = await on.selectDistinct({
+    modality: simulation.modality,
+    connectionType: simulation.connectionType,
+    parameterValues: simulation.personaParameterValues,
+  }).from(simulation).where(within(auth, simulation, and(
+    eq(simulation.runId, runId), eq(simulation.status, "queued"),
+    simulationId === undefined ? undefined : eq(simulation.id, simulationId),
+    inActingProject(auth, simulation),
+  )));
+  const needed = new Set<string>();
+  const allowances = new Set<ReturnType<typeof allowanceKindOf>>();
+  for (const row of rows) {
+    allowances.add(allowanceKindOf({
+      modality: row.modality as Modality,
+      connectionType: row.connectionType as ConnectionType,
+    }));
+    for (const provider of providersNeededBy(
+      personaModelsOfParameters(row.parameterValues),
+      row.modality === "chat" ? "chat" : "voice",
+    )) needed.add(provider);
+  }
+  return { providers: [...needed], allowances: [...allowances] };
+}
+
+export type RunWorkBlock = {
+  readonly error: "allowance_spent" | "providers_unfunded";
+  readonly message: string;
+};
+
+/** Current admission refusal for queued simulations; active work is never checked. */
+export async function readRunWorkBlock(auth: AuthContext, runId: string, simulationId?: string): Promise<RunWorkBlock | null> {
+  authorize(auth, "read", here(auth));
+  try {
+    const wanted = await queuedWorkRequirementsOn(db(), auth, runId, simulationId);
+    if (wanted.allowances.length === 0) return null;
+    const source = billing().entitlements;
+    const [start, funding] = await Promise.all([
+      source.mayStart({ organizationId: auth.organizationId, allowances: wanted.allowances }),
+      source.mayPlatformKeyFund({ organizationId: auth.organizationId, providers: wanted.providers }),
+    ]);
+    if (!start.allowed) {
+      return { error: "allowance_spent", message: start.refusals.map((refusal) => refusal.message).join(" ") };
+    }
+    if (!funding.funded) return { error: "providers_unfunded", message: funding.message };
+    return null;
+  } catch (fault) {
+    console.error("Billing status could not be read; customer work continues", fault);
+    return null;
+  }
 }

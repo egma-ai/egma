@@ -82,7 +82,24 @@ barge-in is represented when the persona becomes full-duplex, and
 | `human_turn` | transcript turn spoken by the persona | The turn, ear to ear. Zero on chat, where a message is one instant. | `egma.turn.text` |
 | `agent_turn` | transcript turn spoken by the agent under test | Same terms as `human_turn`. | `egma.turn.text` |
 | `tool_call` | tool call a platform reported making | One instant. Egma did not conduct the exchange — the platform matched Egma's answers and served them itself — so there is no round trip to bracket and no duration is claimed. Only that lane emits this span: where the agent's own process runs the Egma SDK, that process reports its own calls and Egma writes no row. | `egma.tool.name`, `egma.tool.arguments`, `egma.tool.result` |
+| `provider_usage` | provider request the simulation made | Zero. It is the instant the provider answered, and the record built from it is dated by that instant. A request has a duration and Pipecat's own service spans already carry it; this span is the *bill*, not the timing, and a second interval here would be a second answer about how long one call took. | `egma.usage.provider`, `egma.usage.model`, `egma.usage.operation`, `egma.usage.measurement`, `egma.usage.provider_ref`, `egma.usage.quantities`, `egma.usage.raw` |
 | *measure name* | measurement | **The measurement itself.** A timing span is named for the measure it takes — `first_response_latency`, `turn_response_latency`, `agent_speech_duration` — and its start and end bracket the measured interval, so the span's duration *is* the number, in nanoseconds. The catalog (`measure-catalog.md`) says what each measure means and who emits it. | none |
+
+**Why the bill rides a span at all.** A usage record has to reach the platform
+in order, before the terminal report, and exactly once however many times it is
+sent. The span path already promises all three: it rides the write-ahead log,
+it goes out ahead of the terminal document, and a resend replays the same bytes
+with the same span id. That span id is the record's own identity — which is why
+a re-executed simulation, receiving new span ids, is correctly new spend rather
+than a duplicate collapsing onto the old one. The report contract's event
+objects are closed and carry one kind, so a usage event there would be a
+version 2 of that contract; a span is additive on this one.
+
+**What the span deliberately does not say.** Who pays. Which key funded a
+request is the platform's decision, taken from the row the simulation belongs
+to, and a simulator claiming it would be a claim about a customer that the
+platform has to check anyway — the same reason a resource attribute naming a
+tenant is never consulted.
 
 The speaker of a turn rides the span name — `human_turn` and `agent_turn` are
 the transcript's two labels, exactly — so there is no second field free to
@@ -97,6 +114,13 @@ disagree with it.
 | `egma.tool.name` | `tool_call` | The tool's name, exactly as the platform reported it. |
 | `egma.tool.arguments` | `tool_call` | The arguments, JSON-encoded, exactly as the platform reported them — absent where it reported the invocation and not its arguments. A string deliberately: the reported bytes are the fact worth keeping. |
 | `egma.tool.result` | `tool_call` | The answer the call was given, JSON-encoded — **Egma's own rendering of the answer it authored**, never the platform's echo of it. Present only for a tool this simulation's pinned test version covers, because only there did Egma author the answer; a call for any other name ran the customer's real implementation and its return value is not Egma's to vouch for. |
+| `egma.usage.provider` | `provider_usage` | Which provider answered: `openai`, `deepgram`, `cartesia`. |
+| `egma.usage.model` | `provider_usage` | The model string the request named. A price is per model, so this is what the rate card is looked up by. |
+| `egma.usage.operation` | `provider_usage` | Which protocol was spoken, in the executable catalog's own adapter words — `openai_chat_completions`, `openai_realtime`, `deepgram`, `cartesia_manual`, `cartesia`, `openai`. One model can be reached over two protocols, and they are not billed the same. |
+| `egma.usage.measurement` | `provider_usage` | `provider_reported` where the numbers are the provider's own, `client_measured` where Egma counted what it sent. Two different facts, and a reader must never have to guess which one a number is. |
+| `egma.usage.provider_ref` | `provider_usage` | The provider's own reference for the request — a chat completion's `id`, a realtime `item_id`. Absent where the provider offers none, which is every leg Egma counts itself. |
+| `egma.usage.quantities` | `provider_usage` | What was consumed, as a JSON object keyed by usage type: `input_tokens`, `cached_input_tokens`, `output_tokens`, `audio_input_tokens`, `text_input_tokens`, `audio_seconds`, `characters`. `input_tokens` is the **uncached** part of the prompt everywhere, because OpenAI's own `prompt_tokens` includes the cached tokens and rating both at the uncached price would charge the cache twice. |
+| `egma.usage.raw` | `provider_usage` | The provider's own usage object, JSON-encoded, exactly as it arrived. Kept so a wrong normalisation can be re-rated rather than re-measured. Absent beside `client_measured`, where the provider returned no usage at all. |
 
 **Why there is no tool span for a call Egma served itself.** Where the agent's own
 process runs the Egma SDK, that process is the tool record: every call the agent
@@ -140,6 +164,12 @@ This reverses the earlier rule that Egma observed tool facts at the seam
 - `voice-flush-recording-root.json` — a closing voice flush: the zero-duration
   recording span places audio sample zero on the trace clock, followed by the
   root last.
+- `voice-provider-usage.json` — a flush of its own conversation, carrying the
+  three provider requests one voice exchange makes: the persona's chat completion with the
+  provider's own token counts and the cached half named separately, the
+  realtime transcription with the seconds the provider billed, and the speaking
+  leg with the characters Egma counted and no provider object, because Cartesia
+  returns none. Three legs, three units, one shape.
 - `invalid/resource-naming-no-simulation.json` — a resource with no
   `egma.simulation_id`, which the ingest refuses whole with a body saying what
   to send instead.

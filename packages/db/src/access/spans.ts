@@ -3,6 +3,10 @@ import { Readable } from "node:stream";
 
 import { ClickHouseError } from "@clickhouse/client";
 
+import { canonicalUsage, usageEvidenceHash, type ProviderUsageEvidence } from "../models/provider-usage.ts";
+
+import { billing } from "../billing/ports.ts";
+
 import { traceStore } from "../clickhouse/client.ts";
 import type { AuthContext } from "./context.ts";
 import {
@@ -17,8 +21,9 @@ import {
 
 /**
  * Append spans with organization and project stamped from AuthContext.
- * Span identity is organization, project, trace, and span. Callers must compare
- * committedSpans before replaying: this writer cannot detect conflicting evidence.
+ * Span identity is organization, project, trace, and span. Callers compare
+ * committedSpans before replaying. Usage variants also survive merges, so an
+ * ambiguous concurrent insert cannot silently replace a committed charge.
  * Block and segment tokens reduce duplicate inserts within finite store windows;
  * identity-based reads handle exact replays afterward. Reject oversized fields whole.
  */
@@ -36,7 +41,7 @@ export type SpanSource = "simulation" | "production";
  * inside view are different measurements, so they must not be averaged
  * together.
  */
-export type SpanEmitter = "egma-runtime" | "agent";
+export type SpanEmitter = "egma-runtime" | "agent" | "grader";
 
 /**
  * One span, ready to be filed.
@@ -118,6 +123,7 @@ export type NewSpan = {
    * Use false when unknown; a missing parent does not imply completion.
    */
   readonly endsTrace: boolean;
+  readonly usage?: ProviderUsageEvidence | undefined;
 };
 
 export type AppendedSpans = {
@@ -273,6 +279,7 @@ function canonicalEvidence(span: NewSpan): string {
     tool_result: span.toolResult,
     trace_id: span.traceId,
   };
+  if (span.usage) evidence["usage"] = usageEvidenceHash(span.usage);
   return JSON.stringify(evidence, Object.keys(evidence).sort());
 }
 
@@ -327,6 +334,22 @@ function rowFor(auth: AuthContext, span: NewSpan): Record<string, unknown> {
     persona_version_id: span.personaVersionId,
     payload: span.payload,
     content_hash: spanContentHash(span),
+    usage_identity_hash: span.usage?.price ? usageEvidenceHash(span.usage) : "",
+    usage_received_at: asDateTime64(BigInt(span.usage ? new Date(span.usage.receivedAt).getTime() : 0) * 1_000n),
+    usage_occurred_at: asDateTime64(BigInt(span.usage ? new Date(span.usage.occurredAt).getTime() : 0) * 1_000n),
+    usage_provider: span.usage?.provider ?? "",
+    usage_model: span.usage?.model ?? "",
+    usage_operation: span.usage?.operation ?? "",
+    usage_payment_source: span.usage?.paymentSource ?? "",
+    usage_measurement: span.usage?.measurement ?? "",
+    usage_provider_ref: span.usage?.providerRef ?? "",
+    usage_credential_ref: span.usage?.credentialRef ?? "",
+    usage_unit: span.usage?.price?.unit ?? "",
+    usage_quantities: span.usage?.quantities ?? {},
+    usage_priced_by: span.usage?.price?.pricedBy ?? {},
+    usage_amount_micros: String(span.usage?.price?.amountMicros ?? 0),
+    usage_evidence: span.usage ? canonicalUsage(span.usage) : "",
+
   };
 }
 
@@ -509,7 +532,10 @@ export async function appendSpans(
 ): Promise<AppendedSpans> {
   if (spans.length === 0) return { appended: 0, batches: 0 };
 
-  for (const span of spans) refuseOversizeRecord(span);
+  for (const span of spans) {
+    refuseOversizeRecord(span);
+    if (span.usage && !span.usage.price) throw new Error("usage must be priced before ClickHouse append; retain the durable pending record");
+  }
 
   const batches = preparedInserts(auth, spans);
   for (const [index, block] of batches.entries()) {
@@ -533,6 +559,17 @@ export async function appendSpans(
     }
   }
 
+  const usage = spans.flatMap((span) => span.usage?.price ? [{
+    id: JSON.stringify([auth.organizationId, auth.projectId, span.traceId, span.spanId]),
+    organizationId: auth.organizationId, projectId: projectForTrace(auth),
+    occurredAt: new Date(span.usage.occurredAt), provider: span.usage.provider,
+    model: span.usage.model, paymentSource: span.usage.paymentSource,
+    amountMicros: span.usage.price.amountMicros,
+  }] : []);
+  if (usage.length > 0) {
+    try { await billing().usage.receive(usage); }
+    catch (cause) { console.error("usage sink failed after durable ClickHouse append; its facts remain available", cause); }
+  }
   return { appended: spans.length, batches: batches.length };
 }
 

@@ -17,6 +17,7 @@ from typing import Any
 
 from .persona import Persona, Turn
 from .plugs import AgentReply, ConnectionPlug
+from .usage import ProviderUsage
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,18 @@ part of the words for the reason the words are the transcript: the persona
 is handed those words back, and a transition read as speech is a
 conversation the agent never had."""
 OnTiming = Callable[[str, float], Awaitable[None]]
+
+OnProviderUsage = Callable[[ProviderUsage], Awaitable[None]]
+"""One provider request this conversation made, and what it consumed.
+
+A chat simulation has no pipeline, so there is no metrics bus for a bill to
+arrive on: the persona's own reply carries it, and it is handed over here, at
+the seam the conversation already has. A voice simulation's legs report through
+Pipecat instead, and both end up as the same span.
+"""
+
+OnExecutionEnded = Callable[[], None]
+"""The conversation stopped, before connection cleanup or evidence delivery."""
 
 OnAnswered = Callable[[], Awaitable[None]]
 """Boundary after a nonterminal agent answer, including an empty answer or greeting.
@@ -157,6 +170,8 @@ async def conduct(
     controls: ConversationControls,
     name: str,
     on_answered: OnAnswered | None = None,
+    on_provider_usage: OnProviderUsage | None = None,
+    on_execution_ended: OnExecutionEnded | None = None,
 ) -> Conducted:
     """Hold one simulation's conversation, turn by turn, and say how it went."""
     loop = asyncio.get_running_loop()
@@ -230,6 +245,11 @@ async def conduct(
             if budget_spent():
                 return limit_by_turns()
             reply = await controls.guard(persona.next_turn(history))
+            # The bill before the words, because the bill is a fact about the
+            # request that just returned and the words are about to change the
+            # history it was made against.
+            if on_provider_usage is not None and reply.usage is not None:
+                await on_provider_usage(reply.usage)
             await record("human", reply.text)
             if reply.concluded or reply.requests_end_call:
                 return ended(PERSONA_CONCLUDED)
@@ -279,6 +299,8 @@ async def conduct(
             )
         return ended(duration_limit_reached(max_duration_seconds))
     finally:
+        if on_execution_ended is not None:
+            on_execution_ended()
         watchdog.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await watchdog

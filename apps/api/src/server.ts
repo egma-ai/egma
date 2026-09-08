@@ -23,18 +23,20 @@ import {
   closeAcceptance,
   openAcceptance,
   stagedLoad,
-} from "./ingestion/accept.ts";
+} from "@egma/ingestion";
 import { retainedDefects } from "./ingestion/defects.ts";
 import { startDrainer, type Drainer } from "./ingestion/drainer.ts";
 import {
   pendingObjectStore,
   type PendingObjectStore,
-} from "./ingestion/object-store.ts";
+} from "@egma/ingestion";
+import type { BillingRoutes, BillingWebhookRoutes } from "./billing.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
+import { usageRoutes } from "./routes/usage.ts";
 import { mockEndpointRoutes } from "./routes/mock-endpoint.ts";
 import { passwordResetRoutes } from "./routes/password-reset.ts";
 import { platformApiRoutes } from "./routes/platform-api.ts";
@@ -42,6 +44,7 @@ import { reportRoutes } from "./routes/reports.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
 import { traceRoutes } from "./routes/traces.ts";
+import { credentialed, requesterOf } from "./http/credentialed.ts";
 import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
 import { webHandler } from "./http/web-handler.ts";
 import {
@@ -118,6 +121,26 @@ export type ServerOptions = {
    * for a suite that migrated its own store before building the API.
    */
   readonly traceStoreReady?: (() => boolean) | undefined;
+  /**
+   * The Billing section's reads, on a deployment whose settings selected the
+   * cloud adapter. Absent on every other deployment, and absent is the
+   * ordinary case: a self-hoster has no plan and no balance, so this address
+   * answers 404, which is the truth about their Egma rather than an empty
+   * panel pretending otherwise.
+   *
+   * They arrive as a plugin rather than as a set of reads because the routes
+   * are the commercially licensed package's, and the only thing they need from
+   * the API is the context a request already resolved.
+   */
+  readonly billingRoutes?: BillingRoutes | undefined;
+  /**
+   * Stripe's own door, on a deployment that named a webhook signing secret.
+   *
+   * Its own option because it is registered in its own scope: no session
+   * cookie, no API key, no per-organization budget, and the raw body its
+   * signature is over. See the registration below.
+   */
+  readonly billingWebhookRoutes?: BillingWebhookRoutes | undefined;
 };
 
 export type Api = {
@@ -389,6 +412,55 @@ export function buildApi(options: ServerOptions): Api {
       windowMilliseconds: 60_000,
     });
 
+  // Organization usage, for its settings page. Registered here beside
+  // the other account routes rather than inside the platform boundary below,
+  // because it is not in the published contract and must not be able to enter
+  // the OpenAPI document by sharing a prefix with something that is.
+  void app.register(usageRoutes, {
+    provider: identity.provider,
+    rateLimit,
+  });
+
+  // The Billing section's reads, on a deployment that selected the cloud
+  // adapter. Registered here for the reason the usage routes above are: they
+  // are not in the published contract and must not be able to enter the
+  // OpenAPI document by sharing a prefix with something that is.
+  //
+  // The credential hook is applied inside this scope rather than by the
+  // routes themselves, so the commercially licensed package holds no opinion
+  // about how a request becomes a person: it is handed the context the API
+  // already resolved, and the per-organization budget applies to it exactly as
+  // it does to every other browser read.
+  const mountBillingRoutes = options.billingRoutes;
+  if (mountBillingRoutes !== undefined) {
+    void app.register(async (scope) => {
+      credentialed(scope, { provider: identity.provider, rateLimit });
+      await mountBillingRoutes(scope, {
+        contextOf: (request) => requesterOf(request).auth,
+      });
+    });
+  }
+
+  // Stripe's own door, in a scope of its own and outside the credentialed one.
+  //
+  // **The signature is the whole gate.** Stripe holds no credential of Egma's
+  // and never will, so a cookie check here would refuse every real delivery
+  // and admit nothing extra; what proves a delivery is that only Stripe can
+  // sign a body against this deployment's signing secret. It is outside the
+  // per-organization budget for the claim door's reason: the caller resolves
+  // to no customer, so there is nothing to key a budget on.
+  //
+  // The scope also matters for the body. The routes declare a parser that
+  // keeps the raw bytes, because Stripe signs the body it sent — and Fastify
+  // keeps a content-type parser inside the scope that declared it, so every
+  // other route in this process still gets its JSON parsed as JSON.
+  const mountBillingWebhook = options.billingWebhookRoutes;
+  if (mountBillingWebhook !== undefined) {
+    void app.register(async (scope) => {
+      await mountBillingWebhook(scope);
+    });
+  }
+
   // Every customer-managed resource is registered through this one boundary.
   // It is the same explicit operation set that produces OpenAPI and the
   // generated TypeScript client. The separate protocols below do not enter it.
@@ -416,6 +488,9 @@ export function buildApi(options: ServerOptions): Api {
     serviceToken: config.simulatorServiceToken,
     providerCredentials: config.providerCredentials,
     carrierRoute: config.carrierRoute,
+    // Asked once per organization for each batch this door hands out. On a
+    // deployment with no billing it answers yes without reaching anything.
+    entitlements: config.billing.entitlements,
     // Where the mock endpoint answers. A mocked web call's tool URLs carry no
     // address of Egma's at all — the claim fills one in per call, for exactly
     // the tools that simulation's own test names.

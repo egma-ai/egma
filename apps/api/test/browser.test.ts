@@ -2359,7 +2359,7 @@ describe("recovering when a page cannot load", () => {
       await page.waitForSelector("text=Egma could not be reached");
       await page.unroute("**/v1/members");
       await page.getByRole("button", { name: "Try again" }).click();
-      await page.waitForSelector("text=Everybody in this organization");
+      await page.getByRole("table", { name: "Members" }).waitFor();
 
       await page.route("**/api/invitations/lookup", (route) =>
         route.fulfill({ status: 503, contentType: "application/json", body: '{"message":"unavailable"}' }),
@@ -3768,22 +3768,22 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Settings",
         address: at("settings"),
-        says: "What this product area is called",
+        says: "Save project",
       },
       {
         what: "People",
         address: at("settings", "people"),
-        says: "Everybody in this organization",
+        says: "Standing",
       },
       {
         what: "Keys",
         address: at("settings", "keys"),
-        says: "What a terminal or a script authenticates to Egma with",
+        says: "Create a key",
       },
       {
         what: "Organization",
         address: at("settings", "organization"),
-        says: "The customer every project below belongs to",
+        says: "Save organization",
       },
     ];
   }

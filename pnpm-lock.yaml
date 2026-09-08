@@ -39,6 +39,9 @@ importers:
       '@egma/ids':
         specifier: workspace:*
         version: link:../../packages/ids
+      '@egma/ingestion':
+        specifier: workspace:*
+        version: link:../../packages/ingestion
       '@egma/metrics':
         specifier: workspace:*
         version: link:../../packages/metrics
@@ -94,6 +97,10 @@ importers:
       '@types/nodemailer':
         specifier: ^8.0.1
         version: 8.0.1
+    optionalDependencies:
+      '@egma/ee':
+        specifier: workspace:*
+        version: link:../../ee
 
   apps/cli:
     dependencies:
@@ -119,6 +126,9 @@ importers:
       '@egma/ids':
         specifier: workspace:*
         version: link:../../packages/ids
+      '@egma/ingestion':
+        specifier: workspace:*
+        version: link:../../packages/ingestion
       '@egma/metrics':
         specifier: workspace:*
         version: link:../../packages/metrics
@@ -155,6 +165,10 @@ importers:
       posthog-node:
         specifier: ^5.49.1
         version: 5.49.1
+    optionalDependencies:
+      '@egma/ee':
+        specifier: workspace:*
+        version: link:../../ee
 
   apps/simulator: {}
 
@@ -219,6 +233,24 @@ importers:
         specifier: 4.3.3
         version: 4.3.3
 
+  ee:
+    dependencies:
+      '@egma/db':
+        specifier: workspace:*
+        version: link:../packages/db
+      '@egma/ids':
+        specifier: workspace:*
+        version: link:../packages/ids
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.3)(kysely@0.29.4)(pg@8.22.0)
+      fastify:
+        specifier: ^5.6.1
+        version: 5.12.3
+      stripe:
+        specifier: 22.6.1
+        version: 22.6.1(@types/node@24.13.3)
+
   fixtures/livekit-dumb-agent: {}
 
   packages/db:
@@ -253,6 +285,21 @@ importers:
         version: 0.31.10
 
   packages/ids: {}
+
+  packages/ingestion:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.1116.0
+        version: 3.1116.0
+      '@egma/db':
+        specifier: workspace:*
+        version: link:../db
+      '@egma/ids':
+        specifier: workspace:*
+        version: link:../ids
+      '@opentelemetry/api':
+        specifier: ^1.9.0
+        version: 1.9.1
 
   packages/lint:
     devDependencies:
@@ -4094,6 +4141,15 @@ packages:
 
   strip-literal@3.1.0:
     resolution: {integrity: sha512-8r3mkIM/2+PpjHoOtiAW8Rg3jJLHaV7xPwG+YRGrv6FP0wwk/toTpATxWYOW0BKdWwl82VT2tFYi5DlROa0Mxg==}
+
+  stripe@22.6.1:
+    resolution: {integrity: sha512-hAKSkGeVt2u46TRYhmnvwmVHxBNtOCJnPjc+SH5sP2B2ypElYzAAY3Ljx0Ar8C2w8nfpFQiZ95qoDCDsFkXMTA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@types/node': '>=18'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
 
   styled-jsx@5.1.6:
     resolution: {integrity: sha512-qSVyDTeMotdvQYoHWLNGwRFJHC+i+ZvdBRYosOFgC+Wg1vx4frN2/RG/NA7SYqqvKNLf39P2LSRA2pu6n0XYZA==}
@@ -8192,6 +8248,10 @@ snapshots:
   strip-literal@3.1.0:
     dependencies:
       js-tokens: 9.0.1
+
+  stripe@22.6.1(@types/node@24.13.3):
+    optionalDependencies:
+      '@types/node': 24.13.3
 
   styled-jsx@5.1.6(react@19.2.8):
     dependencies:

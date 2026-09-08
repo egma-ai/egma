@@ -81,7 +81,7 @@ export async function updateOrganization(
 export async function readOrganizationSettings(
   auth: AuthContext,
 ): Promise<OrganizationSettings | undefined> {
-  authorize(auth, "read", here(auth));
+  authorize(auth, "read_organization", here(auth));
 
   const [row] = await db()
     .select(SETTINGS_COLUMNS)

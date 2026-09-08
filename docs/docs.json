@@ -61,6 +61,7 @@
             "group": "Configuration",
             "pages": [
               "configuration/environment-variables",
+              "configuration/provider-api-keys",
               "configuration/authentication"
             ]
           }

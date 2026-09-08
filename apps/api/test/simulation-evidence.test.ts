@@ -321,3 +321,12 @@ describe("one simulation's grades", () => {
     });
   });
 });
+
+describe("billing stays on organization settings", () => {
+  it("has no simulation cost or run hold endpoint", async () => {
+    const { standing, run } = await aCustomerWhoRan("no_simulation_billing");
+    for (const path of [`/api/simulations/${run.heard}/usage`, `/api/runs/${run.heard}/billing-hold`]) {
+      expect((await request(api.app, "GET", path, standing.key)).statusCode).toBe(404);
+    }
+  });
+});

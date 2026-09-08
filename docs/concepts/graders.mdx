@@ -44,6 +44,10 @@ language model and individual pass threshold. You cannot remove it or change
 its scope. A custom clone of this prompt is optional and can have a different
 scope.
 
+To pay the model provider directly, add your key in
+[Settings → Provider API Keys](/configuration/provider-api-keys). This also
+applies to predefined model graders. Code graders do not make model calls.
+
 Expected behaviors reads the statements from the simulation's frozen test
 version. All LLM graders use the same executor and make one model request per
 trace. The request contains the saved instruction, the test's behavior

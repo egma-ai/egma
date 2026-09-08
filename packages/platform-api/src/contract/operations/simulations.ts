@@ -16,7 +16,7 @@ import {
   gradingStateSchema,
   normalizedScoreSchema,
 } from "./grades.ts";
-import { simulationStatusSchema } from "./runs.ts";
+import { simulationStatusSchema, workBlockSchema } from "./runs.ts";
 
 const stringSchema = { type: "string" } as const;
 const integerSchema = { type: "integer" } as const;
@@ -98,6 +98,7 @@ const simulationSchema = {
     runName: nullable(stringSchema),
     position: integerSchema,
     status: simulationStatusSchema,
+    workBlock: nullable(workBlockSchema),
     gradingState: nullable(gradingStateSchema),
     ...gradeProjectionProperties,
     reason: nullable(stringSchema),
@@ -228,6 +229,7 @@ const simulationSchema = {
     ...gradeProjectionRequired,
     "reason",
     "executionFailure",
+    "workBlock",
     "modality",
     "createdAt",
     "startedAt",

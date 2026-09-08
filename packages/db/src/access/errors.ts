@@ -96,13 +96,16 @@ export class RunWriteRefusedError extends Error {
  * no_adapter: no shipped simulator supports the connection.
  * not_admitted: invalid suite, expected versions, or persona selection.
  * already_finished: the run finished before cancellation.
+
  */
 export type RunWriteRefusal =
   | "no_such_connection"
   | "connection_not_on_agent"
   | "no_adapter"
   | "not_admitted"
-  | "already_finished";
+  | "already_finished"
+  | "allowance_spent"
+  | "providers_unfunded";
 
 /**
  * The person being invited is already in an organization.
@@ -412,7 +415,9 @@ export class NotPermittedError extends Error {
   constructor(auth: AuthContext, action: Action, scope: ActionScope) {
     super(
       scope.organizationId === auth.organizationId
-        ? `a ${auth.role} may not ${action}`
+        ? auth.via === "api_key" && auth.projectId !== undefined
+          ? `This API key is limited to project ${auth.projectId} and its creator's current permissions. Use a permitted browser session or an API key for the required project or organization.`
+          : `a ${auth.role} may not ${action}`
         : `${action} named organization ${scope.organizationId}, and the credential is for ${auth.organizationId}`,
     );
     this.name = "NotPermittedError";
@@ -458,3 +463,11 @@ export type ConnectionRestoreRefusal =
   | "credential_forbidden"
   | "credential_choice_required"
   | "parent_agent_archived";
+
+/** New model work cannot start from a reliably exhausted balance. */
+export class FundingRefusedError extends Error {
+  constructor(message: string) {
+    super(message.trim() || "Add inference credit or provider keys before starting this work.");
+    this.name = "FundingRefusedError";
+  }
+}

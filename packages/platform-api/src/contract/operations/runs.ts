@@ -42,6 +42,7 @@ const endingReasonSchema = {
     "simulator_error",
     "orphaned",
     "dispatch_failed",
+    "provider_key_unavailable",
   ],
 } as const;
 
@@ -193,11 +194,22 @@ const runHeaderSchema = {
  * row of a two-hundred-run page would put somebody's telephone routing in front
  * of a reader who asked for a list of runs.
  */
+export const workBlockSchema = {
+  type: "object",
+  properties: {
+    error: { type: "string", enum: ["allowance_spent", "providers_unfunded"] },
+    message: stringSchema,
+  },
+  required: ["error", "message"],
+  additionalProperties: false,
+} as const;
+
 const runDetailSchema = {
   ...runHeaderSchema,
   properties: {
     ...runHeaderSchema.properties,
     eventThrough: integerSchema,
+    workBlock: nullable(workBlockSchema),
     tempMockAgentVersion: nullable(integerSchema),
     tempMockAgentVersionCleanup: nullable(booleanSchema),
     mockMetadata: nullable(mockMetadataSchema),
@@ -215,6 +227,7 @@ const runDetailSchema = {
   required: [
     ...runHeaderSchema.required,
     "eventThrough",
+    "workBlock",
     "tempMockAgentVersion",
     "tempMockAgentVersionCleanup",
     "mockMetadata",
