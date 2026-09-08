@@ -61,7 +61,10 @@ export type PendingObjectStore = {
    * there, so a caller can tell a first upload from a finished retry without
    * either being a failure.
    */
-  create(segment: SealedSegment): Promise<"created" | "present">;
+  create(
+    segment: SealedSegment,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<"created" | "present">;
   read(key: string): Promise<Uint8Array>;
   /** Every pending object, following every listing page. */
   list(): Promise<readonly PendingObject[]>;
@@ -133,7 +136,7 @@ export function pendingObjectStore(
   };
 
   return {
-    async create(segment) {
+    async create(segment, requestOptions) {
       try {
         await client.send(
           new PutObjectCommand({
@@ -149,6 +152,9 @@ export function pendingObjectStore(
             // retries rests on this one header.
             IfNoneMatch: "*",
           }),
+          requestOptions?.signal === undefined
+            ? undefined
+            : { abortSignal: requestOptions.signal },
         );
         return "created";
       } catch (error) {
