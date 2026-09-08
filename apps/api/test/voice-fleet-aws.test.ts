@@ -18,16 +18,15 @@ const settings: AwsVoiceFleetSettings = {
 };
 
 describe("the AWS voice fleet", () => {
-  it("pages pending and running tasks, describes in hundreds, and keeps task identities unique", async () => {
+  it("pages tasks that ECS desires running, including starting tasks, describes in hundreds, and keeps task identities unique", async () => {
     const pending = Array.from({ length: 101 }, (_, index) => `arn:pending:${index}`);
     const send = vi.fn(async (command: unknown) => {
       if (command instanceof ListTasksCommand) {
         const input = command.input;
-        if (input.desiredStatus === "PENDING" && input.nextToken === undefined) {
+        if (input.nextToken === undefined) {
           return { taskArns: pending.slice(0, 100), nextToken: "more" };
         }
-        if (input.desiredStatus === "PENDING") return { taskArns: pending.slice(100) };
-        return { taskArns: [pending[0], "arn:running"] };
+        return { taskArns: [...pending.slice(100), pending[0], "arn:running"] };
       }
       if (command instanceof DescribeTasksCommand) {
         return {
@@ -50,7 +49,7 @@ describe("the AWS voice fleet", () => {
 
     expect(tasks).toHaveLength(101);
     expect(tasks.at(-1)).toEqual({ id: "arn:running", mode: "standby" });
-    expect(send.mock.calls.filter(([command]) => command instanceof ListTasksCommand)).toHaveLength(3);
+    expect(send.mock.calls.filter(([command]) => command instanceof ListTasksCommand)).toHaveLength(2);
     const describes = send.mock.calls.filter(([command]) => command instanceof DescribeTasksCommand);
     expect(describes.map(([command]) => (command as DescribeTasksCommand).input.tasks?.length)).toEqual([100, 2]);
   });

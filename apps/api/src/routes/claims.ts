@@ -1,3 +1,4 @@
+import type { VoiceFleetReadiness } from "../voice-fleet-readiness.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import {
@@ -64,6 +65,8 @@ import {
  */
 
 export type ClaimRoutesOptions = {
+  readonly voiceFleetReadiness?: VoiceFleetReadiness | undefined;
+  readonly wakeVoiceFleet?: (() => void) | undefined;
   /** The deployment's service token, from configuration. */
   readonly serviceToken: string;
   /**
@@ -681,6 +684,15 @@ export async function claimRoutes(
   app.post(CLAIMS_PATH, async (request, reply) => {
     const ask = claimAsk((request.body ?? {}) as Body);
     if ("refusal" in ask) return invalid(reply, ask.refusal);
+    const fleet = options.voiceFleetReadiness;
+    const identity = fleet?.identity(((request.body ?? {}) as Body).fleet);
+    if (identity !== undefined) {
+      fleet?.waiting(identity);
+      options.wakeVoiceFleet?.();
+      if (fleet?.shouldRetire(identity)) {
+        return reply.send({ specs: [], retire: true });
+      }
+    }
 
     // A client that hangs up mid-hold should stop being worked for: rows
     // claimed for nobody would sit claimed until the sweep called them
@@ -712,6 +724,9 @@ export async function claimRoutes(
           Math.min(RECHECK_MILLISECONDS, holdDeadline - Date.now()),
         );
         if (gone) break;
+        if (identity !== undefined && fleet?.shouldRetire(identity)) {
+          return reply.send({ specs: [], retire: true });
+        }
         claims = await claimSimulations({
           claimant: ask.claimant,
           capacity: ask.capacity,
@@ -788,6 +803,7 @@ export async function claimRoutes(
       );
 
       const specs: Record<string, unknown>[] = [];
+      let dispatchedVoice = false;
       const claimedAt: Record<string, string> = {};
       // One read of each run, however many of its conversations this batch
       // took. Lives exactly as long as this response.
@@ -985,6 +1001,7 @@ export async function claimRoutes(
           continue;
         }
         specs.push(spec);
+        dispatchedVoice ||= claim.modality === "voice";
         claimedAt[claim.id] = claim.claimedAt.toISOString();
         request.log.info(
           platformEvent(
@@ -998,6 +1015,14 @@ export async function claimRoutes(
         );
       }
 
+      if (identity !== undefined) {
+        if (dispatchedVoice) {
+          fleet?.busy(identity);
+          options.wakeVoiceFleet?.();
+        } else {
+          fleet?.unclaimed(identity);
+        }
+      }
       return await reply.send({ specs, claimed_at: claimedAt });
     } finally {
       // Taken back off rather than left behind: a keep-alive socket outlives

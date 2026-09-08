@@ -1,3 +1,4 @@
+import type { VoiceFleetReadiness } from "./voice-fleet-readiness.ts";
 import {
   openDrainOwnership,
   ping,
@@ -125,6 +126,7 @@ export type ServerOptions = {
   readonly traceStoreReady?: (() => boolean) | undefined;
   /** Hosted-only wake-up shared by run creation and the standing sweep. */
   readonly wakeVoiceFleet?: (() => void) | undefined;
+  readonly voiceFleetReadiness?: VoiceFleetReadiness | undefined;
   /**
    * The Billing section's reads, on a deployment whose settings selected the
    * cloud adapter. Absent on every other deployment, and absent is the
@@ -337,6 +339,9 @@ export function buildApi(options: ServerOptions): Api {
       ...(config.releaseSha === undefined
         ? {}
         : { releaseSha: config.releaseSha }),
+      ...(options.voiceFleetReadiness === undefined
+        ? {}
+        : { voiceFleet: options.voiceFleetReadiness.snapshot() }),
       role,
       postgres,
       clickhouse,
@@ -495,6 +500,10 @@ export function buildApi(options: ServerOptions): Api {
   // customer — so there is no organization to key a budget on, and a busy
   // run can never eat a customer's request budget from the inside.
   void app.register(claimRoutes, {
+    ...(options.voiceFleetReadiness === undefined
+      ? {}
+      : { voiceFleetReadiness: options.voiceFleetReadiness }),
+    ...(options.wakeVoiceFleet === undefined ? {} : { wakeVoiceFleet: options.wakeVoiceFleet }),
     serviceToken: config.simulatorServiceToken,
     providerCredentials: config.providerCredentials,
     carrierRoute: config.carrierRoute,

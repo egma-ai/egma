@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -170,6 +171,43 @@ class RefusingClient:
         if self.attempts >= self._wanted:
             self.enough.set()
         raise ClaimFailure("claim answered 404: Route POST:/v1/claims not found")
+
+
+class RetiringClient:
+    retire_requested = False
+
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    async def claim(
+        self,
+        claimant: str,
+        capacity: int,
+        modalities: tuple[str, ...] | None = None,
+    ) -> list[ClaimedSpec]:
+        del claimant, capacity, modalities
+        self.attempts += 1
+        self.retire_requested = True
+        return []
+
+
+@pytest.mark.parametrize("mode", ["one-shot", "standby"])
+async def test_a_hosted_retirement_answer_exits_without_claiming(
+    tmp_path, mode, caplog
+):
+    caplog.set_level(logging.INFO, logger="egma_simulator.service")
+    service = a_service(tmp_path)
+    service._config = replace(
+        service._config, mode=mode, capacity=1, modalities=("voice",)
+    )
+    client = RetiringClient()
+    executor = RecordingExecutor(capacity=1)
+
+    await service._claim_for_mode(client, executor)
+
+    assert client.attempts == 1
+    assert executor.accepted == []
+    assert "retired before claiming work" in caplog.text
 
 
 async def test_a_claim_failure_that_never_changes_is_said_once_not_forever(

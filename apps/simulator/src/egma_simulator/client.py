@@ -82,6 +82,7 @@ class ControlPlaneClient:
         *,
         claim_wait_seconds: float,
         service_token: str | None = None,
+        fleet: dict[str, str] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         # Sent on every claim as ``wait_seconds`` and enforced locally as the
@@ -102,7 +103,14 @@ class ControlPlaneClient:
         self._headers = (
             {"Authorization": f"Bearer {service_token}"} if service_token else {}
         )
+        self._fleet = fleet
+        self._retire_requested = False
         self._session: aiohttp.ClientSession | None = None
+
+    @property
+    def retire_requested(self) -> bool:
+        """Whether the latest empty claim answer retired this hosted task."""
+        return self._retire_requested
 
     async def __aenter__(self) -> ControlPlaneClient:
         self._session = aiohttp.ClientSession(headers=self._headers)
@@ -125,6 +133,7 @@ class ControlPlaneClient:
         modalities: tuple[str, ...] | None = None,
     ) -> list[ClaimedSpec]:
         """Ask for compatible specs; an empty list is a quiet queue."""
+        self._retire_requested = False
         try:
             async with self._live_session().post(
                 f"{self._base_url}/v1/claims",
@@ -134,6 +143,7 @@ class ControlPlaneClient:
                     "wait_seconds": self._claim_wait_seconds,
                     "contract_versions": [spec_contract_version()],
                     **({} if modalities is None else {"modalities": list(modalities)}),
+                    **({} if self._fleet is None else {"fleet": self._fleet}),
                 },
                 timeout=self._claim_timeout,
             ) as response:
@@ -148,6 +158,12 @@ class ControlPlaneClient:
         specs = body.get("specs") if isinstance(body, dict) else None
         if not isinstance(specs, list):
             raise ClaimFailure(f"claim answer has no specs list: {body!r}")
+        retire = body.get("retire", False)
+        if not isinstance(retire, bool):
+            raise ClaimFailure("claim answer has an invalid retire flag")
+        if retire and specs:
+            raise ClaimFailure("claim answer cannot retire a task while granting work")
+        self._retire_requested = retire
         claimed_at = body.get("claimed_at", {}) if isinstance(body, dict) else {}
         if not isinstance(claimed_at, dict):
             claimed_at = {}

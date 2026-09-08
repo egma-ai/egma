@@ -12,6 +12,10 @@ export type AwsVoiceFleetSettings = {
 export type VoiceFleetTask = {
   readonly id: string;
   readonly mode: VoiceTaskMode;
+  readonly taskDefinition?: string;
+  readonly createdAt?: number;
+  readonly retiring?: boolean;
+  readonly readiness?: "ready" | "busy";
 };
 
 export type VoiceFleetLaunchFailure = {
@@ -153,11 +157,34 @@ export function createVoiceFleetReconciler(
         const tasks = new Map<string, VoiceFleetTask>();
         for (const task of recent) tasks.set(task.id, task);
         for (const task of listed) tasks.set(task.id, task);
+        for (const task of tasks.values()) {
+          if (task.retiring) tasks.delete(task.id);
+        }
+        const retiring = new Set(
+          listed.filter((task) => task.retiring).map((task) => task.id),
+        );
+        recent = recent.filter((task) => !retiring.has(task.id));
+
+        // After an API rollout, old workers may still be conducting calls but
+        // their in-memory busy observations are gone. Reserve enough unknown
+        // old capacity to cover active database work. Known-idle old workers
+        // can still make way for the new ready pool.
+        const knownBusy = listed.filter(
+          (task) => task.readiness === "busy",
+        ).length;
+        const unknownRetiring = listed.filter(
+          (task) => task.retiring && task.readiness === undefined,
+        ).length;
+        const unknownActive = Math.min(
+          unknownRetiring,
+          Math.max(0, demand.active - knownBusy),
+        );
 
         const desiredWork = demand.active + demand.admissibleQueued;
         const desiredTotal = desiredWork + standbyTarget;
         const present = { "one-shot": 0, standby: 0 };
         for (const task of tasks.values()) present[task.mode] += 1;
+        present["one-shot"] += unknownActive;
         const presentTotal = present["one-shot"] + present.standby;
         const missingTotal = Math.max(0, desiredTotal - presentTotal);
         // A standby keeps its launch mode after it claims. Active simulations

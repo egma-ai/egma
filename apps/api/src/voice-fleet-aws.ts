@@ -17,7 +17,7 @@ import type {
 type EcsSender = Pick<ECSClient, "send">;
 
 const MODE_ENVIRONMENT = "EGMA_SIMULATOR_MODE";
-const LIST_STATUSES = ["PENDING", "RUNNING"] as const;
+const LIST_STATUSES = ["RUNNING"] as const;
 const DESCRIBE_BATCH = 100;
 const RUN_BATCH = 10;
 
@@ -88,7 +88,13 @@ export function awsVoiceFleet(
             task.taskArn !== undefined &&
             ["PROVISIONING", "PENDING", "RUNNING"].includes(task.lastStatus ?? "")
           ) {
-            found.push({ id: task.taskArn, mode: modeOf(task) });
+            found.push({
+              id: task.taskArn, mode: modeOf(task),
+              ...(task.taskDefinitionArn === undefined
+                ? {}
+                : { taskDefinition: task.taskDefinitionArn }),
+              ...(task.createdAt === undefined ? {} : { createdAt: task.createdAt.getTime() }),
+            });
           }
         }
       }
