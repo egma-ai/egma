@@ -629,6 +629,37 @@ describe("expired grading leases", () => {
 });
 
 describe("queue load", () => {
+  it("does not replace abandoned work while draining down to a lower cap", async () => {
+    const traces = ["ca910000000000000000000000000001", "ca910000000000000000000000000002"];
+    for (const traceId of traces) await request(traceId);
+    const held = await claimGradingJobs({
+      claimant: "before-lower-cap", capacity: 2, concurrencyCap: 2,
+    });
+    expect(held).toHaveLength(2);
+    const expired = held[0]!;
+    const active = held[1]!;
+    const queuedTrace = "ca910000000000000000000000000003";
+    await request(queuedTrace);
+    await database.sql(
+      `update grading_job set attempts = 3,
+       heartbeat_at = now() - interval '10 seconds' where id = $1`,
+      [expired.id],
+    );
+
+    await expect(claimGradingJobs({
+      claimant: "after-lower-cap", capacity: 2, concurrencyCap: 1, leaseSeconds: 1,
+    })).resolves.toEqual([]);
+    await expect(getGradingJob(auth, expired.id)).resolves.toMatchObject({ status: "abandoned" });
+    await expect(getGradingJobForTrace(auth, queuedTrace)).resolves.toMatchObject({ status: "pending" });
+
+    await finishGradingJob(active.auth, active.id, active.claimedBy);
+    const [resumed] = await claimGradingJobs({
+      claimant: "after-lower-cap", capacity: 2, concurrencyCap: 1,
+    });
+    expect(resumed?.traceId).toBe(queuedTrace);
+    if (resumed === undefined) throw new Error("pending job did not resume");
+    await finishGradingJob(resumed.auth, resumed.id, resumed.claimedBy);
+  });
   it("holds a platform cap across workers and refills ten freed slots", async () => {
     const tracePrefix = "ca90";
     const traceIds = Array.from(

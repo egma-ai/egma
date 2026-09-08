@@ -184,9 +184,18 @@ export function startService(options: ServiceOptions): Service {
       if (claimed.length > 0) {
         for (const claim of claimed) {
           const grading = holdAndGrade(claim, options, pacing)
-            .catch((error: unknown) => {
-              // Job failures land inside gradeHeldClaim. This protects the
-              // service loop if tracing or logging itself fails around it.
+            .catch(async (error: unknown) => {
+              // Release failures outside gradeHeldClaim before freeing the slot.
+              try {
+                await releaseGradingJob(
+                  claim.auth,
+                  claim.id,
+                  config.claimant,
+                  saying(error),
+                );
+              } catch {
+                // Lease expiry recovers a claim when the database is unreachable.
+              }
               try {
                 log.error(
                   platformEvent("egma.grading_job.process_failed", {

@@ -1100,10 +1100,7 @@ export async function claimGradingJobs(
         .select({ count: count() })
         .from(gradingJob)
         .where(eq(gradingJob.status, "claimed"));
-      const available = Math.max(
-        request.concurrencyCap - Number(active?.count ?? 0),
-        0,
-      );
+      const available = request.concurrencyCap - Number(active?.count ?? 0);
       const expired = await tx
         .select({ id: gradingJob.id, attempts: gradingJob.attempts })
         .from(gradingJob)
@@ -1120,7 +1117,7 @@ export async function claimGradingJobs(
       const abandoned = expired.length - reclaimable;
       const pendingCapacity = Math.min(
         request.capacity - reclaimable,
-        available + abandoned,
+        Math.max(available + abandoned, 0),
       );
       const pending = pendingCapacity === 0
         ? []

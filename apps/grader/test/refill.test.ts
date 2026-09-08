@@ -194,6 +194,9 @@ describe("grader capacity refilling", () => {
     });
 
     await vi.waitFor(() => expect(runtime.claim).toHaveBeenCalledTimes(2));
+    expect(runtime.release).toHaveBeenCalledWith(
+      {}, "job-1", "refill-test", "logger failed while starting the job",
+    );
     service.stop();
     await expect(service.finished).resolves.toBeUndefined();
   });

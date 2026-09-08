@@ -819,6 +819,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           // so no billing adapter and every claim funded.
           stripeSecretKey: undefined,
           capacity: 4,
+          concurrencyCap: undefined,
           heartbeatSeconds: 1,
           leaseSeconds: 3_600,
           sweepSeconds: 3_600,
