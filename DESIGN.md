@@ -110,11 +110,11 @@ Egma uses neutral paper surfaces and one orange-red brand family. Routine produc
 | State | Light value | Meaning |
 | --- | --- | --- |
 | Success | `#28775a` | Passed, complete, or healthy |
-| Warning | `#9a691c` | Skipped, limited, or needs attention |
+| Warning | `#9a691c` | Skipped, limited, needs attention, or work not yet settled |
 | Failure | `#b44444` | Failed, errored, invalid, or destructive |
 
 - Every state includes a word. An icon or shape is optional supporting information, not a second code the reader must learn. Color is supporting information.
-- **Run and simulation status is a filled square before its word.** A run's status word and a simulation's status word each carry a 10px square filled with the state colour: yellow for `Pending`, `Running`, `Queued` and `Grading`, green for `Completed` and for a simulation whose every grader passed its own threshold, red for `Execution failed`, `Grading failed` and a simulation where any grader failed or errored, and grey for `Canceled`. The yellow square pulses in opacity while the work is unsettled and stays solid under reduced motion; the spinner is retired. A graded simulation's word is the count, `2/3 passed`, never `1 failed` in a list. There is no overall threshold: ADR-0017 stands, and the square reads the individual grader results. `claimed` is shown as `Queued`. On Run Results surfaces, grader verdicts still use `Result · Passed` or `Result · Failed`, with colour only on the verdict word and no marker. (Developer decision, 2026-09-07. This replaces the 2026-08-26 text-first rule for run status; the same session made canceled grey rather than warning-coloured on both surfaces.)
+- **Run and simulation status is a filled square before its word.** A run's status word and a simulation's status word each carry a 10px square filled with the state colour: yellow for `Pending`, `Running`, `Queued` and `Grading`, green for `Completed` and for a simulation whose every grader passed its own threshold, red for `Execution failed`, `Grading failed` and a simulation where any grader failed or errored, and grey for `Canceled` and for `Not graded`, when no grader was selected. The yellow square pulses in opacity while the work is unsettled and stays solid under reduced motion; the spinner is retired. A graded simulation's word is the count, `2/3 passed`, never `1 failed` in a list. There is no overall threshold: ADR-0017 stands, and the square reads the individual grader results. `claimed` is shown as `Queued`. On Run Results surfaces, grader verdicts still use `Result · Passed` or `Result · Failed`, with colour only on the verdict word and no marker. (Developer decision, 2026-09-07. This replaces the 2026-08-26 text-first rule for run status; the same session made canceled grey rather than warning-coloured on both surfaces.)
 - **A status marker is a square when a marker is useful.** Small static marks that stand for state elsewhere — for example, a step marker beside a transcript line — are squares of the same size, never circles. A failed or errored marker is filled with the semantic Failure colour. Other static markers beside evidence remain outlines; only the run and simulation status squares above fill with their state colour. It follows the one-radius rule rather than sitting outside it, and it keeps the single round shape in the system meaning one thing: a radio button. (Developer decision, 2026-08-24; narrowed for run surfaces on 2026-08-26; failure fill changed by developer decision, 2026-08-27; status squares filled by developer decision, 2026-09-07.)
 - Brand orange does not mean passed, failed, skipped, or errored.
 - Destructive actions use the failure color inside a clear confirmation flow.
@@ -357,6 +357,7 @@ The rules below are the floor and do not move. (Developer decision, 2026-08-19.)
 | Dialog exit | 180ms | Centered modal exit |
 | Drawer enter | 280ms | Mobile navigation |
 | Drawer exit | 220ms | Mobile navigation exit |
+| Status pulse | 1120ms | The filled status square breathing while work is unsettled; four drawer enters |
 
 ```css
 --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -374,6 +375,7 @@ The rules below are the floor and do not move. (Developer decision, 2026-08-19.)
 | Mobile drawer | Explain spatial movement | Translate from its attached edge |
 | Toast | Show arrival and dismissal | Short translate plus opacity; interruptible transition |
 | Loading | Show progress | Fast, quiet indicator |
+| Status square | Show unsettled work | Opacity pulse on `--ease-in-out`; solid under reduced motion |
 | Table row | Support routine navigation | Color feedback only |
 | Navigation row | Support routine navigation | Color feedback only |
 | Progress | Explain completion | Transform-based fill, linear while active |

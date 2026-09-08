@@ -1518,8 +1518,9 @@ function resolvedSimulationState(
       complete = false;
       continue;
     }
-    // The same reading of a current grade `currentGrades` makes: no score is
-    // an error, and a score is measured against the threshold the plan froze.
+    // A current grade reads the way `currentGrades` in grading/results.ts reads
+    // it: no score is an error, and a score is measured against the threshold
+    // the plan froze.
     if (grade.errored || grade.score === null) errored += 1;
     else if (grade.score >= item.passThreshold) passed += 1;
     else failed += 1;

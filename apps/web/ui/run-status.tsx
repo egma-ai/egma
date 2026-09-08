@@ -4,6 +4,7 @@ import type { VariantProps } from "class-variance-authority";
 import type { ReactNode } from "react";
 
 import {
+  type GradeTally,
   type GradingWord,
   type RunStatusWord,
   type SimulationStatusWord,
@@ -24,8 +25,7 @@ import { cn } from "@/lib/utils";
 /**
  * A run's machinery. `completed` means the work finished, which is not the
  * same as the work going well: the verdicts live on each simulation's own
- * square. The run's square is green on completion because the developer asked
- * for the runs table to say "this one is done" at a glance (2026-09-07).
+ * square. The run's green square says only that the run is done.
  */
 const RUN_STATUS_MEANING: Readonly<Record<RunStatusWord, string>> = {
   pending: "Nothing has been claimed yet.",
@@ -75,8 +75,8 @@ const FILLED_MARK: Readonly<Record<StateMarkKind, string>> = {
  * The outline form is the step marker beside a transcript line and the grading
  * chip: only a failure fills. The `filled` form is the run and simulation
  * status square, which wears its state colour and pulses while work is
- * active (developer decision, 2026-09-07). `moving` is the older spin for a
- * chip; `pulse` wins when both are set.
+ * active. `moving` is the older spin for a chip; `pulse` wins when both are
+ * set.
  */
 export function StateMark({
   kind,
@@ -139,14 +139,6 @@ export function RunStatus({
   );
 }
 
-/** How many of a simulation's frozen graders passed, failed or errored. */
-export type GradeTally = {
-  readonly passed: number;
-  readonly failed: number;
-  readonly errored: number;
-  readonly selected: number;
-};
-
 export type SimulationSquare = {
   readonly kind: StateMarkKind;
   readonly pulse: boolean;
@@ -159,8 +151,9 @@ export type SimulationSquare = {
  * Execution comes first: a canceled or failed simulation never graded. Then
  * the grading work, which pulses until it settles. Then the verdict, which is
  * per grader and never an overall threshold (ADR-0017 stands): green when
- * every frozen grader passed its own pass threshold, red when any failed or
- * errored. The word beside a graded square is the count, `2/3 passed`, so the
+ * every frozen grader passed its own pass threshold, red when any failed. An
+ * errored grader makes the grading state `error`, so it never reaches the
+ * count. The word beside a graded square is the count, `2/3 passed`, so the
  * colour is never the only carrier. `claimed` is shown as `Queued`, because
  * which simulator holds it is not the reader's business.
  */
@@ -196,16 +189,12 @@ export function simulationSquare(row: {
   }
   const tally = row.gradeTally;
   if (tally === null || tally.selected === 0) {
-    return { kind: "not-requested", pulse: false, word: "Graded" };
+    return { kind: "not-requested", pulse: false, word: "Not graded" };
   }
   const word = `${String(tally.passed)}/${String(tally.selected)} passed`;
-  if (tally.errored > 0) {
-    return { kind: "error", pulse: false, word: "Grading failed" };
-  }
-  if (tally.failed > 0 || tally.passed < tally.selected) {
-    return { kind: "failed", pulse: false, word };
-  }
-  return { kind: "passed", pulse: false, word };
+  return tally.failed > 0
+    ? { kind: "failed", pulse: false, word }
+    : { kind: "passed", pulse: false, word };
 }
 
 /**

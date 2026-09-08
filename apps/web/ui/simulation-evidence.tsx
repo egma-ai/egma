@@ -49,7 +49,8 @@ import {
   gradeSummary,
   type DisplayGradeAssertion,
 } from "./grade.tsx";
-import { StateMark, type GradeTally } from "./run-status.tsx";
+import type { GradeTally } from "../lib/runs.ts";
+import { StateMark } from "./run-status.tsx";
 
 type RecordingStatus = "absent" | "loading" | "ready" | "failed";
 
@@ -219,13 +220,9 @@ function scoreText(score: number | null): string {
 }
 
 /**
- * How many of this simulation's frozen graders passed, failed or errored.
- *
- * The evidence read carries no tally of its own, so the browser counts the
- * same facts the platform counts for a run's rows: the frozen plan says which
- * project graders were selected, and each one's current grade says how it came
- * out. Evidence recorded before a plan was frozen has grades and no plan, and
- * those graders are counted instead of reporting that none were selected.
+ * How many of this simulation's frozen graders passed, failed or errored,
+ * counted the way the platform counts them: one current grade per project
+ * grader in the frozen plan, measured against the threshold the plan froze.
  *
  * Nothing here creates an overall verdict. ADR-0017 stands: the count is the
  * fact, and each grader keeps its own threshold.
@@ -234,9 +231,7 @@ export function evidenceGradeTally(evidence: SimulationEvidence): GradeTally {
   const planned = (evidence.gradingPlan?.items ?? []).map(
     (item) => item.projectGraderId,
   );
-  const selected = planned.length > 0
-    ? planned
-    : [...new Set(evidence.grades.map((grade) => grade.projectGraderId))];
+  const selected = planned;
   let passed = 0;
   let failed = 0;
   let errored = 0;
@@ -255,8 +250,8 @@ export function evidenceGradeTally(evidence: SimulationEvidence): GradeTally {
 /**
  * The count of passed graders, and what else the graders returned.
  *
- * Null while grading is in flight, because a partial count would read as a
- * settled one.
+ * Null while grading is in flight or while any selected grader has no
+ * current grade, because a partial count would read as a settled one.
  */
 function gradersPassedText(evidence: SimulationEvidence): string | null {
   if (evidence.gradingState === "pending" || evidence.gradingState === "running") {
@@ -264,6 +259,7 @@ function gradersPassedText(evidence: SimulationEvidence): string | null {
   }
   const tally = evidenceGradeTally(evidence);
   if (tally.selected === 0) return "-";
+  if (tally.passed + tally.failed + tally.errored < tally.selected) return null;
   return [
     `${String(tally.passed)}/${String(tally.selected)}`,
     tally.failed === 0 ? null : `${String(tally.failed)} failed`,
@@ -307,8 +303,7 @@ function summaryValue(value: string) {
  *
  * The first is how many graders passed, not an average of their scores: an
  * average is one number over graders that each answered their own question,
- * and it invites the overall verdict this product does not have. (Developer
- * decision, 2026-09-07.)
+ * and it invites the overall verdict this product does not have.
  */
 export function SimulationEvidenceSummary({
   evidence,

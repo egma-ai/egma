@@ -756,7 +756,7 @@
    */
   [data-slot="state-mark"][data-motion="pulse"] {
     animation: egma-state-mark-pulse calc(var(--duration-drawer-in) * 4)
-      ease-in-out infinite;
+      var(--ease-in-out) infinite;
   }
 
   @media (prefers-reduced-motion: reduce) {

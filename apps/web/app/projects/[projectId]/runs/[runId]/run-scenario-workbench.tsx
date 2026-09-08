@@ -769,33 +769,31 @@ function RegradeAction({ request }: { readonly request: RegradeRequest }) {
 function RegradeNotices({ request }: { readonly request: RegradeRequest }) {
   const { evidence, role, mayRegrade, refused, asked, confirming, working } =
     request;
-  if (
-    refused === null &&
-    asked === null &&
-    (role === null || mayRegrade) &&
-    !confirming
-  ) {
-    return null;
-  }
+  const saysSomething =
+    refused !== null || asked !== null || (role !== null && !mayRegrade);
   return (
-    <div
-      className="flex min-w-0 flex-none flex-col gap-3 border-b border-border px-5 py-3 max-[40rem]:px-4"
-      aria-label="Simulation actions"
-    >
-      {refused === null ? null : (
-        <Refused message={regradeRefusalMessage(refused)} />
-      )}
-      {asked === null ? null : (
-        <Problem>
-          {asked.reopened > 0
-            ? "This simulation is queued for a whole-simulation regrade. New grades appear below as they finish."
-            : "This simulation was already queued for grading, so no duplicate work was added."}
-        </Problem>
-      )}
-      {role === null || mayRegrade ? null : (
-        <Problem>
-          {`Your ${String(role)} role can read every grade here but cannot request a regrade. Ask an organization admin to change your role.`}
-        </Problem>
+    <>
+      {!saysSomething ? null : (
+        <div
+          className="flex min-w-0 flex-none flex-col gap-3 border-b border-border px-5 py-3 max-[40rem]:px-4"
+          aria-label="Simulation actions"
+        >
+          {refused === null ? null : (
+            <Refused message={regradeRefusalMessage(refused)} />
+          )}
+          {asked === null ? null : (
+            <Problem>
+              {asked.reopened > 0
+                ? "This simulation is queued for a whole-simulation regrade. New grades appear below as they finish."
+                : "This simulation was already queued for grading, so no duplicate work was added."}
+            </Problem>
+          )}
+          {role === null || mayRegrade ? null : (
+            <Problem>
+              {`Your ${String(role)} role can read every grade here but cannot request a regrade. Ask an organization admin to change your role.`}
+            </Problem>
+          )}
+        </div>
       )}
       {!confirming ? null : (
         <Dialog
@@ -821,7 +819,7 @@ function RegradeNotices({ request }: { readonly request: RegradeRequest }) {
           )}
         </Dialog>
       )}
-    </div>
+    </>
   );
 }
 
@@ -957,6 +955,7 @@ export function RunScenarioWorkbench({
           ...selected,
           status: evidenceForDisplay.status,
           gradingState: evidenceForDisplay.gradingState,
+          gradeTally: evidenceGradeTally(evidenceForDisplay),
           combinedScore: evidenceForDisplay.combinedScore,
           startedAt: evidenceForDisplay.startedAt,
           endedAt: evidenceForDisplay.endedAt,

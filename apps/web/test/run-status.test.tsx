@@ -40,8 +40,8 @@ describe("simulationSquare", () => {
       .toEqual({ kind: "passed", pulse: false, word: "3/3 passed" });
     expect(simulationSquare(graded(2, 1, 0)))
       .toEqual({ kind: "failed", pulse: false, word: "2/3 passed" });
-    expect(simulationSquare(graded(2, 0, 1)))
-      .toEqual({ kind: "error", pulse: false, word: "Grading failed" });
+    expect(simulationSquare({ ...graded(0, 0, 0), gradeTally: { passed: 0, failed: 0, errored: 0, selected: 0 } }))
+      .toEqual({ kind: "not-requested", pulse: false, word: "Not graded" });
   });
 });
 
