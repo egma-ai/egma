@@ -11,7 +11,9 @@ import {
   LANES_SERVING_MOCK_TOOLS,
   laneProducesAnAgentPov,
   NotPermittedError,
+  FundingRefusedError,
   readTrace,
+  readRunWorkBlock,
   readTraceGrading,
   regradeTrace,
   type GradingPlan,
@@ -20,7 +22,6 @@ import {
   type TraceDetail,
   type TraceSpan,
 } from "@egma/db";
-import { everySpanIn } from "@egma/metrics";
 import { simulationOperations } from "@egma/platform-api/contract";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
@@ -33,7 +34,7 @@ import { describedTraceGrading } from "../http/grades.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
-import { notFound, notPermitted, unprocessable } from "../http/refusals.ts";
+import { notFound, notPermitted, sendRefusal, unprocessable } from "../http/refusals.ts";
 
 export type SimulationRoutesOptions = {
   readonly provider: SessionIdentityProvider;
@@ -64,27 +65,9 @@ function windowOf(
 }
 
 /**
- * The mock tools this simulation's pinned test version names, by name.
- *
- * **The one place a mocked mark comes from.** A mock tool is matched to a call
- * by tool name and by nothing else, and the version a simulation pins is
- * immutable — so reading the mark here, at display time, is reading exactly
- * the world this simulation ran against. egma writes no second copy onto the
- * span: a second copy is a fact that can come to disagree with the first, and
- * the version is the half that cannot move.
- *
- * **The lane is the other half of the same question, and this is the same
- * sentence the claim says.** A simulation is mocked when its own test named a
- * tool *and* the lane can serve one, which is exactly what the work order
- * decides with `LANES_SERVING_MOCK_TOOLS` before the simulator ever runs. The
- * phone lane is deliberately not mockable — the real carrier leg, the real
- * tools — so a test that pins `book_appointment` and then runs over a phone
- * number had that call answered by the customer's own backend. Reading the
- * name alone would mark that real, side-effecting booking as isolated, which
- * is the one lie this mark exists to prevent.
- *
- * Empty for a simulation whose test mocked nothing, which is most of them, and
- * then no call carries a mark at all.
+ * Derive mock tool marks from the pinned test version and connection type.
+ * Phone connections cannot serve mock tools, even if the test names them.
+ * The mark describes configured coverage; it is not a separate execution receipt.
  */
 function mockedToolNames(
   connectionType: string,
@@ -185,9 +168,9 @@ function describedMeasures(
   detail: TraceDetail | undefined,
 ): Record<string, unknown> {
   const measures: Record<string, unknown> = {};
-  if (simulation.startedAt !== null && simulation.endedAt !== null) {
+  if (simulation.startedAt !== null && simulation.executionEndedAt !== null) {
     measures.durationMs =
-      simulation.endedAt.getTime() - simulation.startedAt.getTime();
+      simulation.executionEndedAt.getTime() - simulation.startedAt.getTime();
   }
   if (simulation.turnCount !== null) measures.turnCount = simulation.turnCount;
   if (detail !== undefined) {
@@ -200,53 +183,29 @@ function describedMeasures(
 }
 
 /**
- * Whether this conversation was graded without the agent's own account of it.
- *
- * **Read rather than stored**, because everything it needs is already in hand
- * here and a stored answer would be a second record to keep honest. Four facts,
- * and all four have to hold:
- *
- * - the conversation **completed** — nothing else was ever waited for;
- * - a second account was **coming**: the lane can deliver one and this landing
- *   reported the reference to deliver it under (ADR-0024 §2);
- * - **none arrived** — no span under the trace is the agent's;
- * - and the **bound has passed**, so grading has stopped waiting (§6). Inside
- *   the bound nothing is missing yet; it is simply not here yet.
- *
- * **A reader that shows the agent's POV needs this and cannot infer it.** Such
- * a reader takes the rows filed as the agent's and shows them as the
- * conversation, so a partial export — or none — would quietly become the whole
- * record with nothing saying it was a fragment. Regrade is what picks up a late
- * arrival.
+ * Report incomplete platform evidence for an ended simulation. Explicitly
+ * degraded evidence is incomplete immediately; an absent final session or call
+ * record becomes incomplete after the wait bound. Partial spans do not prove
+ * completion.
  */
 function agentPovIncomplete(
   simulation: Simulation,
   run: Run,
   transcript: TraceDetail | undefined,
 ): boolean {
-  if (simulation.status !== "completed") return false;
-  const reference = simulation.providerReference;
-  if (reference === null || reference === "") return false;
+  if (
+    simulation.status !== "completed" &&
+    simulation.status !== "failed" &&
+    simulation.status !== "canceled"
+  ) return false;
   if (!laneProducesAnAgentPov(run.connectionSnapshot.connectionType)) {
     return false;
   }
-  if (transcript !== undefined) {
-    for (const span of everySpanIn(transcript)) {
-      if (span.pov === "agent") return false;
-    }
-  }
-  // The wait began when the conversation ended, on the earlier of the two
-  // clocks that answer for that — the same reading grading itself takes, so a
-  // report from a machine running ahead cannot make this say "still waiting"
-  // forever.
-  const reported = simulation.endedAt;
-  const stamped = simulation.heartbeatAt;
-  const began =
-    reported === null
-      ? stamped
-      : stamped === null || reported < stamped
-        ? reported
-        : stamped;
+  if (transcript?.agentEvidenceIncomplete === true) return true;
+  if (transcript?.agentEvidenceComplete === true) return false;
+  // Use Egma's completion receipt so provider clock skew cannot shorten or
+  // extend the evidence wait. Historical rows may have only a reported end.
+  const began = simulation.heartbeatAt ?? simulation.endedAt;
   if (began === null) return false;
   return Date.now() - began.getTime() >= AGENT_POV_BOUND_SECONDS * 1_000;
 }
@@ -332,6 +291,9 @@ export async function simulationRoutes(
         runName: run.name,
         position: simulation.position,
         status: simulation.status,
+        workBlock: simulation.status === "queued"
+          ? await readRunWorkBlock(acting.auth, simulation.runId, simulation.id)
+          : null,
         ...describedTraceGrading(grading),
         reason: simulation.endingReason,
         executionFailure: simulation.executionFailure,
@@ -344,13 +306,9 @@ export async function simulationRoutes(
         // A result is read here, so it answers here — never by fetching the
         // run to find out.
         hasRecording: simulation.recordingReference !== null,
-        // **That grading stopped waiting for the agent's own account of this
-        // conversation.** The wait is bounded at thirty seconds so a broken
-        // exporter or a failed pull cannot hold a simulation open forever
-        // (ADR-0024 §6), and past the bound the record has to say so: a reader
-        // showing the agent's POV would otherwise show whatever fragment
-        // arrived as if it were the conversation. False is the ordinary answer
-        // — the account landed, or the lane files none.
+        // Use the grading wait bound to distinguish evidence still arriving
+        // from evidence missing after the deadline.
+        agentPovComplete: transcript?.agentEvidenceComplete === true,
         agentPovIncomplete: agentPovIncomplete(simulation, run, transcript),
         measures: describedMeasures(simulation, transcript),
         // The observed metrics, off the one shared projection the transcript
@@ -457,6 +415,12 @@ export async function simulationRoutes(
         traceId,
         runId: simulation.runId,
       });
+      if (requested.kind === "waiting") {
+        return unprocessable(
+          reply,
+          "the final platform transcript is still arriving. Grading will start when it is ready.",
+        );
+      }
       if (requested.kind === "not_requested") {
         return unprocessable(
           reply,
@@ -479,6 +443,7 @@ export async function simulationRoutes(
   );
 
   app.setErrorHandler(async (error, _request, reply) => {
+    if (error instanceof FundingRefusedError) return sendRefusal(reply, "providers_unfunded", error.message);
     if (error instanceof NotPermittedError) {
       return notPermitted(reply, error.message);
     }

@@ -220,13 +220,7 @@ describe("the Test Suites cutover", () => {
     const suite = await createSuite(key, "Northside Ford");
     const suiteId = String(suite.body.id);
 
-    /*
-     * **The write-time rule, at the seam a caller meets it.** Until 2026-08-24
-     * the server put the project's default persona on a test whose author had
-     * named none — on a create and on an edit alike — so a test could read as
-     * though somebody had said who calls when nobody had. Both shapes of
-     * saying nothing are refused now, in one sentence.
-     */
+    /* Reject both an absent persona list and an empty one; no default is substituted. */
     for (const body of [
       { suiteId, name: "No caller at all", scenario: "The caller asks for Tuesday.", expectedBehaviors: ["Offers Tuesday"] },
       { suiteId, name: "An empty list", scenario: "The caller asks for Tuesday.", expectedBehaviors: ["Offers Tuesday"], personas: [] },
@@ -433,7 +427,7 @@ describe("the Test Suites cutover", () => {
     const registered = await request(api.app, "POST", "/v1/agents", key, {
       agentPlatform: "retell",
       name: "Front desk",
-      connection: RETELL,
+      connection: { ...RETELL, name: "Northside chat" },
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
     const agent = registered.body.agent as { id: string };
@@ -443,7 +437,6 @@ describe("the Test Suites cutover", () => {
       suiteId: suiteId,
       agentId: agent.id,
       connectionId: connection.id,
-      idempotencyKey: "suite-run-once",
       name: "Friday regression",
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
@@ -452,40 +445,46 @@ describe("the Test Suites cutover", () => {
       suiteName: "Northside Ford",
       suiteDeleted: false,
       name: "Friday regression",
+      connectionName: "Northside chat",
       expectedSimulationCount: 2,
     });
     expect(started.body.simulations).toBeUndefined();
     expect(started.body.gradingPlan).toBeUndefined();
     const runId = String(started.body.id);
 
-    const replayed = await request(api.app, "POST", "/v1/runs", key, {
+    const repeated = await request(api.app, "POST", "/v1/runs", key, {
       suiteId: suiteId,
       agentId: agent.id,
       connectionId: connection.id,
-      idempotencyKey: "suite-run-once",
       name: "Friday regression",
     });
-    expect(replayed.statusCode, JSON.stringify(replayed.body)).toBe(201);
-    expect(replayed.body.id).toBe(runId);
-    const conflictingReplay = await request(api.app, "POST", "/v1/runs", key, {
+    expect(repeated.statusCode, JSON.stringify(repeated.body)).toBe(201);
+    expect(repeated.body.id).not.toBe(runId);
+    const changedRequest = await request(api.app, "POST", "/v1/runs", key, {
       suiteId: suiteId,
       agentId: agent.id,
       connectionId: connection.id,
-      idempotencyKey: "suite-run-once",
       name: "A different request",
     });
     expect(
-      conflictingReplay.statusCode,
-      JSON.stringify(conflictingReplay.body),
-    ).toBe(409);
+      changedRequest.statusCode,
+      JSON.stringify(changedRequest.body),
+    ).toBe(201);
+    expect(changedRequest.body.id).not.toBe(runId);
+    expect(changedRequest.body.id).not.toBe(repeated.body.id);
 
     const listed = await request(api.app, "GET", "/v1/runs?pageSize=1", key);
     expect(listed.statusCode, JSON.stringify(listed.body)).toBe(200);
     expect(listed.body.runs).toHaveLength(1);
     expect(listed.body).toHaveProperty("nextPageToken");
+    // The list names the connection each run reached, so a runs table can
+    // show it without a read per row.
+    expect((listed.body.runs as readonly Record<string, unknown>[])[0])
+      .toMatchObject({ connectionId: connection.id, connectionName: "Northside chat" });
 
     const detail = await request(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(detail.statusCode, JSON.stringify(detail.body)).toBe(200);
+    expect(detail.body).toMatchObject({ connectionName: "Northside chat" });
     expect(detail.body.simulations).toBeUndefined();
     expect(detail.body.gradingPlan).toBeUndefined();
     expect(detail.body.mockTools).toBeUndefined();
@@ -548,12 +547,12 @@ describe("the Test Suites cutover", () => {
       { suites: [suiteId] },
       { suiteId: [suiteId, suiteId] },
       { retry_of_run_id: runId },
+      { idempotencyKey: "retired-run-key" },
     ]) {
       const answer = await request(api.app, "POST", "/v1/runs", key, {
         suiteId: suiteId,
         agentId: agent.id,
         connectionId: connection.id,
-        idempotencyKey: `retired-${Object.keys(retired)[0]}`,
         ...retired,
       });
       expect(answer.statusCode, JSON.stringify(answer.body)).toBe(422);
@@ -567,7 +566,6 @@ describe("the Test Suites cutover", () => {
         suiteId: suiteId,
         agentId: agent.id,
         connectionId: connection.id,
-        idempotencyKey: "retired-direct-test-query",
       },
     );
     expect(retiredRunQuery.statusCode, JSON.stringify(retiredRunQuery.body)).toBe(422);
@@ -591,18 +589,12 @@ describe("the Test Suites cutover", () => {
     expect(removed.statusCode, removed.body).toBe(204);
     expect((await request(api.app, "GET", `/v1/runs/${runId}`, key)).body)
       .toMatchObject({ suiteName: "Northside Service", suiteDeleted: true });
-    const replayAfterDelete = await request(api.app, "POST", "/v1/runs", key, {
+    const startAfterDelete = await request(api.app, "POST", "/v1/runs", key, {
       suiteId: suiteId,
       agentId: agent.id,
       connectionId: connection.id,
-      idempotencyKey: "suite-run-once",
       name: "Friday regression",
     });
-    expect(replayAfterDelete.statusCode, JSON.stringify(replayAfterDelete.body)).toBe(201);
-    expect(replayAfterDelete.body).toMatchObject({
-      id: runId,
-      suiteName: "Northside Service",
-      suiteDeleted: true,
-    });
+    expect(startAfterDelete.statusCode, JSON.stringify(startAfterDelete.body)).toBe(422);
   });
 });

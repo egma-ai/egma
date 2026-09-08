@@ -43,19 +43,9 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * Monitoring, agent-shaped, on the durable ingestion boundary.
- *
- * There is no setup object and no health surface to test. An agent binds to
- * its platform, holds that platform's sealed monitoring key, and one switch
- * turns polling on. What is worth proving is what the schema now makes
- * impossible — two agents polling one platform agent, a switch that cannot be
- * kept — and what the poller's notebook promises around it: one clock, a park
- * a lesser failure cannot shorten, a resume that does no backfill, and a
- * bounded retry budget for a call that would not come.
- *
- * A call that lands leaves no row here at all. Its evidence is in the object
- * store and then the trace store, where committed span identity is the
- * exactly-once rule (ADR-0014).
+ * Test pull enablement, binding uniqueness, polling progress, backoff, resume
+ * floors, and bounded import retries. Successfully imported evidence belongs
+ * to ingestion storage, not these control-state tables.
  */
 
 let database: MigratedDatabase;
@@ -359,14 +349,8 @@ describe("the pull switch", () => {
   });
 
   /**
-   * **A turn already in flight may not outlive the switch-on.**
-   *
-   * Turning the switch on opens a new observation, so a lease taken over the
-   * window before it names a scan that no longer exists. Were that turn
-   * allowed to finish, its own completion would drag `completed_through` back
-   * to its older bound and delete the floor the switch just wrote — and the
-   * next regular window would reach into the hours pull was off, which is the
-   * backfill this branch exists to refuse.
+   * An old scan must not commit after re-enablement: it could replace the new
+   * progress and clear the floor that excludes the disabled period.
    */
   it("voids an in-flight lease when the switch is turned on again", async () => {
     const agentId = await pulling("Front desk", "agent_retell_voice_1");

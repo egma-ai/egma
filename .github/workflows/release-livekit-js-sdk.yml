@@ -1,9 +1,7 @@
 name: Release LiveKit JavaScript SDK
 
-# Publishing is one deliberate tag push. Merging does not publish.
-#
-#   git tag livekit-js-sdk-v0.3.0
-#   git push origin livekit-js-sdk-v0.3.0
+# A version increase on main creates its release tag and publishes the SDK.
+# Manual livekit-js-sdk-v<version> tags use the same release checks.
 #
 # npm must trust this repository, workflow, and @egma/livekit package. GitHub
 # then supplies one short-lived OIDC credential. No long-lived npm token is
@@ -11,20 +9,54 @@ name: Release LiveKit JavaScript SDK
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "livekit-js-sdk-v*"
+
+concurrency:
+  group: release-livekit-js-sdk
+  queue: max
 
 permissions:
   contents: read
   id-token: write
 
 jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      should_publish: ${{ steps.release.outputs.should_publish }}
+      version: ${{ steps.release.outputs.version }}
+      npm_tag: ${{ steps.release.outputs.npm_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Compare versions and prepare the release tag
+        id: release
+        run: python3 .github/package_release.py prepare livekit-js
+
   compatibility:
     name: LiveKit JS compatibility
+    needs: prepare
+    if: needs.prepare.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
 
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
@@ -52,12 +84,18 @@ jobs:
 
   release:
     name: Verify and publish
-    needs: compatibility
+    needs: [prepare, compatibility]
+    if: needs.prepare.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      NPM_TAG: ${{ needs.prepare.outputs.npm_tag }}
     steps:
       # This workflow holds npm publishing authority, so every action is pinned
       # to the commit behind the human-readable version in its comment.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
 
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         # Version comes from "packageManager" in the root package.json.
@@ -73,12 +111,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Check the tag matches the package version
+      - name: Check the release matches the package version
         run: |
-          tagged="${GITHUB_REF_NAME#livekit-js-sdk-v}"
           packaged="$(node -p "require('./sdks/livekit-js/package.json').version")"
-          if [ "$tagged" != "$packaged" ]; then
-            echo "Tag says $tagged and sdks/livekit-js/package.json says $packaged." >&2
+          if [ "$RELEASE_VERSION" != "$packaged" ]; then
+            echo "Release says $RELEASE_VERSION and sdks/livekit-js/package.json says $packaged." >&2
             exit 1
           fi
           echo "Releasing @egma/livekit $packaged."
@@ -102,6 +139,36 @@ jobs:
             exit 1
           fi
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          version: "0.11.33"
+
+      - name: Prove the exact package through LiveKit and the simulator
+        env:
+          LIVEKIT_E2E_OPENAI_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
+          LIVEKIT_E2E_JAVASCRIPT_PACKAGE: ${{ steps.pack.outputs.tarball }}
+        run: |
+          if [ -z "$LIVEKIT_E2E_OPENAI_API_KEY" ]; then
+            echo "LIVEKIT_E2E_OPENAI_API_KEY is required before this package can publish." >&2
+            exit 1
+          fi
+          uv sync --frozen --project apps/simulator
+          python3 fixtures/livekit-e2e/run.py --case javascript-all
+
+      - name: Upload redacted LiveKit proof records
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: livekit-js-sdk-release-livekit-e2e-${{ github.sha }}
+          path: .proofs/livekit-e2e/**/upload/**
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Use the minimum supported Node.js release
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -163,7 +230,7 @@ jobs:
         run: |
           set -e
           status=0
-          out="$(npm publish --dry-run "${{ steps.pack.outputs.tarball }}" 2>&1)" || status=$?
+          out="$(npm publish --dry-run --tag "$NPM_TAG" "${{ steps.pack.outputs.tarball }}" 2>&1)" || status=$?
           echo "$out"
           if echo "$out" | grep -qi "auto-corrected some errors"; then
             echo "::error::npm would rewrite the packed manifest before publishing." >&2
@@ -172,4 +239,4 @@ jobs:
           exit "$status"
 
       - name: Publish to npm
-        run: npm publish "${{ steps.pack.outputs.tarball }}"
+        run: python3 .github/package_release.py publish-npm livekit-js "${{ steps.pack.outputs.tarball }}"

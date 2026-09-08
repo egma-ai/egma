@@ -10,19 +10,14 @@ import {
   type Judge,
   type JudgeInput,
   type JudgeQuestion,
+  type JudgeUsage,
   type ResolvedJudge,
 } from "../src/judge/index.ts";
 import { openaiJudge } from "../src/judge/openai.ts";
 
 /**
- * The OpenAI provider's wire, without the wire.
- *
- * The live smoke beside this file asks a real model and needs a real account;
- * this one asserts everything about the request and the answer that does not
- * need one — the endpoint, the header the key rides in, the shape of the body,
- * what a malformed answer comes to, and which refusals are worth asking again
- * about. `fetch` is replaced rather than intercepted, because what is under
- * test is the one function that calls it.
+ * Replace fetch to test request shape, authentication, parsing, and retry rules.
+ * The live smoke test separately checks compatibility with the provider.
  */
 
 const EVIDENCE: JudgeInput = {
@@ -80,6 +75,7 @@ function refusing(status: number, body = "no"): Answering {
 
 function judgeWith(...responses: readonly Answering[]) {
   const calls: { url: string; init: RequestInit }[] = [];
+  const spent: JudgeUsage[] = [];
   let at = 0;
 
   vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
@@ -92,13 +88,35 @@ function judgeWith(...responses: readonly Answering[]) {
 
   return {
     calls,
+    spent,
     judge: openaiJudge({
       provider: "openai",
       model: "gpt-5.6-terra",
       reasoningEffort: "none",
       key: A_KEY,
+      usage: (usage) => { spent.push(usage); },
     }),
   };
+}
+
+/** A provider answer that also says what it consumed, as OpenAI's does. */
+function answeringWithUsage(
+  content: unknown,
+  usage: Record<string, unknown>,
+  id = "chatcmpl-1",
+): Answering {
+  const response = typeof content === "object" && content !== null && "decision" in content
+    ? { results: [{ id: "instruction_1", ...content }] } : content;
+  return () =>
+    new Response(
+      JSON.stringify({
+        id,
+        model: "gpt-5.6-terra-2026-08-01",
+        choices: [{ message: { content: JSON.stringify(response) } }],
+        usage,
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
 }
 
 afterEach(() => {
@@ -262,5 +280,168 @@ describe("a provider that does not answer", () => {
         message: expect.not.stringContaining("NEVERLEAKME") as unknown as string,
       }),
     );
+  });
+});
+
+/**
+ * What a judge call cost, read off the same answer the decision comes from.
+ *
+ * The provider is the only witness to what it charged, so every claim here is
+ * about reading its own numbers faithfully rather than about counting
+ * anything. The one piece of arithmetic — separating the cached half of the
+ * prompt — exists because OpenAI's `prompt_tokens` includes tokens it served
+ * from its cache at a tenth of the price, and a record that rated the gross
+ * figure at the uncached rate would overcharge every repeated prompt.
+ */
+describe("what one judge call consumed", () => {
+  it("records one paid request when one response grades several behaviors", async () => {
+    const results = ["behavior_1", "behavior_2"].map((id) => ({
+      id, decision: "met", rationale: "the evidence confirms it", cited_turns: [],
+    }));
+    const { judge, calls, spent } = judgeWith(answeringWithUsage(
+      { results }, { prompt_tokens: 100, completion_tokens: 10 },
+    ));
+    await expect(judge({ ...QUESTION, expectedBehaviors: [
+      { id: "behavior_1", text: "confirms the date" },
+      { id: "behavior_2", text: "confirms the time" },
+    ] })).resolves.toEqual({ results });
+    expect(calls).toHaveLength(1);
+    expect(spent).toHaveLength(1);
+    expect(spent[0]?.quantities).toEqual({ input_tokens: 100, output_tokens: 10 });
+  });
+
+  it("is reported once per answered request, with the cached prompt separated", async () => {
+    const { judge, spent } = judgeWith(
+      answeringWithUsage(
+        { decision: "met", rationale: "read back.", cited_turns: [2] },
+        {
+          prompt_tokens: 1_400,
+          completion_tokens: 48,
+          total_tokens: 1_448,
+          prompt_tokens_details: { cached_tokens: 1_024 },
+        },
+      ),
+    );
+
+    await judge(QUESTION);
+
+    expect(spent).toHaveLength(1);
+    expect(spent[0]?.quantities).toEqual({
+      // 1,400 prompt tokens of which 1,024 came from the cache.
+      input_tokens: 376,
+      cached_input_tokens: 1_024,
+      output_tokens: 48,
+    });
+    expect(spent[0]?.httpAttempt).toBe(1);
+    expect(spent[0]?.providerRef).toBe("chatcmpl-1");
+    // The provider's own object, whole, so a wrong reading can be re-rated
+    // later rather than re-measured.
+    expect(spent[0]?.rawUsage).toMatchObject({ total_tokens: 1_448 });
+  });
+
+  it("counts a second attempt that also answered as a second request", async () => {
+    // A rate limit, then an answer. The provider generated nothing the first
+    // time, so there is one bill and not two.
+    const rateLimited = judgeWith(
+      refusing(429, "slow down"),
+      answeringWithUsage(
+        { decision: "met", rationale: "read back.", cited_turns: [] },
+        { prompt_tokens: 100, completion_tokens: 10 },
+        "chatcmpl-b",
+      ),
+    );
+    await rateLimited.judge(QUESTION);
+    expect(rateLimited.spent).toHaveLength(1);
+    expect(rateLimited.spent[0]?.httpAttempt).toBe(2);
+
+    vi.unstubAllGlobals();
+
+    // And an attempt that came back with a body Egma could not read still
+    // cost money: the provider generated it. It is measured, then the judge
+    // gives up — spending is not conditional on Egma liking the answer.
+    const unreadable = judgeWith(
+      answeringWithUsage("not an answer object", {
+        prompt_tokens: 100,
+        completion_tokens: 10,
+      }),
+    );
+    await expect(unreadable.judge(QUESTION)).rejects.toThrow();
+    expect(unreadable.spent).toHaveLength(1);
+  });
+
+  it("says nothing where the provider said nothing about what it consumed", async () => {
+    const { judge, spent } = judgeWith(
+      answering({ decision: "met", rationale: "read back.", cited_turns: [] }),
+    );
+    await judge(QUESTION);
+    // A gap is the honest answer. Inventing a token count would be worse.
+    expect(spent).toEqual([]);
+  });
+
+  it("measures nothing at all when nobody is collecting", async () => {
+    vi.stubGlobal("fetch", async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({ results: [{
+                  id: "instruction_1",
+                  decision: "met",
+                  rationale: "read back.",
+                  cited_turns: [],
+                }] }),
+              },
+            },
+          ],
+          usage: { prompt_tokens: 100, completion_tokens: 10 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const judge = openaiJudge({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+      key: A_KEY,
+    });
+    await expect(judge(QUESTION)).resolves.toMatchObject({ results: [{ decision: "met" }] });
+  });
+});
+
+describe("paid attempt persistence", () => {
+  it("waits for usage durability before validating the answer", async () => {
+    let release: () => void = () => undefined;
+    let began: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { began = resolve; });
+    vi.stubGlobal("fetch", async () => answeringWithUsage({ broken: "answer" }, { prompt_tokens: 10, completion_tokens: 1 })());
+    const judge = openaiJudge({ provider: "openai", model: "gpt-5.6-terra", key: A_KEY, usage: async () => { began(); await pending; } });
+    let settled = false;
+    const asked = judge(QUESTION).finally(() => { settled = true; });
+    const rejection = expect(asked).rejects.toThrow();
+    await entered;
+    expect(settled).toBe(false);
+    release();
+    await rejection;
+  });
+
+  it("keeps the obtained grade when accounting fails and does not purchase another reply", async () => {
+    const fetch = vi.fn(async () => answeringWithUsage({ decision: "met", rationale: "yes", cited_turns: [1] }, { prompt_tokens: 10, completion_tokens: 1 })());
+    vi.stubGlobal("fetch", fetch);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const judge = openaiJudge({ provider: "openai", model: "gpt-5.6-terra", key: A_KEY, usage: async () => { throw new Error("store unavailable"); } });
+    await expect(judge(QUESTION)).resolves.toMatchObject({ results: [{ decision: "met" }] });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveBeenCalledTimes(1);
+    errors.mockRestore();
+  });
+
+  it("gives actual repeated HTTP calls different attempt identities even when their provider references match", async () => {
+    const { judge, spent } = judgeWith(answeringWithUsage({ decision: "met", rationale: "yes", cited_turns: [1] }, { prompt_tokens: 10, completion_tokens: 1 }, "same-provider-id"));
+    await judge(QUESTION);
+    await judge(QUESTION);
+    expect(spent).toHaveLength(2);
+    expect(spent[0]?.attemptId).not.toBe(spent[1]?.attemptId);
+    expect(spent[0]?.providerRef).toBe(spent[1]?.providerRef);
   });
 });

@@ -75,16 +75,7 @@ export type DiscoveredAgents = DiscoverAgentsResponse;
 export type DiscoveredAgent = DiscoveredAgents["agents"][number];
 export type ConnectionCandidate = DiscoveredAgent["connectionCandidates"][number];
 
-/**
- * Agents on the account that can be reached the way the form is set to.
- *
- * **The candidates decide, and they are not otherwise shown.** Discovery
- * answers each account agent with the connections it actually offers, so an
- * account holding chat agents and voice agents narrows to the half the chosen
- * modality can reach — and the person picks a name rather than choosing a
- * route. A candidate list of its own was drawn here until 2026-08-24; the
- * boards replaced it with the name and a typed phone number.
- */
+/** Filter discovered agents to those offering a connection for the chosen modality. */
 export function agentsForOption(
   agents: readonly DiscoveredAgent[] | null,
   option: ConnectionOption | undefined,

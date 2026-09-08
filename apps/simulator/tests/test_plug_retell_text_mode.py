@@ -1,23 +1,7 @@
-"""The Retell text mode plug against a text-mode-shaped server.
-
-The plug is the one component that speaks a platform's wire protocol, so
-what is pinned here is the wire: the whole history on every request because
-the platform keeps none of it, the version named every time because its
-default moves, egma's own answers riding along as native mocks, and the
-resume state threaded turn by turn. The counterpart is a real HTTP server
-shaped like the completion API, on loopback — no account, no key, no
-network.
-
-What the plug **saw** is pinned beside it, at the seam that writes it
-down. This lane is the one that still keeps a tool record of egma's own:
-Retell serves egma's answers itself and reports the calls afterwards,
-nothing of egma's runs inside the agent, and this lane offers no provider
-reference — so a call the seam did not keep would land nowhere at all.
-
-The failure paths get the same treatment, because they are where a
-credential leaks if it ever does: a throttle, a billing wall, a key the
-platform refuses, and a platform careless enough to say the key back all
-end in a refusal a person can act on, and none of them says the key.
+"""Verify text-mode requests through a local HTTP stub: history, version, variables,
+native mock answers, resume state, and reported tool evidence.
+Exercise throttling, billing, authentication, and credential-echo failures.
+These checks validate the implementation against the stub, not the live API.
 """
 
 from __future__ import annotations
@@ -29,7 +13,6 @@ from egma_simulator.mock_tools import MockToolSeam
 from egma_simulator.plugs import AgentReply, PlugError, plug_for
 from egma_simulator.plugs.retell import DEFAULT_BASE_URL
 from egma_simulator.plugs.retell_text_mode import (
-    MATCH_ANYTHING,
     RATE_LIMIT_RETRIES,
     RetellTextMode,
 )
@@ -298,7 +281,7 @@ async def test_every_request_names_the_version_the_spec_named(
     await plug.deliver("Hello?")
     await plug.close()
 
-    wanted = version.strip() if isinstance(version, str) else version
+    wanted = str(version).strip()
     assert [request["agent_version"] for request in running.stub.requests] == [
         wanted,
         wanted,
@@ -323,17 +306,8 @@ async def test_a_spec_carrying_no_version_asks_for_none(start_text_mode_stub):
 async def test_a_reply_updates_this_simulations_variables_without_dropping_them(
     start_text_mode_stub, variables_key
 ):
-    """Out byte for byte, and back **over** what was already held.
-
-    A variable the agent set on turn two is set on turn three, because the
-    platform keeps nothing. And a variable it did not mention is still
-    set: whether a reply names every variable or only the ones that
-    changed is not documented anywhere, so a reply that names one is read
-    as naming one — which is what keeps egma's own attribution variable on
-    every request instead of vanishing after the first change.
-
-    Both names a reply might carry them under are exercised, because which
-    one a real reply uses is a guess until the developer's live run.
+    """Forward authored variables unchanged, then merge reply variables over held state.
+    Exercise both supported reply field names; omitted values must survive a delta.
     """
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY,
@@ -359,7 +333,7 @@ async def test_a_reply_updates_this_simulations_variables_without_dropping_them(
     await plug.close()
 
     carried = [
-        request["body"].get("retell_llm_dynamic_variables")
+        request["body"].get("dynamic_variables")
         for request in running.stub.requests
     ]
     assert carried[0] == {"account_id": "sim_01", "caller_name": ""}
@@ -413,9 +387,9 @@ async def test_the_resume_state_is_threaded_across_turns(start_text_mode_stub):
     bodies = [request["body"] for request in running.stub.requests]
     assert "current_node_id" not in bodies[0], "nothing is resumed before anything ran"
     assert bodies[1]["current_node_id"] == "greet"
-    assert "current_component_id" not in bodies[1]
+    assert "component_id" not in bodies[1]
     assert bodies[2]["current_node_id"] == "lookup"
-    assert bodies[2]["current_component_id"] == "verify_caller"
+    assert bodies[2]["component_id"] == "verify_caller"
 
 
 async def test_a_retell_llm_threads_its_state_the_same_way(start_text_mode_stub):
@@ -565,22 +539,24 @@ async def test_egmas_answers_ride_every_request_as_native_mocks(
     )
 
     await plug.open()
+    await plug.deliver("What times are available?")
     await plug.close()
 
-    assert running.stub.mocks()[0] == [
+    expected_mocks = [
         {
             "tool_name": "check_calendar",
-            "input_match_rule": MATCH_ANYTHING,
+            "input_match_rule": {"type": "any"},
             "output": '{"slots":[]}',
             "result": True,
         },
         {
             "tool_name": "book_appointment",
-            "input_match_rule": MATCH_ANYTHING,
+            "input_match_rule": {"type": "any"},
             "output": '"the booking service is down"',
             "result": False,
         },
     ]
+    assert running.stub.mocks() == [expected_mocks, expected_mocks]
 
 
 async def test_a_run_that_mocks_nothing_sends_no_mocks(start_text_mode_stub):

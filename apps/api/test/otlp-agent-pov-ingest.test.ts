@@ -1,5 +1,7 @@
 import {
+  AGENT_POV_BOUND_SECONDS,
   claimSimulations,
+  cancelRun,
   completeSimulation,
   createAgent,
   createPersona,
@@ -9,17 +11,19 @@ import {
   laneProducesAnAgentPov,
   listSimulations,
   resolveSimulationStanding,
+  resolveRunStartReach,
   settleSimulationsPastTheAgentPovBound,
   startRun,
   startSimulation,
 } from "@egma/db";
-import { newId } from "@egma/ids";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { reportPathFor } from "../src/routes/reports.ts";
 import { pullRetellSimulationRecord } from "../src/retell-simulation-ingestion.ts";
+import { fileSimulationEvidence } from "../src/ingestion/simulation-ingestion.ts";
+import { normaliseRetellCall } from "../src/retell/normalise.ts";
 import { decodeOtlpExport, type OtlpExport } from "../src/otlp/decode.ts";
 import {
   PROVIDER_REFERENCE_ATTRIBUTE,
@@ -49,34 +53,10 @@ import {
 } from "./support/traces.ts";
 
 /**
- * **The agent's own POV of a simulation, through the door a customer uses.**
- *
- * A simulation stores both POVs and shows the agent's (ADR-0024 §1). The
- * persona's POV is what egma's simulator said, heard and measured; the agent's
- * is what the agent's own process reported — its turns, its tool calls with the
- * arguments the model emitted and the results it received, its per-turn model
- * and voice timings. That second account arrives by **simulation ingestion**:
- * pushed here by the egma SDK over OTLP with the customer's own project key,
- * naming its conversation by the **provider reference** the platform gave it.
- *
- * What this file drives is the whole of that path, end to end and through no
- * seam that is not a customer's: the real captured LiveKit export goes in at
- * `POST /v1/traces` with a project key, and the simulation comes back out of
- * the v1 read a customer integrates against. Nothing here calls the filing step
- * or the normaliser directly — a test that did would prove the functions and
- * none of the contract.
- *
- * **The export is the real one.** `fixtures/livekit-otlp-trace` is fourteen
- * request bodies as an OTLP exporter actually sent them, byte for byte, from
- * one real conversation with a LiveKit voice agent: 133 spans, five human turns,
- * eight agent turns, two tool calls and three errored spans. The bytes on disk
- * are never edited. What this file adds before posting is the one thing the SDK
- * adds and the capture predates — the `egma.provider_reference` resource
- * attribute holding the room the conversation ran in — so the export posted is
- * the captured one plus exactly the fact that makes it a simulation's.
- *
- * The door answers on object-store durability and writes no row, so every post
- * is followed by a drain wherever the claim is about what a reader sees.
+ * Post captured LiveKit OTLP evidence through /v1/traces with a project key
+ * and the simulation's provider reference, then read it through the public API.
+ * Add the provider-reference attribute in memory; keep fixture files unchanged.
+ * Drain after acceptance before asserting query-visible agent POV evidence.
  */
 
 const storage: ObjectStorage = await startObjectStorage("otlp-agent-pov");
@@ -99,6 +79,13 @@ let acme: Customer;
 let globex: Customer;
 let acmeKey: string;
 let globexKey: string;
+
+afterEach(() => vi.useRealTimers());
+
+function advancePastEvidenceWait(): void {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(Date.now() + AGENT_POV_BOUND_SECONDS * 1_000 + 1);
+}
 
 /** Every captured request, already decoded, so a resource can be stamped. */
 let captured: OtlpExport[] = [];
@@ -150,13 +137,16 @@ const RETELL_CALL = {
 
 /** Every address Retell was asked for, so the pull can be seen happening. */
 const askedOfRetell: string[] = [];
+const extraRetellCalls = new Map<string, object>();
 
 /** Retell, answering for that one call and for nothing else. */
 const retellAnswering = (async (input: unknown) => {
   const asking = String(input);
   askedOfRetell.push(asking);
-  if (asking.includes(`/v2/get-call/${RETELL_CALL_ID}`)) {
-    return new Response(JSON.stringify(RETELL_CALL), {
+  const callId = asking.split("/v2/get-call/")[1];
+  const call = callId === RETELL_CALL_ID ? RETELL_CALL : extraRetellCalls.get(callId ?? "");
+  if (call !== undefined) {
+    return new Response(JSON.stringify(call), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -368,6 +358,8 @@ async function aLandedSimulation(
   // mocked mark is read from at display time, so a test about that mark says
   // here which tool the world covers.
   mockTools: readonly { readonly tool: string; readonly answer: unknown }[] = [],
+  land = true,
+  begin = true,
 ): Promise<{ simulationId: string; runId: string; traceId: string }> {
   const auth = contextFor(person, "member");
   const created = await createAgent(auth, {
@@ -392,7 +384,6 @@ async function aLandedSimulation(
     suiteId,
     agentId: created.id,
     connectionId: created.connection?.id ?? "",
-    idempotencyKey: newId("run"),
   });
   const page = await listSimulations(auth, started.id, { limit: 1 });
   const simulation = page?.items[0];
@@ -405,8 +396,8 @@ async function aLandedSimulation(
   expect(claimed?.id, "this run's conversation was the one to claim").toBe(
     simulation.id,
   );
-  await startSimulation(auth, simulation.id, CONDUCTOR);
-  await completeSimulation(auth, simulation.id, CONDUCTOR, {
+  if (begin) await startSimulation(auth, simulation.id, CONDUCTOR);
+  if (land) await completeSimulation(auth, simulation.id, CONDUCTOR, {
     endingReason: "agent_ended",
     turnCount: 13,
     providerReference: reference,
@@ -476,6 +467,112 @@ function wireTraceIdOfCapture(): string {
   }
   throw new Error("the capture carries no trace id");
 }
+
+describe.skipIf(!storage.available)("LiveKit evidence while the call is running", () => {
+  it.each(["claimed", "running"])("registers the room for a %s claim before SDK exports", async (status) => {
+    const running = await aLandedSimulation(acme, `early livekit export ${status}`, "", A_LIVEKIT_AGENT,
+      undefined, [], false, status === "running");
+    const room = `egma-sim-${running.simulationId}`;
+    const register = (claimant = CONDUCTOR, reference = room, token = api.config.simulatorServiceToken) =>
+      api.app.inject({ method: "POST", url: `/v1/simulations/${running.simulationId}/provider-reference`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { claimant, provider_reference: reference } });
+    const first = captured[0];
+    if (first === undefined) throw new Error("the capture is empty");
+    expect((await post(naming(first, room), acmeKey)).statusCode).toBe(400);
+    expect((await register(CONDUCTOR, room, acmeKey)).statusCode).toBe(401);
+    expect((await register("another-conductor")).statusCode).toBe(409);
+    const registered = await register();
+    expect(registered.statusCode, registered.body).toBe(200);
+    expect((await register()).statusCode).toBe(200);
+    expect((await register(CONDUCTOR, `${room}-different`)).statusCode).toBe(409);
+    expect((await post(naming(first, room), globexKey)).statusCode).toBe(400);
+    await exportTheCapture(acmeKey, room);
+    expect(await countOf(`select count() as n from spans final where trace_id = '${running.traceId}' and emitter = 'agent'`)).toBeGreaterThan(1);
+    const page = await listSimulations(contextFor(acme, "member"), running.runId, { limit: 1 });
+    expect(page?.items[0]).toMatchObject({ status, providerReference: room });
+    if (status === "claimed") await startSimulation(contextFor(acme, "member"), running.simulationId, CONDUCTOR);
+    await completeSimulation(contextFor(acme, "member"), running.simulationId, CONDUCTOR,
+      { endingReason: "agent_ended", providerReference: room });
+    expect((await register()).statusCode).toBe(409);
+  });
+
+  it("rejects room registration after cancellation and outside the LiveKit lane", async () => {
+    const canceled = await aLandedSimulation(acme, "canceled registration", "", A_LIVEKIT_AGENT,
+      undefined, [], false);
+    await cancelRun(contextFor(acme, "member"), canceled.runId);
+    const register = (simulationId: string) => api.app.inject({ method: "POST",
+      url: `/v1/simulations/${simulationId}/provider-reference`,
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: { claimant: CONDUCTOR, provider_reference: `egma-sim-${simulationId}` } });
+    expect((await register(canceled.simulationId)).statusCode).toBe(409);
+    const otherLane = await aLandedSimulation(acme, "non-livekit registration", "", {
+      agentPlatform: "retell", connectionType: "retell_chat_api", accessVariant: "retell_chat_api.api_key",
+      modality: "chat", config: { retellAgentId: "agent_non_livekit_registration" },
+      credentials: { apiKey: "retell-secret-for-registration-test" },
+    }, undefined, [], false);
+    expect((await register(otherLane.simulationId)).statusCode).toBe(409);
+  });
+
+  it("does not queue grading until the final LiveKit session root arrives", async () => {
+    const endedAt = new Date();
+    const delta = BigInt(endedAt.getTime() - CONVERSATION_ENDED_AT.getTime()) * 1_000_000n;
+    const current = captured.map(exported => ({ resourceSpans: (exported.resourceSpans ?? []).map(resource => ({
+      ...resource, scopeSpans: (resource.scopeSpans ?? []).map(scope => ({ ...scope,
+        spans: (scope.spans ?? []).map(span => ({ ...span,
+          startTimeUnixNano: (BigInt(span.startTimeUnixNano ?? "0") + delta).toString(),
+          endTimeUnixNano: (BigInt(span.endTimeUnixNano ?? "0") + delta).toString(),
+        })) })) })) }));
+    const room = "egma-sim-final-root-grading";
+    const landed = await aLandedSimulation(acme, "final root grading", room, A_LIVEKIT_AGENT, {
+      startedAt: new Date(CONVERSATION_STARTED_AT.getTime() + Number(delta / 1_000_000n)), endedAt,
+    });
+    const auth = contextFor(acme, "member");
+    for (const exported of current) {
+      const partial: OtlpExport = { resourceSpans: (exported.resourceSpans ?? []).map(resource => ({ ...resource,
+        scopeSpans: (resource.scopeSpans ?? []).map(scope => ({ ...scope,
+          spans: (scope.spans ?? []).filter(span => span.name !== "agent_session") })) })) };
+      expect((await post(naming(partial, room), acmeKey)).statusCode).toBe(200);
+    }
+    await api.drainEvidence();
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(endedAt.getTime() + 60_000);
+    const pending = await api.app.inject({ method: "GET", url: `/v1/simulations/${landed.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` } });
+    expect(pending.json()).toMatchObject({ gradingState: "pending", agentPovComplete: false, agentPovIncomplete: false });
+    const prematureRegrade = await api.app.inject({ method: "POST", url: `/v1/simulations/${landed.simulationId}/regrade`,
+      headers: { authorization: `Bearer ${acmeKey}` } });
+    expect(prematureRegrade.statusCode, prematureRegrade.body).toBe(422);
+    expect(prematureRegrade.body).toContain("final platform transcript is still arriving");
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+    // The ingestion publisher rotates segments on the real clock.
+    vi.useRealTimers();
+    for (const exported of current) expect((await post(naming(exported, room), acmeKey)).statusCode).toBe(200);
+    await api.drainEvidence();
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toMatchObject({ traceId: landed.traceId });
+  });
+
+  it("does not treat partial agent spans as the final agent record", async () => {
+    const room = "egma-sim-partial-agent-record";
+    const landed = await aLandedSimulation(acme, "partial livekit export", room, A_LIVEKIT_AGENT);
+    for (const exported of captured) {
+      const partial: OtlpExport = { resourceSpans: (exported.resourceSpans ?? []).map(resource => ({ ...resource,
+        scopeSpans: (resource.scopeSpans ?? []).map(scope => ({ ...scope,
+          spans: (scope.spans ?? []).filter(span => span.name !== "agent_session") })) })) };
+      expect((await post(naming(partial, room), acmeKey)).statusCode).toBe(200);
+    }
+    await api.drainEvidence();
+    const read = () => api.app.inject({ method: "GET", url: `/v1/simulations/${landed.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` } });
+    expect((await read()).json()).toMatchObject({ agentPovComplete: false, agentPovIncomplete: false });
+    advancePastEvidenceWait();
+    expect((await read()).json()).toMatchObject({ agentPovComplete: false, agentPovIncomplete: true });
+    vi.useRealTimers();
+    await exportTheCapture(acmeKey, room);
+    expect((await read()).json()).toMatchObject({ agentPovComplete: true, agentPovIncomplete: false });
+  });
+});
 
 describe.skipIf(!storage.available)(
   "a project-key export naming its simulation",
@@ -678,16 +775,8 @@ describe.skipIf(!storage.available)(
 
     it("files the spans that opened before the SDK's stamp existed too", () => {
       /*
-       * The case every customer with their own OpenTelemetry produces.
-       *
-       * The framework's metadata processor stamps a span when the span
-       * *starts*, and the SDK installs it partway through a job that has
-       * already begun — so the job's own entrypoint span, and anything else
-       * open at that moment, ends unstamped and rides the same export. There
-       * is nothing ambiguous about it: nothing else in the resource names
-       * another conversation. Refusing it would refuse the whole export, and
-       * every such customer would lose the agent's POV of every simulation,
-       * silently.
+       * Allow spans without a provider reference when the references present in
+       * the resource agree. Spans started before SDK metadata setup can lack it.
        */
       return (async () => {
         const [first] = captured;
@@ -982,19 +1071,9 @@ describe.skipIf(!storage.available)("the row caps, across an export naming two",
 });
 
 /**
- * **When grading is asked for, and never before.**
- *
- * ADR-0024 §6: a simulation's evidence is ready when the row is complete *and*
- * the agent's own POV has been filed — or when 30 seconds have passed since
- * completion on a lane that produces one. Grading a conversation before the
- * account it will be judged on has arrived is grading the wrong evidence, and
- * the wait must end anyway, because a broken exporter cannot be allowed to hold
- * a simulation open forever.
- *
- * The three cases below are the whole rule: the wait, its end when the POV
- * lands, and its end when the bound expires. Each reads the queue through the
- * data-access seam the grading service claims from, because a job row is the
- * whole of what "grading was asked for" means.
+ * For connections that produce agent POV evidence, check that grading waits
+ * for completion plus filed evidence, or completion plus the wait bound.
+ * Read the grading queue to verify the handoff.
  */
 describe.skipIf(!storage.available)("when a simulation's grading is asked for", () => {
   /** What the v1 read says about the agent's account of one simulation. */
@@ -1061,6 +1140,7 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     const auth = contextFor(acme, "member");
     expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
 
+    advancePastEvidenceWait();
     const settled = await settleSimulationsPastTheAgentPovBound();
     expect(settled.map((one) => one.id)).toContain(landed.simulationId);
     expect(
@@ -1083,14 +1163,8 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
   }, 120_000);
 
   /**
-   * A landing whose clock is an hour behind egma's.
-   *
-   * `ended_at` comes off the report, so a simulator with a skewed clock writes
-   * a moment egma never saw. The bound reads it — it is the conversation's own
-   * moment and the one a person reads — but the window this sweep looks in
-   * cannot, or a row would be stamped outside every window that could ever
-   * settle it and wait for grading forever with nothing saying so. The window
-   * reads egma's own landing stamp instead.
+   * Skew the simulator's reported end time. The sweep selection must use the
+   * server landing timestamp so old reported times cannot leave work unselected.
    */
   it("still settles a landing whose reported clock is far behind egma's", async () => {
     const room = "egma-grading-skewed-1";
@@ -1114,8 +1188,9 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     const auth = contextFor(acme, "member");
     expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
 
-    // The standing window, unwidened: six hours outside it by the report's own
-    // clock, and inside it by the stamp egma wrote when the landing arrived.
+    // A clock behind Egma does not spend the wait before the report arrives.
+    expect((await settleSimulationsPastTheAgentPovBound()).map((one) => one.id)).not.toContain(landed.simulationId);
+    advancePastEvidenceWait();
     const settled = await settleSimulationsPastTheAgentPovBound();
     expect(settled.map((one) => one.id)).toContain(landed.simulationId);
     expect(
@@ -1148,24 +1223,9 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
   }, 120_000);
 
   /**
-   * **The two Retell lanes that could never deliver one either.**
-   *
-   * A chat-API conversation's reference is a chat id, and egma's pull asks for
-   * a *call* record by call id — so a chat id would fetch nothing however long
-   * anything waited. Text mode is the same answer for a different reason: egma
-   * carries the whole exchange on its own requests and Retell hands back no
-   * reference to fetch anything by at all.
-   *
-   * Naming either as producing an agent POV would make every simulation over it
-   * wait out the whole bound and then be recorded as missing an account nobody
-   * was ever going to send. So the drain of egma's own POV is the whole handoff
-   * on both: grading is asked for as soon as that evidence is query-visible,
-   * with no bound in between.
-   *
-   * The chat lane is conducted here end to end. Text mode is pinned by the list
-   * itself rather than conducted, because a run over it is opened against a
-   * named agent version and cannot be started without the platform read this
-   * suite has no reason to stand up.
+   * Retell chat API and text mode do not produce the separately fetched agent
+   * POV. Their readable simulator evidence can trigger grading after completion
+   * without that wait. Exercise chat through the API and check text-mode classification.
    */
   it("grades a chat-lane landing off egma's own POV, with no bound in between", async () => {
     const landed = await aLandedSimulation(
@@ -1443,15 +1503,8 @@ describe.skipIf(!storage.available)("the booking that opened this effort", () =>
   });
 
   /**
-   * **The mocked mark, read by name and from nowhere else.**
-   *
-   * These spans are LiveKit's own: the agent's process wrote them and nothing
-   * of egma's ever touched them, so there is no stamp on them to read. What
-   * says `check_availability` was answered by a mock tool is the test version
-   * this simulation pinned, matched by tool name — the authored world itself,
-   * which cannot change under a result. The two calls that world does not
-   * cover ran for real and carry no mark at all, which is the whole
-   * distinction a developer opens this transcript for.
+   * Derive mock marks by tool name from the pinned test version. The imported
+   * LiveKit spans carry no separate Egma mock receipt.
    */
   it("marks the one call a mock tool answered, by name, and no other", async () => {
     const read = await api.app.inject({
@@ -1509,30 +1562,14 @@ describe.skipIf(!storage.available)("the booking that opened this effort", () =>
   });
 
   /**
-   * **The number this whole effort is about**, on the conversation that opened
-   * it, read back through the contract a customer reads.
-   *
-   * Five human turns, four of them answered. Each wait starts where the caller
-   * stopped being audible — the end of that `user_turn`'s last `user_speaking`
-   * child, which is the VAD's own detected end — and stops at the first
-   * `agent_speaking` before the next human turn. Hand-computed once from the
-   * export's raw nanosecond timestamps, held as the store keeps them: starts
-   * truncated to the microsecond, durations exact.
-   *
-   *   1. caller stops being audible 1788544388880703312, agent speaks
-   *      1788544392672227000 → 3791.523688 ms
-   *   2. 1788544412831362936 → 1788544414353803000 → 1522.440064 ms
-   *   3. 1788544429283150472 → 1788544431499003000 → 2215.852528 ms
-   *   4. 1788544442631104016 → 1788544444538535000 → 1907.430984 ms
-   *
-   * From `user_turn`'s own end — the endpointing commit, which is where the
-   * derivation stopped before catalog version 8 — the same four turns read
-   * 3334.056376, 1108.662037, 1770.409112 and 1394.444331 ms. That difference,
-   * about half a second a turn, is time the caller really waited.
-   *
-   * The fifth human turn is never answered: two agent turns follow it and
-   * neither speaks, so it measures nothing rather than borrowing the next
-   * conversation's silence.
+   * Hand-computed response latency from the last user_speaking end to the next
+   * agent_speaking start. Starts are truncated to microseconds; durations retain
+   * nanosecond precision. The four answered turns give these differences in ns:
+   *   1788544392672227000 - 1788544388880703312 = 3791523688
+   *   1788544414353803000 - 1788544412831362936 = 1522440064
+   *   1788544431499003000 - 1788544429283150472 = 2215852528
+   *   1788544444538535000 - 1788544442631104016 = 1907430984
+   * The fifth human turn has no following agent speech and contributes no sample.
    */
   it("measures the four answered waits from the caller's last audible sample", async () => {
     const read = await api.app.inject({
@@ -1593,9 +1630,9 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
       name: "Front desk retell",
       connection: {
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
-        modality: "chat",
+        connectionType: "retell_web_call",
+        accessVariant: "retell_web_call.api_key",
+        modality: "voice",
         config: { retellAgentId: "agent_front_desk" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
       },
@@ -1614,11 +1651,14 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
       expectedBehaviors: ["gives the weather that was asked about"],
       personaIds: [personaId],
     });
+    const reach = await resolveRunStartReach(auth, created.id, created.connection?.id ?? "");
+    if (reach === undefined) throw new Error("the Retell connection has no reach");
     const started = await startRun(auth, {
+      agentVersion: RETELL_CALL.agent_version,
+      conductedConnectionIdentity: reach.connectionIdentity,
       suiteId,
       agentId: created.id,
       connectionId: created.connection?.id ?? "",
-      idempotencyKey: newId("run"),
     });
     const page = await listSimulations(auth, started.id, { limit: 1 });
     const simulation = page?.items[0];
@@ -1633,15 +1673,8 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
     await startSimulation(auth, simulation.id, CONDUCTOR);
 
     /*
-     * The persona's POV, filed **before** the agent's and opening **earlier**
-     * than it.
-     *
-     * This is what makes the parentless-row ranking observable through the
-     * contract. Retell's own root is the row carrying the reported-measurements
-     * block, and under the reader's old rule — the earliest parentless row wins
-     * — this egma root would have taken its place and the block would have gone
-     * missing from a conversation Retell had measured. The ranking asks whether
-     * a row carries the block first, so it does not.
+     * File an earlier persona root first to verify that the reader prefers the
+     * Retell root carrying reported measurements over the earliest parentless span.
      */
     const own = `${traceId.slice(0, 14)}01`;
     const before = new Date(CONVERSATION_STARTED_AT.getTime() - 30_000);
@@ -1792,14 +1825,8 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
     expect(reported?.samples).toEqual([820, 910, 760]);
 
     /*
-     * And the resend an at-least-once reporter makes does not pull again.
-     *
-     * The duplicate is absorbed and answers `completed`, exactly as the
-     * landing it repeats did — so a door reading the status alone would ask
-     * Retell a second time, minutes later, and Retell fills a call document in
-     * after the call ends. That second reading would land as *changed* content
-     * under the same deterministic span ids, which is the integrity error
-     * ADR-0014 names rather than an update.
+     * A duplicate completion report must not start another Retell pull. A later
+     * provider document may differ under the same deterministic span IDs.
      */
     const askedSoFar = askedOfRetell.length;
     const again = await api.app.inject({
@@ -1833,17 +1860,178 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
     expect(askedOfRetell).toHaveLength(askedSoFar);
   }, 120_000);
 
+  async function runningCall(label: string, webCall = true) {
+    const auth = contextFor(acme, "member");
+    const created = await createAgent(auth, {
+      agentPlatform: "retell",
+      name: `Retell terminal ${label}`,
+      connection: {
+        agentPlatform: "retell",
+        connectionType: webCall ? "retell_web_call" : "retell_chat_api",
+        accessVariant: webCall ? "retell_web_call.api_key" : "retell_chat_api.api_key",
+        modality: webCall ? "voice" : "chat",
+        config: { retellAgentId: "agent_front_desk" },
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
+    });
+    const personaId = (await createPersona(auth, {
+      name: `Retell terminal caller ${label}`, ...NEUTRAL_PERSON,
+    })).id;
+    const suiteId = (await createTestSuite(auth, { name: `Retell terminal ${label}` })).id;
+    await createTest(auth, {
+      suiteId, name: `Retell terminal question ${label}`,
+      scenario: "Ask for the weather.", expectedBehaviors: ["Answers the question"],
+      personaIds: [personaId],
+    });
+    const connectionId = created.connection?.id ?? "";
+    const reach = await resolveRunStartReach(auth, created.id, connectionId);
+    const started = await startRun(auth, {
+      suiteId, agentId: created.id, connectionId,
+      ...(reach === undefined ? {} : {
+        agentVersion: RETELL_CALL.agent_version,
+        conductedConnectionIdentity: reach.connectionIdentity,
+      }),
+    });
+    const [claimed] = await claimSimulations({ claimant: CONDUCTOR, capacity: 1 });
+    if (claimed === undefined) throw new Error("the run had no simulation");
+    await startSimulation(auth, claimed.id, CONDUCTOR);
+    return { auth, agentId: created.id, connectionId, runId: started.id, simulationId: claimed.id,
+      traceId: traceIdOfSimulation(claimed.id) ?? "" };
+  }
+
+  function terminalReport(simulationId: string, status: "completed" | "failed" | "canceled", reference: string | null) {
+    return {
+      contract_version: 1, simulation_id: simulationId,
+      events: [{ kind: "status", event_id: "evt-terminal", at: CONVERSATION_ENDED_AT.toISOString(),
+        status, reason: status === "failed" ? "The media connection closed" : null,
+        facts: {
+          ending: status === "completed" ? "agent_ended" : status === "failed" ? "error" : "canceled",
+          started_at: CONVERSATION_STARTED_AT.toISOString(), ended_at: CONVERSATION_ENDED_AT.toISOString(),
+          turn_count: 3, audio: null, provider_reference: reference,
+        },
+      }],
+    };
+  }
+
+  const terminalStatuses = ["completed", "failed", "canceled"] as const;
+  it.each(terminalStatuses)("imports a %s web call once without changing its execution result", async (status) => {
+    const running = await runningCall(status);
+    const callId = `call_${running.simulationId}`;
+    extraRetellCalls.set(callId, { ...RETELL_CALL, call_id: callId });
+    if (status === "canceled") await cancelRun(running.auth, running.runId);
+    const request = {
+      method: "POST" as const, url: reportPathFor(running.simulationId),
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: terminalReport(running.simulationId, status, callId),
+    };
+    const asksBefore = askedOfRetell.length;
+    const landed = await api.app.inject(request);
+    expect(landed.statusCode, landed.body).toBe(200);
+    await api.drainEvidence();
+    expect(askedOfRetell.slice(asksBefore)).toEqual([expect.stringContaining(`/v2/get-call/${callId}`)]);
+    expect(await agentRowsUnder(running.traceId)).toBeGreaterThan(1);
+    const read = await api.app.inject({ method: "GET", url: `/v1/simulations/${running.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` } });
+    expect(read.statusCode, read.body).toBe(200);
+    expect(read.json()).toMatchObject({ status, agentPovIncomplete: false });
+    expect(read.json().transcript.toolSpanCount).toBe(1);
+    if (status !== "completed") {
+      const job = await getGradingJobForTrace(running.auth, running.traceId);
+      expect(job).toBeUndefined();
+    }
+    const duplicate = await api.app.inject(request);
+    expect(duplicate.statusCode, duplicate.body).toBe(200);
+    expect(askedOfRetell).toHaveLength(asksBefore + 1);
+  });
+
+  it.each(terminalStatuses)("does not fetch a %s web call without a provider reference", async (status) => {
+    const running = await runningCall(`no-id-${status}`);
+    if (status === "canceled") await cancelRun(running.auth, running.runId);
+    const asksBefore = askedOfRetell.length;
+    const landed = await api.app.inject({ method: "POST", url: reportPathFor(running.simulationId),
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: terminalReport(running.simulationId, status, null),
+    });
+    expect(landed.statusCode, landed.body).toBe(200);
+    expect(askedOfRetell).toHaveLength(asksBefore);
+  });
+
+  it.each(terminalStatuses)("marks a %s web call incomplete when Retell has no record", async (status) => {
+    const running = await runningCall(`missing-${status}`);
+    if (status === "canceled") await cancelRun(running.auth, running.runId);
+    const landed = await api.app.inject({ method: "POST", url: reportPathFor(running.simulationId),
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: terminalReport(running.simulationId, status, `missing_${running.simulationId}`),
+    });
+    expect(landed.statusCode, landed.body).toBe(200);
+    advancePastEvidenceWait();
+    const read = await api.app.inject({ method: "GET", url: `/v1/simulations/${running.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` } });
+    expect(read.statusCode, read.body).toBe(200);
+    expect(read.json()).toMatchObject({ status, agentPovIncomplete: true });
+  });
+
+  it("does not send a Retell chat ID to the web call endpoint", async () => {
+    const running = await runningCall("native-chat", false);
+    const asksBefore = askedOfRetell.length;
+    const landed = await api.app.inject({ method: "POST", url: reportPathFor(running.simulationId),
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: terminalReport(running.simulationId, "completed", "chat_native_reference"),
+    });
+    expect(landed.statusCode, landed.body).toBe(200);
+    expect(askedOfRetell).toHaveLength(asksBefore);
+  });
+
+  it("does not give a delayed pull a new request budget after the stored deadline", async () => {
+    const running = await runningCall("expired-pull");
+    const landed = await api.app.inject({
+      method: "POST",
+      url: reportPathFor(running.simulationId),
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: terminalReport(running.simulationId, "completed", `missing_${running.simulationId}`),
+    });
+    expect(landed.statusCode, landed.body).toBe(200);
+    const standing = await resolveSimulationStanding(running.simulationId);
+    if (standing === undefined) throw new Error("the simulation has no standing");
+    advancePastEvidenceWait();
+    const fetchImpl = vi.fn(async () => new Response("", { status: 404 })) as unknown as typeof fetch;
+    await pullRetellSimulationRecord(standing.auth, running.simulationId,
+      { fetchImpl }, api.app.log, { retryWaitsMilliseconds: [] });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("keeps an explicitly incomplete provider record marked incomplete after it arrives", async () => {
+    const running = await runningCall("partial-provider-record");
+    const callId = `missing_${running.simulationId}`;
+    const landed = await api.app.inject({ method: "POST", url: reportPathFor(running.simulationId),
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: terminalReport(running.simulationId, "failed", callId),
+    });
+    expect(landed.statusCode, landed.body).toBe(200);
+    const standing = await resolveSimulationStanding(running.simulationId);
+    if (standing === undefined) throw new Error("the simulation has no standing");
+    // Replay the already-stored shape of a partially readable provider document.
+    // The read must preserve its completeness flag even though agent spans exist.
+    const partial = normaliseRetellCall({ ...RETELL_CALL, call_id: callId,
+      transcript_with_tool_calls: [...RETELL_CALL.transcript_with_tool_calls, "unreadable event"],
+    }, {
+      projectId: running.auth.projectId ?? "", environment: null,
+      platformAgentId: RETELL_CALL.agent_id, platformAgentName: RETELL_CALL.agent_name,
+      platformAgentVersion: String(RETELL_CALL.agent_version),
+    }, Date.now());
+    expect(partial.degraded).toBe(true);
+    await fileSimulationEvidence([{ standing, emitter: "agent", spans: partial.spans }]);
+    await api.drainEvidence();
+    expect(await agentRowsUnder(running.traceId)).toBeGreaterThan(1);
+    const read = await api.app.inject({ method: "GET", url: `/v1/simulations/${running.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` } });
+    expect(read.statusCode, read.body).toBe(200);
+    expect(read.json()).toMatchObject({ status: "failed", agentPovIncomplete: true });
+  });
+
   /**
-   * **A blip on the first attempt is what the retries are for.**
-   *
-   * Retell answering "not yet" and the socket failing are two different
-   * things, and only the first arrives as an answer — a refused connection, a
-   * DNS wobble or a timeout arrives as a throw. Both mean the same to this
-   * simulation: no agent POV yet. So a throw on the first attempt has to fall
-   * into the same bounded retries a thin document does, because the door's
-   * completion resend deliberately starts no second pull — this is the only
-   * pull this conversation will ever get, and losing it loses the transcript
-   * and every tool call Retell holds for good.
+   * Retry a thrown fetch error within the same bounded pull, as with an
+   * incomplete provider document. Duplicate completion reports do not restart it.
    */
   it("retries a first attempt that threw, and files what the retry answers", async () => {
     const auth = contextFor(acme, "member");
@@ -1852,9 +2040,9 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
       name: "Front desk retell blip",
       connection: {
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
-        modality: "chat",
+        connectionType: "retell_web_call",
+        accessVariant: "retell_web_call.api_key",
+        modality: "voice",
         config: { retellAgentId: "agent_front_desk" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
       },
@@ -1873,11 +2061,14 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
       expectedBehaviors: ["gives the weather that was asked about"],
       personaIds: [personaId],
     });
+    const reach = await resolveRunStartReach(auth, created.id, created.connection?.id ?? "");
+    if (reach === undefined) throw new Error("the Retell connection has no reach");
     const started = await startRun(auth, {
+      agentVersion: RETELL_CALL.agent_version,
+      conductedConnectionIdentity: reach.connectionIdentity,
       suiteId,
       agentId: created.id,
       connectionId: created.connection?.id ?? "",
-      idempotencyKey: newId("run"),
     });
     const page = await listSimulations(auth, started.id, { limit: 1 });
     const simulation = page?.items[0];
@@ -1950,7 +2141,7 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
       simulation.id,
       blippedReach,
       api.app.log,
-      { retryWaitsMilliseconds: [1], sleep: async () => {} },
+      { retryWaitsMilliseconds: [1_000], sleep: async () => {} },
     );
 
     // The retry runs after the door has answered, so the record arrives a
@@ -1968,20 +2159,8 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
 });
 
 /**
- * **The mark says isolated, so a lane that isolates nothing must not carry it.**
- *
- * A mocked mark is read at display time from the pinned test version by tool
- * name — and by the lane, which is the half the claim has always applied:
- * a simulation is mocked when its own test named a tool *and* the lane can
- * serve one. The phone lane deliberately serves none: the real carrier leg,
- * the real band, the real tools. So a test that pins `book_appointment` and
- * then runs over a phone number had that call answered by the customer's own
- * backend, and marking it `mocked` would tell a developer a real booking was
- * a rehearsal.
- *
- * Reachable because the filing step never inspects a simulation's lane: an
- * export naming this row's provider reference with a project key is filed
- * under it, whatever the standing or the lane.
+ * Phone connections cannot serve mock tools. Do not mark their tool spans as
+ * mocked merely because the pinned test names matching tools.
  */
 describe.skipIf(!storage.available)("a tool call on a lane that mocks nothing", () => {
   it("carries no mocked mark, though the pinned test names that tool", async () => {
@@ -2015,7 +2194,6 @@ describe.skipIf(!storage.available)("a tool call on a lane that mocks nothing", 
       suiteId,
       agentId: created.id,
       connectionId: created.connection?.id ?? "",
-      idempotencyKey: newId("run"),
     });
     const page = await listSimulations(auth, started.id, { limit: 1 });
     const simulation = page?.items[0];

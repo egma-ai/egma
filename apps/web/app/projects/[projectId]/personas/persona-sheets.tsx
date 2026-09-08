@@ -6,7 +6,6 @@ import {
   createPersona,
   deletePersona,
   getPersona,
-  listPersonaVersions,
   updatePersona,
   usePersona,
 } from "@egma/platform-api/client";
@@ -36,8 +35,6 @@ import {
   type Persona,
   type PersonaForm,
   type PersonaModels,
-  type PersonaVersion,
-  type PersonaVersionPage,
 } from "../../../../lib/personas.ts";
 import {
   platformAnswer,
@@ -49,7 +46,6 @@ import { useDraftNavigation } from "../../../../ui/draft-navigation.tsx";
 import { Refused } from "../../../../ui/form.tsx";
 import { Menu, MenuDivider, MenuItem } from "../../../../ui/menu.tsx";
 import { Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
-import { ListInstant, RelativeInstant, useMinuteClock } from "../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../ui/settings-read.ts";
 import {
@@ -57,23 +53,13 @@ import {
   ModelFields,
   NameFields,
 } from "./persona-fields.tsx";
-import { Reads, SheetSection, StateChip, Versions, type Read } from "./sheet-parts.tsx";
+import { Reads, SheetSection, type Read } from "./sheet-parts.tsx";
 
 /**
- * A persona, created, read and edited in the panel the boards put it in.
- *
- * **The list stays on screen behind it, and the address never moves.** Create,
- * read and edit are three things this one panel is showing, not three places
- * anybody is — so none of them is a route. Somebody who opens a persona,
- * changes their mind and presses Escape is back where they were, with the list
- * they were reading still scrolled where they left it, and no step in the
- * browser's history that says nothing about where they are.
- *
- * Name and description are live metadata. Identity name, personality, and
- * language have immutable core versions. Models are saved project settings.
- * Shared personas expose settings, clone, and read-only core history. Custom
- * personas also expose current-core editing and deletion.
-
+ * Create, read, and edit a persona in a sheet over the list. Name and
+ * description are metadata; identity, personality, and language are versioned
+ * behavior. Project settings are editable inline. Egma-provided behavior is
+ * read-only; Custom personas also support current-version edits and deletion.
  */
 
 /** The words this surface repeats, written once. */
@@ -430,25 +416,8 @@ type Submitted = {
 };
 
 /**
- * The server's answer, taken into the draft.
- *
- * **The invariant, stated once: adoption may touch exactly the fields the
- * request carried, and among those, only where the draft still holds what was
- * sent.** Everything outside the submitted set is left alone, always.
- *
- * Both halves are load-bearing and each was learned the hard way.
- *
- * - *Only the submitted fields.* One save sends only fields that changed. A
- *   reply carries the whole persona, but for a field the request never
- *   mentioned that value is a **stale read, not an answer**.
- * - *Only where the draft still holds what was sent.* A save takes a moment,
- *   and somebody typing during that moment has written something the server
- *   has never seen. Its reply cannot speak for text it never saw.
- *
- * What is left is the case adoption exists for: a field this request sent,
- * untouched since, which egma stored in a form of its own — such as trimmed
- * text — and which the author should be looking at rather than their own
- * draft of it.
+ * Adopt a server value only for a submitted field whose draft still matches
+ * what was sent. Preserve unsubmitted fields and edits made while saving.
  */
 function adopted(
   current: Draft | null,
@@ -544,7 +513,6 @@ export function PersonaSheet({
   readonly onDelete: (persona: Persona) => void;
 }) {
   const choices = form?.status === "ready" ? form.value : null;
-  const now = useMinuteClock();
   const draftNavigation = useDraftNavigation();
   const nameField = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -560,27 +528,11 @@ export function PersonaSheet({
     projectId,
     personaId,
   );
-  const {
-    answer: history,
-    reload: reloadHistory,
-  } = useProjectRead<PersonaVersionPage>(
-    (project) =>
-      platformAnswer(
-        listPersonaVersions(
-          { personaId, projectId: project },
-          { client: platformClient },
-        ),
-      ),
-    projectId,
-    personaId,
-  );
-
   const [held, setHeld] = useState<Draft | null>(null);
   const [editing, setEditing] = useState(startEditing);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
-  /** The frozen version this panel is reading instead of the current one. */
-  const [reading, setReading] = useState<PersonaVersion | null>(null);
 
   /**
    * The editor is filled from the read once and never overwritten by a later
@@ -626,22 +578,26 @@ export function PersonaSheet({
     wasOpen.current = open;
     if (!opening) return;
     setEditing(startEditing);
-    setReading(null);
+    setSaved(false);
     setRefusal(null);
-  }, [open, startEditing]);
+    if (answer?.status === "ready") {
+      const one = answer.value;
+      setHeld({
+        personaId: one.id,
+        versionId: one.versionId,
+        name: one.name,
+        description: one.description ?? "",
+        behavior: behaviorDraftOf(one),
+        models: modelsDraftOf(modelsOfPersona(one)),
+      });
+    }
+  }, [open, startEditing, answer]);
 
-  /**
-   * A panel that starts showing something else starts at the top of it.
-   *
-   * The body is one scrolling column and the three modes are the same column
-   * with other content in it, so without this, pressing *Read* on a version
-   * somebody had to scroll down to reach leaves them looking at the middle of
-   * the frozen version they asked for.
-   */
+  /** Opening the custom identity editor starts at its first field. */
   useEffect(() => {
     const scroller = bodyRef.current;
     if (scroller !== null) scroller.scrollTop = 0;
-  }, [reading, editing]);
+  }, [editing]);
 
   const filled = held !== null;
   useEffect(() => {
@@ -660,8 +616,8 @@ export function PersonaSheet({
     (held.name !== persona.name ||
       held.description !== (persona.description ?? "") ||
       !sameBehaviorDraft(held.behavior, behaviorDraftOf(persona)) ||
-      !sameModelsDraft(held.models, modelsDraftOf(modelsOfPersona(persona))) || persona.settings === null);
-  useUnsavedChanges(open && editing && changed && !saving, saving);
+      !sameModelsDraft(held.models, modelsDraftOf(modelsOfPersona(persona))));
+  useUnsavedChanges(open && changed && !saving, saving);
 
   /**
    * Which persona this panel is holding, readable from inside an await.
@@ -681,6 +637,7 @@ export function PersonaSheet({
   ): Promise<Persona | null> {
     const asked = { projectId, personaId };
     setSaving(true);
+    setSaved(false);
     setRefusal(null);
 
     const written = await platformAnswer(request);
@@ -702,14 +659,12 @@ export function PersonaSheet({
       setRefusal(written.refusal);
       if (written.refusal.error === "version_conflict") {
         refresh();
-        reloadHistory();
       }
       return null;
     }
 
     setHeld((current) => adopted(current, submitted, written.value));
     reload();
-    reloadHistory();
     onWritten();
     return written.value;
   }
@@ -719,7 +674,8 @@ export function PersonaSheet({
       held === null ||
       persona === null ||
       !mayAuthor ||
-      saving
+      saving ||
+      busy
     ) {
       return;
     }
@@ -766,19 +722,24 @@ export function PersonaSheet({
         ...(nameChanged ? { name: held.name } : {}),
         ...(descriptionChanged ? { description: held.description } : {}),
         ...(behaviorChanged ? { behavior: held.behavior } : {}),
-        ...(modelsChanged ? { models: held.models } : {}),
+        ...(modelsChanged || persona.settings === null ? { models: held.models } : {}),
       },
     );
-    if (written !== null) setEditing(false);
+    if (written !== null) {
+      setSaved(true);
+      setEditing(false);
+    }
   }
 
   function edit(next: Draft): void {
+    setSaved(false);
     setHeld(next);
   }
 
   /** Leaving the editor, or the panel, with a question if there is one to ask. */
   function leaveEditor(): void {
     draftNavigation.request(() => {
+      setSaved(false);
       setRefusal(null);
       setEditing(false);
       if (persona !== null && held !== null && held.personaId === persona.id) {
@@ -798,111 +759,69 @@ export function PersonaSheet({
     draftNavigation.request(() => onClose());
   }
 
-  const versions = history?.status === "ready" ? history.value.versions : [];
   const predefined = persona?.owner === "egma";
-  const totalVersions = Math.max(versions.length, persona?.version ?? 0);
-  /**
-   * Whether this panel is drawing an editor, which is four things at once and
-   * not one: somebody asked for it, the persona is available, egma knows whose
-   * panel this is, and the authoring choices have arrived.
-   */
-  const editable =
-    editing && persona !== null && role !== null && choices !== null;
+  const settingsReady = persona !== null && role !== null && choices !== null;
 
-  /** The head of the panel: what kind of record it is, and which version. */
+  /** The head keeps the current core version visible. */
   function meta(): string {
     if (persona === null) return "";
     const kind = ownerSaid(persona.owner);
-    if (reading !== null) {
-      return `${kind} · v${String(reading.version)} of ${String(totalVersions)}`;
-    }
-    if (editing) {
-      return `${kind} · v${String(persona.version)} · Editing`;
-    }
-    return `${kind} · v${String(persona.version)}`;
+    return `${kind} · v${String(persona.version)}${editing ? " · Editing" : ""}`;
   }
 
-  function versionRows() {
-    return versions.map((version) => ({
-      id: version.id,
-      version: version.version,
-      written: <RelativeInstant instant={version.createdAt} now={now} />,
-      current: version.id === persona?.versionId,
-      reading: reading?.id === version.id,
-      ...(version.id === persona?.versionId
-        ? {}
-        : { onRead: () => setReading(version) }),
-    }));
-  }
-
-  /** The read view, which every mode except editing is a shape of. */
+  /** Shared identity stays read-only while the settings below it are editable. */
   function readBody(one: Persona) {
-    const shown = reading;
-    const behavior = shown === null ? behaviorDraftOf(one) : behaviorDraftOf(shown);
-    const models = modelsOfPersona(one);
-
     return (
-      <>
-        <SheetSection label="Who they are">
-          <Reads
-            reads={behaviorReads(
-              behavior,
-              /*
-               * A frozen version carries no name and no description — identity
-               * is live — so printing today's description under "this version
-               * is frozen" would be a sentence that is not true of it.
-               */
-              shown === null ? describedAs(one.description) : null,
-            )}
-          />
+      <SheetSection label="Who they are">
+        <Reads
+          reads={behaviorReads(behaviorDraftOf(one), describedAs(one.description))}
+        />
+      </SheetSection>
+    );
+  }
+
+  function settingsBody(one: Persona, draft: Draft) {
+    if (role === null) {
+      return (
+        <SheetSection label="Settings">
+          <Reads reads={modelReads(modelsOfPersona(one), choices)} />
         </SheetSection>
-
-        {shown === null ? <SheetSection label={one.settings === null ? "Default models" : "Project settings"}>
-          <Reads reads={modelReads(models, choices)} />
-        </SheetSection> : null}
-
-        {(
-          <>
-            <Reads
-              reads={[
-                {
-                  label: "Created",
-                  value: <ListInstant instant={one.createdAt} />,
-                },
-                {
-                  label: "Updated",
-                  value: <ListInstant instant={one.updatedAt} />,
-                },
-              ]}
-            />
-
-            {history === null || history.status === "signed-out" ? (
-              <Loading what="this persona's history" />
-            ) : history.status === "ready" ? (
-              <SheetSection label="Versions">
-                <Versions rows={versionRows()} />
-              </SheetSection>
-            ) : (
-              <Failure
-                message={history.refusal.message}
-                onRetry={reloadHistory}
-              />
-            )}
-          </>
-        )}
-      </>
+      );
+    }
+    if (form === null || form.status === "signed-out") {
+      return (
+        <SheetSection label="Settings">
+          <Loading what="the supported persona models" />
+        </SheetSection>
+      );
+    }
+    if (form.status !== "ready") {
+      return (
+        <SheetSection label="Settings">
+          <Failure message={form.refusal.message} onRetry={reloadForm} />
+        </SheetSection>
+      );
+    }
+    return (
+      <ModelFields
+        prefix="persona"
+        draft={draft.models}
+        form={form.value}
+        disabled={!mayAuthor || saving || busy}
+        onChange={(models) => edit({ ...draft, models })}
+      />
     );
   }
 
   /** Shared personas expose settings; custom personas also expose core fields. */
-  function editBody(draft: Draft, choices: PersonaForm) {
+  function editBody(draft: Draft) {
     return (
       <>
-        {predefined ? null : <><NameFields
+        <NameFields
           prefix="persona"
           name={draft.name}
           description={draft.description}
-          disabled={saving}
+          disabled={!mayAuthor || saving || busy}
           note={COPY.nameNote}
           onName={(name) => edit({ ...draft, name })}
           onDescription={(description) => edit({ ...draft, description })}
@@ -910,15 +829,8 @@ export function PersonaSheet({
         <BehaviorFields
           prefix="persona"
           draft={draft.behavior}
-          disabled={saving}
+          disabled={!mayAuthor || saving || busy}
           onChange={(behavior) => edit({ ...draft, behavior })}
-        /></>}
-        <ModelFields
-          prefix="persona"
-          draft={draft.models}
-          form={choices}
-          disabled={saving}
-          onChange={(models) => edit({ ...draft, models })}
         />
       </>
     );
@@ -932,30 +844,24 @@ export function PersonaSheet({
      */
     if (role === null) return null;
     const why = mayAuthor || whyNot === undefined ? {} : { why: whyNot };
-    const inert = !mayAuthor || saving || busy;
-
-    if (reading !== null) {
-      return <SheetFooter><span className="text-sm text-faint">Core history is read-only.</span><Button type="button" size="lg" variant="secondary" onClick={() => setReading(null)}>Back to v{String(one.version)}</Button></SheetFooter>;
-    }
-
-    if (editable) {
+    if (settingsReady) {
       return (
         <SheetFooter>
           <Button
             type="submit"
             size="lg"
             busy={saving}
-            disabled={!mayAuthor || !changed || saving}
+            disabled={!mayAuthor || (!changed && one.settings !== null) || saving || busy}
             {...why}
           >
-            {saving ? "Saving…" : one.settings === null ? "Use persona" : "Save changes"}
+            {saving ? "Saving…" : saved && !changed ? "Saved" : one.settings === null ? "Use persona" : "Save changes"}
           </Button>
           <Button
             type="button"
             size="lg"
             variant="secondary"
             disabled={saving}
-            onClick={leaveEditor}
+            onClick={editing ? leaveEditor : leave}
           >
             Cancel
           </Button>
@@ -1001,23 +907,6 @@ export function PersonaSheet({
       );
     }
 
-    if (editing && role !== null) {
-      if (form === null || form.status === "signed-out") {
-        return (
-          <SheetBody ref={bodyRef}>
-            <Loading what="the supported persona models" />
-          </SheetBody>
-        );
-      }
-      if (form.status !== "ready") {
-        return (
-          <SheetBody ref={bodyRef}>
-            <Failure message={form.refusal.message} onRetry={reloadForm} />
-          </SheetBody>
-        );
-      }
-    }
-
     return (
       <form
         className="flex min-h-0 flex-1 flex-col gap-5"
@@ -1037,7 +926,8 @@ export function PersonaSheet({
               }
             />
           )}
-          {editable && choices !== null ? editBody(held, choices) : readBody(one)}
+          {editing && !predefined ? editBody(held) : readBody(one)}
+          {settingsBody(one, held)}
         </SheetBody>
         {footer(one)}
       </form>
@@ -1047,18 +937,17 @@ export function PersonaSheet({
   /**
    * The record's own actions, in the head beside the close.
    *
-   * **Every one of a record's actions is in one menu**, which is what makes a
-   * sheet's head the same shape on every surface in the product. Shared cores
-   * stay read-only while their project settings remain editable.
+   * Custom identity editing, cloning, and deletion remain in the menu.
+   * Shared cores stay read-only while settings are edited in the body.
    */
   function actions(one: Persona): ReactNode {
-    if (role === null || editing || reading !== null) return undefined;
+    if (role === null || editing) return undefined;
     const inert = !mayAuthor || saving || busy;
     return (
       <SheetMenu label={`Actions for ${one.name}`}>
         {(close) => (
           <>
-            {(
+            {predefined ? null : (
               <MenuItem
                 disabled={inert}
                 onClick={() => {
@@ -1066,14 +955,14 @@ export function PersonaSheet({
                   setEditing(true);
                 }}
               >
-                {one.settings === null ? "Use" : predefined ? "Edit settings" : "Edit"}
+                Edit
               </MenuItem>
             )}
             <MenuItem
               disabled={inert}
               onClick={() => {
                 close();
-                onFork(one);
+                draftNavigation.request(() => onFork(one));
               }}
             >
               Clone
@@ -1083,7 +972,7 @@ export function PersonaSheet({
                 disabled={inert}
                 onClick={() => {
                   close();
-                  onDelete(one);
+                  draftNavigation.request(() => onDelete(one));
                 }}
               />
             )}
@@ -1110,10 +999,12 @@ export function PersonaSheet({
           {persona === null ? null : (
             <span className="flex flex-wrap items-center gap-2">
               <span className="text-sm text-faint">{meta()}</span>
-              {reading === null ? null : <StateChip>Older version</StateChip>}
             </span>
           )}
         </SheetHeader>
+        <span className="sr-only" role="status">
+          {saved && !changed ? "Persona saved." : ""}
+        </span>
         {body()}
       </SheetContent>
     </Sheet>
@@ -1121,15 +1012,9 @@ export function PersonaSheet({
 }
 
 /**
- * Deleting one persona, and the one question it asks.
- *
- * **Delete is the product's word and the confirmation names who it is about.**
- * Underneath, the row is stamped rather than removed, so every simulation that
- * pinned this persona still reads exactly what it heard — but that is storage,
- * not something a person authoring a test is asked to hold in their head. What
- * they are told is what actually changes for them: the persona leaves every
- * list and picker, and a test that still names them has to name somebody else
- * before it can be written or run again.
+ * Delete removes the persona from lists and pickers while preserving pinned
+ * versions for existing simulations. Tests referencing it need another persona
+ * before they can be saved or run.
  */
 export function DeletePersonaDialog({
   persona,

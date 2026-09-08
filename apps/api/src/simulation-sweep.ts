@@ -6,38 +6,12 @@ import {
 } from "@egma/db";
 
 /**
- * The standing orphan sweep: what notices a dead simulator.
+ * Periodically fail stale claimed simulations and settle completed simulations
+ * past the agent POV wait bound. Each operation has its own error handling.
+ * Guarded database updates allow replicas to run the same sweep.
  *
- * Everything else about a simulation's lifecycle is written by somebody's
- * request — a claim, a beat, a report. A simulator that died mid-conversation
- * sends none of those, so the one honest record it leaves is silence, and
- * silence has to be read on a clock. This loop reads it: every interval, one
- * call to the seam that marks every simulation silent past the staleness
- * window `failed` with reason `orphaned` and finalizes the runs that were
- * waiting on them.
- *
- * **A second silence rides the same tick**: the agent's own POV of a completed
- * simulation, which arrives by a push from inside the room or a pull from the
- * platform — and which, when the exporter is broken or the pull failed, arrives
- * never. Grading waits 30 seconds for it and no longer (ADR-0024 §6), and that
- * bound is the same kind of fact as an orphan's: nobody sends it, so a loop has
- * to read it. Two seams, one interval, one in-flight promise — because a second
- * timer would be a second copy of everything below for a question of exactly
- * the same shape.
- *
- * **Every replica runs one, and nothing elects a leader.** That is safe
- * because the seam itself makes racing sweeps collide harmlessly — the
- * guarded update ends each row exactly once and whoever arrives second finds
- * nothing to do — so a second API replica costs duplicate reads, never
- * duplicate records.
- *
- * **The first sweep waits a whole interval on purpose.** An API that was
- * unreachable for longer than the staleness window comes back to rows whose
- * heartbeats all look ancient — not because their simulators died, but
- * because every beat they sent hit a closed door. Those simulators are still
- * conducting and still beating every few seconds, so one interval of
- * accepting requests is what lets every living row be stamped fresh before
- * the first sweep reads its silence.
+ * Delay the first tick by one interval to give simulators a chance to renew
+ * heartbeats after an API restart. Skip ticks while a previous tick is running.
  */
 
 /**
@@ -82,6 +56,8 @@ export type OrphanSweepOptions = {
   readonly settleAgentPovBound?: () => Promise<
     readonly SimulationPastTheAgentPovBound[]
   >;
+  /** Reconcile hosted voice compute on the same cadence. */
+  readonly wakeVoiceFleet?: (() => void) | undefined;
 };
 
 export type OrphanSweep = {
@@ -170,7 +146,11 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
   // throwing — every fault is caught and logged inside it — so holding the
   // latest promise is holding a completion, never an error to re-raise.
   let inFlight: Promise<void> = Promise.resolve();
+  options.wakeVoiceFleet?.();
   const timer = setInterval(() => {
+    // Fleet demand changes independently of orphan cleanup. Keep its cadence
+    // even while a database sweep is still waiting on the store.
+    options.wakeVoiceFleet?.();
     // A sweep that outlives the cadence — a stalled store, mostly — is
     // skipped over, not piled on: the next tick after it returns will see
     // everything this one would have. The skip has to happen *here*, before

@@ -62,14 +62,11 @@ are available. Otherwise, they use the available conversation evidence. The
 recording follows what Egma's caller heard, so its timing can differ from the
 agent's reported timing.
 
-Grading waits up to 30 seconds after completion for expected agent evidence.
-If it does not arrive, grading can proceed with the available evidence.
-[Get a simulation](/api/get-simulation) returns `agentPovIncomplete: true`
-when that wait has ended and agent evidence is still missing. A `false` value
-does not prove that the export is complete or that existing grades used evidence
-that arrived later. Check the worker or provider export, then
-[regrade](/guides/configure-graders#regrade-a-simulation) after late evidence
-arrives.
+For LiveKit and Retell simulations, grading waits up to 245 seconds after Egma receives the completion report for the final agent record. Grading starts as soon as that record is complete. If the wait ends first, grading can use the available evidence.
+
+[Get a simulation](/api/get-simulation) returns `agentPovComplete` when the final agent record is present. `agentPovIncomplete` is true when the record is explicitly degraded, or still missing after the wait. Existing grades do not change when late evidence arrives; [regrade](/guides/configure-graders#regrade-a-simulation) to use it.
+
+Retell records are checked immediately, every five seconds through the first minute, then at 70, 90, 130, 190, and 240 seconds. Each request has a five-second timeout, with at most 18 requests. Polling stops when the final call record has a usable transcript. After those attempts, Egma does not fetch again automatically; regrading uses stored evidence. LiveKit sends its record through the SDK.
 
 The combined score is a comparison value. Egma does not assign an overall
 pass/fail result to a run. See [Scores and thresholds](/guides/scores-and-thresholds).

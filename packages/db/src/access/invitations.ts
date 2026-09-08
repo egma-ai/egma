@@ -12,19 +12,8 @@ import { projectsOf } from "./projects.ts";
 import { within } from "./within.ts";
 
 /**
- * Asking somebody to join, and their side of it.
- *
- * **The row never holds the token.** What is stored is a single SHA-256 of the
- * high-entropy string that went into the link, exactly as an API key is stored,
- * so a copy of the database is not a pile of working invitations. Hashing is the
- * caller's, for the same reason it is on a key: the module that keeps the secret
- * should never be the module that has seen it.
- *
- * **A link is the credential.** Reading one and accepting one therefore take a
- * hash and nothing else — there is no argument that would make either answer
- * about an invitation the caller was not given, and neither can be asked to
- * enumerate. That is what puts them beside `resolveApiKey` rather than beside
- * the reads that require an `AuthContext`.
+ * Store invitation token hashes, never raw tokens. The caller hashes the secret.
+ * Read and acceptance use that hash to resolve one invitation without AuthContext.
  */
 
 /** An invitation, as the organization that sent it may see it. */
@@ -71,6 +60,7 @@ export async function createInvitation(
   auth: AuthContext,
   input: NewInvitation,
 ): Promise<Invitation> {
+  authorize(auth, "manage_members", here(auth));
   const alreadyIn = await organizationOfEmail(input.email);
   if (alreadyIn !== null) {
     throw new AlreadyBelongsToAnOrganizationError(
@@ -106,7 +96,7 @@ export async function createInvitation(
 export async function listPendingInvitations(
   auth: AuthContext,
 ): Promise<readonly Invitation[]> {
-  authorize(auth, "read", here(auth));
+  authorize(auth, "read_organization", here(auth));
 
   return db()
     .select(COLUMNS)
@@ -139,15 +129,8 @@ function stateOf(row: {
 }
 
 /**
- * What one link names: which organization, for whom, at what role, and whether
- * it is still live.
- *
- * Safe without an `AuthContext` on the same terms as resolving an API key: the
- * only argument is the hash of a secret egma issued to exactly one holder, so
- * there is nothing to name wrongly and no way to ask about a second invitation.
- * It returns the organization's name because the page a person lands on has to
- * be able to say what they are joining, and at that moment they have no account
- * to build a context from.
+ * Resolve an invitation's organization, recipient, role, and status from its token hash.
+ * This lets a recipient view the invitation before they have an account.
  */
 export async function readInvitation(
   tokenHash: string,
@@ -228,22 +211,9 @@ function constraintViolated(error: unknown): string | undefined {
 }
 
 /**
- * A link followed, and the person now in the organization it named.
- *
- * The whole of it is one transaction, and the invitation row is locked before it
- * is read: two people following the same link at the same moment must not both
- * get a membership out of it, and a link is single-use because `accepted_at` is
- * written in the same breath as the membership.
- *
- * The address on the invitation has to be the address on the account. The page
- * shows which one it is and fills the field in, so this costs nothing in the
- * ordinary case — and it keeps an invitation a thing addressed to a person
- * rather than a bearer token for anybody who is handed the URL.
- *
- * Somebody who already belongs to an organization is refused by the unique
- * constraint on the membership, and the whole transaction goes with it. The
- * check cannot be made only when the invitation is written: an account can be
- * created in between, so the database is what has to say so.
+ * Lock the invitation and create membership in one transaction. Require a matching
+ * account email and mark the invitation accepted atomically. The membership unique
+ * constraint rejects users who already belong to an organization.
  */
 export async function acceptInvitation(
   tokenHash: string,

@@ -1,20 +1,10 @@
 /**
- * The data-access boundary.
- *
- * Customer reads and writes take an `AuthContext`. This module builds tenancy
- * predicates from that context. The Postgres pool and ClickHouse driver stay
- * private, and lint rules prevent other packages from importing either driver.
- *
- * A small set of context-establishing calls resolves credentials or membership.
- * A second small set dispatches platform work across all tenants. Those worker
- * calls return an `AuthContext` narrowed to the row they claimed, so every later
- * read and write uses the normal tenant boundary.
- *
- * ClickHouse has two product records behind the same boundary. Spans are the
- * trace evidence. Grades are append-only results tied to one trace and one
- * project grader. Trace reads require a bounded time window. Grade reads require
- * the exact trace and frozen plan. Regrading reopens whole-trace work; it never
- * edits or removes prior grade rows.
+ * Customer data access uses AuthContext to apply organization and project scope.
+ * Keep Postgres and ClickHouse drivers private; lint enforces the import boundary.
+ * Credential resolvers establish contexts. Deployment workers claim stored work
+ * and build a context scoped to that row.
+ * Spans and append-only grades share this boundary. Trace reads require a bounded
+ * time window; grade reads require an exact trace and frozen grading plan.
  */
 
 export type { AuthContext, Role, Via } from "./context.ts";
@@ -25,7 +15,6 @@ export {
   AgentAlreadyBoundError,
   AlreadyBelongsToAnOrganizationError,
   ConnectionRestoreRefusedError,
-  IdempotencyConflictError,
   IdentityConflictError,
   LastAdminError,
   NotPermittedError,
@@ -35,6 +24,7 @@ export {
   ProjectOutsideOrganizationError,
   ProjectSlugTakenError,
   RunWriteRefusedError,
+  FundingRefusedError,
   TestMovedOnError,
   TraceStoreRefusedError,
   UnprocessableInputError,
@@ -377,6 +367,7 @@ export {
 export {
   cancelRun,
   claimSimulations,
+  estimateVoiceSimulationDemand,
   completeSimulation,
   failSimulation,
   failSimulationDispatch,
@@ -389,7 +380,10 @@ export {
   listRuns,
   listSimulations,
   markSimulationCanceled,
+  readQueuedWorkProviders,
+  readRunWorkBlock,
   recordSimulationHeartbeat,
+  recordOrphanedSimulationExecution,
   releaseSimulationClaim,
   resolveRunStartReach,
   resolveSimulationConnection,
@@ -401,8 +395,8 @@ export {
   runCarriesMockTools,
   resolveRetellSimulationPull,
   resolveSimulationByProviderReference,
+  registerSimulationProviderReference,
   resolveSimulationStanding,
-  runAlreadyStartedFor,
   simulationProviderReferencesIn,
   simulationStatusCountsOfRuns,
   startRun,
@@ -410,6 +404,7 @@ export {
   sweepOrphanedSimulations,
   type CompletedEndingReason,
   type ConductedSimulation,
+  type RunWorkBlock,
   type ConnectionSnapshot,
   type FailedEndingReason,
   type ExpectedTestVersion,
@@ -428,6 +423,8 @@ export {
   type Simulation,
   type SimulationClaim,
   type SimulationClaimRequest,
+  type SimulationConcurrencyCaps,
+  type VoiceSimulationDemand,
   type SimulationConnection,
   type SimulationExecutionEvidence,
   type SimulationFailure,
@@ -472,6 +469,7 @@ export {
 export {
   AGENT_POV_BOUND_SECONDS,
   GRADING_WORK_CHANNEL,
+  MAX_GRADING_CLAIM_CAPACITY,
   claimGradingJobs,
   finishGradingJob,
   getGradingJob,
@@ -497,6 +495,7 @@ export {
   type GradingRequest,
   type GradingRequestResult,
   type RegradeTraceResult,
+  type SimulationGradeTally,
   type NamedCurrentGrade,
   type NamedRecordedGrade,
   type TraceGrading,
@@ -515,3 +514,39 @@ export {
   openDrainOwnership,
   type DrainOwnership,
 } from "./drain-ownership.ts";
+
+/**
+ * Usage records: what Egma's provider requests cost, measured where they are
+ * made and priced where they are stored. And the platform usage a month is
+ * counted in, which is a different question about the same conversations —
+ * money for the first two, allowances for the third.
+ *
+ * The first two take the context the work already runs under — a simulation's
+ * claim, or a grading claim — so the organization and the project are stamped
+ * from the row that authorised the work and never from anything a measurement
+ * claimed. `readUsageThisPeriod` takes an ordinary one: it is a read anybody in
+ * the organization may make, because a run that paused for money has to explain
+ * itself to whoever started it. The boot upsert that fills the rate card is not
+ * here: it names no customer and configures the deployment, so it sits beside
+ * the persona shelf's seed.
+ */
+export {
+  readOrganizationUsage,
+  priceUsageSpans,
+  readUsageThisPeriod,
+  recordProviderUsage,
+  type NewUsageRecord,
+  type RecordedProviderUsage,
+  type OrganizationUsage,
+  type ProviderUsageEvidence,
+  type UsageByModel,
+  type UsageIdentity,
+  type UsageQuantities,
+} from "./usage.ts";
+export type {
+  UsageMeasurement,
+  UsagePaymentSource,
+  UsageWorkKind,
+} from "../schema/billing.ts";
+
+export {createProviderFundingReceipt, readProviderFundingReceipt, readProviderKeys, putProviderKey, deleteProviderKey, resolveProviderKeysForWork, ProviderKeyUnavailableError, type ProviderKeyEntry} from './provider-keys.ts';

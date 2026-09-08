@@ -1,0 +1,18 @@
+{
+  "name": "@egma/livekit-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Required real LiveKit end-to-end proof for the packaged SDKs and simulator",
+  "type": "module",
+  "scripts": {
+    "test": "python3 run.py",
+    "worker:javascript": "node javascript_worker.mjs start"
+  },
+  "dependencies": {
+    "@egma/livekit": "workspace:*",
+    "@livekit/agents": "1.7.1",
+    "@livekit/agents-plugin-openai": "1.7.1",
+    "@livekit/agents-plugin-silero": "1.7.1",
+    "zod": "^4.1.8"
+  }
+}

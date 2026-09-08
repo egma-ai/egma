@@ -20,25 +20,9 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The persona routes, over real HTTP against real Postgres.
- *
- * What is asserted here is what a caller observes: the shapes, the envelope,
- * who may do what, and every refusal sentence word for word. **Refusal wording
- * is contract** — it is what a page shows somebody and what tells them their
- * next move — so a sentence that changed without anybody deciding to change it
- * fails here.
- *
- * The factory beneath has its own tests and none of them are repeated. What is
- * new at this seam is everything the wire adds: a project named on every
- * browser request, the codes a client branches on, and the fact that a
- * viewer's write is refused by the server whether or not a browser was
- * involved.
- *
- * **The authored person is flat, and there is no old shape.** A body still
- * carrying a `traits` wrapper or the retired revision token is refused rather
- * than half-applied, and that refusal is asserted here field by field: a
- * client written against the shape this replaced must be told, never quietly
- * answered `200` with nothing of its edit landed.
+ * Persona HTTP coverage for payloads, permissions, project selection, and
+ * refusal codes and messages. Reject traits wrappers and obsolete identity
+ * revision fields; behavior edits use expectedVersionId.
  */
 
 let api: TestApi;
@@ -117,16 +101,10 @@ async function createPersonaThrough(
   return personaIn(made);
 }
 
-/**
- * Egma's own persona, readable from every project.
- *
- * It used to be found through the project's `default_persona_id` pointer. That
- * column is gone with everything that guarded it, so the catalog's fixed
- * identifier is what names them now — which is what it always was underneath.
- */
+/** Use the shared persona catalog ID; projects store no default-persona pointer. */
 const PREDEFINED_PERSONA = EGMA_PROVIDED_PERSONAS.defaultPersona;
 
-/** The one sentence every write to a Predefined persona is refused with. */
+/** Refusal message for protected Egma-provided persona edits. */
 function predefinedRefusal(personaId: string): Record<string, unknown> {
   return {
     error: "egma_provided_persona",
@@ -168,6 +146,7 @@ describe("creating and reading a persona", () => {
       "stt:openai:gpt-4o-transcribe",
       "stt:openai:gpt-4o-mini-transcribe",
       "stt:deepgram:nova-3-general",
+      "tts:openai:gpt-4o-mini-tts-2025-12-15",
       "stt:cartesia:ink-2",
       "tts:cartesia:sonic-3.5",
       "tts:cartesia:sonic-preview",
@@ -297,13 +276,8 @@ describe("creating and reading a persona", () => {
   });
 
   /**
-   * **The shape this replaced is refused, never half-applied.**
-   *
-   * A client written against the old persona API sent a `traits` wrapper with
-   * an accent and a background noise inside it, and named a revision token on
-   * every edit. None of those exist. Dropping them silently would answer `201`
-   * to a create whose personality nobody read, and `200` to an edit that
-   * believed in a guard that is not there — so each is refused by name.
+   * Reject obsolete traits, accent, background-noise, and revision fields.
+   * Behavior edits use expectedVersionId; unknown fields must not be silently ignored.
    */
   it("refuses every key the old persona shape carried", async () => {
     api = await createApi("personas_no_old_shape");
@@ -454,7 +428,7 @@ describe("creating and reading a persona", () => {
     expect(found).toMatchObject({
       name: "Everyday caller",
       description: "Regular conversationalist persona",
-      version: 1,
+      version: 2,
       owner: "egma",
       // Catalog content, and the whole point of it: nobody ever hears
       // "Hi, I'm Everyday caller."
@@ -511,7 +485,7 @@ describe("the list", () => {
       `/v1/personas?projectId=${ada.projectId}&search=O`,
       ada,
     );
-    // "Two" was deleted, and the Predefined persona carries no `o` in its
+    // "Two" was deleted, and the Egma-provided persona carries no `o` in its
     // name, so what one letter leaves is the two rows that do hold it.
     expect(
       (searched.body.personas as WirePersona[]).map((one) => one.name),

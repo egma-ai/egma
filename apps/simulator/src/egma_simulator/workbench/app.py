@@ -1,27 +1,8 @@
-"""The workbench: a fake control plane that speaks the contract from fixtures.
-
-Dev and test only. It serves the four endpoints the simulator dials —
-claim, heartbeat, report, and the OTLP ingest the conversation's spans go
-to — from spec documents loaded off disk, validates everything both ways
-against the contract schemas, and records every observation in order. The
-records are the whole point: the acceptance suite asserts against nothing
-else, and a person watching the log watches a simulation go queued →
-claimed → running → completed with its turns arriving as spans in between.
-
-The two doors carry two different records and the contract is what keeps
-them apart: a report says only where the simulation's lifecycle stands, so
-the report schema accepts status transitions and refuses anything claiming
-to carry a conversation, and the conversation arrives at the span sink.
-
-The span sink is deliberately the smallest thing that can be called one: it
-checks a batch parses and names a simulation this workbench knows, records
-each span, and answers what the OTLP specification says to. It stores
-nothing, indexes nothing and joins nothing — the real ingest does all of
-that, and a second implementation of it here would be a second thing to
-keep true.
-
-The production claim API is the only real control path. This workbench stays a
-local rig for simulator development and contract tests.
+"""Local control-plane fixture for simulator development and contract tests.
+Serve claims, heartbeats, room registration, reports, and OTLP ingestion while
+recording observations. Validate lifecycle documents against schemas. The span
+sink checks JSON and simulation identity; production storage, indexing, and
+joins remain API responsibilities.
 """
 
 from __future__ import annotations
@@ -51,9 +32,18 @@ class RefusedSpans(Exception):
 class WorkbenchState:
     """The queue of specs, the cancel flags, and the record of everything."""
 
-    def __init__(self, *, hold_seconds: float, over_grant: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        hold_seconds: float,
+        over_grant: int = 0,
+        block_reports: bool = False,
+    ) -> None:
         self._hold_seconds = hold_seconds
         self._over_grant = over_grant
+        self._report_gate = asyncio.Event()
+        if not block_reports:
+            self._report_gate.set()
         """How many specs past the declared capacity a claim answers with.
 
         Zero is a well-behaved control plane. Anything else is the
@@ -86,16 +76,24 @@ class WorkbenchState:
             self._record("queued", simulation_id=simulation_id)
             self._arrival.notify_all()
 
-    async def claim(self, claimant: str, capacity: int) -> list[dict]:
+    async def claim(
+        self,
+        claimant: str,
+        capacity: int,
+        modalities: tuple[str, ...] | None = None,
+    ) -> list[dict]:
         """Up to ``capacity`` specs, holding the request open while the queue is dry."""
         deadline = asyncio.get_running_loop().time() + self._hold_seconds
         async with self._arrival:
             while True:
+                compatible = [
+                    simulation_id
+                    for simulation_id, spec in self._queued.items()
+                    if modalities is None or spec.get("modality") in modalities
+                ]
                 granted = [
                     self._queued.pop(simulation_id)
-                    for simulation_id in list(self._queued)[
-                        : capacity + self._over_grant
-                    ]
+                    for simulation_id in compatible[: capacity + self._over_grant]
                 ]
                 if granted:
                     for spec in granted:
@@ -104,13 +102,18 @@ class WorkbenchState:
                         "claim",
                         claimant=claimant,
                         capacity=capacity,
+                        modalities=modalities,
                         granted=[spec["simulation_id"] for spec in granted],
                     )
                     return granted
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
                     self._record(
-                        "claim", claimant=claimant, capacity=capacity, granted=[]
+                        "claim",
+                        claimant=claimant,
+                        capacity=capacity,
+                        modalities=modalities,
+                        granted=[],
                     )
                     return []
                 try:
@@ -219,6 +222,10 @@ class WorkbenchState:
         self._cancel_flags.add(simulation_id)
         self._record("cancel_directive", simulation_id=simulation_id)
 
+    def release_reports(self) -> None:
+        """Release a deliberate report block during fixture teardown."""
+        self._report_gate.set()
+
 
 def build_app(state: WorkbenchState) -> web.Application:
     """The workbench's HTTP face: the contract seam plus its own controls."""
@@ -231,8 +238,26 @@ def build_app(state: WorkbenchState) -> web.Application:
             raise web.HTTPBadRequest(text="claimant must be a non-empty string")
         if not isinstance(capacity, int) or capacity < 1:
             raise web.HTTPBadRequest(text="capacity must be a positive integer")
-        specs = await state.claim(claimant, capacity)
-        return web.json_response({"specs": specs})
+        offered_modalities = body.get("modalities")
+        modalities = (
+            None
+            if offered_modalities is None
+            else tuple(offered_modalities)
+            if isinstance(offered_modalities, list)
+            and offered_modalities
+            and all(item in ("voice", "chat") for item in offered_modalities)
+            else None
+        )
+        if offered_modalities is not None and modalities is None:
+            raise web.HTTPBadRequest(text="modalities must name voice, chat, or both")
+        specs = await state.claim(claimant, capacity, modalities)
+        granted_at = moment()
+        return web.json_response(
+            {
+                "specs": specs,
+                "claimed_at": {spec["simulation_id"]: granted_at for spec in specs},
+            }
+        )
 
     async def heartbeat(request: web.Request) -> web.Response:
         simulation_id = request.match_info["simulation_id"]
@@ -249,11 +274,35 @@ def build_app(state: WorkbenchState) -> web.Application:
         simulation_id = request.match_info["simulation_id"]
         if not state.known(simulation_id):
             raise web.HTTPNotFound(text=f"unknown simulation {simulation_id}")
+        await state._report_gate.wait()
         try:
             state.report(simulation_id, await request.read())
         except RefusedReport as refusal:
             raise web.HTTPBadRequest(text=str(refusal)) from refusal
         return web.Response(status=204)
+
+    async def provider_reference(request: web.Request) -> web.Response:
+        simulation_id = request.match_info["simulation_id"]
+        if not state.known(simulation_id):
+            raise web.HTTPNotFound(text=f"unknown simulation {simulation_id}")
+        body = await request.json()
+        claimant = body.get("claimant")
+        reference = body.get("provider_reference")
+        if not isinstance(claimant, str) or not claimant:
+            raise web.HTTPBadRequest(text="claimant must be a non-empty string")
+        if not isinstance(reference, str) or not reference:
+            raise web.HTTPBadRequest(
+                text="provider_reference must be a non-empty string"
+            )
+        state._record(
+            "provider_reference",
+            simulation_id=simulation_id,
+            claimant=claimant,
+            provider_reference=reference,
+        )
+        return web.json_response(
+            {"simulation_id": simulation_id, "provider_reference": reference}
+        )
 
     async def traces(request: web.Request) -> web.Response:
         try:
@@ -294,6 +343,9 @@ def build_app(state: WorkbenchState) -> web.Application:
     app.router.add_post("/v1/claims", claim)
     app.router.add_post("/v1/simulations/{simulation_id}/heartbeats", heartbeat)
     app.router.add_post("/v1/simulations/{simulation_id}/reports", report)
+    app.router.add_post(
+        "/v1/simulations/{simulation_id}/provider-reference", provider_reference
+    )
     app.router.add_post("/v1/traces", traces)
     app.router.add_get("/workbench/records", records)
     app.router.add_post("/workbench/specs", offer)

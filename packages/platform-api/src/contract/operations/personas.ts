@@ -254,7 +254,11 @@ const createPersonaBody = {
   }],
 } as const;
 
-/** Partial update. Behavior edits must name the current core version. */
+/**
+ * Partial persona update. Behavior edits require expectedVersionId in the
+ * access layer; omitted fields retain their current values. Metadata and
+ * project settings do not create a behavior version.
+ */
 const updatePersonaBody = {
   type: "object",
   properties: {

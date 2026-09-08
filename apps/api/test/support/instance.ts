@@ -15,7 +15,7 @@ import {
 import type { FastifyInstance } from "fastify";
 
 import { loadConfig, type Config } from "../../src/config.ts";
-import type { IngestionStore } from "../../src/ingestion/object-store.ts";
+import type { IngestionStore } from "@egma/ingestion";
 import { buildApi, type ServerOptions } from "../../src/server.ts";
 import {
   holdWebOutputLock,
@@ -35,29 +35,9 @@ import {
 } from "../../../../packages/db/test/support/clickhouse.ts";
 
 /**
- * A whole egma, running: a Postgres of its own, a ClickHouse of its own, the
- * real API, and the real Next process with its real rewrites — reachable at one
- * origin, exactly as a `docker compose up` leaves it.
- *
- * This exists for the browser tests, and every part of it is real on purpose. A
- * stub anywhere in that list removes the only reason to drive a browser at all:
- * what those tests prove is that the pages exist, that they are served from this
- * instance's own origin, and that this process forwards the API paths they use —
- * and none of those three is a claim a mock can make.
- *
- * **One origin, and both halves know it.** Both ports are chosen up front,
- * because the API has to be told the address a browser reaches egma on and the
- * web process has to be told where to forward the API's paths.
- *
- * **One at a time, and that is why every browser test is in one file.** A
- * development server compiles into `apps/web/.next`, and two of them running at
- * once compile into the same files and each ends up serving half of the other's
- * build. Pointing them at different output directories does work and costs more
- * than it buys: Next writes the directory it is using back into the checked-in
- * `tsconfig.json` and `next-env.d.ts`, so running the suite would leave the
- * repository dirty. Vitest runs the tests within one file in order, so one file
- * is the whole of the arrangement — and it is the cheaper one anyway, because
- * every browser test then shares one instance instead of standing up its own.
+ * Start isolated Postgres and ClickHouse databases, the API, and Next with
+ * rewrites that expose one browser origin. Choose both ports before configuring
+ * either process. Serialize browser instances because Next shares apps/web/.next.
  */
 
 const WEB = path.join(import.meta.dirname, "../../../web");
@@ -91,27 +71,13 @@ export type InstanceOptions = {
    */
   readonly traces?: boolean;
   /**
-   * Whether the pages are served beside the API. On by default, because that is
-   * what a browser needs and the browser tests are why this exists.
-   *
-   * Off is for a caller that speaks only the HTTP API and never opens a page —
-   * the CLI is the whole of that list. A development server costs a minute or
-   * two to compile the first page, and a caller that will never ask for one
-   * should not pay it. With the pages off, `origin` is the API's own address
-   * and the instance tells itself so, which keeps every address it hands out —
-   * a device-flow approval address most of all — pointing at something that
-   * answers.
+   * Serve Next by default. API-only tests can disable it and use the API address
+   * as the instance origin.
    */
   readonly web?: boolean;
   /**
-   * The object store recordings are resolved against, where the caller has one
-   * running. Absent by default, because most of what a browser does here has
-   * nothing to do with audio — and because the one flow that does must skip
-   * visibly rather than fail on a machine that cannot start a container.
-   *
-   * It is a whole store rather than a URL because the address the API signs
-   * for is the address the browser will use, and handing both halves in from
-   * one place is what keeps this arrangement from proving the wrong thing.
+   * Optional recording store shared by the API signer and browser fixture.
+   * Media tests must handle unavailable storage explicitly.
    */
   readonly blob?: Config["blob"];
   /**
@@ -171,19 +137,9 @@ async function freePort(): Promise<number> {
 }
 
 /**
- * Wait until the process is serving, or give up loudly rather than hang.
- *
- * **Serving rather than ready, deliberately.** `/health` reports write
- * readiness, and an instance given no ingestion bucket answers `503` there for
- * as long as it lives — truthfully, because it has nowhere to make evidence
- * durable. Most instances here are not about ingestion and are started without
- * one, so waiting for a `200` would be waiting for something that is never
- * coming.
- *
- * So this accepts any reply the route itself produced, which is every status
- * below `500` plus the `503` readiness refusal. A `500` is not one of them: a
- * process faulting on every request is not up, and treating that as "serving"
- * would turn a broken instance into a suite that fails somewhere else later.
+ * Wait for an HTTP response below 500 or a 503 readiness response. Tests
+ * without ingestion storage can serve routes while acceptance remains unready.
+ * Do not accept 500 as successful startup.
  */
 async function answers(
   url: string,
@@ -353,17 +309,9 @@ export async function startInstance(
       () => failedToStart,
     );
   } catch (neverCameUp) {
-    // Nothing will call `close` on an instance that never came back, so this
-    // is the only chance to give back everything it took. The databases matter
-    // most: each one is created here and dropped there, and a run that failed
-    // halfway used to leave both behind — which is not merely untidy, because
-    // `create database` gets slower as the count climbs and the next run is
-    // then likelier to fail the same way. See
-    // `packages/db/test/support/sweep-stale-databases.ts`.
-    // The lock goes back only once the development server has actually gone —
-    // `kill` is a signal, not a departure, and a Next process still writing
-    // `apps/web/.next` while the next holder starts is the corruption the lock
-    // exists to prevent.
+    // Clean up partial startup because callers receive no instance to close.
+    // Wait for Next to exit before releasing its build lock; sending a signal
+    // alone does not stop it from writing to .next.
     await releaseAfter(web, webOutput);
     await Promise.allSettled([
       app.close(),

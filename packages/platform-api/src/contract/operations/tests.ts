@@ -93,17 +93,9 @@ export const testMockToolSchema = {
 } as const;
 
 /**
- * The world the test is conducted in, in the two platforms' own words.
- *
- * The inner keys stay snake_case on purpose. `retell_dynamic_variables` is what
- * Retell calls the values it substitutes into an agent's prompt, and
- * `job_dispatch_metadata` is what LiveKit calls the blob it hands the job. A
- * reader who knows either platform reads this without a translation table, so
- * the wire keeps their spelling even though every structural name around it is
- * lowerCamelCase.
- *
- * A dynamic variable whose name begins `egma_` is refused: those are Egma's own
- * words to the simulator, and a test cannot overwrite them.
+ * Test-owned env for Retell dynamic variables and LiveKit job dispatch
+ * metadata. Preserve the snake_case keys. Variable names starting with
+ * egma_ are reserved and cannot be authored by tests.
  */
 export const testEnvSchema = {
   type: "object",

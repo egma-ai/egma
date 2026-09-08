@@ -1,31 +1,6 @@
-"""The livekit chat plug: the same room, typed into instead of spoken into.
-
-The claim proved here is that a spec naming a chat ``livekit_room``
-connection becomes a whole simulation — a transcript, a distinct ending,
-the answers egma served, and the room's own name as the join to
-the platform's telemetry — with no LiveKit server, no project, no worker and
-no network anywhere. What stands in for the LiveKit is
-:mod:`room_stub`'s chat half, which is the real chat driver and the real
-text room with only the three requests and the one join answered locally.
-Everything else — stamping each stream at its header, reading it to its
-close, dropping egma's own words, reading the agent's own state off the
-wire, deciding where a turn ends and waiting out whatever it has to wait
-out, offering the mock-tool methods on egma's participant — is the code a
-customer's server will run.
-
-The specs go in at the top, through the plug registry and the pipeline the
-service assembles, for the same reason the voice suite's do: a test that
-built the plug by hand would prove the plug and nothing about the seam
-above it.
-
-Two failures matter more than the rest and get the most room below. An
-agent that never took the chat setup is caught at its **first** output,
-because a speech-paced exchange graded as if it were typed is a record of
-the wrong kind of run and every further turn spends more of the customer's
-speech budget proving the same thing twice. And a connection that names
-no agent is refused before a single request leaves egma, because every
-egma dispatch is explicit: the record names the agent it graded, or there
-is no dispatch and whichever worker was listening takes the room.
+"""Chat connection tests through the registry, pipeline, and stubbed room boundary.
+Exercise stream ownership, turn completion, RPC, transcript, and room attribution.
+Reject missing agentName before requests and accidental audio at first output.
 """
 
 from __future__ import annotations
@@ -42,24 +17,33 @@ from conftest import (
     a_spec,
     load_fixture_spec,
 )
-from room_stub import AGENT_IDENTITY, ChatStub, ClosesLate
+from room_stub import (
+    AGENT_IDENTITY,
+    ChatStub,
+    ClosesLate,
+    RpcAsk,
+    StubParticipant,
+)
 from token_endpoint_stub import serving
 
 from egma_simulator import service as service_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.config import SimulatorConfig
-from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR
+from egma_simulator.contract import ERROR
 from egma_simulator.conversation import Conducted, ConversationControls, conduct
 from egma_simulator.media.livekit_room import (
+    AGENT_STATE_ATTRIBUTE,
     CHAT_TOPIC,
     SPOKEN_TRACK_ATTRIBUTE,
     TRANSCRIPTION_TOPIC,
     LiveKitChatRoomBackend,
+    LiveKitStartup,
     RoomSettings,
+    TextRoom,
     Utterance,
 )
 from egma_simulator.media.room import PERSONA_IDENTITY, ROOM_PREFIX
-from egma_simulator.mock_tools import PROTOCOL_VERSION
+from egma_simulator.mock_tools import PROTOCOL_VERSION, TOOL_METHOD, MockToolSeam
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.pipeline import assemble
@@ -144,15 +128,8 @@ stalled stream anywhere.
 """
 
 A_SLOW_TOOL = 3.0
-"""How long the scripted agent stays quiet in the middle of one turn.
-
-The room stub's own pause, and it stands for the slowest honest thing an
-agent does inside a turn: call a tool that egma is **not** answering for,
-wait on the customer's real backend, and answer out of what came back.
-Egma serves its own answers at once, so nothing egma does puts a gap
-here; what leaves one is a real lookup, and
-:data:`~egma_simulator.plugs.livekit_chat.REPLY_SECONDS` is written to
-clear it.
+"""Scripted pause between filler and answer, representing an unmocked tool lookup.
+The fallback quiet period must allow the final answer to arrive.
 """
 
 A_TOOL_TURN_GAP = A_SLOW_TOOL + 0.5
@@ -259,7 +236,9 @@ def chat_endpoint_spec(
     )
 
 
-def chat_room(stub: ChatStub, **config: object) -> LiveKitChat:
+def chat_room(
+    stub: ChatStub, *, mock_tools: MockToolSeam | None = None, **config: object
+) -> LiveKitChat:
     """One livekit chat plug against a room-shaped LiveKit."""
     return LiveKitChat(
         modality="chat",
@@ -267,6 +246,7 @@ def chat_room(stub: ChatStub, **config: object) -> LiveKitChat:
         config={"url": A_URL, "agentName": AN_AGENT} | config,
         credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
         simulation_id=A_SIMULATION,
+        mock_tools=mock_tools,
         driver=stub.driver,
     )
 
@@ -282,7 +262,6 @@ def hurry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(chat_plug, "GREETING_SECONDS", QUIET_SECONDS)
     monkeypatch.setattr(chat_plug, "REPLY_SECONDS", QUIET_SECONDS)
     monkeypatch.setattr(chat_plug, "TURN_DRAIN_SECONDS", DRAIN_SECONDS)
-    monkeypatch.setattr(chat_plug, "AGENT_JOIN_SECONDS", 1.0)
 
 
 async def chat_walk(
@@ -414,16 +393,8 @@ async def test_a_chat_livekit_spec_conducts_a_whole_simulation_in_a_room(
 async def test_the_dispatch_carries_chat_and_none_of_the_test(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """What an agent is told when it is asked for a typed simulation.
-
-    Nothing, on this channel. The signal that lets it go text-only is the
-    room's name, and dispatch metadata is the test's: a test that wrote
-    none sends none, so an agent reads here in a chat simulation exactly
-    what it reads in its own production rooms.
-
-    Which makes the second half of this test the one that matters: not a
-    word about what the agent will be asked, because an agent that reads
-    its script stops being under test.
+    """Chat modality belongs in the room name. Dispatch metadata contains only
+    test-authored context and must not expose scenario instructions.
     """
     scenario = "Ask to move the Tuesday cleaning to Thursday. Say you are Margaret."
     stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
@@ -439,20 +410,8 @@ async def test_the_dispatch_carries_chat_and_none_of_the_test(
 async def test_a_chat_rooms_name_carries_the_mark_the_worker_reads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The published contract, written out by hand on purpose.
-
-    A chat simulation's room begins ``egma-sim-chat-``, and the six lines
-    in Egma's LiveKit integration instructions key their one decision off
-    exactly that string — so this test spells it rather than importing the
-    constant that builds it. A rename in ``media/room.py`` must land here
-    as a red test: every worker already carrying the chat setup would
-    answer the renamed room aloud, and the fail-fast would stop each of
-    those simulations at the agent's first utterance. Read the red as the
-    contract refusing to move.
-
-    The bare ``egma-sim-`` prefix survives inside the marked form, so
-    everything that recognises it — the SDK's simulation detection, a
-    token endpoint's allowlist, the hardening recipe — still matches.
+    """Pin the published egma-sim-chat- literal independently of the room-name builder.
+    Deployed workers rely on it, and it must retain the general egma-sim- prefix.
     """
     stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
     await chat_walk(tmp_path, stub, monkeypatch)
@@ -519,17 +478,8 @@ async def test_a_chat_dispatch_carries_the_tests_metadata_byte_for_byte(
 async def test_a_greeting_that_outran_its_wait_is_never_the_first_answer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The late greeting lands mid-send, and the record refuses it.
-
-    An agent slower than the greeting wait can open its greeting's stream
-    while the persona's first turn is still leaving egma. The question has
-    not arrived anywhere, so those words cannot be its answer — and the
-    turn now begins only once the send has returned, in the same step of
-    the event loop, so a stream opening mid-send is stamped with the
-    greeting era and refused from the first answer. The refusal costs the
-    real answer nothing: a refused utterance leaves the reply budget
-    standing, so the answer that follows is recorded under the question
-    that prompted it.
+    """A greeting stream opened during persona send belongs to the old turn.
+    Discard it from the answer without consuming the new turn's reply budget.
     """
     stub = ChatStub(
         greeting_during_first_send="Welcome to Lakeside Dental!",
@@ -617,6 +567,7 @@ async def test_a_mocked_chat_simulation_puts_no_tool_row_of_egmas_on_the_record(
         classmethod(lambda _cls, _models, *, vad: SCRIPTED_PAIR),
     )
     filed: list[dict] = []
+    control_plane = _FilingControlPlane(filed)
     simulation = RunningSimulation(
         SimulationSpec.from_document(
             chat_spec(
@@ -629,7 +580,7 @@ async def test_a_mocked_chat_simulation_puts_no_tool_row_of_egmas_on_the_record(
                 ],
             )
         ),
-        client=_FilingControlPlane(filed),
+        client=control_plane,
         config=SimulatorConfig(
             control_plane_url="http://127.0.0.1:1",
             claimant="sim-under-test",
@@ -649,6 +600,9 @@ async def test_a_mocked_chat_simulation_puts_no_tool_row_of_egmas_on_the_record(
         # A room where the exchange was never offered has nothing to wait
         # for, which is what the far side would find on a live one.
         await stub.standing_ready.wait()
+        assert control_plane.registered == [
+            (A_SIMULATION, "sim-under-test", stub.rooms[0].name)
+        ]
         await stub.says_hello("check_availability", "opening_hours")
         await stub.calls("check_availability", {"day": "Tuesday"})
 
@@ -686,6 +640,12 @@ class _FilingControlPlane:
 
     def __init__(self, filed: list[dict]) -> None:
         self.filed = filed
+        self.registered: list[tuple[str, str, str]] = []
+
+    async def register_provider_reference(
+        self, simulation_id: str, claimant: str, provider_reference: str
+    ) -> None:
+        self.registered.append((simulation_id, claimant, provider_reference))
 
     async def report(self, simulation_id: str, serialized: bytes) -> None:
         del simulation_id
@@ -764,21 +724,8 @@ async def test_a_tool_call_pause_inside_a_turn_does_not_end_it(
 async def test_an_utterance_left_over_from_the_last_turn_is_never_this_one_s(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """A late answer is dropped rather than filed under the next question.
-
-    The wire carries no marker saying which persona turn an utterance
-    answers, so one that arrives after egma stopped waiting for it cannot
-    be told from a prompt answer to the question asked next. Filed that
-    way it would put the agent's words against a question it never
-    answered, on the record a grader reads.
-
-    So whatever is still queued when the next turn goes out is taken off
-    first. That is the half of the problem a rule can settle; the other
-    half — a stream that has not opened at all by then — is why
-    :data:`REPLY_SECONDS` is sized to make running out of budget
-    exceptional rather than routine. An utterance still in flight at that
-    moment is neither half: its stream opened while its own turn was
-    outstanding, so the turn waits for it rather than losing it.
+    """Clear queued earlier-turn utterances before collecting the next answer.
+    Do not assign old words to a new question; streams already open retain their turn.
     """
     hurry(monkeypatch)
     stub = ChatStub(greeting=None, replies=["The second answer."])
@@ -806,26 +753,8 @@ async def test_an_utterance_left_over_from_the_last_turn_is_never_this_one_s(
 async def test_an_utterance_still_open_when_its_own_turn_ends_stays_on_the_record(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """A stream that opens promptly and closes late is still its turn's.
-
-    That is this plug's own rule, written down in its module docstring: an
-    utterance belongs to the turn that was outstanding when its stream
-    **opened**, "so one that opens promptly and finishes late still
-    belongs to the question it began answering". The stamp was taken for
-    exactly that reason and then used only to *refuse* a late utterance,
-    never to wait for one, so the rule it was taken for was not kept.
-
-    The agent here opens its greeting in two streams and the first one
-    closes last, after the quiet period has run out. Both opened while the
-    greeting was outstanding, so both are the greeting, and the turn is
-    not over while either is open: it waits, takes the late words, and
-    joins the two in the order they opened rather than the order they
-    arrived.
-
-    What the red looks like is what the founder read: an agent turn that
-    begins part-way through the sentence the agent started with — the
-    greeting ends without the open stream, the turn after refuses it for
-    being older, and nothing on the record says a word of it went missing.
+    """Drain both greeting streams even when the first closes after the quiet period.
+    Join them in open order, preserving the opening words.
     """
     hurry(monkeypatch)
     stub = ChatStub(greeting=None, replies=[])
@@ -917,19 +846,8 @@ async def test_a_turn_arrives_in_the_order_it_was_said_not_the_order_it_landed(
 async def test_a_stream_that_never_closes_bounds_the_turn_and_says_so(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
-    """The bound is real, and what it costs the record is said out loud.
-
-    A turn waits for a stream it opened, and it cannot wait for ever: an
-    agent whose process died mid-sentence would otherwise hold the turn,
-    and the simulation behind it, until the run's own duration limit — and
-    the record would then say ``limit_reached`` about something else
-    entirely.
-
-    So the wait is bounded, and where the bound is what ended it the log
-    names the room, the turn, how many streams were still open and what
-    the agent last said about itself. That line is the only place this
-    fact exists: the report schema and the span vocabulary are the
-    simulation contract's, and this lane does not settle those alone.
+    """Bound a stalled stream wait and log the room, turn, open-reader count,
+    and last agent state. The diagnostic belongs in logs, not an invented report field.
     """
     caplog.set_level(logging.WARNING)
     stub = ChatStub(
@@ -965,23 +883,8 @@ async def test_a_stream_that_never_closes_bounds_the_turn_and_says_so(
 async def test_a_turn_of_slow_utterances_gives_every_stream_the_whole_bound(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
-    """The bound is on one stream, not on a turn's worth of them.
-
-    Five utterances of one turn, each opening just after the one before it
-    closed, every one of them slower than the quiet period and not one of
-    them stalled. Each is the agent still writing, so each is waited for,
-    and what each gets is the whole bound — because
-    :data:`~egma_simulator.plugs.livekit_chat.TURN_DRAIN_SECONDS` measures
-    "the writing of one utterance the agent has already begun" and nothing
-    larger.
-
-    Spent as one budget for the whole turn it runs out part-way down an
-    honest one: the streams that closed perfectly normally have already
-    eaten it, the next stream is dropped for stalling when it did not, and
-    the log names a stalled stream where there is none. That is the very
-    defect this rule was written to end, arriving by the rule's own doing,
-    and the honest half of a bad outcome — the log — would be pointing at
-    the agent.
+    """Reset the drain budget as each utterance arrives. Five slow but progressing
+    streams must complete instead of sharing one expiring turn-wide budget.
     """
     caplog.set_level(logging.WARNING)
     hurry(monkeypatch)
@@ -1025,16 +928,8 @@ async def test_a_turn_of_slow_utterances_gives_every_stream_the_whole_bound(
 async def test_the_agents_own_state_ends_the_turn_without_the_quiet_period(
     monkeypatch: pytest.MonkeyPatch
 ):
-    """The whole point of reading ``lk.agent.state``: not waiting.
-
-    The quiet period is a guess about time, and a guess has to be
-    generous — which is why the founder's run spent two thirds of its
-    wall clock in one. The agent publishes the answer instead, and a turn
-    that has it does not pay the guess at all.
-
-    Held to a quiet period ten times the suite's so the difference cannot
-    be a scheduling accident: the turn has to come back in a fraction of
-    a wait it never took.
+    """A finished agent state must bypass the quiet fallback. Use a much larger quiet
+    period here so scheduler noise cannot explain a fast return.
     """
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_LONG_QUIET)
@@ -1061,16 +956,8 @@ async def test_the_agents_own_state_ends_the_turn_without_the_quiet_period(
 async def test_a_state_change_egma_never_saw_go_by_still_ends_the_turn(
     monkeypatch: pytest.MonkeyPatch
 ):
-    """The coalesced transition, which is the common one on a quick turn.
-
-    LiveKit's room plumbing cancels an attribute write that a faster
-    transition overtakes, so a turn can publish ``listening`` and nothing
-    else — ``thinking`` and ``speaking`` never reach egma at all. A rule
-    that waited to see the agent leave ``listening`` before believing it
-    had come back would wait for ever here.
-
-    So nothing waits for them. What ends the turn is the arrival of a
-    finished state after the turn began, whatever came before it.
+    """A listening-only transition must end a started turn without prior thinking
+    or speaking events, which LiveKit can coalesce away.
     """
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_LONG_QUIET)
@@ -1124,24 +1011,9 @@ async def test_an_agent_that_publishes_no_state_is_no_worse_off_than_before(
 async def test_a_stateless_agent_may_take_a_slow_real_tool_inside_one_turn(
     monkeypatch: pytest.MonkeyPatch
 ):
-    """The gap the quiet period is sized for, held to the number itself.
-
-    An agent that publishes no state has nothing but the quiet period to
-    end its turns, and the slowest honest thing it does inside one is call
-    a tool and answer out of what came back. That tool is one egma is not
-    answering for: egma serves its own answers at once, so the wait is the
-    customer's real backend taking as long as it takes, which is why
-    :data:`~egma_simulator.plugs.livekit_chat.REPLY_SECONDS` is written to
-    clear it. The gap between the filler and the answer is then that
-    lookup with a model round trip on either side of it, and the quiet
-    period has to outlast the whole gap or the answer belongs to no turn
-    at all — the record keeps "one moment", the words that answered the
-    question are dropped, and only a line in the log says so.
-
-    The pause below is that gap carried onto this suite's clock at the
-    production ratio, divided by the production number rather than by a
-    copy of it. So this test holds the *number*: cut the quiet period and
-    the pause grows past it, and the turn ends on the filler.
+    """Preserve the final answer after an unmocked-tool pause from a stateless agent.
+    Scale the pause by the production quiet period so shortening that constant
+    causes this regression test to fail.
     """
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_MEASURED_QUIET)
@@ -1176,20 +1048,8 @@ async def test_a_stateless_agent_may_take_a_slow_real_tool_inside_one_turn(
 async def test_the_finish_line_is_the_answers_start_not_the_turns_end(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """``turn_response_latency`` stops where the agent began answering.
-
-    The measure runs between two events. Its starting line is the moment
-    the persona's turn went out; its finish line is the moment the agent
-    began replying. Everything after that is egma establishing the agent
-    has no more to say, so the persona may speak — real work, and egma's
-    own, not the agent's speed.
-
-    A stateless agent pays the whole quiet period for that, every turn.
-    This test holds the two apart: the call really does take the quiet
-    period, and the reported instant really is before it. Carrying the
-    wait was a production defect — an agent answering in about a second
-    read as 6890 ms on the page, which is the quiet period plus the
-    answer, and it was the number the Response latency grader judged.
+    """turn_response_latency ends when the answer starts, before the quiet wait.
+    Check that deliver() pays the wait but the reported timestamp excludes it.
     """
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_MEASURED_QUIET)
@@ -1225,19 +1085,8 @@ async def test_the_finish_line_is_the_answers_start_not_the_turns_end(
 async def test_the_state_a_session_starts_in_never_ends_the_greeting(
     monkeypatch: pytest.MonkeyPatch
 ):
-    """``listening`` means ready before it means finished.
-
-    A LiveKit session publishes ``listening`` the moment it starts, which
-    is before it has greeted anybody. A turn-end rule that took that as
-    the agent finishing would end the greeting turn on it — and the
-    greeting, arriving a moment later, would land in the persona's first
-    question and be refused for being older.
-
-    So the state signal is off until the turn has heard something. Before
-    that the greeting's own budget owns the wait, which is the exemption
-    the greeting has always had: nothing has been asked yet, so silence
-    here is an agent waiting to be spoken to rather than an agent that
-    has finished.
+    """Startup listening must not end a greeting before its first words.
+    Enable the finished-state signal only after output begins.
     """
     hurry(monkeypatch)
     stub = ChatStub(
@@ -1322,22 +1171,9 @@ async def test_a_finished_state_never_ends_a_turn_that_owes_itself_a_stream(
 async def test_a_finished_state_ends_the_turn_in_either_channel_order(
     monkeypatch: pytest.MonkeyPatch, state_first: bool
 ):
-    """The state and the last trailer race, and either one may win.
-
-    An agent's state travels the signalling channel and its words travel
-    the data channel, so ``listening`` and the close of the last stream of
-    the same turn arrive in whichever order the wire happens to hand them
-    over. Both orderings are one turn ending, and the turn has to end at
-    once either way.
-
-    A landing utterance does outrank the latch — a stream that closes
-    after the agent called itself finished is the agent still writing —
-    but only where that stream *opened* after the state arrived. Clearing
-    the latch on every landing utterance threw the signal away whenever it
-    merely beat its own trailer, and the turn then waited out the whole
-    quiet period it had just been told it need not pay. On an agent whose
-    wire happens to deliver that ordering, that is one quiet period per
-    turn: the exact cost reading the state was for.
+    """Accept finished state and the last stream trailer in either arrival order.
+    Only a stream opened after the state clears the latch; earlier streams must
+    not force another quiet wait when their trailers arrive later.
     """
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_LONG_QUIET)
@@ -1436,19 +1272,8 @@ async def test_the_server_dropping_egma_is_answered_at_once_not_after_the_drain(
 async def test_a_stream_that_cannot_be_read_says_which_path_lost_the_words(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
-    """The other way an utterance leaves the record, told apart from the first.
-
-    Two paths drop an agent's words. One is a stream that closed after the
-    turn it belonged to had ended; the other is a stream that could not be
-    read at all. On a production record they leave the same fingerprint —
-    an agent turn that begins part-way through a sentence — so the log has
-    to say which of the two happened, or the next run teaches nobody
-    anything.
-
-    Both lines name the room and the turn. Only the stale-turn one can
-    name a length, because only it has the words; this one says the
-    length is not known rather than pretending to a number. That is the
-    difference a reader keys on.
+    """Distinguish unreadable streams from discarded stale-turn words in logs.
+    Both diagnostics identify room and turn; unreadable content has no known length.
     """
     caplog.set_level(logging.WARNING)
     hurry(monkeypatch)
@@ -1504,18 +1329,8 @@ async def test_a_speaking_agent_is_still_caught_when_it_publishes_its_state(
 async def test_a_turn_the_agent_never_answers_stops_the_exchange(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Quiet where an answer belongs ends it, rather than asking again.
-
-    A stream is stamped when it opens, so one that opens before the next
-    question goes out can always be told from that question's answer. One
-    that has not opened at all by then cannot: nothing on the wire
-    separates a late answer to this question from a prompt answer to the
-    next, and no rule could invent the difference.
-
-    So the exchange stops where the ambiguity would begin. A transcript
-    with a silent gap is a record a customer can read; one where the agent
-    appears to answer a question it was never asked is one they cannot,
-    and they would have no way of knowing.
+    """End the exchange when a persona turn receives no answer within its budget.
+    A stream that opens after the next question could not be attributed safely.
     """
     stub = ChatStub(greeting="Front desk.", replies=[])
 
@@ -1575,23 +1390,16 @@ async def test_the_agent_leaving_mid_exchange_is_the_agent_ending_it(
     assert stub.deleted == [stub.rooms[0].name]
 
 
-def test_the_waits_are_bounded_and_shorter_than_a_simulation():
-    """The four budgets, pinned where the tests above shorten them.
-
-    A wait that outran a simulation's duration limit would put
-    ``limit_reached`` on a record whose real story is that the agent was
-    still thinking, or never turned up at all.
-    """
-    assert 0 < chat_plug.AGENT_JOIN_SECONDS <= 60
+def test_turn_waits_are_bounded():
+    """Output and stream waits stay bounded after startup finishes."""
     assert 0 < chat_plug.GREETING_SECONDS <= 30
     assert 0 < chat_plug.TURN_QUIET_SECONDS <= 15
-    assert 0 < chat_plug.TURN_DRAIN_SECONDS <= chat_plug.AGENT_JOIN_SECONDS
+    assert 0 < chat_plug.TURN_DRAIN_SECONDS
     # The quiet period is the one paid on every turn an agent does not end
     # itself, so it is the one that has to stay smallest: a whole test
     # suite of chat simulations finishing in seconds is what this number
     # is spent against.
     assert chat_plug.TURN_QUIET_SECONDS < chat_plug.GREETING_SECONDS
-    assert chat_plug.GREETING_SECONDS < chat_plug.AGENT_JOIN_SECONDS
     # And the drain has to be the larger of the pair, because it is paid
     # after the quiet period has already expired with a stream still open.
     # A drain shorter than the quiet period would mean a turn gave a
@@ -1816,16 +1624,21 @@ async def test_a_worker_that_never_comes_is_never_the_agent_failing(
     Nothing was tested, so nothing is graded, and the reason is worded for
     whoever has to go and look at their worker.
     """
-    monkeypatch.setattr(chat_plug, "AGENT_JOIN_SECONDS", 0.05)
     stub = ChatStub(agent_joins=False)
 
     with pytest.raises(PlugError) as never_came:
-        await chat_walk(tmp_path, stub, monkeypatch, scenario="One point.")
+        await chat_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=1,
+        )
 
-    assert failed_ending(never_came.value) == AGENT_NEVER_JOINED
+    assert failed_ending(never_came.value) == ERROR
     told = str(never_came.value)
-    assert AN_AGENT in told, "the name nobody registered has to be on the record"
-    assert "worker" in told
+    assert "no agent named" in told
+    assert "configured 1s duration expired" in told
     assert len(stub.dispatches) == 1
     assert stub.deleted == [stub.rooms[0].name]
 
@@ -1843,12 +1656,302 @@ async def test_a_chat_worker_that_never_reports_to_egma_fails_the_simulation(
     stub = ChatStub(greeting="Front desk.", replies=["Noted."], agent_reports=False)
 
     with pytest.raises(PlugError) as unreported:
-        await chat_walk(tmp_path, stub, monkeypatch, scenario="One point.")
+        await chat_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=1,
+        )
 
-    assert failed_ending(unreported.value) == AGENT_NEVER_JOINED
+    assert failed_ending(unreported.value) == ERROR
     told = str(unreported.value)
     assert "did not report to Egma" in told
     assert "egma.hello" in told
+    assert stub.deleted == [stub.rooms[0].name]
+
+
+@pytest.mark.parametrize("initialized_state", ["listening", "thinking", "speaking"])
+async def test_a_worker_may_finish_sdk_setup_after_its_participant_arrives(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    initialized_state: str,
+):
+    """Participant arrival is not session readiness.
+
+    A valid worker can join first and complete the SDK configuration exchange a
+    moment later. The simulation waits for that exchange and the native session
+    state before it sends the first persona turn.
+    """
+    stub = ChatStub(
+        replies=["Certainly."],
+        report_delay_seconds=0.01,
+        agent_state_at_start=initialized_state,
+    )
+
+    conducted, turns, _assembled = await chat_walk(
+        tmp_path,
+        stub,
+        monkeypatch,
+        scenario="Ask one question.",
+        max_duration_seconds=1,
+    )
+
+    assert conducted.status == "completed"
+    assert turns[:2] == [("human", "Ask one question."), ("agent", "Certainly.")]
+
+
+async def test_the_first_persona_turn_waits_for_native_session_readiness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """An accepted hello precedes mock installation and ``session.start``.
+
+    The persona must not type while the worker has accepted configuration but its
+    native LiveKit session is still starting.
+    """
+    release_session = asyncio.Event()
+    stub = ChatStub(
+        replies=["Certainly."],
+        agent_state_at_start="listening",
+        release_initial_state=release_session,
+    )
+    walking = asyncio.create_task(
+        chat_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="Ask one question.",
+            max_duration_seconds=2,
+        )
+    )
+
+    await asyncio.wait_for(stub.report_complete.wait(), timeout=1)
+    assert stub.typed == []
+    release_session.set()
+
+    conducted, turns, _assembled = await walking
+    assert conducted.status == "completed"
+    assert turns[:2] == [("human", "Ask one question."), ("agent", "Certainly.")]
+
+
+async def test_another_participants_state_cannot_start_the_simulation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Only the participant whose hello was accepted can become ready."""
+    release_session = asyncio.Event()
+    stub = ChatStub(
+        replies=["Certainly."],
+        release_initial_state=release_session,
+    )
+    walking = asyncio.create_task(
+        chat_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="Ask one question.",
+            max_duration_seconds=2,
+        )
+    )
+    await asyncio.wait_for(stub.report_complete.wait(), timeout=1)
+
+    bystander = StubParticipant("room-observer", {"lk.agent.state": "listening"})
+    stub.room._room.handlers["participant_connected"](bystander)
+    stub.room._room.handlers["participant_attributes_changed"](
+        {"lk.agent.state": "listening"}, bystander
+    )
+    assert stub.typed == []
+
+    release_session.set()
+    conducted, turns, _assembled = await walking
+    assert conducted.status == "completed"
+    assert turns[:2] == [("human", "Ask one question."), ("agent", "Certainly.")]
+
+
+async def test_text_join_reads_initialized_state_from_the_existing_roster(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A worker already present emits no arrival or attribute-change event."""
+    from livekit import rtc
+
+    class ExistingRoster:
+        def __init__(self) -> None:
+            participant = StubParticipant(
+                AGENT_IDENTITY,
+                {AGENT_STATE_ATTRIBUTE: "speaking"},
+            )
+            self.remote_participants = {AGENT_IDENTITY: participant}
+            self.handlers: dict[str, object] = {}
+            self.text_streams: dict[str, object] = {}
+
+        def on(self, event: str):
+            def keep(handler: object) -> object:
+                self.handlers[event] = handler
+                return handler
+
+            return keep
+
+        def off(self, event: str, handler: object) -> None:
+            if self.handlers.get(event) is handler:
+                self.handlers.pop(event)
+
+        def register_text_stream_handler(self, topic: str, handler: object) -> None:
+            self.text_streams[topic] = handler
+
+        def unregister_text_stream_handler(self, topic: str) -> None:
+            self.text_streams.pop(topic, None)
+
+        async def connect(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def disconnect(self) -> None:
+            pass
+
+    wire = ExistingRoster()
+    monkeypatch.setattr(rtc, "Room", lambda: wire)
+    startup = LiveKitStartup(MockToolSeam())
+    room = TextRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
+    room.watch_startup(startup)
+
+    await room.join()
+    startup.report_accepted(RpcAsk(payload="{}"))
+    await asyncio.wait_for(startup.wait(room), timeout=1)
+    await room.leave()
+
+    assert wire.handlers == {}
+    assert wire.text_streams == {}
+
+
+async def test_overall_duration_fails_an_initializing_livekit_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A session that never becomes ready is a startup failure, not a zero-turn run."""
+    stub = ChatStub(
+        release_initial_state=asyncio.Event(),
+        agent_state_at_start="listening",
+    )
+
+    with pytest.raises(PlugError) as unfinished:
+        await chat_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=1,
+        )
+
+    assert failed_ending(unfinished.value) == ERROR
+    told = str(unfinished.value)
+    assert "reported to Egma" in told
+    assert "did not publish an initialized state" in told
+    assert "configured 1s duration expired" in told
+    assert stub.typed == []
+
+
+async def test_a_departed_worker_cannot_reuse_its_old_state_after_rejoining():
+    """A disconnect is terminal even if the same identity appears again."""
+    release_session = asyncio.Event()
+    stub = ChatStub(
+        agent_state_at_start="listening",
+        release_initial_state=release_session,
+    )
+    plug = chat_room(stub, mock_tools=MockToolSeam())
+    opening = asyncio.create_task(plug.open())
+    await asyncio.wait_for(stub.report_complete.wait(), timeout=1)
+
+    wire = stub.room._room
+    participant = StubParticipant(AGENT_IDENTITY)
+    wire.handlers["participant_disconnected"](participant)
+    wire.handlers["participant_connected"](
+        StubParticipant(
+            AGENT_IDENTITY,
+            {"lk.agent.state": "listening"},
+        )
+    )
+    wire.handlers["participant_attributes_changed"](
+        {"lk.agent.state": "listening"}, participant
+    )
+
+    with pytest.raises(PlugError) as disconnected:
+        await opening
+    assert "disconnected" in str(disconnected.value)
+    await plug.close()
+
+
+async def test_a_refused_configuration_fails_startup_immediately():
+    """A permanent protocol refusal does not wait for the overall duration."""
+    from livekit import rtc
+
+    stub = ChatStub(agent_reports=False, agent_state_at_start="listening")
+    plug = chat_room(stub, mock_tools=MockToolSeam())
+    opening = asyncio.create_task(plug.open())
+    await asyncio.wait_for(stub.standing_ready.wait(), timeout=1)
+
+    with pytest.raises(rtc.RpcError):
+        await stub.says_hello(protocol_version=PROTOCOL_VERSION + 1)
+    with pytest.raises(PlugError) as refused:
+        await asyncio.wait_for(opening, timeout=1)
+
+    assert failed_ending(refused.value) == ERROR
+    assert "refused" in str(refused.value)
+    await plug.close()
+
+
+async def test_partial_rpc_registration_fails_before_the_simulation_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Hello alone is unsafe when the worker cannot call the mock-tool method."""
+    stub = ChatStub(refuses_rpc_method=TOOL_METHOD)
+
+    with pytest.raises(PlugError) as unavailable:
+        await asyncio.wait_for(
+            chat_walk(tmp_path, stub, monkeypatch, scenario="One point."),
+            timeout=1,
+        )
+
+    assert failed_ending(unavailable.value) == ERROR
+    told = str(unavailable.value)
+    assert "could not offer its configuration and mock-tool exchange" in told
+    assert TOOL_METHOD in told
+    assert stub.typed == []
+
+
+@pytest.mark.parametrize("stage", ["no-worker", "no-hello", "initializing"])
+async def test_cancellation_stops_each_livekit_startup_stage_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+):
+    """Cancellation stays a canceled simulation while startup is pending."""
+    release_session = asyncio.Event() if stage == "initializing" else None
+    stub = ChatStub(
+        agent_joins=stage != "no-worker",
+        agent_reports=stage != "no-hello",
+        agent_state_at_start="listening",
+        release_initial_state=release_session,
+    )
+    controls = ConversationControls()
+    walking = asyncio.create_task(
+        chat_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=2,
+            controls=controls,
+        )
+    )
+
+    await asyncio.wait_for(stub.standing_ready.wait(), timeout=1)
+    if stage == "no-hello":
+        await asyncio.wait_for(stub.room.arrivals.wait(), timeout=1)
+    if stage == "initializing":
+        await asyncio.wait_for(stub.report_complete.wait(), timeout=1)
+    controls.request_cancel()
+
+    conducted, turns, _assembled = await asyncio.wait_for(walking, timeout=1)
+    assert conducted.status == "canceled"
+    assert turns == []
+    assert not stub.room._stating
+    if stub.reporting is not None:
+        assert stub.reporting.done()
     assert stub.deleted == [stub.rooms[0].name]
 
 
@@ -2077,7 +2180,11 @@ async def test_nothing_a_chat_simulation_produces_carries_the_api_secret(
     produced: list[str] = []
     try:
         _conducted, turns, _assembled = await chat_walk(
-            tmp_path, stub, monkeypatch, scenario="One point."
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=1,
         )
         produced += [text for _speaker, text in turns]
     except PlugError as refused:

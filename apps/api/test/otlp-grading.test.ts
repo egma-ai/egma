@@ -9,25 +9,9 @@ import {
 import { capturedRequests, type CapturedRequest } from "./support/fixture.ts";
 
 /**
- * A real conversation ending, at the door it really ends at.
- *
- * The other half of what the ingest path does with an export: the spans go to
- * the trace store, and the conversations they belong to become grading work.
- * This file asserts the second half against the same evidence the first is
- * asserted against — the captured LiveKit trace, fourteen flushes, byte for
- * byte as an exporter sent them.
- *
- * **Why the capture rather than a payload invented here.** Whether a
- * conversation has ended is read off telemetry, and the reading is the thing
- * that can be wrong: the root span arrives alone in the fourteenth flush, thirty
- * seconds after the caller said goodbye, and no assertion written against a
- * hand-made body would have noticed if egma had decided a trace was over on the
- * first one.
- *
- * It is a file of its own rather than more assertions beside the ingest tests,
- * because it needs a credential those do not: this capture is judged only when
- * it arrives on a key that names a project, and the ingest file's key names the
- * whole customer on purpose.
+ * Replay the LiveKit capture with a project key to check grading handoff.
+ * Its completion root arrives in the final flush, after the spoken exchange;
+ * earlier evidence must not be treated as completion.
  */
 
 const storage: ObjectStorage = await startObjectStorage("otlp-grading");
@@ -169,14 +153,8 @@ describe.skipIf(!storage.available)("a captured conversation arriving on a proje
   });
 
   /**
-   * **A span with no parent is not an ending**, and this is the case that used
-   * to say otherwise.
-   *
-   * Completion was inferred from any parentless span, so a scope Egma does not
-   * recognise could complete a conversation by flushing a span whose parent had
-   * not arrived — and a mangled parent id, which normalises to no parent at all,
-   * did the same. Neither says anything about whether the caller hung up. A
-   * platform this release has no explicit end fact for gets no completion here.
+   * A parentless span alone does not signal completion. Require a recognized
+   * platform end marker, including when malformed parent IDs normalize to absence.
    */
   it("is not completed by a parentless span from a platform Egma does not recognise", async () => {
     const traceId = "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a";

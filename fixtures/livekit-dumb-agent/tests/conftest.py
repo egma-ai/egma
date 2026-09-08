@@ -1,14 +1,4 @@
-"""What the fixture's own tests build from.
-
-Two things and no more: a way to reach ``agent.py``, which sits beside
-this directory rather than inside an importable package, and the two
-stand-ins a job context is when nothing is really running.
-
-Nothing here talks to LiveKit, to OpenAI, or to a room. That is the point
-of the suite: what it proves is what this agent does when there is no
-egma anywhere near it, and a test that needed a server could not prove
-that on the developer's machine.
-"""
+"""Load the fixture agent and provide offline job contexts for its integration tests."""
 
 from __future__ import annotations
 
@@ -56,20 +46,9 @@ class StubEgmaParticipant:
 
 @dataclass
 class StubRoom:
-    """A room with a willing egma in it, which nothing should ever ask.
-
-    Every message the SDK could send goes through ``perform_rpc``, and
-    this one **answers** rather than refusing — with a well-formed reply
-    naming a tool it would cover. That is deliberate: a room that failed
-    the call would fail the test at the call, which proves the same thing
-    twice and hides which claim broke. Answering means an SDK that spoke
-    in a production room goes on to succeed, quietly, and is caught by
-    the one thing that would then be untrue — ``asked`` not being empty.
-
-    egma is in the participant list for the same reason. The SDK finds
-    egma by name among the people in the room, so a room with nobody in it
-    would make this suite pass by absence rather than by the room's name
-    being the customer's own.
+    """Provide an Egma participant with valid RPC replies in a production room.
+    The SDK must still send nothing; assert asked is empty so inertness is
+    proved by room detection, not by participant absence or RPC failure.
     """
 
     asked: list[str] = field(default_factory=list)
@@ -141,16 +120,8 @@ def outside_egma(
 def inside_egma(
     room_name: str = "egma-sim-fixture-0001", metadata: str = ""
 ) -> StubContext:
-    """A job in a room egma named, with nobody in it yet.
-
-    Empty on purpose. Nothing dispatches this worker on egma's behalf
-    unless the practice configured a named agent, so the ordinary order is
-    that this agent is in the room first and egma walks in afterwards —
-    which is what ``StubRoom.arrive`` is for.
-
-    ``metadata`` is what egma wrote onto the dispatch, which is the test's
-    own ``job_dispatch_metadata`` serialised — the string a real worker
-    reads out of ``ctx.job.metadata``.
+    """Simulation job with an initially empty room. arrive() can add Egma later.
+    metadata contains the serialized test-owned dispatch context.
     """
     return StubContext(
         room=StubRoom(present=()),

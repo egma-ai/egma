@@ -1,27 +1,16 @@
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 
-import type { IngestionStore } from "../../src/ingestion/object-store.ts";
+import type { IngestionStore } from "@egma/ingestion";
 import {
   presignedObjectUrl,
   type BlobStore,
 } from "../../src/recordings/signed-link.ts";
 
 /**
- * A real object store, with a real read-only credential in it.
- *
- * There is no fake here and there cannot be one. Everything that goes wrong
- * between a signer and an object store goes wrong on the wire — a signature
- * computed over the wrong host, a query parameter sorted the wrong way, an
- * expiry the store disagrees about, a credential that turns out to be allowed to
- * write — and a stand-in would agree with whatever this code believed about all
- * four. What runs is MinIO, in a container, and where one cannot be started the
- * suites that need it **skip and say so**, which is the promise ticket 01 made a
- * contributor: running the tests costs them no new infrastructure.
- *
- * The image is the one the compose file deploys. Proving the signing path
- * against a store nobody runs would prove it about the wrong store the first
- * time the two drifted.
+ * Start the deployed MinIO image to test signatures and storage permissions
+ * on real requests. Suites report unavailable storage rather than substitute
+ * a fake; required-storage runs fail through the helper below.
  */
 
 export const MINIO_IMAGE = "minio/minio:RELEASE.2025-09-07T16-13-09Z";
@@ -55,17 +44,8 @@ export const BUCKET = "egma-recordings";
 export const INGEST_BUCKET = "egma-ingestion";
 
 /**
- * The policy the read-only credential is given, written the way the compose
- * file's bucket job writes it: one action, one bucket, no listing.
- *
- * `s3:GetObject` and nothing else. Not `s3:*`, not `s3:GetObject` plus
- * `s3:PutObject` "for later", and not `s3:ListBucket` — a credential that can
- * list is a credential that can enumerate every recording a deployment holds,
- * and nothing in the product ever asks the store a question: it is handed a
- * reference by a row it has already checked the reader against.
- *
- * `deployment.test.ts` holds the compose file's own copy against this one, so
- * the two cannot drift into proving different things.
+ * Allow only GetObject in the recording bucket, with no listing or writes.
+ * deployment.test.ts compares this policy with the deployed copy.
  */
 export const READ_ONLY_POLICY = {
   Version: "2012-10-17",
@@ -79,21 +59,9 @@ export const READ_ONLY_POLICY = {
 } as const;
 
 /**
- * The policy the ingestion credential is given, written the way the compose
- * file's bucket entrypoint writes it: one prefix of one bucket, and the four
- * operations the pending spool needs.
- *
- * **The prefix is the containment**, and it is the whole reason this is a third
- * credential rather than a wider second one. Ingestion writes, reads, lists and
- * deletes — a spool is not much use otherwise — so what keeps a leak of this
- * pair from reaching a customer's call recording cannot be the operations. It
- * is the resource: `arn:aws:s3:::egma-ingestion/pending/*` names one prefix of
- * one bucket and nothing in the recordings bucket at all, and the listing
- * statement carries a prefix condition so the credential cannot even enumerate
- * the ingestion bucket outside `pending/`.
- *
- * `deployment.test.ts` holds the compose file's own copy against this one, so
- * the two cannot drift into proving different things.
+ * Allow ingestion read, write, delete, and prefix-scoped listing only under
+ * pending/ in the ingestion bucket. The credential must not reach recordings.
+ * deployment.test.ts compares this policy with the deployed copy.
  */
 export const INGEST_POLICY = {
   Version: "2012-10-17",
@@ -224,15 +192,8 @@ async function answering(url: string, within: number): Promise<boolean> {
 }
 
 /**
- * One MinIO of this file's own, with the bucket made and the read-only user
- * created — the same three `mc admin` steps the deployment's bucket job runs.
- *
- * Every way this can fail answers `available: false` with a sentence rather
- * than throwing. A contributor with no docker was promised the suite costs them
- * nothing, and a red line here would be this arrangement breaking that promise
- * rather than the code breaking anything. A run that sets
- * `EGMA_REQUIRE_OBJECT_STORAGE` has said the opposite — see
- * `absentObjectStorage` above — and gets the red line it asked for.
+ * Start MinIO and provision the bucket and restricted credentials. Report
+ * unavailability unless EGMA_REQUIRE_OBJECT_STORAGE requires setup to succeed.
  */
 export async function startObjectStorage(
   label: string,
@@ -374,16 +335,8 @@ export async function startObjectStorage(
 }
 
 /**
- * A recording, as a browser meets one: a dual-channel PCM WAV, the person
- * calling on the left and the agent under test on the right, at the narrow band
- * a telephone carries.
- *
- * Synthesised rather than captured, because what these suites ask of it is that
- * a real browser can load it, report a duration and seek inside it — for which
- * a second of real audio is exactly as good as a real call and about four
- * hundred times smaller. What a recording *contains* is proved where it is
- * written, at the simulator's contract seam, which reads it back and transcribes
- * each channel.
+ * Generate a short stereo PCM WAV for browser decoding, duration, and seeking
+ * tests. It is synthetic audio and does not prove recorded speaker content.
  */
 export function aRecording(seconds = 1, sampleRateHertz = 8000): Uint8Array {
   const frames = seconds * sampleRateHertz;

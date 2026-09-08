@@ -10,21 +10,9 @@ import {
 } from "./support/database.ts";
 
 /**
- * A killed idle connection must never take the process with it.
- *
- * Teardown drops each test database `with (force)`, which terminates any
- * backend still attached. The terminated backend's FATAL — `57P01`,
- * `admin_shutdown` — arrives asynchronously on whichever pool held the idle
- * connection, as an `error` event. An unlistened `error` event is an uncaught
- * exception: the run fails with every test green, which is how this file's
- * absence looked in CI. In production the same event is a restarted or failed-
- * over Postgres, and the cost is the whole API process.
- *
- * Both pools — the application's in `src/client.ts` and the test support's in
- * `support/database.ts` — park an idle connection here, have the database
- * dropped out from under them on purpose, and the assertion is arriving at the
- * end of the file at all. Before the listeners existed, this file failed the
- * run exactly the way CI did.
+ * Force-drop a database while both pools hold idle connections. PostgreSQL
+ * emits an asynchronous admin_shutdown error (57P01); listeners must handle
+ * it without crashing the process.
  */
 
 it("the support pool survives its database being force-dropped under it", async () => {

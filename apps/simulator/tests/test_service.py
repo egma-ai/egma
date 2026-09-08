@@ -1,14 +1,5 @@
-"""What the claim loop does with an answer it did not expect.
-
-The capacity a claim declares is a request, and the answer is the control
-plane's to compose. A simulator that trusted the answer would overload on a
-bad one, and a simulator that raised on it would take its own in-flight work
-down with it. Neither is acceptable, so the loop takes what fits, refuses
-the rest out loud, and keeps going.
-
-These are the runtime's own defences, tested with the workbench's clamping
-deliberately out of the way — a well-behaved control plane can never
-exercise them.
+"""Test excess or malformed claims without the workbench's normal clamping.
+The simulator must accept only valid work within capacity and keep running.
 """
 
 from __future__ import annotations
@@ -16,12 +7,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from datetime import UTC, datetime
 
 import pytest
 from conftest import scripted_spec
 
 from egma_simulator import service as service_module
-from egma_simulator.client import ClaimFailure
+from egma_simulator.client import ClaimedSpec, ClaimFailure
 from egma_simulator.config import SimulatorConfig
 from egma_simulator.redaction import SecretRegistry
 from egma_simulator.service import SimulatorService
@@ -112,6 +104,18 @@ def test_credentials_from_an_accepted_spec_are_registered_for_redaction(tmp_path
     assert service._secrets.redact("saw hunter2-not-real here") == "saw [redacted] here"
 
 
+def test_a_persistent_service_does_not_retain_claim_deadlines(tmp_path):
+    service = a_service(tmp_path)
+    executor = RecordingExecutor(capacity=1)
+
+    service._accept(
+        [ClaimedSpec(scripted_spec("sim-standing"), datetime.now(UTC))], executor
+    )
+
+    assert service._claimed_at == {}
+    assert service._hard_stop is None
+
+
 def test_a_spec_naming_an_unplugged_connection_type_is_refused(tmp_path, caplog):
     """No plug for the type: the claim is refused out loud, nothing reported."""
     service = a_service(tmp_path, capacity=4)
@@ -156,7 +160,12 @@ class RefusingClient:
         self.enough = asyncio.Event()
         self._wanted = attempts_wanted
 
-    async def claim(self, claimant: str, capacity: int) -> list[dict]:
+    async def claim(
+        self,
+        claimant: str,
+        capacity: int,
+        modalities: tuple[str, ...] | None = None,
+    ) -> list[dict]:
         self.attempts += 1
         if self.attempts >= self._wanted:
             self.enough.set()

@@ -3,8 +3,10 @@ import { gunzipSync } from "node:zlib";
 import {
   authorize,
   NotPermittedError,
+  providerUsageSpan,
   resolveSimulationByProviderReference,
   resolveSimulationStanding,
+  type AuthContext,
   type SimulationStanding,
 } from "@egma/db";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
@@ -14,7 +16,7 @@ import { requesterOf } from "../http/credentialed.ts";
 import {
   IngestionUnavailableError,
   type EvidenceGroup,
-} from "../ingestion/accept.ts";
+} from "@egma/ingestion";
 import {
   attributionOf,
   fileSimulationEvidence,
@@ -49,83 +51,24 @@ import {
   SIMULATION_ID_ATTRIBUTE,
   type NormalisationBudget,
 } from "../otlp/normalise.ts";
+import { providerUsageIn } from "../otlp/provider-usage.ts";
 import {
   EXPORT_TRACE_SERVICE_RESPONSE,
   RPC_STATUS_MESSAGE,
 } from "../otlp/schema.ts";
 
 /**
- * The ingest door: `POST /v1/traces`, OTLP/HTTP, protobuf or JSON.
+ * Accept OTLP/HTTP exports as protobuf or JSON.
  *
- * It is the standard path a configured OpenTelemetry exporter posts to.
- * LiveKit customers configure that exporter with the explicit Egma
- * Python SDK helper; other runtimes must configure their own exporter. **One
- * door**, for customer agents and for egma's own simulator — one wire format,
- * one code path, and a simulation and a production trace therefore arrive the
- * same way and are the same shape at rest.
+ * The service token attributes resources through simulation IDs stored in this
+ * deployment. Customer credentials supply organization and project scope; a
+ * provider reference selects simulation evidence, and its absence selects
+ * production evidence. Late simulation evidence is accepted regardless of status.
  *
- * **The door branches on the credential first.** A customer key resolves
- * tenancy as it always has. The deployment's own service token — the same
- * secret the claim door answers to — resolves to no customer at all: each
- * arriving resource must say which simulation its spans are evidence of
- * (`egma.simulation_id`), and the door resolves the organization, the project
- * and the run from that simulation's own row. Spans are accepted for any
- * simulation this deployment conducted, whatever its status: a late-returning
- * orphan's spans are evidence and are kept, even as its lifecycle claims are
- * refused elsewhere.
- *
- * **Inside the customer branch there is one more branch, and it is per
- * resource.** A resource carrying `egma.provider_reference` is the agent's own
- * POV of a simulation egma conducted — pushed by the egma SDK from a simulation
- * room, naming the room it ran in — and is filed under that simulation:
- * `source = simulation`, `emitter = agent`, the run and the version pins off
- * egma's own row, the framework's trace id kept on each span's payload
- * (ADR-0024 §2). A resource without it is production traffic and takes the path
- * it always took. **The reference names a conversation, never a customer**: it
- * is looked up inside the project the key resolved to, so a reference belonging
- * to another project resolves to nothing and is refused whole, with the same
- * sentence a reference nobody carries gets.
- *
- * **The organization and the project come from the credential, or from egma's
- * own row — never from the payload.** A tenancy attribute in the payload is
- * not refused and not obeyed — it is simply not consulted, the way a reserved
- * attribute is treated by every platform that learned this lesson the
- * expensive way. The rows the data-access module writes have no organization
- * on them for a handler to set, so this is a property of the shape rather than
- * of anyone's care. The simulation id a resource names is not a tenancy claim:
- * it names a conversation, and whose it is is read off the row egma wrote.
- *
- * **What one request may ask for is bounded, and the bound is reported rather
- * than enforced in silence.** A body stops at the size the OpenTelemetry
- * Collector stops at, and an export becomes at most a fixed number of spans and
- * a fixed weight of rows — because every row carries its resource verbatim, so
- * a small request can otherwise become gigabytes of them. What did not fit
- * comes back in the partial-success field, which is the same mechanism a
- * refused span uses.
- *
- * **The response is OTLP's, not egma's.** An exporter reads
- * `ExportTraceServiceResponse` and its partial-success field; inventing a
- * different body would mean every OpenTelemetry SDK on earth mis-reads what
- * happened. Spans egma refuses are reported there — a count and one message —
- * because the specification is explicit that rejected data must not be retried
- * and the client must be told how much of it there was.
- *
- * **The door decodes and hands over, and that is the whole of what it does.**
- * Authentication, decompression, decoding, tenant resolution and normalization
- * happen here, and then the evidence goes to the one acceptance module — which
- * answers when it is durable in the object store and not before. Nothing here
- * writes a trace row, updates Monitoring health or names a grader. Those are
- * effects of evidence being *query-visible*, which happens later and elsewhere,
- * and a door that performed them would be claiming an outcome it cannot see:
- * an exporter's timeout would depend on a store's cold start, and a request
- * answered before a durable copy existed would be a promise nothing kept.
- *
- * **`503` is the one new answer, and it means *not yet*.** Evidence that could
- * not be made durable inside the request's bound is still staged and is
- * retryable, which is exactly what an OTLP exporter does with a 5xx. Evidence
- * this side refuses — a malformed span, a reserved environment, a record over a
- * documented bound — is still reported the way the specification says to report
- * data that must not be retried: a 200 carrying a count and a reason.
+ * Body, span, and normalized-row limits bound each request. Use OTLP responses
+ * for decoding errors and partial rejections. Acceptance waits for object-store
+ * durability; temporary failures return 503 for retry. Query visibility and
+ * grading follow later in the drainer.
  */
 
 export type TraceRoutesOptions = {
@@ -138,16 +81,7 @@ export type TraceRoutesOptions = {
 /** The path OTLP/HTTP defines. Nothing else is served here. */
 export const OTLP_TRACES_PATH = "/v1/traces";
 
-/**
- * How much of a body will be read.
- *
- * Twenty mebibytes, which is what the OpenTelemetry Collector's own HTTP
- * receiver accepts by default — so an exporter configured to reach a Collector
- * reaches egma unchanged, and one that would be refused here would have been
- * refused there. An export is one flush of an exporter's batch queue and the
- * SDKs split their own flushes; a cap larger than any of them only decides how
- * much memory a runaway client can ask for.
- */
+/** Bound both the buffered request and its decompressed body to 20 MiB. */
 const MAXIMUM_BODY_BYTES = 20 * 1024 * 1024;
 
 /**
@@ -194,14 +128,8 @@ function decompressed(
 }
 
 /**
- * A refusal as the specification says to write one: `google.rpc.Status`, in the
- * encoding the request arrived in.
- *
- * An exporter that sent protobuf parses protobuf back — handing it JSON with an
- * egma-shaped body means the one thing it can say about a 400 is that it was a
- * 400, and the reason it was refused never reaches whoever has to fix it. When
- * the encoding is the thing being refused there is none to mirror, and JSON is
- * what a person reading a `curl` sees.
+ * Encode google.rpc.Status in the request encoding. Use JSON when the request
+ * encoding is unknown.
  */
 function statusResponse(
   reply: FastifyReply,
@@ -257,15 +185,8 @@ function exportResponse(
 }
 
 /**
- * Whether a request carries anything that could name a customer at all.
- *
- * Read off the headers before a byte of the body is, because the body is the
- * expensive part: a client with no credential would otherwise have twenty
- * mebibytes buffered on its behalf before anything asked who it was, and an
- * unauthenticated flood costs the memory of every request in flight. What
- * counts as "something" is deliberately shallow — a bearer token or any cookie
- * at all — because deciding whether a credential is *good* is the resolver's
- * job and this only declines to read a body for a request that named nobody.
+ * Reject requests without authorization or cookie headers before buffering
+ * the body. Header presence is only an early check; resolution validates it.
  */
 function carriesACredential(request: FastifyRequest): boolean {
   return (
@@ -290,14 +211,7 @@ declare module "fastify" {
 const A_TRACE_ID = /^[0-9a-f]{32}$/u;
 
 /**
- * A provider reference as a refusal may quote it back.
- *
- * A reference is a room name or a call id — a few dozen characters. What
- * arrives on the wire is whatever a resource attribute held, and a refusal is
- * built before anything has looked at its size, so quoting it whole would let a
- * one-line mistake in an exporter's configuration turn a megabyte of attribute
- * into a megabyte of error message. The prefix is enough to recognise which
- * reference was meant, which is the whole job the quote does.
+ * Limit provider references quoted in errors so an attribute cannot inflate the response.
  */
 const LONGEST_QUOTED_REFERENCE = 200;
 
@@ -358,16 +272,7 @@ function gatheredBySimulation(
   return [...gathered.values()];
 }
 
-/**
- * One simulation's gathered resources, normalised and ready for the filing
- * step, with whatever the normaliser refused counted alongside.
- *
- * Normalised per simulation, because a simulation is the unit that is filed and
- * two of them must never be blended. **The row caps still bound the request**,
- * not the call: the budget is made once where the request starts and carried
- * through every one of these calls, so an export naming several simulations
- * cannot buy several times the bound by naming them.
- */
+/** Normalize each simulation separately while sharing one request-wide row budget. */
 function normalisedFilings(
   gathered: readonly SimulationResources[],
   emitter: "egma-runtime" | "agent",
@@ -397,26 +302,9 @@ function normalisedFilings(
 }
 
 /**
- * The simulator's own path through the door.
- *
- * By the time this runs, the gate has already matched the service token, and
- * the token resolves to nobody — so the first real work is attribution: every
- * resource must name its simulation, every named simulation must be one this
- * deployment conducted, and both are settled before a single row is built.
- * Attribution is all-or-nothing on purpose. A resource that cannot be
- * attributed is an emitter defect, not a partial success: answering 200 for
- * it would tell the sender's write-ahead log the evidence landed when it has
- * nowhere to land, and the refusal is terminal (a 400 is never retried) so
- * the defect surfaces in the simulator's log instead of looping.
- *
- * Whatever the simulation's status. The row is looked up, never inspected: a
- * late flush for a simulation the sweep already called orphaned is evidence
- * arriving after the messenger was marked terminal, and it is kept.
- *
- * A refusal here is `google.rpc.Status`, like every refusal on this door —
- * the sender is an OTLP exporter before it is anything else — with the
- * sentence written for whoever reads the simulator's log: what happened, and
- * what to send instead.
+ * The service token has already been checked. Resolve every resource to a
+ * stored simulation before building rows; unknown attribution rejects the
+ * whole export. Accept late evidence for terminal simulations too.
  */
 async function simulatorExport(
   request: FastifyRequest,
@@ -483,31 +371,10 @@ async function simulatorExport(
   }
 
   /*
-   * And every span is filed under the trace its own simulation's id spells.
-   *
-   * **This is what stops a transcript playing the wrong conversation's audio.**
-   * A simulation id and its trace id are the same 128 bits written two ways,
-   * and both directions of that derivation are load-bearing reads: a reader
-   * opening a transcript converts the trace id back into a simulation id to
-   * find its grades, and — since ticket 03 — to resolve its recording. So a
-   * resource that named simulation A while filing its spans under B's trace
-   * would hand whoever opened that transcript B's turns beside A's audio, both
-   * inside one organization, with nothing anywhere saying they disagree.
-   *
-   * Nothing egma ships can do it: the simulator derives the trace from the id
-   * it was handed and authors every span itself, forwarding none. That is
-   * exactly why it is checked here rather than trusted — the invariant is worth
-   * more than the emitter's current good behaviour, and an emitter that took a
-   * trace id from a provider instead would be a one-line change over there and
-   * a wrong recording over here.
-   *
-   * Refused whole, like every other attribution failure at this door: a partial
-   * success would tell the sender's write-ahead log that evidence landed when
-   * it landed somewhere nobody will look, and the 400 is terminal so the defect
-   * surfaces in the simulator's log rather than looping. A malformed id is
-   * deliberately not this check's business — normalisation already rejects
-   * those span by span, and widening this to catch them would turn a per-span
-   * rejection into a whole refused export.
+   * Reject valid trace IDs that do not derive from the named simulation ID.
+   * Transcript grades and recordings use this mapping, so a mismatch could pair
+   * one simulation with another's evidence. Normalization handles malformed IDs
+   * as individual span rejections.
    */
   for (const [index, resourceSpans] of resources.entries()) {
     const simulationId = named[index] ?? "";
@@ -544,14 +411,32 @@ async function simulatorExport(
     count: 0,
     firstReason: "",
   };
+  // Held rather than passed straight through, because the bills this flush
+  // carried are read off the same gathering, from the resources themselves.
+  const gathered = gatheredBySimulation(resources, (resourceSpans) =>
+    targets.get(simulationNamedBy(resourceSpans)),
+  );
   const filings = normalisedFilings(
-    gatheredBySimulation(resources, (resourceSpans) =>
-      targets.get(simulationNamedBy(resourceSpans)),
-    ),
+    gathered,
     "egma-runtime",
     rejected,
     budgetForOneRequest(),
   );
+
+  const unreadableBills: string[] = [];
+  const usageBySimulation = new Map<string, ReadonlyMap<string, ReturnType<typeof providerUsageSpan>>>();
+  for (const one of gathered) {
+    const usage = providerUsageIn(one.resources, () => ({ simulationId: one.standing.id, runId: one.standing.runId,auth:one.standing.auth,claimedAt:one.standing.claimedAt }));
+    unreadableBills.push(...usage.skipped);
+    usageBySimulation.set(one.standing.id, new Map(usage.records.map((record) => {
+      const span = providerUsageSpan(record);
+      return [span.spanId.toLowerCase(), span];
+    })));
+  }
+  const measuredFilings = filings.map((filing) => ({ ...filing, spans: filing.spans.map((span) => {
+    const measured = usageBySimulation.get(filing.standing.id)?.get(span.spanId.toLowerCase());
+    return measured ? { ...span, kind: "provider_usage", usage: measured.usage } : span;
+  }) }));
 
   // Every filing in one call, and one answer for all of them: a batch naming
   // several projects gets a segment each, and it is a success only once every
@@ -561,10 +446,20 @@ async function simulatorExport(
   // which stable span identity makes a no-op rather than a duplicate.
   let accepted;
   try {
-    accepted = await fileSimulationEvidence(filings);
+    accepted = await fileSimulationEvidence(measuredFilings);
   } catch (cause) {
     if (!(cause instanceof IngestionUnavailableError)) throw cause;
     return unavailable(request, reply, encoding, cause);
+  }
+
+  if (unreadableBills.length > 0) {
+    // Whoever reads this deployment's log is who can fix an emitter. The
+    // sender is told nothing: every span in this flush is stored, and telling
+    // an exporter otherwise would cost it the conversation.
+    request.log.warn(
+      { unreadableBills },
+      "spans landed whole, but Egma could not read what they say they cost",
+    );
   }
 
   // One truthful answer: the normaliser's rejects plus the records acceptance
@@ -580,15 +475,9 @@ async function simulatorExport(
 }
 
 /**
- * Evidence that could not be made durable in time, answered as *not yet*.
- *
- * `503` rather than a rejection, because the two are read differently and only
- * one of them is true here: an OTLP exporter retries a 5xx and stops resending
- * data reported as rejected. The staged copy is still on this side's disk and
- * still on its way to the object store, so a retry meeting it is a replay of
- * one immutable identity and produces one visible span. The body is the same
- * `google.rpc.Status` every other refusal on this door uses, in the encoding
- * the request arrived in.
+ * Return retryable 503 when evidence cannot become durable within the request
+ * bound. Any staged copy remains eligible for upload; repeated span identities
+ * are handled by the storage replay rules.
  */
 function unavailable(
   request: FastifyRequest,
@@ -604,18 +493,9 @@ export async function traceRoutes(
   app: FastifyInstance,
   options: TraceRoutesOptions,
 ): Promise<void> {
-  // The one place an unexpected throw is answered, and it is answered as OTLP's
-  // — not egma's, and never with the cause. A failure with no status of its own
-  // can carry an absolute local-log path or an ordinal in its message, and the
-  // body is read by an exporter and logged where an exporter's operator sees it;
-  // so the cause goes to this side's log alone and the sender gets one generic
-  // sentence and a status it retries. Everything a handler means to say — a
-  // refusal, a partial success, `503` — it returns rather than throws, so this
-  // catches only what nobody meant to happen.
-  //
-  // A framework refusal the door itself did not raise — a body over the cap is
-  // the one that reaches here — arrives with its own status and a generic
-  // message that names no evidence and no path, so it keeps both.
+  // Preserve framework client-error status codes in OTLP format. Log unexpected
+  // errors locally and return a generic retryable error so internal paths or
+  // evidence do not appear in the response.
   app.setErrorHandler((error: unknown, request, reply) => {
     const encoding = encodingOf(request.headers["content-type"]);
     const framework = error as { statusCode?: unknown; message?: unknown };
@@ -790,19 +670,9 @@ export async function traceRoutes(
     }
 
     /*
-     * **The one branch on this path, and it is per resource.**
-     *
-     * A resource carrying the egma provider-reference attribute is the agent's
-     * own POV of a simulation egma conducted: the SDK stamps the room it is
-     * running in, and that reference is the one key the agent's account is
-     * matched to its conversation on (ADR-0024 §2). A resource without it is
-     * production traffic and takes the path it always took — the ordinary case,
-     * unchanged, and the reason the branch is here rather than on a second URL.
-     *
-     * The credential still decides the tenancy. The reference is looked up
-     * inside the project the key resolved to, so an export naming a room that
-     * belongs to another customer finds nothing, exactly as one naming a room
-     * nobody has finds nothing, and both are told the same thing.
+     * Resources with a provider reference are simulation agent POV evidence.
+     * Resolve the reference within the credential's project; resources without
+     * one are production evidence.
      */
     const resources = decoded.resourceSpans ?? [];
     // Claimed once per resource, and the answer carried, because the two
@@ -904,17 +774,8 @@ export async function traceRoutes(
       const standing = await resolveSimulationByProviderReference(auth, reference);
       if (standing === undefined) {
         /*
-         * Refused whole, with nothing stored, for the reason the service path
-         * refuses an unknown simulation whole: a partial success would tell the
-         * exporter's own queue that this flush landed when part of it had
-         * nowhere to land, and a 400 is terminal, so the mistake surfaces in
-         * the developer's log instead of looping.
-         *
-         * **One sentence for both refusals.** A reference nobody in this
-         * project carries and a reference another project carries are answered
-         * identically, on purpose: a copied key must not be able to learn which
-         * rooms exist in an account it does not hold, and a sender that owns
-         * the key can only ever be in the first case anyway.
+         * Reject the whole export before storage. Unknown and out-of-project
+         * references get the same response to avoid revealing another project's data.
          */
         return statusResponse(
           reply,

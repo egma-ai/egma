@@ -215,3 +215,33 @@ function recommendedGraderModel(): GraderModel {
 
 export const RECOMMENDED_GRADER_MODEL: GraderModel =
   recommendedGraderModel();
+
+/**
+ * The providers one conversation needs a key for, in catalog words.
+ *
+ * **The same rule the claim's model block already follows, said once.** A
+ * voice conversation runs three legs — the persona's LLM, the speech-to-text
+ * that hears the agent (the realtime transcription among them) and the
+ * text-to-speech that speaks — and a chat conversation runs only the LLM, so
+ * only the LLM's key crosses the claim door for one. Whoever asks whether
+ * Egma's key may fund this work has to ask about exactly the providers whose
+ * keys it is about to hand over, and a second list of them would be a second
+ * answer.
+ *
+ * De-duplicated and in one order, so two callers asking the same question ask
+ * it with the same list — one provider serving two legs is one provider.
+ */
+export function providersNeededBy(
+  models: {
+    readonly llm: { readonly provider: string };
+    readonly stt: { readonly provider: string };
+    readonly tts: { readonly provider: string };
+  },
+  modality: "chat" | "voice",
+): readonly string[] {
+  const needed =
+    modality === "chat"
+      ? [models.llm.provider]
+      : [models.llm.provider, models.stt.provider, models.tts.provider];
+  return [...new Set(needed)];
+}

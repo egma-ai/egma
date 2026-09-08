@@ -15,7 +15,7 @@ import {
   recordFor,
   RECORD_FORMAT_VERSION,
   spanFor,
-} from "../src/ingestion/record.ts";
+} from "@egma/ingestion";
 import {
   UnreadableSegmentError,
   verifiedSegment,
@@ -31,24 +31,14 @@ import {
   stagedFrameFrom,
   stagedFramePayload,
   type SegmentScope,
-} from "../src/ingestion/segment.ts";
-import { openWriteAheadLog } from "../src/ingestion/write-ahead-log.ts";
+} from "@egma/ingestion";
+import { openWriteAheadLog } from "@egma/ingestion";
 import { aRecord } from "./support/ingestion.ts";
 
 /**
- * A pending object, inspected the way an operator would inspect one.
- *
- * The bytes are the contract. Everything downstream of acceptance — the
- * drainer, a repair by hand, a reader written years from now — meets a segment
- * as a compressed file in a bucket and nothing else, so what this suite asserts
- * is what is *in* the file: one version, one project, stable identities, a
- * checksum that holds, a record count that matches, and no field anywhere that
- * a transport credential could occupy.
- *
- * It decompresses and reads rather than calling a reader of our own, on
- * purpose. A reader that agreed with the writer about a mistake would prove
- * nothing, and the mistake this file is here to catch is exactly the kind two
- * halves of one implementation make together.
+ * Decompress segments independently of the production reader to check format
+ * version, project attribution, identities, checksum, count, and credential-free
+ * envelopes. Payloads remain customer evidence and may contain customer data.
  */
 
 const SCOPE: SegmentScope = {

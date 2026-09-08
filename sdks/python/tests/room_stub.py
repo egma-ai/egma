@@ -1,43 +1,18 @@
-"""A room with egma in it, on this machine — what CI holds the SDK against.
+"""Offline room stub for participant discovery and mock-tool RPC.
 
-The customer's side of the exchange is proved with no LiveKit server, no
-project, no worker and no network. What this stands in for is exactly the
-two places the SDK reaches a LiveKit — the room's own list of who is in
-it, and the call it makes to egma's participant — and nothing else.
-Everything above that is the SDK's own code: reading the room's name,
-finding egma, building the census, standing the couriers, reading a
-reply, falling open.
-
-Two things it can be, and a test picks by what it builds:
-
-- **egma answering** — a script of replies, keyed by method. The calls it
-  received are on the record, in order, so a test can say the census went
-  first.
-- **egma absent** — every call refused with the transport's own
-  ``RECIPIENT_NOT_FOUND``, which is the whole of what a room that lost
-  its egma looks like from in here.
-
-The refusals are real :class:`~livekit.rtc.RpcError` instances, because
-the SDK's fail-open branch reads a code off one and a stand-in with its
-own error type would prove the stand-in's conversion rather than the
-SDK's reading.
-
-## Who is in the room, and when
-
-A room here holds identities rather than participant objects, because
-identity is the whole of what the SDK reads about anybody. ``arrive``
-puts one in after the fact and fires the room's own arrival event, which
-is how the three dispatch paths that put an agent in an egma room before
-egma is behave.
+Replies are scripted by method; refusals use real LiveKit RpcError instances.
+Calls are recorded in order. arrive() adds an identity and emits the arrival
+event so tests can cover an agent that joins before the Egma participant.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from livekit.rtc import RpcError
+from livekit.rtc import ConnectionState, RpcError
 
 from egma import seam
 
@@ -114,20 +89,11 @@ class StubRemoteParticipant:
 
 @dataclass
 class StubRoom:
-    """A room, from the seat the SDK sits in.
+    """Room stub with configurable participants and RPC replies.
 
-    ``mocked_tools`` is what egma answers a census with. ``answers`` is
-    what it answers each tool call with, by name, already in the tagged
-    shape the wire carries — ``{"answer": …}`` or ``{"error": …}`` — so a
-    test writes the same bytes egma would send.
-
-    ``refuses_with`` puts a code in front of everything instead, which is
-    how an absent egma and every honest refusal are both said.
-
-    ``present`` is who is in the room when the SDK looks. It holds egma by
-    default, because the room a test builds is usually one egma is already
-    in; a test that wants the other order builds it empty and calls
-    ``arrive`` later.
+    mocked_tools lists hello results; answers maps tools to tagged answer/error replies.
+    refuses_with overrides RPC replies with an error code. present sets initial
+    identities; arrive() can add the Egma participant later.
     """
 
     mocked_tools: tuple[str, ...] = ()
@@ -135,6 +101,8 @@ class StubRoom:
     refuses_with: RpcError | None = None
     refuses_tool_with: RpcError | None = None
     refuses_hello_until: int = 0
+    hello_failures: list[RpcError] = field(default_factory=list)
+    hello_waiter: asyncio.Event | None = None
     hello_reply: str | None = None
     asked: list[Asked] = field(default_factory=list)
     connected: bool = True
@@ -147,6 +115,9 @@ class StubRoom:
         }
         self._listeners: dict[str, list[Any]] = {}
         self._helloes = 0
+        self.pending_hellos = 0
+        self.hello_started = asyncio.Event()
+        self.second_hello_started = asyncio.Event()
 
     # -- who is in it ---------------------------------------------------------
 
@@ -164,6 +135,18 @@ class StubRoom:
         participant = StubRemoteParticipant(identity)
         self.remote_participants[identity] = participant
         for callback in list(self._listeners.get("participant_connected", [])):
+            callback(participant)
+
+    def disconnect(self) -> None:
+        """End the room the way LiveKit announces a lost connection."""
+        self.connected = False
+        for callback in list(self._listeners.get("connection_state_changed", [])):
+            callback(ConnectionState.CONN_DISCONNECTED)
+
+    def depart(self, identity: str) -> None:
+        """Remove a participant the way LiveKit announces its departure."""
+        participant = self.remote_participants.pop(identity)
+        for callback in list(self._listeners.get("participant_disconnected", [])):
             callback(participant)
 
     @property
@@ -188,6 +171,17 @@ class StubRoom:
             raise self.refuses_with
         if asked.method == seam.HELLO_METHOD:
             self._helloes += 1
+            self.hello_started.set()
+            if self._helloes >= 2:
+                self.second_hello_started.set()
+            if self.hello_waiter is not None:
+                self.pending_hellos += 1
+                try:
+                    await self.hello_waiter.wait()
+                finally:
+                    self.pending_hellos -= 1
+            if self.hello_failures:
+                raise self.hello_failures.pop(0)
             if self._helloes <= self.refuses_hello_until:
                 # What the transport says while egma is in the room and has
                 # not registered the exchange yet.
@@ -272,21 +266,9 @@ class StubContext:
 
 
 def egma_metadata(*, identity: str = EGMA_IDENTITY) -> str:
-    """The context block egma merges into a named dispatch's metadata.
-
-    Four keys, written underneath whatever the customer configured, for
-    SDK versions older than the room-name contract. This suite carries it
-    so the SDK can be held to reading *none* of it: a simulation room with
-    this in its metadata must behave exactly like the same room without
-    it, and a production room with it must stay a production room.
-
-    ``identity`` is here for the test that names somebody other than egma,
-    which is the case that would matter if this block were ever treated as
-    an address.
-
-    Written out here rather than imported so this suite holds the SDK to
-    the *shape a deployment really sends*, not to a constant the two
-    halves could move together.
+    """Legacy-shaped dispatch metadata for negative tests.
+    The SDK must ignore every field, including identity: only the room name
+    selects simulation behavior.
     """
     return json.dumps(
         {

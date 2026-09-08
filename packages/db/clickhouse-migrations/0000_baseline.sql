@@ -3,8 +3,8 @@
 -- because ClickHouse has no transaction around a migration file and a boot
 -- must be able to resume after a partial failure.
 
--- One row is one span. The sorting key is the immutable span identity, while
--- the shorter primary key keeps organization, project, and trace reads cheap.
+-- One row is one span. Usage evidence remains distinct on conflicts; exact
+-- replays keep one identity. The shorter primary key serves trace reads.
 CREATE TABLE IF NOT EXISTS spans
 (
     trace_id                 String,
@@ -37,18 +37,33 @@ CREATE TABLE IF NOT EXISTS spans
     test_version_id          String,
     persona_version_id       String,
     payload                  String,
-    content_hash             String
+    content_hash             String,
+    usage_identity_hash      String,
+    usage_received_at        DateTime64(6, 'UTC'),
+    usage_occurred_at        DateTime64(6, 'UTC'),
+    usage_provider           LowCardinality(String),
+    usage_model              LowCardinality(String),
+    usage_operation          LowCardinality(String),
+    usage_payment_source     LowCardinality(String),
+    usage_measurement        LowCardinality(String),
+    usage_provider_ref       String,
+    usage_credential_ref     String,
+    usage_unit               LowCardinality(String),
+    usage_quantities         Map(String, Float64),
+    usage_priced_by          Map(String, String),
+    usage_amount_micros      UInt64,
+    usage_evidence           String
 )
 ENGINE = ReplacingMergeTree
 PARTITION BY toYYYYMM(started_at)
-ORDER BY (organization_id, project_id, trace_id, span_id)
+ORDER BY (organization_id, project_id, trace_id, span_id, usage_identity_hash, usage_received_at)
 PRIMARY KEY (organization_id, project_id, trace_id)
 SETTINGS non_replicated_deduplication_window = 1000
 ;
 --> statement-breakpoint
 
--- The transcript read model. It uses the same identity as spans so a replay of
--- one span is also one visible turn.
+-- The transcript read model deduplicates by span identity, so a replay is
+-- one visible turn.
 CREATE TABLE IF NOT EXISTS turns
 (
     organization_id  LowCardinality(String),
@@ -118,6 +133,7 @@ CREATE TABLE IF NOT EXISTS grades
     grader_pass_threshold      Float64,
     grading_sequence           UInt32,
     graded_at                  DateTime64(6, 'UTC'),
+    parameter_values           String,
 
     CONSTRAINT grade_score_is_normalized
       CHECK score IS NULL OR (score >= 0 AND score <= 1),

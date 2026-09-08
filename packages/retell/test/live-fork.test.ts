@@ -20,63 +20,17 @@ import {
 } from "../src/index.ts";
 
 /**
- * Two questions this package answers against a live account, and nowhere else.
+ * Operator-run live checks for LLM engine branching, version lifecycle, and routing-variable
+ * rendering during web-call creation. A successful create does not prove tool execution.
+ * The builder independently rejects a shared engine before writing.
  *
- * **Three: does the per-call routing work on a Retell LLM engine?** The
- * founder's live proof of it (2026-09-03) was on a **conversation-flow** agent,
- * and Retell documents neither engine's behaviour here — so ADR-0022 left the
- * LLM half owed. It is answered below, on the scratch agent this file already
- * creates and deletes: the transform is written onto the branched version, read
- * back, and two web calls are created against it. Retell validates a tool's
- * *rendered* URL as it creates a call — an unrendered `{{…}}` is refused with
- * `Got invalid url` — so a call it accepts is a call whose routing variables
- * rendered.
+ * Set EGMA_LIVE_RETELL_API_KEY, then run:
+ * npx vitest run --root packages/retell --config /dev/null test/live-fork.test.ts
+ * Without the key, tests skip.
  *
- * **One: does branching an agent version fork a Retell LLM** the way it
- * provably forks a conversation flow? The flow half is observed behaviour:
- * `create-agent-version` mints a new agent version with its own freshly forked
- * flow version. The Retell-LLM half is not — there is no LLM-versioning
- * endpoint in the API at all, and `response_engine.version` is the only pointer
- * — so the question is settled here, by a test, rather than by an assumption in
- * the builder. **The builder never assumes the answer either way**: its fork
- * guard refuses a branch whose engine reference still matches the serving
- * version's, before any write. Whatever this test finds is informational.
- *
- * **Two: does the corrected version lifecycle hold on a real router?** Three
- * facts this package now depends on, each of which a fake can only agree with:
- * the delete names its version as a **query parameter** (the path form Egma
- * sent for a week is not a route at all, and Retell answers it 404 "Cannot
- * DELETE"); the **current listing** reads the versions back, so a deletion is
- * proved rather than assumed; and `latest_published` resolves the newest
- * published version rather than the newest draft. On this scratch agent
- * nothing is published, which makes it the exact shape the two-door refusal
- * exists for.
- *
- * ## The one command
- *
- * ```sh
- * EGMA_LIVE_RETELL_API_KEY=<a Retell key> \
- *   npx vitest run --root packages/retell --config /dev/null test/live-fork.test.ts
- * ```
- *
- * Without that variable every check here is **skipped, visibly** — Vitest
- * prints them as skipped rather than passing them in silence. CI has no key, so
- * CI never touches an account.
- *
- * ## What it does to the account
- *
- * It creates everything it touches and deletes everything it created, in a
- * `finally` that runs even when a check fails: one scratch Retell LLM, one
- * scratch agent pointing at it, and one branched version of that agent. It
- * **binds no telephone number**, publishes nothing, and never reads or writes
- * any agent that was already on the account. A crash between the create and the
- * delete leaves two objects named `egma-fork-check-…` and nothing else.
- *
- * ## Who runs it
- *
- * The developer, by hand. Agents never execute against a live account. When it
- * is run, its finding goes — dated — into the research file this effort was
- * built from: `.scratch/mock-tools/research/retell-mocking-surface.md`.
+ * Creates a scratch LLM, agent, branch, and web calls. finally removes the scratch
+ * agent and LLM; a crash can leave egma-fork-check- objects. It binds no number,
+ * publishes nothing, and does not modify pre-existing agents.
  */
 
 const LIVE_KEY_VARIABLE = "EGMA_LIVE_RETELL_API_KEY";

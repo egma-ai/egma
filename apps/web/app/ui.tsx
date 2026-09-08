@@ -7,29 +7,8 @@ import { cn } from "@/lib/utils";
 import { useTheme } from "../ui/theme.tsx";
 
 /**
- * The access pages' own shell, and nothing else.
- *
- * Signing in, signing up, accepting an invitation and authorizing a terminal
- * are not product pages: nobody has a project yet, there is nothing to navigate
- * between, and the page is the whole of what somebody is doing. They keep the
- * large type `DESIGN.md` reserves for auth, onboarding and public pages.
- *
- * **One column, centred, and nothing beside it.** The surface used to be a
- * split screen — a brand panel on the left with a canvas of drifting dots
- * behind it, the work on the right. The 2026-08-23 look is the opposite of
- * that: Neutral Paper, one Pure Paper panel inside a hairline with no corner
- * and no shadow, the wordmark and one quiet sentence above it, and a single
- * entrance. Nothing else on the page moves.
- *
- * **Everything a signed-in product page is drawn inside lives in `ui/`** — the
- * compact shell, the selector, the navigation, the page states, the lists and
- * the controls. This file re-exports the four pieces that pages already name so
- * that a page composes its own subject and never its own frame.
- *
- * **The controls here are the product's controls.** This surface once carried
- * its own `Button`, `TextInput` and `Field`; they are gone, and what is left is
- * composition — a shell, a panel, a notice and a line of links. There is one
- * control vocabulary in this product and it is the shadcn base.
+ * Compose access pages in a centered shell with shared product controls.
+ * Signed-in product navigation and page layouts live in ui/.
  */
 export {
   AppShell,
@@ -43,20 +22,8 @@ export {
 const STATEMENT = "Trust the voice agents you ship in production.";
 
 /**
- * The full Egma logo, which belongs here and in the signed-in sidebar.
- *
- * 32px tall, and only that: the width comes off the SVG's own viewBox, the way
- * the signed-in sidebar's copy of this mark takes it. A number in the class
- * list would be a second declaration of the logo's proportion, and a logo has
- * exactly one. It is left-aligned to the panel's edge and is deliberately
- * **not a link**: signed
- * out, `/` sends everybody straight back to `/sign-in`, so a link here would be
- * a control that reloads the page somebody is already on.
- *
- * The dark-theme treatment is an arbitrary variant rather than a `dark:` one
- * because this product has no `dark:` variant: every other surface changes with
- * the token values, and a two-colour SVG has no token to change. `data-theme`
- * is written on the document element, so the ancestor selector is the theme.
+ * Set logo height and let the SVG preserve its aspect ratio. Keep it unlinked
+ * on access pages. The document data-theme selector handles the two-color SVG.
  */
 export function Brand() {
   return (
@@ -120,17 +87,8 @@ export function ThemeToggle() {
 }
 
 /**
- * A quiet line of links under an access panel: the way to sign up, the way back
- * to signing in, the way to ask for another link.
- *
- * It is a component rather than a class list repeated eleven times because the
- * link inside it carries five decisions — the Ember underline, the offset, the
- * thickening on hover, the 44px target a coarse pointer needs, and the press
- * feedback — and a page that wrote four of them would look right.
- *
- * The two spacing rules are relationships rather than properties: the first
- * line after a form is separated from it by a rule, and a second line follows
- * the first more closely than it follows the form.
+ * Share access-page links, interaction targets, and spacing. Separate the
+ * first link row from the form and place subsequent rows closer together.
  */
 export function LinkLine({ children }: { readonly children: ReactNode }) {
   return (
@@ -164,23 +122,8 @@ export function LinkLine({ children }: { readonly children: ReactNode }) {
 }
 
 /**
- * The fields of an access page, in a column.
- *
- * **The shared `Form` draws a card, and this surface is already one.** The old
- * arrangement kept it and then reached into it from the access stylesheet —
- * `.authCard form { border: 0; background: transparent; … }` — to undo four of
- * its five declarations. That is a route styling the inside of a shared
- * component, which is the thing this migration exists to remove, and it stopped
- * working the moment the card became Tailwind.
- *
- * So the access surface composes its own form. What is left after the undoing
- * was a flex column and one gap, and that is what this is.
- *
- * **A notice inside it pays the gap once.** `Notice` carries its own bottom
- * margin, because on two access pages it stands over a fact list or a lone
- * button rather than over a form. Inside this column that margin lands on top
- * of the flex gap and opens 40px where the rhythm says 20, so the form — the
- * one element that can see it is a row among rows — takes it back.
+ * Use a plain form column inside the existing access card. Remove a notice's
+ * bottom margin here so it does not add to the form gap.
  */
 export function AuthForm({
   onSubmit,
@@ -192,6 +135,7 @@ export function AuthForm({
   return (
     <form
       className="flex flex-col gap-5 [&>[data-slot=notice]]:mb-0"
+      method="post"
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit?.();
@@ -203,19 +147,9 @@ export function AuthForm({
 }
 
 /**
- * The access composition: the wordmark, one sentence, and the panel that holds
- * the work — one centred column on Neutral Paper.
- *
- * **The whole column enters once and nothing else ever moves.** Opacity and 8px
- * of travel on the dialog's own duration, drawn by `@starting-style` rather
- * than by a script, so nothing decides at runtime whether this page is visible:
- * a browser without it draws the column already arrived, which is the only
- * failure a sign-in page is allowed to have. Reduced motion keeps the fade and
- * drops the travel.
- *
- * The panel is `--surface` inside a 1px hairline with **no corner and no
- * shadow**. `DESIGN.md` gives the shared shadow to menus, sheets and dialogs —
- * surfaces that sit *over* something. This one floats over nothing.
+ * Access shell with one entrance transition. @starting-style falls back to
+ * visible content; reduced motion removes travel. The panel uses a hairline
+ * without the shadow reserved for overlays.
  */
 export function AuthShell({
   eyebrow,
@@ -270,16 +204,7 @@ export function AuthShell({
             "max-[620px]:p-6",
           )}
         >
-          {/*
-           * The eyebrow, the title and the lead are one block with one rhythm,
-           * so a page with no eyebrow or no lead is spaced by what it has
-           * rather than by a margin written for the page that has both.
-           *
-           * The 32px under the block is a relationship rather than a property:
-           * it is paid only when there is something below to pay it to, which
-           * is what keeps a bare loading state from ending in a band of
-           * nothing.
-           */}
+          {/* Space the heading block from content only when content follows it. */}
           <div className="flex flex-col gap-3 [&:not(:last-child)]:mb-8">
             {eyebrow === undefined ? null : (
               <p className="m-0 text-sm tracking-(--tracking-label) text-faint uppercase">
@@ -321,17 +246,8 @@ export function StatePage({
 }
 
 /**
- * One thing worth saying above the form it is about.
- *
- * The tone decides the edge and the announcement, never the words: an error is
- * an `alert` because somebody has to hear it without looking, and a neutral
- * notice is neither, because a page that announces everything announces
- * nothing.
- *
- * `data-slot` is on it because the transcript pages space themselves against a
- * notice from their own stylesheet, and a class name they cannot see is not
- * something they can point at. `AuthForm` uses the same handle to take the
- * bottom margin back inside a gapped column.
+ * Errors use alert semantics; neutral notices do not. The data-slot allows
+ * composition-specific spacing, including removal of margin inside AuthForm.
  */
 export function Notice({
   tone = "neutral",

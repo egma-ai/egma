@@ -24,25 +24,8 @@ import type {
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
- * **One transcript**, rendered rather than read as source.
- *
- * This page had no rendered proof at all. Everything asserted about it lived in
- * `pages.test.ts` and `transcripts.test.ts` as source-text matches, which is a
- * real claim about wiring and
- * says nothing whatever about what a person ends up looking at. A page can hold
- * every one of those strings and draw an empty screen.
- *
- * That mattered the day its layout moved off the last CSS Module in the
- * application. A migration of 54 class names has one failure mode, and it is
- * silent: a state that used to draw now draws nothing, or draws twice, and no
- * source match notices. So the states are asserted here first, through the DOM,
- * and the migration is held against them.
- *
- * **What is asserted is what a reader can see and reach**, never a class list.
- * Class names are the thing being changed; a test that read them would fail on
- * every correct migration and pass on none of the wrong ones. So each case asks
- * for a heading, a role, a label, or a sentence — the page's own words, from
- * `transcript-copy.ts`, which is where they are checkable.
+ * Drive transcript detail states through rendered headings, roles, labels,
+ * and text. Source checks alone cannot establish that a state is visible.
  */
 
 const routed = vi.hoisted(() => ({
@@ -194,6 +177,7 @@ const GRADE: Grade = {
 /** The whole answer, with a case naming only the part it is about. */
 function detail(over: Partial<Detail> = {}): Detail {
   return {
+    workBlock: null,
     trace: TRACE,
     turns: [HUMAN_TURN, AGENT_TURN],
     spans: [OUTSIDE_STEP],
@@ -636,6 +620,34 @@ describe("what egma made of the exchange", () => {
     expect(grades.textContent).toContain("The model did not return a valid score.");
   });
 
+  it("offers credits and provider keys for blocked production grading", async () => {
+    stub({ status: 200, body: detail({
+      gradingState: "pending", grades: [], gradeHistory: [], combinedScore: null,
+      workBlock: { error: "providers_unfunded", message: "The inference balance is $0.00." },
+    }) });
+    await open();
+    await settled();
+    const message = screen.getByText("Grading is waiting. The inference balance is $0.00.");
+    const block = within(message.closest('[role="alert"]') as HTMLElement);
+    expect(block.getByRole("link", { name: "Add credits" }).getAttribute("href"))
+      .toBe("/projects/prj_2/settings/billing");
+    expect(block.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_2/settings/provider-api-keys");
+  });
+
+  it("offers provider key repair for a typed grader credential error", async () => {
+    const error: Grade = { ...GRADE, score: null, result: "errored", details: {
+      error: "The saved OpenAI key cannot be used.", errorCode: "provider_key_unavailable", provider: "openai",
+    } };
+    stub({ status: 200, body: detail({ gradingState: "error", grades: [error], gradeHistory: [], combinedScore: null }) });
+    await open();
+    await settled();
+    expect(screen.getByText("The saved OpenAI key cannot be used.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_2/settings/provider-api-keys");
+    expect(screen.queryByRole("link", { name: "Add credits" })).toBeNull();
+  });
+
   it("shows a waiting state before grades arrive", async () => {
     stub({
       status: 200,
@@ -966,14 +978,8 @@ describe("the inspector", () => {
   });
 
   /**
-   * **Provenance names the platform that ran the agent**, which is the answer
-   * production monitoring replaced a single *Connection* row with: a person
-   * looking at a production exchange cannot open the connection egma dialled,
-   * because egma dialled nothing. What identifies the agent is the platform's
-   * own name for it, its identifier there, and the version that answered.
-   *
-   * The platform is read out in a reader's words rather than in the wire's —
-   * `livekit` is what arrives and **LiveKit** is what is drawn.
+   * Production provenance names the agent platform, its agent ID, and version.
+   * Display platform labels such as LiveKit instead of raw identifiers.
    */
   it("names the platform, and the agent the platform ran", async () => {
     stub({ status: 200, body: detail() });

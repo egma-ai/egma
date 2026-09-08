@@ -3,15 +3,23 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  installBillingPlugIn,
   reconcileGraderCatalog,
   runClickHouseMigrations,
   runMigrations,
   seedPersonaLibrary,
+  estimateVoiceSimulationDemand,
 } from "@egma/db";
 
-import { loadConfig } from "./config.ts";
+import { loadCloudBilling, type StoppableJob } from "./billing.ts";
+import { loadConfig, type Config } from "./config.ts";
 import { platformEvent } from "./platform-log.ts";
 import { buildApi } from "./server.ts";
+import { startRateCardInitialization } from "./rate-card.ts";
+import {
+  createVoiceFleetReconciler,
+  type VoiceFleetReconcileResult,
+} from "./voice-fleet.ts";
 
 const config = loadConfig();
 
@@ -31,30 +39,9 @@ connect({
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
 
 /**
- * The trace store's own schema, applied in the background and never fatal.
- *
- * **This is the failure the durable boundary exists to remove.** A slow
- * ClickHouse Cloud wake used to throw out of this module, so the process never
- * reached `listen()` — and an egma that could have accepted evidence into
- * object storage and drained it later instead accepted nothing, and took the
- * hosted address down with it. Evidence is safe when it is durable in the
- * bucket; ClickHouse is what happens next, and "next" is allowed to be late.
- *
- * So it runs beside the server rather than in front of it, its state is a
- * reported component, and the drainer refuses to drain until it finishes —
- * writing a segment into a schema still being built is how a good object
- * becomes a retained defect for a reason that had nothing to do with it.
- *
- * It never settles into a terminal failure. A slow or unreachable store is
- * retried with a doubling, capped backoff: the migrations are idempotent and one
- * instance holds their lock, so a later attempt finishes what an earlier one
- * could not — and until one does, the acceptance path keeps taking evidence and
- * the drainer stands by. A process stuck in a `failed` state would hold the
- * deployment's one drain claim behind a green health check for good, while a
- * healthy sibling stood by forever.
- *
- * The `ingest` role skips it: that process never writes ClickHouse, and a role
- * that only accepts evidence has no business applying somebody else's schema.
+ * Apply ClickHouse migrations in the background with capped exponential retry.
+ * Acceptance can serve while ClickHouse is unavailable; draining waits for
+ * schema readiness. The ingest-only role skips these migrations.
  */
 type TraceStoreSchema =
   | { readonly state: "skipped" }
@@ -87,10 +74,62 @@ const personaShelf = await seedPersonaLibrary();
 // release that changed nothing writes nothing at all — not even `updated_at`.
 const graderCatalog = await reconcileGraderCatalog();
 
+// The billing adapter this deployment's settings select.
+//
+// With no Stripe secret named this is `undefined`, nothing is imported, and
+// the product runs on the open plug-in — every allowance unlimited, every
+// usage record discarded. That is the deployment every self-hoster runs and it
+// is not a special case. With one named, the commercially licensed package is
+// loaded here, once, and its plan rows are written before the first request:
+// an allowance cannot be answered against a plan nobody wrote.
+const cloudBilling = await loadCloudBilling(config);
+
+const running: Config = cloudBilling === undefined
+  ? config
+  : { ...config, billing: cloudBilling.plugIn };
+
+// The billing plug-in, put in place for the whole process before the first
+// request. This is where the seams inside the data-access module — run start,
+// the claim door and the write that stores a usage record — start reaching it.
+installBillingPlugIn(running.billing);
+
+let reconcileVoiceFleet:
+  | (() => Promise<VoiceFleetReconcileResult>)
+  | undefined;
+const wakeVoiceFleet = config.voiceFleet === undefined
+  ? undefined
+  : () => {
+      void reconcileVoiceFleet?.().catch((err: unknown) => {
+        app.log.error(
+          { err },
+          "voice fleet reconciliation failed; queued work will retry on the next sweep",
+        );
+      });
+    };
+
 const { app } = buildApi({
-  config,
+  config: running,
   traceStoreReady: () => traceSchema.state === "ready",
+  ...(wakeVoiceFleet === undefined ? {} : { wakeVoiceFleet }),
+  ...(cloudBilling === undefined ? {} : { billingRoutes: cloudBilling.routes }),
+  ...(cloudBilling?.webhookRoutes === undefined
+    ? {}
+    : { billingWebhookRoutes: cloudBilling.webhookRoutes }),
 });
+
+if (config.voiceFleet !== undefined) {
+  // The AWS package is absent from the self-hosted boot path. Merely having
+  // ordinary AWS credentials in the environment cannot select this adapter.
+  const { awsVoiceFleet } = await import("./voice-fleet-aws.ts");
+  const reconciler = createVoiceFleetReconciler({
+    fleet: awsVoiceFleet(config.voiceFleet),
+    estimateDemand: () => estimateVoiceSimulationDemand({
+      caps: config.simulationConcurrencyCaps,
+    }),
+    log: app.log,
+  });
+  reconcileVoiceFleet = reconciler.reconcile;
+}
 
 /** The longest this process waits between attempts on the trace-store schema. */
 const TRACE_SCHEMA_BACKOFF_CAP_MILLISECONDS = 5 * 60_000;
@@ -150,6 +189,28 @@ if (graderCatalog.definitions.length > 0) {
     "Predefined graders were written to the library",
   );
 }
+if (cloudBilling !== undefined && cloudBilling.seededPlans.length > 0) {
+  // A plan is a price somebody set. Saying which rows this boot wrote is what
+  // makes a pricing change readable in a deployment log rather than only in a
+  // file's history.
+  app.log.info(
+    { plans: cloudBilling.seededPlans },
+    "Cloud plan rows were written from the shipped file",
+  );
+}
+if (cloudBilling !== undefined && cloudBilling.caughtUp.charged > 0) {
+  // A usage sink may fail without failing the write that stored the record,
+  // and a resend cannot replace the lost delivery — so the plug-in charges
+  // what it finds uncharged when it loads. Every row here is money this
+  // deployment would otherwise never have collected.
+  app.log.warn(
+    {
+      charged: cloudBilling.caughtUp.charged,
+      amountMicros: cloudBilling.caughtUp.amountMicros,
+    },
+    "Inference charges that reached no sink were caught up at boot",
+  );
+}
 if (graderCatalog.projectGraders.length > 0) {
   // The projects, never anything a customer wrote: what is worth saying is
   // that projects which lacked their protected Expected behaviors policy now
@@ -168,9 +229,34 @@ app.log.info(
     : "schema migrations applied",
 );
 
+/**
+ * The hourly job that tells Stripe what each Pro organization's month has
+ * used.
+ *
+ * **In this process, on a deployment that bills, and nowhere else.** It is
+ * started with the cloud plug-in and it is the only scheduled work billing
+ * adds: the allowances are enforced from Postgres on every request, and this
+ * only reports minutes so Stripe can price the tiers and put the overage on
+ * the invoice. A Stripe that is unreachable delays a bill and stops no work.
+ *
+ * It runs once when this process starts serving, for the hour that has just
+ * closed — so a deployment that was restarting on the hour still reports it —
+ * and then on the hour.
+ * Every event carries an identifier made of the meter, the organization and
+ * the hour, so a repeat is refused by Stripe rather than counted twice.
+ *
+ * The `ingest` role does not run it, for the reason it skips the trace-store
+ * schema: a process that only accepts evidence has no business reporting
+ * somebody's month.
+ */
+let meterJob: StoppableJob | undefined;
+let rateCardJob: StoppableJob | undefined;
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     stopping = true;
+    meterJob?.stop();
+    rateCardJob?.stop();
     void (async () => {
       await app.close();
       await disconnect();
@@ -186,3 +272,10 @@ app.log.info(
     "server.port": config.port,
   }),
 );
+
+// Started once the process is serving: it is neither a gate on serving nor
+// something a request waits for.
+rateCardJob = startRateCardInitialization(app.log, running.billing.pricingUnavailable);
+if (cloudBilling !== undefined && config.ingestion.role !== "ingest") {
+  meterJob = cloudBilling.startMeterJob(app.log);
+}

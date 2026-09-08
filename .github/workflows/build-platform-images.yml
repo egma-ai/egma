@@ -1,0 +1,278 @@
+name: Build platform images
+run-name: Build platform images ${{ inputs.public_sha || github.sha }} from ${{ inputs.source_run_id || github.event.pull_request.number || 'manual' }}
+
+# Pull requests prove each Dockerfile on native AMD64 and ARM64 runners without
+# receiving AWS credentials. A manual main run publishes immutable commit tags.
+# The cloud repository becomes the deployment writer in the release handoff.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/build-platform-images.yml
+      - .github/ecr-image-exists.sh
+      - .github/verify-platform-images.py
+      - .github/test_verify_platform_images.py
+      - .github/fixtures/simulator-*-response.json
+      - .github/fixtures/simulator-soci-manifest.json
+      - .github/fixtures/*-ecr-response.json
+      - apps/api/**
+      - apps/grader/**
+      - apps/simulator/**
+      - certificates/**
+      - packages/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - tsconfig.base.json
+  workflow_dispatch:
+    inputs:
+      public_sha:
+        description: Exact public commit to publish; defaults to this run's commit
+        required: false
+        type: string
+      source_run_id:
+        description: Calling test workflow run used to identify this publication
+        required: false
+        type: string
+
+concurrency:
+  group: build-platform-images-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify-publisher:
+    name: Verify publication manifest checks
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 -B .github/test_verify_platform_images.py
+
+  validate:
+    name: Build ${{ matrix.app }} (${{ matrix.arch }})
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: api
+            runner: ubuntu-latest
+            arch: amd64
+          - app: api
+            runner: ubuntu-24.04-arm
+            arch: arm64
+          - app: grader
+            runner: ubuntu-latest
+            arch: amd64
+          - app: grader
+            runner: ubuntu-24.04-arm
+            arch: arm64
+          - app: simulator
+            runner: ubuntu-latest
+            arch: amd64
+          - app: simulator
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Prove this is a native build
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          actual="$(uname -m)"
+          case "$EXPECTED_ARCH:$actual" in
+            amd64:x86_64|arm64:aarch64|arm64:arm64) ;;
+            *) echo "Expected native $EXPECTED_ARCH runner, got $actual." >&2; exit 1 ;;
+          esac
+
+      - name: Build without publishing
+        env:
+          APP: ${{ matrix.app }}
+          ARCH: ${{ matrix.arch }}
+        run: docker build --pull -f "apps/$APP/Dockerfile" -t "egma-ci/$APP:$GITHUB_SHA-$ARCH" .
+
+  authorize-publish:
+    name: Require main for publication
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - name: Refuse publication from any other ref
+        run: test "$GITHUB_REF" = refs/heads/main
+
+      - name: Select one immutable public commit
+        id: release
+        env:
+          REQUESTED_SHA: ${{ inputs.public_sha }}
+        run: |
+          set -euo pipefail
+          sha="${REQUESTED_SHA:-$GITHUB_SHA}"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "public_sha must be one full lowercase commit SHA." >&2
+            exit 1
+          }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Publish native ${{ matrix.app }} (${{ matrix.arch }})
+    needs: authorize-publish
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: api
+            runner: ubuntu-latest
+            arch: amd64
+          - app: api
+            runner: ubuntu-24.04-arm
+            arch: arm64
+          - app: grader
+            runner: ubuntu-latest
+            arch: amd64
+          - app: grader
+            runner: ubuntu-24.04-arm
+            arch: arm64
+          - app: simulator
+            runner: ubuntu-latest
+            arch: amd64
+          - app: simulator
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      REGISTRY: ${{ vars.ECR_REGISTRY }}
+      DEPLOY_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      RELEASE_SHA: ${{ needs.authorize-publish.outputs.release_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.0
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Prove this is a native build
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          actual="$(uname -m)"
+          case "$EXPECTED_ARCH:$actual" in
+            amd64:x86_64|arm64:aarch64|arm64:arm64) ;;
+            *) echo "Expected native $EXPECTED_ARCH runner, got $actual." >&2; exit 1 ;;
+          esac
+
+      - name: Log in to ECR
+        run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+
+      - name: Build and push the native image
+        env:
+          APP: ${{ matrix.app }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          image="$REGISTRY/egma/$APP:$RELEASE_SHA-$ARCH"
+          if bash .github/ecr-image-exists.sh "egma/$APP" "$RELEASE_SHA-$ARCH"; then
+            echo "$image is already published; keeping its immutable bytes."
+            exit 0
+          else
+            status=$?
+            [ "$status" -eq 1 ] || exit "$status"
+          fi
+          docker build --pull -f "apps/$APP/Dockerfile" -t "$image" .
+          docker push "$image"
+
+  publish:
+    name: Publish immutable multi-architecture tags
+    needs: [authorize-publish, build]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      REGISTRY: ${{ vars.ECR_REGISTRY }}
+      DEPLOY_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      SOCI_VERSION: 0.15.0
+      RELEASE_SHA: ${{ needs.authorize-publish.outputs.release_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.0
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.11.1
+
+      - name: Install the pinned SOCI v2 converter
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes skopeo
+          base="https://github.com/awslabs/soci-snapshotter/releases/download/v${SOCI_VERSION}"
+          asset="soci-snapshotter-${SOCI_VERSION}-linux-amd64-static.tar.gz"
+          curl -fsSLO "$base/$asset"
+          curl -fsSLO "$base/$asset.sha256sum"
+          sha256sum --check "$asset.sha256sum"
+          tar -xzf "$asset" soci
+          sudo install -m 0755 soci /usr/local/bin/soci
+          soci --version
+
+      - name: Log in to ECR
+        run: |
+          set -euo pipefail
+          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+          aws ecr get-login-password --region "$AWS_REGION" | skopeo login --username AWS --password-stdin "$REGISTRY"
+
+      - name: Publish one commit tag for every image
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          for app in api grader simulator; do
+            repo="$REGISTRY/egma/$app"
+            if bash .github/ecr-image-exists.sh "egma/$app" "$RELEASE_SHA"; then
+              echo "$repo:$RELEASE_SHA is already published; verifying it below."
+              continue
+            else
+              status=$?
+              [ "$status" -eq 1 ] || exit "$status"
+            fi
+            if bash .github/ecr-image-exists.sh "egma/$app" "raw-$RELEASE_SHA"; then
+              echo "Reusing the immutable native manifest list."
+            else
+              status=$?
+              [ "$status" -eq 1 ] || exit "$status"
+              docker buildx imagetools create \
+                --tag "$repo:raw-$RELEASE_SHA" \
+                "$repo:$RELEASE_SHA-amd64" \
+                "$repo:$RELEASE_SHA-arm64"
+            fi
+
+            if [ "$app" = simulator ]; then
+              skopeo copy --all "docker://$repo:raw-$RELEASE_SHA" "oci-archive:$work/simulator.tar"
+              soci convert --standalone --all-platforms "$work/simulator.tar" "$work/simulator-soci.tar"
+              skopeo copy --all "oci-archive:$work/simulator-soci.tar" "docker://$repo:$RELEASE_SHA"
+            else
+              docker buildx imagetools create --tag "$repo:$RELEASE_SHA" "$repo:raw-$RELEASE_SHA"
+            fi
+          done
+
+      - name: Verify platforms and simulator SOCI v2 manifests
+        run: python3 .github/verify-platform-images.py "$RELEASE_SHA"

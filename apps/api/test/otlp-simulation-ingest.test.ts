@@ -4,6 +4,11 @@ import { fileURLToPath } from "node:url";
 
 import {
   claimSimulations,
+  createProviderFundingReceipt,
+  resolveSimulationStanding,
+  putProviderKey,
+  deleteProviderKey,
+  readPlatformUsageTotal,
   completeSimulation,
   connectClickHouse,
   createAgent,
@@ -24,7 +29,7 @@ import {
   EXPORT_TRACE_SERVICE_RESPONSE,
 } from "../src/otlp/schema.ts";
 import { createApi, type TestApi } from "./support/api.ts";
-import { pendingObjectStore } from "../src/ingestion/object-store.ts";
+import { pendingObjectStore } from "@egma/ingestion";
 import { pendingSegments } from "./support/ingestion.ts";
 import {
   startObjectStorage,
@@ -41,25 +46,10 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The simulator's spans, at the same door a customer's agent posts to.
- *
- * The service token opens the second path through the OTLP ingest: no customer
- * context at all, each resource naming the simulation its spans are evidence
- * of, and the door resolving the organization, the project and the run from
- * the simulation row — never from anything the payload claims. What is posted
- * here is the contract's own golden fixtures, byte for byte, because those
- * files are the meeting point with the emitter: if the door mis-files what
- * they carry, it would mis-file the simulator.
- *
- * The seeded simulations are real rows made by `startRun`, then renamed by raw
- * SQL to the ids the fixtures pin — the one edit no exported function offers,
- * made before anything references the row, so the golden bytes can post
- * unchanged against a database whose every other fact is genuine.
- *
- * The door answers on object-store durability and writes no row, so a post is
- * followed by a drain wherever the claim is about what a reader sees. The one
- * claim that is about the boundary itself — a batch naming two projects — reads
- * the pending objects before anything drains them.
+ * Post simulation-contract fixtures with the service token and derive tenancy
+ * from stored simulation rows. Seed with startRun, then assign fixture IDs
+ * through SQL before adding references. Drain before query assertions; inspect
+ * pending objects directly for multi-project acceptance boundaries.
  */
 
 const storage: ObjectStorage = await startObjectStorage("otlp-simulation");
@@ -86,6 +76,8 @@ const CHAT_SIMULATION = "sim_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const CHAT_TRACE = "0198fb73d08e479627eea08a75fbf1d8";
 const VOICE_SIMULATION = "sim_01K3XSW9GJ2Q4RD8VXH0MEKAFP";
 const VOICE_TRACE = "0198fb9e261215c986a37d8828e9a9f6";
+const USAGE_SIMULATION = "sim_01M1X7VHHXE2AA4P7F7JEWPK8Z";
+const USAGE_TRACE = "01a07a7dc63d7094a258ef3c9dcb4d1f";
 
 /** What the test API's configuration holds, and the simulator would be started with. */
 const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
@@ -95,6 +87,7 @@ let acme: Customer;
 let globex: Customer;
 let chatRunId: string;
 let voiceRunId: string;
+let usageRunId: string;
 let acmeSeed: { agentId: string; testVersionId: string; personaVersionId: string };
 
 function store(): NonNullable<TestApi["traceStore"]> {
@@ -192,7 +185,6 @@ async function seedSimulationNamed(
     suiteId,
     agentId: created.id,
     connectionId: created.connection?.id ?? "",
-    idempotencyKey: newId("run"),
   });
   const page = await listSimulations(auth, started.id, { limit: 1 });
   const simulation = page?.items[0];
@@ -225,6 +217,9 @@ beforeAll(async () => {
   acmeSeed = chat;
   const voice = await seedSimulationNamed(globex, "voice", VOICE_SIMULATION);
   voiceRunId = voice.runId;
+  usageRunId = (
+    await seedSimulationNamed(globex, "usage", USAGE_SIMULATION)
+  ).runId;
 });
 
 afterAll(async () => {
@@ -371,18 +366,8 @@ describe.skipIf(!storage.available)("the contract's golden flushes, posted with 
   });
 
   /**
-   * **The metrics display, end to end, from the emitter's own bytes.**
-   *
-   * The golden flushes go in at the door and come back out of the read endpoint
-   * as numbers — computed by the one shared measure module, from exactly the
-   * spans this trace holds, with nothing stored in between. That is the whole of
-   * the claim the module exists for: the figure a page shows and the figure a
-   * future latency grader reads are one arithmetic, so the two can never
-   * disagree about how fast the agent answered.
-   *
-   * Read with an ordinary customer key, at the endpoint the dashboard reads —
-   * not through the module directly — because what is being asserted is that the
-   * numbers reach a reader, not that a function returns them.
+   * Read shared measures through the public endpoint after ingesting golden
+   * simulation exports, to verify that derived values reach API consumers.
    */
   it("read back as the conversation's measures, at the endpoint a page reads", async () => {
     const key = await mintKey(api.app, acme.cookie, "reading the measures");
@@ -575,18 +560,9 @@ describe.skipIf(!storage.available)("the same path in the other encoding", () =>
   });
 
   /**
-   * **One immutable identity holds one account of one span, and the first
-   * account is the one that stands.**
-   *
-   * Three things happen at once here, and all three matter. The door
-   * **accepts** the changed bytes, because a sender resending is ordinary and
-   * refusing at a wire boundary would be answering a storage question there.
-   * The drainer **refuses to write them**, because the stored evidence is
-   * already somebody's record of that moment, and two rows saying different
-   * things about one moment leave a reader no rule for choosing. And the object
-   * is **retained** rather than deleted, because Egma promised those bytes were
-   * safe before it ever read them back — so a defect in Egma is not a reason to
-   * throw a customer's evidence away.
+   * Accept conflicting evidence durably, then refuse the conflicting write during
+   * drain. Preserve both the original stored span and the pending object so the
+   * conflict does not silently replace or discard evidence.
    */
   it("keeps the stored account and retains the object when protobuf evidence reuses span ids", async () => {
     const before = await countOf(
@@ -756,21 +732,8 @@ describe.skipIf(!storage.available)("a resource that names no simulation, or one
   });
 
   /**
-   * A resource naming one simulation while filing its spans under another
-   * simulation's trace.
-   *
-   * **This is the check that stops a transcript playing the wrong
-   * conversation's audio.** The two identifiers are the same 128 bits written
-   * two ways, and both directions are read: a reader opening a transcript
-   * converts the trace id back into a simulation id to find that conversation's
-   * grades and its recording. So spans filed under somebody else's trace put
-   * one conversation's turns on screen beside another's audio — inside one
-   * organization, with nothing anywhere saying the two disagree.
-   *
-   * Nothing egma ships can produce it: the simulator derives the trace from the
-   * id it was handed. Which is why it is asserted rather than assumed — the
-   * emitter taking a trace id from a provider instead would be a small change
-   * over there and a wrong recording over here.
+   * Reject a resource whose valid trace ID belongs to a different simulation.
+   * The trace/simulation mapping also resolves grades and recordings.
    */
   it("is refused whole when its spans are filed under another simulation's trace", async () => {
     const body = (
@@ -879,20 +842,9 @@ describe.skipIf(!storage.available)("a batch carrying two customers' evidence", 
   }
 
   /**
-   * **A segment belongs to exactly one project, and the answer waits for all of
-   * them.**
-   *
-   * The trusted service batch is the only body that can carry two projects, and
-   * this is the one place the rule is visible: two projects may not share a
-   * durable object, so one request becomes two sealed segments — and the sender
-   * is not told the batch was accepted until every one of them is in the bucket.
-   * A per-group answer would report success while one project's evidence was
-   * still in a local log.
-   *
-   * No shipped client sends this. The simulator refuses a batch spanning more
-   * than one trace and delivers one reporter per simulation, so the body is
-   * built by hand here — the route's multi-project path is defensive, and a
-   * defence nothing exercises is a defence nobody knows is broken.
+   * A service-token export spanning projects must create separate segments and
+   * wait for all uploads before success. Build this case explicitly because the
+   * simulator normally sends one trace per reporter.
    */
   it("seals one segment for each project and answers only when both are durable", async () => {
     const response = await stage(twoTenantBatch());
@@ -1088,5 +1040,497 @@ describe.skipIf(!storage.available)("the simulation grading handoff", () => {
       [CHAT_TRACE],
     );
     expect(Number(jobs.rows[0]?.n)).toBe(1);
+  });
+});
+
+/**
+ * The bill, at the same door as the evidence.
+ *
+ * A `provider_usage` span is the simulator saying what one provider request
+ * consumed. The door turns it into a priced usage span in ClickHouse — priced
+ * here rather than in a worker, so a price change never needs a simulator
+ * release — while the span itself is filed like every other span.
+ *
+ * The three claims are the three ways this can go wrong: a bill that is never
+ * priced, a resend that charges twice, and a price change that reaches
+ * backwards into work already paid for.
+ */
+describe.skipIf(!storage.available)("a provider_usage span", () => {
+  it("does not let customer OTLP attributes create platform-funded usage", async () => {
+    const before = await countOf(
+      "SELECT count() AS n FROM spans WHERE usage_identity_hash != ''",
+    );
+    const key = await mintKey(
+      api.app,
+      globex.cookie,
+      "Customer provider-usage forgery",
+      globex.projectId,
+    );
+    const body = (
+      await fixture("valid", "voice-provider-usage.json")
+    ).replaceAll("cc1000000000001", "fa1000000000001");
+    const response = await post(body, key);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(
+      await countOf(
+        "SELECT count() AS n FROM spans WHERE usage_identity_hash != ''",
+      ),
+    ).toBe(before);
+    const rows = await store().rows<{
+      emitter: string;
+      usage_payment_source: string;
+    }>(
+      "SELECT emitter, usage_payment_source FROM spans WHERE span_id LIKE 'fa1000000000001%'",
+    );
+    expect(rows).toHaveLength(3);
+    for (const row of rows)
+      expect(row).toEqual({ emitter: "agent", usage_payment_source: "" });
+  });
+
+  type UsageRow = {
+    organization_id: string;
+    project_id: string;
+    run_id: string;
+    work_kind: string;
+    simulation_id: string;
+    provider: string;
+    model: string;
+    operation: string;
+    unit: string;
+    quantities: Record<string, number>;
+    measurement: string;
+    provider_ref: string | null;
+    payment_source: string;
+    raw_usage: Record<string, unknown>;
+    amount_micros: string;
+    priced_by: Record<string, string>;
+    span_id: string;
+  };
+
+  async function usageOf(simulationId: string): Promise<UsageRow[]> {
+    const rows = await store().rows<{
+      organization_id: string;
+      project_id: string;
+      run_id: string;
+      span_id: string;
+      usage_evidence: string;
+    }>(
+      `SELECT organization_id, project_id, any(run_id) AS run_id, span_id, any(usage_evidence) AS usage_evidence FROM spans WHERE usage_identity_hash != '' GROUP BY organization_id, project_id, trace_id, span_id ORDER BY span_id`,
+    );
+    return rows
+      .map((row) => {
+        const usage = JSON.parse(row.usage_evidence);
+        return {
+          organization_id: row.organization_id,
+          project_id: row.project_id,
+          run_id: row.run_id,
+          span_id: row.span_id,
+          work_kind: usage.identity.work,
+          simulation_id: usage.identity.simulationId,
+          provider: usage.provider,
+          model: usage.model,
+          operation: usage.operation,
+          unit: usage.price.unit,
+          quantities: usage.quantities,
+          measurement: usage.measurement,
+          provider_ref: usage.providerRef,
+          payment_source: usage.paymentSource,
+          raw_usage: usage.rawUsage,
+          amount_micros: String(usage.price.amountMicros),
+          priced_by: usage.price.pricedBy,
+        };
+      })
+      .filter((row) => row.simulation_id === simulationId);
+  }
+
+  it("becomes one priced record per request, under the simulation's own customer and run", async () => {
+    const flush = await post(
+      await fixture("valid", "voice-provider-usage.json"),
+    );
+    expect(flush.statusCode, flush.body).toBe(200);
+    expect(flush.json()).toEqual({});
+
+    const rows = await usageOf(USAGE_SIMULATION);
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      // The tenancy is the simulation row's, never the payload's — Globex owns
+      // this conversation, and the span said nothing about whose it was.
+      expect(row.organization_id).toBe(globex.organizationId);
+      expect(row.project_id).toBe(globex.projectId);
+      expect(row.run_id).toBe(usageRunId);
+      expect(row.work_kind).toBe("simulation");
+      // This fixture has no server-issued customer funding receipt.
+      expect(row.payment_source).toBe("platform");
+    }
+
+    const llm = rows.find((row) => row.model === "gpt-4o-mini");
+    expect(llm).toBeDefined();
+    expect(llm?.operation).toBe("openai_chat_completions");
+    expect(llm?.unit).toBe("tokens");
+    expect(llm?.measurement).toBe("provider_reported");
+    expect(llm?.provider_ref).toBe("chatcmpl-9f2b1c");
+    expect(llm?.quantities).toEqual({
+      input_tokens: 1_000,
+      cached_input_tokens: 400,
+      output_tokens: 100,
+    });
+    // 1,000 uncached at $0.15/1M, 400 cached at $0.075/1M, 100 out at $0.60/1M.
+    expect(Number(llm?.amount_micros)).toBe(240);
+    // The provider's own object is kept whole, so a wrong normalisation can be
+    // re-rated later rather than re-measured.
+    expect(llm?.raw_usage).toMatchObject({ total_tokens: 1_500 });
+
+    const stt = rows.find((row) => row.model === "gpt-live-transcribe");
+    expect(stt?.unit).toBe("seconds");
+    // 7.3 seconds at $0.017 a minute is 2,068.33 micros, rounded to the micro.
+    expect(Number(stt?.amount_micros)).toBe(2_068);
+
+    const tts = rows.find((row) => row.model === "sonic-3.5");
+    expect(tts?.unit).toBe("characters");
+    expect(tts?.measurement).toBe("client_measured");
+    // Cartesia returns no usage object at all, so the record keeps none.
+    expect(tts?.raw_usage).toEqual({});
+    // 42 characters at $50 per 1M credits, one credit a character.
+    expect(Number(tts?.amount_micros)).toBe(2_100);
+  });
+
+  it("is stored once however many times the flush is sent", async () => {
+    const again = await post(
+      await fixture("valid", "voice-provider-usage.json"),
+    );
+    expect(again.statusCode, again.body).toBe(200);
+
+    // The write-ahead log replays the same bytes, span ids included, so the
+    // second delivery collapses onto the first and nothing is charged twice.
+    expect(await usageOf(USAGE_SIMULATION)).toHaveLength(3);
+  });
+
+  it("bounds inference independently while retaining the usual allowance period", async () => {
+    const read = (query = "") =>
+      api.app.inject({
+        method: "GET",
+        url: `/api/organization/usage${query}`,
+        headers: { cookie: globex.cookie },
+      });
+    const defaultPeriod = await read();
+    const included = await read(
+      "?from=2026-01-01T00:00:00Z&to=2027-01-01T00:00:00Z",
+    );
+    const excluded = await read(
+      "?from=2027-01-01T00:00:00Z&to=2028-01-01T00:00:00Z",
+    );
+    expect(included.statusCode, included.body).toBe(200);
+    expect(included.json().inference).toMatchObject({
+      amountMicros: 4408,
+      requests: 3,
+    });
+    expect(excluded.json().inference).toMatchObject({
+      amountMicros: 0,
+      requests: 0,
+    });
+    for (const response of [included, excluded]) {
+      const { inference: _inference, ...period } = response.json();
+      const { inference: _defaultInference, ...expected } =
+        defaultPeriod.json();
+      expect(period).toEqual(expected);
+    }
+    for (const query of [
+      "?from=2026-01-01T00:00:00Z",
+      "?from=bad&to=2027-01-01T00:00:00Z",
+      "?from=2027-01-01T00:00:00Z&to=2026-01-01T00:00:00Z",
+      "?from=2027-01-01T00:00:00Z&to=2027-01-01T00:00:00Z",
+    ])
+      expect((await read(query)).statusCode).toBe(400);
+  });
+
+  it("files the span itself under its own kind, like every other span", async () => {
+    const kinds = await store().rows<{ kind: string; n: string }>(
+      "select kind, count(*) as n from spans final " +
+        `where trace_id = '${USAGE_TRACE}' and kind = 'provider_usage' group by kind`,
+    );
+    expect(Number(kinds[0]?.n)).toBe(3);
+  });
+
+  it("is not read off a scope that is not Egma's own simulator", async () => {
+    const before = (await usageOf(USAGE_SIMULATION)).length;
+    const body = JSON.stringify({
+      resourceSpans: [
+        {
+          resource: {
+            attributes: [
+              {
+                key: "egma.simulation_id",
+                value: { stringValue: USAGE_SIMULATION },
+              },
+            ],
+          },
+          scopeSpans: [
+            {
+              // A framework's own scope, carrying a span that calls itself by
+              // Egma's name. It is stored like any other span and it is not a
+              // bill: a door that read one as spend would let an emitter write
+              // rows into a customer's cost by naming a span.
+              scope: { name: "pipecat", version: "1.7.0" },
+              spans: [
+                {
+                  traceId: USAGE_TRACE,
+                  spanId: "cc10000000000099",
+                  parentSpanId: "cc10000000000001",
+                  name: "provider_usage",
+                  startTimeUnixNano: "1788862447900000000",
+                  endTimeUnixNano: "1788862447900000000",
+                  attributes: [
+                    {
+                      key: "egma.usage.provider",
+                      value: { stringValue: "openai" },
+                    },
+                    {
+                      key: "egma.usage.model",
+                      value: { stringValue: "gpt-4o-mini" },
+                    },
+                    {
+                      key: "egma.usage.operation",
+                      value: { stringValue: "openai_chat_completions" },
+                    },
+                    {
+                      key: "egma.usage.measurement",
+                      value: { stringValue: "provider_reported" },
+                    },
+                    {
+                      key: "egma.usage.quantities",
+                      value: { stringValue: '{"input_tokens":9999999}' },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const posted = await post(body);
+    expect(posted.statusCode, posted.body).toBe(200);
+    expect(await usageOf(USAGE_SIMULATION)).toHaveLength(before);
+  });
+
+  it("costs the flush nothing when Egma cannot read it: the spans still land whole", async () => {
+    const before = (await usageOf(USAGE_SIMULATION)).length;
+    const body = JSON.stringify({
+      resourceSpans: [
+        {
+          resource: {
+            attributes: [
+              {
+                key: "egma.simulation_id",
+                value: { stringValue: USAGE_SIMULATION },
+              },
+            ],
+          },
+          scopeSpans: [
+            {
+              scope: { name: "egma-simulator", version: "1" },
+              spans: [
+                {
+                  traceId: USAGE_TRACE,
+                  spanId: "cc10000000000021",
+                  parentSpanId: "cc10000000000001",
+                  name: "provider_usage",
+                  startTimeUnixNano: "1788862455000000000",
+                  endTimeUnixNano: "1788862455000000000",
+                  attributes: [
+                    {
+                      key: "egma.usage.provider",
+                      value: { stringValue: "openai" },
+                    },
+                    {
+                      key: "egma.usage.model",
+                      value: { stringValue: "gpt-4o-mini" },
+                    },
+                    {
+                      key: "egma.usage.operation",
+                      value: { stringValue: "openai_batch" },
+                    },
+                    {
+                      key: "egma.usage.measurement",
+                      value: { stringValue: "provider_reported" },
+                    },
+                    {
+                      key: "egma.usage.quantities",
+                      value: { stringValue: '{"gpu_hours":3}' },
+                    },
+                  ],
+                },
+                {
+                  traceId: USAGE_TRACE,
+                  spanId: "cc10000000000022",
+                  parentSpanId: "cc10000000000001",
+                  name: "human_turn",
+                  startTimeUnixNano: "1788862455100000000",
+                  endTimeUnixNano: "1788862455100000000",
+                  attributes: [
+                    {
+                      key: "egma.turn.text",
+                      value: { stringValue: "Can we move it to Friday?" },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const posted = await post(body);
+    expect(posted.statusCode, posted.body).toBe(200);
+
+    /*
+     * **Nothing in the partial-success field, and that is the whole claim.**
+     * OTLP's rejected count means "this data was not stored, do not send it
+     * again", and this simulator's own sender raises on a non-zero one — after
+     * which the reporter abandons the simulation and its terminal report never
+     * leaves. A cost Egma could not read is an emitter defect for this
+     * deployment's log; losing the conversation over it would be a far worse
+     * answer than not knowing what one request cost.
+     */
+    expect(posted.json()).toEqual({});
+
+    // The turn beside it landed, and so did the unreadable bill's own span:
+    // the evidence is kept whole either way.
+    const landed = await store().rows<{ span_id: string; kind: string }>(
+      `select span_id, kind from spans final where trace_id = '${USAGE_TRACE}' ` +
+        "and span_id in ('cc10000000000021', 'cc10000000000022') order by span_id",
+    );
+    expect(landed.map((row) => row.kind)).toEqual(["usage", "turn:human"]);
+
+    // And no record was priced from it, because nothing about it could be.
+    expect(await usageOf(USAGE_SIMULATION)).toHaveLength(before);
+  });
+
+  it("is priced at the rate that was in force when the provider answered", async () => {
+    // A price change lands with its own effective date, after the flush above.
+    await api.database.sql(
+      "insert into rate_card (id, provider, model, usage_type, unit, " +
+        "usd_per_million, effective_from, source, read_at) values " +
+        "($1, 'openai', 'gpt-4o-mini', 'input_tokens', 'tokens', '1.50', " +
+        "$2, 'https://developers.openai.com/api/docs/pricing', '2027-01-01')",
+      [`rat_${"0".repeat(26)}`, new Date("2027-01-01T00:00:00.000Z")],
+    );
+
+    // The record already stored keeps the price it was written at: a stored
+    // cost never moves.
+    const before = await usageOf(USAGE_SIMULATION);
+    expect(
+      Number(before.find((row) => row.model === "gpt-4o-mini")?.amount_micros),
+    ).toBe(240);
+
+    // And a request made after that date is priced at the new row. The same
+    // fixture with new span ids and a later instant is a different request.
+    const later = JSON.parse(
+      (await fixture("valid", "voice-provider-usage.json"))
+        .replaceAll("cc1000000000001", "cc1000000000009")
+        .replaceAll("1788862447900000000", "1803896047900000000"),
+    ) as Record<string, unknown>;
+    const priced = await post(JSON.stringify(later));
+    expect(priced.statusCode, priced.body).toBe(200);
+
+    const rows = await usageOf(USAGE_SIMULATION);
+    const now = rows.filter((row) => row.span_id.startsWith("cc1000000000009"));
+    expect(now).toHaveLength(3);
+    // $1.50 per 1M on the thousand uncached tokens, and the cached and output
+    // halves still at the prices that did not change.
+    expect(
+      Number(now.find((row) => row.model === "gpt-4o-mini")?.amount_micros),
+    ).toBe(1_500 + 30 + 60);
+  });
+
+  it("keeps customer-funded usage after key removal and charges only the remaining platform provider", async () => {
+    const owner = contextFor(globex, "admin");
+    const saved = await putProviderKey(
+      owner,
+      "openai",
+      "test-delayed-customer-key-ABCD",
+      null,
+    );
+    await claimSimulations({ claimant: "provider-receipt-test", capacity: 50 });
+    const standing = await resolveSimulationStanding(USAGE_SIMULATION);
+    if (!standing?.claimedAt)
+      throw new Error("the usage simulation has no claim");
+    const receipt = createProviderFundingReceipt(standing.auth, {
+      simulationId: USAGE_SIMULATION,
+      claimedAt: standing.claimedAt,
+      provider: "openai",
+      credentialRef: saved.credential!.revision,
+    });
+    const body = JSON.parse(
+      (await fixture("valid", "voice-provider-usage.json")).replaceAll(
+        "cc1000000000001",
+        "bb1000000000001",
+      ),
+    ) as {
+      resourceSpans: {
+        scopeSpans: {
+          spans: {
+            attributes: { key: string; value: { stringValue: string } }[];
+          }[];
+        }[];
+      }[];
+    };
+    for (const resource of body.resourceSpans)
+      for (const scope of resource.scopeSpans)
+        for (const span of scope.spans) {
+          if (
+            span.attributes.some(
+              (attribute) =>
+                attribute.key === "egma.usage.provider" &&
+                attribute.value.stringValue === "openai",
+            )
+          ) {
+            span.attributes.push({
+              key: "egma.usage.funding_receipt",
+              value: { stringValue: receipt },
+            });
+          }
+        }
+    await deleteProviderKey(owner, "openai", saved.credential!.revision);
+    const scope = {
+      organizationId: globex.organizationId,
+      occurredAtOrAfter: new Date("2020-01-01"),
+    };
+    const before = await readPlatformUsageTotal(scope);
+    const response = await post(JSON.stringify(body));
+    expect(response.statusCode, response.body).toBe(200);
+    const rows = (await usageOf(USAGE_SIMULATION)).filter((row) =>
+      row.span_id.startsWith("bb1000000000001"),
+    );
+    expect(rows).toHaveLength(3);
+    expect(
+      rows
+        .filter((row) => row.provider === "openai")
+        .every((row) => row.payment_source === "customer"),
+    ).toBe(true);
+    const platform = rows.find((row) => row.provider === "cartesia")!;
+    expect(platform.payment_source).toBe("platform");
+    const after = await readPlatformUsageTotal(scope);
+    expect(after.amountMicros - before.amountMicros).toBe(
+      BigInt(platform.amount_micros),
+    );
+    expect(after.requests - before.requests).toBe(1n);
+    await post(JSON.stringify(body));
+    expect(await readPlatformUsageTotal(scope)).toEqual(after);
+    const forged = JSON.stringify(body)
+      .replaceAll("bb1000000000001", "bc1000000000001")
+      .replaceAll(receipt, receipt.slice(0, -5) + "WRONG");
+    expect((await post(forged)).statusCode).toBe(200);
+    const forgedRows = (await usageOf(USAGE_SIMULATION)).filter((row) =>
+      row.span_id.startsWith("bc1000000000001"),
+    );
+    expect(forgedRows.map((row) => row.provider)).toEqual(["cartesia"]);
+    expect(
+      await countOf(
+        "SELECT count() AS n FROM spans FINAL WHERE span_id LIKE 'bc1000000000001%' AND kind='usage'",
+      ),
+    ).toBe(2);
   });
 });

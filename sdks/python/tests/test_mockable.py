@@ -1,23 +1,6 @@
-"""The exchange, from the customer's seat: census, couriers, and answers.
-
-Every test here runs against a room-shaped stand-in for egma's
-participant, so the whole of the SDK's own code is exercised — the room's
-name read, egma found among the people in the room, the census built off
-a real agent, the export installed, the couriers stood in LiveKit's own
-side table, the reply read, the failures raised — with no LiveKit server
-and no network anywhere.
-
-**Every test here is in a simulation room, so every one fails closed.**
-Where the old verb logged and left the agent alone, this one raises
-``NotReported`` and the session never starts; where a courier used to run
-the real tool because Egma was not reached, it now errors. Those two are
-the same decision from two directions: a simulation that isolated nothing
-must not be allowed to look like one that did.
-
-Where a courier is called, it is called the way the framework delivers a
-call to one: through LiveKit's own argument trimming. That is the only
-way the copied signature can be proved, because trimming is the very
-thing the copy exists to survive.
+"""Test simulation startup and mock-tool RPC against an offline room stub.
+Failed startup raises NotReported; failed mock RPC never runs the real tool.
+Invoke mocks through LiveKit argument trimming to verify copied signatures.
 """
 
 from __future__ import annotations
@@ -57,10 +40,6 @@ from room_stub import (
 
 from egma import export, seam, simulation
 from egma.simulation_room import NotReported
-
-# The module rather than the verb: the tests that shorten this SDK's own
-# waits have to reach past the name the package re-exports.
-implementation = importlib.import_module("egma.simulation_room")
 
 
 @pytest.fixture(autouse=True)
@@ -237,6 +216,53 @@ async def test_egma_arriving_after_the_agent_is_waited_for(session):
     assert room.listeners == {}
 
 
+async def test_room_disconnect_ends_the_wait_for_egma(session):
+    agent = ReceptionAgent()
+    room = StubRoom(present=())
+    waiting = asyncio.create_task(
+        simulation(agent, in_a_simulation(room), session)
+    )
+    await asyncio.sleep(0)
+
+    room.disconnect()
+
+    with pytest.raises(NotReported, match="room disconnected"):
+        await asyncio.wait_for(waiting, 0.2)
+    assert room.listeners == {}
+
+
+async def test_cancelling_startup_removes_its_room_listeners(session):
+    agent = ReceptionAgent()
+    room = StubRoom(present=())
+    waiting = asyncio.create_task(
+        simulation(agent, in_a_simulation(room), session)
+    )
+    await asyncio.sleep(0)
+
+    waiting.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await waiting
+    assert waiting.done()
+    assert room.listeners == {}
+
+
+async def test_egma_departure_interrupts_an_in_flight_hello(session):
+    agent = ReceptionAgent()
+    room = StubRoom(hello_waiter=asyncio.Event())
+    waiting = asyncio.create_task(
+        simulation(agent, in_a_simulation(room), session)
+    )
+    await room.hello_started.wait()
+
+    room.depart(EGMA_IDENTITY)
+
+    with pytest.raises(NotReported, match="Egma's participant.*disconnected"):
+        await asyncio.wait_for(waiting, 0.2)
+    assert room.pending_hellos == 0
+    assert room.listeners == {}
+
+
 async def test_egma_already_in_the_room_is_found_without_waiting(session):
     """The other order, which is the one an explicit dispatch produces."""
     agent = ReceptionAgent()
@@ -303,31 +329,28 @@ async def test_two_participants_answering_to_egmas_name_are_refused(session, cap
     ],
 )
 async def test_a_participant_who_is_not_egma_is_never_asked(
-    session, monkeypatch, identity
+    session, identity
 ):
-    """The room's name says simulation; who to talk to is a separate question.
-
-    The name gets this side as far as looking, and no further: what the
-    census carries is every tool this agent has, by name and schema, so
-    the only participant it may be sent to is one that answers to egma's
-    name exactly — the bare name, or the name with a ``-`` and a
-    simulation after it. A prefix test would hand that inventory to
-    ``egma-personality-quiz``. Nobody here matches, so the search waits
-    the bound out and the simulation ends unreported.
+    """Only exact Egma participant names may receive tool schemas.
+    Unrelated prefix matches must never receive the census.
     """
     agent = ReceptionAgent()
     room = StubRoom(present=(identity,), mocked_tools=("check_calendar",))
-    monkeypatch.setattr(implementation, "STARTUP_SECONDS", 0.2)
+    waiting = asyncio.create_task(
+        simulation(agent, in_a_simulation(room), session)
+    )
+    await asyncio.sleep(0)
+    room.disconnect()
 
     with pytest.raises(NotReported):
-        await simulation(agent, in_a_simulation(room), session)
+        await waiting
 
     assert couriers_on(session, agent) == {}
     assert room.asked == []
 
 
 async def test_a_room_that_will_not_say_who_is_in_it_ends_the_simulation(
-    session, monkeypatch
+    session,
 ):
     """A room this side cannot see into is read as a room egma is not in.
 
@@ -340,18 +363,22 @@ async def test_a_room_that_will_not_say_who_is_in_it_ends_the_simulation(
     agent = ReceptionAgent()
     room = StubRoom(mocked_tools=("check_calendar",))
     room.remote_participants = None
-    monkeypatch.setattr(implementation, "STARTUP_SECONDS", 0.2)
+    waiting = asyncio.create_task(
+        simulation(agent, in_a_simulation(room), session)
+    )
+    await asyncio.sleep(0)
+    room.disconnect()
 
     with pytest.raises(NotReported) as refused:
-        await simulation(agent, in_a_simulation(room), session)
+        await waiting
 
-    assert "no Egma participant joined" in str(refused.value)
+    assert "room disconnected" in str(refused.value)
     assert couriers_on(session, agent) == {}
     assert room.asked == []
 
 
 async def test_a_simulation_room_egma_never_joined_says_what_to_do(
-    session, monkeypatch
+    session,
 ):
     """The branch that is unreachable in production, by construction.
 
@@ -363,14 +390,17 @@ async def test_a_simulation_room_egma_never_joined_says_what_to_do(
     """
     agent = ReceptionAgent()
     room = StubRoom(present=(), mocked_tools=("check_calendar",))
-    monkeypatch.setattr(implementation, "STARTUP_SECONDS", 0.2)
+    waiting = asyncio.create_task(
+        simulation(agent, in_a_simulation(room), session)
+    )
+    await asyncio.sleep(0)
+    room.disconnect()
 
     with pytest.raises(NotReported) as refused:
-        await simulation(agent, in_a_simulation(room), session)
+        await waiting
 
     said = str(refused.value)
-    assert "no Egma participant joined" in said
-    assert EGMA_IDENTITY in said
+    assert "room disconnected" in said
     assert "LiveKit room" in said
     assert "`egma` package" in said
     assert couriers_on(session, agent) == {}
@@ -398,32 +428,42 @@ async def test_a_census_sent_before_egma_registered_the_exchange_is_asked_again(
     assert set(couriers_on(session, agent)) == {"check_calendar"}
 
 
-async def test_a_census_asked_again_until_the_deadline_ends_the_simulation(
-    session, monkeypatch
-):
-    """The retry is bounded, and what it ends in is an unreported ending."""
+@pytest.mark.parametrize("code", [1400, 1501, 1502, 1505])
+async def test_a_transient_hello_failure_retries_the_same_census(session, code):
+    agent = ReceptionAgent()
+    room = StubRoom(
+        mocked_tools=("check_calendar",),
+        hello_failures=[RpcError(code, "one hello attempt was lost")],
+    )
+
+    await simulation(agent, in_a_simulation(room), session)
+
+    assert room.methods_asked == [seam.HELLO_METHOD, seam.HELLO_METHOD]
+    assert room.asked[0].payload == room.asked[1].payload
+    assert set(couriers_on(session, agent)) == {"check_calendar"}
+
+
+async def test_a_census_is_asked_again_until_the_room_ends(session):
+    """Transient setup keeps trying while the simulation room is active."""
     agent = ReceptionAgent()
     room = StubRoom(mocked_tools=("check_calendar",), refuses_hello_until=10_000)
-    monkeypatch.setattr(implementation, "STARTUP_SECONDS", 0.3)
+    waiting = asyncio.create_task(
+        simulation(agent, in_a_simulation(room), session)
+    )
+    await room.second_hello_started.wait()
+    room.disconnect()
 
     with pytest.raises(NotReported) as refused:
-        await simulation(agent, in_a_simulation(room), session)
+        await waiting
 
-    assert EGMA_IDENTITY in str(refused.value)
+    assert "room disconnected" in str(refused.value)
     assert couriers_on(session, agent) == {}
     assert room.methods_asked
 
 
 async def test_a_room_that_lost_egma_is_not_waited_out(session):
-    """``RECIPIENT_NOT_FOUND`` is answered at once, not asked again.
-
-    It is the same kind of race as an unregistered method in principle,
-    and it is treated differently on purpose: nothing gets as far as
-    asking without having seen egma in this room's own participant table,
-    so a destination that cannot be found now is one that left. Asking it
-    again for the rest of the bound would hold this agent silent through
-    the simulation it was waiting to serve, and end in the same place —
-    which is this simulation ending unreported.
+    """Do not retry RECIPIENT_NOT_FOUND: discovery already saw the participant,
+    so this response means it left. Startup must end with NotReported.
     """
     agent = ReceptionAgent()
     room = StubRoom(refuses_with=not_reached())
@@ -462,7 +502,7 @@ async def test_the_legacy_context_block_changes_nothing_in_a_simulation_room(ses
 
 
 async def test_an_identity_named_in_metadata_is_never_the_address(
-    session, monkeypatch
+    session,
 ):
     """The address comes from the room, never from a string handed to it.
 
@@ -475,16 +515,20 @@ async def test_an_identity_named_in_metadata_is_never_the_address(
     """
     agent = ReceptionAgent()
     room = StubRoom(present=("caller-8871",), mocked_tools=("check_calendar",))
-    monkeypatch.setattr(implementation, "STARTUP_SECONDS", 0.2)
-
-    with pytest.raises(NotReported):
-        await simulation(
+    waiting = asyncio.create_task(
+        simulation(
             agent,
             StubContext(
                 room, SIMULATION_ROOM, egma_metadata(identity="caller-8871")
             ),
             session,
         )
+    )
+    await asyncio.sleep(0)
+    room.disconnect()
+
+    with pytest.raises(NotReported):
+        await waiting
 
     assert room.asked == []
     assert couriers_on(session, agent) == {}
@@ -1371,15 +1415,8 @@ async def test_a_refusal_reaches_the_model_and_never_the_real_tool(session, refu
 
 
 async def test_a_census_egma_refuses_ends_the_simulation_and_says_why(session):
-    """egma is there and will not answer for anything.
-
-    Nothing is wrapped and the session never starts. Egma's own sentence
-    is carried through whole, because it is the half of the finding this
-    side did not write and the half a developer acts on.
-
-    The agent is left exactly as it was on the way out: raising is how
-    this stops the session, never how it damages the object it was
-    handed.
+    """A refused hello must preserve Egma's error, leave tools unchanged,
+    and prevent AgentSession.start.
     """
     agent = ReceptionAgent()
     room = StubRoom(
@@ -1555,7 +1592,7 @@ async def test_the_export_is_installed_before_a_word_goes_on_the_wire(
 
 
 async def test_the_export_is_installed_even_when_the_exchange_then_fails(
-    session, egma_export, monkeypatch
+    session, egma_export
 ):
     """A simulation that cannot mock anything still reports what it did.
 
@@ -1566,10 +1603,14 @@ async def test_the_export_is_installed_even_when_the_exchange_then_fails(
     """
     agent = ReceptionAgent()
     room = StubRoom(present=(), mocked_tools=("check_calendar",))
-    monkeypatch.setattr(implementation, "STARTUP_SECONDS", 0.2)
+    waiting = asyncio.create_task(
+        simulation(agent, in_a_simulation(room), session)
+    )
+    await asyncio.sleep(0)
+    room.disconnect()
 
     with pytest.raises(NotReported):
-        await simulation(agent, in_a_simulation(room), session)
+        await waiting
 
     assert egma_export.registered == [(egma_export.provider, SIMULATION_ROOM)]
 

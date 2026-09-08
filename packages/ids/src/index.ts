@@ -91,6 +91,38 @@ export const ID_PREFIXES = [
    * oldest-first without a second sort key.
    */
   "sgm",
+  /**
+   * One price on the rate card: what a million of one usage type of one model
+   * costs, from one date. Its own identity because a usage record cites the
+   * exact row that priced it, and because an append-only price history has to
+   * be able to hold two rows for the same model that differ only by date.
+   */
+  "rat",
+  /**
+   * One measured provider request. The row's identity is Egma's own, minted
+   * and time-sortable like every other; the deterministic identity that makes
+   * a resend collapse rides beside it in its own unique column, because a hash
+   * is neither prefixed nor sortable and could never be one of these.
+   */
+  /**
+   * One plan Egma Cloud sells: its fee, its three allowances and its two
+   * overage prices. Its own identity rather than the plan code as a key,
+   * because the code is what a customer's account names and a row can be
+   * superseded without the code moving.
+   */
+  "cpl",
+  /**
+   * One organization's billing account on Egma Cloud: its plan, its period
+   * anchor, whatever Stripe holds for it, and its inference balance.
+   */
+  "cba",
+  /**
+   * One movement of an inference balance: a welcome credit, a purchased
+   * credit, an inference charge or a correction. Its own identity because the
+   * ledger is append-only and a row is never edited — what makes a movement
+   * happen at most once is its idempotency key beside this, never this.
+   */
+  "cle",
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];

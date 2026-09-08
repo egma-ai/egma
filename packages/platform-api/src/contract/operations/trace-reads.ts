@@ -15,6 +15,7 @@ import {
   gradeProjectionRequired,
   gradingStateSchema,
 } from "./grades.ts";
+import { workBlockSchema } from "./runs.ts";
 
 const stringSchema = { type: "string" } as const;
 const integerSchema = { type: "integer" } as const;
@@ -113,6 +114,7 @@ const traceDetailSchema = {
     metrics: arrayOf(metricSchema),
     simulationId: nullable(stringIdSchema),
     gradingState: gradingStateSchema,
+    workBlock: nullable(workBlockSchema),
     ...gradeProjectionProperties,
   },
   required: [
@@ -123,6 +125,7 @@ const traceDetailSchema = {
     "metrics",
     "simulationId",
     "gradingState",
+    "workBlock",
     ...gradeProjectionRequired,
   ],
   additionalProperties: false,

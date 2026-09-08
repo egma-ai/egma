@@ -1,15 +1,5 @@
-"""What the simulator refuses to start with, and what it starts without.
-
-The simulator is one more container, and a container's whole conversation
-with whoever deployed it is its environment and its first log lines. So
-the rule these tests hold is one rule: anything the simulator cannot work
-without is refused at startup **by name**, and everything else has a
-working default. Nobody should discover a mistyped variable halfway
-through their first simulation, and nobody should have to set nine
-variables to see one.
-
-Every test here is hermetic — an environment, a temporary directory, and
-no network at all.
+"""Verify named startup errors and usable defaults with an isolated environment
+and temporary directories. No network is needed.
 """
 
 from __future__ import annotations
@@ -34,6 +24,11 @@ def test_one_variable_is_enough(env, tmp_path):
 
     assert config.control_plane_url == A_URL
     assert config.capacity == 2
+    assert config.mode == "persistent"
+    assert config.modalities is None
+    assert config.execution_deadline_seconds == 900.0
+    assert config.standby_seconds == 1800.0
+    assert config.thread_pool_workers is None
     assert config.vad_provider == "scripted"
     assert config.service_token is None
     assert config.claimant.startswith("egma-simulator-")
@@ -55,6 +50,9 @@ def test_empty_means_unset(env):
         "EGMA_SIMULATOR_HEARTBEAT_SECONDS",
         "EGMA_SIMULATOR_LOG_LEVEL",
         "EGMA_SIMULATOR_SERVICE_TOKEN",
+        "EGMA_SIMULATOR_MODE",
+        "EGMA_SIMULATOR_MODALITIES",
+        "EGMA_SIMULATOR_THREAD_POOL_WORKERS",
     ):
         env.setenv(name, "")
 
@@ -118,6 +116,8 @@ DURATION_VARIABLES = [
     "EGMA_SIMULATOR_HEARTBEAT_SECONDS",
     "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS",
     "EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS",
+    "EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS",
+    "EGMA_SIMULATOR_STANDBY_SECONDS",
 ]
 """Every variable read as a duration — all of them through one helper."""
 
@@ -125,16 +125,8 @@ DURATION_VARIABLES = [
 @pytest.mark.parametrize("variable", DURATION_VARIABLES)
 @pytest.mark.parametrize("written", ["nan", "inf", "-inf", "Infinity", "NaN"])
 def test_a_duration_that_is_not_finite_is_refused_by_name(env, variable, written):
-    """The numbers that read as numbers and behave as neither.
-
-    ``float()`` accepts every one of these, and the range check cannot
-    see two of them: every comparison against nan is False, and +inf is
-    greater than zero, so both would be taken for a duration. What they
-    would buy is silence rather than an error — an infinite heartbeat
-    interval never beats again, so a simulation going along fine looks
-    orphaned to the control plane, and an infinite report deadline
-    retries one report until the process ends, holding a capacity slot
-    nothing will ever free.
+    """Reject NaN and infinities even though float() accepts them.
+    Range checks alone can admit values that disable heartbeats or retry deadlines.
     """
     env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
     env.setenv(variable, written)
@@ -159,6 +151,40 @@ def test_an_unknown_log_level_is_refused_by_name(env):
     env.setenv("EGMA_SIMULATOR_LOG_LEVEL", "CHATTY")
 
     with pytest.raises(ValueError, match="EGMA_SIMULATOR_LOG_LEVEL"):
+        SimulatorConfig.from_env()
+
+
+@pytest.mark.parametrize("mode", ["one-shot", "standby"])
+def test_a_bounded_voice_mode_has_one_slot_and_its_own_lifetime(env, mode):
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_MODE", mode)
+    env.setenv("EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS", "12")
+    env.setenv("EGMA_SIMULATOR_STANDBY_SECONDS", "34")
+    env.setenv("EGMA_SIMULATOR_THREAD_POOL_WORKERS", "1")
+
+    config = SimulatorConfig.from_env()
+
+    assert config.mode == mode
+    assert config.capacity == 1
+    assert config.modalities == ("voice",)
+    assert config.execution_deadline_seconds == 12
+    assert config.standby_seconds == 34
+    assert config.thread_pool_workers == 1
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("EGMA_SIMULATOR_CAPACITY", "2"),
+        ("EGMA_SIMULATOR_MODALITIES", "chat"),
+    ],
+)
+def test_a_bounded_mode_refuses_non_voice_fleet_shape(env, variable, value):
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_MODE", "one-shot")
+    env.setenv(variable, value)
+
+    with pytest.raises(ValueError, match=variable):
         SimulatorConfig.from_env()
 
 

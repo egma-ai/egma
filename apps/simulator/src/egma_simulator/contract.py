@@ -1,17 +1,6 @@
-"""The simulation contract, as the simulator sees it.
-
-The two JSON Schemas under ``packages/simulation-contract`` are the one
-meeting point between the TypeScript control plane and this service. This
-module locates that package, compiles both schemas once, and offers the two
-validation directions: a claimed spec is refused if it does not speak the
-contract, and every outgoing report is held to the report schema before a
-byte of it leaves the process.
-
-The schemas are read from the contract package rather than vendored here,
-deliberately: one shared artifact, two readers. Inside the repository the
-package sits a fixed walk up from this file; a deployment that lays files
-out differently points ``EGMA_SIMULATION_CONTRACT_DIR`` at a directory
-holding ``schemas/`` and ``fixtures/``.
+"""Validate claimed specs and outgoing reports against the shared JSON Schemas
+in packages/simulation-contract. Compile schemas once; do not vendor copies.
+EGMA_SIMULATION_CONTRACT_DIR can override the package location in deployments.
 """
 
 from __future__ import annotations

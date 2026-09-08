@@ -1,12 +1,20 @@
 import {
+  openBillingPlugIn,
+  PROVIDERS_BY_JOB,
+  type BillingPlugIn,
+  type SimulationConcurrencyCaps,
+} from "@egma/db";
+import {
   providerCredentialSource,
   type ProviderCredentialSource,
 } from "@egma/provider-credentials";
 
 import { SERVICE_TOKEN_PREFIX } from "./auth/service-token.ts";
 import type { SmtpSettings } from "./auth/email.ts";
-import type { IngestionStore } from "./ingestion/object-store.ts";
+import { loadIngestionSettings, type IngestionSettings } from "@egma/ingestion";
+export type { IngestionSettings } from "@egma/ingestion";
 import type { BlobStore } from "./recordings/signed-link.ts";
+import type { AwsVoiceFleetSettings } from "./voice-fleet.ts";
 
 /** The one deployment-owned route used for phone simulations. */
 export type CarrierRoute = {
@@ -58,39 +66,6 @@ const E164 = /^\+[1-9]\d{1,14}$/u;
  */
 export type DeploymentRole = "all" | "ingest" | "drain";
 
-/**
- * Everything the durable ingestion path is told, in one place.
- *
- * **The numbers here are documented starting values, not proven capacity.**
- * Each one is set where the code that reads it can survive it and where the
- * bound it sits under is known — the segment byte bound sits under the trace
- * store's own insert bound, the flush interval sits inside the product's
- * two-second visibility target — and the release's capacity proof is what
- * turns any of them into a claim.
- */
-export type IngestionSettings = {
-  readonly role: DeploymentRole;
-  /**
-   * The ingestion bucket, or `undefined` on a deployment that has named no
-   * endpoint. Naming the endpoint is what selects it, the way naming the
-   * browser's address selects the recording store above.
-   */
-  readonly store: IngestionStore | undefined;
-  /** Where the local write-ahead log lives. A writable directory, on a volume. */
-  readonly logDirectory: string;
-  readonly logMaxBytes: number;
-  readonly logMaxRecords: number;
-  /** How long the oldest staged record waits for company before its segment seals. */
-  readonly flushMilliseconds: number;
-  /** Uncompressed NDJSON bytes, under the trace store's own insert bound. */
-  readonly segmentMaxBytes: number;
-  readonly segmentMaxRecords: number;
-  /** Past this, a request is answered retryably with its staged record retained. */
-  readonly requestTimeoutMilliseconds: number;
-  /** How often the whole pending prefix is listed, restart scan aside. */
-  readonly scanIntervalMilliseconds: number;
-};
-
 export type Config = {
   readonly databaseUrl: string;
   /**
@@ -122,14 +97,8 @@ export type Config = {
    */
   readonly encryptionKey: string;
   /**
-   * One organization on this deployment, and the first person to sign up claims
-   * it. Sentry's flag, and Sentry's reason: without it anyone who can reach the
-   * URL signs up, joins the only organization, and — because everyone defaults
-   * to `admin` — administers somebody else's egma.
-   *
-   * On by default, because the default deployment is a self-hosted one. A
-   * multi-tenant deployment turns it off; nothing derives from which one this
-   * is.
+   * Close open signup after the first organization claims this deployment.
+   * Enabled by default for self-hosting; hosted deployments can disable it.
    */
   readonly singleOrganization: boolean;
   /**
@@ -149,15 +118,8 @@ export type Config = {
    */
   readonly rateLimitPerMinute: number;
   /**
-   * What the simulator shows this API to claim simulation work — `egma_st_`
-   * and then a secret, the same value both containers read. Absent means the
-   * service will not start: the claim answers carry customers' live provider
-   * credentials, port 3100 is published on the host, and a claim door that
-   * quietly served whoever asked would hand those credentials to the LAN.
-   * The compose file has no default for it, on the `EGMA_AUTH_SECRET` pattern:
-   * a token written into a public repository is a token every reader of it
-   * holds, so a deployment that states none is refused at start by name rather
-   * than started with a claim door the world already has the key to.
+   * Required deployment token for internal simulation requests, prefixed
+   * egma_st_. Claims return provider credentials, so no public default is safe.
    */
   readonly simulatorServiceToken: string;
   /**
@@ -168,6 +130,46 @@ export type Config = {
    * Postgres, and neither keeps a cross-work key cache.
    */
   readonly providerCredentials: ProviderCredentialSource;
+  /** Optional deployment-wide simulation and speech-provider concurrency caps. */
+  readonly simulationConcurrencyCaps: SimulationConcurrencyCaps;
+  /** Hosted voice compute. Unset self-hosts never import the AWS adapter. */
+  readonly voiceFleet: AwsVoiceFleetSettings | undefined;
+  /** Immutable public commit running in this task, exposed by `/health`. */
+  readonly releaseSha: string | undefined;
+  /**
+   * The billing plug-in this deployment runs on: an entitlement source and a
+   * usage sink, chosen once from the settings below.
+   *
+   * **Absent billing is the default and is not a special case.** With no Stripe
+   * secret named, the plug-in is the open one — every allowance unlimited,
+   * every usage record discarded — and the product is exactly the product. A
+   * self-hoster who names the same secret gets the same billing, which is what
+   * makes billing a hosted service rather than a cloud-only feature (ADR-0024).
+   * Nothing about the choice derives from whether this deployment is the cloud.
+   */
+  readonly billing: BillingPlugIn;
+  /**
+   * `EGMA_STRIPE_SECRET_KEY`, as the deployment named it, or `undefined`.
+   *
+   * **It is a setting and never a mode.** Its presence is what selects the
+   * cloud adapter, and the selection itself happens in `billing.ts` beside
+   * this file, because the adapter lives in the commercially licensed package
+   * and loading it is a dynamic import taken only when this is set. Reading
+   * the setting here rather than there keeps every deployment value in one
+   * place.
+   */
+  readonly stripeSecretKey: string | undefined;
+  /**
+   * `EGMA_STRIPE_WEBHOOK_SECRET`, as the deployment named it, or `undefined`.
+   *
+   * **What proves a delivery came from Stripe.** A webhook carries no cookie
+   * and no key: anybody can post to the endpoint, and only Stripe can sign a
+   * body against this secret. Absent, the endpoint is not mounted at all —
+   * an endpoint that could not check a signature would be one anybody could
+   * post a payment to. The buttons still work without it; Stripe's answers
+   * land the day it is set.
+   */
+  readonly stripeWebhookSecret: string | undefined;
   /**
    * The deployment's phone carrier route, read from the process environment.
    *
@@ -177,20 +179,9 @@ export type Config = {
    */
   readonly carrierRoute: CarrierRoute | undefined;
   /**
-   * The object store voice simulations' recordings live in, or `undefined` on a
-   * deployment that has named none.
-   *
-   * **Naming the browser's address is what selects it**, the way naming an
-   * endpoint is what sends the simulator's recordings to object storage in the
-   * first place. Absent, the control plane can still read and report every
-   * simulation it could before; it simply cannot hand anybody a link to the
-   * audio, and it says so in a sentence naming the variable rather than
-   * answering an empty player.
-   *
-   * The address here is **the browser's**, and this process holds no other one.
-   * It never opens a connection to the store — signing is arithmetic — so there
-   * is no internal endpoint in this configuration for a future reader to sign
-   * against by mistake. See `recordings/signed-link.ts`.
+   * Recording playback configuration, enabled by EGMA_BLOB_PUBLIC_URL.
+   * Use the browser-accessible address for signed links. Signing does not
+   * connect to storage; without this configuration, audio links are unavailable.
    */
   readonly blob: BlobStore | undefined;
   /**
@@ -227,197 +218,127 @@ function flag(
   throw new Error(`${name} is not a yes or a no: ${environment[name]}`);
 }
 
-/** Which halves of ingestion this process serves. See `DeploymentRole`. */
-function deploymentRole(environment: NodeJS.ProcessEnv): DeploymentRole {
-  const raw = environment.EGMA_ROLE?.trim();
-  if (raw === undefined || raw === "") return "all";
-  if (raw === "all" || raw === "ingest" || raw === "drain") return raw;
-  throw new Error("EGMA_ROLE must be all, ingest or drain, not " + raw);
-}
-
-/**
- * One ingestion bound, as a positive whole number.
- *
- * Refused by name rather than coerced, because every one of these is a bound
- * that decides what happens under load: a zero or a stray unit suffix would
- * turn a bound into a refusal of everything, at the moment there is most
- * traffic to refuse.
- */
-function bound(
+function positiveWhole(
   environment: NodeJS.ProcessEnv,
   name: string,
-  fallback: number,
-): number {
+): number | undefined {
   const raw = environment[name]?.trim();
-  if (raw === undefined || raw === "") return fallback;
-  const held = Number(raw);
-  if (!Number.isInteger(held) || held <= 0) {
-    throw new Error(`${name} is not a positive whole number: ${raw}`);
+  if (raw === undefined || raw === "") return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${name} must be a whole number of at least 1: ${raw}`);
   }
-  return held;
+  return value;
 }
 
-/**
- * The ingestion bucket and the credential confined to it, or `undefined` where
- * nobody named an endpoint.
- *
- * **This address is Egma's own, and that is the difference from
- * `EGMA_BLOB_PUBLIC_URL` next door.** The control plane has never opened a
- * connection to an object store before this release — recordings are signed
- * arithmetic and fetched by a browser — so this is the first setting in the
- * file that names where *this container* reaches a store. On the bundled
- * deployment that is `http://minio:9000`, which is exactly the value the
- * recordings setting must never hold.
- *
- * All of it or none of it, refused at startup by name, on the recording store's
- * discipline: half a credential accepts evidence it cannot make durable, and a
- * request that answers `503` for a reason nobody can see is worse than a
- * process that refuses to start naming the variable.
- */
-function ingestionStore(
+function simulationConcurrencyCaps(
   environment: NodeJS.ProcessEnv,
-): IngestionStore | undefined {
-  const endpoint = environment.EGMA_INGEST_ENDPOINT?.trim() || "";
-  if (endpoint === "") return undefined;
-
-  let parsed: URL;
+): SimulationConcurrencyCaps {
+  const voice = positiveWhole(
+    environment,
+    "EGMA_VOICE_SIMULATION_CONCURRENCY_CAP",
+  );
+  const chat = positiveWhole(
+    environment,
+    "EGMA_CHAT_SIMULATION_CONCURRENCY_CAP",
+  );
+  const raw = environment.EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS?.trim();
+  if (raw === undefined || raw === "") {
+    return {
+      ...(voice === undefined ? {} : { voice }),
+      ...(chat === undefined ? {} : { chat }),
+    };
+  }
+  let parsed: unknown;
   try {
-    parsed = new URL(endpoint);
+    parsed = JSON.parse(raw);
   } catch {
     throw new Error(
-      `EGMA_INGEST_ENDPOINT is not a URL: ${endpoint}. It is the address this ` +
-        "container reaches the ingestion bucket at, and on the bundled " +
-        "deployment it looks like http://minio:9000.",
+      "EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS must be a JSON object of provider names to positive whole numbers",
     );
   }
-  if (!["http:", "https:"].includes(parsed.protocol)) {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error(
-      `EGMA_INGEST_ENDPOINT speaks ${parsed.protocol} and Egma reaches an ` +
-        "object store over http: or https:",
+      "EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS must be a JSON object of provider names to positive whole numbers",
     );
   }
-  // Scheme, host and port, and nothing after them — the narrowing the recording
-  // store's address makes, for a reason of its own. A credential in this URL
-  // would be a second place a credential lives, silently outranking the pair
-  // below; a path would be read as part of the bucket's address by one client
-  // and dropped by another, and a segment written under one reading would be
-  // invisible to a listing made under the other.
+  const speechProviders = new Set<string>(
+    [...PROVIDERS_BY_JOB.stt, ...PROVIDERS_BY_JOB.tts].map(
+      (entry) => entry.provider,
+    ),
+  );
+  const caps: Record<string, number> = {};
+  for (const [provider, offered] of Object.entries(parsed)) {
+    if (!speechProviders.has(provider)) {
+      throw new Error(
+        `EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS names unsupported speech provider ${provider}`,
+      );
+    }
+    if (!Number.isInteger(offered) || Number(offered) < 1) {
+      throw new Error(
+        `EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS must give ${provider} a whole number of at least 1`,
+      );
+    }
+    caps[provider] = Number(offered);
+  }
+  return {
+    ...(voice === undefined ? {} : { voice }),
+    ...(chat === undefined ? {} : { chat }),
+    speechProviders: caps,
+  };
+}
+
+function jsonStringList(environment: NodeJS.ProcessEnv, name: string): string[] {
+  const raw = environment[name]?.trim();
+  if (!raw) throw new Error(`${name} is required by EGMA_VOICE_FLEET_LAUNCHER`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`${name} must be a JSON array of non-empty strings`);
+  }
   if (
-    parsed.username !== "" ||
-    parsed.password !== "" ||
-    (parsed.pathname !== "" && parsed.pathname !== "/") ||
-    parsed.search !== "" ||
-    parsed.hash !== ""
+    !Array.isArray(parsed) || parsed.length === 0 ||
+    parsed.some((value) => typeof value !== "string" || value.trim() === "")
   ) {
-    throw new Error(
-      `EGMA_INGEST_ENDPOINT must be only the address Egma reaches the ` +
-        `ingestion store at — scheme, host and port, nothing else — and this ` +
-        `one carries more. Set it to ${parsed.origin}, and set the credential ` +
-        `in EGMA_INGEST_ACCESS_KEY_ID and EGMA_INGEST_SECRET_ACCESS_KEY rather ` +
-        `than in the address.`,
-    );
+    throw new Error(`${name} must be a non-empty JSON array of non-empty strings`);
   }
-
-  const accessKeyId = environment.EGMA_INGEST_ACCESS_KEY_ID?.trim() || "";
-  const secretAccessKey = environment.EGMA_INGEST_SECRET_ACCESS_KEY?.trim() || "";
-  const missing = [
-    accessKeyId === "" ? "EGMA_INGEST_ACCESS_KEY_ID" : "",
-    secretAccessKey === "" ? "EGMA_INGEST_SECRET_ACCESS_KEY" : "",
-  ].filter((name) => name !== "");
-  if (missing.length > 0) {
-    throw new Error(
-      `EGMA_INGEST_ENDPOINT names an ingestion store and this deployment is ` +
-        `missing ${missing.join(" and ")}. Both halves are one credential, and ` +
-        "it is its own — never the recording store's read pair and never the " +
-        "simulator's write pair. It is confined to this bucket's pending " +
-        "prefix, so one workload cannot read, delete or expire the other's " +
-        "objects.",
-    );
-  }
-
-  const bucket = environment.EGMA_INGEST_BUCKET?.trim() || DEFAULT_INGEST_BUCKET;
-  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(bucket)) {
-    throw new Error(
-      `EGMA_INGEST_BUCKET must be a bucket name — lower case, 3 to 63 ` +
-        `characters, letters, digits, dots and hyphens, and no separator; ` +
-        `got ${bucket}`,
-    );
-  }
-
-  return {
-    endpoint: parsed.origin,
-    bucket,
-    region: ingestRegion(environment, parsed),
-    accessKeyId,
-    secretAccessKey,
-  };
+  return parsed.map((value) => value.trim());
 }
 
-/**
- * What the ingestion client signs for.
- *
- * The recording store's rule, one bucket over and for the same two reasons:
- * MinIO ignores the region and every signature must still carry one, so a
- * deployment that named none works; and on Amazon's own S3 the default is not a
- * default but a wrong answer, refused by name rather than signed with. A bucket
- * in `eu-west-1` signed for `us-east-1` refuses every upload with
- * `SignatureDoesNotMatch`, which names neither the region nor the variable —
- * and here that is not a recording that will not play, it is acceptance
- * answering `503` for every request the deployment receives.
- */
-function ingestRegion(environment: NodeJS.ProcessEnv, address: URL): string {
-  const named = environment.EGMA_INGEST_REGION?.trim() || "";
-  if (named !== "") return named;
-
-  if (address.hostname.endsWith(".amazonaws.com")) {
-    throw new Error(
-      `EGMA_INGEST_ENDPOINT points at ${address.hostname}, which is Amazon's ` +
-        "own S3, and no EGMA_INGEST_REGION was set. A signature carries the " +
-        "region and S3 refuses one signed for another, so Egma would sign " +
-        "every segment for us-east-1 and every acceptance would fail. Set " +
-        "EGMA_INGEST_REGION to the ingestion bucket's region.",
-    );
-  }
-  return DEFAULT_INGEST_REGION;
-}
-
-/** Everything the durable ingestion path is told. See `IngestionSettings`. */
-function ingestionSettings(
+function voiceFleetSettings(
   environment: NodeJS.ProcessEnv,
-): IngestionSettings {
+): AwsVoiceFleetSettings | undefined {
+  const kind = environment.EGMA_VOICE_FLEET_LAUNCHER?.trim();
+  if (!kind) return undefined;
+  if (kind !== "aws-ecs") {
+    throw new Error(`EGMA_VOICE_FLEET_LAUNCHER does not support ${kind}`);
+  }
+  const required = (name: string): string => {
+    const value = environment[name]?.trim();
+    if (!value) throw new Error(`${name} is required by EGMA_VOICE_FLEET_LAUNCHER`);
+    return value;
+  };
   return {
-    role: deploymentRole(environment),
-    store: ingestionStore(environment),
-    logDirectory:
-      environment.EGMA_INGESTION_LOG_DIR?.trim() || DEFAULT_INGESTION_LOG_DIR,
-    logMaxBytes: bound(environment, "EGMA_INGESTION_LOG_MAX_BYTES", 536_870_912),
-    logMaxRecords: bound(environment, "EGMA_INGESTION_LOG_MAX_RECORDS", 200_000),
-    flushMilliseconds: bound(
+    kind,
+    cluster: required("EGMA_VOICE_FLEET_CLUSTER"),
+    taskDefinition: required("EGMA_VOICE_FLEET_TASK_DEFINITION"),
+    containerName: "simulator",
+    subnets: jsonStringList(environment, "EGMA_VOICE_FLEET_SUBNETS"),
+    securityGroups: jsonStringList(
       environment,
-      "EGMA_INGESTION_FLUSH_MILLISECONDS",
-      500,
-    ),
-    segmentMaxBytes: bound(
-      environment,
-      "EGMA_INGESTION_SEGMENT_MAX_BYTES",
-      8_388_608,
-    ),
-    segmentMaxRecords: bound(
-      environment,
-      "EGMA_INGESTION_SEGMENT_MAX_RECORDS",
-      5_000,
-    ),
-    requestTimeoutMilliseconds: bound(
-      environment,
-      "EGMA_INGESTION_REQUEST_TIMEOUT_MILLISECONDS",
-      10_000,
-    ),
-    scanIntervalMilliseconds: bound(
-      environment,
-      "EGMA_INGESTION_SCAN_INTERVAL_MILLISECONDS",
-      30_000,
+      "EGMA_VOICE_FLEET_SECURITY_GROUPS",
     ),
   };
+}
+
+function releaseSha(environment: NodeJS.ProcessEnv): string | undefined {
+  const value = environment.EGMA_RELEASE_SHA?.trim();
+  if (!value) return undefined;
+  if (!/^[0-9a-f]{40}$/u.test(value)) {
+    throw new Error("EGMA_RELEASE_SHA must be a 40-character lowercase commit SHA");
+  }
+  return value;
 }
 
 /**
@@ -605,9 +526,19 @@ export function loadConfig(
     rateLimitPerMinute,
     simulatorServiceToken,
     providerCredentials: providerCredentialSource(environment),
+    simulationConcurrencyCaps: simulationConcurrencyCaps(environment),
+    voiceFleet: voiceFleetSettings(environment),
+    releaseSha: releaseSha(environment),
+    // The open plug-in, always, and the one setting that can replace it. A
+    // deployment that named a Stripe secret has the cloud adapter installed
+    // over this at boot; see `billing.ts` and `index.ts`.
+    billing: openBillingPlugIn(),
+    stripeSecretKey: environment.EGMA_STRIPE_SECRET_KEY?.trim() || undefined,
+    stripeWebhookSecret:
+      environment.EGMA_STRIPE_WEBHOOK_SECRET?.trim() || undefined,
     carrierRoute: carrierRoute(environment),
     blob: blobStore(environment, parsedBaseUrl),
-    ingestion: ingestionSettings(environment),
+    ingestion: loadIngestionSettings(environment),
   };
 }
 
@@ -677,32 +608,10 @@ function carrierRoute(environment: NodeJS.ProcessEnv): CarrierRoute | undefined 
 }
 
 /**
- * The bucket that holds recordings and the read-only credential that reaches
- * it, or `undefined` where nobody named one.
- *
- * **The address is the browser's, and that is this whole setting's reason for
- * existing.** A signed link is bound by signature to the host it was signed for.
- * The API reaches MinIO at `minio:9000` inside the compose network and a browser
- * reaches it at whatever the deployment publishes — sign for one, fetch from the
- * other, and the store answers `SignatureDoesNotMatch`, which names neither
- * address and costs whoever meets it a day. So the browser's address is its own
- * variable from the first commit rather than after the first report, and it is
- * the only address this process holds.
- *
- * **The credential is read-only**, separate from the write credential the
- * simulator holds. A leaked read credential must not be usable to overwrite a
- * customer's call recording — the compose file's bucket job creates a MinIO user
- * that can do nothing but `s3:GetObject`.
- *
- * All of it or none of it, refused at startup by name, on the simulator's
- * discipline: half a credential resolves no recording at all and would be
- * discovered by somebody pressing play, one simulation at a time, with the
- * store's own refusal in a log they cannot see.
- *
- * **`baseUrl` is here for one reason: the two addresses have to agree about
- * scheme.** Both are addresses of *the same browser* — one to egma, one to the
- * store — and an `https:` page may not fetch `http:` audio. See the mixed
- * content refusal below.
+ * Parse recording playback settings and require a complete credential pair.
+ * The endpoint must be browser-accessible because signatures bind its host.
+ * Use a read-only credential; its permissions are enforced by storage policy.
+ * Reject HTTP storage when the Egma page uses HTTPS.
  */
 function blobStore(
   environment: NodeJS.ProcessEnv,
@@ -728,29 +637,8 @@ function blobStore(
         "recording over http: or https:",
     );
   }
-  // The two settings are one browser's two addresses, and a browser will not
-  // mix their schemes. A page served over https: may not fetch audio over
-  // http:: every browser blocks it as mixed content *before the request is
-  // made*, so the store is never asked, the signature is never checked, and
-  // the only sentence naming the reason is in a console the person pressing
-  // play is not looking at. That is this effort's own bug class arriving by a
-  // third route — a setting whose wrong value fails while naming nothing —
-  // after the address binding and the region defaulting from nothing. Both of
-  // those were closed by refusing here, by name, and so is this.
-  //
-  // Only this one pair is incoherent. An http: egma with an https: store is
-  // fine — a plaintext page may fetch encrypted bytes — and an http: egma with
-  // an http: store is the ordinary deployment this compose file ships, so
-  // `http://localhost:9000` must keep starting and does.
-  //
-  // A plaintext store on a *remote* address is allowed and not refused,
-  // deliberately: it is only reachable from an egma that is itself plaintext,
-  // where the session cookie granting access to every recording already
-  // crosses the same network in the clear. Refusing the audio while serving
-  // the cookie would be a rule egma applies to one byte stream and not the
-  // other. What it costs is said beside the example, in `.env.example`, the
-  // compose file and the README, rather than decided for a self-hoster on a
-  // private network egma cannot see.
+  // Require HTTPS recordings for an HTTPS page to avoid mixed-content playback
+  // failures. HTTP pages may use either storage scheme.
   if (baseUrl.protocol === "https:" && parsed.protocol === "http:") {
     throw new Error(
       `EGMA_BASE_URL is ${baseUrl.origin}, which is https:, and ` +
@@ -828,21 +716,8 @@ function blobStore(
 }
 
 /**
- * What to sign for.
- *
- * MinIO ignores the region entirely and every signature must still carry one,
- * so `us-east-1` is the value that lets a deployment with no region at all
- * work — the same default the simulator uses, because the two halves sign
- * against one store and a disagreement between them is every upload working and
- * every playback failing.
- *
- * **On real S3 the default is not a default, it is a wrong answer**, and it is
- * refused rather than signed with. A bucket in `eu-west-1` signed for
- * `us-east-1` answers `SignatureDoesNotMatch` on every single recording, naming
- * neither the region nor the variable — the same nameless failure the public
- * address is a separate setting to prevent, arriving by a second route. The one
- * deployment that can be *known* to be wrong is the one whose store is AWS's
- * own, where a region is never optional, so that is the one this refuses.
+ * Require an explicit recording region for .amazonaws.com endpoints.
+ * Other endpoints use the configured region or the MinIO-compatible default.
  */
 function blobRegion(environment: NodeJS.ProcessEnv, address: URL): string {
   const named = environment.EGMA_BLOB_REGION?.trim() || "";
@@ -867,17 +742,3 @@ const DEFAULT_BLOB_BUCKET = "egma-recordings";
 
 /** What a store that ignores regions is signed for. See `blobRegion`. */
 const DEFAULT_BLOB_REGION = "us-east-1";
-
-/** The second bucket on the same store, created beside the recordings one. */
-const DEFAULT_INGEST_BUCKET = "egma-ingestion";
-
-/** What a store that ignores regions is signed for. See `ingestRegion`. */
-const DEFAULT_INGEST_REGION = "us-east-1";
-
-/**
- * Where staged evidence waits, on the named volume the deployment gives the
- * api service. It is the one path in this file that must be writable and must
- * survive a container replacement: what is in it is evidence that has been
- * accepted and is not durable yet.
- */
-const DEFAULT_INGESTION_LOG_DIR = "/var/lib/egma/ingestion";

@@ -22,31 +22,11 @@ import { runMigrations } from "../migrate.ts";
 import { organization, user } from "../schema/index.ts";
 
 /**
- * Drives the test factory from a terminal, until the real front door (the API)
- * exists. Signup does not reach a terminal yet either, so the script keeps one
- * development organization of its own — provisioned through the same front
- * door signup will use — and acts in it as its admin.
- *
- *   node packages/db/dist/scripts/test.js create \
- *     --name "Reschedules a booked appointment" \
- *     --scenario "Their cleaning is booked for Thursday and has to move…" \
- *     --behavior "verifies who it is speaking to first" \
- *     --behavior "confirms the new time back before finishing" \
- *     --persona prs_…
- *
- *   node packages/db/dist/scripts/test.js get tst_…
- *   node packages/db/dist/scripts/test.js edit tst_… --scenario "…"
- *   node packages/db/dist/scripts/test.js get-version tstv_…
- *   node packages/db/dist/scripts/test.js list [--limit 50] [--cursor tst_…]
- *   node packages/db/dist/scripts/test.js delete tst_… tstv_… rev_…
- *
- * A test says who calls, so `--persona` is required on a create: name one the
- * development project can use, which `persona.js create` or `persona.js list`
- * will give you.
- *
- * On an edit, a flag left out keeps what the test already says, so editing the
- * scenario alone is one flag. A `--behavior` or a `--persona` given at
- * all replaces the whole list, because the order is content.
+ * Development test CLI. Provisions or reuses the factory-dev organization
+ * and acts as its admin. Run node packages/db/dist/scripts/test.js for usage.
+ * Create requires a suite and usable persona IDs; create-suite and persona.js
+ * provide them. On edit, omitted flags retain values; behavior and persona
+ * flags replace their respective lists.
  */
 
 const DATABASE_URL =

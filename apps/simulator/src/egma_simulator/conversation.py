@@ -1,21 +1,9 @@
-"""One simulation holds one conversation: persona and plug, turn by turn.
+"""Conduct one simulation through alternating persona and agent turns.
+Record turns, answer latency, and the distinct ending cause. Cancellation and
+duration limits share ConversationControls; the first ending cause wins.
 
-The conversation loop is the plug-blind, model-blind middle: it opens the exchange
-through the plug, lets the persona and the agent alternate, records every
-turn as it flows, measures each answer, and names how it all ended. Four
-deliberate endings — the persona concluding, the agent ending, the turn
-limit, the duration limit — plus the cancel directive; each is reported
-distinctly, and a limit ending is never the agent failing.
-
-Two hands may stop a running conversation from outside its own loop: a cancel
-directive honored at a heartbeat, and the duration watchdog. Both act
-through :class:`ConversationControls`, and the first cause to land is the one the
-record shows — a cause arriving after the conversation already ended changes
-nothing, because what happened is the record.
-
-An agent that stays silent is an observed outcome of the conversation.
-The voice persona follows up at most twice, then concludes normally. The
-record is available to graders; silence alone is not an execution fault.
+Agent silence is an observed outcome, not an execution fault. The voice persona
+can follow up twice before concluding; graders assess the resulting evidence.
 """
 
 from __future__ import annotations
@@ -28,7 +16,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from .persona import Persona, Turn
-from .plugs import AgentReply, ConnectionPlug
+from .plugs import AgentReply, ConnectionPlug, PlugError
+from .usage import ProviderUsage
 
 logger = logging.getLogger(__name__)
 
@@ -41,20 +30,22 @@ is handed those words back, and a transition read as speech is a
 conversation the agent never had."""
 OnTiming = Callable[[str, float], Awaitable[None]]
 
+OnProviderUsage = Callable[[ProviderUsage], Awaitable[None]]
+"""One provider request this conversation made, and what it consumed.
+
+A chat simulation has no pipeline, so there is no metrics bus for a bill to
+arrive on: the persona's own reply carries it, and it is handed over here, at
+the seam the conversation already has. A voice simulation's legs report through
+Pipecat instead, and both end up as the same span.
+"""
+
+OnExecutionEnded = Callable[[], None]
+"""The conversation stopped, before connection cleanup or evidence delivery."""
+
 OnAnswered = Callable[[], Awaitable[None]]
-"""Everything one agent answer produced is on the record — the words it
-carried and the time it took.
-
-It carries nothing, because it is not an observation: it is the boundary
-between one answer and the next, and turn-taking is the only thing that
-knows where that falls. An answer that produced no words is still an
-answer that ended, which is exactly the case a reader of the turns alone
-would miss. An agent that speaks first has finished saying its piece the
-same way, so the opening counts as one.
-
-The last answer of a conversation is deliberately not announced: the
-conversation is over, and whatever it produced belongs with the record of the whole
-thing rather than in a boundary of its own."""
+"""Boundary after a nonterminal agent answer, including an empty answer or greeting.
+The final answer is reported with the completed simulation instead.
+"""
 
 # The two causes a ConversationControls can carry. Writer and reader both name
 # these constants, so a stop can never be misread as the other cause.
@@ -179,6 +170,8 @@ async def conduct(
     controls: ConversationControls,
     name: str,
     on_answered: OnAnswered | None = None,
+    on_provider_usage: OnProviderUsage | None = None,
+    on_execution_ended: OnExecutionEnded | None = None,
 ) -> Conducted:
     """Hold one simulation's conversation, turn by turn, and say how it went."""
     loop = asyncio.get_running_loop()
@@ -227,8 +220,10 @@ async def conduct(
         _duration_watchdog(max_duration_seconds, controls),
         name=f"{name}:watchdog",
     )
+    startup_finished = False
     try:
         opened = await controls.guard(plug.open())
+        startup_finished = True
         # Two shapes, because most platforms open with words and nothing
         # else, and one that says more about its opening should not have to
         # hold it back until the second turn to say it.
@@ -252,6 +247,11 @@ async def conduct(
             if budget_spent():
                 return limit_by_turns()
             reply = await controls.guard(persona.next_turn(history))
+            # The bill before the words, because the bill is a fact about the
+            # request that just returned and the words are about to change the
+            # history it was made against.
+            if on_provider_usage is not None and reply.usage is not None:
+                await on_provider_usage(reply.usage)
             await record("human", reply.text)
             if reply.concluded or reply.requests_end_call:
                 return ended(PERSONA_CONCLUDED)
@@ -299,8 +299,14 @@ async def conduct(
                 reason=None,
                 provider_reference=plug.provider_reference,
             )
+        if not startup_finished:
+            explain = getattr(plug, "startup_duration_failure", None)
+            if callable(explain):
+                raise PlugError(explain(max_duration_seconds)) from None
         return ended(duration_limit_reached(max_duration_seconds))
     finally:
+        if on_execution_ended is not None:
+            on_execution_ended()
         watchdog.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await watchdog
@@ -310,37 +316,10 @@ async def conduct(
 def _answer_started_at(
     answer: AgentReply, *, asked_at: float, returned_at: float
 ) -> float | None:
-    """The finish line of ``turn_response_latency``, for one answer.
-
-    The measure runs between two events. Its **starting line** is the
-    moment the persona's turn went out, which the loop above holds. Its
-    **finish line** is the moment the agent began answering, which is this
-    — and everything egma spends past it is egma's own cost, never the
-    agent's speed.
-
-    Three cases, in order:
-
-    - **The plug saw the answer start.** It reports the instant, and that
-      is the finish line. Only a plug reading a live room can see it, and
-      it is exactly the plug whose ``deliver`` returns much later than the
-      answer began: it must also establish the agent has no more to say
-      before the persona may speak, and that wait can be seconds.
-    - **The plug's ``deliver`` is a request and its response.** Then the
-      call returns when the answer does, the two instants are the same,
-      and the return is the finish line. Nothing is lost by using it.
-    - **The turn never began an answer.** A turn that only called a tool,
-      or produced nothing at all. There is no moment the agent started
-      replying, so no sample is taken. A wait that never happened is not
-      a wait of zero, and the voice lane answers the same way, out of the
-      audio, for the same reason.
-
-    A reported instant before the starting line is refused rather than
-    measured. Nothing egma ships can produce one — a stream is stamped
-    with the turn that was outstanding when it opened, and this turn's
-    streams open after its question went out — so this guards a future
-    plug rather than a present one. A measure that ran backwards would be
-    worse than a missing one: it can never fail a bound, so it would sit
-    in the series holding one trivially and drag every mean below it.
+    """Select the finish line for turn_response_latency.
+    Use answered_at if it is not before persona delivery. Without a timestamp,
+    use deliver() completion only when answer.text is present.
+    An explicit live-room timestamp excludes the later turn-completion wait.
     """
     answered_at = answer.answered_at
     if answered_at is not None:

@@ -1,38 +1,10 @@
-"""CI's Retell text mode: a local HTTP server shaped like the completion API.
+"""Local HTTP stub for text-mode completion with scripted replies and request logging.
+Require full history on each request, match mocks by tool name, and log the version
+exactly as supplied. Exercise authentication, invalid-agent, throttle, and billing
+failures.
 
-The one endpoint the text-mode plug speaks — Retell's agent-text-mode
-completion — answering with Retell's own field names, status codes and
-bearer-key auth, from a script. Real HTTP on a loopback port, because a
-plug's whole job is speaking a platform's wire protocol and a mock of that
-protocol would prove the mock instead.
-
-It is a **stateless** counterpart, exactly as the API it stands in for is:
-it keeps no conversation. Every request carries the whole history, the
-mocks to serve, and where the engine had got to; every reply carries only
-what is new. So this server holds a script and a log, and nothing that
-would let the plug get away with sending less than it must.
-
-Two behaviours here are the platform's rather than the script's, and they
-are what the plug is really proved against:
-
-- **The mocks are matched and served here.** A scripted tool call is
-  answered with the request's own mock for that name where one rode along,
-  and with the script's real return value where none did. A plug that
-  forgot to send the mocks would therefore see real answers come back, and
-  the record would say so.
-- **The version is never defaulted.** The request's ``agent_version`` is
-  logged verbatim, absent included, so a test can say what the plug asked
-  for and — just as much — what it did not.
-
-Its refusals are the platform's too: a request without the exact bearer key
-is refused 401, a request naming no agent is refused 422, and the scripted
-``refusals`` play a throttle or a billing wall in front of a working
-account. Those are what the plug's failure paths are tested against.
-
-**Every field name here is a guess where Retell's documentation was not in
-reach**, marked in :mod:`egma_simulator.plugs.retell_text_mode` where the
-plug names the same field. The two are wrong together or right together,
-which is the point: one live run against the real platform corrects both.
+Wire assumptions are listed in plugs/retell_text_mode.py. Agreement with this stub
+does not validate them against the live platform.
 """
 
 from __future__ import annotations
@@ -204,7 +176,7 @@ class TextModeStub:
         self.requests.append(
             {
                 "agent_id": agent_id,
-                "agent_version": body.get("agent_version"),
+                "agent_version": request.query.get("version"),
                 "body": body,
             }
         )
@@ -214,6 +186,27 @@ class TextModeStub:
 
         if body.get("messages") is None:
             raise web.HTTPUnprocessableEntity(text="messages is required")
+
+        allowed = {
+            "messages", "dynamic_variables", "tool_mocks", "current_node_id",
+            "component_id", "current_state",
+        }
+        if set(body) - allowed:
+            raise web.HTTPBadRequest(text="unknown playground request fields")
+
+        for index, mock in enumerate(body.get("tool_mocks") or []):
+            if not isinstance(mock.get("input_match_rule"), dict):
+                raise web.HTTPBadRequest(
+                    text=json.dumps(
+                        {
+                            "error_message": (
+                                f"request/body/tool_mocks/{index}/input_match_rule "
+                                "must be object"
+                            )
+                        }
+                    ),
+                    content_type="application/json",
+                )
 
         # The script is walked by the exchanges really conducted, not by the
         # requests made: a refused request is one the agent never saw, so a
@@ -229,7 +222,7 @@ class TextModeStub:
         if reply.seconds:
             await asyncio.sleep(reply.seconds)
         if self.answers_without_messages:
-            return web.json_response({"agent_ended": False}, status=201)
+            return web.json_response({"call_ended": False}, status=201)
 
         offered = (
             {}
@@ -287,11 +280,11 @@ class TextModeStub:
                 for index, bubble in enumerate(bubbles)
             )
 
-        answered: dict = {"messages": messages, "agent_ended": reply.ends}
+        answered: dict = {"messages": messages, "call_ended": reply.ends}
         if reply.node is not None:
             answered["current_node_id"] = reply.node
         if reply.component is not None:
-            answered["current_component_id"] = reply.component
+            answered["component_id"] = reply.component
         if reply.state is not None:
             answered["current_state"] = reply.state
         if reply.variables is not None:

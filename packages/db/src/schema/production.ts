@@ -22,22 +22,10 @@ import {
 } from "./columns.ts";
 
 /**
- * Production evidence reaches egma through exactly two mechanism families, and
- * only one of them is configured.
- *
- * **Pull** is declared: an agent binds to its platform, holds that platform's
- * sealed monitoring key, and its `pull_production_calls` switch turns polling
- * on. **Push** is observed: the customer's own process sends spans to the OTLP
- * door with the project key, and the stored evidence is the whole record —
- * nothing is configured, nothing is stamped, and nobody can know in advance
- * when a customer starts.
- *
- * So there is no monitoring setup object here and no health surface. What
- * remains is machinery, and only for pull: one notebook per pulled agent, and
- * one short-lived retry record per call that could not be turned into
- * evidence. There is no receipt book — once a call arrives it belongs to the
- * ingestion boundary: write-ahead log, object store, drainer, and exactly-once
- * by committed span identity. See ADR-0014 and ADR-0015.
+ * Pull monitoring uses an agent platform credential and the pull switch.
+ * Push ingestion accepts customer spans through OTLP with a project key.
+ * These tables track pull progress and failed imports; span storage and
+ * deduplication belong to ingestion. See ADR-0014 and ADR-0015.
  */
 
 /**
@@ -53,22 +41,10 @@ export const MONITORING_SCAN_KINDS = ["historical_import", "regular"] as const;
 export type MonitoringScanKind = (typeof MONITORING_SCAN_KINDS)[number];
 
 /**
- * One agent's poller notebook — machine-owned, platform-neutral, and never
- * edited by a person.
- *
- * The row is created by the pull switch and, in v1, only by it; turning the
- * switch off leaves the row where it is, and turning it on again is a new
- * observation of the provider from that moment — a fresh `import_generation`
- * and a `regular_floor_at` at the switch, never a backfill of what happened
- * while it was off. The deep historical import runs once, on an agent's first
- * ever switch-on. Cursors are opaque text and windows are generic moments, so
- * a later Vapi or ElevenLabs pull reuses the table unchanged.
- *
- * The failure columns are a retry clock, not a health surface: they push
- * `next_poll_at` out and nothing reads them on a screen. There is no
- * account-wide gate, because there is no account-wide anything — a shared key
- * that starts refusing is discovered independently by each agent's poller, and
- * each backs off on its own.
+ * Per-agent pull progress. First enablement starts a historical import; later
+ * enablement starts a new generation with a floor at that time, excluding
+ * the disabled period. Disabling pull retains this row.
+ * Failure fields schedule per-agent backoff; they are not product health status.
  */
 export const monitoringState = pgTable(
   "monitoring_state",
@@ -97,14 +73,8 @@ export const monitoringState = pgTable(
      */
     nextPollAt: moment("next_poll_at").notNull(),
     /**
-     * The earliest instant a regular scan may look back to, while it is set.
-     *
-     * A regular window normally starts five minutes before the last completed
-     * upper bound, so a call the provider exposes a little late is still found.
-     * A floor overrides that subtraction, which is what a resume needs: the
-     * first window after the switch comes on must not reach behind it and
-     * import the conversations that happened while it was off. It is cleared
-     * once a window has completed above it, and the overlap resumes.
+     * Prevents the regular overlap window from reaching into a disabled period.
+     * Cleared after a window completes above the floor.
      */
     regularFloorAt: moment("regular_floor_at"),
     /**
@@ -171,26 +141,11 @@ export const monitoringState = pgTable(
 );
 
 /**
- * One Retell call egma could not turn into evidence, and nothing else.
- *
- * **Short-lived control state, never a payload archive.** A call whose fetch or
- * normalization failed leaves an identity and a bounded budget here — never the
- * provider's document, never a transcript, never a receipt. A call that lands
- * leaves no row at all: Postgres growth follows failures, not conversations.
- *
- * **One table for two shapes, because it is one row changing state.** While
- * automatic retries remain, `next_attempt_at` says when the next one is due.
- * When the budget ends the same row loses that time and gains `expires_at`,
- * becoming a marker that schedules nothing. It exists then for one reason: the
- * regular five-minute overlap lists the same provider call again, and without a
- * trace of the terminal drop that repeat would silently start a second budget.
- * Exactly one of the two instants is set, and the check makes the other shape
- * unwritable rather than merely unusual.
- *
- * A marker expires on its own once the call is outside every regular overlap
- * window, and deleting the agent takes its rows with it. There is no replay
- * door and no failure list: giving up is one structured event and one
- * low-cardinality metric, and the product surface says nothing about it.
+ * Retry state for a Retell import that failed; stores identity, not payload.
+ * An active retry has next_attempt_at. An exhausted retry has expires_at
+ * instead, preventing overlap scans from starting another retry budget.
+ * Expired markers can be swept after the call leaves the overlap window.
+ * Deleting the agent cascades to these rows.
  */
 export const retellCallRetry = pgTable(
   "retell_call_retry",

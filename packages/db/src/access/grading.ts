@@ -6,6 +6,7 @@ import {
 import {
   and,
   asc,
+  count,
   eq,
   gt,
   inArray,
@@ -16,7 +17,10 @@ import {
   type SQL,
 } from "drizzle-orm";
 
+import { FundingRefusedError } from "./errors.ts";
+import { billing } from "../billing/ports.ts";
 import { traceStore } from "../clickhouse/client.ts";
+import { graderModelOfParameters } from "../grader-library/parameters.ts";
 import { db, listen, type Listening, type Queryable } from "../client.ts";
 import { combinedGradeScore } from "../grading/results.ts";
 import type { PlanGroup } from "../grading/plan.ts";
@@ -30,6 +34,7 @@ import {
 } from "../schema/grading.ts";
 import { run, simulation } from "../schema/runs.ts";
 import { validClaimant } from "./claimants.ts";
+import { AGENT_EVIDENCE_COMPLETE_SQL } from "./agent-evidence.ts";
 import type { AuthContext } from "./context.ts";
 import {
   readCurrentSimulationGradeFacts,
@@ -60,8 +65,9 @@ import { within } from "./within.ts";
 /** A notification is a wake-up hint. The Postgres row remains the queue. */
 export const GRADING_WORK_CHANNEL = "egma_grading_work";
 
-const LARGEST_CLAIM_CAPACITY = 50;
+export const MAX_GRADING_CLAIM_CAPACITY = 50;
 const DEFAULT_LEASE_SECONDS = 120;
+const GRADING_CAP_LOCK = "egma:grading-concurrency-cap";
 /** The last failed attempt is retained as an abandoned job, never a grade. */
 export const MOST_GRADING_ATTEMPTS = 3;
 const THE_ENGINE = "engine";
@@ -90,6 +96,7 @@ export type GradingRequestResult =
 
 export type RegradeTraceResult =
   | { readonly kind: "not_requested" }
+  | { readonly kind: "waiting"; readonly for: "evidence" }
   | {
       readonly kind: "queued";
       readonly jobId: string;
@@ -132,6 +139,8 @@ export type GradingClaimRequest = {
   readonly claimant: string;
   readonly capacity: number;
   readonly leaseSeconds?: number | undefined;
+  /** Omission preserves the uncapped self-hosted queue. */
+  readonly concurrencyCap?: number | undefined;
 };
 
 const JOB_COLUMNS = {
@@ -498,16 +507,12 @@ export async function traceEvidenceStartedAt(
     readonly runId?: string | undefined;
     readonly window: TimeWindow;
     /**
-     * Narrow the probe to one POV's rows.
-     *
-     * A simulation's trace holds two accounts of one conversation — egma's own,
-     * written by the simulator, and the agent's, filed by simulation ingestion
-     * — under one trace id and told apart by this column. Absent asks about the
-     * conversation's evidence as a whole, which is what production wants and
-     * what a lane with only one account wants. `agent` asks the one question
-     * grading has to wait on: has the agent's own POV landed yet?
+     * Optionally restrict the evidence probe by POV emitter. Use agent to check
+     * for the agent POV; omit to search all evidence for the trace.
      */
     readonly emitter?: "egma-runtime" | "agent" | undefined;
+    /** Require the platform's final record, rather than its first exported span. */
+    readonly requireAgentCompletion?: boolean | undefined;
   },
 ): Promise<Date | undefined> {
   authorize(auth, "read", here(auth));
@@ -536,7 +541,9 @@ export async function traceEvidenceStartedAt(
                and started_at >= {from:DateTime64(6, 'UTC')}
                and started_at < {to:DateTime64(6, 'UTC')}
                and (${input.runId === undefined ? "1" : "run_id = {run_id:String}"})
+               and kind != 'provider_usage'
                and (${input.emitter === undefined ? "1" : "emitter = {emitter:String}"})
+               and (${input.requireAgentCompletion === true ? AGENT_EVIDENCE_COMPLETE_SQL : "1"})
              order by started_at
              limit 1`,
     query_params: {
@@ -558,36 +565,17 @@ export async function traceEvidenceStartedAt(
 }
 
 /**
- * How long grading waits for the agent's own POV after a simulation completes.
- *
- * **A safety bound and nothing else** (ADR-0024 §6). There is no artificial
- * wait: the moment the agent's account is query-visible, grading is asked for.
- * This exists only so that a broken exporter or a failed platform pull cannot
- * hold a simulation open forever — past it grading proceeds on what there is,
- * and the record says the agent's POV is incomplete. Regrade is what a late
- * arrival is picked up by.
- *
- * The Retell pull's own retries are shorter than this on purpose, so a thin
- * record has run out of attempts before the bound expires.
+ * Maximum wait for a final platform record after simulation completion.
+ * Covers four minutes of Retell polling and its last five-second request.
+ * Grade as soon as the record is query-visible, or report missing evidence at the bound.
+ * A later arrival requires regrading.
  */
-export const AGENT_POV_BOUND_SECONDS = 30;
+export const AGENT_POV_BOUND_SECONDS = 245;
 
 /**
- * Whether a simulation's evidence is ready to grade, and whether the agent's
- * own account of it was there.
- *
- * **Two questions, and which one is asked depends on the row.** A simulation
- * with no second account coming — egma dials a phone number and nothing of
- * egma's runs on the far end, or the platform gave egma no reference to fetch
- * one by — has one account of the conversation, so its evidence is ready as
- * soon as that account is query-visible. A simulation expecting one is not
- * ready until the agent's own account has landed, or until the bound above has
- * passed since the conversation ended.
- *
- * `agentPovFiled` says which of the two made it ready, so a caller can say out
- * loud that a conversation was graded without the agent's account of it. It is
- * false on every row that never waited for one, which is the honest answer:
- * nothing was missing.
+ * Evidence readiness and agent POV availability. Without an expected agent POV,
+ * wait for any visible evidence and leave agentPovFiled false. Otherwise, become
+ * ready when agent evidence is visible or the wait expires.
  */
 export type SimulationEvidenceReadiness = {
   readonly ready: boolean;
@@ -597,12 +585,8 @@ export type SimulationEvidenceReadiness = {
 };
 
 /**
- * Ask the trace store what this simulation's evidence holds, and answer both.
- *
- * **The agent's POV is asked about first, because its answer is usually the
- * whole answer**: a trace whose agent account has landed is ready, and that
- * account's earliest span is a valid trace start. Only a trace without one asks
- * the second, wider question.
+ * Probe expected agent evidence first. If present, also read the earliest span
+ * across both POVs. After the wait expires, return readiness even without an agent POV.
  */
 export async function simulationEvidenceReadiness(
   auth: AuthContext,
@@ -627,7 +611,7 @@ export async function simulationEvidenceReadiness(
       traceId: input.traceId,
       runId: input.runId,
       window: input.window,
-      ...(emitter === undefined ? {} : { emitter }),
+      ...(emitter === undefined ? {} : { emitter, requireAgentCompletion: true }),
     });
 
   if (!input.producesAnAgentPov) {
@@ -678,6 +662,7 @@ function simulationTracesIn(
 ): ReadonlyMap<string, DrainedSimulationTrace> {
   const traces = new Map<string, DrainedSimulationTrace>();
   for (const span of spans) {
+    if (span.kind === "provider_usage" || span.usage !== undefined) continue;
     if (span.source !== "simulation") continue;
     const simulationId = simulationIdOfTrace(span.traceId);
     if (simulationId === undefined) continue;
@@ -696,27 +681,9 @@ function simulationTracesIn(
 }
 
 /**
- * Wake grading when durable simulation evidence becomes query-visible.
- *
- * A span never completes a simulation here. The existing simulation row is the
- * only completion authority. This handoff covers the opposite ordering from
- * `completeSimulation`: the row committed first, then its accepted evidence
- * drained. Replays reach the frozen run plan and the same trace-level job.
- *
- * **This is where grading starts for a simulation expecting an agent POV of its
- * own** (ADR-0024 §6). Completion no longer asks for grading on those rows —
- * the agent's account had not arrived when the row closed, and grading a
- * conversation without the account it will be judged on is grading the wrong
- * evidence. So the request waits here, for the drain that carries the agent's
- * own spans. A drain carrying only egma's own POV finds the readiness answer
- * still `false` and asks for nothing, which is the ordinary case for every
- * flush during the conversation.
- *
- * **Asking twice is already harmless**, and nothing here adds a second guard
- * for it: `requestGradingIn` takes a per-trace advisory lock and hands back the
- * job a pending or claimed request already made, or `terminal` once every
- * grader has a result. Two drains of one segment, two replicas and a replay all
- * converge on one job.
+ * Request grading when drained evidence is ready for an already completed simulation.
+ * Only the simulation row determines completion. Wait for an expected agent POV
+ * until its bound expires; requestGradingIn deduplicates requests under a trace lock.
  */
 export async function recordSimulationTraces(
   auth: AuthContext,
@@ -778,16 +745,8 @@ export async function recordSimulationTraces(
 }
 
 /**
- * Whether a second account of this conversation is coming — a fact about the
- * **row**, answerable before any evidence has arrived.
- *
- * Two halves, and both are needed. The lane says whether egma has a way to
- * receive one at all: the SDK exports from inside a LiveKit room, and a Retell
- * web call is fetched back by its call id. And the row's **provider reference**
- * says whether this particular conversation gave egma the handle to file or
- * fetch it under — a room name, a call id. A landing that reported none has
- * nothing to wait for however capable its lane is, so it grades at completion
- * rather than waiting out a bound nothing could ever end.
+ * Expect an agent POV only when the connection supports it and this simulation
+ * has a nonempty provider reference for evidence ingestion.
  */
 function simulationExpectsAnAgentPov(row: {
   readonly providerReference: string | null;
@@ -801,25 +760,14 @@ function simulationExpectsAnAgentPov(row: {
 }
 
 /**
- * When the wait for the agent's POV began: the earlier of what the report said
- * and when egma stamped the landing.
- *
- * **The earlier of the two, because a report cannot postpone its own bound.**
- * The conduction's own `ended_at` is the honest moment and is what the record
- * shows, but it comes from a machine egma does not own — and a clock running
- * ahead would hold a simulation open past every window that could ever settle
- * it. egma's landing stamp is the backstop, and on every ordinary landing the
- * two are within milliseconds of each other.
+ * Start the agent POV wait when Egma received completion. The simulator's
+ * reported end time can use a different clock and must not shorten or extend it.
  */
 function theWaitBeganAt(row: {
   readonly endedAt: Date | null;
   readonly heartbeatAt: Date | null;
 }): Date {
-  const reported = row.endedAt;
-  const stamped = row.heartbeatAt;
-  if (reported === null) return stamped ?? new Date(0);
-  if (stamped === null) return reported;
-  return reported < stamped ? reported : stamped;
+  return row.heartbeatAt ?? row.endedAt ?? new Date(0);
 }
 
 /**
@@ -851,35 +799,11 @@ export type SimulationPastTheAgentPovBound = {
 };
 
 /**
- * The agent-POV bound, read on a clock.
- *
- * **The one thing nobody else can say.** Every other way grading starts is
- * somebody's arrival: a landing, or a drain carrying the agent's own spans. A
- * POV that never comes sends nothing, so its absence has to be noticed by a
- * loop — the same argument the orphan sweep is built on, and it runs on the
- * same tick.
- *
- * **What it looks for is a simulation nobody has asked grading about.** The
- * queue row is the record of that asking, so a completed simulation with no
- * grading job is a simulation still waiting — and once a job exists, whether it
- * is pending, claimed or already answered, this sweep has nothing to add.
- * Successful work deletes its job row, and such a row reappears here: the
- * request that follows finds every grader answered and comes back `terminal`,
- * which creates nothing and is reported as nothing. So this is a backstop and
- * never an arbiter — asking twice is made harmless by `requestGradingIn`'s own
- * per-trace lock, not by anything here.
- *
- * **It takes no `AuthContext` and cannot be given one**, on the orphan sweep's
- * exact terms: a bound is read by egma standing behind every organization at
- * once, the only rows it reads are ones egma's own claim machinery stamped, and
- * the answer is identifiers and no content.
- *
- * **Bounded on both sides, and on a clock egma owns.** The floor reads the
- * landing's own heartbeat stamp rather than the conduction's reported
- * `ended_at`: the report supplies that moment, and a simulator whose clock is an
- * hour behind would otherwise write a row this sweep could never see. What
- * `ended_at` is still used for is the thirty seconds themselves, which is the
- * conversation's own moment and the one a person reads.
+ * Check completed simulations without queued grading jobs across all organizations.
+ * Use Egma's completion heartbeat for the lookback window and the wait bound.
+ * Request grading when evidence is ready.
+ * Finished jobs may have been deleted; requestGradingIn returns terminal without
+ * creating work when all graders already have results.
  */
 export async function settleSimulationsPastTheAgentPovBound(options?: {
   /**
@@ -978,7 +902,7 @@ export async function settleSimulationsPastTheAgentPovBound(options?: {
 
 /**
  * How far back one tick looks for a simulation nobody asked grading about, and
- * how many it settles at a time. An hour is far more than the thirty seconds a
+ * how many it settles at a time. An hour is far more than the four minutes a
  * healthy wait takes, and short enough that a deployment coming back after a
  * long outage does not grade a day of backlog in one tick.
  */
@@ -1014,6 +938,7 @@ function completedProductionTracesIn(
 ): readonly CompletedProductionTrace[] {
   const completed = new Map<string, CompletedProductionTrace>();
   for (const span of spans) {
+    if (span.kind === "provider_usage" || span.usage !== undefined) continue;
     const modality = supportedProductionEndModality(span);
     if (modality === undefined) continue;
     const held = completed.get(span.traceId);
@@ -1084,6 +1009,50 @@ export async function recordProductionTraces(
   }
 }
 
+/**
+ * Which of these customers Egma's own key may fund a judge for.
+ *
+ * **Once per organization, never once per job, and never a network call.** A
+ * grading job's only spend is model usage — the judge's — so the question the
+ * deployment is asked is the funding one, with the providers a judge can run
+ * on in this release. The allowance question is not asked here: a grading job
+ * is not a chat simulation, a web-call minute or a phone minute, and the three
+ * allowances are what a plan limits.
+ *
+ * On a deployment with no billing this is one resolved promise per customer
+ * and every one of them is funded.
+ */
+function providersForGrading(entries: readonly FrozenGradingEntry[]): readonly string[] {
+  return [...new Set(entries.filter((entry) => entry.definition.type === "llm_as_judge")
+    .map((entry) => graderModelOfParameters(entry.parameterValues).provider))];
+}
+
+async function gradingHeldForFunding(
+  jobs: readonly Pick<GradingJob, "id" | "organizationId" | "entries">[],
+): Promise<ReadonlySet<string>> {
+  const funded = new Set<string>();
+  const grouped = new Map<string, { id: string; providers: readonly string[] }[]>();
+  for (const job of jobs) {
+    const providers = providersForGrading(job.entries);
+    if (providers.length === 0) { funded.add(job.id); continue; }
+    const group = grouped.get(job.organizationId) ?? [];
+    group.push({ id: job.id, providers });
+    grouped.set(job.organizationId, group);
+  }
+  await Promise.all([...grouped].map(async ([organizationId, group]) => {
+    const decision = await billing().entitlements.mayPlatformKeyFund({
+      organizationId,
+      providers: [...new Set(group.flatMap((job) => job.providers))],
+    });
+    for (const job of group) {
+      if (decision.funded || !job.providers.some((provider) => decision.providers.includes(provider))) {
+        funded.add(job.id);
+      }
+    }
+  }));
+  return funded;
+}
+
 export async function claimGradingJobs(
   request: GradingClaimRequest,
 ): Promise<readonly GradingClaim[]> {
@@ -1091,30 +1060,76 @@ export async function claimGradingJobs(
   if (
     !Number.isInteger(request.capacity) ||
     request.capacity < 1 ||
-    request.capacity > LARGEST_CLAIM_CAPACITY
+    request.capacity > MAX_GRADING_CLAIM_CAPACITY
   ) {
     throw new RangeError(
-      `a claim takes between 1 and ${LARGEST_CLAIM_CAPACITY} grading jobs`,
+      `a claim takes between 1 and ${MAX_GRADING_CLAIM_CAPACITY} grading jobs`,
     );
   }
   const leaseSeconds = request.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
   if (!Number.isInteger(leaseSeconds) || leaseSeconds < 1) {
     throw new RangeError("a lease is a positive whole number of seconds");
   }
+  if (
+    request.concurrencyCap !== undefined &&
+    (!Number.isInteger(request.concurrencyCap) || request.concurrencyCap < 1)
+  ) {
+    throw new RangeError("the grading concurrency cap is a positive whole number");
+  }
 
   const now = new Date();
   const silentSince = new Date(now.getTime() - leaseSeconds * 1_000);
   const rows = await db().transaction(async (tx) => {
-    const candidates = await tx
-      .select({ id: gradingJob.id, attempts: gradingJob.attempts })
-      .from(gradingJob)
-      .where(or(
-        eq(gradingJob.status, "pending"),
-        and(eq(gradingJob.status, "claimed"), lt(gradingJob.heartbeatAt, silentSince)),
-      ))
-      .orderBy(asc(gradingJob.id))
-      .limit(request.capacity)
-      .for("update", { skipLocked: true });
+    let candidates: readonly { readonly id: string; readonly attempts: number }[];
+    if (request.concurrencyCap === undefined) {
+      candidates = await tx
+        .select({ id: gradingJob.id, attempts: gradingJob.attempts })
+        .from(gradingJob)
+        .where(or(
+          eq(gradingJob.status, "pending"),
+          and(eq(gradingJob.status, "claimed"), lt(gradingJob.heartbeatAt, silentSince)),
+        ))
+        .orderBy(asc(gradingJob.id))
+        .limit(request.capacity)
+        .for("update", { skipLocked: true });
+    } else {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${GRADING_CAP_LOCK}::text, 0))`,
+      );
+      const [active] = await tx
+        .select({ count: count() })
+        .from(gradingJob)
+        .where(eq(gradingJob.status, "claimed"));
+      const available = request.concurrencyCap - Number(active?.count ?? 0);
+      const expired = await tx
+        .select({ id: gradingJob.id, attempts: gradingJob.attempts })
+        .from(gradingJob)
+        .where(and(
+          eq(gradingJob.status, "claimed"),
+          lt(gradingJob.heartbeatAt, silentSince),
+        ))
+        .orderBy(asc(gradingJob.id))
+        .limit(request.capacity)
+        .for("update", { skipLocked: true });
+      const reclaimable = expired.filter(
+        (candidate) => candidate.attempts < MOST_GRADING_ATTEMPTS,
+      ).length;
+      const abandoned = expired.length - reclaimable;
+      const pendingCapacity = Math.min(
+        request.capacity - reclaimable,
+        Math.max(available + abandoned, 0),
+      );
+      const pending = pendingCapacity === 0
+        ? []
+        : await tx
+          .select({ id: gradingJob.id, attempts: gradingJob.attempts })
+          .from(gradingJob)
+          .where(eq(gradingJob.status, "pending"))
+          .orderBy(asc(gradingJob.id))
+          .limit(pendingCapacity)
+          .for("update", { skipLocked: true });
+      candidates = [...expired, ...pending];
+    }
     if (candidates.length === 0) return [];
 
     const exhausted = candidates
@@ -1152,7 +1167,35 @@ export async function claimGradingJobs(
       .returning(JOB_COLUMNS);
   });
 
-  return rows.map((row) => {
+  const funded = await gradingHeldForFunding(
+    rows.filter((row) => row.source === "production"),
+  );
+  const isFunded = (row: (typeof rows)[number]) => row.source === "simulation" || funded.has(row.id);
+  const unfunded = rows.filter((row) => !isFunded(row));
+  if (unfunded.length > 0) {
+    // **Left unclaimed rather than failed.** Nothing is wrong with this work:
+    // the customer's inference balance cannot pay the judge, and it runs when
+    // credit arrives or a key is added. So the lease is given straight back
+    // and the attempt is uncounted — a job nobody could start is not a job
+    // that failed three times.
+    await db()
+      .update(gradingJob)
+      .set({
+        status: "pending",
+        claimedBy: null,
+        claimedAt: null,
+        heartbeatAt: null,
+        attempts: sql`greatest(${gradingJob.attempts} - 1, 0)`,
+      })
+      .where(
+        inArray(
+          gradingJob.id,
+          unfunded.map((row) => row.id),
+        ),
+      );
+  }
+
+  return rows.filter(isFunded).map((row) => {
     const job = jobFromRow(row);
     if (
       job.status !== "claimed" ||
@@ -1212,15 +1255,18 @@ export async function finishGradingJob(
   id: string,
   claimant: string,
 ): Promise<{ readonly id: string } | undefined> {
-  const [row] = await db()
-    .delete(gradingJob)
-    .where(and(
-      theJob(auth, id),
-      eq(gradingJob.status, "claimed"),
-      eq(gradingJob.claimedBy, validClaimant(claimant)),
-    ))
-    .returning({ id: gradingJob.id });
-  return row;
+  return db().transaction(async (tx) => {
+    const [row] = await tx
+      .delete(gradingJob)
+      .where(and(
+        theJob(auth, id),
+        eq(gradingJob.status, "claimed"),
+        eq(gradingJob.claimedBy, validClaimant(claimant)),
+      ))
+      .returning({ id: gradingJob.id });
+    if (row !== undefined) await notify(tx, row.id);
+    return row;
+  });
 }
 
 export async function releaseGradingJob(
@@ -1258,7 +1304,7 @@ export async function releaseGradingJob(
       .where(eq(gradingJob.id, id))
       .returning(JOB_COLUMNS);
     if (row === undefined) return undefined;
-    if (!abandoned) await notify(tx, row.id);
+    await notify(tx, row.id);
     return jobFromRow(row);
   });
 }
@@ -1312,6 +1358,7 @@ export type TraceGrading = {
   readonly history: readonly NamedRecordedGrade[];
   readonly current: readonly NamedCurrentGrade[];
   readonly combinedScore: number | null;
+  readonly workBlock: { readonly error: "providers_unfunded"; readonly message: string } | null;
 };
 
 export type TraceGradingRef = {
@@ -1368,11 +1415,24 @@ export async function readTraceGrading(
   const grades = await readTraceGrades(auth, ref);
   const job = await jobForTrace(db(), auth, ref.traceId);
 
+  let workBlock: TraceGrading["workBlock"] = null;
+  if (ref.source === "production" && entries !== undefined && entries.length > 0 && job?.status === "pending") {
+    try {
+      const providers = providersForGrading(job.entries);
+      if (providers.length > 0) {
+        const funding = await billing().entitlements.mayPlatformKeyFund({ organizationId: auth.organizationId, providers });
+        if (!funding.funded) workBlock = { error: "providers_unfunded", message: funding.message };
+      }
+    } catch (fault) {
+      console.error("Billing status could not be read; customer work continues", fault);
+    }
+  }
+
   // A production trace can be visible before its explicit end/evidence-ready
   // handshake freezes selection. That is pending, not an empty decision.
   if (entries === undefined) {
     if (ref.source === "simulation") return undefined;
-    return { state: "pending", history: [], current: [], combinedScore: null };
+    return { workBlock, state: "pending", history: [], current: [], combinedScore: null };
   }
 
   const names = await namesFor(
@@ -1392,17 +1452,18 @@ export async function readTraceGrading(
   const current = grades.current.map(named);
 
   if (entries.length === 0) {
-    return { state: "not_requested", history, current, combinedScore: null };
+    return { workBlock, state: "not_requested", history, current, combinedScore: null };
   }
   if (job?.status === "claimed") {
-    return { state: "running", history, current, combinedScore: null };
+    return { workBlock, state: "running", history, current, combinedScore: null };
   }
   if (job?.status === "pending") {
-    return { state: "pending", history, current, combinedScore: null };
+    return { workBlock, state: "pending", history, current, combinedScore: null };
   }
   const terminal = allEntriesHaveResults(entries, grades.current);
   if (!terminal.complete) {
     return {
+      workBlock,
       state: job?.status === "abandoned" ? "error" : "pending",
       history,
       current,
@@ -1410,9 +1471,10 @@ export async function readTraceGrading(
     };
   }
   if (terminal.errored) {
-    return { state: "error", history, current, combinedScore: null };
+    return { workBlock, state: "error", history, current, combinedScore: null };
   }
   return {
+    workBlock,
     state: "complete",
     history,
     current,
@@ -1436,16 +1498,33 @@ type SimulationPlanRow = {
   readonly jobStatus: string | null;
 };
 
+/**
+ * How one simulation's current grades stand against its frozen plan.
+ *
+ * `selected` is the number of project graders the plan holds. The three
+ * results count the current grade of each of them, so a simulation with
+ * grading still to do tallies fewer results than it selected.
+ */
+export type SimulationGradeTally = {
+  readonly passed: number;
+  readonly failed: number;
+  readonly errored: number;
+  readonly selected: number;
+};
+
 type ResolvedSimulationState = {
   readonly gradable: boolean;
   readonly state: TraceGradingState | null;
   readonly combinedScore: number | null;
+  readonly tally: SimulationGradeTally | null;
 };
 
 export type SimulationGradingState = {
   readonly simulationId: string;
   readonly state: TraceGradingState | null;
   readonly combinedScore: number | null;
+  /** Null when there is no grading state to count: no plan, or no trace yet. */
+  readonly tally: SimulationGradeTally | null;
 };
 
 export type SimulationGradingRef = {
@@ -1533,19 +1612,42 @@ function resolvedSimulationState(
   facts: ReadonlyMap<string, ReadonlyMap<string, CurrentSimulationGradeFact>>,
 ): ResolvedSimulationState {
   if (row.status !== "completed") {
-    return { gradable: false, state: null, combinedScore: null };
+    return { gradable: false, state: null, combinedScore: null, tally: null };
   }
 
   const group = selectedGroup(row);
   if (group.items.length === 0) {
-    return { gradable: false, state: "not_requested", combinedScore: null };
+    return {
+      gradable: false,
+      state: "not_requested",
+      combinedScore: null,
+      tally: null,
+    };
   }
 
+  // Work in flight reads no grade facts, so the tally reports the plan with
+  // no result counted yet rather than a count nothing was read for.
+  const waiting: SimulationGradeTally = {
+    passed: 0,
+    failed: 0,
+    errored: 0,
+    selected: group.items.length,
+  };
   if (row.jobStatus === "claimed") {
-    return { gradable: true, state: "running", combinedScore: null };
+    return {
+      gradable: true,
+      state: "running",
+      combinedScore: null,
+      tally: waiting,
+    };
   }
   if (row.jobStatus === "pending") {
-    return { gradable: true, state: "pending", combinedScore: null };
+    return {
+      gradable: true,
+      state: "pending",
+      combinedScore: null,
+      tally: waiting,
+    };
   }
 
   const traceId = traceIdOfSimulation(row.simulationId);
@@ -1553,19 +1655,40 @@ function resolvedSimulationState(
     throw new Error(`simulation ${row.simulationId} has no trace identity`);
   }
   const current = facts.get(traceId);
-  let errored = false;
+  let passed = 0;
+  let failed = 0;
+  let errored = 0;
+  let complete = true;
   for (const item of group.items) {
     const grade = current?.get(item.projectGraderId);
     if (grade === undefined) {
-      return {
-        gradable: true,
-        state: row.jobStatus === "abandoned" ? "error" : "pending",
-        combinedScore: null,
-      };
+      complete = false;
+      continue;
     }
-    errored ||= grade.errored;
+    // A current grade reads the way `currentGrades` in grading/results.ts reads
+    // it: no score is an error, and a score is measured against the threshold
+    // the plan froze.
+    if (grade.errored || grade.score === null) errored += 1;
+    else if (grade.score >= item.passThreshold) passed += 1;
+    else failed += 1;
   }
-  if (errored) return { gradable: true, state: "error", combinedScore: null };
+  const tally: SimulationGradeTally = {
+    passed,
+    failed,
+    errored,
+    selected: group.items.length,
+  };
+  if (!complete) {
+    return {
+      gradable: true,
+      state: row.jobStatus === "abandoned" ? "error" : "pending",
+      combinedScore: null,
+      tally,
+    };
+  }
+  if (errored > 0) {
+    return { gradable: true, state: "error", combinedScore: null, tally };
+  }
   return {
     gradable: true,
     state: "complete",
@@ -1573,6 +1696,7 @@ function resolvedSimulationState(
       group.items.map((item) => item.projectGraderId),
       current === undefined ? [] : [...current.values()],
     ),
+    tally,
   };
 }
 
@@ -1622,6 +1746,7 @@ export async function readSimulationGradingStates(
       simulationId: row.simulationId,
       state: resolved.state,
       combinedScore: resolved.combinedScore,
+      tally: resolved.tally,
     }];
   });
 }
@@ -1690,15 +1815,55 @@ export async function regradeTrace(
     if (entries.length === 0) return { kind: "not_requested" };
 
     const existing = await jobForTrace(tx, auth, ref.traceId);
-    if (existing !== undefined) {
-      if (existing.status === "pending" || existing.status === "claimed") {
-        return {
-          kind: "queued",
-          jobId: existing.id,
-          reopened: false,
-          alreadyWaiting: true,
-        };
+    if (existing?.status === "pending" || existing?.status === "claimed") {
+      return {
+        kind: "queued",
+        jobId: existing.id,
+        reopened: false,
+        alreadyWaiting: true,
+      };
+    }
+    if (ref.source === "simulation") {
+      const simulationId = simulationIdOfTrace(ref.traceId);
+      if (simulationId === undefined || ref.runId === undefined) {
+        throw new Error(`trace ${ref.traceId} is not a simulation trace`);
       }
+      const [row] = await tx
+        .select({
+          startedAt: simulation.startedAt,
+          endedAt: simulation.endedAt,
+          heartbeatAt: simulation.heartbeatAt,
+          providerReference: simulation.providerReference,
+          connectionSnapshot: run.connectionSnapshot,
+        })
+        .from(simulation)
+        .innerJoin(run, eq(run.id, simulation.runId))
+        .where(within(auth, simulation, eq(simulation.id, simulationId)))
+        .limit(1);
+      if (row === undefined) throw new Error(`simulation ${simulationId} is not readable`);
+      if (simulationExpectsAnAgentPov(row)) {
+        const completedAt = theWaitBeganAt(row);
+        const now = new Date();
+        const readiness = await simulationEvidenceReadiness(auth, {
+          traceId: ref.traceId,
+          runId: ref.runId,
+          window: {
+            from: BigInt((row.startedAt ?? completedAt).getTime() - 5 * 60 * 1_000) * 1_000n,
+            to: BigInt(now.getTime() + 1_000) * 1_000n,
+          },
+          producesAnAgentPov: true,
+          completedAt,
+          now,
+        });
+        if (!readiness.ready) return { kind: "waiting", for: "evidence" };
+      }
+    }
+    const providers = providersForGrading(entries);
+    if (providers.length > 0) {
+      const funding = await billing().entitlements.mayPlatformKeyFund({ organizationId: auth.organizationId, providers });
+      if (!funding.funded) throw new FundingRefusedError(funding.message);
+    }
+    if (existing !== undefined) {
       const prior = await readTraceGrades(auth, ref);
       const [row] = await tx
         .update(gradingJob)

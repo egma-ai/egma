@@ -2,33 +2,17 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { loadConfig } from "../src/config.ts";
 
 /**
- * The deployment story, checked against the code that reads it.
- *
- * The full environment reference tells an operator about every advanced
- * variable, while `.env.example` stays limited to normal operator inputs.
- * Compose and this app's README must agree with that reference. Each names
- * variables, and every one of them can fall behind the module that reads them,
- * silently, because nothing fails when a variable is documented and unread or
- * read and undocumented. The second is the expensive kind: a self-hoster cannot
- * set a variable nobody told them about, and the failure is a feature that
- * quietly never turns on.
- *
- * So this file compares them, and it is deliberately about **names and shapes**
- * rather than about Docker. It parses no YAML and starts no container: what it
- * asserts is true of the text, which is what somebody reads. The simulator's own
- * deployment test does exactly this, and this is that test for the service on
- * the other side of the wire.
- *
- * The other half is the invariant the whole arrangement rests on — **the grader
- * publishes nothing** — which is a claim about every compose file in the
- * repository at once, and so cannot be tested from inside any one of them.
+ * Check environment names against the operator reference, Compose, and README.
+ * These are text-contract tests, not container tests. Also check every
+ * Compose file for the grader's no-inbound-port rule.
  */
 
 const ROOT = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
-const VARIABLE = /EGMA_GRADER_[A-Z0-9_]+/g;
+const VARIABLE = /EGMA_(?:GRADER|GRADING)_[A-Z0-9_]+/g;
 
 async function read(...parts: string[]): Promise<string> {
   return readFile(path.join(ROOT, ...parts), "utf8");
@@ -147,11 +131,8 @@ describe("the grader's place in the deployment", () => {
     expect(block).toContain("CLICKHOUSE_URL:");
   });
 
-  /** The grader reads the shared provider bundle. It no longer opens model
-   * credentials stored in Postgres, so the connection encryption key must not
-   * cross this container boundary.
-   */
-  it("is handed the provider credential inputs, and no encryption key", async () => {
+  /** The grader opens organization keys and also uses deployment provider keys. */
+  it("is handed provider inputs and the same key used to seal organization credentials", async () => {
     const block = serviceBlock(await read("docker-compose.yml"), "grader");
     expect(block).toBeDefined();
     expect(block).toContain("EGMA_OPENAI_API_KEY:");
@@ -159,7 +140,7 @@ describe("the grader's place in the deployment", () => {
     expect(block).toContain("EGMA_CARTESIA_API_KEY:");
     expect(block).toContain("EGMA_PROVIDER_CREDENTIALS_SECRET_ID:");
     expect(block).toContain("EGMA_PROVIDER_CREDENTIALS_REGION:");
-    expect(block).not.toContain("EGMA_ENCRYPTION_KEY:");
+    expect(block).toContain("EGMA_ENCRYPTION_KEY:");
   });
 
   it("has no healthcheck, because nothing listens for one to reach", async () => {
@@ -196,4 +177,21 @@ describe("the API process", () => {
     await walk(source);
     expect(offending).toEqual([]);
   });
+});
+
+
+it("keeps the grader WAL on its own volume when the shared environment names the API log", () => {
+  vi.stubEnv("DATABASE_URL", "postgres://unused");
+  vi.stubEnv("CLICKHOUSE_URL", "http://unused:8123");
+  vi.stubEnv("EGMA_INGEST_ENDPOINT", "");
+  vi.stubEnv("EGMA_INGESTION_LOG_DIR", "/a/host/path/for/the/api");
+  vi.stubEnv("EGMA_GRADER_INGESTION_LOG_DIR", "");
+  vi.stubEnv("EGMA_ROLE", "drain");
+  try {
+    expect(loadConfig().ingestion).toMatchObject({
+      role: "ingest", logDirectory: "/var/lib/egma/grader-ingestion",
+    });
+    vi.stubEnv("EGMA_GRADER_INGESTION_LOG_DIR", "/mounted/grader/log");
+    expect(loadConfig().ingestion.logDirectory).toBe("/mounted/grader/log");
+  } finally { vi.unstubAllEnvs(); }
 });

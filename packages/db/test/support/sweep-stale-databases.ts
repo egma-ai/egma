@@ -1,45 +1,9 @@
 /**
- * Drop the test databases a previous run left behind — and only those.
- *
- * Every test file that touches a store creates a database of its own named
- * `egma_test_…` and drops it when it disconnects. A file that runs out of time
- * never reaches its disconnect, so its database stays — and stale databases are
- * not merely untidy. `create database` copies a template while holding a lock,
- * and both stores get slower at it as the count climbs, so one run that timed
- * out makes the next run likelier to time out too. One observed run failed 63
- * tests across 12 files and left 31 databases behind; dropping them made the
- * next run pass.
- *
- * ## Why "and only those" is the hard half
- *
- * Two suites can be running on one machine at once — two worktrees, two agents,
- * a person and a watcher — and they share these stores. A sweep that dropped
- * every matching database would not merely race with the other run: it would
- * **destroy** it, killing live sessions mid-transaction and leaving failures
- * that look like the code under test. That is strictly worse than the piling-up
- * this exists to prevent, so the sweep asks, per database, whether anybody is
- * using it, and leaves anything that might be in use for the next run.
- *
- * The two stores answer that question differently:
- *
- * - **Postgres** knows exactly. A database with any backend connected has rows
- *   in `pg_stat_activity`, so those are skipped outright — and the drop is
- *   issued *without* `force`, so a session that arrives in the moment between
- *   the check and the drop makes Postgres refuse rather than makes us kill it.
- *   Refusal is the right answer there; the database stays for next time.
- * - **ClickHouse** has no per-database session to ask about, so the question
- *   becomes age: the newest metadata timestamp among a database's tables. A
- *   database whose schema was written in the last {@link IN_USE_MINUTES}
- *   minutes may belong to a run happening now and is left alone, and one with
- *   no tables at all was created seconds ago by a file whose migrations have
- *   not finished. Neither is what this is for: the databases worth dropping are
- *   yesterday's.
- *
- * The sweep runs where the stores are started — `pnpm db:up`, which `pnpm test`
- * runs first — rather than inside the suite, where a file that has already
- * claimed a name must not have it swept out from under it. Nothing here touches
- * the deployment database: the prefix is only ever used by the test support
- * modules beside this one.
+ * Remove abandoned databases with the test prefix before starting the suite.
+ * PostgreSQL skips databases with matching sessions and drops without FORCE.
+ * ClickHouse uses schema age as a heuristic: skip unknown timestamps and
+ * schemas newer than IN_USE_MINUTES. This cannot prove that an older database
+ * is idle, so the cutoff must exceed the expected test-run duration.
  */
 
 import { createClient } from "@clickhouse/client";

@@ -7,27 +7,9 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * The centered modal layer, drawn the way the confirm boards draw it.
- *
- * 480px wide, 24px of padding, a 20px column gap, the shared orange-brown
- * shadow over a neutral hairline and no corner at all — read off `BEM-0` and
- * `BMT-0` with `get_computed_styles` on 2026-08-23. The header is a title with
- * a close beside it over a hairline; the footer is the answer and the way out,
- * in that order, at the left. The boards put 28px of padding on the panel and
- * this is 24: 28px is off `DESIGN.md`'s 4px spacing list, and the ticket rounds
- * it to the step that is on it.
- *
- * Radix supplies what `DESIGN.md` requires of a dialog and a hand-written one
- * keeps getting wrong: focus is trapped, the page behind it is inert, Escape
- * closes it, and the exact opener is focused again afterwards.
- *
- * The entrance and the exit are not here. They are in `tailwind-theme.css`,
- * keyed on `data-slot` and `data-state`, so the motion is a property of the
- * theme rather than a class list each dialog has to remember — and so the exit
- * is a CSS animation, which is what Radix waits for before unmounting.
- *
- * A destructive dialog still has to name the agent, test, persona, grader, key,
- * invitation, run, or project it is about. No component can do that for it.
+ * Shared dialog primitives with theme-owned dimensions and motion. Radix
+ * manages modal behavior and exit presence; callers supply meaningful titles
+ * and name the affected record in destructive confirmations.
  */
 function Dialog(props: ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
@@ -117,17 +99,8 @@ function DialogContent({
 }
 
 /**
- * The head of a dialog, and the hairline the boards draw under it.
- *
- * `BK0-0` measures 16px of padding under the title and a 1px `--border` rule
- * across the panel's inner width — the same on `BEM-0`, `BMT-0` and `C8F-0`.
- * Nothing here drew it, and no caller could add it (`ui/dialog.tsx` takes no
- * class for its head), so one screen reached for a `Separator` as the panel's
- * first child instead. It belongs on the head, once.
- *
- * A column rather than the board's row: the close control is placed by
- * `DialogContent`, against the panel, so that a head with two lines in it does
- * not move the ✕ down the corner.
+ * Keep the title divider in the shared header. The close button is positioned
+ * by DialogContent so multiline titles do not move it.
  */
 function DialogHeader({ className, ...props }: ComponentProps<"div">) {
   return (

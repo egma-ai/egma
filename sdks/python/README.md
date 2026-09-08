@@ -1,453 +1,119 @@
-# Egma Python SDK
+# Egma SDK for livekit Python agents
 
-Test a LiveKit agent with mock tools and send its production spans to Egma.
+This SDK connects your livekit agent to egma for simulation testing and production monitoring. It records the agent's POV during simulations and lets egma inject mock tools.
 
-The two verbs are separate, and the room decides which one acts:
+We need to do four things to set it up.
 
-- `simulation(...)` is for an Egma simulation room. It reports your
-  agent's tools to Egma, lets Egma answer the tools the running test
-  mocks, and sends the agent's own spans to Egma as that simulation's
-  agent POV. It does nothing in production.
-- `monitor(...)` sends production LiveKit spans to the Monitoring page.
-  It does nothing in an Egma simulation.
+## 1. Install the SDK
 
-Calling one verb never enables or changes the other.
-
-`simulation(...)` is **required** for a LiveKit simulation, and it fails
-closed: an agent that cannot report to Egma raises `egma.NotReported` and
-the session does not start. Egma ends that simulation from its own side
-with the same finding.
-
-## Install
+Install the latest compatible release in the repo where your livekit worker runs. Use the package manager the repo already uses.
 
 ```bash
-pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
+pip install --upgrade egma
 ```
 
-This source request has no version, tag, or commit. Let the repository's
-package manager resolve and lock the latest compatible SDK.
-
-For a LiveKit agent on Python 3.11 or newer.
-
-## Production monitoring
-
-Open **Agents → Connect an agent**, choose **Monitoring** or **Both**, and then
-choose **LiveKit**. The guided flow shows these worker, key, and deployment
-steps. A LiveKit agent pushes its own spans, so there is nothing to switch on
-in Egma.
-
-Set the Egma API origin and an existing project API key in the agent's
-environment:
+For a repo using uv:
 
 ```bash
-export EGMA_URL=https://api.egma.ai
-export EGMA_API_KEY=egma_sk_...
+uv add --upgrade egma
 ```
 
-For self-hosted Egma, prefer the published API address, such as
-`http://localhost:3100`. The web address also works because Egma forwards
-`/v1/traces` to the API, but the API is one hop shorter. The agent process must
-be able to make HTTP or HTTPS requests to the address you choose.
+The SDK supports Python 3.11 or newer and `livekit-agents>=1.6.6,<1.9`, including LiveKit 1.8. It uses OpenAI Python 2. Check compatibility with the worker's existing dependencies before upgrading and keep the resolved versions in the repo's lockfile.
 
-In a customer-hosted worker, set these values through your normal deployment
-secret store. For LiveKit Cloud, place them in a gitignored secrets file and
-apply it to the agent:
+## 2. Setup the worker's environment
+
+Use an egma API key scoped to the project you want to send data to. You can create it through the CLI or the UI.
+
+- **CLI:** from a repo with a logged-in egma CLI and the right project in `egma/config.yaml`, run the command below. Use `egma login` if you need to sign in, and `egma init` if the repo does not have a project setup yet.
+
+  ```bash
+  egma project api-key create --name livekit-worker
+  ```
+
+- **UI:** open your project in [egma](https://app.egma.ai), go to **Settings → API keys**, enter a name, select your project under **Scope**, and click **Create key**.
+
+Copy the key when it is shown. The secret is shown once, and the CLI does not save it.
+
+Set these values in the worker's environment:
 
 ```bash
-lk agent update-secrets --secrets-file=.env.monitoring
+EGMA_URL=https://api.egma.ai
+EGMA_API_KEY=<your project API key>
 ```
 
-Use the same file with `lk agent create --secrets-file=.env.monitoring` for a
-new deployment. LiveKit Cloud restarts the agent after a secret update.
+For self-hosted egma, use your egma API URL. The worker must be able to reach it. Put the key in the worker's secret store or a gitignored environment file. For a cloud worker, set it in the deployed environment as well.
 
-Call `monitor` as the first statement of the job entrypoint, before
-`ctx.connect` and `AgentSession.start`:
+## 3. Add the integration
 
-```python
-from egma import monitor
-from livekit import agents
-from livekit.agents import Agent, AgentSession
+There are two functions depending on what you want to setup.
 
+### A. Simulation testing
 
-async def entrypoint(ctx: agents.JobContext) -> None:
-    monitor(ctx)
-    await ctx.connect()
-
-    agent = Agent(instructions=INSTRUCTIONS, tools=[check_calendar])
-    session = AgentSession(stt=..., llm=..., tts=...)
-    await session.start(agent=agent, room=ctx.room)
-```
-
-You can pass the same values directly when environment variables are not the
-right configuration source:
-
-```python
-monitor(ctx, endpoint="https://api.egma.ai", api_key=project_key)
-```
-
-Use the same call for an agent hosted in your cloud and an agent hosted in
-LiveKit Cloud. The helper adds Egma to a compatible OpenTelemetry provider; it
-does not remove LiveKit Cloud observability or another existing span
-processor. It sends spans in batches and flushes the final batch when the
-LiveKit job stops.
-
-If this job runs in an Egma simulation room, the helper returns without
-adding a production exporter and says so at `WARNING`. `simulation(...)`
-exports that conversation instead, filed under the simulation rather than
-as a second production call.
-
-The helper reads the room's name for that and nothing else. Every Egma
-simulation room is named `egma-sim-…`; a room named anything else gets the
-production exporter. The name arrives with the job, so this decision costs
-no network and happens before `ctx.connect()`.
-
-After deployment, open **Monitoring**. Nothing needs to be confirmed in Egma —
-the deployed helper is what sends spans, and the first production conversation
-appears in the list as soon as it arrives.
-
-The caller's phone, SIP, or WebRTC entry path does not change this setup. The
-SDK does not guess that path from a LiveKit trace.
-
-### Setup status
-
-The helper stops immediately with one direct error when required settings are
-missing or malformed, or when tracer providers conflict. It does not include
-the key in that error.
-
-After deployment, Monitoring stays empty until the first trace reaches Egma,
-then lists each production conversation as it arrives. This release uses one-way
-OTLP export. Egma cannot see a DNS, firewall, or network failure inside the
-worker. Check the worker's OpenTelemetry logs and confirm that it can reach
-`EGMA_URL` when nothing appears.
-
-## Simulation mock tools
-
-A simulation that reaches your real tools has real side effects: it books
-the appointment, sends the message, charges the card. And a real backend
-only ever shows you the branch its data happens to be on — "the calendar
-is full", "the lookup fails", "the booking API errors" are where voice
-agents die in production, and none of them can be ordered up from a real
-backend on demand.
-
-A **mock tool** answers for one of your agent's tools during a
-simulation. It is written on the test itself, beside that test's scenario
-and expected behaviors, and matched strictly by tool name: one answer, or
-one error, per tool per test. This package is the piece that lives in your
-own agent's process and lets Egma answer.
-
-**Egma answers for exactly the tools the running test names. Every other
-tool runs its real implementation, untouched, and Egma is not in that
-path.** A test that names none runs your agent against your real backend
-from end to end.
-
-**Unmocked tools run real, and are recorded from the agent's POV.** The
-record of a simulation is your agent's own account of the conversation, so
-every call it made is on it, with the arguments the model sent and the
-result it received. A call a mock tool answered is marked `mocked`, beside
-the tool's own name; a call Egma refused shows as the error this package
-raised on it; a call carrying neither is a real one that ran.
-
-A mock tool whose name never matches one of your agent's tools runs
-nothing and leaves no trace: the model never calls that name, and the
-record shows no call and no warning. Spell each tool exactly as your agent
-registers it.
-
-### Use
-
-One call, after the agent is built and before the session starts:
+Call and await `simulation(agent, ctx, session)` after creating the agent and session, before `session.start`. Add this around the existing start call in your job entrypoint:
 
 ```python
 from egma import simulation
+
+await simulation(agent, ctx, session)
+await session.start(agent=agent, room=ctx.room)
 ```
+
+This is required for every voice and text simulation, even when the test has no mock tools. It sends the agent's traces to the simulation and lets egma answer the tools named under `## Mock tools` in the test. Other tools run their real implementations and are recorded too.
+
+The SDK recognises simulation rooms by the `egma-sim-` prefix. In other rooms, `simulation` does nothing. Keep that prefix reserved for egma simulations.
+
+For text simulations, disable audio and transcription pacing in `egma-sim-chat-` rooms. Use this start call, keeping your normal voice settings in the other branch:
 
 ```python
-async def entrypoint(ctx: agents.JobContext) -> None:
-    agent = Agent(instructions=INSTRUCTIONS, tools=[check_calendar, book_appointment])
-    session = AgentSession(stt=..., llm=..., tts=...)
+from livekit.agents import room_io
 
-    await simulation(agent, ctx, session)
+is_egma_chat = ctx.job.room.name.startswith("egma-sim-chat-")
+options = (
+    room_io.RoomOptions(
+        audio_input=False,
+        audio_output=False,
+        text_output=room_io.TextOutputOptions(sync_transcription=False),
+    )
+    if is_egma_chat
+    else room_io.RoomOptions()
+)
 
-    await session.start(agent=agent, room=ctx.room)
+await session.start(agent=agent, room=ctx.room, room_options=options)
 ```
 
-That is the whole simulation integration. It reads `EGMA_URL` and
-`EGMA_API_KEY`, the same two settings `monitor` reads, or the matching
-`endpoint=` and `api_key=` arguments.
+Keep the `await simulation(...)` call before this start call. Turn off any separate audio publishers in the text branch too.
 
-**One LiveKit job per process.** The room a process exports under is fixed
-when its exporter is built and cannot be rewritten, so a second job in the
-same process is refused rather than filed under the first job's room.
-LiveKit runs one job per process by default; keep it that way.
+If the worker cannot complete the handshake with egma, `simulation` raises `NotReported`. Fix the setup before starting the session. If a mocked tool cannot reach egma during a simulation, that tool errors instead of calling the real backend.
 
-### What it sends to Egma
+`simulation` has no total startup deadline. It waits for Egma to join and accept the tool configuration while the simulation room stays active. A room disconnect, Egma participant departure, or task cancellation stops the wait. Each RPC attempt keeps its own transport timeout, and transient registration or delivery failures are retried with the same configuration.
 
-Your agent's own spans, over OTLP, to `EGMA_URL` with your project API
-key — the same road `monitor` uses. Each span carries the room's name, so
-Egma files them under the simulation that opened that room. They are
-batched at one second and flushed when the session closes and again when
-the LiveKit job stops, so the end of a conversation lands in Egma within a
-second or two of the caller leaving.
+### B. Production monitoring
 
-That is the **agent's POV** of the simulation: its turns, its tool calls,
-its own timings. Egma stores it beside what its own caller heard and shows
-it on the simulation.
-
-If your worker already has an OpenTelemetry tracer provider — Langfuse, or
-your own collector — it is kept and used as it stands. Egma is added
-beside what you already export, never in place of it.
-
-### How it knows it is in a simulation
-
-It reads the **room's name** off the job. Every room Egma conducts a
-simulation in is named `egma-sim-…`, and that prefix is fixed. Nothing
-else is read, nothing is asked, and no room is connected to find out.
-
-The name is the signal because it is the one that arrives on every
-dispatch path an agent can end up in an Egma room by — whether Egma
-dispatches your worker by name, whether LiveKit walks an unnamed worker
-into the room, and whether your own token endpoint puts the agent there.
-A signal carried by an explicit dispatch arrives on only the first of
-those.
-
-In a simulation room, `simulation` connects the job with LiveKit's own
-`JobContext.connect()` if your startup has not already done so, then finds
-Egma among the room's participants: Egma joins as `egma-persona` or
-`egma-persona-<simulation>`. On two of the three dispatch paths your
-agent is in the room **before** Egma, so it waits for that participant,
-for up to 45 seconds and without polling anything outside the room. That
-is a long time to hold an agent before it greets anybody, and it is the
-price of the wait being correct on every dispatch path rather than on one;
-a simulation ordinarily pays a fraction of it. It does not reconnect an
-already-connected room, and it never connects a production room.
-
-If nobody by that name arrives, `simulation` raises `egma.NotReported`
-and your session never starts. If two participants answer to that name,
-the exchange is refused for the same reason a room with two claimants has
-no knowable answer — your tool inventory is not sent to either of them,
-and the same error is raised.
-
-That is the fail-closed rule, and it is deliberate: a simulation that ran
-without reaching Egma would have called your real backends everywhere a
-mock tool was meant to answer, and its record would say nothing about it.
-A test that isolated nothing must not be allowed to look like one that
-did.
-
-Then `simulation` reports your agent's tools to Egma — names and schemas,
-read off the agent object, so mock authoring starts from your real tool
-names instead of your memory of them — and asks which tools this
-simulation answers for. Egma replies with exactly the names the running
-test wrote, and couriers go in front of those names only. Calls to them
-go to Egma and come back with the authored answer. Every one of them
-lands on the simulation's record with its arguments, its answer, how long
-it took, and which mock tool answered.
-
-**In every other room it does nothing at all.** A room your own system
-named — which is every production room — is a room where `simulation`
-returns having touched nothing: no wrapper, no message, no exporter, no
-connect. Your
-tools are the same objects, called the same way, with no wrapper between
-them and the model. Zero added latency, by construction rather than by
-care. That property is a test in this package (`tests/test_inert.py`),
-not a promise in this file.
-
-Your job's **dispatch metadata carries the test's own env**. This SDK
-writes nothing into it and reads nothing out of it — not one key, in any
-room, for any purpose. With Project credentials, Egma writes the running
-test's `job_dispatch_metadata` directly to the dispatch. With a token
-endpoint, Egma sends the same value in `room_config` and the endpoint copies
-that configuration into the token it mints. Either way, the worker receives
-one compact JSON string, key for key, and nothing of Egma's beside it;
-`json.loads(ctx.job.metadata)["tenant"]` reads the value that scenario
-meant it to read. A test that names no env dispatches the empty string. The
-room's metadata Egma always leaves empty.
-
-### Where to call it
-
-After the agent object exists and before `session.start`. The report of
-your tools is the first thing said, so an Egma that is not in the room is
-found before any tool call rather than half way through a test.
-
-Keep one `simulation` call for the initial agent. The SDK follows LiveKit's
-public handoff events and installs the same simulation couriers for each
-selected `Agent` or `AgentTask` before that activity starts, so a tool the
-test names is answered whichever agent holds it.
-
-### What a call to a mocked tool does
-
-- Goes to Egma over the same LiveKit room. No new endpoint, no new
-  credential, nothing new to expose. If needed, `simulation` connects that
-  room through the job context before sending the first RPC.
-- Comes back with the authored answer, or raises the authored error as
-  the tool's own error, so your agent handles it exactly as it would
-  handle a real backend failing.
-- **Fails, if Egma turns out not to be reachable.** The call raises as the
-  tool's own error and your real tool is never run. A mocked tool exists
-  because this test answers for it, so running its real implementation
-  would book the real appointment and charge the real card — which is the
-  one thing a test may never do.
-- **Never waits forever.** Every branch ends in an answer or an error the
-  model can hear.
-
-A tool you attach to the agent *after* calling `simulation` is still
-intercepted on its first call — Egma's answers are held by name. Its
-arguments may be incomplete on the record, and Egma marks that call so
-you can see it.
-
-### Logging
-
-Everything this package says goes to the `egma` logger. It is worth
-having on at `INFO` the first time you wire an agent up: the line after
-the tool report names how many tools you have and how many Egma answers
-for.
-
-A simulation that could not report to Egma raises `egma.NotReported`
-rather than logging: no Egma participant arrived in the room, two
-participants claimed to be Egma, the room would not open, or the two
-halves do not speak the same version of the exchange. The message names
-what happened and the two things to check — the room and Egma's own side
-of it, then the package installed here. None of that is reachable in a
-production room.
-
-## Before you install anything: the interim recipe
-
-You can get isolation today with no Egma code at all, using LiveKit's own
-`mock_tools` and a guard you write yourself:
+Call `monitor(ctx)` at the start of the job entrypoint, before `ctx.connect` and `session.start`:
 
 ```python
-from livekit.agents import mock_tools
+from egma import monitor
 
-
-def in_a_simulation(ctx: agents.JobContext) -> bool:
-    return ctx.job.room.name.startswith("egma-sim-")
-
-
-async def entrypoint(ctx: agents.JobContext) -> None:
-    await ctx.connect()
-    agent = Agent(instructions=INSTRUCTIONS, tools=[check_calendar])
-    session = AgentSession(stt=..., llm=..., tts=...)
-
-    if in_a_simulation(ctx):
-        mock_tools(
-            type(agent),
-            {"check_calendar": lambda day: "No free slots on that day."},
-            session=session,
-        )
-
-    await session.start(agent=agent, room=ctx.room)
+monitor(ctx)
 ```
 
-A room your own system named means the guard is false and nothing is
-wrapped. Note where that safety comes from, because it is not where
-`simulation`'s comes from: this guard fires on a prefix being *present*
-rather than on Egma being *absent*. So it is true in any room whose name
-begins `egma-sim-`, including one Egma is not in — `simulation` waits for
-Egma's participant and then fails the simulation, while this guard has
-nobody to wait for and simply mocks. Refuse that prefix wherever your own side mints
-production tokens, or a production room named to look like a simulation
-runs your canned answers against a live caller.
+It sends production traces to egma Monitoring. It does nothing in simulation rooms.
 
-**Write the guard on the room name, and not on `egmaIdentity` in
-`ctx.job.metadata`.** That key is in no simulation room at all: the
-dispatch carries the test's own env and no key of Egma's. A guard on it
-does not raise — it quietly fails to fire, and every real tool it was
-meant to hold back runs inside a simulation.
+If you want both testing and monitoring, add both calls: `monitor(ctx)` at the start of the entrypoint, then `await simulation(agent, ctx, session)` before the session starts. Both use the same environment settings.
 
-What it cannot do is the rest of the job. One canned world for every
-test, so you cannot write "the calendar is full" as a *test* — you would
-be editing your agent's source to change a test's data. Nothing about
-those calls reaches Egma's record: no arguments, no answers, no timings,
-so graders that read tool facts have nothing to read. And it sends no
-spans, so the simulation has no agent POV — which a LiveKit simulation now
-requires, so a run set up this way fails.
+The SDK adds egma to a compatible existing OpenTelemetry provider. Keep LiveKit's default of one job per process, so each job's traces stay attached to its own room.
 
-**And the honest caveat: that guard couples your agent's source to how
-Egma announces itself.** The room-name prefix is a stated contract rather
-than an implementation detail, so it is the safe thing to key off — but
-the *rest* of the mechanism is not: where Egma sits in the room, what
-it is called, how long it takes to arrive, and what a room with two
-claimants means are all Egma's to evolve. That is precisely what
-`simulation` exists to own, and your side stays one line.
+## 4. Run the updated worker and verify
 
-Use the recipe as the bridge, not as the small tier.
+For simulations, register the agent and a connection in egma if you have not already done so. Start the updated worker with an explicit `agent_name` matching that connection. Supply the job dispatch metadata your worker needs for startup.
 
-## Upgrading from 0.2
+Keep a local worker running during tests. To use a cloud worker, deploy the SDK changes and environment settings there first. A successful local run does not deploy those changes.
 
-Version 0.3 replaces `mockable` with `simulation` and `monitor_livekit` with
-`monitor`. Update the imports and calls; the old names are no longer exported.
+- **Testing:** run a simulation, wait for it to finish, and check that it completed with the agent's POV. If the agent calls a mocked tool, check its recorded arguments and answer too.
+- **Monitoring:** make a production conversation and check that it appears in egma Monitoring.
 
-`simulation` now also exports the agent's traces. Set `EGMA_URL` and
-`EGMA_API_KEY`, or pass `endpoint` and `api_key`, before calling it. A simulation
-that cannot report its tools raises `NotReported` before the session starts.
-The supported LiveKit range remains `>=1.6.7,<1.7`.
-
-## Compatibility
-
-The `egma-sim-` room-name prefix is a stated contract, not an internal
-detail. Every room Egma opens for a simulation begins with it, on every
-dispatch path, and it is there to be relied on and to be allowlisted in
-a token endpoint. This SDK keys its whole simulation/production decision
-off it.
-
-Every Egma deployment names its rooms that way, so this package works
-against a self-hosted Egma on whatever schedule its owner upgrades it.
-Nothing else is consulted — in particular, neither metadata channel,
-which carries your own configured JSON and nothing of Egma's.
-
-This package pins `livekit-agents` to one minor version
-(`>=1.6.7,<1.7`), and that is deliberate. Interception uses LiveKit's
-testing API. Monitoring also reads LiveKit's current dynamic tracer
-provider because the public telemetry API has a setter but no getter.
-The fixture and live tests verify both seams before the supported range
-changes.
-
-CI builds the wheel once and runs the core SDK tests against the minimum
-supported LiveKit version and the version in `uv.lock`, in parallel clean
-environments. The live tests run once on the locked version after those
-checks, so they have sole use of the local LiveKit server port.
-
-The package also keeps the OpenAI Python package on major version 2.
-LiveKit Agents 1.6 does not support OpenAI 3.
-
-`mock_tools` writes into a side table LiveKit keeps per session. It does
-not touch your agent, your agent's class, or your tool registry, and the
-model keeps seeing your real tool schemas throughout. Never calling it
-leaves everything byte for byte as it was, which is what makes the inert
-path literal.
-
-If that API ever moves, the documented fallback is
-`Agent.update_tools(...)` with `function_tool(raw_schema=...)` wrappers
-built from the real tools' schemas. It is a heavier mechanism — it takes
-responsibility for schema fidelity, for the real implementations, and for
-re-wrapping after a handoff — which is exactly why it is the fallback and
-not the mechanism.
-
-## Developing this package
-
-The toolchain is [uv](https://docs.astral.sh/uv/).
-
-```bash
-uv sync
-uv run ruff check src tests
-uv run pytest
-```
-
-The normal suite is hermetic: no LiveKit server, no project, and no external
-network. One monitoring test uses a local HTTP collector. One live test skips
-visibly when the environment is silent, naming what it needs. To run it, point
-it at a LiveKit project:
-
-```bash
-TEST_LIVEKIT_URL=wss://... \
-TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \
-TEST_MODEL_API_KEY=... \
-uv run pytest tests/test_live_mockable.py -v
-```
-
-Each name falls back to the plain one the tool's own CLI reads —
-`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `OPENAI_API_KEY`
-— so one environment serves this and whatever else you run beside it.
-`TEST_MODEL_NAME` picks the model; it defaults to `gpt-4o-mini`.
+If no worker joins, check the worker process and agent name. If the handshake fails, check the SDK call and room connection. If traces are missing, check the project key, `EGMA_URL`, and the worker's export logs.
 
 ## License
 
-Apache-2.0, with the rest of Egma.
+MIT. See [LICENSE](https://github.com/egma-ai/egma/blob/main/sdks/python/LICENSE).

@@ -12,44 +12,12 @@ import {
 } from "@egma/retell";
 
 /**
- * What a run over a Retell connection reads before it starts.
- *
- * **Both Retell lanes that reach a live agent read the same one fact first:
- * which version is serving.** Resolved once, here, and named explicitly on
- * every request from then on. Retell's own default is "the newest version", and
- * the newest version is exactly the one a concurrent edit — or another run's
- * draft — has just made, so a suite that leaned on the default could be testing
- * two different agents halfway through. Resolving once and pinning the number
- * that comes back is the whole fix, and the number is what the run's record
- * carries — and what the work order hands the simulator, so the version the run
- * conducts against is the version the record names.
- *
- * **What "serving" means is decided in one place for every surface.** The
- * account's numbers are read and this agent's own bindings answer it: a bound
- * version, an environment tag, or — where no binding names anything — the
- * newest *published* version, never Retell's `latest`, which means the newest
- * version *created* and so reaches whichever draft was minted last. That rule
- * is `versionReferenceIn` in the shared client, and the enable-time screen and
- * the mocked builder ask it the same question, so no two surfaces can disagree
- * about which version an agent is tested at.
- *
- * **An agent that publishes nothing and binds nothing is refused here**, before
- * a run row exists, with a sentence naming the ways out. There is no third
- * answer, because the third answer is a run conducted against a draft nobody
- * chose.
- *
- * **The text-mode lane reads one thing more, and refuses on it.** A custom LLM
- * has no configuration on Retell at all: the brain and the tools live on the
- * customer's own socket server, behind a websocket URL, and text mode cannot
- * reach one. The shared client answers that as `not-held` rather than as a
- * failure, because there was never anything to ask for — and that sentence is
- * what a developer is told, plus where the future of reaching such an agent
- * actually lies. A web call is brokered by Retell itself, which reaches a
- * custom LLM perfectly well, so that lane asks no such question.
- *
- * **Nothing here is optional.** A read that fails fails the run, loudly, before
- * a single simulation exists. The alternative is a run whose record names no
- * version, which is a result nobody can tie to an agent.
+ * Resolve a serving version before creating a Retell text or web-call run.
+ * Use shared binding resolution, falling back to latest published when no
+ * binding selects a version. Do not use Retell's newest-created draft default.
+ * Text mode also requires readable engine configuration and rejects custom
+ * LLMs; web calls do not apply that engine gate. Mocked web calls later build
+ * a temporary version through their own lifecycle.
  */
 
 /**
@@ -130,30 +98,9 @@ type LaneReach = {
 };
 
 /**
- * The serving version, read the one way for whichever lane is asking.
- *
- * **Shared rather than written twice**, because the two lanes make the identical
- * request for the identical reason, and two copies of it would be two places for
- * the answer to "which version is this run against" to drift. Each of the three
- * failures is a sentence about the connection, never about the request that met
- * it, and the credential is used and never returned, logged, or quoted — the
- * shared client owns that discipline.
- *
- * **Which reference, and who asks for it.** A run resolves what this agent's
- * own number bindings name — a bound version, an environment tag, and
- * `latest_published` only where no binding names anything — which is the same
- * reference `versionReferenceIn` gives the enable-time screen and the mocked
- * builder, resolved through the same verb. Asking for the published pointer
- * regardless would let a screen call an agent mockable on the strength of a
- * number bound to version 5 while the run refused it for publishing nothing:
- * one account, two answers.
- *
- * **The connect door asks for less, and that is deliberate.** Registering a
- * connection conducts nothing: it is asking whether this lane can reach this
- * agent at all. It has no version to pin, so it has no business reading the
- * customer's phone numbers — and a door that failed on a numbers listing would
- * refuse a registration for something no registration depends on, in a sentence
- * about a run that does not exist. `bindings` is what separates the two.
+ * Resolve the shared serving-version reference. Run starts inspect number
+ * bindings; connection validation skips that listing and uses latest published.
+ * Registration checks reachability without choosing a run version.
  */
 async function readServingVersion(
   lane: LaneReach,
@@ -264,14 +211,8 @@ function laneReach(
 }
 
 /**
- * The version a web-call run will conduct against.
- *
- * **One read and no gate.** A web call is brokered by Retell, so every engine
- * Retell will place a call against is one this lane reaches — including a custom
- * LLM, whose brain the broker talks to on the customer's own socket. There is
- * nothing here to refuse an agent for. A mocked web-call run asks Retell for
- * more than this, and it asks after the run row exists, in the builder that owns
- * putting the account back.
+ * Resolve the web-call serving version without the text-mode engine gate.
+ * Mock-draft creation is a separate step after the run exists.
  */
 export async function readWebCallWorld(
   input: {
@@ -295,17 +236,8 @@ export async function readWebCallWorld(
 }
 
 /**
- * The version a text-mode run will conduct against, once this lane can reach it.
- *
- * The second read is a gate and not a stamp: what comes back decides whether
- * text mode can reach this agent at all, and nothing of it is kept.
- *
- * **Two callers, one of which conducts nothing.** A run start passes
- * `bindings: true`, because the version it lands on has to be the one every
- * other surface would name. The connect door passes false: it is asking whether
- * this lane can reach this agent at all, it pins no version, and reading the
- * customer's phone numbers to answer that would let a registration fail on
- * something no registration depends on.
+ * Resolve the version and require engine configuration supported by text mode.
+ * Run starts inspect bindings; connection validation passes bindings: false.
  */
 export async function readTextModeWorld(
   input: {

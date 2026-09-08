@@ -1,0 +1,249 @@
+{
+  "note": [
+    "The rate card: Egma's price for one unit of one provider's work, one entry",
+    "per model in the executable catalog beside this file.",
+    "",
+    "A price is never edited. A change is a new entry with a later",
+    "effectiveFrom, and rating picks the newest entry effective at or before",
+    "the usage's own instant — so a past simulation's cost never moves and this",
+    "file's history is the price history.",
+    "",
+    "usdPerMillion is US dollars per 1,000,000 of the unit named beside it, as a",
+    "decimal string so no float rounds it on the way in. It is written per",
+    "million because that is how the providers publish token prices, and because",
+    "one micro-dollar is exactly one unit at $1.00 per million — so a record's",
+    "amount in micros is quantity times this number, with no scale factor to get",
+    "wrong.",
+    "",
+    "source is the page the number was read from and readAt the day it was read."
+  ],
+  "entries": [
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "prices": {
+        "input_tokens": { "unit": "token", "usdPerMillion": "0.15" },
+        "cached_input_tokens": { "unit": "token", "usdPerMillion": "0.075" },
+        "output_tokens": { "unit": "token", "usdPerMillion": "0.60" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "prices": {
+        "input_tokens": { "unit": "token", "usdPerMillion": "2.50" },
+        "cached_input_tokens": { "unit": "token", "usdPerMillion": "1.25" },
+        "output_tokens": { "unit": "token", "usdPerMillion": "10.00" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "note": "Standard tier, short context. The page also publishes a cache-writes column ($2.50); Egma records no cache-write quantity, so no price is given one here rather than a price being carried for a number nothing measures.",
+      "prices": {
+        "input_tokens": { "unit": "token", "usdPerMillion": "2.00" },
+        "cached_input_tokens": { "unit": "token", "usdPerMillion": "0.20" },
+        "output_tokens": { "unit": "token", "usdPerMillion": "12.00" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "note": "Standard tier, short context. Cache writes are published at $5.00 and are not priced here, for the reason gpt-5.6-terra's entry gives.",
+      "prices": {
+        "input_tokens": { "unit": "token", "usdPerMillion": "4.00" },
+        "cached_input_tokens": { "unit": "token", "usdPerMillion": "0.40" },
+        "output_tokens": { "unit": "token", "usdPerMillion": "20.00" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "note": "Standard tier, short context. Cache writes are published at $0.25 and are not priced here, for the reason gpt-5.6-terra's entry gives.",
+      "prices": {
+        "input_tokens": { "unit": "token", "usdPerMillion": "0.20" },
+        "cached_input_tokens": { "unit": "token", "usdPerMillion": "0.02" },
+        "output_tokens": { "unit": "token", "usdPerMillion": "1.20" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "note": "Standard tier, under 272K context. Egma's prompts stay far below that threshold.",
+      "prices": {
+        "input_tokens": { "unit": "token", "usdPerMillion": "5.00" },
+        "cached_input_tokens": { "unit": "token", "usdPerMillion": "0.50" },
+        "output_tokens": { "unit": "token", "usdPerMillion": "30.00" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "note": "Standard tier, under 272K context.",
+      "prices": {
+        "input_tokens": { "unit": "token", "usdPerMillion": "2.50" },
+        "cached_input_tokens": { "unit": "token", "usdPerMillion": "0.25" },
+        "output_tokens": { "unit": "token", "usdPerMillion": "15.00" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-live-transcribe",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "note": "Published as \"$0.017 / minute\" with no token price at all, so the billed unit is the audio's own duration. Per million seconds: 0.017 / 60 * 1000000 = 283.333333333333, carried to twelve decimal places because a sixtieth of a cent does not terminate.",
+      "prices": {
+        "audio_seconds": { "unit": "second", "usdPerMillion": "283.333333333333" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-realtime-whisper",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "note": "Published as \"$0.017 / minute\", converted per second exactly as gpt-live-transcribe's entry sets out.",
+      "prices": {
+        "audio_seconds": { "unit": "second", "usdPerMillion": "283.333333333333" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-transcribe",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "note": "Token-billed: the pricing table publishes one Input column ($2.50) and one Output column ($10.00), and the realtime transcription event splits its input into audio and text tokens under that one input price. The \"$0.006 / minute\" beside them is the page's own estimate, not the billed unit.",
+      "prices": {
+        "audio_input_tokens": { "unit": "token", "usdPerMillion": "2.50" },
+        "text_input_tokens": { "unit": "token", "usdPerMillion": "2.50" },
+        "output_tokens": { "unit": "token", "usdPerMillion": "10.00" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini-transcribe",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "note": "Token-billed on the same shape as gpt-4o-transcribe: one published Input column ($1.25) covering audio and text input tokens, one Output column ($5.00). The \"$0.003 / minute\" beside them is the page's own estimate.",
+      "prices": {
+        "audio_input_tokens": { "unit": "token", "usdPerMillion": "1.25" },
+        "text_input_tokens": { "unit": "token", "usdPerMillion": "1.25" },
+        "output_tokens": { "unit": "token", "usdPerMillion": "5.00" }
+      }
+    },
+    {
+      "provider": "deepgram",
+      "model": "nova-3-general",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://deepgram.com/pricing",
+      "readAt": "2026-09-07",
+      "note": "Nova-3 streaming, monolingual, pay-as-you-go: \"Current price $0.0048/min\" (the same row shows \"Regular price $0.0077/min\"). The published pay-as-you-go price is the base rate, per the rate-card rule. Per million seconds: 0.0048 / 60 * 1000000 = 80.",
+      "prices": {
+        "audio_seconds": { "unit": "second", "usdPerMillion": "80.00" }
+      }
+    },
+    {
+      "provider": "cartesia",
+      "model": "ink-2",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://docs.cartesia.ai/pricing",
+      "readAt": "2026-09-07",
+      "note": "Cartesia publishes credits, not dollars: ink-2 costs \"3 credits per second of audio\". Cartesia publishes no pay-as-you-go dollar price, only plans, so the base rate is the published rate of its smallest paid plan — Pro, $5 per month for 100K credits, which is $50 per 1M credits (https://cartesia.ai/pricing, read 2026-09-07). 3 credits per second at $50 per 1M credits is $150 per 1M seconds.",
+      "prices": {
+        "audio_seconds": { "unit": "second", "usdPerMillion": "150.00" }
+      }
+    },
+    {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://docs.cartesia.ai/pricing",
+      "readAt": "2026-09-07",
+      "note": "\"Standard TTS costs approximately 1 credit per character.\" Cartesia publishes no pay-as-you-go dollar price, only plans, so the base rate is the published rate of its smallest paid plan — Pro, $5 per month for 100K credits, which is $50 per 1M credits (https://cartesia.ai/pricing, read 2026-09-07). 1 credit per character therefore prices at $50 per 1M characters. Cartesia's own \"approximately\" is its transcript pre-processing: the credits it counts can differ slightly from the characters Egma sent.",
+      "prices": {
+        "characters": { "unit": "character", "usdPerMillion": "50.00" }
+      }
+    },
+    {
+      "provider": "cartesia",
+      "model": "sonic-preview",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://docs.cartesia.ai/pricing",
+      "readAt": "2026-09-07",
+      "note": "The same credit meter as sonic-3.5 — one credit per character, priced at the smallest paid plan's published $50 per 1M credits, on the ruling written into that entry.",
+      "prices": {
+        "characters": { "unit": "character", "usdPerMillion": "50.00" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "tts-1",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "note": "Published directly in the unit Egma measures: \"$15.00 / 1M characters\".",
+      "prices": {
+        "characters": { "unit": "character", "usdPerMillion": "15.00" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "tts-1-hd",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "note": "Published directly in the unit Egma measures: \"$30.00 / 1M characters\".",
+      "prices": {
+        "characters": { "unit": "character", "usdPerMillion": "30.00" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini-tts-2025-12-15",
+      "effectiveFrom": "2026-09-08",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-08",
+      "approximate": true,
+      "note": "The dated snapshot uses the same published price and character approximation as its gpt-4o-mini-tts alias.",
+      "prices": {
+        "characters": { "unit": "character", "usdPerMillion": "38.40" }
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini-tts",
+      "effectiveFrom": "2026-09-07",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-07",
+      "approximate": true,
+      "note": "AN APPROXIMATION, and the only one in this file. OpenAI bills this model by audio output token ($12.00 per 1M audio tokens); Egma measures the characters it sent, and OpenAI publishes no character price and no per-minute estimate for it (its Estimated cost cell is empty). Derived from OpenAI's own numbers in two steps. (1) OpenAI's audio-token rate, from its transcription rows on the same page: $0.006 per minute at $2.50 per 1M audio tokens is 2,400 audio tokens per minute, and the mini row agrees exactly ($0.003 at $1.25 per 1M). So $12.00 per 1M audio tokens is $0.0288 per minute of generated audio. (2) Characters per minute of speech: Cartesia publishes \"One minute of audio generation requires 750-800 credits\" at approximately one credit per character (https://cartesia.ai/pricing, read 2026-09-07); 750 is the end that does not under-price. $0.0288 / 750 = $0.0000384 per character, i.e. $38.40 per 1M characters — equivalently 3.2 audio tokens per character. Replace this with a published price the day OpenAI publishes one.",
+      "prices": {
+        "characters": { "unit": "character", "usdPerMillion": "38.40" }
+      }
+    }
+  ]
+}

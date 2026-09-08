@@ -57,9 +57,9 @@ function pointerIn(document: unknown, pointer: string): unknown {
 }
 
 describe("the platform API operation registry", () => {
-  it("contains one unique definition for each of the 76 current operations", () => {
+  it("contains one unique definition for each of the 79 current operations", () => {
     const operations = Object.values(platformOperations);
-    expect(operations).toHaveLength(76);
+    expect(operations).toHaveLength(79);
     expect(new Set(operations.map((operation) => operation.operationId)).size).toBe(
       operations.length,
     );
@@ -553,6 +553,42 @@ describe("the platform API operation registry", () => {
       anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
     });
     expect(simulationEvent.properties).not.toHaveProperty("verdict");
+  });
+
+  it("names a run's connection and counts a simulation's current grades", () => {
+    const run = platformOperations.listRuns.responses[200].schema.properties.runs
+      .items;
+    const runDetail = platformOperations.getRun.responses[200].schema;
+    const simulation = platformOperations.listRunSimulations.responses[200].schema
+      .properties.simulations.items;
+
+    // A list row names the connection it ran over. Null only where the
+    // connection row is gone, so a reader never meets a missing key.
+    expect(run.properties.connectionName).toEqual({
+      anyOf: [{ type: "string" }, { type: "null" }],
+    });
+    expect(run.required).toContain("connectionName");
+    expect(runDetail.required).toContain("connectionName");
+
+    // The counts a simulation row prints beside its grading state. Null where
+    // there is no grading state to count at all.
+    expect(simulation.properties.gradeTally).toEqual({
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            passed: { type: "integer" },
+            failed: { type: "integer" },
+            errored: { type: "integer" },
+            selected: { type: "integer" },
+          },
+          required: ["passed", "failed", "errored", "selected"],
+          additionalProperties: false,
+        },
+        { type: "null" },
+      ],
+    });
+    expect(simulation.required).toContain("gradeTally");
   });
 });
 

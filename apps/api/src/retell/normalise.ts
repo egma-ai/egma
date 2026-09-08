@@ -11,29 +11,12 @@ import {
 import { safeRetellProviderData } from "@egma/retell";
 
 /**
- * One Retell call object, as spans. The single place that reading happens.
- *
- * The v3 list selects terminal calls. Get Call then supplies the complete
- * document. This file is the one place that document becomes Egma spans, so a
- * live polling pass and a historical import cannot disagree about what a
- * conversation is.
- *
- * **Nothing here is synthesised.** Spoken turns use Retell's reported word
- * bounds when they exist. A turn with no usable word bounds stays at the call
- * start with zero duration rather than receiving invented timing. Every
- * latency figure Retell reports rides the root span as an attribute of the
- * whole conversation.
- *
- * **The safe payload is kept whole on the root.** Every span is built from the
- * same copy after access tokens and authentication header values are removed.
- * What is not captured cannot be recovered by a later migration, while a
- * credential that was captured would already be a leak.
- *
- * **A payload this cannot fully read is still written.** `degraded` says so,
- * the root span still lands, whatever parsed is on it, and the safe provider
- * document is intact — so a conversation Retell shaped in a way egma has not
- * met yet costs a flag rather than a hole in somebody's monitoring, and the
- * poller's cursor moves past it instead of grinding on it forever.
+ * Normalize Retell call documents for production and simulation ingestion.
+ * Use observed word timing where available; otherwise mark placeholder turns
+ * at call start with zero duration. Keep reported measurements on the root.
+ * Preserve the provider document after safeRetellProviderData removes known
+ * operational credentials. Incomplete parsing marks the result degraded;
+ * callers decide whether to retry before accepting it.
  */
 
 /** What Retell's own document is called where egma names it. */
@@ -49,14 +32,8 @@ export type NormalisedTrace = {
    */
   readonly endedAt: Date;
   /**
-   * Whether `endedAt` is the provider's own answer or egma's stand-in for one.
-   *
-   * **The poller's cursor moves only on a reported end.** A cursor is the claim
-   * *everything at or before this is stored*, and a stand-in is a wall-clock
-   * reading rather than a fact about the conversation — so honouring it would
-   * jump the cursor to now and silently drop everything between the old cursor
-   * and that moment if the sweep then stopped. The conversation is still
-   * stored, flagged degraded; only the cursor declines to believe it.
+   * True when the provider supplied end_timestamp. False for a fallback
+   * instant, which must not establish production completion.
    */
   readonly endReported: boolean;
   /** True when something in the payload could not be read. Never fatal. */
@@ -74,22 +51,9 @@ export type NormaliseInto = {
 };
 
 /**
- * The trace identity, minted deterministically from the provider's call id and
- * the project.
- *
- * **Deterministic is the whole point**: a retry, a historical import, and a
- * recreated Monitoring setup must agree on identity without stored connection
- * state. So the id is a function of the project and the provider's call id,
- * and the ledger's unique constraint does the rest.
- *
- * **The project is in it because of fan-out.** The same Retell call can be
- * monitored in two Egma projects, and each project owns its own visible trace.
- * Recreating a Monitoring setup or rotating its key inside one project must not
- * create a second trace for that same provider call.
- *
- * Thirty-two hex characters, which is the shape a trace id has in this store —
- * the same 128 bits OpenTelemetry writes, so every trace reader sees one shared
- * identity shape.
+ * Derive a 128-bit trace ID from project and provider call ID. Retries and
+ * credential changes within a project retain identity; another project gets
+ * its own trace ID for the same provider call.
  */
 export function traceIdFor(projectId: string, callId: string): string {
   return createHash("sha256")
@@ -128,20 +92,9 @@ function microseconds(milliseconds: number): bigint {
 }
 
 /**
- * Where a conversation sits in time, as far as the provider is willing to say —
- * **and the only place that question is answered.**
- *
- * Everything that needs to know when a conversation ended reads this: the
- * spans' own instants, the ledger's `ended_at`, the cursor, and the order the
- * poller writes a page in. It used to be answered in two places that disagreed
- * — the normalizer stood in the wall clock for a payload with no timestamps
- * while the poller's own reader answered zero for the same call — and two
- * answers to when something happened is one answer too many for anything that
- * keeps a cursor.
- *
- * `reported` is the load-bearing half. It says whether this instant came from
- * the provider or from egma standing in for one, which is what lets a cursor
- * decline to move on a guess.
+ * Read the provider end timestamp, or fall back to its start timestamp.
+ * reported is true only for an explicit end; the fallback does not prove
+ * that execution finished.
  */
 export function endInstantOf(call: RetellCall): {
   readonly at: number | undefined;
@@ -155,24 +108,9 @@ export function endInstantOf(call: RetellCall): {
 }
 
 /**
- * The two ends of the conversation, in milliseconds, and never in the wrong
- * order.
- *
- * **The span's duration is `endedAt - startedAt` and the column it lands in is
- * unsigned**, so a payload whose end precedes its start cannot be allowed to
- * produce one: the store refuses the whole batch, the claim stays unwritten,
- * and the sweep that replays it hits the same refusal on every tick for ever.
- * One clock-skewed conversation would stop all later Monitoring imports.
- *
- * So a contradictory pair is a degraded payload like any other: it is filed at
- * the instant the provider called the end, with no duration, flagged, and with
- * both original timestamps intact in the safe provider payload. The same is
- * true of a call reporting only one of the two.
- *
- * A call reporting neither is filed at the moment egma read it — honest (egma
- * heard about this now) and findable in a window somebody would actually ask
- * for — and it is exactly the case `reported` exists to keep away from the
- * cursor.
+ * Return a nonnegative extent. Missing or reversed timestamps produce a
+ * zero-duration degraded record at the available end/start, or now if neither
+ * exists. Original timestamp values remain in the provider payload.
  */
 function extent(call: RetellCall, now: number): {
   readonly startedAt: number;
@@ -193,7 +131,7 @@ function extent(call: RetellCall, now: number): {
   return {
     startedAt: started,
     endedAt: end.at,
-    whole: true,
+    whole: end.reported,
     reported: end.reported,
   };
 }
@@ -351,18 +289,10 @@ function toolSummariesIn(call: RetellCall): ReadonlyMap<string, ToolSummary> {
 }
 
 /**
- * Spoken turns and tools from Retell's current woven transcript.
- *
- * Tool invocation and result entries are separate and can have other provider
- * events between them. Their `tool_call_id` is the relationship Retell states,
- * so it is the only relationship used here. A tool after an agent stays inside
- * that agent turn. A tool after a human belongs to the following agent reply,
- * because that is the reply whose work the call represents. With no such agent
- * it stays under the root rather than being assigned to the caller.
- *
- * A provider that does not supply the woven form can still supply spoken turns
- * through `transcript_object`. Egma does not read the retired nested tool-call
- * assumption from that fallback.
+ * Read woven transcript turns and pair tool invocation/results by tool_call_id.
+ * Attach tools to the preceding agent turn or the next agent reply after a
+ * human turn; otherwise use the root. Fall back to transcript_object for
+ * spoken turns without assuming nested tool calls.
  */
 function turnsIn(call: RetellCall): Transcript {
   const woven = call["transcript_with_tool_calls"];
@@ -500,26 +430,28 @@ function turnsIn(call: RetellCall): Transcript {
   return { turns, toolCalls, whole };
 }
 
-/** Whether a full Get Call document can be normalized without inventing facts. */
+/** Whether Retell reported a terminal record that can be read without fallbacks. */
 export function retellCallDocumentIsComplete(call: RetellCall): boolean {
+  const status = call["call_status"];
   return (
-    text(call["call_id"]) !== "" &&
+    text(call["call_id"]).trim() !== "" &&
+    (status === "ended" || status === "error" || status === "not_connected") &&
     extent(call, 0).whole &&
     turnsIn(call).whole
   );
 }
 
+/** Simulation grading needs spoken evidence in addition to a finished record. */
+export function retellCallHasFinalTranscript(call: RetellCall): boolean {
+  return (
+    retellCallDocumentIsComplete(call) &&
+    turnsIn(call).turns.some((turn) => turn.text.trim() !== "")
+  );
+}
+
 /**
- * What Retell measured about the whole conversation, gathered onto the root.
- *
- * Retell reports one object per stage — `e2e`, `llm`, `tts` and the rest — each
- * holding its own summary (`p50`, `p90`, `p95`, `p99`, `min`, `max`, `num`)
- * beside `values`, the individual measurements the summary was worked out from.
- * They describe the call rather than any moment in it, so the root span is the
- * only honest place for them. This keeps the whole object under the vendor's
- * own names, unchanged, which is where a reader who knows Retell will look; the
- * translation into egma's vocabulary is `reportedLatencyOf` below, and it reads
- * `values` alone.
+ * Retain reported latency-stage objects on the root. reportedLatencyOf
+ * separately maps their values arrays into Egma measurements.
  */
 function latencyOf(call: RetellCall): Record<string, unknown> {
   const held = call["latency"];
@@ -545,16 +477,8 @@ const RETELL = "retell";
 const MILLISECONDS = "milliseconds";
 
 /**
- * A catalog name, refused if the catalog has stopped saying it.
- *
- * The measure catalog owns the names egma computes and graders can use, and this
- * table is the one place a vendor's word is bound to one of them. A rename in
- * the catalog with no rename here would leave Retell's numbers stored under a
- * measure nothing reads — green, silent, and wrong, which is the exact failure
- * the catalog exists to prevent. The sibling OTLP normalizer takes the same
- * rule the other way round, by reading its span names out of the catalog rather
- * than listing them again; a mapping cannot do that, so it says so instead, at
- * the moment the table is built and loudly enough to stop a build.
+ * Reject mappings to names outside the span-derived measure catalog when
+ * this module initializes.
  */
 function catalogNamed(measure: string): string {
   if (!isSpanDerivedMeasure(measure)) {
@@ -568,20 +492,8 @@ function catalogNamed(measure: string): string {
 }
 
 /**
- * Which of Retell's latency stages is which measure, and the only place that
- * mapping is written down.
- *
- * **Same meaning, same name.** Retell's `e2e` is what the measure catalog calls
- * `turn_response_latency` — how long the agent took to answer — so it is
- * reported under the catalog's own name, so every reader sees the same metric
- * for Retell and for traces Egma measures itself. A stage the catalog has no
- * counterpart for keeps a
- * platform-prefixed name rather than a forced fit: the numbers are captured
- * now, surfaced when a display asks for them, and promoted to a catalog name
- * the day a second platform proves the general shape.
- *
- * Ordered, because the block's bytes are: the order here is the order the
- * measurements are written in, and a replay has to produce the identical batch.
+ * Map Retell stages to shared catalog measures where defined; keep
+ * knowledge-base latency platform-prefixed. Fixed order preserves stable bytes.
  */
 const REPORTED_LATENCY_MEASURES: readonly (readonly [
   stage: string,
@@ -602,34 +514,10 @@ const REPORTED_LATENCY_MEASURES: readonly (readonly [
 ];
 
 /**
- * Retell's own measurements as the neutral reported-measurements block, or
- * `undefined` where Retell reported none worth carrying.
- *
- * **This is the only code that knows Retell's shape.** The block it builds is
- * one contract for every platform, so the shared measure module — on the day it
- * reads this block — reads a single shape for all of them, and the next
- * platform is one more mapping table in its own normalizer rather than a second
- * parser under the shared metric arithmetic.
- *
- * **The individual measurements, never the summary.** Each stage's `values` are
- * the measurements themselves, so "every measurement holds the bound, the worst
- * turn decides" stays truthful and percentile math stays egma's own. A p50
- * carried as a measurement would let one summarised turn pass a bound a real
- * turn failed.
- *
- * Read defensively, because this is a vendor document: a stage that is missing,
- * a `values` that is not a list, and an entry inside one that is not a finite
- * number are each simply not there. A stage left with nothing is dropped, and a
- * call whose every stage is dropped writes no block at all — absence being the
- * honest shape for a conversation nobody measured.
- *
- * **A measurement that is not a number is dropped silently, and that is the
- * deliberate line.** `degraded` is raised for a payload egma could not read as
- * a conversation — no id, contradictory instants, a transcript that is not one
- * — because that is a trace somebody has to look at. One unreadable entry in a
- * stage's list is not: the rest of the list is still true, the vendor's whole
- * document is still on the row after credential removal, and flagging the
- * trace would spend somebody's attention on a number egma never needed.
+ * Map Retell latency samples to the shared reported-measurement format.
+ * Keep finite raw values, not vendor percentiles; omit empty stages and return
+ * undefined when none remain. Invalid samples alone do not mark the trace
+ * as degraded.
  */
 function reportedLatencyOf(
   call: RetellCall,
@@ -766,19 +654,8 @@ export function normaliseRetellCall(
       name: "retell_call",
       kind: "conversation",
       /*
-       * Retell's own answer, and only Retell's.
-       *
-       * `endReported` is the same fact the poller's cursor already refuses to
-       * move without: `true` means the provider named an end timestamp for this
-       * call, and `false` means Egma stood in a plausible instant because the
-       * payload carried none. The two must not be confused — a call still in
-       * progress reads back with a start and no end, and treating that as an
-       * ending would close a conversation while the caller is still talking.
-       *
-       * It was already computed here and already surfaced on the normalised
-       * trace; carrying it onto the span is what lets everything downstream of
-       * storage read the platform's statement instead of inferring one from
-       * this span having no parent.
+       * Only an explicit provider end timestamp establishes production completion.
+       * Fallback instants must not close a trace; simulation filing clears this marker.
        */
       endsTrace: times.reported,
       startedAtMicroseconds: startedAt,

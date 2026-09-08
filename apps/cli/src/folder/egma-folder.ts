@@ -1,27 +1,10 @@
 /**
- * The `egma/` folder in the developer's repository.
+ * Committed repository configuration and tests.
+ * egma/config.yaml binds one platform and project with agents and connections.
+ * egma/tests/<suite>/ contains suite.yaml and test Markdown files.
+ * Reserve egma/memory/ for per-agent memory without creating it.
  *
- * ```
- * egma/
- *   config.yaml     one platform and project, with many agents and connections
- *   tests/          one direct directory per test suite
- *     release/
- *       suite.yaml  stable suite identity and current display name
- *       *.md        the tests in that suite
- * ```
- *
- * Everything in it is committed. Nothing secret ever lands here — the key this
- * machine signs in with lives in the developer's home folder and the vendor's
- * key lives sealed on the platform — so there are no gitignore carve-outs to
- * write and none to forget. That is the whole reason tests are files: a test
- * nobody can review in a pull request is a test nobody reviews.
- *
- * `egma/memory/` is the reserved home for per-agent memory files. It is named
- * here so that nothing else claims the name, and it is deliberately not created.
- *
- * Making the folder is safe to repeat. A folder that is already here is
- * recognised and left exactly as it is: a second developer cloning the
- * repository runs the same command as the first and loses nothing by it.
+ * Keep credentials outside this folder. Initialization preserves existing content.
  */
 
 import { FolderProblem, namesItsPlace } from "./problem.ts";
@@ -192,17 +175,8 @@ function identifiedConnection(
 }
 
 /**
- * The committed origin, in the one shape every origin is compared in.
- *
- * A person edits this file, and a person writes `https://egma.example/`, or
- * `https://EGMA.example`, or the default port spelled out, where egma would
- * have written `https://egma.example`. All of them name the same platform, so
- * all of them have to read back as the same platform — otherwise the binding
- * disagrees with itself, and a repository is refused for moving nowhere.
- *
- * An origin egma cannot make sense of is left exactly as it was written. It is
- * refused by name one step later, at the edge that takes addresses, and quietly
- * rewriting it here would hide which line in the file is the wrong one.
+ * Normalize equivalent platform origins, including host case and default ports.
+ * Preserve invalid input so address validation can report what the file contains.
  */
 function committedOrigin(written: string): string {
   try {
@@ -392,16 +366,7 @@ export const MOVE_TO_ANOTHER_PLATFORM: readonly string[] = [
   "Keep your tests. Reconnect each agent and connection on the new platform; the runs you have already done stay on the platform that ran them, because a run's numbers only mean anything against the versions that platform minted.",
 ];
 
-/**
- * A refusal with the whole move under it, one blank line apart.
- *
- * Every refusal that stands between a developer and another platform ends the
- * same way, because they are not different problems to the person who has one:
- * whichever of them fires, the next thing they need is the same list. One
- * function so that the list cannot drift into three versions of itself, and so
- * that the blank line before it is always there — it is what makes the block
- * below it a block rather than the tail of a paragraph.
- */
+/** Append shared platform-move instructions after a blank line. */
 export function teachingTheMove(refusal: string): string {
   return [refusal, "", ...MOVE_TO_ANOTHER_PLATFORM].join("\n");
 }
@@ -575,15 +540,8 @@ export type FolderTest = {
 };
 
 /**
- * A file in `egma/tests/` that egma could not turn into a test, and why.
- *
- * The folder is written by people and by coding agents, and both of them write
- * a broken file sometimes: frontmatter with a list that never closes its
- * bracket is the ordinary one. One such file used to end whatever was reading
- * the folder, which meant one bad file out of twelve threw away the eleven good
- * ones. So it is carried instead of thrown, and every reader says what it will
- * do about it — because a file egma cannot read is still the developer's file
- * and still has to be named.
+ * Unreadable test file with its path and reason. Return the issue so each command
+ * can report it without losing other valid tests.
  */
 export type UnreadableTest = {
   /** Absolute. */

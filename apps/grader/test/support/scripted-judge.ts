@@ -10,21 +10,9 @@ import type {
 import { judgeFor } from "../../src/judge/index.ts";
 
 /**
- * The scripted judge: deterministic answers, no key, no network.
- *
- * **This is the seam the whole engine suite runs on.** Per-behavior fan-out,
- * the skipped denominator, one judge call failing while its siblings land —
- * every one of those is a claim about egma rather than about a model, and
- * asserting them against a real judge would be
- * paying an account to learn something a model cannot tell you reliably anyway.
- * The thin live smoke beside these files is where a real model is asked whether
- * the wire still looks the way this pretends it does.
- *
- * It records what it was asked and what it was made from, which is how a test
- * asserts the two things that are otherwise invisible: that each call saw one
- * criterion and no other behavior's words, and that the key resolved from the
- * deployment bundle actually reached the provider seam — without that key ever
- * being written anywhere a grade, a log or a report could pick it up.
+ * Deterministic LLM-judge responses for engine tests, with no network or key.
+ * Capture questions and construction inputs to verify assertion isolation
+ * and credential delivery without exposing keys in grades or logs.
  */
 
 /** An answer, or what the provider does instead of answering. */

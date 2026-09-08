@@ -1,5 +1,6 @@
 import {
   appendSpans,
+  priceUsageSpans,
   committedSpans,
   AGENT_PLATFORMS,
   projectOfOrganizationState,
@@ -22,9 +23,9 @@ import {
   type IngestionDefect,
   type IngestionLog,
 } from "./defects.ts";
-import type { PendingObjectStore } from "./object-store.ts";
-import { contentHashOf, spanFor, type IngestionRecord } from "./record.ts";
-import { segmentIdIn, type SegmentScope } from "./segment.ts";
+import type { PendingObjectStore } from "@egma/ingestion";
+import { contentHashOf, recordFor, spanFor, type IngestionRecord } from "@egma/ingestion";
+import { segmentIdIn, type SegmentScope } from "@egma/ingestion";
 import { verifiedSegment, type VerifiedSegment } from "./verify.ts";
 
 const meter = openTelemetryMetrics.getMeter("@egma/api/ingestion-drainer");
@@ -63,68 +64,19 @@ meter
   );
 
 /**
- * The drainer: pending objects in, query-visible evidence out, and the object
- * gone only once everything that depends on it has happened.
+ * Drain pending objects sequentially. Full bucket scans recover work missed
+ * by upload hints; hints improve latency but are not the work record.
  *
- * A pending object **is** the work record. There is no row saying it exists and
- * no notification anybody has to receive, which is the whole reason this
- * release adds no broker: the bucket already remembers, and remembering is the
- * only thing a broker would have been for. Everything else here follows from
- * that one choice.
+ * For each object: verify its format and scope, check committed fingerprints,
+ * write spans, update monitoring and trace records, then delete the object.
+ * Known conflicting evidence is retained before writes. Legacy rows without
+ * fingerprints stay authoritative and are skipped during insertion.
  *
- * ## Finding work
- *
- * Two ways, and only one of them is authority. A successful upload hands the
- * key straight over, which is what makes a conversation visible in about a
- * second at the volumes this release serves. And at startup and on an interval
- * the whole pending prefix is listed, **every page of it**, which is what makes
- * that speed optional: an in-process hand-off lost to a crash, a restart, a
- * missed notification or a bug costs latency and never evidence. A listing that
- * stopped at the first page would be worse than no listing at all — it would
- * report a clean backlog while a thousand accepted segments sat behind it.
- *
- * ## The order, which is the whole correctness argument
- *
- * Per object, in this order and no other:
- *
- * 1. **Verify.** Identity, version, scope, compression, checksum, shape.
- * 2. **Check integrity against what is already stored.** A batched probe of the
- *    identities this segment carries. An identity already held with the same
- *    content is an exact replay; one held with *different* content is a defect,
- *    and the object is retained without a single row being written.
- * 3. **Write ClickHouse**, the complete segment, under the segment's own
- *    deduplication token.
- * 4. **Monitoring bookkeeping**, monotone, so a replay cannot wind a customer's
- *    "last heard from" backwards.
- * 5. **The evidence-ready handoff**, which says only that this trace's evidence
- *    is now readable. Not that it is complete, not that a grader applies, not
- *    that anything is scheduled.
- * 6. **Delete.**
- *
- * A failure at any step leaves the object exactly where it is, and the next
- * pass runs the whole object again. That is safe because every step above is
- * idempotent — identity for the rows, `greatest` for the bookkeeping, an upsert
- * that touches nothing already claimed for the handoff — and it is why the
- * delete is last: an object deleted before its handoffs would leave a
- * conversation stored and unreportable, with nothing left to replay from.
- *
- * A failed delete is not special. The object stays, the next scan finds it, and
- * draining it again is a no-op that tries the delete again. **Rediscovery is
- * harmless** is not a hope here; it is the retry.
- *
- * ## Why the handoffs are after the write, and never before
- *
- * The evidence-ready boundary is a promise that the named trace can be read.
- * Raising it before the rows are visible would wake a grader for a conversation
- * it would then read as empty, and an empty conversation graded is worse than
- * one graded late — the grade looks like an answer.
- *
- * ## One drainer
- *
- * One active drainer per deployment in this release, and no claim, shard or
- * ownership protocol to make several safe. Sequential per object, batched
- * inside one. That is enough for the volume this release serves, and the seam
- * for splitting it later is the role setting rather than a second protocol.
+ * Retryable failures leave the object for another pass. Permanent defects
+ * remain for operator repair and are skipped by this process. Follow-up
+ * writes must support replay because deletion can fail after they succeed.
+ * Production supplies a deployment ownership lock; schema readiness and
+ * ownership are checked before draining.
  */
 
 export type DrainerOptions = {
@@ -160,14 +112,9 @@ export type DrainerOptions = {
 export type DrainStandby = "standby" | "trace_store_migrating";
 
 /**
- * What the drain component looks like from outside, past whether it is running.
- *
- * The health surface reports it in words and never these raw numbers, and the
- * status code never turns on any of it: a stalled drain is a downstream problem
- * to see, not the acceptance path being unable to receive a conversation. The
- * numbers are here for the metric series and for `stalled`, which is the one
- * derived word — a drainer that has work and keeps making no progress on it,
- * which is what a store it cannot reach looks like from here.
+ * Drain progress for metrics and health detail. Stalled means pending work
+ * without progress across consecutive passes; it does not itself make
+ * acceptance unavailable.
  */
 export type DrainHealth = {
   /** Why this pass did nothing on purpose, or `undefined` when it is draining. */
@@ -222,14 +169,8 @@ type Running = {
   /** Keys handed over by a successful upload and not yet tried. */
   readonly hinted: Set<string>;
   /**
-   * Objects this process has already reported and left behind.
-   *
-   * A retained object stays under its key forever until a person deals with
-   * it, so every scan finds it again — and reporting it again would turn one
-   * damaged object into a rising count that measures how long the process has
-   * been up. It is reported once and then skipped. A restart reports it once
-   * more, which is honest: a new process has genuinely met it for the first
-   * time, and an operator who repaired the object wants it looked at again.
+   * Retained keys already reported by this process are skipped. Restart
+   * clears this set so repaired objects can be checked again.
    */
   readonly retained: Set<string>;
   timer: NodeJS.Timeout | undefined;
@@ -252,23 +193,9 @@ type Running = {
 const INTERNAL_USER = "ingestion-drainer";
 
 /**
- * The context one segment's effects are written under.
- *
- * Built from the **sealed header** and from nothing else — not from the key,
- * not from anything a caller remembered, not from an attribute on the evidence.
- * A segment states its own organization and project inside the bytes the
- * checksum covers, so this is the one tenancy statement that exists and there
- * is nothing for it to disagree with. That the pair is a real one is a separate
- * question and is asked below, against Postgres, before anything is written.
- *
- * `monitoring` for the same reason `claimDueRetellMonitoringAgent` uses it: this
- * names no person, it came from egma's own record of accepted work rather than
- * from a credential, and it opens neither the grading service's capabilities nor
- * the conductor's.
- *
- * `member` because that is the role `ingest_traces` admits, and a context that
- * carried more than the work needs is a context somebody later reaches for to
- * do something else with.
+ * Build a member/monitoring context from the verified segment header.
+ * The drainer checks the project-organization relation in PostgreSQL before
+ * writing. Evidence attributes and the object key do not choose scope.
  */
 function authFor(scope: SegmentScope): AuthContext {
   return {
@@ -305,21 +232,9 @@ function windowOf(records: readonly IngestionRecord[]): {
 }
 
 /**
- * A segment's identities held against what the store already says about them.
- *
- * Answers nothing and throws on a conflict, because there is only one thing to
- * do about one: **stop before writing anything.** A conflicting segment that
- * had written half its rows would have made the defect it reports partly true.
- *
- * A stored row whose content hash is empty is evidence written before the
- * fingerprint existed — the simulation evidence carried through the identity
- * rebuild. It cannot be compared, so it stays authoritative in fact and not
- * only in name: its identity comes back in the returned set and is left out of
- * the insert, rather than being written over the row already there.
- *
- * The answer is the set of identities to leave out for that reason. An exact
- * replay stays in — writing it again is a no-op the identity collapses — and a
- * disagreement stops the whole object before a row is written.
+ * Reject conflicts with committed fingerprints before writing any rows.
+ * Return identities of legacy rows without hashes so insertion skips them.
+ * Exact replays with matching hashes can be written again.
  */
 async function refuseConflictingEvidence(
   auth: AuthContext,
@@ -386,15 +301,9 @@ export class ProjectDeletedAfterAcceptanceError extends Error {
 }
 
 /**
- * Which platform's Monitoring state this segment moves, and to when.
- *
- * Gathered per `(platform, selected agent)` rather than per conversation — one
- * segment carrying two hundred calls of one agent is one statement — and the
- * instant comes from **the evidence** rather than from the clock. That is what
- * makes a replay monotone in practice as well as in the merge: a segment
- * drained today carrying yesterday's calls says yesterday, so it cannot move a
- * customer's "last production conversation" forward to a moment nothing
- * happened at.
+ * Group production spans by platform and agent, keeping the latest span
+ * start time. Using evidence time prevents a replay from advancing monitoring
+ * to the time it was drained.
  */
 type MonitoringFact = {
   readonly agentPlatform: AgentPlatform;
@@ -496,7 +405,7 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
   }
 
   const auth = authFor(segment.scope);
-  const spans: readonly NewSpan[] = segment.records.map(spanFor);
+  let spans: readonly NewSpan[] = segment.records.map(spanFor);
 
   // The header binds a project to an organization and the checksum covers that
   // binding, so nothing can have edited it — but a pair that was never real, and
@@ -534,6 +443,20 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     );
   }
 
+  let usagePending = false;
+  try {
+    spans = await priceUsageSpans(auth, spans);
+    segment = { ...segment, records: spans.map(recordFor) };
+  } catch (cause) {
+    // Billing must not hold the conversation. Retain the complete durable
+    // object, while ordinary evidence and its grading handoff continue.
+    waitAndTryAgain(cause, "usage pricing did not finish; its accepted evidence remains pending");
+    usagePending = true;
+    spans = spans.filter((span) => span.usage === undefined);
+    if (spans.length === 0) return false;
+    segment = { ...segment, records: spans.map(recordFor) };
+  }
+
   let authoritative: ReadonlySet<string>;
   try {
     authoritative = await refuseConflictingEvidence(auth, segment);
@@ -566,7 +489,7 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     // blocks under the same deduplication token, and the token would then
     // suppress the very rows the replay existed to write. Identity is what makes
     // the repeat free; the token only makes it cheap.
-    await appendSpans(auth, insertable, { segmentId: segment.segmentId });
+    await appendSpans(auth, insertable, { segmentId: usagePending ? `${segment.segmentId}:conversation` : segment.segmentId });
   } catch (cause) {
     if (cause instanceof TraceStoreRefusedError) {
       // Rows the store has looked at and will refuse forever. Retained rather
@@ -593,6 +516,8 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     // repeated forever.
     return classify(cause, "a drained segment's handoffs did not finish");
   }
+
+  if (usagePending) return false;
 
   try {
     await store.delete(key);
@@ -723,15 +648,8 @@ async function pass(held: Running): Promise<number> {
 }
 
 /**
- * One pass at a time, and every caller gets a pass that **starts after it
- * asked**.
- *
- * Returning a pass already in flight would be the cheaper answer and the wrong
- * one: that pass has already listed the prefix, so a key that became durable a
- * moment ago is not in it, and a caller told "drained" would have been told
- * about somebody else's work. So a call that arrives mid-pass waits behind it —
- * and every caller that arrives while one is already waiting shares that one,
- * which is what keeps a burst of uploads from becoming a burst of listings.
+ * Serialize drain passes. Calls during a pass share a queued next pass,
+ * which lists objects after they called instead of returning an older scan.
  */
 function drainNow(held: Running): Promise<number> {
   if (held.waiting !== undefined) return held.waiting;

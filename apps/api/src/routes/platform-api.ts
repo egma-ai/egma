@@ -14,6 +14,7 @@ import { memberRoutes } from "./members.ts";
 import { monitoringRoutes } from "./monitoring.ts";
 import { organizationRoutes } from "./organization.ts";
 import { personaRoutes } from "./personas.ts";
+import { providerKeyRoutes } from './provider-keys.ts';
 import { projectRoutes } from "./projects.ts";
 import { recordingRoutes } from "./recordings.ts";
 import { repositoryRoutes } from "./repository.ts";
@@ -32,6 +33,7 @@ export type PlatformApiRoutesOptions = {
   readonly blob: Config["blob"];
   readonly retellFetch?: RetellFetch | undefined;
   readonly retellReach?: RetellReach | undefined;
+  readonly wakeVoiceFleet?: (() => void) | undefined;
 };
 
 type ValidationIssue = {
@@ -106,6 +108,7 @@ export async function platformApiRoutes(
     baseUrl: options.baseUrl,
   });
   void app.register(organizationRoutes, credentialed);
+  void app.register(providerKeyRoutes, credentialed);
   void app.register(projectRoutes, credentialed);
   void app.register(personaRoutes, credentialed);
   void app.register(testSuiteRoutes, credentialed);
@@ -117,6 +120,9 @@ export async function platformApiRoutes(
     ...credentialed,
     baseUrl: options.baseUrl,
     carrierRoute: options.carrierRoute,
+    ...(options.wakeVoiceFleet === undefined
+      ? {}
+      : { wakeVoiceFleet: options.wakeVoiceFleet }),
     // The one Retell seam the run start needs, for everything it reads or
     // writes at creation: the version-pinning run-start read both Retell lanes
     // do, and the mocked-world build a web-call connection with the switch on

@@ -26,26 +26,9 @@ import {
 } from "./support/test-factory.ts";
 
 /**
- * What happens to the tests that name a persona when that persona is deleted,
- * and what happens when the two writes race.
- *
- * **Delete asks the tests nothing.** It used to: an Archive counted the live
- * tests naming the persona and refused if there were any. That guard was
- * written when every test created without naming anybody was silently given
- * the project's default persona, so one Archive could quietly empty a page of
- * tests. Tests name their personas explicitly now, Delete is one honest verb
- * with one confirmation, and the protection sits where the loss would happen
- * instead — a run for a test naming a deleted persona is refused, and that
- * test's next write has to name somebody alive.
- *
- * It sits in a file of its own because it belongs to neither factory alone —
- * the rule is written into the persona's Delete and answered by the test
- * tables, and a reader looking for what a Delete does to a test should find
- * both halves in one place.
- *
- * The factory functions are the seam. Raw SQL appears only in the race tests,
- * where one side of the race has to be held open mid-transaction, which no seam
- * can do.
+ * Deleting a persona does not require removing test references first.
+ * Runs and subsequent test edits reject deleted selections. Raw SQL holds
+ * transactions open for the race cases.
  */
 
 let database: MigratedDatabase;

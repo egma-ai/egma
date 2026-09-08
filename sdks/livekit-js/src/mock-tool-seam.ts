@@ -13,6 +13,7 @@ export const RESPONSE_TIMEOUT_SECONDS =
   MAX_ROUND_TRIP_SECONDS;
 export const HELLO_TIMEOUT_SECONDS =
   MAX_ROUND_TRIP_SECONDS + SERVING_MARGIN_SECONDS;
+/** Each attempt is bounded; idempotent hello can retry while startup is active. */
 
 export const MALFORMED_REQUEST = 901;
 export const UNKNOWN_TOOL = 902;
@@ -23,6 +24,9 @@ export const EGMA_NOT_REACHED: ReadonlySet<number> = new Set([
   1400, 1401, 1403, 1404, 1503,
 ]);
 export const EGMA_NOT_LISTENING_YET: ReadonlySet<number> = new Set([1400]);
+export const TRANSIENT_HELLO_FAILURES: ReadonlySet<number> = new Set([
+  1400, 1501, 1502, 1505,
+]);
 
 export function isEgmaRefusal(code: number): boolean {
   return code >= 901 && code < 1_000;
@@ -34,6 +38,10 @@ export function isEgmaNotReached(code: number): boolean {
 
 export function isEgmaNotListeningYet(code: number): boolean {
   return EGMA_NOT_LISTENING_YET.has(code);
+}
+
+export function isTransientHelloFailure(code: number): boolean {
+  return TRANSIENT_HELLO_FAILURES.has(code);
 }
 
 export class SeamError extends Error {

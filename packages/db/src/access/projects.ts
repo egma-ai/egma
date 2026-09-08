@@ -11,18 +11,11 @@ import {
 } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 /**
- * The one project factory, shared with signup.
- *
- * **This import closes a cycle — `projects` → `provisioning` → `seeded-graders` →
- * `projects` — and it is safe on the one condition that keeps any such cycle
- * safe: nothing on either side is read while the other is still being
- * evaluated.** `insertProject` is called from inside a function here, and
- * `isProjectOfOrganization` is called from inside a function there, so both
- * bindings exist long before either is reached. Move either use to module scope
- * and the cycle stops being safe.
+ * This import forms a cycle through provisioning and seeded-graders. Keep uses
+ * of insertProject and isProjectOfOrganization inside functions, after module evaluation.
  */
 import { insertProject } from "./provisioning.ts";
-import { theProject, within } from "./within.ts";
+import { inCredentialProject, theProject, within } from "./within.ts";
 
 /**
  * A product area inside a customer: a permission scope and a query filter,
@@ -57,25 +50,9 @@ const COLUMNS = {
 const notDeleted: SQL = isNull(project.deletedAt);
 
 /**
- * Which projects belong to an organization? The second half of what an
- * `AuthContext` is built from, and the counterpart to `membershipsOf`.
- *
- * Resolving a browser session is otherwise circular: the context names a
- * project, and finding the project needs a context. `membershipsOf` answers
- * which organization the person is in, this answers which projects are in it,
- * and only then is there a context to hand to anything else. Every other read
- * of a project goes through `listProjects` below, which takes the context like
- * everything else.
- *
- * It is safe on the same terms as `membershipsOf`: the organization it is given
- * is the one the credential already resolved to, it names no project, and it
- * can return nothing outside the organization it was asked about. A caller with
- * somebody else's organization id has already gone wrong somewhere no read
- * could have saved them.
- *
- * The order is by identifier, which sorts by mint time, so the first row is the
- * organization's oldest project — the one provisioning created — and a session
- * that has named no project lands there.
+ * Resolve active projects after verifying organization membership, before building
+ * AuthContext. IDs sort oldest first for session default selection.
+ * Use listProjects once the caller has a context.
  */
 export async function projectsOf(
   organizationId: string,
@@ -95,20 +72,16 @@ export async function listProjects(
   return db()
     .select(COLUMNS)
     .from(project)
-    .where(within(auth, project, notDeleted))
+    .where(within(auth, project, and(
+      notDeleted,
+      inCredentialProject(auth, project.id),
+    )))
     .orderBy(project.id);
 }
 
 /**
- * The project the caller is acting in. Like `readOrganization`, it takes no id:
- * the project comes from the credential too, so there is no call that reaches
- * another project — not another customer's, and not another one of the
- * caller's.
- *
- * A credential that names no project is acting in none, so there is none to
- * read and the answer is nothing. `listProjects` is what that caller wants, and
- * it is scoped by the organization rather than by the project for exactly this
- * reason.
+ * Read the active project named by AuthContext, or undefined if no project is set.
+ * Use listProjects to list projects in the organization.
  */
 export async function readProject(
   auth: AuthContext,
@@ -127,14 +100,8 @@ export async function readProject(
 }
 
 /**
- * The word a project is known by in a URL, worked out from its name.
- *
- * **Deterministic, and deliberately dull.** The same name always produces the
- * same candidate, so two people creating "Outbound sales" in two organizations
- * get `outbound-sales` in both — and an admin who never thinks about slugs
- * never has to. Everything outside the small alphabet becomes a separator, runs
- * of separators collapse, and a name made entirely of punctuation still has to
- * produce something, so it falls back to a word rather than to an empty string.
+ * Derive a lowercase URL slug from a name. Replace non-alphanumeric runs with
+ * hyphens, trim outer hyphens, and use project when the result is empty.
  */
 export function slugFrom(name: string): string {
   const shaped = name
@@ -153,15 +120,8 @@ export function slugFrom(name: string): string {
 const SLUG_LIMIT = 48;
 
 /**
- * The first free slug in the numbered series a name produces: `outbound`, then
- * `outbound-2`, then `outbound-3`.
- *
- * **Deterministic under collision, which is the property that matters**: the
- * answer depends only on the name and on what the organization already holds,
- * never on a clock or on randomness. Two admins creating "Outbound" a second
- * apart both compute `outbound-2`, one of them loses the unique index, and the
- * loser recomputes and gets `outbound-3` — rather than both ending up with
- * `outbound-8f3c` and nobody able to guess either.
+ * Return the first available slug: the base, then base-2, base-3, and so on.
+ * The caller must still handle concurrent uniqueness conflicts.
  */
 export function nextFreeSlug(
   wanted: string,
@@ -199,14 +159,8 @@ async function slugsLike(
 export type NewProject = {
   readonly name: string;
   /**
-   * The slug an admin typed, when they typed one. Absent means egma works one
-   * out from the name and numbers it past whatever is already there.
-   *
-   * The two are answered differently on collision and that is the whole reason
-   * this is optional rather than always supplied by the caller: a slug somebody
-   * chose is refused out loud, because silently giving them `outbound-2` when
-   * they asked for `outbound` is egma deciding something they came to decide.
-   * A slug egma derived is renumbered, because nobody asked for it.
+   * Optional user-chosen slug. Reject collisions for a chosen slug; derive and
+   * renumber a slug from the project name when omitted or blank.
    */
   readonly slug?: string | undefined;
   readonly description?: string | null | undefined;
@@ -248,26 +202,9 @@ function isSlugCollision(thrown: unknown): boolean {
 }
 
 /**
- * A whole project, in one transaction.
- *
- * The new project belongs to the caller's customer. There is no other option.
- *
- * **Only an `admin` creates one**, on the row of the permission table that says
- * so. The check is here as well as at the route, because signup provisions a
- * project before anybody has a context at all and the two paths must not be
- * able to drift apart on who may.
- *
- * What it writes is `insertProject`'s business and deliberately not this
- * function's: the project and its `expected_behaviors` project grader. A
- * project created here is therefore indistinguishable from the one signup
- * makes, which is the point — anything less is a project whose completed
- * simulations receive no expected-behavior grade.
- *
- * **The project and its expected-behavior grading are one transaction**, which
- * is the factory's doing rather than this function's: a project that existed
- * for even a moment with no project grader would produce completed simulations
- * with no expected-behavior grade, and "it depends when you looked" is not an
- * answer a trust product may give.
+ * Create an organization project and its expected-behaviors project grader in one
+ * transaction through the signup factory. Require manage_projects. Retry derived
+ * slug collisions up to SLUG_ATTEMPTS; reject a chosen slug collision immediately.
  */
 export async function createProject(
   auth: AuthContext,
@@ -344,17 +281,9 @@ export type ProjectChanges = {
 };
 
 /**
- * A project's live fields, edited.
- *
- * **Only an `admin`**, because a project's name and slug are what every link
- * anybody has sent is written against, and a slug change is felt by everybody
- * in the organization at once.
- *
- * The row is locked, the expected revision is checked against the locked row,
- * and the revision moves on every write — so two admins editing one project in
- * two tabs are told, rather than the second silently overwriting the first.
- * Editing a project the caller cannot see returns what reading it would:
- * nothing, with nothing disturbed.
+ * Require manage_projects and lock the visible active project for editing.
+ * Check expectedRevision when supplied and advance revision on every write.
+ * Return undefined for unseen projects; report slug conflicts explicitly.
  */
 export async function updateProject(
   auth: AuthContext,
@@ -444,15 +373,8 @@ export async function isProjectOfOrganization(
 export type ProjectTenancyState = "live" | "deleted" | "absent";
 
 /**
- * The organization's project as a tenancy fact, deletion included.
- *
- * The counterpart to `isProjectOfOrganization` for a caller that has to tell a
- * project the organization never had from one it had and later archived. Both
- * come back `false` from the boolean above, and they are two different truths:
- * evidence naming a pair that was never real is a binding that could not exist,
- * while evidence for a project archived after the evidence was accepted names a
- * pair that was real when it arrived. It reads the same one row, without the
- * live filter, and answers which of the three it is.
+ * Distinguish a live project, a deleted project, and an absent organization/project
+ * pair. Ingestion uses this to validate evidence accepted before project deletion.
  */
 export async function projectOfOrganizationState(
   auth: AuthContext,

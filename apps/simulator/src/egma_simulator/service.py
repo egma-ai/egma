@@ -1,31 +1,9 @@
-"""The standing service: claim, conduct, heartbeat, report, repeat.
+"""Claim work within capacity and run each simulation with its own heartbeat.
+Heartbeat cancellation stops the conductor. All requests are outbound.
 
-One long-poll claim loop asks the control plane for exactly as much work as
-the executor has room for. Each claimed spec becomes one running simulation
-— a task conducting the exchange, and a task beating every few seconds —
-and a cancel directive arriving on a beat's answer stops the conducting at
-that beat.
-Every arrow points out: the simulator is never dialled into.
-
-A running simulation writes two records of itself and this is where they
-are joined. The lifecycle goes to the control plane as report events; the
-conversation goes to the OTLP ingest as spans, authored here from what
-whichever conductor ran observed. Neither says what the other says: a
-turn, a tool call and a measurement are spans and only spans, and what the
-lifecycle carries about them is the one summary fact a reader of a single
-simulation asks for — how many turns it reached. Both go through one
-reporter, so they are delivered in the order they happened and the
-terminal document is last.
-
-The executor is deliberately a seam. Today it runs each simulation as one
-asyncio task in this process; a process- or container-per-simulation
-executor implements the same handful of methods and the claim loop never
-learns the difference.
-
-Nothing here may take the whole service down. A control plane that is slow,
-broken, or answering nonsense is an ordinary Tuesday, and the loops below
-are written so that the worst it costs is the work in flight — never the
-simulator itself, and never a capacity slot that no longer comes back.
+Conductors report observations here for a shared span emitter. Lifecycle reports
+and OTLP evidence use one ordered reporter, with the terminal report last.
+Isolate claim and simulation faults so failed work releases its capacity.
 """
 
 from __future__ import annotations
@@ -33,11 +11,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
+import threading
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Protocol
 
 from .blob import BlobStore, FilesystemBlobStore, S3BlobStore
-from .client import ClaimFailure, ControlPlaneClient, HeartbeatFailure
+from .client import ClaimedSpec, ClaimFailure, ControlPlaneClient, HeartbeatFailure
 from .config import MediaSettings, SimulatorConfig
 from .contract import ContractViolation
 from .conversation import Conducted, ConversationControls, conduct
@@ -51,6 +32,7 @@ from .reporting import Reporter
 from .spans import SpanEmitter, trace_id_for
 from .spec import SimulationSpec
 from .speech import SpeechProviders
+from .usage import ProviderUsage
 
 logger = logging.getLogger(__name__)
 
@@ -68,26 +50,9 @@ for whoever wants to count them."""
 
 
 def blob_store_for(config: SimulatorConfig) -> BlobStore:
-    """Where this simulator's recordings go, decided once at startup.
-
-    Naming an object-storage endpoint is the whole of what selects it —
-    the same shape as naming a media backend, and the reason the entire
-    test suite runs against a directory with no container anywhere. The
-    two are exclusive because the configuration made them so: a
-    deployment with a store has no blob directory to fall back to. One
-    place or the other, never both — a copy kept on the container's own
-    disk beside the one in the store would hide exactly the fault the
-    store is here to fix, until the day a second simulator made half the
-    recordings unreadable and nothing said so.
-
-    Everything above this line is given a :class:`BlobStore` and never
-    learns which one it got.
-
-    The settings are taken apart here rather than handed over whole, so
-    that ``blob.py`` stays a leaf: it knows what an object store needs and
-    nothing about where a deployment's answers come from. That is what
-    lets the seam be tested with five arguments and no environment, and
-    what would otherwise make the store's tests configuration's tests too.
+    """Select the configured recording store once. Object storage has no filesystem
+    fallback. Pass explicit storage values so blob.py stays independent of
+    configuration.
     """
     store = config.object_store
     if store is None:
@@ -189,15 +154,8 @@ class AsyncioExecutor:
 
 
 class RunningSimulation:
-    """One claimed spec being conducted, and its heartbeat.
-
-    It is also the one place that sees everything a conductor observes,
-    which is why the conversation's spans are authored here rather than
-    deeper in. There are two conductors and they observe in two
-    currencies: the conversation loop sees a turn at the moment it happened, and the
-    voice conductor sees both ends of one, read off the audio. Both report
-    to the callbacks below, and what comes out is one emitter for chat and
-    voice alike.
+    """Run one claimed simulation and its heartbeat. Shared callbacks turn chat and
+    voice observations into spans while preserving each conductor's timing.
     """
 
     def __init__(
@@ -257,9 +215,14 @@ class RunningSimulation:
                 # process-wide provider holding this simulation's route.
                 self._spans.abort()
 
+    async def _register_provider_reference(self, reference: str) -> None:
+        await self._client.register_provider_reference(
+            self.simulation_id, self._config.claimant, reference
+        )
+        self._reporter.provider_reference = reference
+
     async def _conduct_and_report(self) -> None:
         reporter = self._reporter
-        reporter.running()
         self._spans.opened()
         log_event(
             logger,
@@ -289,6 +252,7 @@ class RunningSimulation:
                 media=MediaSettings.for_simulation(
                     self._config.media, self._spec.platform.carrier
                 ),
+                on_provider_reference=self._register_provider_reference,
             )
             self._assembled = assembled
             persona = Persona(
@@ -296,6 +260,9 @@ class RunningSimulation:
                 scenario_instructions=self._spec.scenario_instructions,
                 model=model,
             )
+            # Preparing clients and validating configuration is not execution.
+            # Dialing and the normal wait for an answer begin with conducting.
+            reporter.running()
             try:
                 # Which of the two conductors this simulation gets was
                 # decided by assembly, from the spec alone. Both answer
@@ -311,6 +278,8 @@ class RunningSimulation:
                         on_utterance=self._on_utterance,
                         on_measured=self._on_measured,
                         on_answered=self._on_answered,
+                        on_provider_usage=self._on_provider_usage,
+                        on_execution_ended=reporter.execution_ended,
                     )
                 else:
                     assert assembled.plug is not None
@@ -322,6 +291,8 @@ class RunningSimulation:
                         on_turn=self._on_turn,
                         on_timing=self._on_timing,
                         on_answered=self._on_answered,
+                        on_provider_usage=self._on_provider_usage,
+                        on_execution_ended=reporter.execution_ended,
                         controls=self._controls,
                         name=f"sim:{self.simulation_id}",
                     )
@@ -329,18 +300,14 @@ class RunningSimulation:
                 # Keep the platform call reference on every terminal report,
                 # including faults that stopped conducting before an ending.
                 conducting = assembled.conductor or assembled.plug
-                if conducting is not None:
+                if conducting is not None and conducting.provider_reference is not None:
                     reporter.provider_reference = conducting.provider_reference
                 # Conducting closed the pipeline on its way out, whatever
                 # happened, so whatever was recorded is measured by now.
                 recording = assembled.recording
-                reporter.audio = (
-                    None if recording is None else recording.as_report()
-                )
+                reporter.audio = None if recording is None else recording.as_report()
                 if recording is not None:
-                    self._spans.recording(
-                        started_unix_nano=recording.started_unix_nano
-                    )
+                    self._spans.recording(started_unix_nano=recording.started_unix_nano)
                 # The same moment for the same reason: the conversation is
                 # over, so every call a platform has reported is settled.
                 # Drained before anything is sealed, so a call reported in
@@ -356,6 +323,9 @@ class RunningSimulation:
             self._spans.abort()
             raise
         except Exception as fault:
+            # Construction/open faults may precede the conductor callback.
+            # A cleanup fault must preserve the already captured execution end.
+            reporter.execution_ended()
             reason = self._secrets.redact(f"{type(fault).__name__}: {fault}")
             # Which failed ending this is belongs to whoever raised: a
             # phone that rang out is not the same record as a simulator
@@ -460,34 +430,17 @@ class RunningSimulation:
         )
 
     async def _on_answered(self) -> None:
-        """One flush per answer, which is where the conversation actually
-        has a seam: the persona's turn, whatever the agent did while
-        answering, and the answer itself go together, and the flush after
-        them is the moment a reader could watch this simulation live.
-        Finer would be a request per span; coarser would be a transcript
-        that only exists once it is over.
-
-        Whichever conductor ran says when an answer is whole rather than
-        this file inferring it from a turn arriving, because an answer that
-        made a tool call and said nothing produces no turn — and it is
-        precisely that answer whose evidence must not sit in a buffer
-        waiting for the agent to speak again.
+        """Flush after each complete agent answer, including tool-only answers.
+        The conductor supplies the boundary; a transcript turn alone cannot identify it.
         """
         self._record_reported_tool_calls()
         self._spans.flush()
 
     def _record_reported_tool_calls(self) -> None:
-        """Every tool call a platform has reported since this last asked.
-
-        Taken rather than pushed: a report arrives in whatever task the
-        plug reads it in, and a span authored from over there would be
-        minted between two the conversation was in the middle of. Drained
-        here instead, at the seams the conversation already has, so the
-        order of the record is the order the simulation learned things in.
-
-        Empty on every lane but one. Where the agent's own process runs the
-        egma SDK, that process reports its own calls and egma writes no row
-        at all.
+        """Drain platform-reported tool calls at conversation boundaries to preserve
+        order.
+        LiveKit calls are reported by the agent SDK and do not create duplicate spans
+        here.
         """
         assembled = self._assembled
         if assembled is None:
@@ -499,6 +452,25 @@ class RunningSimulation:
                 answer=call.answer,
                 at_unix_nano=call.at_unix_nano,
             )
+
+    async def _on_provider_usage(self, usage: ProviderUsage) -> None:
+        """One provider request this simulation made, onto the record.
+
+        Authored as its own span, so it rides the write-ahead log and the one
+        ordered sender the transcript rides — which is what puts every bill on
+        the wire before the terminal report, and what makes a resend of this
+        flush collapse rather than charge twice.
+        """
+        selected = (self._spec.models.llm, self._spec.models.stt, self._spec.models.tts)
+        funding_receipt = next(
+            (
+                model.funding_receipt
+                for model in selected
+                if model.provider == usage.provider
+            ),
+            None,
+        )
+        self._spans.provider_usage(usage, funding_receipt)
 
     async def _on_timing(self, measure: str, milliseconds: float) -> None:
         self._spans.measure(measure, milliseconds)
@@ -569,6 +541,8 @@ class SimulatorService:
         self._claim_failure_said_at = 0.0
         self._claim_failure_count = 0
         self._stop = asyncio.Event()
+        self._claimed_at: dict[str, datetime] = {}
+        self._hard_stop: threading.Timer | None = None
 
     def request_stop(self) -> None:
         """Ask for the drain: claim nothing new, finish the work in flight.
@@ -611,7 +585,7 @@ class SimulatorService:
                 "simulator started",
                 attributes={"egma.capacity": config.capacity},
             )
-            claiming = asyncio.ensure_future(self._claim_forever(client, executor))
+            claiming = asyncio.ensure_future(self._claim_for_mode(client, executor))
             stop = asyncio.ensure_future(self._stop.wait())
             try:
                 await asyncio.wait(
@@ -645,6 +619,9 @@ class SimulatorService:
             "egma.service.stopped",
             "simulator stopped",
         )
+        if self._hard_stop is not None:
+            self._hard_stop.cancel()
+            self._hard_stop = None
 
     async def _claim_forever(
         self, client: ControlPlaneClient, executor: Executor
@@ -656,7 +633,9 @@ class SimulatorService:
 
             try:
                 specs = await client.claim(
-                    self._config.claimant, executor.free_capacity
+                    self._config.claimant,
+                    executor.free_capacity,
+                    self._config.modalities,
                 )
             except ClaimFailure as failure:
                 self._note_claim_failure(str(failure))
@@ -676,6 +655,46 @@ class SimulatorService:
             # again, even if it is the same sentence as before.
             self._last_claim_failure = None
             self._accept(specs, executor)
+
+    async def _claim_for_mode(
+        self, client: ControlPlaneClient, executor: Executor
+    ) -> None:
+        if self._config.mode == "persistent":
+            await self._claim_forever(client, executor)
+            return
+
+        async def claim_until_work() -> None:
+            while executor.free_capacity > 0:
+                try:
+                    specs = await client.claim(
+                        self._config.claimant,
+                        1,
+                        self._config.modalities,
+                    )
+                except ClaimFailure as failure:
+                    self._note_claim_failure(str(failure))
+                    if self._config.mode == "one-shot":
+                        return
+                    await asyncio.sleep(CLAIM_RETRY_SECONDS)
+                    continue
+                self._last_claim_failure = None
+                self._accept(specs, executor)
+                if specs or self._config.mode == "one-shot":
+                    return
+
+        if self._config.mode == "standby":
+            try:
+                async with asyncio.timeout(self._config.standby_seconds):
+                    await claim_until_work()
+            except TimeoutError:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "egma.service.standby_expired",
+                    "standby simulator idle limit expired",
+                )
+        else:
+            await claim_until_work()
 
     def _note_claim_failure(self, failure: str) -> None:
         """Say a claim failure when it is new, and once a minute after that.
@@ -734,17 +753,17 @@ class SimulatorService:
         self._claim_failure_said_at = now
 
     def _accept(self, documents: list, executor: Executor) -> None:
-        """Take what fits and can be understood; refuse the rest out loud.
-
-        The claim declared how much room there was, but the answer is the
-        control plane's to compose, and a simulator that trusted it blindly
-        would overload on a bad answer. Anything past capacity is left
-        alone: it stays claimed at the control plane, whose sweep is what
-        notices a claimed simulation nobody is beating for. Overloading, or
-        dying on the surprise, would both be worse than being one queue
-        deep for a while.
+        """Accept only valid claims within capacity. Leave excess work for the
+        control-plane
+        sweep rather than overloading the simulator or inventing terminal reports.
         """
-        for position, document in enumerate(documents):
+        for position, offered in enumerate(documents):
+            if isinstance(offered, ClaimedSpec):
+                document = offered.document
+                claimed_at = offered.claimed_at
+            else:
+                document = offered
+                claimed_at = datetime.now(UTC)
             if executor.free_capacity < 1:
                 log_event(
                     logger,
@@ -819,6 +838,9 @@ class SimulatorService:
             self._secrets.register(spec.credentials)
             self._secrets.register(list(spec.platform.secrets))
             self._secrets.register(list(spec.models.secrets))
+            if self._config.mode != "persistent":
+                self._claimed_at[spec.simulation_id] = claimed_at
+                self._arm_hard_stop(claimed_at)
             executor.submit(spec)
             log_event(
                 logger,
@@ -839,4 +861,38 @@ class SimulatorService:
                 secrets=self._secrets,
                 blobs=self._blobs,
             )
-            await simulation.run()
+            if self._config.mode == "persistent":
+                await simulation.run()
+                return
+            claimed_at = self._claimed_at.pop(spec.simulation_id, datetime.now(UTC))
+            elapsed = max(0.0, (datetime.now(UTC) - claimed_at).total_seconds())
+            remaining = max(0.0, self._config.execution_deadline_seconds - elapsed)
+            try:
+                async with asyncio.timeout(remaining):
+                    await simulation.run()
+            except TimeoutError:
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "egma.simulation.execution_deadline_expired",
+                    "simulation execution deadline expired",
+                    attributes={
+                        "egma.execution_deadline_seconds": (
+                            self._config.execution_deadline_seconds
+                        ),
+                        "error.type": "execution_deadline_expired",
+                    },
+                )
+
+    def _arm_hard_stop(self, claimed_at: datetime) -> None:
+        """Bound the whole one-simulation process, including final teardown."""
+        elapsed = max(0.0, (datetime.now(UTC) - claimed_at).total_seconds())
+        remaining = max(0.0, self._config.execution_deadline_seconds - elapsed)
+        if self._hard_stop is not None:
+            self._hard_stop.cancel()
+        # Async cancellation cannot stop a native audio call or a blocked
+        # thread. The process backstop stays armed until client and executor
+        # teardown have both completed.
+        self._hard_stop = threading.Timer(remaining, lambda: os._exit(124))
+        self._hard_stop.daemon = True
+        self._hard_stop.start()

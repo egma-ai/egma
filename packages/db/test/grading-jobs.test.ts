@@ -5,6 +5,8 @@ import {
   appendGrades,
   appendSpans,
   claimGradingJobs,
+  installBillingPlugIn,
+  openBillingPlugIn,
   connectClickHouse,
   disconnectClickHouse,
   finishGradingJob,
@@ -189,6 +191,36 @@ afterAll(async () => {
 });
 
 describe("one frozen production job", () => {
+  it("runs and regrades code-only work without asking for model funding", async () => {
+    const questions: unknown[] = [];
+    const restore = installBillingPlugIn({
+      ...openBillingPlugIn(),
+      entitlements: {
+        mayStart: async () => ({ allowed: true }),
+        mayPlatformKeyFund: async (asked) => {
+          questions.push(asked);
+          return { funded: false, providers: asked.providers, message: "Add credits." };
+        },
+      },
+    });
+    try {
+      const traceId = "aaaaaaaaaaaaaaaaaaaaaaaaaa110011";
+      await request(traceId);
+      expect(await readTraceGrading(auth, { source: "production", traceId }))
+        .toMatchObject({ state: "pending", workBlock: null });
+      const claim = await claimTrace(traceId, "code-without-funding");
+      await appendOne(claim, 1, 1_777_000_001_000_000n);
+      await finishGradingJob(claim.auth, claim.id, claim.claimedBy);
+      expect(await regradeTrace(auth, { source: "production", traceId })).toMatchObject({ kind: "queued" });
+      const regrade = await claimTrace(traceId, "code-regrade-without-funding");
+      await appendOne(regrade, 1, 1_777_000_002_000_000n);
+      await finishGradingJob(regrade.auth, regrade.id, regrade.claimedBy);
+      expect(questions).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
   it("creates no receipt or job until the explicit end arrives", async () => {
     const traceId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaddd";
 
@@ -359,6 +391,7 @@ describe("one frozen production job", () => {
       claimant: "grader-after-final-expiry",
       capacity: 50,
       leaseSeconds: 1,
+      concurrencyCap: 1,
     });
 
     await expect(getGradingJob(auth, final.id)).resolves.toMatchObject({
@@ -570,6 +603,7 @@ describe("expired grading leases", () => {
       claimant: "grader-after-expiry",
       capacity: 50,
       leaseSeconds: 1,
+      concurrencyCap: 1,
     })).find((claim) => claim.traceId === traceId);
     if (reclaimed === undefined) throw new Error("the expired job was not reclaimed");
 
@@ -595,6 +629,80 @@ describe("expired grading leases", () => {
 });
 
 describe("queue load", () => {
+  it("does not replace abandoned work while draining down to a lower cap", async () => {
+    const traces = ["ca910000000000000000000000000001", "ca910000000000000000000000000002"];
+    for (const traceId of traces) await request(traceId);
+    const held = await claimGradingJobs({
+      claimant: "before-lower-cap", capacity: 2, concurrencyCap: 2,
+    });
+    expect(held).toHaveLength(2);
+    const expired = held[0]!;
+    const active = held[1]!;
+    const queuedTrace = "ca910000000000000000000000000003";
+    await request(queuedTrace);
+    await database.sql(
+      `update grading_job set attempts = 3,
+       heartbeat_at = now() - interval '10 seconds' where id = $1`,
+      [expired.id],
+    );
+
+    await expect(claimGradingJobs({
+      claimant: "after-lower-cap", capacity: 2, concurrencyCap: 1, leaseSeconds: 1,
+    })).resolves.toEqual([]);
+    await expect(getGradingJob(auth, expired.id)).resolves.toMatchObject({ status: "abandoned" });
+    await expect(getGradingJobForTrace(auth, queuedTrace)).resolves.toMatchObject({ status: "pending" });
+
+    await finishGradingJob(active.auth, active.id, active.claimedBy);
+    const [resumed] = await claimGradingJobs({
+      claimant: "after-lower-cap", capacity: 2, concurrencyCap: 1,
+    });
+    expect(resumed?.traceId).toBe(queuedTrace);
+    if (resumed === undefined) throw new Error("pending job did not resume");
+    await finishGradingJob(resumed.auth, resumed.id, resumed.claimedBy);
+  });
+  it("holds a platform cap across workers and refills ten freed slots", async () => {
+    const tracePrefix = "ca90";
+    const traceIds = Array.from(
+      { length: 110 },
+      (_, index) => `${tracePrefix}${index.toString(16).padStart(28, "0")}`,
+    );
+    await Promise.all(traceIds.map((traceId) => request(traceId)));
+
+    const firstWave = await Promise.all([
+      claimGradingJobs({
+        claimant: "capped-grader-a",
+        capacity: 50,
+        concurrencyCap: 100,
+      }),
+      claimGradingJobs({
+        claimant: "capped-grader-b",
+        capacity: 50,
+        concurrencyCap: 100,
+      }),
+    ]);
+    const firstHundred = firstWave.flat();
+    expect(firstHundred).toHaveLength(100);
+    await expect(claimGradingJobs({
+      claimant: "capped-grader-c",
+      capacity: 50,
+      concurrencyCap: 100,
+    })).resolves.toEqual([]);
+
+    await Promise.all(firstHundred.slice(0, 10).map((claim) =>
+      finishGradingJob(claim.auth, claim.id, claim.claimedBy)
+    ));
+    const refill = await claimGradingJobs({
+      claimant: "capped-grader-c",
+      capacity: 50,
+      concurrencyCap: 100,
+    });
+    expect(refill).toHaveLength(10);
+
+    await Promise.all([...firstHundred.slice(10), ...refill].map((claim) =>
+      finishGradingJob(claim.auth, claim.id, claim.claimedBy)
+    ));
+  });
+
   it("keeps Postgres job rows equal to live backlog while durable history grows", async () => {
     const tracePrefix = "f004";
     const traceCount = 64;
@@ -837,6 +945,7 @@ describe("regrading uses frozen history", () => {
     await expect(readTraceGrading(auth, { source: "production", traceId }))
       .resolves.toEqual({
         state: "not_requested",
+        workBlock: null,
         history: [],
         current: [],
         combinedScore: null,

@@ -1,10 +1,16 @@
 "use client";
 
 import { getSimulation, regradeSimulation } from "@egma/platform-api/client";
+import { ChevronRightIcon, RefreshCwIcon } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Table,
   TableBody,
@@ -49,19 +55,23 @@ import { projectPath } from "../../../../../lib/project-context.ts";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Problem, Refused } from "../../../../../ui/form.tsx";
+import { WorkRefusalActions } from "../../../../../ui/work-refusal-actions.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
-import { shownScore } from "../../../../../ui/run-status.tsx";
 import {
-  ChatTranscript,
+  StateMark,
+  shownScore,
+  simulationSquare,
+} from "../../../../../ui/run-status.tsx";
+import {
+  SimulationTranscript,
+  evidenceGradeTally,
   recordingSpeakerTimeline,
   RecordingEvidence,
-  recordingOriginOf,
   SimulationEvidenceSummary,
-  simulationToolCalls,
-  TranscriptEmpty,
   useSimulationEvidenceRecording,
+  waitingForSimulationTranscript,
 } from "../../../../../ui/simulation-evidence.tsx";
-import { Actions, SearchField } from "../../../../../ui/section.tsx";
+import { Actions } from "../../../../../ui/section.tsx";
 import { useShellSession } from "../../../../../ui/shell.tsx";
 
 type MoreSimulations = {
@@ -79,6 +89,14 @@ const EXECUTION_LABEL: Readonly<Record<SimulationStatusWord, string>> = {
   canceled: "Canceled",
 };
 
+/**
+ * One row in the list, opening with the state square its word explains.
+ *
+ * The square stands at the start of the first line and the word follows the
+ * persona, so a graded row reads "Patient caller · 2/3 passed" rather than
+ * asking a colour to carry the verdict. The label a screen reader announces
+ * carries the same word.
+ */
 function SimulationChoice({
   row,
   selected,
@@ -88,6 +106,7 @@ function SimulationChoice({
   readonly selected: boolean;
   readonly onSelect: () => void;
 }) {
+  const square = simulationSquare(row);
   return (
     <li className="m-0 min-w-0">
       <button
@@ -98,17 +117,22 @@ function SimulationChoice({
         )}
         data-selected={selected ? "true" : "false"}
         type="button"
-        aria-label={`${row.testName ?? "No stored test"}, ${row.personaName}, ${EXECUTION_LABEL[row.status]}`}
+        aria-label={`${row.testName ?? "No stored test"}, ${row.personaName}, ${square.word}`}
         aria-pressed={selected}
         onClick={onSelect}
       >
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-medium text-foreground">
-            {row.testName ?? "No stored test"}
+        <span className="flex min-w-0 items-start gap-2">
+          {/* The square sits on the first line's own height, not the row's. */}
+          <span className="flex h-5 flex-none items-center">
+            <StateMark kind={square.kind} filled pulse={square.pulse} />
           </span>
-          <span className="mt-1 block truncate text-sm text-muted-foreground">
-            {row.personaName}
-            {row.status === "completed" ? null : ` · ${EXECUTION_LABEL[row.status]}`}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-foreground">
+              {row.testName ?? "No stored test"}
+            </span>
+            <span className="mt-1 block truncate text-sm text-muted-foreground">
+              {`${row.personaName} · ${square.word}`}
+            </span>
           </span>
         </span>
       </button>
@@ -281,9 +305,11 @@ function EarlierGrades({ grades }: { readonly grades: readonly EvidenceGrade[] }
 function ExecutionFailureNotice({
   reason,
   executionFailure,
+  projectId,
 }: {
   readonly reason: string | null;
   readonly executionFailure: string | null | undefined;
+  readonly projectId: string;
 }) {
   return (
     <div
@@ -297,6 +323,9 @@ function ExecutionFailureNotice({
         {executionFailureMessage(reason, executionFailure)} This is an execution
         problem, not a failed grade.
       </p>
+      {reason === "provider_key_unavailable" ? (
+        <div className="mt-3"><WorkRefusalActions code={reason} projectId={projectId} /></div>
+      ) : null}
     </div>
   );
 }
@@ -305,6 +334,7 @@ function ResultNotice({ evidence }: { readonly evidence: SimulationEvidence }) {
   if (evidence.status === "failed") {
     return (
       <ExecutionFailureNotice
+        projectId={evidence.projectId}
         reason={evidence.reason}
         executionFailure={evidence.executionFailure}
       />
@@ -366,30 +396,48 @@ function GraderResultCard({
   const behaviorRows = expectedBehaviorGrader
     ? expectedBehaviorResults(evidence, row.grade)
     : [];
-  const behaviorRowsHaveWrittenResults = behaviorRows.some(({ assertion }) =>
-    assertion !== null &&
-    ((typeof assertion.rationale === "string" && assertion.rationale.trim() !== "") ||
-      (typeof assertion.error === "string" && assertion.error.trim() !== "")),
-  );
-  const planFacts = [
-    row.plan?.passThreshold === undefined
-      ? null
-      : `Pass threshold ${shownScore(row.plan.passThreshold)}`,
-    row.plan?.graderDefinitionVersion === undefined
-      ? null
-      : `Definition v${String(row.plan.graderDefinitionVersion)}`,
-  ].filter((fact): fact is string => fact !== null);
+  /*
+   * The table is this grader's evidence, so it replaces the written finding.
+   * An errored grader has no table to read: its content is the error itself.
+   */
+  const showsBehaviorTable =
+    behaviorRows.length > 0 && row.grade?.result !== "errored";
   const frozenDefinition = row.plan ?? row.grade ?? row.history[0];
   const definitionHref = frozenDefinition === undefined
     ? null
     : `${projectPath(evidence.projectId, "graders")}?graderDefinition=${encodeURIComponent(frozenDefinition.graderDefinitionId)}&definitionVersion=${String(frozenDefinition.graderDefinitionVersion)}`;
+  const passThreshold = row.plan?.passThreshold ?? row.grade?.passThreshold ?? null;
+  const scoreFacts = [
+    `Score ${row.grade === null || row.grade.score === null ? "-" : shownScore(row.grade.score)}`,
+    passThreshold === null ? null : `Threshold ${shownScore(passThreshold)}`,
+  ].filter((fact): fact is string => fact !== null);
+  /*
+   * A grader that passed is closed, because its row already says so. Anything
+   * else — failed, errored, or still waiting for a result — opens, because the
+   * finding is the reason somebody came to this page.
+   */
+  const openByDefault = row.grade?.result !== "passed";
 
   return (
     <section className="min-w-0 border border-border bg-surface" aria-label={row.name}>
-      <header className="flex min-w-0 flex-wrap items-start justify-between gap-4 border-b border-border bg-surface-soft px-5 py-4 max-[40rem]:px-4">
-        <div className="min-w-0">
-          <h3 className="m-0 text-sm font-medium wrap-anywhere text-foreground">
-            Grader <span aria-hidden="true">·</span>{" "}
+      <Collapsible defaultOpen={openByDefault}>
+        <header className="relative flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 bg-surface-soft px-5 py-3 max-[40rem]:px-4">
+          {/*
+            The trigger is a real button, and its hit area covers the row
+            through one overlay. The grader's name stays a link above that
+            overlay: the way into the frozen definition is not a way to fold
+            the section away.
+          */}
+          <CollapsibleTrigger asChild>
+            <button
+              className="flex flex-none items-center border-0 bg-transparent p-0 text-muted-foreground after:absolute after:inset-0 after:content-['']"
+              type="button"
+            >
+              <ChevronRightIcon aria-hidden="true" />
+              <span className="sr-only">{row.name}</span>
+            </button>
+          </CollapsibleTrigger>
+          <h3 className="relative z-10 m-0 min-w-0 text-sm font-medium wrap-anywhere text-foreground">
             {definitionHref === null ? row.name : (
               <Link
                 className="no-underline underline-offset-4 pointer-hover:underline pointer-hover:decoration-brand focus-visible:underline"
@@ -399,116 +447,178 @@ function GraderResultCard({
               </Link>
             )}
           </h3>
-          {planFacts.length === 0 ? null : (
-            <p className="m-0 mt-1 text-sm tabular-nums text-muted-foreground">
-              {planFacts.join(" · ")}
-            </p>
-          )}
-        </div>
-        <div className="flex flex-none flex-wrap items-center justify-end gap-3">
           <GradeResultText
             result={row.grade?.result ?? null}
             missing={stillGrading ? "Grading" : "No grade"}
           />
-          <span className="font-mono text-sm tabular-nums text-foreground">
-            Total Score {row.grade === null || row.grade.score === null
-              ? "-"
-              : shownScore(row.grade.score)}
+          <span className="ms-auto flex-none text-sm tabular-nums text-faint">
+            {scoreFacts.join(" · ")}
           </span>
-        </div>
-      </header>
+        </header>
 
-      {row.grade === null && !(expectedBehaviorGrader && behaviorRows.length > 0) ? (
-        <p className="m-0 px-5 py-4 text-sm text-muted-foreground max-[40rem]:px-4">
-          {stillGrading
-            ? "Waiting for this grader to return a result."
-            : "No result is available for this grader."}
-        </p>
-      ) : expectedBehaviorGrader && behaviorRows.length > 0 ? (
-        <>
-          {!behaviorRowsHaveWrittenResults &&
-          typeof row.grade?.details.rationale === "string" &&
-          row.grade.details.rationale.trim() !== "" ? (
-            <p className="m-0 border-b border-border px-5 py-3 text-sm wrap-anywhere text-muted-foreground max-[40rem]:px-4">
-              {row.grade.details.rationale}
-            </p>
-          ) : null}
-          <TablePanel className="stacked:overflow-visible border-0">
-            <Table className="stacked:block" aria-label={`${row.name} results`}>
-              <TableHeader className="stacked:sr-only">
-                <TableRow>
-                  <TableHead className="w-[38%]">Expected behavior</TableHead>
-                  <TableHead>Grader result</TableHead>
-                  <TableHead className="w-28 text-center">Total Score</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody className="stacked:block">
-                {behaviorRows.map((behavior) => (
-                  <TableRow
-                    className="stacked:flex stacked:flex-col stacked:gap-3 stacked:border-t stacked:border-border stacked:px-4 stacked:py-4 stacked:first:border-t-0"
-                    key={behavior.key}
-                  >
-                    <TableCell className={STACKED_BEHAVIOR_CELL} data-label="Expected behavior">
-                      <span className="wrap-anywhere text-foreground stacked:max-w-[65%] stacked:text-end">
-                        {behavior.expected}
-                      </span>
-                    </TableCell>
-                    <TableCell className={STACKED_BEHAVIOR_CELL} data-label="Grader result">
-                      <span
-                        className={cn(
-                          "wrap-anywhere text-muted-foreground stacked:max-w-[65%] stacked:text-end",
-                          behavior.assertion?.error === undefined ? null : "text-failure",
-                        )}
-                      >
-                        {assertionFinding(behavior.assertion, stillGrading)}
-                      </span>
-                    </TableCell>
-                    <TableCell
-                      className={cn(STACKED_BEHAVIOR_CELL, "text-center font-mono tabular-nums text-foreground stacked:text-end")}
-                      data-label="Total Score"
-                    >
-                      {behavior.assertion?.score === undefined
-                        ? "-"
-                        : shownScore(behavior.assertion.score)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TablePanel>
-        </>
-      ) : (
-        <div className="px-5 py-4 max-[40rem]:px-4">
-          <p className="m-0 text-sm text-faint">Grader result</p>
-          <p
-            className={cn(
-              "m-0 mt-1 text-sm wrap-anywhere text-foreground",
-              row.grade?.result === "errored" && "text-failure",
-            )}
-          >
-            {row.grade === null
-              ? stillGrading
+        {/* An opened section shows its evidence and nothing about itself. */}
+        <CollapsibleContent className="border-t border-border">
+          {row.grade === null && !showsBehaviorTable ? (
+            <p className="m-0 px-5 py-4 text-sm text-muted-foreground max-[40rem]:px-4">
+              {stillGrading
                 ? "Waiting for this grader to return a result."
-                : "No result is available for this grader."
-              : findingOf(row.grade)}
-          </p>
-        </div>
-      )}
-      <EarlierGrades grades={row.history} />
+                : "No result is available for this grader."}
+            </p>
+          ) : showsBehaviorTable ? (
+            <>
+              <TablePanel className="stacked:overflow-visible border-0">
+                <Table className="stacked:block" aria-label={`${row.name} results`}>
+                  <TableHeader className="stacked:sr-only">
+                    <TableRow>
+                      <TableHead className="w-[38%]">Expected behavior</TableHead>
+                      <TableHead>Grader result</TableHead>
+                      <TableHead className="w-28 text-center">Total Score</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody className="stacked:block">
+                    {behaviorRows.map((behavior) => (
+                      <TableRow
+                        className="stacked:flex stacked:flex-col stacked:gap-3 stacked:border-t stacked:border-border stacked:px-4 stacked:py-4 stacked:first:border-t-0"
+                        key={behavior.key}
+                      >
+                        <TableCell className={STACKED_BEHAVIOR_CELL} data-label="Expected behavior">
+                          <span className="wrap-anywhere text-foreground stacked:max-w-[65%] stacked:text-end">
+                            {behavior.expected}
+                          </span>
+                        </TableCell>
+                        <TableCell className={STACKED_BEHAVIOR_CELL} data-label="Grader result">
+                          <span
+                            className={cn(
+                              "wrap-anywhere text-muted-foreground stacked:max-w-[65%] stacked:text-end",
+                              behavior.assertion?.error === undefined ? null : "text-failure",
+                            )}
+                          >
+                            {assertionFinding(behavior.assertion, stillGrading)}
+                          </span>
+                        </TableCell>
+                        <TableCell
+                          className={cn(STACKED_BEHAVIOR_CELL, "text-center font-mono tabular-nums text-foreground stacked:text-end")}
+                          data-label="Total Score"
+                        >
+                          {behavior.assertion?.score === undefined
+                            ? "-"
+                            : shownScore(behavior.assertion.score)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TablePanel>
+            </>
+          ) : (
+            <div className="px-5 py-4 max-[40rem]:px-4">
+              <p className="m-0 text-sm text-faint">Grader result</p>
+              <p
+                className={cn(
+                  "m-0 mt-1 text-sm wrap-anywhere text-foreground",
+                  row.grade?.result === "errored" && "text-failure",
+                )}
+              >
+                {row.grade === null
+                  ? stillGrading
+                    ? "Waiting for this grader to return a result."
+                    : "No result is available for this grader."
+                  : findingOf(row.grade)}
+              </p>
+              {row.grade?.details.errorCode === "provider_key_unavailable" ? (
+                <div className="mt-3">
+                  <WorkRefusalActions code="provider_key_unavailable" projectId={evidence.projectId} />
+                </div>
+              ) : null}
+            </div>
+          )}
+          <EarlierGrades grades={row.history} />
+        </CollapsibleContent>
+      </Collapsible>
     </section>
   );
 }
 
-function ResultSummary({ evidence }: { readonly evidence: SimulationEvidence }) {
+/**
+ * The line the grader sections stand under, with the regrade control on it.
+ *
+ * The line carries no count: the summary bar above it already says how many
+ * graders passed, and ADR-0017 stands, so nothing here folds the graders into
+ * one verdict. Regrade sits on this line because it is grading work.
+ */
+function GradersLine({ regrade }: { readonly regrade: RegradeRequest }) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <h3 className="m-0 text-base font-medium text-foreground">Graders</h3>
+      <RegradeAction request={regrade} />
+    </div>
+  );
+}
+
+/**
+ * The panel while the conversation has not happened yet.
+ *
+ * There is no evidence to show, so the panel says which of the two waits this
+ * is instead of drawing empty facts. The mark breathes on the status square's
+ * own keyframe, so one motion means "still going" everywhere.
+ */
+function WaitingForSimulation({
+  status,
+}: {
+  readonly status: SimulationStatusWord;
+}) {
+  const running = status === "running";
+  return (
+    <div
+      className="flex min-h-full min-w-0 flex-col items-center justify-center gap-3 px-5 py-16 text-center max-[40rem]:px-4"
+      role="status"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        className="size-14 [[data-theme=dark]_&]:invert"
+        data-slot="waiting-mark"
+        data-motion="pulse"
+        src="/brand/egma-mark-light.svg"
+        alt=""
+        width={56}
+        height={56}
+      />
+      <p className="m-0 text-base font-medium text-foreground">
+        {running ? "Running" : "Queued"}
+      </p>
+      <p className="m-0 max-w-[48ch] text-sm text-faint">
+        {running
+          ? "The conversation is happening now. Results appear here when it ends."
+          : "Waiting for a simulator to start."}
+      </p>
+    </div>
+  );
+}
+
+function ResultSummary({
+  evidence,
+  regrade,
+}: {
+  readonly evidence: SimulationEvidence;
+  readonly regrade: RegradeRequest;
+}) {
   const rows = graderRows(evidence);
   const stillGrading =
     evidence.gradingState === "pending" || evidence.gradingState === "running";
 
+  if (
+    ["queued", "claimed", "running"].includes(evidence.status) &&
+    evidence.grades.length === 0
+  ) {
+    return <WaitingForSimulation status={evidence.status} />;
+  }
+
   if (evidence.gradingState === "not_requested") {
     return (
       <div className="flex min-w-0 flex-col gap-4">
-        <ResultNotice evidence={evidence} />
         <SimulationFacts evidence={evidence} />
+        <ResultNotice evidence={evidence} />
+        <GradersLine regrade={regrade} />
         <div className="border border-border bg-surface p-5 max-[40rem]:p-4">
           <h3 className="m-0 text-base font-medium text-foreground">
             No grading was requested
@@ -524,8 +634,9 @@ function ResultSummary({ evidence }: { readonly evidence: SimulationEvidence }) 
   if (rows.length === 0) {
     return (
       <div className="flex min-w-0 flex-col gap-4">
-        <ResultNotice evidence={evidence} />
         <SimulationFacts evidence={evidence} />
+        <ResultNotice evidence={evidence} />
+        <GradersLine regrade={regrade} />
         <div className="border border-border bg-surface p-5 max-[40rem]:p-4">
           <h3 className="m-0 text-base font-medium text-foreground">
             {stillGrading ? "Graders are preparing" : "No grades are available"}
@@ -546,8 +657,9 @@ function ResultSummary({ evidence }: { readonly evidence: SimulationEvidence }) 
       role="region"
       aria-label="Grader results"
     >
-      <ResultNotice evidence={evidence} />
       <SimulationFacts evidence={evidence} />
+      <ResultNotice evidence={evidence} />
+      <GradersLine regrade={regrade} />
       {rows.map((row) => (
         <GraderResultCard
           evidence={evidence}
@@ -571,9 +683,6 @@ function TranscriptAndAudio({
 }) {
   const active = ["queued", "claimed", "running"].includes(evidence.status);
   const recording = useSimulationEvidenceRecording(evidence, evidence.projectId);
-  const toolCalls = useMemo(() => simulationToolCalls(evidence), [evidence]);
-  const recordingStartedAt =
-    evidence.transcript === null ? null : recordingOriginOf(evidence.transcript);
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
@@ -597,37 +706,21 @@ function TranscriptAndAudio({
         <h3 className="m-0 mb-3 text-base font-medium text-foreground" id="run-evidence-conversation">
           Conversation
         </h3>
-        {evidence.transcript === null ? (
-          <TranscriptEmpty />
-        ) : (
-          <div className="flex min-w-0 flex-col gap-3">
-            {evidence.transcript.spansTruncated ? (
-              <p
-                className="m-0 border border-s-[3px] border-border border-s-brand bg-selected px-5 py-3 text-sm text-foreground max-[40rem]:px-4"
-                role="status"
-              >
-                {`This simulation filed ${String(evidence.transcript.spanCount)} steps. This view shows the first steps in order, so later tool calls or conversation turns may be absent.`}
-              </p>
-            ) : null}
-            <ChatTranscript
-              transcript={evidence.transcript}
-              toolCalls={toolCalls}
-              recordingStartedAt={recordingStartedAt}
-              {...(recording.status === "ready"
-                ? {
-                    currentTime: recording.currentTime,
-                    onSeek: recording.seek,
-                  }
-                : {})}
-            />
-          </div>
-        )}
+        <SimulationTranscript evidence={evidence} recording={recording} />
       </section>
     </div>
   );
 }
 
-function SimulationReviewActions({
+/**
+ * The regrade request, its refusals and its confirmation, held in one place.
+ *
+ * The control and the notices sit in two different parts of the panel — the
+ * button on the Graders line, the notices under the tab rail where both tabs
+ * can see them — so the state machine lives here and each part reads it. There
+ * is one dialog, and it is rendered with the notices.
+ */
+function useRegradeRequest({
   evidence,
   onReload,
 }: {
@@ -674,39 +767,94 @@ function SimulationReviewActions({
     onReload();
   }
 
+  return {
+    evidence,
+    role,
+    mayRegrade,
+    refused,
+    asked,
+    confirming,
+    working,
+    ask: () => setConfirming(true),
+    close: () => setConfirming(false),
+    regrade,
+  };
+}
+
+type RegradeRequest = ReturnType<typeof useRegradeRequest>;
+
+/**
+ * The control itself: one small square beside the word `Graders`.
+ *
+ * It answers only when there is grading work to redo — the conversation
+ * finished and no grader is running — and it says what it does in its label,
+ * because the icon is the whole of what is drawn.
+ */
+function RegradeAction({ request }: { readonly request: RegradeRequest }) {
+  if (!request.mayRegrade) return null;
+  const { evidence } = request;
+  const gradingBusy =
+    evidence.gradingState === "pending" || evidence.gradingState === "running";
   return (
-    <div className="flex min-w-0 flex-col gap-3" aria-label="Simulation actions">
-      {mayRegrade ? (
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={working}
-            onClick={() => setConfirming(true)}
-          >
-            Regrade
-          </Button>
+    <Button
+      className={cn(
+        "size-5.5 min-h-0 border-border text-muted-foreground",
+        "pointer-coarse:size-(--tap-target)",
+        "disabled:opacity-100 disabled:text-faint",
+      )}
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-label="Regrade this simulation"
+      title="Regrade this simulation"
+      disabled={request.working || evidence.status !== "completed" || gradingBusy}
+      onClick={request.ask}
+    >
+      <RefreshCwIcon className="size-3.25" aria-hidden="true" />
+    </Button>
+  );
+}
+
+/**
+ * What the request has to say, under the rail so both tabs show it, and the
+ * one confirmation it opens.
+ */
+function RegradeNotices({ request }: { readonly request: RegradeRequest }) {
+  const { evidence, role, mayRegrade, refused, asked, confirming, working } =
+    request;
+  const saysSomething =
+    refused !== null || asked !== null || (role !== null && !mayRegrade);
+  return (
+    <>
+      {!saysSomething ? null : (
+        <div
+          className="flex min-w-0 flex-none flex-col gap-3 border-b border-border px-5 py-3 max-[40rem]:px-4"
+          aria-label="Simulation actions"
+        >
+          {refused === null ? null : (
+            <Refused
+              message={regradeRefusalMessage(refused)}
+              action={<WorkRefusalActions code={refused.error} projectId={evidence.projectId} />}
+            />
+          )}
+          {asked === null ? null : (
+            <Problem>
+              {asked.reopened > 0
+                ? "This simulation is queued for a whole-simulation regrade. New grades appear below as they finish."
+                : "This simulation was already queued for grading, so no duplicate work was added."}
+            </Problem>
+          )}
+          {role === null || mayRegrade ? null : (
+            <Problem>
+              {`Your ${String(role)} role can read every grade here but cannot request a regrade. Ask an organization admin to change your role.`}
+            </Problem>
+          )}
         </div>
-      ) : null}
-      {refused === null ? null : (
-        <Refused message={regradeRefusalMessage(refused)} />
-      )}
-      {asked === null ? null : (
-        <Problem>
-          {asked.reopened > 0
-            ? "This simulation is queued for a whole-simulation regrade. New grades appear below as they finish."
-            : "This simulation was already queued for grading, so no duplicate work was added."}
-        </Problem>
-      )}
-      {role === null || mayRegrade ? null : (
-        <Problem>
-          {`Your ${String(role)} role can read every grade here but cannot request a regrade. Ask an organization admin to change your role.`}
-        </Problem>
       )}
       {!confirming ? null : (
         <Dialog
           title={`Regrade “${evidence.test.name ?? `simulation ${String(evidence.position)}`}”?`}
-          onClose={() => setConfirming(false)}
+          onClose={request.close}
         >
           {(dismiss) => (
             <>
@@ -715,7 +863,11 @@ function SimulationReviewActions({
                 <Button type="button" variant="secondary" onClick={() => dismiss()}>
                   Not now
                 </Button>
-                <Button type="button" busy={working} onClick={() => void regrade()}>
+                <Button
+                  type="button"
+                  busy={working}
+                  onClick={() => void request.regrade()}
+                >
                   {working ? "Requesting…" : "Regrade simulation"}
                 </Button>
               </Actions>
@@ -723,9 +875,21 @@ function SimulationReviewActions({
           )}
         </Dialog>
       )}
-    </div>
+    </>
   );
 }
+
+/**
+ * The rail tab's own bottom line.
+ *
+ * The chosen tab keeps the shared two-pixel Ember edge. The other draws a
+ * single neutral pixel on the same baseline, which is what the row's own
+ * hairline used to do for both of them.
+ */
+const RAIL_TAB = cn(
+  "data-[state=inactive]:after:bg-border",
+  "group-data-[orientation=horizontal]/tabs:data-[state=inactive]:after:h-px",
+);
 
 function EvidenceDetail({
   evidence,
@@ -734,26 +898,35 @@ function EvidenceDetail({
   readonly evidence: SimulationEvidence;
   readonly onReload: () => void;
 }) {
+  const regradeRequest = useRegradeRequest({ evidence, onReload });
   return (
       <Tabs
         key={evidence.id}
         defaultValue="results"
         className="min-h-0 flex-1 gap-0 overflow-hidden"
       >
-        <TabsList variant="line" className="w-full border-b border-border px-5 max-[40rem]:px-4">
-          <TabsTrigger value="results">Results summary</TabsTrigger>
-          <TabsTrigger value="transcript">
-            {evidence.modality === "voice" ? "Transcript & audio" : "Transcript"}
-          </TabsTrigger>
-        </TabsList>
+        {/*
+          The row draws no hairline of its own. Each tab carries its own line
+          instead — two pixels of Ember under the chosen one, one neutral pixel
+          under the other — so the pair reads as a rail without a rule running
+          past both of them.
+        */}
+        <div className="flex min-w-0 flex-none items-center px-5 max-[40rem]:px-4">
+          <TabsList variant="line" className="min-w-0">
+            <TabsTrigger className={RAIL_TAB} value="results">
+              Results summary
+            </TabsTrigger>
+            <TabsTrigger className={RAIL_TAB} value="transcript">
+              {evidence.modality === "voice" ? "Transcript & audio" : "Transcript"}
+            </TabsTrigger>
+          </TabsList>
+        </div>
+        <RegradeNotices request={regradeRequest} />
         <TabsContent
           value="results"
           className="min-h-0 overflow-y-auto p-5 max-[40rem]:p-4"
         >
-          <div className="flex min-w-0 flex-col gap-4">
-            <SimulationReviewActions evidence={evidence} onReload={onReload} />
-            <ResultSummary evidence={evidence} />
-          </div>
+          <ResultSummary evidence={evidence} regrade={regradeRequest} />
         </TabsContent>
         <TabsContent
           value="transcript"
@@ -784,29 +957,10 @@ export function RunScenarioWorkbench({
   readonly onExecutionFailureVisible: (simulationId: string) => void;
   readonly more?: MoreSimulations;
 }) {
-  const [query, setQuery] = useState("");
-
-  const visibleRows = useMemo(() => {
-    const asked = query.trim().toLocaleLowerCase();
-    if (asked === "") return rows;
-    return rows.filter((row) =>
-      [row.testName ?? "", row.personaName]
-        .join(" ")
-        .toLocaleLowerCase()
-        .includes(asked),
-    );
-  }, [query, rows]);
-
   useEffect(() => {
-    setQuery("");
-  }, [projectId, runId]);
-
-  useEffect(() => {
-    if (selectedId !== null && visibleRows.some((row) => row.id === selectedId)) {
-      return;
-    }
-    onSelect(visibleRows[0]?.id ?? selectedId ?? rows[0]?.id ?? null);
-  }, [onSelect, rows, selectedId, visibleRows]);
+    if (selectedId !== null && rows.some((row) => row.id === selectedId)) return;
+    onSelect(rows[0]?.id ?? selectedId ?? null);
+  }, [onSelect, rows, selectedId]);
 
   const selected = rows.find((row) => row.id === selectedId) ?? rows[0] ?? null;
   const evidenceProject = selected === null ? null : projectId;
@@ -852,6 +1006,7 @@ export function RunScenarioWorkbench({
           ...selected,
           status: evidenceForDisplay.status,
           gradingState: evidenceForDisplay.gradingState,
+          gradeTally: evidenceGradeTally(evidenceForDisplay),
           combinedScore: evidenceForDisplay.combinedScore,
           startedAt: evidenceForDisplay.startedAt,
           endedAt: evidenceForDisplay.endedAt,
@@ -869,7 +1024,7 @@ export function RunScenarioWorkbench({
     const active = ["queued", "claimed", "running"].includes(evidence.status);
     const grading =
       evidence.gradingState === "pending" || evidence.gradingState === "running";
-    if (!active && !grading) return undefined;
+    if (!active && !grading && !waitingForSimulationTranscript(evidence)) return undefined;
     const timer = window.setTimeout(refreshEvidence, 2000);
     return () => window.clearTimeout(timer);
   }, [runId, selectedEvidence, refreshEvidence]);
@@ -895,37 +1050,29 @@ export function RunScenarioWorkbench({
       aria-label="Run simulations workbench"
     >
       <aside className="flex min-h-0 min-w-0 flex-col border-r border-border max-[900px]:border-r-0 max-[900px]:border-b" aria-label="Simulations in this run">
-        <header className="border-b border-border p-4">
-          <div className="mb-3 flex items-baseline justify-between gap-3">
-            <h2 className="m-0 text-base font-medium text-foreground">Simulations</h2>
-            <span className="text-sm tabular-nums text-muted-foreground">
-              {String(total)} {total === 1 ? "simulation" : "simulations"}
+        {/*
+          The head is the panel's own 56px bar, so its hairline meets the
+          selected simulation's heading across the fold. The count is a quiet
+          annotation on the word rather than a fact of its own at the far end.
+        */}
+        <header className="flex min-h-(--topbar-height) items-center border-b border-border px-4">
+          <h2 className="m-0 text-base font-medium text-foreground">
+            Simulations{" "}
+            <span className="text-sm font-normal tabular-nums text-faint">
+              <span aria-hidden="true">·</span> {String(total)}
             </span>
-          </div>
-          <SearchField
-            className="w-full [&_input]:w-full"
-            aria-label="Search simulations"
-            placeholder="Search simulations"
-            value={query}
-            onChange={(event) => setQuery(event.currentTarget.value)}
-          />
+          </h2>
         </header>
-        {visibleRows.length === 0 ? (
-          <p className="m-0 p-4 text-sm text-muted-foreground">
-            No simulation matches this search.
-          </p>
-        ) : (
-          <ol className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-0 max-[900px]:max-h-80 max-[900px]:flex-none">
-            {visibleRows.map((row) => (
-              <SimulationChoice
-                key={row.id}
-                row={row.id === displayedSelected?.id ? displayedSelected : row}
-                selected={row.id === selected?.id}
-                onSelect={() => onSelect(row.id)}
-              />
-            ))}
-          </ol>
-        )}
+        <ol className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-0 max-[900px]:max-h-80 max-[900px]:flex-none">
+          {rows.map((row) => (
+            <SimulationChoice
+              key={row.id}
+              row={row.id === displayedSelected?.id ? displayedSelected : row}
+              selected={row.id === selected?.id}
+              onSelect={() => onSelect(row.id)}
+            />
+          ))}
+        </ol>
         {more === undefined ? null : (
           <div className="flex items-center justify-between gap-3 border-t border-border p-3">
             <span className="text-sm text-muted-foreground">{more.note}</span>
@@ -945,10 +1092,15 @@ export function RunScenarioWorkbench({
       <div className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background max-[900px]:overflow-visible">
         {displayedSelected === null ? null : (
           <header
-            className="min-w-0 border-b border-border bg-surface p-5 max-[40rem]:p-4"
+            className="flex min-h-(--topbar-height) min-w-0 items-center border-b border-border bg-surface px-5 max-[40rem]:px-4"
             data-slot="selected-simulation-header"
           >
-            <h2 className="m-0 text-lg font-medium wrap-anywhere text-foreground">
+            {/*
+              The test's name and nothing else. The square and the state word
+              are on this simulation's row in the list, one column to the left,
+              and the row is where the reader chose it.
+            */}
+            <h2 className="m-0 min-w-0 text-base font-medium wrap-anywhere text-foreground">
               {displayedSelected.testName ?? "No stored test"}
             </h2>
           </header>
@@ -957,6 +1109,7 @@ export function RunScenarioWorkbench({
         {selectedFailureBeforeEvidence === null ? null : (
           <div className="px-5 pt-5 max-[40rem]:px-4 max-[40rem]:pt-4">
             <ExecutionFailureNotice
+              projectId={projectId}
               reason={selectedFailureBeforeEvidence.reason}
               executionFailure={selectedFailureBeforeEvidence.executionFailure}
             />

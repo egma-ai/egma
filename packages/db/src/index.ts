@@ -1,4 +1,13 @@
-export { connect, disconnect, ping, type ConnectOptions } from "./client.ts";
+export {
+  connect,
+  disconnect,
+  fencedDatabase,
+  ping,
+  type ConnectOptions,
+  type Database,
+  type Queryable,
+  type Transaction,
+} from "./client.ts";
 export {
   MIGRATIONS_DIRECTORY,
   readMigrations,
@@ -33,6 +42,102 @@ export {
   type SeededPersona,
 } from "./persona-library/seed.ts";
 export {
+  upsertRateCard,
+  type UpsertedRateCard,
+} from "./rate-card/seed.ts";
+/**
+ * What a month of platform usage is, and the seam billing plugs into.
+ *
+ * Neither reaches a store. The first is arithmetic over a simulation row's own
+ * frozen facts, and it crosses the boundary because the page that shows a
+ * month, the read that sums it and any adapter that limits it have to be
+ * counting the same thing. The second is two interfaces and the answers a
+ * deployment with no billing gives; the process that boots chooses the adapter
+ * once, from its settings, and every seam that asks reaches it from inside
+ * this package.
+ */
+export {
+  ALLOWANCE_KINDS,
+  ALLOWANCE_UNITS,
+  SHORTEST_BILLABLE_SECONDS,
+  allowanceKindOf,
+  allowanceKindsAmong,
+  allowancePeriodAt,
+  allowanceUsedBy,
+  billableSecondsOf,
+  minutesFromSeconds,
+  type AllowanceKind,
+  type AllowancePeriod,
+} from "./billing/allowance.ts";
+/**
+ * A month of usage as one query, and the period arithmetic under it.
+ *
+ * It reaches no store: predicates and aggregate expressions go out, and
+ * whoever runs them supplies the tenancy and the connection. It crosses the
+ * boundary for the reason the pure arithmetic beside it does — the page that
+ * shows a month and the adapter that limits one must be counting the same
+ * thing, and a second copy of the SQL is a second answer a customer would find
+ * before a test did.
+ */
+export {
+  allowanceTotalsSelection,
+  begunInThePeriod,
+  organizationInThePeriod,
+  periodAt,
+  periodUsageFrom,
+  voiceSecondsSelection,
+  type AllowanceTotals,
+  type PeriodUsage,
+  type VoiceSeconds,
+} from "./billing/period-usage.ts";
+export {
+  billingIsConfigured,
+  faultTolerantEntitlements,
+  discardingUsageSink,
+  installBillingPlugIn,
+  openBillingPlugIn,
+  openEntitlementSource,
+  type AllowanceRefusal,
+  type BillingPlugIn,
+  type BillingSettings,
+  type EntitlementSource,
+  type FundingDecision,
+  type FundingRequest,
+  type StartDecision,
+  type StartRequest,
+  type StoredUsageRecord,
+  type UsageSink,
+} from "./billing/ports.ts";
+export {
+  entitlementSourceContract,
+  usageSinkContract,
+  type AdapterFactory,
+  type PortCheck,
+  type PortWorld,
+} from "./billing/contract.ts";
+/**
+ * The rate card's vocabulary and its coverage rule. No store is reached: a
+ * catalog and a parsed file go in, and the usage types Egma measures, the unit
+ * each is counted in, and the models with no price come out. It crosses the
+ * boundary because the simulator's ingest, the grader and the tests all have
+ * to write the same words, and a second list of them is a second answer to
+ * what a token is.
+ */
+export {
+  USAGE_TYPES,
+  USAGE_UNITS,
+  billableUsageTypesOf,
+  catalogModelsMissingAPrice,
+  isUsageType,
+  readRateCard,
+  unitOfQuantities,
+  unitOfUsageType,
+  type RateCardEntry,
+  type RateCardPrice,
+  type UsageType,
+  type UsageUnit,
+} from "./models/rate-card.ts";
+export {
   MODEL_ADAPTERS,
   MODEL_JOBS,
   MODEL_PROVIDERS,
@@ -54,6 +159,7 @@ export {
   SPEED_RANGE,
   graderModelFromRow,
   personaModelsFromRow,
+  providersNeededBy,
   sameGraderModel,
   samePersonaModels,
   validGraderModel,
@@ -95,16 +201,7 @@ export {
   validateProjectGraderScope,
 } from "./grader-library/policy.ts";
 
-/**
- * Whether a conversation over this connection kind could ever produce the
- * agent's own account of itself (ADR-0024 §2).
- *
- * A pure question about a word, reaching nothing. It is exported because the
- * read that tells a customer their record is missing the agent's POV has to ask
- * the same list grading waits on: two lists would one day disagree about which
- * conversations were ever owed a second account, and the record would say one
- * thing while the queue did another.
- */
+/** Shared connection capability check for agent POV ingestion and grading waits. */
 export { laneProducesAnAgentPov } from "./schema/agents.ts";
 
 /**
@@ -128,19 +225,8 @@ export {
 } from "./grading/results.ts";
 
 /**
- * The two catalogs a form is drawn from, and the readers that hold a key to
- * them.
- *
- * They are here beside other shared product catalogs because they reach
- * no store, take no context, and have no tenancy to stamp. The connection
- * registry decides what a connection type is made of in code rather than a
- * table, so stored rows cannot name a kind no adapter can run.
- *
- * Exported all the same, and from this entry point, because a browser form has
- * to be drawn from them. **What crosses is labels, field shapes, the credential
- * rule and the adapter facts** — never a gate, a hint function, a refusal
- * sentence or a credential. A second handwritten copy of any of it in a web
- * application would be a second opinion able to disagree with the gate.
+ * Pure connection registry lookups and browser-safe catalog projections.
+ * Send connectionOptionMetadata to clients, not raw access variant descriptors.
  */
 export {
   connectionTypeReadsPlatformAtRunStart,
@@ -157,38 +243,14 @@ export {
   type CredentialRuleName,
   type AccessVariantMetadata,
 } from "./access/connection-registry.ts";
-/**
- * The two pure decisions about one span's evidence, taken before it is stored
- * and again by whoever stores it.
- *
- * Here rather than on the data-access surface, and for that surface's own
- * reason: neither reaches a store. A record goes in, a fingerprint or a refusal
- * comes out, and there is no tenancy to stamp because there is nothing to stamp
- * it on. Exported all the same, and from the same entry point as the folds,
- * because each has to be worked out in exactly one place. The acceptance path
- * refuses an oversize record before it is staged and fingerprints what it
- * stages; this package fingerprints the row and compares it against what is
- * already stored. Two implementations of either is one of them deciding that a
- * conflict is a replay, or that a cut value is a whole one.
- */
+/** Shared pure evidence limits, validation, and hashing for ingestion and storage. */
 export {
   LARGEST_BOUNDED_RECORD_BYTES,
   refuseOversizeRecord,
   refuseUnstorableInstant,
   spanContentHash,
 } from "./access/spans.ts";
-/**
- * What a test's own world may cost the wire that carries it, and the one
- * serialization the dispatch is measured on.
- *
- * Here beside the span limits above for the span limits' own reason: none of
- * them reaches a store, and each has to be said in a refusal by whoever
- * enforces it. **The same rules are applied twice by design** — once at
- * authoring time, where the person who can fix a refusal is reading, and once
- * where the value is actually carried — so a second copy of a number, or a
- * second serializer with different spacing, would be two caps measuring two
- * different things and calling both the limit.
- */
+/** Shared mock reply limits and dispatch serialization for authoring and execution. */
 export {
   LARGEST_JOB_DISPATCH_METADATA_BYTES,
   LARGEST_MOCK_TOOL_ANSWER_BYTES,
@@ -206,8 +268,14 @@ export {
   personaParameterContract,
   personaParametersOfModels,
   personaModelsOfParameters,
+  speechProvidersOfParameters,
   validatePersonaParameterContract,
   validatePersonaParameterValues,
   type PersonaParameterValues,
 } from "./persona-library/parameters.ts";
 export type { ProjectPersonaSettings } from "./access/project-personas.ts";
+
+export { readPlatformUsageTotal } from "./billing/usage.ts";
+export { providerUsageSpan } from "./models/provider-usage.ts";
+
+export {listCustomerFundedProviders} from './billing/provider-keys.ts';

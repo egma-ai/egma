@@ -1,63 +1,56 @@
+import { loadIngestionSettings, type IngestionSettings } from "@egma/ingestion";
 import { hostname } from "node:os";
 
 /**
- * What the grader service is configured with, and where a bad value is caught.
- *
- * Everything has a working default except where the two stores are, and those
- * are required on the same terms the API requires them: a grader that started
- * without somewhere to read conversations from and somewhere to write grades
- * to would look healthy and grade nothing. A misconfigured deployment is loud at
- * boot rather than silent for a week.
+ * Validate grader configuration at startup. Store addresses are required;
+ * other settings have defaults.
  */
 export type Config = {
   readonly databaseUrl: string;
+  readonly encryptionKey?: string | undefined;
+  readonly ingestion: IngestionSettings;
   readonly clickhouseUrl: string;
   /** This copy's own name for itself, in claims and in the log. */
   readonly claimant: string;
   /** How many conversations this copy grades at once. */
   readonly capacity: number;
+  /** Optional platform-wide limit across every grader copy. */
+  readonly concurrencyCap: number | undefined;
   /** How often it says it is still alive while it holds one. */
   readonly heartbeatSeconds: number;
   /** How long its claim survives its silence. */
   readonly leaseSeconds: number;
   /** The backstop, for a notification nothing was listening for. */
   readonly sweepSeconds: number;
+  /**
+   * `EGMA_STRIPE_SECRET_KEY`, as the deployment named it, or `undefined`.
+   *
+   * **A setting and never a mode**, read here beside every other deployment
+   * value rather than off the process where it is used. Its presence selects
+   * the cloud billing adapter, which this service asks at its own claim: a
+   * grading job's only spend is the judge's model usage, so the claim asks
+   * whether Egma's key may fund it before it hands a job out. Empty is every
+   * deployment that charges nobody, and nothing is imported at all.
+   */
+  readonly stripeSecretKey: string | undefined;
   readonly logLevel: LogLevel;
 };
 
 export const LOG_LEVELS = ["DEBUG", "INFO", "WARN", "ERROR"] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
-/**
- * How many conversations one copy grades at once.
- *
- * Four, matching the simulator's, and for the same reason: a copy claims only
- * what it has room for, so a burst of finished simulations degrades to a queue
- * rather than to overload. Raise it, or start a second copy, and they distribute
- * between themselves with nothing in front of them.
- */
+/** Maximum grading jobs claimed concurrently by this service instance. */
 const DEFAULT_CAPACITY = 4;
 
-/**
- * How often a copy holding work says so. Well inside the lease, so that an
- * ordinary pause — a slow judge model, a long transcript — is never mistaken for
- * a copy that died.
- */
+/** Heartbeat interval must remain below the job lease to retain long-running work. */
 const DEFAULT_HEARTBEAT_SECONDS = 15;
 
 /** How long a claim survives silence before another copy may take the job. */
 const DEFAULT_LEASE_SECONDS = 120;
 
 /**
- * How often a copy asks anyway.
- *
- * **This is not how work arrives.** Work arrives on a notification raised by the
- * transaction that finished the conversation, which is why nothing here promises
- * a latency and why no interval is on the path a grade travels. This is the
- * backstop underneath it: a notification raised while every copy was restarting
- * reaches nobody, and the queue would otherwise wait for the next conversation
- * to wake somebody up. Half a minute, because it costs one indexed query and
- * catches the case that would otherwise look like grading having stopped.
+ * Poll as a fallback for notifications missed during restart or disconnect.
+ * Normal grading work arrives through Postgres notifications.
  */
 const DEFAULT_SWEEP_SECONDS = 30;
 
@@ -77,7 +70,22 @@ function positiveWholeNumber(name: string, fallback: number): number {
 
   const value = Number(written);
   if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`${name} is a positive whole number, and "${written}" is not`);
+    throw new Error(
+      `${name} is a positive whole number, and "${written}" is not`,
+    );
+  }
+  return value;
+}
+
+function optionalPositiveWholeNumber(name: string): number | undefined {
+  const written = process.env[name]?.trim();
+  if (written === undefined || written === "") return undefined;
+
+  const value = Number(written);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(
+      `${name} is a positive whole number, and "${written}" is not`,
+    );
   }
   return value;
 }
@@ -95,13 +103,7 @@ function logLevel(): LogLevel {
   return found;
 }
 
-/**
- * A name for this copy, when the deployment did not give it one.
- *
- * The host and the process, which is what tells two copies apart on one machine
- * and two containers apart in one compose project. Operational only: it is never
- * an identity in egma's tables, and nothing is ever resolved from it.
- */
+/** Default worker name derived from hostname and process ID; operational only. */
 function defaultClaimant(): string {
   return `grader-${hostname()}-${process.pid}`;
 }
@@ -111,9 +113,23 @@ export function loadConfig(): Config {
 
   const config: Config = {
     databaseUrl: required("DATABASE_URL"),
+    encryptionKey: process.env["EGMA_ENCRYPTION_KEY"]?.trim() || undefined,
+    ingestion: loadIngestionSettings(
+      {
+        ...process.env,
+        EGMA_INGESTION_LOG_DIR:
+          process.env["EGMA_GRADER_INGESTION_LOG_DIR"]?.trim() ||
+          "/var/lib/egma/grader-ingestion",
+      },
+      { role: "ingest" },
+    ),
     clickhouseUrl: required("CLICKHOUSE_URL"),
-    claimant: claimant === undefined || claimant === "" ? defaultClaimant() : claimant,
+    claimant:
+      claimant === undefined || claimant === "" ? defaultClaimant() : claimant,
     capacity: positiveWholeNumber("EGMA_GRADER_CAPACITY", DEFAULT_CAPACITY),
+    concurrencyCap: optionalPositiveWholeNumber(
+      "EGMA_GRADING_CONCURRENCY_CAP",
+    ),
     heartbeatSeconds: positiveWholeNumber(
       "EGMA_GRADER_HEARTBEAT_SECONDS",
       DEFAULT_HEARTBEAT_SECONDS,
@@ -126,12 +142,11 @@ export function loadConfig(): Config {
       "EGMA_GRADER_SWEEP_SECONDS",
       DEFAULT_SWEEP_SECONDS,
     ),
+    stripeSecretKey: process.env["EGMA_STRIPE_SECRET_KEY"]?.trim() || undefined,
     logLevel: logLevel(),
   };
 
-  // A heartbeat slower than the lease is a copy that loses every job it holds
-  // while it is working on it — the queue would hand the same conversation
-  // round the fleet forever, and every copy would look fine.
+  // Reject heartbeat intervals that would let active job leases expire.
   if (config.heartbeatSeconds >= config.leaseSeconds) {
     throw new Error(
       "EGMA_GRADER_HEARTBEAT_SECONDS must be well under EGMA_GRADER_LEASE_SECONDS, or a copy loses the job it is working on",

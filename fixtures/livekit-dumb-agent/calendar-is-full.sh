@@ -1,27 +1,11 @@
 #!/usr/bin/env bash
+# Run the calendar-is-full live fixture with a worker and a simulation.
+# It uses a mock tool for check_availability and prints the test evidence.
 #
-# The calendar-is-full run, in one command.
-#
-#     ./fixtures/livekit-dumb-agent/calendar-is-full.sh
-#
-# It starts this agent as a real LiveKit worker, conducts one real
-# simulation against it in a real room with `check_availability` answered
-# by a mock tool, and hands back the transcript and the record showing
-# which mock tool answered, with what, and how long it took — and the
-# test's own job dispatch metadata read back out of the worker's log.
-#
-# Everything it needs is in one environment file — by default
-# ~/.egma-livekit.env, the same one the README's two-step recipe sources.
-# EGMA_LIVEKIT_ENV names a different one, or several separated by colons
-# for a machine that keeps its LiveKit project and its speech providers in
-# different files. They are read left to right, so a later one wins.
-#
-# Nothing here prints a credential. The worker writes its own log to a
-# file whose path is named — only the path is printed, never the contents
-# — and the file is left behind on purpose, so a run that went wrong can
-# be read afterwards. Before it finishes, this scans that log for every
-# credential it loaded and says so if it finds one; the simulation's own
-# record, logs and write-ahead log are scanned by the test itself.
+# Load ~/.egma-livekit.env by default, or the colon-separated files in
+# EGMA_LIVEKIT_ENV, with later values taking precedence. Retain the worker log
+# for diagnosis and scan it for loaded credentials without printing its contents.
+# The test separately checks simulation evidence and job dispatch metadata.
 
 set -euo pipefail
 
@@ -87,22 +71,9 @@ until grep -q "registered worker" "$worker_log" 2>/dev/null; do
 done
 echo "the worker is registered; conducting the simulation"
 
-# -s so the transcript and the record reach the terminal — that output is
-# the whole point of this command, watching the promise work rather than
-# reading a line that says a test passed. -rs so that a run which skips
-# says which value it was short of, rather than passing quietly.
-#
-# The status is kept rather than acted on, because the scan below has to
-# run on the run that went *wrong*: a refusal quoting somebody else's
-# words is the likeliest way a credential ever reaches a log, and that is
-# a thing only a failed run produces.
-#
-# The worker's log path goes to the test, because half of what this run
-# proves happens inside the *customer's* process: the test writes its own
-# job dispatch metadata, egma puts it on the dispatch, and the only place
-# the far side's reading of it is visible is the worker's own output. A
-# test handed the path reads the line back and asserts it; one run by hand
-# without the path says where to look instead.
+# Use -s to show test evidence and -rs to explain skips. Preserve failure
+# status while still scanning the worker log. Pass its path so the test can
+# check metadata received by the agent process.
 conducted=0
 cd "$root/apps/simulator"
 EGMA_DUMB_AGENT_LOG="$worker_log" \

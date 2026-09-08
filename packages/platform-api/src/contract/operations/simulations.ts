@@ -16,7 +16,7 @@ import {
   gradingStateSchema,
   normalizedScoreSchema,
 } from "./grades.ts";
-import { simulationStatusSchema } from "./runs.ts";
+import { simulationStatusSchema, workBlockSchema } from "./runs.ts";
 
 const stringSchema = { type: "string" } as const;
 const integerSchema = { type: "integer" } as const;
@@ -102,10 +102,8 @@ const simulationSchema = {
     runName: nullable(stringSchema),
     position: integerSchema,
     status: simulationStatusSchema,
-    gradingState: {
-      ...nullable(gradingStateSchema),
-      description: "Grading progress, separate from simulation execution status. Read grades for each grader's result.",
-    },
+    workBlock: nullable(workBlockSchema),
+    gradingState: nullable(gradingStateSchema),
     ...gradeProjectionProperties,
     reason: nullable(stringSchema),
     executionFailure: nullable(stringSchema),
@@ -115,26 +113,10 @@ const simulationSchema = {
     endedAt: nullable(dateTimeSchema),
     providerReference: nullable(stringSchema),
     hasRecording: booleanSchema,
-    /**
-     * That this conversation was graded without the agent's own POV of it.
-     *
-     * A simulation stores two accounts of one conversation and grading waits
-     * for the agent's — the SDK's export from inside the room, or the pull from
-     * the platform — for thirty seconds and no longer (ADR-0024 §6). True says
-     * the wait ran out: what is stored is egma's account, and the agent's is
-     * missing or partial. **A reader that shows the agent's POV has to ask**,
-     * because "the rows filed as the agent's" is a fragment here rather than
-     * the conversation, and a fragment shown as the whole is worse than a gap
-     * that says it is one. Regrade picks up a late arrival.
-     *
-     * False on every conversation whose agent POV landed, and on every lane
-     * that files none — a phone number reaches nothing of egma's, so nothing
-     * was ever waited for.
-     */
-    agentPovIncomplete: {
-      ...booleanSchema,
-      description: "True when the bounded wait ended and agent evidence is still missing. False does not guarantee a complete export or that existing grades used late evidence. Regrade after late evidence arrives.",
-    },
+    /** The platform's final agent session or call record is present. */
+    agentPovComplete: booleanSchema,
+    /** Provider evidence is explicitly degraded, or absent/partial after the bounded wait. */
+    agentPovIncomplete: booleanSchema,
     measures: {
       type: "object",
       properties: {
@@ -257,12 +239,14 @@ const simulationSchema = {
     ...gradeProjectionRequired,
     "reason",
     "executionFailure",
+    "workBlock",
     "modality",
     "createdAt",
     "startedAt",
     "endedAt",
     "providerReference",
     "hasRecording",
+    "agentPovComplete",
     "agentPovIncomplete",
     "measures",
     "metrics",

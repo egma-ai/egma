@@ -5,40 +5,10 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * What this run's connection will and will not do with the tests' own data.
- *
- * **A test carries mock tools and env now, and a connection either uses them or
- * cannot.** A person about to start a run has to know which, because the
- * failure this exists to stop is somebody believing a call was mocked when it
- * reached their real backend. One fact is not about the test's data at all: a
- * LiveKit run needs the Egma SDK in the customer's own agent or the simulation
- * fails, so that requirement is said on every LiveKit run. The support table
- * below is the whole of the rule.
- *
- * **It is one quiet box, under the Connection field of the run-start sheet**
- * (founder, 2026-09-04): the house hairline, the surface fill, no corner, no
- * icon and no title. Muted text at the table's 14px, one short line per fact,
- * one or two of them in the ordinary case. The box's own edge carries the
- * warning colour where a connection cannot use what a test holds, so a "cannot
- * use" case is still read before an informative one without a coloured bar
- * beside every line. The words themselves say "cannot", so the colour stays
- * supporting information rather than the whole of the news.
- *
- * **The note is said once, where the choice is made.** It used to be drawn on
- * the run page as well, from the versions that run's simulations pinned. That
- * reading cost two walks of the run — every page of simulations, then every
- * version they named — to repeat a sentence the person had already read and
- * acted on, at the one moment they can no longer act on it. (Founder,
- * 2026-09-04.)
- *
- * **A fact is a title and the lines that explain it, and the ceiling drops a
- * fact whole.** Cutting the list wherever the last line fell left a title
- * standing with its explanation gone — a note that names a rule and never says
- * what the rule is.
- *
- * **Nothing here is stored.** The lines are computed from the connection and
- * the suite's tests every time they are drawn. Two runs of one suite can
- * therefore say different things, which is the truth.
+ * Describe connection support for the selected tests' mock tools and env at
+ * run setup. Include LiveKit SDK requirements and unsupported capabilities.
+ * Compute notes from current selections; if limiting output, omit whole facts
+ * rather than separating a title from its explanation.
  */
 
 /** How loudly one line speaks, and the only three volumes there are. */
@@ -315,6 +285,44 @@ export function RunNote({
   /* The lines are already loudest first, so the first one names the box. */
   const accent = lines[0]?.accent ?? "quiet";
   return (
+    <NoteBox
+      accent={accent}
+      slot="run-note"
+      {...(className === undefined ? {} : { className })}
+    >
+      {lines.map((line, at) => (
+        <NoteLine key={`run-note-${String(at)}`}>{line.text}</NoteLine>
+      ))}
+    </NoteBox>
+  );
+}
+
+/**
+ * The box a quiet fact about a run is drawn in, and the only one there is.
+ *
+ * The house hairline, the surface fill, no corner, no icon and no title, with
+ * the edge carrying the warning colour where a fact is one a person has to
+ * read before they act (founder, 2026-09-04). It is exported because a second
+ * surface says a second kind of fact in it — why a run's queued work is
+ * waiting — and two copies of a box is how a product ends up with two box
+ * looks: the next change to this one reaches only one of them.
+ *
+ * The words always say the news themselves, so the colour stays supporting
+ * information, as `DESIGN.md` requires.
+ */
+export function NoteBox({
+  accent,
+  slot,
+  className,
+  children,
+}: {
+  readonly accent: RunNoteAccent;
+  /** What this box is, for the stylesheet and for a test. */
+  readonly slot: string;
+  readonly className?: string;
+  readonly children: ReactNode;
+}) {
+  return (
     <div
       className={cn(
         "flex flex-col gap-1 border bg-surface p-3",
@@ -322,17 +330,17 @@ export function RunNote({
         className,
       )}
       data-accent={accent}
-      data-slot="run-note"
+      data-slot={slot}
       role="note"
     >
-      {lines.map((line, at) => (
-        <p
-          className="m-0 text-sm leading-(--line-normal) text-faint"
-          key={`run-note-${String(at)}`}
-        >
-          {line.text}
-        </p>
-      ))}
+      {children}
     </div>
+  );
+}
+
+/** One line inside a note box. Quiet ink at the product's own reading size. */
+export function NoteLine({ children }: { readonly children: ReactNode }) {
+  return (
+    <p className="m-0 text-sm leading-(--line-normal) text-faint">{children}</p>
   );
 }

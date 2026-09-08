@@ -1,5 +1,8 @@
 packages:
   - apps/*
+  # The commercially licensed package. One directory, not a glob: it is one
+  # package and `ee/LICENSE` governs the whole of it.
+  - ee
   - fixtures/*
   - packages/*
   - sdks/*

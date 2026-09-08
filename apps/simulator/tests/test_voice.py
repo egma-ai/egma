@@ -1,16 +1,6 @@
-"""The voice conductor, in process: a whole simulation, fast and exact.
-
-One real Pipecat pipeline against the loopback counterpart: the persona
-brain writes the words, the speaking leg turns them into PCM, the line
-carries them a slice at a time, the voice activity detector hears the far
-end start and stop, the turn model says when it has finished, and the
-transcriber reads it back. Nothing here reaches a model, a provider, or a
-network.
-
-Every number asserted below is measured from the audio that flowed —
-positions on the conversation's own sample timeline — rather than from a
-packet-arrival clock. Transcript boundaries may differ by one media frame,
-and the acceptance proves that this offset does not grow.
+"""Exercise a real Pipecat pipeline with scripted speech and loopback media.
+No external model, provider, or network is needed. Read expected timing from
+audio samples; transcript offsets may differ by one frame but must not accumulate.
 """
 
 from __future__ import annotations
@@ -417,22 +407,9 @@ async def test_the_recording_holds_each_speaker_on_their_own_channel(
 async def test_every_span_points_at_the_audio_it_names(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The two channels are one clock, and the spans are on it.
-
-    Both directions carry the same number of samples, quiet included, so
-    the recording is the conversation's own timeline. Every stretch of
-    speech a listener can find on it — either channel — is one turn's
-    span on that shared timeline. Its transcript boundary stays within one
-    media frame, and the offset at the final spoken turn does not grow from
-    the first. The check uses the audio, not a second transcript clock.
-
-    Two things that go wrong on a real call are done here on purpose. The
-    line stalls for a second between two of the agent's frames, so the
-    audio after it arrives a second later than the audio before it — a
-    gap, which the recording must hold as a second of quiet rather than
-    close up. And the recorder itself is held back while one early frame
-    waits, because a busy machine is not a pause in the conversation and
-    must not move anything on the file.
+    """Align both recording channels and turn spans to the audio timeline within one
+    frame.
+    Preserve a real one-second transport gap, but exclude delay inside the recorder.
     """
     opened_unix_nano = 1_800_000_000_000_000_000
     monkeypatch.setattr(conductor_module, "_now", lambda: opened_unix_nano)
@@ -548,16 +525,8 @@ async def test_every_span_points_at_the_audio_it_names(
 async def test_the_recording_is_stamped_from_its_own_first_sample(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The filed zero is the first sample, not the moment the line opened.
-
-    Every transcript position is an offset into the recording, so the
-    instant that zero stands for is what makes a seek land on the words a
-    turn names. The line opens first and the first frame arrives after
-    it, and the two are not the same moment.
-
-    The clock moves here on purpose. Pinning it, as the alignment test
-    above does to read positions off the audio, hides a zero that was
-    read at the wrong moment or thrown away before it was filed.
+    """Recording zero must be the first sample's time, not connection-open time.
+    Advance the clock to expose an incorrect origin that a fixed clock would hide.
     """
     readings: list[int] = []
     reading = 1_800_000_000_000_000_000
@@ -1156,22 +1125,9 @@ async def test_genuine_overlap_stays_in_the_transcript_and_recording(
 async def test_the_speech_legs_need_no_corpus_and_no_download(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The hermetic promise, held where it could quietly break.
-
-    The library under the speaking leg splits sentences with a tokenizer
-    corpus it fetches on demand, which in a suite that must need no
-    network is a bug waiting for the first machine with a cold cache. The
-    simulator never splits sentences, so the corpus is never opened — and
-    the way to keep that true is to make any attempt raise here.
-
-    What the assertions below watch is the recording, not an exception.
-    A leg that reaches for the corpus and cannot have it does not raise
-    out to here — the frame that was being processed is abandoned and the
-    error is logged — so the symptom is a persona turn that the transcript
-    shows and the audio does not. The turn also carries several sentences
-    on purpose: a single sentence never reaches the tokenizer whatever the
-    leg is built on, so a one-sentence turn would pass while the promise
-    was broken.
+    """Scripted TTS must preserve multi-sentence audio without an NLTK corpus.
+    Force corpus access to fail and inspect the recording, because frame-processing
+    errors can drop audio without propagating to the test.
     """
     import nltk
     import pipecat.utils.string
@@ -1511,26 +1467,9 @@ def test_assembling_a_spec_with_no_plug_refuses_before_anything_happens(
 async def test_a_wall_clock_gap_inside_one_utterance_loses_no_audio(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """A slow machine is not a silence, and the recorder must not treat it
-    as one.
-
-    Pipecat's recorder resamples both directions, and a resampler holds
-    part of a frame back to give out with the next one. Every sample it
-    holds is audio the recording will carry — as long as it is still
-    there.
-
-    Pipecat clears that held state after 0.2 seconds of **wall-clock**
-    quiet, which is the right default for audio that really did pause. It
-    is the wrong one here, and the trigger is not the conversation: a
-    loaded machine can be descheduled for longer than that between two
-    frames of one continuous utterance. Nothing paused; only the CPU did.
-    The clear then throws those samples away, and the recording loses the
-    join between two frames of speech a customer plays back — quietly, on
-    either channel, on any machine, at any load.
-
-    So this feeds one unbroken utterance across a clock jump far past that
-    window and counts the samples out the other side. Sixteen kilohertz in
-    and twenty-four out is the real ratio: three samples for every two.
+    """A scheduling gap over 0.2 seconds must not clear buffered resampler samples.
+    Feed continuous 16 kHz audio across the clock jump and verify the 24 kHz sample
+    count.
     """
     from pipecat.audio.resamplers import soxr_stream_resampler
 
@@ -1565,6 +1504,111 @@ async def test_a_wall_clock_gap_inside_one_utterance_loses_no_audio(
         held = float(resampler._soxr_stream.delay())
 
         fed = 2 * 320
-        assert emitted + held == pytest.approx(
-            fed * 24_000 / 16_000, abs=1.0
-        ), channel
+        assert emitted + held == pytest.approx(fed * 24_000 / 16_000, abs=1.0), channel
+
+
+@pytest.mark.parametrize(
+    "status,customer,typed",
+    [
+        (401, True, True),
+        (403, True, True),
+        (429, True, False),
+        (503, True, False),
+        (401, False, False),
+    ],
+)
+async def test_customer_speech_auth_failure_keeps_provider_identity(
+    tmp_path, monkeypatch, status, customer, typed
+):
+    import httpx
+
+    from egma_simulator.provider_keys import ProviderKeyUnavailable
+
+    class RefusingMouth(FrameProcessor):
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if isinstance(frame, TextFrame):
+                try:
+                    httpx.Response(
+                        status, request=httpx.Request("POST", "https://provider.test/")
+                    ).raise_for_status()
+                except httpx.HTTPStatusError as fault:
+                    await self.push_error("provider refused", exception=fault)
+                return
+            await self.push_frame(frame, direction)
+
+    def refusing_legs(providers, *, voice):
+        return SpeechLegs(stt=ScriptedSTT(), tts=RefusingMouth(), voice=voice)
+
+    monkeypatch.setattr(conductor_module, "build_legs", refusing_legs)
+    speech = SpeechProviders(tts_provider="cartesia", tts_customer_funded=customer)
+    with pytest.raises(ProviderKeyUnavailable if typed else SpeechFault) as caught:
+        await voice_simulation(
+            tmp_path, speech=speech, scenario="One point.", replies=["Noted."]
+        )
+    if typed:
+        assert caught.value.provider == "cartesia"
+        assert failed_ending(caught.value) == "provider_key_unavailable"
+
+
+@pytest.mark.timeout(12)
+@pytest.mark.parametrize("status", [401, 403])
+async def test_openai_tts_auth_failure_survives_the_real_pipeline(
+    tmp_path, monkeypatch, status
+):
+    from aiohttp import web
+    from conftest import direct_models
+
+    from egma_simulator.provider_keys import ProviderKeyUnavailable
+
+    requests = []
+
+    async def reject(request):
+        requests.append((request.headers["Authorization"], await request.json()))
+        return web.json_response(
+            {
+                "error": {
+                    "message": "This key cannot synthesize speech.",
+                    "type": "invalid_request_error",
+                    "code": "invalid_api_key",
+                }
+            },
+            status=status,
+        )
+
+    provider = web.Application()
+    provider.router.add_post("/v1/audio/speech", reject)
+    runner = web.AppRunner(provider)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = runner.addresses[0][1]
+    monkeypatch.setenv("OPENAI_BASE_URL", f"http://127.0.0.1:{port}/v1")
+    speech = SpeechProviders(
+        tts="openai",
+        tts_key="test-customer-speech-key",
+        tts_model="tts-1",
+        tts_provider="openai",
+        tts_customer_funded=True,
+    )
+    models = direct_models(
+        modality="voice", voice={"provider": "openai", "voiceId": "alloy", "speed": 1}
+    )
+    try:
+        with pytest.raises(ProviderKeyUnavailable) as caught:
+            await voice_simulation(
+                tmp_path,
+                speech=speech,
+                models=models,
+                scenario="One point.",
+                replies=["Noted."],
+            )
+        assert caught.value.provider == "openai"
+        assert failed_ending(caught.value) == "provider_key_unavailable"
+        assert "test-customer-speech-key" not in str(caught.value)
+        assert len(requests) == 1
+        assert requests[0][0] == "Bearer test-customer-speech-key"
+        assert requests[0][1]["model"] == "tts-1"
+        assert requests[0][1]["voice"] == "alloy"
+    finally:
+        await runner.cleanup()

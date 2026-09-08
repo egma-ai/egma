@@ -23,18 +23,20 @@ import {
   closeAcceptance,
   openAcceptance,
   stagedLoad,
-} from "./ingestion/accept.ts";
+} from "@egma/ingestion";
 import { retainedDefects } from "./ingestion/defects.ts";
 import { startDrainer, type Drainer } from "./ingestion/drainer.ts";
 import {
   pendingObjectStore,
   type PendingObjectStore,
-} from "./ingestion/object-store.ts";
+} from "@egma/ingestion";
+import type { BillingRoutes, BillingWebhookRoutes } from "./billing.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
+import { usageRoutes } from "./routes/usage.ts";
 import { mockEndpointRoutes } from "./routes/mock-endpoint.ts";
 import { passwordResetRoutes } from "./routes/password-reset.ts";
 import { platformApiRoutes } from "./routes/platform-api.ts";
@@ -42,6 +44,7 @@ import { reportRoutes } from "./routes/reports.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
 import { traceRoutes } from "./routes/traces.ts";
+import { credentialed, requesterOf } from "./http/credentialed.ts";
 import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
 import { webHandler } from "./http/web-handler.ts";
 import {
@@ -75,15 +78,8 @@ export type ServerOptions = {
    */
   readonly rateLimit?: RateLimit;
   /**
-   * Where log lines are written. Defaults to the process's own output, which
-   * is what a container reads.
-   *
-   * A test hands in a destination of its own, because one of the promises this
-   * door makes is about what is *not* written: a customer's provider secret
-   * arrives here and must appear in no line egma keeps. That promise is only
-   * worth making while something can read the log back and check it, so the
-   * log is a seam rather than a side effect. A destination handed in is asked
-   * for lines, whatever `LOG_LEVEL` a test run was started with.
+   * Optional log destination for tests that inspect emitted lines, including
+   * secret-redaction checks. Supplying it enables logging regardless of LOG_LEVEL.
    */
   readonly logTo?: { write(line: string): void } | undefined;
   /**
@@ -112,17 +108,12 @@ export type ServerOptions = {
   /** Test seam for Retell account reads. Production uses the global fetch. */
   readonly retellFetch?: RetellFetch | undefined;
   /**
-   * Whether this process runs the standing drainer, over and above what its
-   * role already says. Defaults to whatever the role says.
-   *
-   * The role is the deployment's answer — `all` and `drain` drain, `ingest`
-   * does not — and this is the seam a proof uses to hold a sealed segment
-   * still and look inside it: in a running deployment that state lasts about
-   * as long as one upload, and a proof that raced it would be a proof about
-   * timing. It can only take draining away, never give it to a role that does
-   * not have it.
+   * Tests can disable the standing drainer to inspect pending segments.
+   * This option cannot enable draining for a role that does not support it.
    */
   readonly drainsPendingEvidence?: boolean;
+  /** Test seam for the API's 120-second evidence-upload shutdown window. */
+  readonly ingestionShutdownTimeoutMilliseconds?: number;
   /**
    * Whether the trace store's schema has finished being applied.
    *
@@ -132,6 +123,28 @@ export type ServerOptions = {
    * for a suite that migrated its own store before building the API.
    */
   readonly traceStoreReady?: (() => boolean) | undefined;
+  /** Hosted-only wake-up shared by run creation and the standing sweep. */
+  readonly wakeVoiceFleet?: (() => void) | undefined;
+  /**
+   * The Billing section's reads, on a deployment whose settings selected the
+   * cloud adapter. Absent on every other deployment, and absent is the
+   * ordinary case: a self-hoster has no plan and no balance, so this address
+   * answers 404, which is the truth about their Egma rather than an empty
+   * panel pretending otherwise.
+   *
+   * They arrive as a plugin rather than as a set of reads because the routes
+   * are the commercially licensed package's, and the only thing they need from
+   * the API is the context a request already resolved.
+   */
+  readonly billingRoutes?: BillingRoutes | undefined;
+  /**
+   * Stripe's own door, on a deployment that named a webhook signing secret.
+   *
+   * Its own option because it is registered in its own scope: no session
+   * cookie, no API key, no per-organization budget, and the raw body its
+   * signature is over. See the registration below.
+   */
+  readonly billingWebhookRoutes?: BillingWebhookRoutes | undefined;
 };
 
 export type Api = {
@@ -243,24 +256,9 @@ export function buildApi(options: ServerOptions): Api {
   // The container health check polls this every few seconds; logging each poll
   // would bury everything else in `docker compose logs`.
   /**
-   * `/health` answers one question: **can this process still accept evidence
-   * and keep the promise it makes when it does?**
-   *
-   * That promise is object-store durability, so the status code follows the
-   * three things acceptance actually needs — Postgres for authentication and
-   * control state, a writable local log below its refusal bound, and a
-   * reachable ingestion bucket. Nothing else may flip it.
-   *
-   * **ClickHouse deliberately cannot.** It used to: a slow trace store made
-   * this endpoint answer `503`, which took the container out of its own health
-   * check and, on the hosted platform, took the shared address down with it —
-   * while the write path was perfectly able to accept evidence and drain it
-   * later. Read health and drain health are real facts and they are reported
-   * here, but they are components rather than verdicts. A query outage is a
-   * query outage; it is not egma being unable to receive a conversation.
-   *
-   * The path and the existing body keys stay exactly as they were, because
-   * five `depends_on` edges and one hosted tunnel already read them.
+   * Acceptance health depends on Postgres, local-log capacity, and ingestion
+   * bucket reachability. Report ClickHouse and drainer health separately so a
+   * query outage does not disable evidence acceptance.
    */
   const reachability = async (
     store: string,
@@ -336,6 +334,9 @@ export function buildApi(options: ServerOptions): Api {
 
     return reply.code(ready ? 200 : 503).send({
       status: ready ? "ok" : "unavailable",
+      ...(config.releaseSha === undefined
+        ? {}
+        : { releaseSha: config.releaseSha }),
       role,
       postgres,
       clickhouse,
@@ -418,6 +419,55 @@ export function buildApi(options: ServerOptions): Api {
       windowMilliseconds: 60_000,
     });
 
+  // Organization usage, for its settings page. Registered here beside
+  // the other account routes rather than inside the platform boundary below,
+  // because it is not in the published contract and must not be able to enter
+  // the OpenAPI document by sharing a prefix with something that is.
+  void app.register(usageRoutes, {
+    provider: identity.provider,
+    rateLimit,
+  });
+
+  // The Billing section's reads, on a deployment that selected the cloud
+  // adapter. Registered here for the reason the usage routes above are: they
+  // are not in the published contract and must not be able to enter the
+  // OpenAPI document by sharing a prefix with something that is.
+  //
+  // The credential hook is applied inside this scope rather than by the
+  // routes themselves, so the commercially licensed package holds no opinion
+  // about how a request becomes a person: it is handed the context the API
+  // already resolved, and the per-organization budget applies to it exactly as
+  // it does to every other browser read.
+  const mountBillingRoutes = options.billingRoutes;
+  if (mountBillingRoutes !== undefined) {
+    void app.register(async (scope) => {
+      credentialed(scope, { provider: identity.provider, rateLimit });
+      await mountBillingRoutes(scope, {
+        contextOf: (request) => requesterOf(request).auth,
+      });
+    });
+  }
+
+  // Stripe's own door, in a scope of its own and outside the credentialed one.
+  //
+  // **The signature is the whole gate.** Stripe holds no credential of Egma's
+  // and never will, so a cookie check here would refuse every real delivery
+  // and admit nothing extra; what proves a delivery is that only Stripe can
+  // sign a body against this deployment's signing secret. It is outside the
+  // per-organization budget for the claim door's reason: the caller resolves
+  // to no customer, so there is nothing to key a budget on.
+  //
+  // The scope also matters for the body. The routes declare a parser that
+  // keeps the raw bytes, because Stripe signs the body it sent — and Fastify
+  // keeps a content-type parser inside the scope that declared it, so every
+  // other route in this process still gets its JSON parsed as JSON.
+  const mountBillingWebhook = options.billingWebhookRoutes;
+  if (mountBillingWebhook !== undefined) {
+    void app.register(async (scope) => {
+      await mountBillingWebhook(scope);
+    });
+  }
+
   // Every customer-managed resource is registered through this one boundary.
   // It is the same explicit operation set that produces OpenAPI and the
   // generated TypeScript client. The separate protocols below do not enter it.
@@ -428,6 +478,9 @@ export function buildApi(options: ServerOptions): Api {
     baseUrl: config.baseUrl,
     carrierRoute: config.carrierRoute,
     blob: config.blob,
+    ...(options.wakeVoiceFleet === undefined
+      ? {}
+      : { wakeVoiceFleet: options.wakeVoiceFleet }),
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),
@@ -445,6 +498,10 @@ export function buildApi(options: ServerOptions): Api {
     serviceToken: config.simulatorServiceToken,
     providerCredentials: config.providerCredentials,
     carrierRoute: config.carrierRoute,
+    // Asked once per organization for each batch this door hands out. On a
+    // deployment with no billing it answers yes without reaching anything.
+    entitlements: config.billing.entitlements,
+    caps: config.simulationConcurrencyCaps,
     // Where the mock endpoint answers. A mocked web call's tool URLs carry no
     // address of Egma's at all — the claim fills one in per call, for exactly
     // the tools that simulation's own test names.
@@ -483,32 +540,15 @@ export function buildApi(options: ServerOptions): Api {
       : { simulationPullOptions: options.simulationPullOptions }),
   });
 
-  // The mock endpoint: the seam's one new public surface. Registered without
-  // `fastify-plugin` for the same reason the OTLP door below is — it keeps the
-  // bytes that were sent, because a signature is over the raw body, and
-  // encapsulation is what stops that reaching the JSON routes.
-  //
-  // Outside the credentialed scope and outside the per-organization rate limit
-  // on purpose. The caller is the customer's own agent platform, which holds no
-  // credential of egma's: the whole gate is one unguessable identifier, a live
-  // run, and a tool the simulation's own test named. A budget keyed on the
-  // organization would let a busy mocked run eat that customer's own request
-  // budget from the inside, and a run whose tool calls started failing would be
-  // a green suite that quietly tested nothing.
+  // Keep mock endpoint body parsers isolated from ordinary JSON routes.
+  // The endpoint uses a simulation-specific URL, a live run, and pinned test
+  // coverage; it does not verify a body signature. Platform tool requests use
+  // this gate outside the credentialed organization rate limit.
   void app.register(mockEndpointRoutes);
 
-  // The OTLP door, registered without `fastify-plugin` for the same reason the
-  // provider's adapter is: it replaces every body parser inside its own scope
-  // so that telemetry arrives as the bytes that were sent, and encapsulation is
-  // what stops that reaching the JSON routes above. It takes the service token
-  // beside the customer credentials because it is the one door with two: a
-  // customer key files an agent's traces, and the simulator's own spans arrive
-  // through this same door naming the simulation they are evidence of.
-  //
-  // Registered for the roles that accept evidence. A `drain` process has no
-  // local log open and no promise it could keep, so the honest answer there is
-  // that this door is not here — rather than a door that takes a request and
-  // refuses every one of them.
+  // Isolate OTLP body parsers from JSON routes. Customer credentials and the
+  // service token share this ingestion endpoint. Register it only for roles
+  // that accept evidence and have a local log.
   if (acceptsEvidence) {
     void app.register(traceRoutes, {
       provider: identity.provider,
@@ -582,6 +622,9 @@ export function buildApi(options: ServerOptions): Api {
     }
     orphanSweep = startOrphanSweep({
       log: app.log,
+      ...(options.wakeVoiceFleet === undefined
+        ? {}
+        : { wakeVoiceFleet: options.wakeVoiceFleet }),
       ...(options.orphanSweepIntervalMilliseconds === undefined
         ? {}
         : { intervalMilliseconds: options.orphanSweepIntervalMilliseconds }),
@@ -605,16 +648,24 @@ export function buildApi(options: ServerOptions): Api {
       });
     }
   });
+  // Fastify runs this before it waits for active requests and closes sockets.
+  // That starts the evidence deadline at shutdown initiation, stops new
+  // acceptance, and lets an in-flight request receive its durable success or
+  // retryable failure inside the same task-stop window.
+  app.addHook("preClose", async () => {
+    await closeAcceptance({
+      ...(options.ingestionShutdownTimeoutMilliseconds === undefined
+        ? {}
+        : { timeoutMilliseconds: options.ingestionShutdownTimeoutMilliseconds }),
+    });
+  });
   app.addHook("onClose", async () => {
     // Awaited, so closing drains any tick in flight: whoever closes the app
     // and then the stores knows the sweep holds no connection to them.
     await orphanSweep?.stop();
     await retellProductionIngestion?.stop();
-    // Acceptance before the drainer, so nothing new is uploaded into a bucket
-    // nobody is reading; and neither uploads nor drains anything on the way
-    // out. What is staged is on the disk with its checksums and what is pending
-    // is in the bucket, and the next start is what moves both.
-    await closeAcceptance();
+    // The drainer stays alive through the earlier acceptance shutdown, so a
+    // segment uploaded during that window can still be consumed in process.
     await drainer?.stop();
     // Last, so the claim is given up only once this process has stopped
     // draining. Postgres would drop it with the connection anyway; releasing it

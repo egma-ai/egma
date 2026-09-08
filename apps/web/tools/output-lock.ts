@@ -11,55 +11,13 @@ import {
 import path from "node:path";
 
 /**
- * One writer at a time for `apps/web/.next`.
+ * Serialize writers to this checkout's .next directory. A build and browser
+ * test cannot share generated output; a live holder causes an immediate refusal.
  *
- * Two things in this repository write that directory. `next build` writes the
- * production build into it, and the real-browser test starts `next dev`, which
- * compiles into the same place. Run both in one checkout at once and each ends
- * up reading half of the other's output: the build ships pages it did not
- * compile, or the browser test fails somewhere deep inside Next with a message
- * about a missing chunk, and neither failure names the cause.
- *
- * Pointing the two at different output directories does work and costs more
- * than it buys — Next writes the directory it is using back into the checked-in
- * `tsconfig.json` and `next-env.d.ts`, so running the suite would leave the
- * repository dirty. So instead there is one lock file beside the directory, and
- * whoever is second is **refused with a sentence** rather than left to find out.
- *
- * Refused, not queued. A build that waited would look like a build that had
- * hung, and the honest answer to "these two cannot run at once" is to say so
- * while somebody is still watching the terminal.
- *
- * The lock is per checkout, which is exactly the scope of the problem: two
- * worktrees have two `.next` directories and never collide.
- *
- * ## What makes it actually exclusive
- *
- * Three rules, and each one is a way this was wrong before.
- *
- * 1. **The lock file is never seen empty.** Its content is written to a private
- *    path first and the file appears at the lock's own path already holding it,
- *    through `link`, which the kernel refuses when the path exists. Creating an
- *    empty file and filling it in afterwards leaves a window in which the lock
- *    exists but says nothing — and a lock that says nothing was read as one
- *    nobody was behind, and stolen. Four processes racing found that window in
- *    24 rounds out of 30.
- * 2. **Unreadable is not abandoned.** A lock whose content cannot be understood
- *    is refused, never cleared. The only honest thing to say about a file this
- *    code did not write is that somebody has to look at it.
- * 3. **Clearing an abandoned lock is itself serialised, and giving it back is
- *    checked.** Two processes that both decide a lock is abandoned must not
- *    both remove it and both claim — the second would remove the first's fresh
- *    lock. So clearing happens behind a second, briefly-held file, and
- *    `release` removes the lock only when the token in it is still the token it
- *    wrote.
- * 4. **A process id is not an identity.** Operating systems reuse them. A
- *    holder that was killed leaves its lock behind, and the moment something
- *    unrelated is given its number the lock reads as held by a living process
- *    and every later build and browser test is refused until somebody deletes
- *    the file by hand. So the lock records *when* the holder started as well as
- *    which number it had, and a number wearing a different start time is a
- *    different process — see `processIdentity`.
+ * Write complete metadata before claiming the path with an exclusive hard link.
+ * Refuse unreadable locks. Serialize abandoned-lock cleanup with a second file
+ * and verify the recorded holder again before removal. Release only the matching
+ * token. Record PID and process start time to detect PID reuse.
  */
 
 /** The two holders, named once so both sides say the same words. */
@@ -181,17 +139,9 @@ function numberInUse(pid: number): boolean {
 }
 
 /**
- * When a process started, as the machine reports it — the half of a process's
- * identity that a recycled number cannot bring with it.
- *
- * `/proc` first, which is Linux, every container and all of CI, and costs a
- * file read. `ps` second, which is what a developer's macOS answers, and costs
- * one short-lived process — paid only when a lock file is already there, so
- * never on the path that simply takes the lock.
- *
- * `undefined` means this machine would not say. That is read as "still the
- * holder" everywhere below, because refusing a build is a smaller harm than
- * two processes writing one directory.
+ * Read process start identity from Linux /proc, falling back to ps. Acquisition
+ * also reads this process's identity. Unknown identity prevents reclaiming a live
+ * holder and prevents this process from creating a new lock.
  */
 function processIdentity(pid: number): string | undefined {
   try {
@@ -262,16 +212,9 @@ function claim(lockPath: string, holder: Holder): boolean {
 }
 
 /**
- * Remove a lock nobody is behind — one process at a time.
- *
- * The second file is what makes this safe. Only the process that creates it may
- * clear, and while it exists no other process can be inside this function, so
- * the read and the removal below cannot be split by anybody. Nothing else can
- * change the lock in that moment either: claiming is `link`, which fails while
- * the file is there.
- *
- * Answers whether the caller may now try to claim. `false` means somebody else
- * is doing this, and the caller should look again rather than assume anything.
+ * Serialize abandoned-lock removal with an exclusive cleanup file. Recheck
+ * the holder token, PID, and liveness before unlinking. Return false when
+ * another process is clearing so the caller retries.
  */
 function clearAbandoned(lockPath: string, abandoned: Holder): boolean {
   const clearing = `${lockPath}.clearing`;
@@ -419,16 +362,8 @@ function before(finished: Promise<void>, milliseconds: number): Promise<boolean>
 }
 
 /**
- * Ask a process to stop, and wait until it really has.
- *
- * `kill` only sends a signal. A Next development server given `SIGTERM` keeps
- * writing `apps/web/.next` while it closes its watchers, so a caller that
- * signalled and moved on would hand the output directory to the next holder
- * while the last one was still writing it — the exact corruption the lock
- * exists to prevent, arrived at through the lock.
- *
- * Bounded, and then insistent: a process that ignores `SIGTERM` must not hold a
- * suite open for as long as it likes.
+ * Send SIGTERM and wait for exit, then try SIGKILL with another bounded wait.
+ * This can return after the second timeout even without a confirmed exit.
  */
 export async function stopped(
   child: ChildProcess,

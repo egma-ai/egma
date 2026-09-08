@@ -8,24 +8,9 @@ import { Dialog } from "@/ui/dialog.tsx";
 import { Form, FormActions, Problem } from "@/ui/form.tsx";
 
 /**
- * The confirmation in front of the one destructive thing these screens offer.
- *
- * **It says "Delete", and the write underneath still archives.** (Founder
- * ruling, 2026-08-24.) A person removing an agent means delete, and the
- * sentence beside the button is what keeps that honest: it says what stops and
- * says that stored transcripts stay stored. The soft write is why the history
- * an organization is answerable for survives a mistake — that is an argument
- * for how Egma stores it, not for making somebody read the word "archive"
- * when they meant delete.
- *
- * **It names the thing, which `DESIGN.md` asks of every destructive dialog**,
- * and it says what stops. What it cannot say is a number: the counts of
- * archived connections and cancelled runs are in the *answer*, and this sentence
- * is written before the write is made. So it says what will happen rather than
- * inventing an arithmetic it does not have.
- *
- * The button inside is the filled failure-colour one, which is the only place
- * in the product that draws it.
+ * The UI says Delete; the API archives the record. The confirmation explains
+ * what stops and that stored transcripts remain. Permission enforcement is
+ * server-side, with disabled controls explaining unavailable actions.
  */
 export function ArchiveConfirm({
   title,

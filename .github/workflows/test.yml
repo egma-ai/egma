@@ -1,41 +1,10 @@
 name: Tests
 
-# What runs, and when.
-#
-# Every pull request gets the cheap lane: lint, typecheck, and `test:fast` —
-# the unit, database, API, grader, CLI and web tests, with no Chrome and no web
-# application. That is the loop a change is written in, and it is what a review
-# needs to see.
-#
-# A pull request **into `main`** gets everything: the cheap lane plus the
-# real-browser proof, the simulator tests, the SDK tests and the fixture
-# tests. That is the handoff gate, and nothing in it is allowed to skip.
-#
-# A push to `main` runs the same jobs again on the tree `main` now owns.
-# One `Deploy` job then waits for all of them. This keeps the test names identical
-# on pull requests and main, and gives production one gate and one owner.
-#
-# The split is deliberate rather than thrifty. An effort lands as a dozen pull
-# requests into one integration branch and then one pull request from that
-# branch into `main`. Running the browser proof and separate SDK suites on each
-# of the dozen would pay for the complete proof twelve times and gate on it
-# once — which is the wrong way round. So the trigger is broad and the scope
-# depends on the branch being merged into: `github.base_ref`, which on a pull
-# request is the branch the change is going to.
-#
-# `vitest.config.ts` owns what each lane selects, as two Vitest projects. The
-# fast lane declares no `include` — it is Vitest's own default search minus the
-# one real-browser file — so a new test file joins it by existing. Every run
-# prints its lane and Vitest labels each file with the project it came from, so
-# a green tick can always be read back to the proof it stands for.
-#
-# Every job runs on a Blacksmith runner, which the organization already pays
-# for and which carries GitHub's own runner image — so docker, the compose
-# services and the official cache actions all behave as they did. One thing it
-# does not carry is `node-gyp`, which this repository needs to install at all;
-# `.github/native-toolchain.sh` is that gap and nothing else. The release
-# workflow beside this one stays on `ubuntu-latest` on purpose: it holds npm
-# publishing authority, and moving that is a separate decision.
+# All pull requests run lint, typecheck, and the fast tests. Pull requests
+# into main and pushes to main also run browser, simulator, SDK, and fixture
+# tests. Deployment on main waits for the required jobs.
+# Vitest defines test discovery and separates the browser acceptance file.
+# CI uses the native-toolchain script when dependencies need compilation.
 
 on:
   pull_request:
@@ -43,6 +12,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: Replace production and ship the web after publishing the images
+        required: true
+        type: boolean
+        default: true
 
 concurrency:
   # A newer push makes an older pull-request run pointless. Main is different:
@@ -115,7 +90,7 @@ jobs:
           pnpm docs:check
           pnpm docs:build
 
-      - name: Check compatibility job failure handling
+      - name: Test CI and release helpers
         run: python3 -B -m unittest discover -s .github -p 'test_*.py'
 
   fast:
@@ -147,16 +122,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Install uv and sync the simulator
-        # The fast lane is not all TypeScript. `apps/api/test/simulator-
-        # conversation.test.ts` spawns the real shipped simulator — `uv run
-        # --frozen egma-simulator`, in `apps/simulator` — and drives a run
-        # through it to a verdict. Without uv that child never starts, and the
-        # pass waits sixty seconds for a simulation nothing was ever going to
-        # conduct.
-        #
-        # The sync is separate so the Python install is paid here rather than
-        # inside that sixty-second window. It is the same pair of steps
-        # `egma-dev-setup` runs on a developer's machine.
+        # The fast lane starts the shipped Python simulator in an API integration
+        # test. Install and sync it here so dependency setup does not consume the
+        # test's startup timeout.
         run: pipx install uv && uv sync --frozen
         working-directory: apps/simulator
 
@@ -165,21 +133,8 @@ jobs:
         # of their own from the image the compose file deploys, so pulling it
         # through compose keeps one version in one place.
         if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
-        # **Compose interpolates every service before it pulls one**, and the
-        # self-hosted phone platform declares ten variables with no default —
-        # the LiveKit pair, the recording store's four credentials, the auth
-        # secret. So `docker compose pull minio` fails on a variable that has
-        # nothing to do with MinIO, before any network call happens.
-        #
-        # Those guards are right where they are: a self-hoster who has not run
-        # `egma self-host up` should be told which variable by name rather than
-        # handed a half-started platform. CI is not that person and starts none
-        # of those services. Placeholders would work today and break on the
-        # eleventh variable, so this does not use them.
-        #
-        # The tag still lives in one place. This reads it out of the compose
-        # file rather than repeating it, so the image CI warms stays the image
-        # the compose file deploys.
+        # Pull the image directly to avoid interpolating unrelated required Compose
+        # settings. Read its tag from Compose so the warmed image matches deployment.
         run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
 
       - name: Run the fast lane
@@ -288,7 +243,7 @@ jobs:
   livekit-python-compatibility:
     name: LiveKit Python compatibility
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
-    # Two isolated Python environments run their core suites concurrently.
+    # Isolated Python environments run their core suites concurrently.
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
@@ -315,7 +270,7 @@ jobs:
           test -n "$wheel"
           echo "wheel=$wheel" >> "$GITHUB_OUTPUT"
 
-      - name: Verify the minimum and locked LiveKit versions in parallel
+      - name: Verify the supported LiveKit versions in parallel
         run: python3 .github/livekit_compatibility.py python "${{ steps.pack.outputs.wheel }}"
 
   livekit-js-compatibility:
@@ -388,22 +343,76 @@ jobs:
       - name: Run the fixture agent tests
         run: pnpm test:fixture
 
+  livekit-e2e:
+    name: LiveKit packaged end-to-end
+    if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          version: "0.11.33"
+
+      - name: Make the native build toolchain available
+        run: ./.github/native-toolchain.sh
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Sync the shipped simulator
+        working-directory: apps/simulator
+        run: uv sync --frozen
+
+      - name: Require the trusted model credential
+        env:
+          LIVEKIT_E2E_OPENAI_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
+        run: |
+          if [ -z "$LIVEKIT_E2E_OPENAI_API_KEY" ]; then
+            echo "LIVEKIT_E2E_OPENAI_API_KEY is unavailable. A maintainer must run reviewed code in a trusted repository context before merge." >&2
+            exit 1
+          fi
+
+      - name: Run packaged SDKs through LiveKit and the simulator
+        env:
+          LIVEKIT_E2E_OPENAI_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
+        run: pnpm test:livekit-e2e
+
+      - name: Upload redacted proof records
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: livekit-e2e-${{ github.sha }}
+          path: .proofs/livekit-e2e/**/upload/**
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
   deploy:
     name: Deploy
-    needs: [checks, fast, browser, simulator, livekit-python-compatibility, livekit-js-compatibility, fixture]
+    needs: [checks, fast, browser, simulator, livekit-python-compatibility, livekit-js-compatibility, fixture, livekit-e2e]
     if: >-
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read
-      id-token: write
+      actions: write
     env:
-      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-      DEPLOY_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-      REGISTRY: ${{ vars.ECR_REGISTRY }}
-      INSTANCE: ${{ vars.PLATFORM_INSTANCE_ID }}
+      REPLACE_PRODUCTION: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy }}
+      CLOUD_REPOSITORY: egma-ai/egma-cloud
+      DEPLOYMENT_HEALTH_URL: ${{ vars.DEPLOYMENT_HEALTH_URL || 'https://app.egma.ai/health' }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -419,8 +428,13 @@ jobs:
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "platform=true" >> "$GITHUB_OUTPUT"
-            echo "web=true" >> "$GITHUB_OUTPUT"
-            echo "Dispatched by hand: the whole deployment runs."
+            if [ "$REPLACE_PRODUCTION" = "true" ]; then
+              echo "web=true" >> "$GITHUB_OUTPUT"
+              echo "Dispatched by hand: the whole deployment runs."
+            else
+              echo "web=false" >> "$GITHUB_OUTPUT"
+              echo "Dispatched by hand: build and publish the exact image tags only."
+            fi
             exit 0
           fi
           base=$(curl -fsS \
@@ -448,10 +462,10 @@ jobs:
           web=false
           while IFS= read -r path; do
             case "$path" in
-              apps/api/*|apps/grader/*|apps/simulator/*|packages/*) platform=true ;;
+              apps/api/*|apps/grader/*|apps/simulator/*|packages/*|ee/*) platform=true ;;
               docker-compose.yml|docker-compose.managed.yml|.env.example) platform=true ;;
               pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) platform=true ;;
-              .github/workflows/test.yml) platform=true ;;
+              certificates/*|.github/ecr-image-exists.sh|.github/verify-platform-images.py|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) platform=true ;;
               apps/web/*|tools/*) web=true ;;
             esac
           done <<< "$changed"
@@ -467,92 +481,117 @@ jobs:
 
       - name: Check the platform deployment is configured
         if: steps.decide.outputs.platform == 'true'
+        env:
+          CLOUD_RELEASE_TOKEN: ${{ secrets.EGMA_CLOUD_RELEASE_TOKEN }}
         run: |
           missing=""
-          for v in DEPLOY_ROLE REGISTRY INSTANCE; do
-            [ -n "${!v}" ] || missing="$missing $v"
-          done
+          if [ "$REPLACE_PRODUCTION" = "true" ]; then
+            [ -n "$CLOUD_RELEASE_TOKEN" ] || missing="$missing EGMA_CLOUD_RELEASE_TOKEN"
+            [ -n "$DEPLOYMENT_HEALTH_URL" ] || missing="$missing DEPLOYMENT_HEALTH_URL"
+          fi
           if [ -n "$missing" ]; then
             echo "Set these repository variables before deploying:$missing" >&2
-            echo "AWS_DEPLOY_ROLE_ARN is the role this workflow assumes." >&2
-            echo "ECR_REGISTRY is <account>.dkr.ecr.<region>.amazonaws.com." >&2
-            echo "PLATFORM_INSTANCE_ID is the box to restart." >&2
             exit 1
           fi
+          if [ "$REPLACE_PRODUCTION" = "true" ]; then
+            curl -fsS --max-time 20 \
+              -H "Authorization: Bearer $CLOUD_RELEASE_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$CLOUD_REPOSITORY/actions/workflows/infrastructure.yml" >/dev/null || {
+                echo "Configure the cloud workflow and EGMA_CLOUD_RELEASE_TOKEN with egma-cloud Contents:write and Actions:read before deployment." >&2
+                exit 1
+              }
+          fi
 
-      - name: Take a short-lived AWS credential
+      - name: Publish the immutable native images
         if: steps.decide.outputs.platform == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          token=$(curl -sS \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')
-          creds=$(aws sts assume-role-with-web-identity \
-            --role-arn "$DEPLOY_ROLE" \
-            --role-session-name "deploy-${GITHUB_RUN_ID}" \
-            --web-identity-token "$token" \
-            --duration-seconds 3600 \
-            --query Credentials --output json)
-          python3 - "$creds" >> "$GITHUB_ENV" <<'PY'
-          import json, sys
-          c = json.loads(sys.argv[1])
-          print(f"AWS_ACCESS_KEY_ID={c['AccessKeyId']}")
-          print(f"AWS_SECRET_ACCESS_KEY={c['SecretAccessKey']}")
-          print(f"AWS_SESSION_TOKEN={c['SessionToken']}")
-          PY
-          echo "::add-mask::$(echo "$creds" | python3 -c 'import json,sys; print(json.load(sys.stdin)["SecretAccessKey"])')"
-          echo "::add-mask::$(echo "$creds" | python3 -c 'import json,sys; print(json.load(sys.stdin)["SessionToken"])')"
-
-      - name: Build and push the three images
-        if: steps.decide.outputs.platform == 'true'
-        run: |
-          set -euo pipefail
-          aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin "$REGISTRY"
-          for app in api simulator grader; do
-            echo "::group::$app"
-            docker build -f "apps/$app/Dockerfile" \
-              -t "$REGISTRY/egma/$app:$GITHUB_SHA" \
-              -t "$REGISTRY/egma/$app:latest" .
-            docker push "$REGISTRY/egma/$app:$GITHUB_SHA"
-            docker push "$REGISTRY/egma/$app:latest"
-            echo "::endgroup::"
+          started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          title="Build platform images $GITHUB_SHA from $GITHUB_RUN_ID"
+          gh workflow run build-platform-images.yml --ref main \
+            -f "public_sha=$GITHUB_SHA" -f "source_run_id=$GITHUB_RUN_ID"
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id=$(gh run list --workflow build-platform-images.yml \
+              --event workflow_dispatch --limit 20 \
+              --json databaseId,createdAt,displayTitle \
+              --jq "[.[] | select(.createdAt >= \"$started\" and .displayTitle == \"$title\")][0].databaseId // empty")
+            [ -n "$run_id" ] && break
+            sleep 2
           done
+          [ -n "$run_id" ] || { echo "The image publication run did not appear." >&2; exit 1; }
+          gh run watch "$run_id" --exit-status
 
-      - name: Replace what is running, and wait for its health checks
-        if: steps.decide.outputs.platform == 'true'
+      - name: Ask the cloud repository to deploy this release
+        if: steps.decide.outputs.platform == 'true' && env.REPLACE_PRODUCTION == 'true'
+        env:
+          CLOUD_RELEASE_TOKEN: ${{ secrets.EGMA_CLOUD_RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          ACCOUNT="${REGISTRY%%.*}"
-          command_id=$(aws ssm send-command \
-            --instance-ids "$INSTANCE" \
-            --document-name AWS-RunShellScript \
-            --comment "deploy $GITHUB_SHA" \
-            --parameters commands="aws s3 sync s3://egma-deploy-${ACCOUNT}/deployment /opt/egma/deployment --delete && bash /opt/egma/deployment/deploy.sh $GITHUB_SHA" \
-            --query Command.CommandId --output text)
-          echo "SSM command: $command_id"
-          for _ in $(seq 1 120); do
-            status=$(aws ssm get-command-invocation \
-              --command-id "$command_id" --instance-id "$INSTANCE" \
-              --query Status --output text 2>/dev/null || echo Pending)
-            case "$status" in
-              Success|Failed|Cancelled|TimedOut|Undeliverable|Terminated) break ;;
-            esac
+          started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          title="Release $GITHUB_SHA from $GITHUB_RUN_ID"
+          payload=$(jq -cn \
+            --arg sha "$GITHUB_SHA" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            '{event_type:"public-release",client_payload:{sha:$sha,source_repository:$repository,source_run_id:$run_id}}')
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $CLOUD_RELEASE_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$CLOUD_REPOSITORY/dispatches" \
+            -d "$payload"
+          run_id=""
+          for _ in $(seq 1 30); do
+            runs=$(curl -fsS \
+              -H "Authorization: Bearer $CLOUD_RELEASE_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$CLOUD_REPOSITORY/actions/workflows/infrastructure.yml/runs?event=repository_dispatch&per_page=20")
+            run_id=$(jq -r --arg title "$title" --arg started "$started" \
+              '[.workflow_runs[] | select(.display_title == $title and .created_at >= $started)][0].id // empty' <<<"$runs")
+            [ -n "$run_id" ] && break
+            sleep 2
+          done
+          [ -n "$run_id" ] || { echo "The cloud release run did not appear." >&2; exit 1; }
+          for _ in $(seq 1 540); do
+            run=$(curl -fsS \
+              -H "Authorization: Bearer $CLOUD_RELEASE_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$CLOUD_REPOSITORY/actions/runs/$run_id")
+            status=$(jq -r '.status' <<<"$run")
+            if [ "$status" = "completed" ]; then
+              conclusion=$(jq -r '.conclusion' <<<"$run")
+              [ "$conclusion" = "success" ] || { echo "Cloud release ended with $conclusion." >&2; exit 1; }
+              break
+            fi
             sleep 10
           done
-          aws ssm get-command-invocation \
-            --command-id "$command_id" --instance-id "$INSTANCE" \
-            --query '[Status,StandardOutputContent,StandardErrorContent]' \
-            --output text
-          status=$(aws ssm get-command-invocation \
-            --command-id "$command_id" --instance-id "$INSTANCE" \
-            --query Status --output text)
-          [ "$status" = "Success" ] || { echo "Deployment failed: $status" >&2; exit 1; }
+          [ "${status:-}" = "completed" ] || { echo "Cloud release did not finish within 90 minutes." >&2; exit 1; }
+
+      - name: Wait for this exact release identity
+        if: steps.decide.outputs.platform == 'true' && env.REPLACE_PRODUCTION == 'true'
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 540); do
+            identity=$(curl -fsS "$DEPLOYMENT_HEALTH_URL" 2>/dev/null || true)
+            if jq -e --arg sha "$GITHUB_SHA" \
+              '.status == "ok" and .releaseSha == $sha' <<<"$identity" >/dev/null 2>&1; then
+              echo "Deployment reports release $GITHUB_SHA."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Deployment did not report release $GITHUB_SHA within 90 minutes." >&2
+          exit 1
 
       - name: Yield when a newer merge owns the web deployment
         id: yield
-        if: steps.decide.outputs.platform == 'true' || steps.decide.outputs.web == 'true'
+        if: >-
+          env.REPLACE_PRODUCTION == 'true' &&
+          (steps.decide.outputs.platform == 'true' || steps.decide.outputs.web == 'true')
         run: |
           set -euo pipefail
           git fetch --quiet origin main
@@ -564,10 +603,10 @@ jobs:
           deployable=false
           while IFS= read -r path; do
             case "$path" in
-              apps/api/*|apps/grader/*|apps/simulator/*|packages/*) deployable=true ;;
+              apps/api/*|apps/grader/*|apps/simulator/*|packages/*|ee/*) deployable=true ;;
               docker-compose.yml|docker-compose.managed.yml|.env.example) deployable=true ;;
               pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) deployable=true ;;
-              .github/workflows/test.yml) deployable=true ;;
+              certificates/*|.github/ecr-image-exists.sh|.github/verify-platform-images.py|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) deployable=true ;;
               apps/web/*|tools/*) deployable=true ;;
             esac
           done <<< "$(git diff --name-only "${{ github.sha }}" "$head")"
@@ -581,6 +620,7 @@ jobs:
 
       - name: Tell Vercel to ship
         if: >-
+          env.REPLACE_PRODUCTION == 'true' &&
           (steps.decide.outputs.platform == 'true' || steps.decide.outputs.web == 'true') &&
           steps.yield.outputs.fire == 'true'
         env:

@@ -2,7 +2,9 @@ import {
   completeSimulation,
   failSimulation,
   markSimulationCanceled,
+  recordOrphanedSimulationExecution,
   resolveSimulationStanding,
+  registerSimulationProviderReference,
   startSimulation,
   type CompletedEndingReason,
   type FailedEndingReason,
@@ -33,38 +35,14 @@ import {
 } from "../retell-simulation-ingestion.ts";
 
 /**
- * The report door: `POST /v1/simulations/:simulationId/reports`, where the
- * simulator says what happened — the lifecycle landing, and only that. What
- * was said in the conversation arrives at the OTLP ingest as spans and never
- * here, which the contract holds rather than this route: a document carrying
- * a turn does not validate, so there is no second record of one conversation
- * for two readers to disagree about.
+ * Accept lifecycle reports under the deployment service token, outside
+ * organization rate limits. Transcript spans arrive through OTLP separately.
+ * Resolve scope and claimedBy from stored simulation state; this shared token
+ * does not independently identify which simulator process sent the report.
  *
- * It sits with the claim door on the claim door's exact terms: the service
- * token is the whole gate and resolves to nothing, and the group is outside
- * the per-organization rate limit because the caller is egma's own service
- * standing behind every organization at once. What is different here is
- * where authority over each row comes from. **The token gates the door, and
- * the row names its conductor**: every write below is made under a context
- * derived from the row's own tenancy, in the name of the row's own
- * `claimed_by` — never in the name of anything the request said — so the one
- * secret a simulator holds decides only whether it may knock, and which
- * conversations it speaks for was decided when each row was claimed.
- *
- * **Idempotency without a ledger.** The client delivers at least once and
- * resends byte-identically, so this door must absorb what it has already
- * heard: a `running` for a row already running answers 200, a terminal event
- * matching the row's terminal state answers 200, and only a document that
- * would *rewrite* the record — a different ending, a different terminal
- * status, a running for a finished conversation — is refused with 409. No
- * table of seen event ids exists, on purpose: the row's own state says
- * everything a duplicate check needs, and a ledger would be a second record
- * to keep honest.
- *
- * The shipped simulator posts one event per document; the contract permits
- * several, and they apply in order. Each application commits by itself, so a
- * refusal partway leaves the earlier, valid transitions standing — exactly
- * what a resend of the same document then absorbs as duplicates.
+ * Apply events in order, committing each transition separately. Matching
+ * replays succeed; incompatible history returns conflict. If a later event
+ * fails, earlier transitions remain committed and can be replayed.
  */
 
 export type ReportRoutesOptions = {
@@ -99,6 +77,7 @@ export function reportPathFor(simulationId: string): string {
 
 /** One status event, after the contract check has vouched for its shape. */
 type StatusEvent = {
+  readonly at: string;
   readonly status: "running" | "completed" | "failed" | "canceled";
   readonly reason: string | null;
   readonly facts?: {
@@ -134,21 +113,13 @@ const FAILED_ENDING_OF: Record<
   agent_never_joined: "agent_never_joined",
   not_answered: "not_answered",
   error: "simulator_error",
+  provider_key_unavailable: "provider_key_unavailable",
 };
 
 /**
- * The reported moments, trusted exactly when they can be true.
- *
- * A landing given the conduction's own moments writes them over its server
- * stamps, so a retried report cannot stretch the record — but a document
- * whose `ended_at` precedes its `started_at` describes an interval that
- * never existed on any clock, and writing it verbatim would put an
- * impossible duration on the row forever. Refusing the document would be
- * worse: the reporter treats a final refusal as final, and punishing
- * delivery for a skewed clock would turn a truthful conversation into a
- * sweep's false orphan. So an incoherent pair is answered with `undefined`,
- * the landing falls back to its own server stamps for both moments, and the
- * caller logs the pair it declined to believe.
+ * Use reported execution times only when coherent. A reversed interval
+ * returns undefined so storage can close the lifecycle without inventing
+ * measured execution time or discarding the other report facts.
  */
 function reportedMoments(facts: {
   readonly started_at: string;
@@ -156,7 +127,7 @@ function reportedMoments(facts: {
 }): { readonly startedAt: Date; readonly endedAt: Date } | undefined {
   const startedAt = new Date(facts.started_at);
   const endedAt = new Date(facts.ended_at);
-  if (endedAt.getTime() < startedAt.getTime()) return undefined;
+  if (!Number.isFinite(startedAt.getTime()) || !Number.isFinite(endedAt.getTime()) || endedAt < startedAt) return undefined;
   return { startedAt, endedAt };
 }
 
@@ -172,7 +143,7 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
     ...(facts.audio === null
       ? {}
       : { recordingReference: facts.audio.recording }),
-    // Absent when incoherent, so the landing's own stamps stand for both.
+    // Incoherent times leave measured execution unknown.
     ...(reportedMoments(facts) ?? {}),
   };
 }
@@ -230,6 +201,34 @@ export async function reportRoutes(
       return notTheService(reply);
     }
     return undefined;
+  });
+
+  // Acknowledged before the simulator creates or dispatches the room. The
+  // service token authenticates the sender; the active claim authorizes the
+  // row, and the stored reference remains the project-key ingest lookup key.
+  app.post("/v1/simulations/:simulationId/provider-reference", async (request, reply) => {
+    const { simulationId } = request.params as { simulationId: string };
+    const body = request.body as Record<string, unknown> | null;
+    if (body === null || typeof body !== "object" || Array.isArray(body) ||
+      Object.keys(body).some(key => key !== "claimant" && key !== "provider_reference") ||
+      typeof body.claimant !== "string" || body.claimant.trim() === "" || body.claimant.length > 200 ||
+      typeof body.provider_reference !== "string" || body.provider_reference.length > 512 ||
+      !/^egma-sim-(?:chat-)?[A-Za-z0-9_-]+$/.test(body.provider_reference)) {
+      return invalid(reply, "Room registration requires a claimant and a non-empty Egma LiveKit room name.");
+    }
+    const standing = await resolveSimulationStanding(simulationId);
+    if (standing === undefined) {
+      return conflict(reply, "This active LiveKit claim cannot register that room reference.");
+    }
+    const registered = await registerSimulationProviderReference(standing.auth, {
+      simulationId,
+      claimant: body.claimant.trim(),
+      providerReference: body.provider_reference,
+    });
+    if (!registered) {
+      return conflict(reply, "This active LiveKit claim cannot register that room reference.");
+    }
+    return reply.send({ simulation_id: simulationId, provider_reference: body.provider_reference });
   });
 
   /**
@@ -290,51 +289,27 @@ export async function reportRoutes(
     // above has already refused anything else: a conversation's turns, tool
     // calls and measurements arrive as spans at the OTLP door, and a report
     // claiming to carry one does not validate.
-    // Whether anything in this document actually moved the row to completed.
-    // A resend answers `completed` too, and the pull below must not run twice.
-    let completedNow = false;
+    // Pull once for a new terminal transition, including a call whose media
+    // failed. An absorbed resend must not fetch and file the call again.
+    let endedNow = false;
     for (const event of report.events) {
       const applied = await applyStatusEvent(reply, simulationId, event);
       if (!("status" in applied)) return applied;
       lastKnownStatus = applied.status;
-      completedNow ||= applied.moved && applied.status === "completed";
+      endedNow ||=
+        applied.moved &&
+        (applied.status === "completed" ||
+          applied.status === "failed" ||
+          applied.status === "canceled");
     }
 
     /*
-     * The agent's POV of a Retell simulation, pulled the moment the
-     * conversation ends.
-     *
-     * Retell exports nothing, so this is where the second POV of a Retell
-     * simulation comes from at all (ADR-0024 §2). It runs on a **completed**
-     * landing only: a conversation that never ran has no call record to fetch,
-     * and asking Retell about one would be a request per failed dispatch.
-     *
-     * **Once per conversation, on the landing that moved the row** — never on
-     * a resend of it. A reporter delivers at least once and an absorbed
-     * duplicate answers `completed` exactly as the transition it repeats did,
-     * so a condition reading the status alone would pull again minutes later.
-     * Retell fills a call document in after the call ends, so that second pull
-     * can normalise *changed* content under the same deterministic span ids —
-     * which is not an update but the integrity error ADR-0014 names, and the
-     * drainer would rightly retain the pair for repair. The bit that says this
-     * document is what moved the row is threaded out of the landing for
-     * exactly this.
-     *
-     * The first attempt is awaited, so an ordinary call's record is durable
-     * before this request answers and grading starts on a record that already
-     * holds the agent's POV. A record that came back thin retries in the
-     * background and never reaches this request; the module says why.
-     *
-     * The context is the standing's own — the conducting context the row's
-     * tenancy built, which is the one thing a connection's credential is
-     * unsealed for. Nothing here is answered with: the module logs every
-     * failure itself, and this catch is the last resort for a throw it did not
-     * expect, said out loud rather than swallowed. The simulator is waiting to
-     * be told its landing was accepted, and what Retell owes egma is not that
-     * landing's problem — a POV that never arrived is a state the record
-     * already has a word for.
+     * Pull Retell agent evidence when a report moves the simulation to completed,
+     * failed, or canceled. Replays must not fetch changed evidence under the same
+     * span IDs. Await the first attempt; incomplete documents retry in the
+     * background. Log pull failures without failing report acceptance.
      */
-    if (options.simulationPullReach !== undefined && completedNow) {
+    if (options.simulationPullReach !== undefined && endedNow) {
       await pullRetellSimulationRecord(
         standing.auth,
         simulationId,
@@ -355,17 +330,9 @@ export async function reportRoutes(
       });
     }
 
-    // The teardown, when this document may have been the last thing a mocked
-    // run was waiting for.
-    //
-    // It settles only runs that have **finished**, so this is a cheap read for
-    // every landing and a delete plus a restore exactly once per mocked run.
-    // Nothing depends on it happening here: a run whose teardown never ran —
-    // because this deployment restarted, or because the platform was away — is
-    // finished by the next run's sweep, which is the same act in the same
-    // order. That is why a failure here is logged rather than answered: the
-    // simulator is waiting on a report about a conversation, and what Egma owes
-    // somebody's Retell account is not that conversation's problem.
+    // Attempt owed mock cleanup after terminal reports. The shared sweep skips
+    // active runs and can retry unfinished cleanup before a later build.
+    // Cleanup failure does not change the simulation report response.
     if (
       options.mockedWorldReach !== undefined &&
       (lastKnownStatus === "completed" ||
@@ -385,15 +352,9 @@ export async function reportRoutes(
 }
 
 /**
- * One status event against the row as it now stands: the transition when the
- * row is there to move, a 200-worthy nothing when the row already says what
- * the event says, and a refusal when the document and the record disagree
- * about history. Answers the row's status afterwards, or the refusal it sent.
- *
- * The row is re-read per event rather than once per document, because each
- * event's application moves it and the next event's duplicate check must see
- * where it landed. Each read is one indexed select; a document carries a
- * handful of events at most.
+ * Apply one event against freshly read state and distinguish a transition
+ * from an absorbed replay. Reread per event because earlier events commit
+ * independently.
  */
 /**
  * What one status event did to the row: where it stands afterwards, and
@@ -436,7 +397,7 @@ async function applyStatusEvent(
   }
 
   return event.status === "running"
-    ? applyRunning(reply, standing)
+    ? applyRunning(reply, standing, event)
     : applyTerminal(reply, standing, event);
 }
 
@@ -449,10 +410,14 @@ async function applyStatusEvent(
 async function applyRunning(
   reply: FastifyReply,
   standing: SimulationStanding,
+  event: StatusEvent,
 ): Promise<FastifyReply | Applied> {
   // The duplicate the at-least-once client is owed: already running is what
   // this event says, so it is absorbed rather than refused.
   if (standing.status === "running") return absorbed("running");
+  if (standing.status === "failed" && standing.endingReason === "orphaned") {
+    return recoverOrphanedStart(reply, standing, event);
+  }
 
   if (standing.status === "claimed" && standing.claimedBy !== null) {
     const started = await startSimulation(
@@ -466,6 +431,7 @@ async function applyRunning(
     // and answer as the first read would have, one race later.
     const since = await resolveSimulationStanding(standing.id);
     if (since?.status === "running") return absorbed("running");
+    if (since?.status === "failed" && since.endingReason === "orphaned") return recoverOrphanedStart(reply, since, event);
     return refusedByTheRecord(reply, since ?? standing, "running");
   }
 
@@ -485,6 +451,9 @@ async function applyTerminal(
   standing: SimulationStanding,
   event: StatusEvent,
 ): Promise<FastifyReply | Applied> {
+  if (standing.status === "failed" && standing.endingReason === "orphaned") {
+    return recoverOrphanedFacts(reply, standing, event);
+  }
   // A terminal row answers from what it already says: the matching resend
   // is absorbed, anything else is a document trying to rewrite the record.
   if (
@@ -513,8 +482,7 @@ async function applyTerminal(
     );
   }
 
-  // Said out loud when the reported pair cannot be believed: the landing
-  // below will stand on its own stamps, and the record of why is this line.
+  // Lifecycle closure can be recorded even when measured time is unknown.
   if (reportedMoments(facts) === undefined) {
     reply.log.warn(
       {
@@ -523,7 +491,7 @@ async function applyTerminal(
         reportedEndedAt: facts.ended_at,
       },
       `simulation ${standing.id} reported ended_at before started_at; ` +
-        `landing with the server's own stamps for both moments`,
+        `recording lifecycle closure without measured execution time`,
     );
   }
 
@@ -534,6 +502,9 @@ async function applyTerminal(
   // request and the row now says what this document says — absorbed — or
   // the record genuinely disagrees, and the freshest reading names how.
   const since = await resolveSimulationStanding(standing.id);
+  if (since?.status === "failed" && since.endingReason === "orphaned") {
+    return recoverOrphanedFacts(reply, since, event);
+  }
   if (since !== undefined && matchesTerminalRow(event, since)) {
     return absorbed(since.status);
   }
@@ -569,6 +540,45 @@ async function applyTerminal(
     );
   }
   return refusedByTheRecord(reply, since ?? standing, event.status);
+}
+
+/** A separate late running document retains proof needed by its terminal report. */
+async function recoverOrphanedStart(
+  reply: FastifyReply,
+  standing: SimulationStanding,
+  event: StatusEvent,
+): Promise<FastifyReply | Applied> {
+  if (standing.claimedBy === null || standing.claimedAt === null) {
+    return refusedByTheRecord(reply, standing, event.status);
+  }
+  await recordOrphanedSimulationExecution(
+    standing.auth, standing.id, standing.claimedBy, standing.claimedAt,
+    { startedAt: new Date(event.at) },
+  );
+  return absorbed("failed");
+}
+
+/** Late facts can establish measured usage, but cannot undo an orphan sweep. */
+async function recoverOrphanedFacts(
+  reply: FastifyReply,
+  standing: SimulationStanding,
+  event: StatusEvent,
+): Promise<FastifyReply | Applied> {
+  const facts = event.facts;
+  if (facts === undefined || standing.claimedBy === null || standing.claimedAt === null) {
+    return refusedByTheRecord(reply, standing, event.status);
+  }
+  if (facts.audio !== null && standing.modality === "chat") {
+    return unprocessable(reply, "A chat has no recording. Send audio: null with its terminal facts.");
+  }
+  const moments = reportedMoments(facts);
+  if (moments !== undefined) {
+    await recordOrphanedSimulationExecution(
+      standing.auth, standing.id, standing.claimedBy, standing.claimedAt,
+      { ...summaryFactsOf(event), ...moments },
+    );
+  }
+  return absorbed("failed");
 }
 
 /** The landing itself, chosen by the event's status. */

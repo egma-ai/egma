@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import { createPersona, type AuthContext } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -6,22 +5,9 @@ import { NEUTRAL_PERSON } from "./support/traces.ts";
 import { startInstance, type Instance } from "./support/instance.ts";
 
 /**
- * The held claim, over a real socket.
- *
- * The rest of the claim door's suite drives the API in process, and that is
- * the right altitude for everything except the hold — because the hold's one
- * moving part is the connection itself. The route watches the socket to stop
- * claiming for a client that hung up, and a socket is exactly what an
- * injected request does not have: the in-process harness never emits the
- * lifecycle events a real connection does, so only a listening server can
- * prove the hold survives them. A request's own `close` fires when its body
- * has been read — milliseconds in, client still there — and a hold that
- * mistook that for the client leaving would answer every empty-queue claim
- * at once, turning the simulator's patient long poll into a busy loop.
- *
- * So: a real port, a real HTTP client, and the two promises measured on a
- * clock — a short `wait_seconds` really holds, and work arriving mid-hold
- * really answers.
+ * Use a real HTTP connection to test claim long polling and work arriving
+ * during the wait. Request-body close is not client disconnect; an injected
+ * request cannot reproduce that socket lifecycle.
  */
 
 /** The value `startInstance` configures the API with. */
@@ -106,7 +92,6 @@ async function aQueuedRun(): Promise<void> {
       suiteId,
       agentId,
       connectionId,
-      idempotencyKey: newId("run"),
       expectedTestVersions: [{ testId, versionId }],
     },
   );

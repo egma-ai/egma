@@ -1,26 +1,16 @@
+import { randomUUID } from "node:crypto";
 import {
   DECISIONS,
   type Judge,
   type JudgeAnswer,
   type JudgeQuestion,
+  type JudgeUsageSink,
   type ResolvedJudge,
 } from "./contract.ts";
 import { asJudgeReads } from "./input.ts";
 import { validateJudgeAnswer } from "./response.ts";
 
-/**
- * The OpenAI judge: one criterion, one chat completion, one answer.
- *
- * The only provider v1 ships, and it is deliberately the smallest surface that
- * can ask a model a question — one POST, one JSON body, one JSON answer. There
- * is no SDK behind it: the whole request is four fields, an SDK would be a
- * dependency that moves under the product, and the day a second provider
- * arrives it is a second file of this size rather than a second dependency.
- *
- * **Version-pinned in the URL.** `/v1/chat/completions` is the endpoint every
- * OpenAI-compatible provider implements, which is what makes the next provider
- * a base URL rather than a rewrite.
- */
+/** Call OpenAI Chat Completions and validate the structured LLM-judge response. */
 
 const OPENAI_CHAT_COMPLETIONS = "https://api.openai.com/v1/chat/completions";
 
@@ -54,14 +44,7 @@ const JUDGE_RESPONSE_FORMAT = {
   },
 } as const;
 
-/**
- * How many times a call is made before the assertion is `errored`.
- *
- * Three, for the reason the grading job's own attempt count is three: the
- * failures worth retrying are the transient ones — a rate limit, a gateway that
- * dropped the connection — and a fourth attempt at a request the provider keeps
- * refusing is spending the customer's money to learn the same thing again.
- */
+/** Maximum model requests, including retries for transient failures. */
 const MOST_ATTEMPTS = 3;
 
 /** How long a judge is given to answer before the attempt is abandoned. */
@@ -77,28 +60,22 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       ...(judge.reasoningEffort === undefined
         ? {}
         : { reasoning_effort: judge.reasoningEffort }),
-      // The lowest the API allows, because the same conversation and the same
-      // criterion should get the same answer twice. It is not a guarantee —
-      // no model offers one — and it is the difference between a judgment that
-      // usually reproduces and one that never does.
+      // Reduce output variation across repeated judgments.
       temperature: 0,
       response_format: JUDGE_RESPONSE_FORMAT,
       messages: [
-        // The library entry's own words, handed down with the question. This
-        // file holds no prompt of its own: what a judge is told it is is
-        // product behaviour a release ships and a developer can read on the
-        // Library screen, not something the provider adapter decides.
+        // Use the grading instructions from the resolved grader definition version.
         { role: "system", content: question.prompt },
         { role: "user", content: asked(question) },
       ],
     });
 
-    const said = await withRetries(async () => {
+    const said = await withRetries(async (httpAttempt) => {
+      const attemptId = randomUUID();
       const response = await fetch(OPENAI_CHAT_COMPLETIONS, {
         method: "POST",
         headers: {
-          // The one place the key is ever written down, and it is written into
-          // a header on the way out. Nothing logs this object.
+          // Send the provider key only in the authorization header; do not log it.
           authorization: `Bearer ${judge.key}`,
           "content-type": "application/json",
         },
@@ -107,15 +84,27 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       });
 
       if (!response.ok) {
-        // The provider's own words, trimmed to a line — never the request, so
-        // there is no path by which the header above reaches a log.
+        // Include up to 200 characters of the provider's error response.
         throw new JudgeRefused(
-          `the judge model answered ${response.status}: ${(await response.text()).slice(0, 200)}`,
+          `the judge model answered ${response.status}: ${(await response.text()).replaceAll(judge.key, "[redacted]").slice(0, 200)}`,
           retryable(response.status),
+          response.status,
         );
       }
 
-      return response.json() as Promise<unknown>;
+      const answered = (await response.json()) as unknown;
+      // Reported here rather than after the answer is parsed, because this is
+      // the moment the provider billed: a body that turns out to be unreadable
+      // was still generated and still cost money, and a spend record that
+      // depended on Egma liking the answer would under-count exactly the calls
+      // worth looking at.
+      try {
+        await report(judge.usage, httpAttempt, attemptId, answered);
+      } catch (cause) {
+        // A paid reply remains the reply even if every accounting store fails.
+        console.error("judge usage could not be retained; this accounting failure will not purchase another model response", cause);
+      }
+      return answered;
     });
 
     return answerOf(said, question);
@@ -125,29 +114,28 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
 /** A judge call that did not produce an answer, and whether asking again helps. */
 export class JudgeRefused extends Error {
   readonly retryable: boolean;
+  readonly status: number | undefined;
 
-  constructor(message: string, retryable: boolean) {
+  constructor(message: string, retryable: boolean, status?: number) {
     super(message);
     this.retryable = retryable;
+    this.status = status;
   }
 }
 
-/**
- * Which refusals are worth a second ask. A rate limit and a gateway error pass;
- * a rejected key and a model name that does not exist do not — asking again
- * would spend the same seconds to be told the same thing, and the assertion is
- * `errored` either way with the provider's own words on it.
- */
+/** Retry transient rate-limit and server failures, not authentication or model errors. */
 function retryable(status: number): boolean {
   return status === 408 || status === 409 || status === 429 || status >= 500;
 }
 
-async function withRetries<T>(attempt: () => Promise<T>): Promise<T> {
+async function withRetries<T>(
+  attempt: (httpAttempt: number) => Promise<T>,
+): Promise<T> {
   let waited = FIRST_BACKOFF_MILLISECONDS;
 
   for (let made = 1; ; made += 1) {
     try {
-      return await attempt();
+      return await attempt(made);
     } catch (error) {
       const worthRetrying =
         error instanceof JudgeRefused ? error.retryable : true;
@@ -157,6 +145,69 @@ async function withRetries<T>(attempt: () => Promise<T>): Promise<T> {
       waited *= 2;
     }
   }
+}
+
+/**
+ * What one answered request consumed, handed to whoever is collecting.
+ *
+ * **The cached half of the prompt is separated here, once.** OpenAI's
+ * `prompt_tokens` includes the tokens it served from its cache, and the cached
+ * rate is a tenth of the uncached one on the models Egma grades with — so a
+ * record that carried the gross figure and rated it at the uncached price
+ * would overcharge every grading call whose prompt repeated. The provider's own
+ * object rides along verbatim, so a mistake here can be re-rated later rather
+ * than re-measured.
+ *
+ * A body with no `usage` reports nothing. That is not a silent loss: it means
+ * the provider said nothing about what it consumed, and inventing a number
+ * would be worse than the gap.
+ */
+async function report(
+  sink: JudgeUsageSink | undefined,
+  httpAttempt: number,
+  attemptId: string,
+  said: unknown,
+): Promise<void> {
+  if (sink === undefined) return;
+  const body = typeof said === "object" && said !== null
+    ? (said as Record<string, unknown>)
+    : {};
+  const usage = body["usage"];
+  if (typeof usage !== "object" || usage === null || Array.isArray(usage)) {
+    return;
+  }
+  const counted = usage as Record<string, unknown>;
+  const promptTokens = numberIn(counted, "prompt_tokens");
+  const details = counted["prompt_tokens_details"];
+  const cached =
+    typeof details === "object" && details !== null
+      ? numberIn(details as Record<string, unknown>, "cached_tokens")
+      : 0;
+  const completionTokens = numberIn(counted, "completion_tokens");
+
+  const quantities: Record<string, number> = {};
+  const uncached = Math.max(promptTokens - cached, 0);
+  if (uncached > 0) quantities["input_tokens"] = uncached;
+  if (cached > 0) quantities["cached_input_tokens"] = cached;
+  if (completionTokens > 0) quantities["output_tokens"] = completionTokens;
+  if (Object.keys(quantities).length === 0) return;
+
+  const id = body["id"];
+  await sink({
+    attemptId,
+    occurredAt: new Date(),
+    httpAttempt,
+    providerRef: typeof id === "string" && id !== "" ? id : undefined,
+    quantities,
+    rawUsage: counted,
+  });
+}
+
+function numberIn(held: Record<string, unknown>, key: string): number {
+  const value = held[key];
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : 0;
 }
 
 /** The question, as the words after the system prompt. */
@@ -174,14 +225,8 @@ function asked(question: JudgeQuestion): string {
 }
 
 /**
- * The model's answer, read strictly.
- *
- * A judge that answered something this cannot read is a judge that did not
- * answer, and it is `errored` rather than quietly `cannot_determine`: the two
- * are different facts — one is a model saying the evidence does not settle the
- * question, the other is egma not knowing what the model said — and collapsing
- * them would hide a broken integration behind a word that means "fine, not
- * applicable".
+ * Reject malformed model responses as grading errors. Do not treat a parse
+ * failure as the model deciding that evidence is insufficient.
  */
 function answerOf(said: unknown, question: JudgeQuestion): JudgeAnswer {
   const content = contentOf(said);
@@ -226,4 +271,3 @@ function contentOf(said: unknown): string {
   }
   return content;
 }
-

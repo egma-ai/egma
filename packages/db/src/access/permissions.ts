@@ -3,29 +3,9 @@ import type { AuthContext } from "./context.ts";
 import { NotPermittedError } from "./errors.ts";
 
 /**
- * What each role may do, and the one function every action passes through.
- *
- * Everybody is an `admin` today, so nobody notices any of this. The machinery
- * is real anyway: shipping admin-only would mean writing the authorization
- * layer twice, once trivially and once properly the first time somebody wants a
- * read-only QA lead — which is a use case egma's own positioning names as
- * first-class. Switching the default later is a setting rather than a project.
- *
- * **A named set with an explicit action map, not an ordered number.** The three
- * roles happen to nest, so a numeric comparison would work today and `role >=
- * ADMIN` would read fine. It is declined because custom roles are
- * non-hierarchical by definition, and a numeric scale forecloses them — it
- * would have to be torn out the moment the first one arrives. An explicit map
- * is also the only form anybody audits: the whole permission model is one table
- * a person can hold in their head.
- *
- * **Nothing here reads the database.** The decision is made from the role the
- * `AuthContext` already carries, and the context was built by the
- * authentication path from a membership read at that moment. That is what makes
- * a key act at its creator's *current* role: the key row records who minted it
- * and nothing about what they may do, so the only way to turn a key into a
- * context is through the membership resolver, and demoting somebody takes
- * effect on their next request with no key row edited.
+ * Explicit allowed roles per action. Check the current role from AuthContext
+ * without reading the database here. Avoid numeric role ordering so each
+ * action's permissions remain visible in one table.
  */
 
 /**
@@ -34,8 +14,11 @@ import { NotPermittedError } from "./errors.ts";
  * the left of a row is every role that may not.
  */
 const PERMISSIONS = {
-  /** Read anything in the organization. */
+  /** Read project data and the caller's basic organization identity. */
   read:                   ["viewer", "member", "admin"],
+
+  /** Read organization settings, members, provider keys and billing. */
+  read_organization:      ["viewer", "member", "admin"],
 
   /** Create, edit, delete tests, personas, graders and test suites. */
   author_definitions:     [          "member", "admin"],
@@ -96,27 +79,19 @@ export type Action = keyof typeof PERMISSIONS;
 
 export const ACTIONS = Object.keys(PERMISSIONS) as readonly Action[];
 
+/** These actions affect or expose the whole organization, even from a project page. */
+const ORGANIZATION_ACTIONS: ReadonlySet<Action> = new Set([
+  "read_organization",
+  "manage_members",
+  "manage_organization",
+  "manage_projects",
+  "delete_organization",
+]);
+
 /**
- * Where an action is being taken. Both are named on every call.
- *
- * The organization is checked against the caller's own, which is the whole
- * reason it is a parameter: a credential naming one customer cannot act on
- * another's, whatever the role says.
- *
- * **The project is accepted and deliberately ignored.** Every member of an
- * organization holds their organization role on every project in it, so today
- * the project changes no answer. It is taken from the first commit anyway, and
- * this is not an oversight to tidy up later: project-level grants arrive as
- * overrides on top of the organization role, and having the argument already
- * there makes that a change to one function body rather than an audit of every
- * call site in the product.
- *
- * **It can be absent**, because an organization-scoped credential names no
- * project and an action taken for a whole customer is not taken in one. When
- * project-level grants arrive, that is the case that falls back to the
- * organization role rather than to any project's override — which is the
- * answer, not a gap, and stating the absence here is what will make it
- * answerable then.
+ * Organization and optional project the action targets. A project API key may
+ * target only its project. A session's active project is navigation context;
+ * it does not reduce the person's organization role.
  */
 export type ActionScope = {
   readonly organizationId: string;
@@ -127,13 +102,23 @@ export type ActionScope = {
  * Where the caller already is: their own organization, and the project they are
  * acting in if they are acting in one.
  *
- * Internal to this module, and it is what every check inside it names, because
- * nothing here can act anywhere else — an exported function reaches only the
- * rows the context already names. A route may legitimately name somewhere else
- * and writes the scope out in full; a data-access function never can.
+ * Use this for operations on the caller's current scope. An operation that
+ * accepts a different target, such as minting a key, must name that target
+ * explicitly so the credential ceiling can check it.
  */
 export function here(auth: AuthContext): ActionScope {
   return { organizationId: auth.organizationId, projectId: auth.projectId };
+}
+
+function scopeWithinCredential(auth: AuthContext, scope: ActionScope): boolean {
+  return (
+    scope.organizationId === auth.organizationId &&
+    (
+      auth.via !== "api_key" ||
+      auth.projectId === undefined ||
+      scope.projectId === auth.projectId
+    )
+  );
 }
 
 /**
@@ -150,28 +135,22 @@ export function permits(
 ): boolean {
   // The credential names the customer. A caller acting for one organization has
   // no role at all in another, so this is refused before the role is consulted.
-  if (scope.organizationId !== auth.organizationId) return false;
-
-  // scope.projectId is read by nothing, on purpose. See ActionScope.
+  if (!scopeWithinCredential(auth, scope)) return false;
+  if (
+    auth.via === "api_key" &&
+    auth.projectId !== undefined &&
+    ORGANIZATION_ACTIONS.has(action)
+  ) {
+    return false;
+  }
 
   const permitted: readonly Role[] = PERMISSIONS[action];
   return permitted.includes(auth.role);
 }
 
 /**
- * The one permission function every action in the product passes through.
- *
- * It answers by refusing: a call that returns is a call that was allowed, so
- * there is no result to forget to look at. The decision itself is still made in
- * exactly one place — `permits`, above — and this adds only the refusal.
- *
- * **Called from the route that takes the action, and from this module when
- * there is no route.** Creating a project and writing an organization's
- * settings are reachable only through the data-access module today, so that is
- * where they are refused; a row of the table with nothing calling it refuses
- * nobody while reading like coverage, which is worse than not having written
- * it. A test reads the source and fails on a row that is neither enforced nor
- * declared unreachable.
+ * Throw when permits rejects an action. Enforce at the action boundary, including
+ * direct data access entry points; declaring a permission alone does not enforce it.
  */
 export function authorize(
   auth: AuthContext,
@@ -184,25 +163,15 @@ export function authorize(
 }
 
 /**
- * Whether the caller may see or revoke one particular API key.
- *
- * The table has a single row for this and the word that carries it is
- * *anyone's*: an `admin` reaches every key in the organization, so responding
- * to a leak never depends on the person who created the key. A key you minted
- * is yours at any role, which is what keeps the product usable for a `viewer` —
- * login mints a key as its final step, and a credential you cannot list or
- * revoke is one you cannot rotate.
- *
- * It lives here rather than as a comparison written out at each call site for
- * the same reason `authorize` does. A rule spread across call sites is a rule
- * nobody can audit.
+ * All roles may see and revoke their own keys within the credential's scope.
+ * Admins may also manage other members' keys within that same scope.
  */
 export function permitsApiKeyMintedBy(
   auth: AuthContext,
   userId: string,
   scope: ActionScope,
 ): boolean {
-  if (scope.organizationId !== auth.organizationId) return false;
+  if (!scopeWithinCredential(auth, scope)) return false;
   if (userId === auth.userId) return true;
   return permits(auth, "manage_any_api_key", scope);
 }

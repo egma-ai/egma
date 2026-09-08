@@ -23,7 +23,7 @@ import { metrics as openTelemetryMetrics } from "@opentelemetry/api";
 import {
   acceptEvidence,
   IngestionUnavailableError,
-} from "./ingestion/accept.ts";
+} from "@egma/ingestion";
 import { platformEvent, safeExceptionType } from "./platform-log.ts";
 import {
   getRetellCall,
@@ -40,53 +40,15 @@ import {
 } from "./retell/normalise.ts";
 
 /**
- * Retell polling: a bookmark, a bounded budget, and nothing kept.
+ * Poll Retell using stored scan progress and bounded retry state. Normalize
+ * fetched records and accept them through the shared durable-ingestion path.
  *
- * Retell has to be pulled, so this is the one provider-shaped loop egma runs.
- * What it is **not** is a second way to store evidence: a hydrated call is
- * normalized and handed to the same acceptance module the OTLP door uses, and a
- * call that lands leaves no Postgres row at all. What Postgres keeps is where a
- * selected agent's reading has got to, and — only for calls that did not work —
- * a short-lived retry budget.
- *
- * ## What one turn does, in the order it does it
- *
- * 1. **Owed retries first, and only when something is owed.** The claim already
- *    knows whether this agent has any transient call state, so an agent with
- *    none does no work here and no query is issued for it. That is what keeps a
- *    30-second empty poll to one claim, one provider request and one release.
- * 2. **List one fixed page.** The window and the page bounds were fixed when the
- *    scan was claimed and do not move while it is paged.
- * 3. **An empty page stops here.** No trace-store lookup, no transient lookup,
- *    no hydration, no object write, no import log — an empty poll is the normal
- *    case at low volume, and it must be quiet and nearly free.
- * 4. **A non-empty page asks two batched questions**: which of these calls the
- *    trace store already holds, and which of them egma is already retrying or
- *    has recently dropped. Two statements for a hundred calls, never two per
- *    call.
- * 5. **Fetch and accept the remainder together**, one hydration attempt each
- *    and at most `RETELL_HYDRATION_CONCURRENCY` of them open at once.
- * 6. **Advance only when every listed identity has an answer** — committed,
- *    durable in the object store, scheduled for a retry, or terminally dropped.
- *
- * ## The bounded budget, and why it is stored
- *
- * A call whose fetch or normalization fails gets one initial attempt and at
- * most three automatic retries. The count is a Postgres row, not a loop
- * variable: a restart in the middle of a budget resumes it, and the five-minute
- * overlap listing the same call again is the *same* observation rather than a
- * new one. After the last retry fails, egma emits one structured event and one
- * low-cardinality counter, drops the work, and leaves an identity-only marker
- * that stops the overlap starting the whole cycle again. There is no customer
- * repair screen and no `Retry now`: a provider call egma could not read is an
- * operational error and an honest gap in Monitoring.
- *
- * ## Object-store failure is not a hydration failure
- *
- * If acceptance cannot make evidence durable, egma has the evidence and the
- * provider did nothing wrong. That call gets **no** retry state and the page
- * does **not** advance past it. The next turn lists the same page and tries
- * again — which is the one behaviour that cannot lose a conversation.
+ * Process due retries, then pages within the fixed scan window. Batch-check
+ * committed, pending-retry, dropped, and simulation identities before fetching
+ * the rest with bounded concurrency. Advance only when each item is accounted for.
+ * Hydration failures use a persisted retry budget and terminal marker.
+ * Object-store acceptance failure does not spend that budget or advance
+ * the page. Accepted evidence is durable before it becomes query-visible.
  */
 
 /** Retell selected agents are due about every 30 seconds. */
@@ -112,14 +74,9 @@ const BACKOFF_CAP_MILLISECONDS = 5 * 60_000;
 const RETRY_BACKOFF_MILLISECONDS = [30_000, 60_000, 120_000] as const;
 
 /**
- * How far before the scan's lower bound the committed-identity probe looks.
- *
- * The provider lists by the instant a call **ended**; the trace store files a
- * span by the instant it **started**. A call that ran across the scan's lower
- * bound is therefore listed by one and filed before the other, so the probe
- * reaches back far enough to cover any real conversation. Getting this wrong
- * costs a re-fetch and a replay, never a duplicate — which is why a generous
- * bounded margin is the right shape and a clever exact one is not.
+ * The provider lists by end time while storage partitions by span start.
+ * Look back before the scan window to find calls that cross its lower bound.
+ * A missed identity can cause another fetch and acceptance attempt.
  */
 const CALL_START_MARGIN_MILLISECONDS = 6 * 60 * 60 * 1_000;
 
@@ -127,55 +84,24 @@ const CALL_START_MARGIN_MILLISECONDS = 6 * 60 * 60 * 1_000;
 const RETRIES_PER_TURN = 25;
 
 /**
- * How many of one page's calls egma hydrates at the same time.
- *
- * The ceiling is protective, not a throughput dial. A burst wide enough to make
- * Retell refuse costs egma either way. A refusal that reads as this call's own
- * spends one attempt of that call's bounded hydration budget — one initial
- * attempt and at most three automatic retries — and a budget spent on refusals
- * egma provoked ends where any exhausted budget ends: a terminal drop, and a
- * conversation egma never imports. A refusal that reads as the account's pauses
- * the whole selected agent until the provider says it may read again. Sixteen
- * is narrow enough that a page cannot become that burst, and wide enough that a
- * full page is a few waves rather than one sequential read per conversation.
+ * Limit concurrent hydration to reduce provider pressure. Rate limits can
+ * pause polling or consume per-call retry attempts; this value is not a
+ * measured throughput or rate-limit guarantee.
  */
 export const RETELL_HYDRATION_CONCURRENCY = 16;
 
 /**
- * How long an accepted-but-not-yet-visible identity is remembered.
- *
- * Long enough to outlast the five-minute overlap a regular scan rereads, so a
- * call this poller has already made durable is recognised on every poll that
- * could list it again — right up until the drainer makes it query-visible and
- * the committed probe takes the recognition over. Bounded so a drainer that
- * never catches up cannot grow this memory without end: past this window the
- * call is outside every overlap and nothing lists it, so forgetting it imports
- * nothing.
+ * Expire local accepted-identity memory after this interval. Reconciliation
+ * also removes committed identities. Expiration can permit another fetch
+ * if draining remains behind or the provider lists the call again.
  */
 const ACCEPTED_IDENTITY_MEMORY_MILLISECONDS = 15 * 60_000;
 
 /**
- * A per-poller memory of identities this process has accepted but has not yet
- * seen the trace store commit.
- *
- * A call is durable in the object store the instant `acceptEvidence` returns,
- * but query-visible only once the drainer has taken its segment — a gap of at
- * least one scan interval, and longer when the drainer is behind. Across that
- * gap the five-minute overlap lists the same call again, and neither guard the
- * page keeps would recognise it: the committed probe is blind until the drain,
- * and a call that simply worked leaves no transient row. This is what does — an
- * identity is remembered when it is accepted and consulted beside the probe on
- * every later turn, so one conversation is imported once even while its drain is
- * behind.
- *
- * In memory and per process, never Postgres: a successful call leaves no row and
- * this keeps that true. The residual the design accepts is here: a monitored
- * agent whose lease moves to another process between acceptance and visibility
- * carries none of this memory, so that process can accept the same call again —
- * and the store's identity check then retains the changed pair as a conflict
- * rather than replacing the first. That outcome is operator-visible and never
- * silent, which is why one process's memory is enough and a shared one is not
- * built.
+ * Per-process cache of durable identities not yet visible in ClickHouse.
+ * Consult it with the committed-span probe to avoid repeated hydration while
+ * draining lags. Restart or lease movement loses this cache; a repeated fetch
+ * may be accepted again and changed evidence can become an integrity conflict.
  */
 export type AcceptedIdentities = {
   /** Remember one trace made durable at `now`. */
@@ -898,20 +824,9 @@ function endsTurn(outcome: CallOutcome): boolean {
 }
 
 /**
- * Hydrate and accept a page's outstanding calls together, answering in listed
- * order.
- *
- * At most `RETELL_HYDRATION_CONCURRENCY` hydrations are open at once, and each
- * call keeps everything one at a time gave it: its own lease check, its own
- * single attempt, and an answer that belongs to it alone — one call's failed
- * hydration writes that call's retry row and leaves its page-mates to finish.
- * Acceptances are deliberately not serialized: the door they go through already
- * takes many senders at once, and acceptances that overlap share segment seals,
- * which makes them fewer and fuller objects rather than a contended queue.
- *
- * The answer is shorter than `outstanding` where the turn bound stopped it
- * short, and every call it did reach has finished before it answers: a turn
- * about to yield its lease must have nothing of its own still writing.
+ * Hydrate and accept with bounded concurrency, returning results in listed
+ * order. Keep per-call lease checks and retry state. If the turn deadline
+ * stops scheduling, return fewer results after all started work finishes.
  */
 async function hydrateOutstanding(
   target: MonitoringPullTarget,
@@ -1266,23 +1181,9 @@ async function runTarget(
         );
 
         /*
-         * The calls egma's own simulator made, which are simulations and not
-         * production.
-         *
-         * A Retell simulation's record is pulled the moment the conversation
-         * ends and filed under its simulation — one conversation, one trace,
-         * both POVs (ADR-0024 §2). Listing it here again would put the same
-         * conversation under Monitoring a second time, where a team reads its
-         * *production* traffic, and would judge it as live traffic nobody asked
-         * egma to create.
-         *
-         * **A gate, not an optimization**, which is the difference between this
-         * lookup and the committed-identity probe above: that one may fail and
-         * the calls are simply accepted again, harmlessly, under one immutable
-         * identity. Filing a simulation as production is not harmless, so this
-         * question is asked of Postgres — the same store the poller already
-         * reads its transient state from, in the same batched step — and a
-         * failure to answer it stops the turn rather than guessing.
+         * Exclude provider calls recorded as simulations so they do not also appear
+         * as production. This PostgreSQL lookup is required; failure stops the turn.
+         * The committed-trace probe above is only an optimization.
          */
         const simulated = await options.store.simulationProviderReferencesIn(
           target.auth,

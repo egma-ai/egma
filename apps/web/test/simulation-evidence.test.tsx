@@ -150,6 +150,7 @@ function grade(overrides: Record<string, unknown> = {}) {
 
 function evidence(overrides: Record<string, unknown> = {}) {
   return {
+    workBlock: null,
     id: "sim_1",
     projectId: "prj_1",
     runId: "run_1",
@@ -173,6 +174,8 @@ function evidence(overrides: Record<string, unknown> = {}) {
     startedAt: "2026-08-15T10:00:00.000Z",
     endedAt: "2026-08-15T10:00:40.000Z",
     providerReference: "call_abc123",
+    agentPovComplete: false,
+    agentPovIncomplete: false,
     hasRecording: false,
     measures: { durationMs: 40_000, turnCount: 2, toolCallCount: 0 },
     metrics: [
@@ -308,7 +311,29 @@ describe("one simulation's grades", () => {
     expect(screen.queryByText("simulator_error")).toBeNull();
   });
 
-  it("shows the total average score without creating an overall pass or fail", async () => {
+  it("offers key repair for a proven simulation credential failure", async () => {
+    page({ read: evidence({ status: "failed", reason: "provider_key_unavailable",
+      executionFailure: "The saved OpenAI key cannot be used.", gradingPlan: null, transcript: null,
+    }) });
+    render(<SimulationEvidencePage />);
+    expect(await screen.findByText("The saved OpenAI key cannot be used.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/provider-api-keys");
+    expect(screen.queryByRole("link", { name: "Add credits" })).toBeNull();
+  });
+
+  it("offers key repair beside a grader's typed customer-key error", async () => {
+    page({ read: evidence({ gradingState: "error", grades: [grade({ score: null, result: "errored",
+      details: { errorCode: "provider_key_unavailable", error: "The saved OpenAI key cannot be used." },
+    })], gradeHistory: [], combinedScore: null }) });
+    render(<SimulationEvidencePage />);
+    expect(await screen.findByText("The saved OpenAI key cannot be used.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/provider-api-keys");
+    expect(screen.queryByRole("link", { name: "Add credits" })).toBeNull();
+  });
+
+  it("counts the graders that passed without creating an overall pass or fail", async () => {
     page();
     render(<SimulationEvidencePage />);
 
@@ -333,12 +358,28 @@ describe("one simulation's grades", () => {
     const summary = await screen.findByRole("region", {
       name: "Simulation summary",
     });
-    expect(within(summary).getByText("Total avg score")).toBeTruthy();
-    expect(within(summary).getByText("0.50")).toBeTruthy();
+    expect(within(summary).getByText("Graders passed")).toBeTruthy();
+    expect(within(summary).getByText("0/1 · 1 failed")).toBeTruthy();
+    /*
+     * The bar's values read in the product's own sans face. Tabular figures
+     * still hold the columns still; mono stays where it names a thing.
+     */
+    for (const value of ["0/1 · 1 failed", "40s"]) {
+      expect(within(summary).getByText(value).className).not.toContain("font-mono");
+      expect(within(summary).getByText(value).className).toContain("tabular-nums");
+    }
     expect(within(summary).getByText("Duration")).toBeTruthy();
     expect(within(summary).getByText("40s")).toBeTruthy();
     expect(within(summary).getByText("Total turns")).toBeTruthy();
+    /*
+     * The average of every grader's score has left the bar. One number over
+     * graders that each answered their own question reads as an overall
+     * verdict, and there is none: ADR-0017 stands.
+     */
+    expect(within(summary).queryByText("Total avg score")).toBeNull();
+    expect(within(summary).queryByText("0.50")).toBeNull();
     expect(within(summary).queryByText(/overall|verdict/iu)).toBeNull();
+    expect(within(summary).queryByText(/^(Passed|Failed|Error)$/u)).toBeNull();
   });
 
   it("presents chat as chat and leaves every audio control out", async () => {
@@ -380,7 +421,7 @@ describe("one simulation's grades", () => {
     const transcript = await screen.findByRole("dialog", { name: "Transcript" });
     expect(within(transcript).queryByRole("heading", { name: "Recording" })).toBeNull();
     expect(
-      within(transcript).getByText(/no conversation turns for this simulation/iu),
+      within(transcript).getByText("Waiting for LiveKit transcript"),
     ).toBeTruthy();
     expect(within(transcript).queryByText(/speech/iu)).toBeNull();
   });
@@ -388,6 +429,10 @@ describe("one simulation's grades", () => {
   it("shows a dash for every summary value that was not recorded", async () => {
     page({
       read: evidence({
+        gradingState: "not_requested",
+        grades: [],
+        gradeHistory: [],
+        gradingPlan: null,
         combinedScore: null,
         measures: { durationMs: null, turnCount: null, toolCallCount: null },
         metrics: [],
@@ -433,7 +478,7 @@ describe("one simulation's grades", () => {
     const summary = await screen.findByRole("region", {
       name: "Simulation summary",
     });
-    expect(within(summary).getByText("0.00")).toBeTruthy();
+    expect(within(summary).getByText("0/1 · 1 failed")).toBeTruthy();
     expect(within(summary).getByText("0s")).toBeTruthy();
     expect(within(summary).getByText("0")).toBeTruthy();
     expect(within(summary).getByText("0 ms")).toBeTruthy();
@@ -531,7 +576,9 @@ describe("one simulation's grades", () => {
     expect(screen.getByText("Waiting for this grader to return a grade."))
       .toBeTruthy();
     const summary = screen.getByRole("region", { name: "Simulation summary" });
-    expect(within(summary).getByText("-")).toBeTruthy();
+    expect(within(summary).getByText("Graders passed")).toBeTruthy();
+    /* A partial count while grading would read as a settled one. */
+    expect(within(summary).getByText("—")).toBeTruthy();
     expect(within(summary).queryByText("Not available")).toBeNull();
     expect(document.body.textContent).not.toContain("gradingJobs");
   });
@@ -558,8 +605,45 @@ describe("one simulation's grades", () => {
       .toBeTruthy();
     expect(screen.getAllByText("errored").length).toBeGreaterThan(0);
     const summary = screen.getByRole("region", { name: "Simulation summary" });
-    expect(within(summary).getByText("-")).toBeTruthy();
+    expect(within(summary).getByText("0/1 · 1 errored")).toBeTruthy();
     expect(within(summary).queryByText("Not available")).toBeNull();
+  });
+
+  it("shows the current funding block for a queued simulation", async () => {
+    page({ read: evidence({
+      status: "queued",
+      workBlock: { error: "providers_unfunded", message: "The inference balance is $0.00." },
+    }) });
+    render(<SimulationEvidencePage />);
+    const refusal = await screen.findByText("This simulation is waiting. The inference balance is $0.00.");
+    const alert = within(refusal.closest('[role="alert"]') as HTMLElement);
+    expect(alert.getByRole("link", { name: "Add credits" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/billing");
+    expect(alert.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/provider-api-keys");
+  });
+
+  it("keeps a regrade funding refusal distinct from missing evidence and offers both funding paths", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/v1/simulations/sim_1": { status: 200, body: evidence() },
+      "/v1/simulations/sim_1/regrade": {
+        status: 422,
+        body: { error: "providers_unfunded", message: "The inference balance is $0.00." },
+      },
+    });
+    render(<SimulationEvidencePage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Regrade" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Regrade simulation" }));
+    const refusal = await screen.findByText("The inference balance is $0.00.");
+    const alert = within(refusal.closest('[role="alert"]') as HTMLElement);
+    expect(alert.getByRole("link", { name: "Add credits" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/billing");
+    expect(alert.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/provider-api-keys");
+    expect(screen.queryByText(/did not finish with gradeable evidence/iu)).toBeNull();
+    expect(screen.queryByText(/queued for a whole-simulation regrade/iu)).toBeNull();
   });
 
   it("regrades the whole simulation and keeps the action from viewers", async () => {
@@ -699,14 +783,8 @@ describe("the transcript time rail", () => {
   });
 
   /**
-   * **Who answered a tool call, said once and quietly.**
-   *
-   * A mock tool answered this call, read by name off the test version this
-   * simulation pinned, so a reader knows the answer in front of them came from
-   * the test rather than from their own backend. The mock tool's own name is
-   * the tool's name, already on the row, so the mark does not repeat it. A real
-   * call is the ordinary case and says nothing extra — there is no second word
-   * for "not mocked" to learn.
+   * Render the supplied mocked provenance mark without repeating the tool name.
+   * An unmarked tool call gets no extra label. This does not verify tool execution.
    */
   it("marks a call a mock tool answered, and leaves a real one unmarked", () => {
     const read = evidence();
@@ -1163,18 +1241,9 @@ describe("the transcript time rail", () => {
 });
 
 /**
- * **The run view shows the agent's POV, and one conversation once.**
- *
- * A simulation stores both accounts of the same call: the persona's, which is
- * what egma's own simulator said, heard and recorded, and the agent's, which is
- * what the agent's own process reported — every tool call with the arguments
- * its model emitted and the result it received. The transcript a developer
- * reads is the agent's. There is no side-by-side, no threshold and no diff:
- * the persona's POV is stored, and what it is still drawn for is the recording
- * underneath and the origin every row seeks against.
- *
- * The conversation here is the one that opened this effort — a booking, three
- * tool calls, one of them mocked and one of them refused.
+ * Use the agent POV for the readable transcript. The persona POV supplies
+ * recording evidence and the seek origin. This fixture contains a booking
+ * with three tool calls, including mocked and refused results.
  */
 describe("the agent's POV is what a reader is shown", () => {
   const AGENT_TURNS = [
@@ -1222,6 +1291,147 @@ describe("the agent's POV is what a reader is shown", () => {
     };
   }
 
+  it("shows a failed Retell web call's missing transcript without simulator speech or mock rows", async () => {
+    const read = evidence();
+    page({
+      read: evidence({
+        status: "failed",
+        gradingState: "not_requested",
+        agentPovIncomplete: true,
+        connectionSnapshot: {
+          ...read.connectionSnapshot,
+          connectionType: "retell_web_call",
+        },
+        transcript: {
+          ...read.transcript,
+          turns: read.transcript.turns.map((one) => ({ ...one, pov: "persona" })),
+          spans: [toolCall({ toolName: "book_appointment", pov: "persona", toolProvenance: "mocked" })],
+        },
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText("Retell transcript unavailable")).toBeTruthy();
+    expect(screen.queryByText("Move Thursday's clean.")).toBeNull();
+    expect(screen.queryByText("You are all set for Tuesday.")).toBeNull();
+    expect(screen.queryByLabelText("Tool call, book_appointment")).toBeNull();
+  });
+
+  it("refreshes a failed LiveKit simulation while its platform transcript is still pending", async () => {
+    const read = evidence({
+      status: "failed",
+      gradingState: "not_requested",
+      agentPovIncomplete: false,
+      transcript: null,
+      connectionSnapshot: { ...evidence().connectionSnapshot, connectionType: "livekit_room" },
+    });
+    page({ read });
+    render(<SimulationEvidencePage />);
+    expect(await screen.findByText("Waiting for LiveKit transcript")).toBeTruthy();
+
+    page({ read: { ...read, agentPovIncomplete: true } });
+    expect(await screen.findByText("LiveKit transcript unavailable", {}, { timeout: 4000 })).toBeTruthy();
+  });
+
+  it("keeps reading a partial LiveKit transcript until its final record arrives", async () => {
+    const read = evidence({
+      agentPovComplete: false,
+      connectionSnapshot: {
+        ...evidence().connectionSnapshot,
+        connectionType: "livekit_room",
+      },
+      transcript: bothPovs([]),
+    });
+    page({ read });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText("Tuesday is fully booked.")).toBeTruthy();
+    expect(screen.getByText(/Waiting for LiveKit transcript/u)).toBeTruthy();
+    page({
+      read: {
+        ...read,
+        agentPovComplete: true,
+        transcript: bothPovs([toolCall({ toolName: "get_availability" })]),
+      },
+    });
+
+    expect(await screen.findByLabelText("Tool call, get_availability", {}, { timeout: 4000 })).toBeTruthy();
+    expect(screen.queryByText(/Waiting for LiveKit transcript/u)).toBeNull();
+    expect(screen.queryByText("You are all set for Tuesday.")).toBeNull();
+  });
+
+  it.each(["retell_web_call", "livekit_room"])("shows only platform evidence on the %s simulation page", async (connectionType) => {
+    page({
+      read: evidence({
+        agentPovComplete: true,
+        agentPovIncomplete: false,
+        connectionSnapshot: { ...evidence().connectionSnapshot, connectionType },
+        transcript: bothPovs([
+          toolCall({ toolName: "get_availability" }),
+          toolCall({ spanId: "mock_booking", toolName: "book_appointment", pov: "persona" }),
+        ]),
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText("Tuesday is fully booked.")).toBeTruthy();
+    expect(screen.getByLabelText("Tool call, get_availability")).toBeTruthy();
+    expect(screen.queryByText("You are all set for Tuesday.")).toBeNull();
+    expect(screen.queryByLabelText("Tool call, book_appointment")).toBeNull();
+  });
+
+  it.each(["retell_web_call", "livekit_room"])("keeps zero platform tools empty on the %s simulation page", async (connectionType) => {
+    page({
+      read: evidence({
+        agentPovComplete: true,
+        agentPovIncomplete: false,
+        connectionSnapshot: { ...evidence().connectionSnapshot, connectionType },
+        transcript: bothPovs([
+          toolCall({ toolName: "book_appointment", pov: "persona" }),
+        ]),
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText("Tuesday is fully booked.")).toBeTruthy();
+    expect(screen.queryByLabelText(/^Tool call, /u)).toBeNull();
+  });
+
+  it("marks a failed simulation's partial Retell transcript without filling its missing tools", async () => {
+    page({
+      read: evidence({
+        status: "failed",
+        agentPovIncomplete: true,
+        connectionSnapshot: { ...evidence().connectionSnapshot, connectionType: "retell_web_call" },
+        transcript: bothPovs([toolCall({ toolName: "book_appointment", pov: "persona" })]),
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText(/Retell transcript incomplete/u)).toBeTruthy();
+    expect(screen.getByText("Tuesday is fully booked.")).toBeTruthy();
+    expect(screen.queryByLabelText("Tool call, book_appointment")).toBeNull();
+  });
+
+  it.each(["retell_text_mode", "retell_chat_api", "phone_number"])("keeps the directly collected transcript on %s", async (connectionType) => {
+    const read = evidence();
+    page({
+      read: evidence({
+        connectionSnapshot: { ...read.connectionSnapshot, connectionType },
+        transcript: {
+          ...read.transcript,
+          turns: read.transcript.turns.map((one) => ({ ...one, pov: "persona" })),
+          spans: [toolCall({ pov: "persona" })],
+        },
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText("You are all set for Tuesday.")).toBeTruthy();
+    expect(screen.getByLabelText("Tool call, check_availability")).toBeTruthy();
+    expect(screen.queryByText(/transcript unavailable|Waiting for .* transcript/u)).toBeNull();
+  });
+
   it("lists the agent's turns and tool calls, and none of the persona's", () => {
     const withBoth = bothPovs([
       toolCall({ spanId: "lk_tool_1", toolName: "list_providers" }),
@@ -1254,6 +1464,21 @@ describe("the agent's POV is what a reader is shown", () => {
     // not drawn beside it.
     expect(screen.getAllByLabelText(/^Tool call, /u)).toHaveLength(1);
     expect(screen.getByLabelText("Tool call, list_providers")).toBeTruthy();
+  });
+
+  it("never fills an agent transcript's empty tool list with simulator tools", () => {
+    const withBoth = bothPovs([]);
+    render(
+      <ChatTranscript
+        transcript={withBoth as never}
+        requiredPov="agent"
+        toolCalls={[toolCall({ pov: "persona", toolName: "book_appointment" }) as never]}
+      />,
+    );
+
+    expect(screen.getByText("Tuesday is fully booked.")).toBeTruthy();
+    expect(screen.queryByLabelText("Tool call, book_appointment")).toBeNull();
+    expect(screen.queryByText("You are all set for Tuesday.")).toBeNull();
   });
 
   it("keeps egma's own tool rows when the agent reported none", () => {
@@ -1679,4 +1904,12 @@ describe("recording evidence", () => {
       screen.getByText("No audio recording is available for this trace."),
     ).toBeTruthy();
   });
+});
+
+it("keeps simulation evidence free of billing reads and cost elements", async () => {
+  page();
+  render(<SimulationEvidencePage />);
+  expect(await screen.findByText("You are all set for Tuesday.")).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Cost" })).toBeNull();
+  expect(sent.some((request) => request.path.includes("/usage") || request.path.includes("/billing"))).toBe(false);
 });

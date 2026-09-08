@@ -1008,14 +1008,8 @@ describe("the project Graders surface", () => {
   });
 
   /**
-   * A sheet that is not open holds no draft.
-   *
-   * The create sheet stays mounted after it closes — the page renders it
-   * unconditionally — and its fields are reset when it opens rather than when
-   * it closes, so what was typed survives and its `changed` stays true. With no
-   * `open` in the condition, that closed sheet kept a draft registered in the
-   * shared registry, and the next product link asked "Leave without saving?"
-   * about a grader that was already created.
+   * A closed create sheet must unregister its draft even though it remains
+   * mounted and retains field values until the next open.
    */
   it("stops protecting the custom-grader draft once the sheet closes", async () => {
     apiAnswers(answersThatCreateAGrader());
@@ -1222,7 +1216,7 @@ describe("the project Graders surface", () => {
       ...standardAnswers(),
       [`GET /v1/grader-library/${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}`]: {
         status: 200,
-        body: EXPECTED_DEFINITION,
+        body: { ...EXPECTED_DEFINITION, definitionVersion: 3, currentDefinitionVersion: 3 },
       },
       "PATCH /v1/graders/grd_expected": { status: 200, body: changed },
     });
@@ -1230,6 +1224,8 @@ describe("the project Graders surface", () => {
     await chooseRowMenuItem("Expected behaviors", "Edit");
 
     const sheet = await screen.findByRole("dialog", { name: "Expected behaviors" });
+    expect(await within(sheet).findByText("Predefined · v3")).toBeTruthy();
+    expect(within(sheet).queryByText("This project's scope, settings, and individual pass threshold.")).toBeNull();
     /* The caption that answered a question nobody asked is gone. */
     expect(within(sheet).queryByText("Fixed by Egma")).toBeNull();
     expect(within(sheet).getByText("Scope")).toBeTruthy();

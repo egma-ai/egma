@@ -1,26 +1,12 @@
 import protobuf from "protobufjs";
 
 /**
- * The OpenTelemetry trace wire format, as the door has to be able to read it.
- *
- * Transcribed from `opentelemetry-proto` v1.9.0 — `common/v1/common.proto`,
- * `resource/v1/resource.proto`, `trace/v1/trace.proto` and
- * `collector/trace/v1/trace_service.proto` — with the upstream comments and the
- * per-language `option` lines left out and nothing else changed. Field numbers,
- * field types and message nesting are what decide whether bytes off the wire
- * come back as the values that were sent, so those are exactly upstream's.
- *
- * It is a string in a TypeScript file rather than four `.proto` files beside it
- * because the compiled service is what runs in a container: `tsc` emits
- * JavaScript and copies nothing, so a `.proto` on disk would be present when the
- * tests run from source and missing the moment the image starts. Refreshing it
- * means re-transcribing from a named upstream tag, which is the same discipline
- * the captured fixture is refreshed under.
- *
- * **Reading is almost all this is for.** Nothing in egma writes OTLP; the two
- * messages encoded here are the responses the specification requires the door
- * to answer with — `ExportTraceServiceResponse` when the export was accepted,
- * and `google.rpc.Status` when it was refused.
+ * OTLP trace schema transcribed from opentelemetry-proto v1.9.0:
+ * common/v1/common.proto, resource/v1/resource.proto, trace/v1/trace.proto,
+ * and collector/trace/v1/trace_service.proto. Preserve field numbers, types,
+ * and nesting when refreshing from a named upstream tag.
+ * Embedded as a string because tsc does not copy .proto files into the build.
+ * This API decodes exports and encodes OTLP success/error responses.
  */
 
 const COMMON = `
@@ -178,14 +164,8 @@ message ExportTracePartialSuccess {
 `;
 
 /**
- * The message OTLP/HTTP requires every 4xx and 5xx body to be, in the encoding
- * the request arrived in.
- *
- * From `google/rpc/status.proto`, minus its third field — `repeated
- * google.protobuf.Any details` — which egma never sets and which would drag the
- * whole of `Any` in behind it. A decoder skips a field that is not there, and
- * the two that are keep their numbers, so this reads as a `Status` to anything
- * that knows one.
+ * google.rpc.Status for OTLP HTTP errors. Omit the unused Any details field;
+ * retain upstream field numbers for code and message.
  */
 const RPC_STATUS = `
 syntax = "proto3";

@@ -1,68 +1,13 @@
-"""One real typed simulation in a real LiveKit room — opt-in.
+"""Opt-in chat simulation against the LiveKit fixture worker and local workbench.
+Start fixtures/livekit-dumb-agent with chat setup before running this test.
 
-The chat plug is proved offline against a room-shaped LiveKit, which says
-the lifecycle and the turn rule are right and nothing at all about a real
-project, a real worker, or a real agent that has taken the six lines. This
-file is the other half: a spec whose connection names a room and says
-``chat`` goes in at the control plane, egma makes the room in that
-project — named with the ``egma-sim-chat-`` mark the worker reads —
-dispatches the fixture worker into it, types to it, reads its typed
-answers back, and the record that comes back is read the way the offline
-acceptance suite reads one.
+Run: uv run pytest tests/test_live_livekit_chat.py -v
+Set TEST_LIVEKIT_URL, TEST_LIVEKIT_API_KEY, TEST_LIVEKIT_API_SECRET,
+TEST_LIVEKIT_AGENT_NAME, and TEST_MODEL_API_KEY. Standard LiveKit variables,
+EGMA_DUMB_AGENT_NAME, and OPENAI_API_KEY are fallbacks. No STT or TTS key is needed.
 
-It is opt-in because CI holds no LiveKit project and no agent worker, and
-it skips — visibly, never failing, never waiting on anybody::
-
-    TEST_LIVEKIT_URL=wss://... \\
-    TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \\
-    TEST_LIVEKIT_AGENT_NAME=front-desk \\
-    TEST_MODEL_API_KEY=... \\
-    uv run pytest tests/test_live_livekit_chat.py -v
-
-Each name falls back to the plain one LiveKit's own tooling reads, and
-``TEST_LIVEKIT_AGENT_NAME`` falls back to ``EGMA_DUMB_AGENT_NAME`` — the
-name the counterpart worker registers under — so one environment starts
-the worker and runs this.
-
-**Two things this needs that the spoken live test needs and this one does
-not.** There is no speech key of either kind: the contract's schema
-refuses ``models.stt.key`` and ``models.tts.key`` on a chat spec, which is
-the same fact as no speech running. And there is no sentence-tokenizer
-corpus, because nothing here speaks a sentence. The shorter skip list is
-the product claim written as an environment.
-
-The counterpart is ``fixtures/livekit-dumb-agent``, carrying the six lines
-that read the modality off the room's name. Start it first and leave it
-running.
-
-## What is asserted
-
-*Structure*, not content, as everywhere live. A conversation happened, it
-ended honestly, the room's own name is the provider reference, no
-credential appears in a byte the simulator wrote — and two things only a
-typed run can say:
-
-- **there is no audio on the record at all**, which is what a simulation
-  that synthesised nothing looks like from the outside;
-- **the turns were text-paced.** Said carefully, because the wire fact
-  that distinguishes the two paths — LiveKit's transcribed-track mark — is
-  read by the plug and written onto no record, so it cannot be asserted
-  from here directly. What can be: the simulation did not end with the
-  missing-chat-setup reason, which is the plug saying it never saw that
-  mark or an audio track; and every second the agent spent answering,
-  less the quiet period, adds up to less than speaking those same words
-  would have taken.
-
-  The quiet period is the only cost this plug can add to *every* turn,
-  and on an agent that publishes its own state it adds none at all, so
-  subtracting it understates the agent's thinking time — the safe
-  direction here. It is not the plug's ceiling. A turn that ends with a
-  stream still open pays up to ``TURN_DRAIN_SECONDS`` inside the same
-  ``deliver`` call the latency is measured across, and nothing below
-  subtracts that: a drained turn makes this assertion strict rather than
-  safe, and could fail it for a reason that is not speech pace. Such a
-  turn writes its own line in the simulator's log, which is where to look
-  if this fails on a run whose words were plainly typed.
+Check completed transcript structure, room attribution, no recording, credential
+redaction, and a loose text-pacing bound. Missing settings produce a skip.
 """
 
 from __future__ import annotations
@@ -81,10 +26,7 @@ from conftest import (
 )
 
 from egma_simulator.media.room import ROOM_PREFIX
-from egma_simulator.plugs.livekit_chat import (
-    AGENT_JOIN_SECONDS,
-    TURN_QUIET_SECONDS,
-)
+from egma_simulator.plugs.livekit_chat import TURN_QUIET_SECONDS
 
 LIVEKIT_URL = credential("TEST_LIVEKIT_URL", "LIVEKIT_URL")
 LIVEKIT_API_KEY = credential("TEST_LIVEKIT_API_KEY", "LIVEKIT_API_KEY")
@@ -129,7 +71,7 @@ SIMULATION = "sim-livekit-chat-live-001"
 MAX_TURNS = 8
 MAX_DURATION_SECONDS = 90
 
-WITHIN_SECONDS = AGENT_JOIN_SECONDS + MAX_DURATION_SECONDS + 60
+WITHIN_SECONDS = MAX_DURATION_SECONDS + 60
 
 SPEECH_WORDS_PER_SECOND = 2.9
 """How fast a synthesised reply arrives, measured rather than guessed.
@@ -239,17 +181,9 @@ async def test_the_simulator_types_a_whole_simulation_in_a_real_room(
     assert reference, "no room name came back"
     assert reference.startswith(f"{ROOM_PREFIX}-"), reference
 
-    # Text-paced, on the one arithmetic a live run can be held to. Every
-    # answer's own latency less the quiet period is at most the time the
-    # agent really took, and all of it together is less than speaking
-    # those same words would have cost. The quiet period is the only cost
-    # this plug can add to every turn — a turn the agent ended itself paid
-    # none of it — so subtracting it here can only understate the agent.
-    # It is not the whole of what the plug can add: a turn that ended with
-    # a stream still open also paid TURN_DRAIN_SECONDS inside the measured
-    # call, and nothing subtracts that. A run with such a turn in it holds
-    # this assertion strictly rather than safely, and names the turn in
-    # the simulator's log.
+    # Compare a conservative latency estimate with estimated speaking time.
+    # The subtraction below makes this a loose pacing check; it does not measure
+    # transport overhead, which answer-start timestamps already exclude.
     answering = [
         record["span"]
         for record in spans_for(records, SIMULATION)

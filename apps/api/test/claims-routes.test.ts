@@ -1,6 +1,7 @@
-import { newId } from "@egma/ids";
 import {
   createPersona,
+  resolveSimulationStanding,
+  readProviderFundingReceipt,
   editPersona,
   getSimulation,
   listRunEvents,
@@ -34,15 +35,9 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The simulator's claim door, over real HTTP against real Postgres.
- *
- * This is the one route a customer credential can never open: the service
- * token is the whole gate, the claim reaches every customer's queue at once,
- * and what comes back is the fully assembled spec — credentials included —
- * that the shipped simulator conducts from. So what is asserted here is what
- * that simulator observes: the token gate's one sentence, the held claim
- * answering the moment work arrives, every outgoing spec speaking the
- * contract, and a budget that belongs to no organization being spent by none.
+ * Claim-route coverage against Postgres: service-token access, held claims,
+ * assembled simulation specs, and no use of organization request budgets.
+ * Real socket lifecycle behavior is covered in claims-hold.test.ts.
  */
 
 let api: TestApi;
@@ -344,7 +339,6 @@ async function aQueuedRun(
     suiteId: String(version.body.suiteId),
     agentId: agent.id,
     connectionId,
-    idempotencyKey: newId("run"),
     expectedTestVersions: [{
       testId: String(version.body.testId),
       versionId,
@@ -424,11 +418,15 @@ describe("claiming work", () => {
       claimant: "sim-under-test",
       capacity: 4,
       wait_seconds: 0,
+      modalities: ["chat"],
     });
     expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
 
     const specs = answered.body.specs as Record<string, unknown>[];
     expect(specs).toHaveLength(1);
+    expect(answered.body.claimed_at).toEqual({
+      [simulationId]: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    });
     const spec = specs[0];
     if (spec === undefined) throw new Error("no spec came back");
 
@@ -477,10 +475,10 @@ describe("claiming work", () => {
         adapter: "openai_realtime",
       },
       tts: {
-        provider: "cartesia",
-        model: "sonic-3.5",
-        adapter: "cartesia",
-        voice_id: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+        provider: "openai",
+        model: "gpt-4o-mini-tts-2025-12-15",
+        adapter: "openai",
+        voice_id: "alloy",
         speed: 1,
       },
     });
@@ -506,20 +504,8 @@ describe("claiming work", () => {
   });
 
   /**
-   * **The spec speaks the version the simulation pinned, never the persona as
-   * they stand now — and this is the test that can tell the two apart.**
-   *
-   * Everywhere else in this file the persona is created and never edited, so
-   * the pinned version and the current one are the same row: an assembler that
-   * quietly read `getPersona` instead of `getPersonaVersion` would pass every
-   * one of them. That is the whole guarantee this effort exists for — the same
-   * test hears the same person on every run, and an old result can still say
-   * who the agent actually heard — so it gets a test that fails when it breaks.
-   *
-   * The pin is taken when the run is created, so the edit below lands strictly
-   * after this simulation already names version 1 by its own `prsv_` id. Every
-   * authored field moves at once, because each of the three travels in the work
-   * order and each would be a separate way to leak the current row.
+   * Edit all persona behavior fields after run creation to distinguish the
+   * pinned persona version from the current one in the claimed spec.
    */
   it("speaks the persona version the simulation pinned, not the edit that came after", async () => {
     const { ada, key, connectionId, versionId, persona } =
@@ -687,17 +673,8 @@ describe("claiming work", () => {
 
   it("leaves Egma's own variables off a call placed on the serving version", async () => {
     /*
-     * **The run branched a copy, and this simulation is not on it.** A web-call
-     * run makes one temporary version for the tests that mock, and conducts
-     * every other test against the version real callers reach. The routing
-     * variables are names that only the temporary version declares, so a call
-     * on the serving version is handed none of them — a row of empty
-     * `egma_url_…` on the customer's own call record would name variables that
-     * version never had.
-     *
-     * The run's world is written here rather than branched, because branching
-     * one is Retell's business and this door's business is what it hands the
-     * simulator once one exists.
+     * An unmocked test uses the serving version without temporary routing
+     * variables. Seed mock metadata directly here; Retell branching has separate coverage.
      */
     const { key, connectionId, versionId } = await aCustomerReadyToRun(
       "claims_serving_version_variables",
@@ -855,6 +832,15 @@ describe("claiming work", () => {
     });
     expect(badCapacity.statusCode).toBe(400);
     expect(String(badCapacity.body.message)).toContain("capacity");
+
+    const badModalities = await claim(token, {
+      claimant: "sim-1",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["video"],
+    });
+    expect(badModalities.statusCode).toBe(400);
+    expect(String(badModalities.body.message)).toContain("modalities");
 
     const badWait = await claim(token, {
       claimant: "sim-1",
@@ -1502,7 +1488,7 @@ describe("one source of execution truth", () => {
     expect(second).toMatchObject({ llm: { key: "openai-rotated" } });
     expect(first).toMatchObject({
       stt: { provider: "openai", model: "gpt-live-transcribe" },
-      tts: { provider: "cartesia", model: "sonic-3.5" },
+      tts: { provider: "openai", model: "gpt-4o-mini-tts-2025-12-15" },
     });
     expect((first.stt as Record<string, unknown>).key).toBeUndefined();
     expect((first.tts as Record<string, unknown>).key).toBeUndefined();
@@ -1610,4 +1596,119 @@ describe("persona settings frozen before dispatch", () => {
     expect(next?.models).toMatchObject({ llm: editedModels.llm, stt: editedModels.stt, tts: { provider: "openai", model: "tts-1", voice_id: "custom-voice-id", speed: 1.3 } });
     expect(specComplaints(next)).toEqual([]);
   });
+});
+
+it("uses the organization provider key at claim time and keeps its receipt after rotation", async () => {
+  const load = vi.fn(async () => {
+    throw new ProviderCredentialSourceUnavailableError();
+  });
+  const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+    "claims_organization_provider",
+    { providerCredentials: { load } },
+  );
+  const request = async (method: "GET" | "PUT" | "DELETE", payload?: unknown) =>
+    api.app.inject({
+      method,
+      url: "/v1/provider-keys" + (method === "GET" ? "" : "/openai"),
+      headers: { cookie: ada.cookie },
+      ...(payload ? { payload } : {}),
+    });
+  const saved = await request("PUT", {
+    key: "test-customer-openai-key-ABCD",
+    expectedRevision: null,
+  });
+  expect(saved.statusCode, saved.body).toBe(200);
+  expect(saved.body).not.toContain("test-customer-openai-key");
+  const revision = saved.json().credential.revision;
+  const queued = await aQueuedRun(key, connectionId, versionId);
+  const response = await claim(api.config.simulatorServiceToken, {
+    claimant: "customer-key-worker",
+    capacity: 1,
+    wait_seconds: 0,
+  });
+  expect(response.statusCode).toBe(200);
+  const spec = (
+    response.body.specs as Array<{
+      models: { llm: { key: string; funding_receipt: string } };
+    }>
+  )[0]!;
+  expect(spec.models.llm.key).toBe("test-customer-openai-key-ABCD");
+  expect(specComplaints(spec)).toEqual([]);
+  expect(load).not.toHaveBeenCalled();
+  const rotated = await request("PUT", {
+    key: "test-customer-openai-new-WXYZ",
+    expectedRevision: revision,
+  });
+  expect(rotated.statusCode).toBe(200);
+  expect(
+    (await request("DELETE", { expectedRevision: revision })).statusCode,
+  ).toBe(409);
+  expect(
+    (
+      await request("DELETE", {
+        expectedRevision: rotated.json().credential.revision,
+      })
+    ).statusCode,
+  ).toBe(200);
+  const standing = await resolveSimulationStanding(queued.simulationId);
+  if (!standing) throw new Error("no simulation standing");
+  expect(
+    readProviderFundingReceipt(
+      standing.auth,
+      {
+        simulationId: standing.id,
+        claimedAt: standing.claimedAt,
+        provider: "openai",
+      },
+      spec.models.llm.funding_receipt,
+    ),
+  ).toEqual({ paymentSource: "customer", credentialRef: revision });
+  expect(
+    (await request("GET"))
+      .json()
+      .providers.find((row: { provider: string }) => row.provider === "openai")
+      .credential,
+  ).toBeNull();
+});
+
+it("names an unreadable customer key at dispatch and does not fall back to the deployment key", async () => {
+  const load = vi.fn(async () => {
+    throw new ProviderCredentialSourceUnavailableError();
+  });
+  const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+    "claims_unreadable_customer_key",
+    { providerCredentials: { load } },
+  );
+  const saved = await api.app.inject({
+    method: "PUT",
+    url: "/v1/provider-keys/openai",
+    headers: { cookie: ada.cookie },
+    payload: {
+      key: "test-unreadable-customer-key-ABCD",
+      expectedRevision: null,
+    },
+  });
+  expect(saved.statusCode).toBe(200);
+  await api.database.sql(
+    "UPDATE provider_key SET credentials='not-a-sealed-credential' WHERE organization_id=$1",
+    [ada.organizationId],
+  );
+  const queued = await aQueuedRun(key, connectionId, versionId);
+  const response = await claim(api.config.simulatorServiceToken, {
+    claimant: "unreadable-customer-key",
+    capacity: 1,
+    wait_seconds: 0,
+  });
+  expect(response.body.specs).toEqual([]);
+  const row = await getSimulation(
+    contextFor(ada, "member"),
+    queued.simulationId,
+  );
+  expect(row).toMatchObject({
+    status: "failed",
+    endingReason: "provider_key_unavailable",
+  });
+  expect(row?.executionFailure).toContain("OpenAI API key");
+  expect(row?.executionFailure).not.toContain("not-a-sealed-credential");
+  expect(load).not.toHaveBeenCalled();
 });

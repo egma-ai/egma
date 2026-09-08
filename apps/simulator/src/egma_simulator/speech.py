@@ -1,36 +1,10 @@
-"""The speech legs: words into sound, and sound back into words.
+"""Pipecat speech processors selected by the claimed persona models.
+STT produces agent transcript text; TTS speaks persona output. VAD is an
+internal simulator choice. Runtime work never falls back to scripted providers.
 
-A voice simulation is a chat simulation with two more legs. The persona
-brain still writes the words — it never learns that they are spoken — and
-these are what carry them: a text-to-speech leg giving the persona a
-voice, and a speech-to-text leg turning what comes back into the
-transcript's ``agent`` turns. A third leg listens for *whether* anybody is
-speaking rather than for words — the voice activity detector. It is an
-internal simulator choice, not authored persona data.
-
-Both legs are ordinary Pipecat frame processors, in the two places a
-real provider's service sits — Cartesia or OpenAI speaking, and Cartesia,
-Deepgram, or OpenAI Realtime listening —
-so the pipeline assembled around them is the same pipeline either way.
-The listening leg goes further and is a Pipecat STT service, the very
-class a real one subclasses; the speaking leg deliberately is not, and
-:class:`ScriptedTTS` says why.
-
-**Which pair is used comes only from the claimed models block.** The
-scripted pair is an explicit unit-test injection. Runtime work orders never
-fall back to it or combine it with one selected provider leg.
-
-**The scripted codec.** Scripted speech is real PCM — 16-bit signed
-little-endian mono, at whatever band the transport carries — and it is
-exactly invertible: each UTF-8 byte of the text becomes one fixed-length
-tone whose frequency names the byte. The STT reads nothing but the samples
-handed to it, so the loopback proves the whole audio path rather than
-smuggling the text past it, and a recording of the exchange can be read
-back the same way — which is how a test tells which speaker is on which
-channel.
-
-The tones stay under 3 kHz so that the narrowest band a connection can
-carry, 8 kHz telephony, still holds them.
+The test codec maps each UTF-8 byte to a fixed-duration tone in signed
+16-bit little-endian mono PCM. Tones stay below 3 kHz for 8 kHz telephony.
+Scripted STT decodes samples, so tests verify the audio path and recording channels.
 """
 
 from __future__ import annotations
@@ -49,6 +23,7 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
+    MetricsFrame,
     StartFrame,
     TextFrame,
     TranscriptionFrame,
@@ -56,6 +31,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
@@ -63,7 +39,9 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 from .config import STT_PROVIDERS, TTS_PROVIDERS, VAD_PROVIDERS
+from .provider_keys import ProviderKeyUnavailable, authentication_rejected
 from .spec import SelectedModels
+from .usage import ProviderUsage, realtime_transcription_usage
 
 logger = logging.getLogger(__name__)
 
@@ -229,27 +207,9 @@ def decode_speech(pcm: bytes, sample_rate_hz: int) -> str:
 
 
 class ScriptedTTS(FrameProcessor):
-    """The persona's voice, deterministically.
-
-    Holds the voice the persona was authored with the way a real service
-    holds a provider voice id — the exchange is what proves the leg was
-    assembled from this simulation's own spec.
-
-    **Why this one is not built on Pipecat's TTS service, when the
-    listening leg is built on Pipecat's STT service.** That base class
-    regroups whatever it is given back into sentences, and it does the
-    grouping with NLTK, whose corpus is fetched from the internet the
-    first time it is wanted. On a machine without that corpus the
-    grouping raises, the turn's audio is dropped, and the recording
-    quietly loses a persona turn while the transcript still shows it —
-    found by starving a run of the corpus and reading the channels back.
-    There is no way to hand that base class a different grouper.
-
-    So this leg is a plain frame processor emitting exactly the frames the
-    base class emits, in the same place in the chain. A real provider is
-    still an ordinary Pipecat TTS service dropped into that same place —
-    what it is not is *this* leg's base class, and CI needs no corpus and
-    no network to speak.
+    """Deterministic persona speech using the scripted codec and selected voice.
+    Use a plain frame processor to avoid Pipecat TTS sentence grouping and its
+    NLTK corpus dependency in offline tests. Emit the same pipeline frame types.
     """
 
     def __init__(self, *, voice: PersonaVoice) -> None:
@@ -285,15 +245,8 @@ class ScriptedTTS(FrameProcessor):
 
 
 class ScriptedSTT(SegmentedSTTService):
-    """What the agent said, read back out of the audio it arrived as.
-
-    Segmented rather than streaming, because that is what this leg
-    honestly is: it reads a whole stretch of speech at once. A full-duplex
-    line hands its pipeline one small slice of audio at a time and never a
-    turn, so a leg that transcribed each slice on its own would read every
-    utterance as a string of fragments. The base class here is the one a
-    local model subclasses: it buffers between the voice detector's start
-    and stop and calls :meth:`run_stt` once with the whole utterance.
+    """Decode one complete scripted utterance. The segmented STT base buffers audio
+    between VAD boundaries before calling run_stt(), avoiding partial-byte fragments.
     """
 
     def __init__(self) -> None:
@@ -321,22 +274,9 @@ class ScriptedSTT(SegmentedSTTService):
 
 
 class ScriptedVAD(VADAnalyzer):
-    """Hears the scripted codec exactly, and nothing else.
-
-    A voice activity detector answers one question — is somebody speaking
-    in this window of audio — and the scripted codec answers it without a
-    model: a tone is loud and quiet is exactly zero samples. So this leg
-    reads the samples and says so, which makes every speech boundary it
-    reports a sample position rather than a probability.
-
-    That exactness is what the record rests on. A window is one encoded
-    byte wide, so a scripted utterance begins and ends on a window
-    boundary at every band; the detector confirms speech one window in and
-    silence :data:`QUIET_WINDOWS` windows later, and both are corrected
-    back by exactly those windows — so the interval it hands over is the
-    interval that was really spoken, to the sample.
-
-    Silero is the leg a live simulation hears with; see :func:`build_vad`.
+    """Detect scripted tones using byte-sized windows and exact zero-sample silence.
+    Correct the speech and silence confirmation delays back to sample boundaries.
+    Live simulations use Silero through build_vad().
     """
 
     SPEAKING_WINDOWS = 1
@@ -390,6 +330,20 @@ class SpeechFault(RuntimeError):
     """
 
 
+class ProviderUsageMetricsData(MetricsData):
+    """What one provider request cost, on Pipecat's own metrics bus.
+
+    Pipecat already carries client-measured usage — seconds of audio sent,
+    characters handed over — and one collector at the end of the pipeline sees
+    every one of them. Where Egma holds the provider's *own* numbers instead,
+    they have to reach that same collector or they would need a second path
+    with a second set of ordering problems. So they ride the bus as one more
+    kind of metrics datum, and the collector reads all of them the same way.
+    """
+
+    usage: ProviderUsage
+
+
 @dataclass(frozen=True)
 class SpeechProviders:
     """The speech adapters resolved from one pinned persona version."""
@@ -410,6 +364,18 @@ class SpeechProviders:
     tts_model: str | None = None
     """The exact pinned models. Runtime code supplies no default."""
 
+    stt_customer_funded: bool = False
+    tts_customer_funded: bool = False
+
+    stt_provider: str | None = None
+    tts_provider: str | None = None
+    """Who bills for each leg.
+
+    The adapter above says which protocol is spoken; this says whose account
+    the request lands on, and a usage record needs both — one model name can be
+    reached over two protocols, and one protocol serves more than one provider.
+    """
+
     @classmethod
     def from_models(cls, models: SelectedModels, *, vad: str) -> SpeechProviders:
         """Resolve the direct adapters from the required models block.
@@ -426,24 +392,16 @@ class SpeechProviders:
             tts_key=models.tts.key,
             stt_model=models.stt.model,
             tts_model=models.tts.model,
+            stt_provider=models.stt.provider,
+            stt_customer_funded=models.stt.funding_receipt is not None,
+            tts_customer_funded=models.tts.funding_receipt is not None,
+            tts_provider=models.tts.provider,
         )
 
     def checked(self) -> SpeechProviders:
-        """These legs, or the refusal an unrecognised provider earns.
-
-        **Refused rather than quietly downgraded to the stand-in.** Every
-        builder below accepts the scripted leg only for direct unit tests.
-        A misspelled runtime provider must not turn into a canned robot: a
-        typo on a settings page would otherwise produce a completed, green
-        simulation conducted by a canned robot, which is worse than a
-        failure because a failure tells the truth about what happened.
-
-        Runtime speech names come from the validated work order. The
-        additional scripted name exists only for explicit unit-test injection.
-
-        Called where the legs are *built*, not where they are resolved: a
-        chat simulation has no mouth and no ears, and must not fail over a
-        speech provider it was never going to use.
+        """Reject unknown providers when building speech services.
+        Scripted providers are explicit unit-test inputs, never runtime fallbacks.
+        Chat does not build speech services and does not use this validation.
         """
         for owner, setting, chosen, allowed in (
             ("persona", "STT selection", self.stt, STT_PROVIDERS),
@@ -728,7 +686,23 @@ def _openai_mouth(
     providers: SpeechProviders, voice: PersonaVoice
 ) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
     """The persona's voice through Pipecat's stock OpenAI service."""
-    from pipecat.services.openai.tts import OpenAITTSService
+    from pipecat.services.openai.tts import OpenAITTSService as StockOpenAITTSService
+
+    class OpenAITTSService(StockOpenAITTSService):
+        async def run_tts(
+            self, text: str, context_id: str
+        ) -> AsyncGenerator[Frame, None]:
+            try:
+                async for frame in super().run_tts(text, context_id):
+                    yield frame
+            except Exception as fault:
+                if providers.tts_customer_funded and authentication_rejected(fault):
+                    from pipecat.frames.frames import ErrorFrame
+
+                    failure = ProviderKeyUnavailable("openai")
+                    yield ErrorFrame(error=str(failure), exception=fault)
+                else:
+                    raise
 
     if not providers.tts_key:
         raise SpeechFault("the openai speaking leg was chosen without a key")
@@ -752,26 +726,10 @@ def _openai_mouth(
 def _openai_realtime_ears(
     providers: SpeechProviders,
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
-    """What the agent said, transcribed while they are still saying it.
-
-    This is the only OpenAI STT adapter in this release. It holds a socket
-    open and transcribes as audio arrives. The segmented transcription
-    endpoint is not another interpretation of the same model selection.
-
-    **Turn boundaries stay egma's, not the provider's.** The service is
-    built in its local-VAD mode, so the detector that decides where a turn
-    ended is the same :class:`~egma_simulator.conductor._AgentEar` that
-    stamps the record's sample positions — one reading of the line, used
-    for both. Server-side detection would be a second opinion arriving on
-    a different clock, and the transcript and the timings would then
-    disagree about when the agent stopped talking. The ear sits directly
-    in front of this leg in the pipeline and pushes the frame it commits
-    on, so the two are wired together by the assembly order.
-
-    The stock service owns the rate its socket requires and converts the
-    pipeline audio itself. Egma changes one request field for
-    ``gpt-live-transcribe`` because that model accepts plural ``languages``;
-    Pipecat 1.7 still sends the older singular ``language`` field.
+    """Streaming OpenAI transcription using local VAD boundaries from _AgentEar.
+    The same boundaries drive transcript commits and recorded timing.
+    The stock service converts audio to its required rate. For gpt-live-transcribe,
+    replace Pipecat 1.7's singular language field with the required languages field.
     """
     from pipecat.services.openai._constants import OPENAI_SAMPLE_RATE
     from pipecat.services.openai.stt import (
@@ -780,6 +738,49 @@ def _openai_realtime_ears(
 
     class OpenAIRealtimeSTTService(PipecatOpenAIRealtimeSTTService):
         """Pipecat's realtime service with the live model's current wire shape."""
+
+        async def _handle_transcription_completed(self, evt: dict) -> None:
+            """Keep what the provider says the transcription cost.
+
+            The completed event is the only place OpenAI states it, and Pipecat
+            reads the transcript out of that event and drops the rest. Two
+            shapes arrive — seconds of committed audio, or audio and text
+            tokens — and which one a model uses is said on the event itself, so
+            both are read rather than assumed.
+
+            Pushed before ``super()``, so the bill is on the bus ahead of the
+            transcription frame the turn is built from — the same ordering
+            Pipecat's own usage report has, and the one that puts the record
+            ahead of the terminal report.
+            """
+            usage = realtime_transcription_usage(
+                evt, selection_model=self._settings.model
+            )
+            if usage is not None:
+                await self.push_frame(
+                    MetricsFrame(
+                        data=[
+                            ProviderUsageMetricsData(
+                                processor=self.name,
+                                model=self._settings.model,
+                                usage=usage,
+                            )
+                        ]
+                    )
+                )
+            await super()._handle_transcription_completed(evt)
+
+        async def emit_stt_usage_metrics(self) -> None:
+            """Say nothing about the seconds Egma sent.
+
+            Pipecat counts the audio submitted to a listening leg and reports
+            it, which is the right answer for a provider that says nothing.
+            This one says something: the completed event carries the figure
+            OpenAI actually bills, and it is read above. Reporting Egma's own
+            count beside it would put two numbers for one request on the bus,
+            and whichever the platform used, one of them would be wrong.
+            """
+            return None
 
         async def _send_session_update(self) -> None:
             if self._settings.model != "gpt-live-transcribe":
@@ -839,20 +840,10 @@ def _openai_realtime_ears(
     opened = _connection_opened_by(leg)
 
     async def connected() -> None:
-        # **Two gates, because an open socket is not yet able to hear.**
-        # The service opens the connection and only then asks the provider
-        # to configure a transcription session; audio handed over in
-        # between is sent to a session that does not exist yet, and
-        # `run_stt` does not hold it back. The first thing a voice
-        # simulation does is hand this leg the agent's greeting, so
-        # without the second gate the first turn of a real call would
-        # simply be missing — the failure LISTENING_READY_SECONDS exists
-        # for, and the one the deepgram leg waits out the same way.
-        #
-        # The first gate is the service's own public event. The second reads
-        # a private flag, exactly as the Deepgram leg does. Pipecat 1.7.0,
-        # pinned in uv.lock, has no event for a configured realtime session;
-        # a rename must fail loudly here rather than make first turns vanish.
+        # Wait for both socket connection and configured transcription session before
+        # audio.
+        # Pipecat 1.7.0 exposes the second state only through a private flag; a renamed
+        # flag must fail visibly rather than lose the agent's greeting.
         await opened.wait()
         if not hasattr(leg, "_session_ready"):
             raise SpeechFault(

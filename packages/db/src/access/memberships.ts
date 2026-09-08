@@ -11,14 +11,8 @@ import { authorize, here } from "./permissions.ts";
 import { within } from "./within.ts";
 
 /**
- * Who is in an organization, and everything that changes it.
- *
- * This is the only file that reads the membership table, and a lint rule fails
- * the build if another one starts to. Everything that needs to know which
- * organization a person is in comes through `membershipsOf` below, and every
- * write that adds, re-roles or removes somebody is here beside it — so the
- * answer to "who is in this organization" has one place that decides it and one
- * place that changes it.
+ * Membership reads and writes live here. Lint enforces this table boundary;
+ * credential resolution uses membershipsOf.
  */
 
 /** A person's place in an organization, carrying their role. */
@@ -29,20 +23,8 @@ export type Membership = {
 };
 
 /**
- * The same place as the resolver below answers it: the role, and whether the
- * account behind it has been switched off.
- *
- * **The second fact is the account's rather than the membership's**, and it is
- * carried here because this resolver is the only way a credential reaches a
- * role. A role is a power and a switched-off account holds none, so the fact
- * that says whether the powers exist arrives with the fact that says what they
- * are — and a credential path cannot read the second without being handed the
- * first. That is the difference between a rule every path remembers and a rule
- * every path is given, which is the whole reason the browser path was able to
- * miss it.
- *
- * `Membership` itself stays exactly what the glossary says it is, because
- * provisioning writes one and reads nothing about the account when it does.
+ * Return account deactivation with membership role so credential resolvers can
+ * reject disabled accounts. Deactivation belongs to the account, not the membership.
  */
 export type ResolvedMembership = Membership & {
   /**
@@ -87,26 +69,9 @@ const MEMBER_COLUMNS = {
 } as const;
 
 /**
- * Which organizations is this person in? The single resolver, and the whole
- * reversibility condition on one-organization-per-person.
- *
- * It returns a list, and it will always return at most one today, because
- * `membership` carries `UNIQUE (user_id)` in v1. The signature is the
- * multi-organization one anyway: dropping that unique index is among the
- * cheapest migrations that exists, but only while nothing has compiled *the*
- * person's organization into its own shape. Every caller therefore has to
- * decide what it does with none, one, or several — today the second case, and
- * one day the third, with no signature to change.
- *
- * This is the one shape of read that cannot take an `AuthContext`: it is what
- * produces the organization an `AuthContext` is later built from. It takes a
- * person and returns their memberships and nothing else, so there is no
- * argument that would make it return somebody else's.
- *
- * It joins the identity table for exactly one column — whether the account is
- * switched off — because every credential that becomes a role becomes it here,
- * and a resolver that hands out a role without saying whether the account still
- * holds it is a resolver each caller has to remember to second-guess.
+ * Resolve memberships and account deactivation for a verified user ID before
+ * building AuthContext. Return a list, though the current unique user_id constraint
+ * allows at most one membership.
  */
 export async function membershipsOf(
   userId: string,
@@ -128,7 +93,7 @@ export async function membershipsOf(
 export async function listMembers(
   auth: AuthContext,
 ): Promise<readonly Member[]> {
-  authorize(auth, "read", here(auth));
+  authorize(auth, "read_organization", here(auth));
 
   return db()
     .select(MEMBER_COLUMNS)
@@ -238,22 +203,15 @@ export async function insertMembership(
 }
 
 /**
- * Somebody's role, changed.
- *
- * There is nothing to hunt down afterwards. A key carries no role of its own
- * and re-reads its creator's membership on every request, so a demotion is
- * complete the moment this row is written — the next request they make, with
- * any key they have ever minted, is answered at the new role.
- *
- * The last admin cannot be demoted. Nobody else may invite, change a role or
- * remove anybody, so it would leave an organization nobody can administer, and
- * there is no role above the organization to fix it from.
+ * Change a membership role after checking that another admin remains.
+ * API keys use the new role when they next resolve the creator's membership.
  */
 export async function changeRole(
   auth: AuthContext,
   userId: string,
   role: Role,
 ): Promise<Member | undefined> {
+  authorize(auth, "manage_members", here(auth));
   const existing = await memberOf(auth, userId);
   if (existing === undefined) return undefined;
   if (existing.role === role) return existing;
@@ -278,23 +236,14 @@ export type RemovedMember = {
 };
 
 /**
- * Somebody removed from the organization.
- *
- * **Their keys are revoked and everything they authored stays, with their name
- * on it.** Records of what somebody did are preserved; powers that act on their
- * behalf are revoked. A project they created keeps their id in `created_by`, and
- * an IT deprovisioning script therefore cannot delete a team's work by removing
- * the person who wrote it.
- *
- * The two writes are one transaction, because the window between them is one in
- * which a key of theirs still resolves — the membership is what a key borrows
- * its powers from, so removing it is a second, independent revocation, and
- * neither half is worth having on its own.
+ * Remove membership and revoke the member's organization API keys in one
+ * transaction. Preserve authored records and their attribution.
  */
 export async function removeMember(
   auth: AuthContext,
   userId: string,
 ): Promise<RemovedMember | undefined> {
+  authorize(auth, "manage_members", here(auth));
   const existing = await memberOf(auth, userId);
   if (existing === undefined) return undefined;
 
@@ -318,22 +267,14 @@ export async function removeMember(
 }
 
 /**
- * Somebody's account switched off.
- *
- * The sharper of the two: removing somebody ends their place in *this*
- * organization, and this ends their account. Every key they minted stops
- * resolving on the very next request — the key row is not touched, because
- * resolving one already reads whether its creator is still active — and their
- * membership, their name on what they authored and their organization's history
- * are all left exactly as they were.
- *
- * The last admin cannot be deactivated, for the same reason they cannot be
- * demoted or removed.
+ * Deactivate the account without removing membership or authored history.
+ * Key resolution rejects deactivated creators. Check that another admin remains.
  */
 export async function deactivateUser(
   auth: AuthContext,
   userId: string,
 ): Promise<Member | undefined> {
+  authorize(auth, "manage_members", here(auth));
   const existing = await memberOf(auth, userId);
   if (existing === undefined) return undefined;
   if (existing.deactivatedAt !== null) return existing;

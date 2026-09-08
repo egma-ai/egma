@@ -198,7 +198,6 @@ describe("the CLI and API suite contract", () => {
           versionId: pushed.versionId,
         }],
         name: "CLI release run",
-        idempotencyKey: "cli-api-suite-run",
       },
       fetchImpl,
     );
@@ -335,7 +334,6 @@ describe("the CLI and API suite contract", () => {
         versionId: pushed.versionId,
       }],
       name: "CLI release run",
-      idempotencyKey: "cli-api-suite-run",
     });
   });
 });

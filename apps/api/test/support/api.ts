@@ -7,8 +7,11 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  installBillingPlugIn,
   reconcileGraderCatalog,
   seedPersonaLibrary,
+  upsertRateCard,
+  type BillingPlugIn,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 import type { Fetch as RetellFetch } from "@egma/retell";
@@ -19,7 +22,7 @@ import type { Email, EmailSender } from "../../src/auth/email.ts";
 import type { RateLimit } from "../../src/http/rate-limit.ts";
 import { buildApi, type ServerOptions } from "../../src/server.ts";
 import type { Identity } from "../../src/auth/better-auth.ts";
-import type { IngestionStore } from "../../src/ingestion/object-store.ts";
+import type { IngestionStore } from "@egma/ingestion";
 import { drainPendingEvidence } from "./ingestion.ts";
 import {
   createMigratedDatabase,
@@ -91,15 +94,8 @@ export type TestApiOptions = {
   /** Whether the transport claims a message actually reaches anybody. */
   readonly emailDelivers?: boolean;
   /**
-   * Something the fake transport waits on before its `send` finishes — for the
-   * one test whose claim is that **nothing waits for it**. A real transport
-   * takes a quarter of a second to reach an SMTP server, and a fake one that
-   * returns the instant it is called cannot tell a flow that waits for delivery
-   * from one that does not.
-   *
-   * The message is recorded the moment it is handed over, before the wait, so
-   * every other test reads `mail` exactly as it did before. It is asked for
-   * once per message, so a test can arm it after the messages it is not about.
+   * Optional delivery gate for tests that verify responses do not wait for mail.
+   * Record each message before waiting, and request a fresh gate per message.
    */
   readonly emailSendCompletesOn?: () => Promise<void> | undefined;
   /** Use the server's no-SMTP sender instead of this helper's captured sender. */
@@ -108,6 +104,7 @@ export type TestApiOptions = {
   readonly rateLimit?: RateLimit;
   /** A sweep cadence short enough to observe, for the tests about the sweep. */
   readonly orphanSweepIntervalMilliseconds?: number;
+  readonly wakeVoiceFleet?: ServerOptions["wakeVoiceFleet"];
   /** Where Retell answers. A test stands a Retell-shaped server on loopback. */
   readonly retellReach?: ServerOptions["retellReach"];
   /**
@@ -144,6 +141,8 @@ export type TestApiOptions = {
    * proving it costs a second rather than the deployment's ten.
    */
   readonly ingestionRequestTimeoutMilliseconds?: number;
+  /** Shortens the planned-shutdown upload window in focused ingestion tests. */
+  readonly ingestionShutdownTimeoutMilliseconds?: number;
   /**
    * What the local log will hold before it refuses. Tiny here for the one suite
    * whose claim is the refusal, so that reaching a bound costs one request
@@ -188,6 +187,40 @@ export type TestApiOptions = {
   readonly retellFetch?: RetellFetch;
   /** Current model-provider keys for claim and grader boundary tests. */
   readonly providerCredentials?: ProviderCredentialSource;
+  /**
+   * The billing plug-in this instance runs on. Absent is the deployment
+   * everybody runs: every allowance unlimited, every usage record discarded.
+   */
+  readonly billing?: BillingPlugIn;
+  /**
+   * Whether to put that plug-in in place for the whole process, the way the
+   * real entry point does.
+   *
+   * **Off by default, and the default is what most suites want.** The claim
+   * door is handed its entitlement source directly, so a suite about that door
+   * can hand in an adapter without changing what run start or the usage write
+   * do. A suite about the *cloud* adapter needs the other two seams as well —
+   * they reach the installed plug-in from inside the data-access module — so
+   * it asks for this and gets the deployment a Stripe secret would have built,
+   * without an environment variable anywhere.
+   */
+  readonly installBilling?: boolean;
+  /**
+   * The Billing section's routes, on an instance standing in for a deployment
+   * that selected the cloud adapter. A test passes `billingRoutes` from
+   * `@egma/ee` directly; nothing here reads a Stripe key.
+   */
+  readonly billingRoutes?: ServerOptions["billingRoutes"];
+  /**
+   * Stripe's own door, on an instance standing in for a deployment that named
+   * a webhook signing secret.
+   *
+   * A test passes a closure over `billingWebhookRoutes` from `@egma/ee` with a
+   * Stripe adapter built from a test key. Nothing in that adapter reaches
+   * Stripe to check a signature: the check is the same cryptography whether
+   * the key was ever used against an account or not.
+   */
+  readonly billingWebhookRoutes?: ServerOptions["billingWebhookRoutes"];
 };
 
 export function testConfig(overrides: Partial<Config> = {}): Config {
@@ -257,6 +290,7 @@ export async function createApi(
     ...(options.providerCredentials === undefined
       ? {}
       : { providerCredentials: options.providerCredentials }),
+    ...(options.billing === undefined ? {} : { billing: options.billing }),
   });
   const config: Config =
     options.ingestStore === undefined || ingestionLogDirectory === undefined
@@ -284,16 +318,35 @@ export async function createApi(
           },
         };
 
-  // The two fixed-id catalogs the real entry point writes before a project can
+  // The three shipped catalogs the real entry point writes before a project can
   // be created. A new project points directly at the Egma-provided persona, and
   // its project grader points at the predefined catalog, so skipping either
-  // would put this instance in a state no deployment serves requests from.
+  // would put this instance in a state no deployment serves requests from. The
+  // rate card is the third: a usage record is priced where it is stored, so an
+  // instance with an empty rate card would price every provider request at
+  // nothing.
   await seedPersonaLibrary();
   await reconcileGraderCatalog();
+  await upsertRateCard();
+
+  // The plug-in in place for the whole process, as `index.ts` does it. The
+  // undo is kept so an instance puts the deployment back the way it found it:
+  // suites share a process, and a cloud adapter left installed would answer
+  // the next file's run starts.
+  const restoreBilling =
+    options.installBilling === true
+      ? installBillingPlugIn(config.billing)
+      : undefined;
 
   const { app, identity, drainer } = buildApi({
     config,
     drainsPendingEvidence: options.drainsPendingEvidence ?? false,
+    ...(options.ingestionShutdownTimeoutMilliseconds === undefined
+      ? {}
+      : {
+          ingestionShutdownTimeoutMilliseconds:
+            options.ingestionShutdownTimeoutMilliseconds,
+        }),
     ...(options.defaultEmailSender === true ? {} : { emailSender }),
     ...(options.rateLimit === undefined ? {} : { rateLimit: options.rateLimit }),
     ...(options.logTo === undefined ? {} : { logTo: options.logTo }),
@@ -303,12 +356,21 @@ export async function createApi(
           orphanSweepIntervalMilliseconds:
             options.orphanSweepIntervalMilliseconds,
         }),
+    ...(options.wakeVoiceFleet === undefined
+      ? {}
+      : { wakeVoiceFleet: options.wakeVoiceFleet }),
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),
     ...(options.retellReach === undefined
       ? {}
       : { retellReach: options.retellReach }),
+    ...(options.billingRoutes === undefined
+      ? {}
+      : { billingRoutes: options.billingRoutes }),
+    ...(options.billingWebhookRoutes === undefined
+      ? {}
+      : { billingWebhookRoutes: options.billingWebhookRoutes }),
     ...(options.simulationPullOptions === undefined
       ? {}
       : { simulationPullOptions: options.simulationPullOptions }),
@@ -335,6 +397,7 @@ export async function createApi(
     },
     async close() {
       await app.close();
+      restoreBilling?.();
       await disconnect();
       await database.drop();
       if (

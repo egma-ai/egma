@@ -1,19 +1,6 @@
 /**
- * Reading what a request said, and the two constants every group of this
- * fixture has to agree about.
- *
- * Three lines of code each group would otherwise write for itself, and would
- * eventually write differently — which is exactly what happened: one half
- * trimmed a query parameter and the other did not, so `?project=%20` named a
- * project on one route and named nothing on the next.
- *
- * The rule that matters is `given`: **a parameter that arrived empty is a
- * parameter nobody set.** `?project=` is what a form submits for a field left
- * blank, and reading it as a name would answer about a project that cannot
- * exist. It does not trim, because the API does not: a body field is trimmed by
- * `text` before `given` sees it, and a query parameter is read as it arrived.
- * Every route that treats absence as a meaningful case has to agree about what
- * absence is.
+ * Shared fixture request readers. given treats empty strings as absent without
+ * trimming. Body text is trimmed separately; query values retain their bytes.
  */
 
 // The platform's own identifier reader, reached by path rather than by package

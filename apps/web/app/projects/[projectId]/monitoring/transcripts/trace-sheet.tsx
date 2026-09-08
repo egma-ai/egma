@@ -25,6 +25,8 @@ import {
   type EvidenceTranscript,
 } from "../../../../../ui/simulation-evidence.tsx";
 import { GradeCard } from "../../../../grade-card.tsx";
+import { Refused } from "../../../../../ui/form.tsx";
+import { WorkRefusalActions } from "../../../../../ui/work-refusal-actions.tsx";
 
 const AGAIN_MS = 2000;
 const SUMMARY_ID = "trace-summary";
@@ -296,6 +298,12 @@ export function TraceSheet({
                   <h2 className="m-0 text-lg font-normal" id="trace-grading">
                     {TRACE_SHEET.grading.title}
                   </h2>
+                  {answer.value.workBlock === null ? null : (
+                    <Refused
+                      message={`Grading is waiting. ${answer.value.workBlock.message}`}
+                      action={<WorkRefusalActions code={answer.value.workBlock.error} projectId={projectId} />}
+                    />
+                  )}
                   {answer.value.grades.length === 0 ? (
                     <div
                       className="mt-4 border border-border bg-surface-soft p-5"
@@ -336,6 +344,7 @@ export function TraceSheet({
                       <div className="mt-4 grid gap-3">
                         {answer.value.grades.map((grade) => (
                           <GradeCard
+                            projectId={projectId}
                             key={`${grade.projectGraderId}:${grade.gradedAt}`}
                             grade={grade}
                           />

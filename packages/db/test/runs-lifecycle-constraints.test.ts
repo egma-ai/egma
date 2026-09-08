@@ -238,6 +238,10 @@ async function insertSimulation(
     test_version_id: testVersionId,
     position: 1,
     modality: "chat",
+    // The lane, frozen at execution beside the modality. The fixture's one
+    // connection is a Retell chat connection, so every conversation it writes
+    // is one — and the column is required, so a raw insert has to say so.
+    connection_type: "retell_chat_api",
     status,
     ...shapeOf(status),
     ...overrides,
@@ -491,20 +495,26 @@ describe("a simulation's shape", () => {
     );
   });
 
-  it("holds the summary facts to ended rows, exactly as the report's", async () => {
+  it("allows room registration after claim while keeping turn counts terminal", async () => {
+    for (const status of ["queued", "claimed", "running"] as const) {
+      await expect(
+        insertSimulation(status, { turn_count: 6 }),
+      ).rejects.toSatisfy(
+        (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+      );
+    }
     await expect(
-      insertSimulation("running", { turn_count: 6 }),
+      insertSimulation("queued", { provider_reference: "egma-sim-not-claimed" }),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
     );
-    await expect(
-      insertSimulation("claimed", { provider_reference: "chat_5d1f9a3b7c" }),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
+    for (const status of ["claimed", "running"] as const) {
+      await expect(
+        insertSimulation(status, { provider_reference: `egma-sim-${status}` }),
+      ).resolves.toBeDefined();
+    }
 
-    // On a landed row they are exactly what the columns are for — canceled
-    // included, where the reason stays empty but the facts still landed.
+    // Terminal reports still retain their counts and provider reference.
     await expect(
       insertSimulation("completed", {
         turn_count: 14,

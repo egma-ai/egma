@@ -28,34 +28,11 @@ import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
 
 /**
- * The two v1 read endpoints: the list of a customer's traces, and one trace as a
- * transcript.
+ * Trace list and transcript reads require a bounded time window and use page
+ * tokens. The credential sets the organization; project selection follows
+ * session access or API key scope.
  *
- * They carry the real contract from the first commit, and the reason is that a
- * read API is a one-way door. Everything expensive about it is decided now,
- * while the only consumer is egma's own dashboard: **the window is required and
- * capped**, so no request can ask the store to read everything it holds;
- * **paging is by token**, so a page is a position in an ordering rather than a
- * count of rows to skip and re-sort; and **the organization comes from the
- * credential**, so there is no query parameter that could name somebody else's
- * data. Adding any of those later means breaking every integration written
- * against their absence.
- *
- * **The project is a filter and never a wall.** Reading across a whole
- * organization is the first-class case, because two projects of one customer are
- * always queryable together; `projectId` narrows to one when a caller wants
- * that. A credential that already names a project reads that project and cannot
- * be argued out of it.
- *
- * **`trace` and `span` are storage words**, and they are the right ones in a
- * machine API: this is the store's own surface, and the paths, the parameters
- * and the field names all say so. They never reach a page — what a person reads
- * is a transcript of a simulation.
- *
- * Separate from the ingest door in the same way it is separate from every other
- * route: that plugin replaces its own body parsers so telemetry arrives as the
- * bytes that were sent, and these are ordinary JSON responses that want nothing
- * to do with it. `POST /v1/traces` and `GET /v1/traces` share a path and no code.
+ * Keep these JSON routes outside the OTLP plugin, which replaces body parsers.
  */
 
 export type TraceReadRoutesOptions = {
@@ -91,19 +68,9 @@ const MICROSECOND_DIGITS = 6;
 const FRACTIONAL_SECOND = /^(.*\d{2}:\d{2}:\d{2})\.(\d+)(.*)$/u;
 
 /**
- * An RFC 3339 instant as microseconds since the epoch, or `undefined` for
- * anything that is not one.
- *
- * `Date` still does the calendar and the offset; only the fraction is read here,
- * because a `Date` holds milliseconds and this store holds microseconds. `to` is
- * exclusive, so a bound rounded down to the millisecond silently drops the 999
- * microseconds after it — paste a trace's own `endedAt` of `…776865Z` in as
- * `to` and the span that ended at it would be missing, with nothing in the
- * answer to say why.
- *
- * More than six digits is refused rather than rounded, for the same reason a
- * too-wide window is: there is no seventh digit in the column to put it in, so
- * honouring it would mean moving somebody's bound and not mentioning it.
+ * Parse timestamps to microseconds, preserving fractions that Date would
+ * truncate. Reject more than six fractional digits instead of moving a bound.
+ * Date handles the remaining timestamp syntax and calendar conversion.
  */
 function instantOf(text: string): bigint | undefined {
   const fraction = FRACTIONAL_SECOND.exec(text);
@@ -177,24 +144,8 @@ function windowOf(query: Query): ParsedWindow {
 const TRAFFIC_SOURCES: readonly SpanSource[] = ["simulation", "production"];
 
 /**
- * Which kind of traffic to read — **optional, and absent means both.**
- *
- * That is the whole of what makes this addition safe on a surface that is
- * otherwise a one-way door: an integration written before the parameter existed
- * sends nothing, and gets byte for byte the answer it always got. Nothing is
- * defaulted here and nothing is echoed back, so there is no shape to change.
- *
- * A word that is not one of the two is **refused rather than ignored**. A
- * misspelled filter that quietly read everything would answer a different
- * question than the one asked and say nothing about having done so — the same
- * rule the window is held to — and on this parameter the difference is a page
- * of simulations under a heading that promised production. The refusal names
- * both accepted words, because a caller who got it wrong is a caller who does
- * not know what the right ones are.
- *
- * An **empty** parameter is a parameter nobody set, on the same terms as
- * `?projectId=` and `?pageSize=`: it is what a form submits for a field left
- * blank, and refusing it would refuse a request nobody meant anything by.
+ * An absent or empty source selects both production and simulation traces.
+ * Reject unknown values so a misspelled filter cannot silently select both.
  */
 type ParsedSource =
   | { readonly source: SpanSource | undefined }
@@ -217,18 +168,7 @@ function sourceOf(query: Query): ParsedSource {
   return { source: known };
 }
 
-/**
- * The window as it was read, to the microsecond it was read at.
- *
- * The same precision every other instant in these responses comes back at, so a
- * caller can paste one straight back in. The division is written out here rather
- * than borrowed from the store: the data-access module formats its own return
- * values this way, and ten lines are not a reason to widen a boundary that
- * exists to be narrow.
- *
- * Only ever reached on a window the store has already accepted, which is what
- * makes the four-digit year `toISOString` writes a safe thing to assume.
- */
+/** Format accepted window bounds at microsecond precision for reuse in queries. */
 function describedWindow(window: TimeWindow): Record<string, string> {
   const MILLION = 1_000_000n;
   const format = (microseconds: bigint): string => {
@@ -334,28 +274,9 @@ export async function traceReadRoutes(
   });
 
   /**
-   * The customer's traces inside a window, newest first.
-   *
-   * `limit` above the maximum is clamped rather than refused, which is the
-   * ordinary reading of the word: a caller asking for a thousand gets the page
-   * size back in the page they were given, and nothing they asked for is
-   * missing. A `limit` that is not a count at all — zero, negative, or a word —
-   * is refused, because there is no page that answers it. The window is a third
-   * case and is always refused, because a narrowed window silently answers a
-   * different question.
-   *
-   * **A parameter that arrived empty is a parameter nobody set.** `?projectId=`
-   * is what a form submits for a field left blank, and reading it as a name
-   * would answer with the traces of a project that cannot exist; `?limit=` is
-   * the same case, and `Number("")` is zero, which would be refused as a page
-   * size nobody could want. `?source=` joins them. All three read as absence,
-   * which is what they mean.
-   *
-   * **`source` is the one filter this list has, and it is additive.** Absent, it
-   * is not consulted and the answer is what it has always been; present, it
-   * narrows to one kind of traffic. It rides every page of a walk, because a
-   * token is a position in an ordering and the ordering it was minted in is the
-   * narrowed one.
+   * List newest traces within the requested window. Empty optional parameters
+   * mean absence. The store caps page size and validates the window and page
+   * token; each page request must retain the same filters.
    */
   registerPlatformOperation(app, traceReadOperations.listTraces, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -461,28 +382,14 @@ export async function traceReadRoutes(
 
     return reply.send({
       ...describedDetail(detail),
-      // The same derivation again, and this time as an answer rather than as a
-      // lookup key: which simulation this trace *is*, for a reader holding only
-      // the hex.
-      //
-      // **Only where egma conducted the exchange.** Every trace id converts —
-      // they are the same 128 bits written two ways, so a customer's own
-      // production trace derives a perfectly well-formed simulation id that
-      // nothing ever minted. Sending that would be this endpoint claiming a
-      // simulation exists, and the transcript surface would go asking for the
-      // recording of a conversation egma never had. `source` is the row's own
-      // word for who conducted it, so it decides here rather than the reader
-      // guessing from an id that is always present.
-      //
-      // It is one field on an answer already being sent, computed from what is
-      // already in hand: no second read, no join, and no second endpoint for
-      // the surface that needs it. A transcript then resolves its recording
-      // through the one route a run's results use.
+      // Only simulation traces map to simulation IDs. A production trace ID can
+      // convert to a UUID, but that does not mean a simulation or recording exists.
       simulationId:
         detail.source === "simulation"
           ? simulationIdOfTrace(traceId) ?? null
           : null,
       ...describedTraceGrading(grading),
+      workBlock: grading?.workBlock ?? null,
     });
   });
 
@@ -502,60 +409,17 @@ export async function traceReadRoutes(
 }
 
 /**
- * Which project these reads narrow to, once `projectId` has been answered.
- *
- * **A session's project is a default; a key's is a scope**, and that one
- * sentence is the whole of this function. Every member of an organization holds
- * their organization role on every project in it, so a browser naming a sibling
- * project is what the project selector does on every click — while a key minted
- * for one product area is bounded by it, and reaching a sibling with one is
- * refused rather than quietly narrowed back.
- *
- * The two rules are not written here. `acting.ts` owns them, and its own note
- * says why the branch lives there: *"so that every route group a page reaches
- * gets the one rule, and a group added later cannot get the other one by
- * omission."* This surface was that group. It carried a project check of its
- * own, written when a session's project was a fact nobody could change, and
- * that check read a session's default as though it were a key's scope — so an
- * organization with two projects had Monitoring answer 400 on every project but
- * the first.
- *
- * **The key half is unchanged, deliberately and to the byte.** It is a published
- * refusal on a public contract, and a key that reached a sibling project because
- * this function grew a branch would be the one failure worth more than the bug
- * being fixed. A key for the whole organization is unchanged too: it names no
- * project, so there is nothing here to refuse, and the data-access module
- * narrows by whatever it asked for.
- *
- * **Tenancy cannot widen either way.** The organization comes off the credential
- * and appears in every predicate underneath; the only project a session can come
- * to name is one its own membership already reaches, which is `browserProject`'s
- * read and not this request's claim.
+ * Sessions may select another accessible project. Project API keys remain
+ * limited to their assigned project; organization keys may apply a project filter.
  */
 type ReadingProject =
   | { readonly auth: AuthContext }
   | { readonly refusal: string };
 
 /**
- * **Every refusal here leaves as a 400 `invalid_request`, and the flattening of
- * `browserProject`'s own code is deliberate.**
- *
- * A project this session cannot reach is, in tenancy terms, an absence — which
- * argues for 404. It must not leave as one. The browser folds an answer into
- * what a page shows through `answerFor`, and there a 404 *is* the missing
- * state: on the transcript page it draws "That transcript is not here", so a
- * mistyped project id would tell somebody their conversation had aged out of
- * the store. The request is what was malformed, not the thing it asked for, and
- * 400 is the code that says so.
- *
- * Nothing is lost by it: the refusal's own sentence is carried word for word
- * and is what the page displays. What is lost is the ability to branch on the
- * code, and no caller does.
- *
- * **A new code added upstream has to be re-decided here.** `browserProject`
- * answering a second kind of refusal one day would have it flattened into this
- * one without anybody choosing that, so whoever adds it reads this paragraph
- * and either keeps the flattening or gives the route a second branch.
+ * Map project-selection refusals to 400 invalid_request. A 404 would make the
+ * transcript page show a missing trace when the project parameter is wrong.
+ * Reassess this mapping if browserProject gains other refusal types.
  */
 async function readingProject(
   auth: AuthContext,
@@ -572,17 +436,7 @@ async function readingProject(
   return refusal === undefined ? { auth } : { refusal };
 }
 
-/**
- * Whether a project-scoped **key** was asked for a different project.
- *
- * The data-access module ignores the argument in that case and reads the
- * credential's own project regardless, which is the property that matters. This
- * is the other half: saying so out loud, because a caller whose filter was
- * silently dropped would read the answer as though the filter had applied.
- *
- * Reached only for a key now — see `readingProject` above — and its wording says
- * "key" because that is the only credential it can be about.
- */
+/** Reject a project filter outside the API key scope instead of silently ignoring it. */
 function projectRefusal(
   credentialProjectId: string | undefined,
   asked: string | undefined,

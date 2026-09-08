@@ -15,6 +15,18 @@ const resolve = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 const REAL_BROWSER_TEST = "apps/api/test/browser.test.ts";
 
 /**
+ * The Stripe lane: the real sandbox, and nothing that stands in for it.
+ *
+ * Its own lane for the reason the browser proof has one — it needs something
+ * the daily run has no business needing, here a Stripe sandbox key — and
+ * because it is the one lane that is *skipped whole* when that thing is
+ * absent. There is no fake to fall back to and there never will be: the
+ * founders' rule of 2026-09-07 is that Stripe is never simulated, so a lane
+ * with no key runs nothing rather than running a pretence.
+ */
+const STRIPE_LANE = "ee/test/stripe/**";
+
+/**
  * The private planning repository, linked into this checkout rather than nested.
  *
  * It is a separate Git repository with test files of its own, and Vitest's
@@ -32,15 +44,9 @@ const THE_PLANNING_REPOSITORY = "egma-planning/**";
 const LOCAL_AGENT_WORKTREES = "**/.claude/worktrees/**";
 
 /**
- * Two lanes, so daily work does not pay for a real browser on every edit.
- *
- * **The lanes are defined by what they leave out, never by a list of what they
- * hold.** Vitest's own default already finds every test file in every
- * JavaScript and TypeScript extension, so a new test file joins the fast lane
- * by existing. A hand-kept list of what to include cannot do that: a file the
- * list does not name runs nowhere, fails nothing, and leaves the run green. It
- * is the one mistake in this area that gives no signal at all, so the shape
- * here is chosen to make it impossible rather than to guard against it.
+ * Separate browser acceptance from the default test discovery. The fast lane
+ * uses Vitest defaults with explicit exclusions; the browser lane names its
+ * ordered acceptance file.
  */
 const SHARED = {
   env: { LOG_LEVEL: "silent" },
@@ -75,7 +81,9 @@ export default defineConfig({
         "./packages/platform-api/src/client.ts",
       ),
       "@egma/retell": resolve("./packages/retell/src/index.ts"),
+      "@egma/ingestion": resolve("./packages/ingestion/src/index.ts"),
       "@egma/db": resolve("./packages/db/src/index.ts"),
+      "@egma/ee": resolve("./ee/src/index.ts"),
       "@egma/simulation-contract": resolve(
         "./packages/simulation-contract/src/index.ts",
       ),
@@ -103,6 +111,7 @@ export default defineConfig({
             LOCAL_AGENT_WORKTREES,
             "**/.next/**",
             REAL_BROWSER_TEST,
+            STRIPE_LANE,
           ],
           // The CLI tests drive the built entry point, because that is what a
           // developer runs, and the grader test drives the one its image runs.
@@ -116,6 +125,24 @@ export default defineConfig({
             "packages/db/test/support/use-database-template.ts",
           ],
           ...SHARED,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "stripe",
+          include: [STRIPE_LANE],
+          // The database template, because the lane drives Egma's own webhook
+          // route against real rows. Neither entry point is built: this lane
+          // runs no CLI and no grader image.
+          globalSetup: ["packages/db/test/support/prepare-database-template.ts"],
+          setupFiles: ["packages/db/test/support/use-database-template.ts"],
+          ...SHARED,
+          // Every step here waits on Stripe, and two of them wait on a test
+          // clock advancing a month. Each test states its own budget as well;
+          // this is the floor under the ones that do not.
+          testTimeout: 180_000,
+          hookTimeout: 180_000,
         },
       },
       {

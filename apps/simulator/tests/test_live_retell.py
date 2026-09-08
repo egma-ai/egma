@@ -1,24 +1,8 @@
-"""One real conversation with a real Retell chat agent — opt-in.
-
-Everything else in this suite converses with a Retell-shaped stub, which
-proves the plug speaks the documented protocol and nothing at all about the
-platform behind it. This file is the other half: the whole path end to end
-against a live agent, so the runtime is trusted against reality rather than
-against a fixture.
-
-It is opt-in because CI holds no Retell account. With no credentials in the
-environment it skips — visibly, never failing, never waiting on anybody:
-
-    TEST_RETELL_API_KEY=key_... \\
-    TEST_RETELL_AGENT_ID=agent_... \\
-    uv run pytest tests/test_live_retell.py -v
-
-The agent is the only live thing in the exchange: the persona still speaks
-through the scripted model client, so what varies between two runs is the
-agent's own answers and nothing of egma's. Assertions read the workbench's
-records, exactly as the offline acceptance suite does — plus one question
-put to Retell itself, because whether the chat was really ended at the
-platform is not visible from inside egma.
+"""Opt-in simulation against a real Retell chat agent with a scripted persona.
+Run with TEST_RETELL_API_KEY and TEST_RETELL_AGENT_ID:
+uv run pytest tests/test_live_retell.py -v
+Check workbench reports and query Retell to verify platform chat termination.
+Skip without credentials.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer as createProxy, request } from "node:http";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
@@ -11,13 +11,14 @@ import type { NewSpan } from "@egma/db";
 import {
   acceptEvidenceForProjects,
   IngestionUnavailableError,
+  pendingObjectStore,
   stagedEvidence,
   type EvidenceGroup,
-} from "../src/ingestion/accept.ts";
+} from "@egma/ingestion";
 import { buildApi } from "../src/server.ts";
-import type { IngestionStore } from "../src/ingestion/object-store.ts";
-import { RECORD_FORMAT_VERSION } from "../src/ingestion/record.ts";
-import { PENDING_PREFIX } from "../src/ingestion/segment.ts";
+import type { IngestionStore } from "@egma/ingestion";
+import { RECORD_FORMAT_VERSION } from "@egma/ingestion";
+import { PENDING_PREFIX } from "@egma/ingestion";
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
@@ -31,20 +32,9 @@ import {
 import { mintKey, signUp, type Customer } from "./support/traces.ts";
 
 /**
- * The acceptance boundary, entered through the door a customer really uses.
- *
- * One promise is under test here and it is the whole design: **a request is
- * answered as accepted only when its evidence is durable in the object store.**
- * Not when it normalized, not when it reached the local log, and — the change
- * this release is — not when a row was written. So every question this file
- * asks is asked in the gap the door now leaves: what is in the bucket before
- * anything drains it, what is in the bucket when the request was refused, and
- * what a sender was told either way.
- *
- * It runs against a real MinIO, a real Postgres and a real ClickHouse, because
- * every one of those answers a question no stand-in can. The door tests next
- * door still own the wire contract; what is proved here is the boundary behind
- * it.
+ * Verify through the OTLP endpoint that acceptance waits for object-store
+ * durability. Inspect pending segments before draining, using real MinIO,
+ * Postgres, and ClickHouse. Wire-format cases have separate route coverage.
  */
 
 const storage: ObjectStorage = await startObjectStorage("ingestion-accept");
@@ -66,12 +56,18 @@ if (!storage.available) {
  */
 async function aStoreThatNeverAnswers(): Promise<{
   readonly store: IngestionStore;
+  readonly connected: Promise<void>;
   readonly close: () => void;
 }> {
+  let sawConnection: () => void = () => undefined;
+  const connected = new Promise<void>((resolve) => {
+    sawConnection = resolve;
+  });
   const held: Server = createServer((socket) => {
     // Accepted and then ignored, deliberately. The socket is kept so the
     // client sees an open connection rather than a reset.
     socket.on("error", () => undefined);
+    sawConnection();
   });
   await new Promise<void>((listening) => {
     held.listen(0, "127.0.0.1", listening);
@@ -88,6 +84,7 @@ async function aStoreThatNeverAnswers(): Promise<{
       accessKeyId: "SENTINEL-silent-store-key-id",
       secretAccessKey: "SENTINEL-silent-store-secret",
     },
+    connected,
     close: () => {
       held.close();
       held.unref();
@@ -96,14 +93,8 @@ async function aStoreThatNeverAnswers(): Promise<{
 }
 
 /**
- * Something wearing the store's address that refuses the Nth object it is asked
- * to create, and forwards everything else untouched.
- *
- * A proxy rather than a stand-in client, because what has to be proved is the
- * real client meeting a real refusal: the request is signed for this address
- * and passed on byte for byte, headers included, so the store validates the
- * signature it was given and the only thing that changes is which call comes
- * back as a `503`.
+ * Proxy real signed storage requests and refuse the selected object write
+ * with 503. Forward other requests unchanged to exercise the storage client.
  */
 type RefusingStore = {
   readonly store: IngestionStore;
@@ -502,14 +493,8 @@ describe.skipIf(!storage.available)("evidence at the acceptance boundary", () =>
 });
 
 /**
- * The store stops answering, and the whole promise is tested at once: the
- * refusal a sender can act on, the staged evidence nothing threw away, the
- * upload a later start finishes, and the one visible span a client's retry
- * leaves behind.
- *
- * It gets its own instance because it needs two of them over one local log —
- * which is what a restart is — and because the bound it proves is a second
- * rather than the deployment's ten.
+ * Lose one task's local log before its replacement starts, then prove that a
+ * sender retry is the recovery path and still creates one customer record.
  */
 describe.skipIf(!storage.available)("an object store that has gone quiet", () => {
   const running = storage as Extract<ObjectStorage, { available: true }>;
@@ -530,6 +515,7 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
       ingestStore: silent.store,
       ingestionLogDirectory: logDirectory,
       ingestionRequestTimeoutMilliseconds: 700,
+      ingestionShutdownTimeoutMilliseconds: 100,
     });
     acme = await signUp(api.app, "ada@acme.example", "Acme");
     secret = await mintKey(api.app, acme.cookie, "the outbound agent", acme.projectId);
@@ -542,7 +528,7 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
     rmSync(logDirectory, { recursive: true, force: true });
   });
 
-  it("answers 503, keeps the staged evidence, and lands it once on the next start", async () => {
+  it("answers 503, loses unacknowledged ephemeral staging, and accepts the sender retry once", async () => {
     const body = jsonExport([
       jsonSpan({
         traceId: "ee55ee55ee55ee55ee55ee55ee55ee55",
@@ -550,7 +536,7 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
       }),
     ]);
 
-    const refused = await api.app.inject({
+    const answering = api.app.inject({
       method: "POST",
       url: OTLP_TRACES_PATH,
       headers: {
@@ -559,38 +545,43 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
       },
       payload: body,
     });
+    await silent.connected;
+    const stoppingAt = Date.now();
+    const closing = api.app.close();
+    const overlappingClose = api.app.close();
+    const refused = await answering;
     // Not a rejection: an exporter stops resending what it is told was
     // rejected, and this evidence is still on its way.
     expect(refused.statusCode).toBe(503);
-    expect(refused.json()).toMatchObject({
+    const refusal = refused.json() as { code: number; message: string };
+    expect(refusal).toMatchObject({
       code: 14,
       message: expect.stringContaining("send it again"),
     });
+    expect(refusal.message).not.toContain("recover");
     expect(await pendingSegments(running.ingestStore)).toHaveLength(0);
 
-    // The process stops with the record staged and starts again against a
-    // store that answers — the same local log, and nothing in it discarded.
-    await api.app.close();
+    // A Fargate replacement does not have the old task's ephemeral disk. Lose
+    // that directory before the next instance starts, as the deployment does.
+    await Promise.all([closing, overlappingClose]);
+    expect(Date.now() - stoppingAt).toBeLessThan(1_000);
+    rmSync(logDirectory, { recursive: true, force: true });
+    mkdirSync(logDirectory, { recursive: true });
     restarted = buildApi({
       config: {
         ...api.config,
         ingestion: { ...api.config.ingestion, store: running.ingestStore },
       },
       retellProductionIngestionIntervalMilliseconds: 60 * 60_000,
-      // The recovered segment is left in the bucket to be looked at, which is
-      // this file's claim; that it is then drained is the drain suite's.
+      // The retried segment is left in the bucket for this file to inspect.
       drainsPendingEvidence: false,
     });
     await restarted.app.ready();
 
-    await expect
-      .poll(async () => (await pendingSegments(running.ingestStore)).length, {
-        timeout: 10_000,
-      })
-      .toBe(1);
+    expect(await pendingSegments(running.ingestStore)).toHaveLength(0);
 
-    // And the client's retry, which meets evidence already on its way. One
-    // immutable identity, so the two are a replay of each other.
+    // The sender retry is the recovery path. It becomes durable before the
+    // answer and drains into one customer record.
     const retried = await restarted.app.inject({
       method: "POST",
       url: OTLP_TRACES_PATH,
@@ -606,7 +597,7 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
       .poll(async () => (await pendingSegments(running.ingestStore)).length, {
         timeout: 10_000,
       })
-      .toBe(2);
+      .toBe(1);
     await drainPendingEvidence(running.ingestStore);
 
     const traceStore = api.traceStore;
@@ -624,25 +615,72 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
   });
 });
 
+describe.skipIf(!storage.available)("planned ingestion shutdown", () => {
+  const running = storage as Extract<ObjectStorage, { available: true }>;
+
+  let refusing: RefusingStore;
+  let api: TestApi;
+  let acme: Customer;
+
+  beforeAll(async () => {
+    refusing = await aStoreRefusingOnePut(running.ingestStore);
+    api = await createApi("ingestion_shutdown", {
+      ingestStore: refusing.store,
+      ingestionFlushMilliseconds: 100,
+      ingestionRequestTimeoutMilliseconds: 1_000,
+      ingestionShutdownTimeoutMilliseconds: 500,
+    });
+    acme = await signUp(api.app, "ida@acme.example", "Acme");
+  });
+
+  afterAll(async () => {
+    refusing?.stopRefusing();
+    await api?.app.close();
+    for (const segment of await pendingSegments(running.ingestStore)) {
+      if (segment.records.some((record) => record.span_id === "9d9d9d9d00000001")) {
+        await pendingObjectStore(running.ingestStore).delete(segment.key);
+      }
+    }
+    await api?.close();
+    refusing?.close();
+  });
+
+  it("retries staged evidence inside the shutdown window before closing its ephemeral log", async () => {
+    refusing.refuseEveryPutAfter(0);
+
+    await expect(
+      acceptEvidenceForProjects([
+        {
+          auth: {
+            userId: acme.userId,
+            organizationId: acme.organizationId,
+            projectId: acme.projectId,
+            role: "member",
+            via: "api_key",
+          },
+          spans: [aSpanOf("9d9d9d9d00000001")],
+        },
+      ]),
+    ).rejects.toBeInstanceOf(IngestionUnavailableError);
+    expect(await pendingSegments(running.ingestStore)).toHaveLength(0);
+
+    refusing.stopRefusing();
+    await api.app.close();
+
+    const [landed] = await pendingSegments(running.ingestStore);
+    expect(landed?.records.map((record) => record.span_id)).toEqual([
+      "9d9d9d9d00000001",
+    ]);
+    if (landed !== undefined) {
+      await pendingObjectStore(running.ingestStore).delete(landed.key);
+    }
+  });
+});
+
 /**
- * A batch naming two projects, one of whose segments the store refuses.
- *
- * **The answer is all or nothing, and no evidence is discarded either way.** A
- * trusted service batch may carry more than one project, each project gets a
- * segment of its own, and the request is a success only once every one of them
- * is durable — so a store that takes one and refuses the other is a retryable
- * refusal for the whole call.
- *
- * What the two halves then are is deliberately different, and both are safe.
- * The project whose segment landed is **durable**, and stays so: an object in
- * the store is not un-made by another project's failure. The project whose
- * segment was refused is **still staged**, and stays so until the store
- * confirms it. A sender's retry meets one of each, and stable identity makes
- * the meeting a replay rather than a duplicate.
- *
- * The fault sits on the wire rather than behind an injected client, so what is
- * proved is the real client meeting a real refusal from something wearing the
- * store's address.
+ * A multi-project request succeeds only after every segment is durable. If
+ * one upload fails, keep uploaded objects and retain the other staged records;
+ * the whole request is retryable without undoing successful uploads.
  */
 describe.skipIf(!storage.available)("a store that refuses one project's segment", () => {
   const running = storage as Extract<ObjectStorage, { available: true }>;
@@ -674,12 +712,16 @@ describe.skipIf(!storage.available)("a store that refuses one project's segment"
       // Long enough that the refused segment is still staged when the
       // assertions read it, and short enough that the retry below is prompt.
       ingestionRequestTimeoutMilliseconds: 2_000,
+      ingestionShutdownTimeoutMilliseconds: 500,
     });
     acme = await signUp(api.app, "ada@acme.example", "Acme");
     globex = await signUp(api.app, "grace@globex.example", "Globex");
   });
 
   afterAll(async () => {
+    refusing?.stopRefusing();
+    await api?.app.close();
+    await drainPendingEvidence(running.ingestStore);
     await api?.close();
     refusing?.close();
   });
@@ -730,21 +772,9 @@ describe.skipIf(!storage.available)("a store that refuses one project's segment"
 });
 
 /**
- * A store that keeps refusing, and the pace at which Egma asks it again.
- *
- * A sealed segment whose upload failed stays sealed, which is what keeps the
- * evidence — and it also means the group is permanently *due*, so the standing
- * loop would otherwise wake, fail and wake again with nothing between the
- * attempts. Against a store that is refusing quickly, that is a loop as fast as
- * the network answers: it spends this service's capacity and lands on the
- * failing store as a flood, at exactly the moment the store is least able to
- * take one.
- *
- * So an attempt that failed puts its own group aside for a while. The wait
- * starts at the flush interval and doubles up to the request bound — two
- * settings this path already has, rather than a third nobody has tuned — and it
- * ends the moment an attempt succeeds. Nothing is discarded while it waits, and
- * a request that is waiting keeps its own bound and its own `503`.
+ * Failed uploads must back off while retaining sealed segments. The delay
+ * starts at the flush interval and doubles to max(flush interval, request
+ * timeout), then resets on success. Each waiting request keeps its own deadline.
  */
 describe.skipIf(!storage.available)("a store that keeps refusing", () => {
   const running = storage as Extract<ObjectStorage, { available: true }>;
@@ -761,11 +791,15 @@ describe.skipIf(!storage.available)("a store that keeps refusing", () => {
       ingestStore: refusing.store,
       ingestionFlushMilliseconds: 100,
       ingestionRequestTimeoutMilliseconds: 1_000,
+      ingestionShutdownTimeoutMilliseconds: 500,
     });
     acme = await signUp(api.app, "ada@acme.example", "Acme");
   });
 
   afterAll(async () => {
+    refusing?.stopRefusing();
+    await api?.app.close();
+    await drainPendingEvidence(running.ingestStore);
     await api?.close();
     refusing?.close();
   });

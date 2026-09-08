@@ -1,35 +1,13 @@
-"""One real phone call to a real number — opt-in.
+"""Opt-in test that calls TEST_PHONE_NUMBER through real LiveKit SIP.
+Run: uv run pytest tests/test_live_phone.py -v
+Requires TEST_LIVEKIT_URL and its key pair, TEST_SIP_TRUNK_ADDRESS,
+TEST_SIP_TRUNK_NUMBER, TEST_SIP_TRUNK_USERNAME, TEST_SIP_TRUNK_PASSWORD,
+TEST_PHONE_NUMBER, TEST_DEEPGRAM_API_KEY, TEST_CARTESIA_API_KEY, and
+TEST_MODEL_API_KEY, plus the tokenizer corpus.
 
-Everything else about the phone plug is proved against the scripted media
-backend, which says the lifecycle is right and nothing at all about
-LiveKit, a SIP trunk, or a carrier. This file is the other half: a spec
-naming a number goes in at the workbench, a real phone rings, a real
-agent answers, and the record that comes back is read the same way the
-offline acceptance suite reads one.
-
-It is opt-in because CI holds no LiveKit deployment, no trunk and no
-phone number, and it skips — visibly, never failing, never waiting on
-anybody. A whole live deployment is what it takes, because a call that
-was placed but spoken in a test codec would prove nothing about a phone
-line::
-
-    TEST_LIVEKIT_URL=wss://... \\
-    TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \\
-    TEST_SIP_TRUNK_ADDRESS=... TEST_SIP_TRUNK_NUMBER=+1... \\
-    TEST_SIP_TRUNK_USERNAME=... TEST_SIP_TRUNK_PASSWORD=... \\
-    TEST_PHONE_NUMBER=+1... \\
-    TEST_DEEPGRAM_API_KEY=... TEST_CARTESIA_API_KEY=... \\
-    uv run pytest tests/test_live_phone.py -v
-
-The test writes all four ``TEST_SIP_TRUNK_*`` values into the work order's
-platform carrier. They never enter simulator deployment configuration. The
-number is the caller ID the call appears to come from.
-
-What is asserted is *structure*, not content: a live agent says different
-words every time and a carrier's latency is nobody's to pin. So this
-checks that a conversation happened, that it ended honestly, that the
-recording resolves with both speakers audible, and that no credential
-appears in a single byte the simulator wrote.
+The four carrier values go in the work order; TEST_SIP_TRUNK_NUMBER is caller ID.
+Check transcript structure, ending, stereo recording, and credential redaction.
+Missing prerequisites produce a skip.
 """
 
 from __future__ import annotations

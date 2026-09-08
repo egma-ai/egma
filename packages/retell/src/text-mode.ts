@@ -1,38 +1,12 @@
 /**
- * Text mode: one text exchange with a Retell **voice** agent, with no
- * call, no audio and nothing stored on Retell's side.
+ * Retell voice-agent testing through text completion, with full history per request.
+ * Require an explicit agent version and carry mock answers in the request;
+ * this module creates no temporary agent version.
  *
- * Retell's own dashboard tests a voice agent in text through this API, and it
- * is what lets egma conduct a chat simulation against an agent whose only other
- * door is a telephone. The exchange is stateless and egma-owned: every request
- * carries the whole history, and the reply carries only what is new — the
- * agent's messages, the variables as they now stand, where in its flow or its
- * state machine it now is, and whether it ended the exchange.
- *
- * **Nothing here lets Retell choose the version.** The version is a required
- * argument and always goes in the body. Retell's own default is the newest
- * version, and the newest version is exactly the one a concurrent edit has just
- * created — so a suite that leaned on the default could change what it is
- * testing between one simulation and the next.
- *
- * **Nothing here writes.** A text-mode request carries its mocked answers with
- * it, so this lane creates no draft, pins nothing, and has nothing to sweep.
- *
- * ## The wire names live in one place, deliberately
- *
- * `WIRE` below is the whole of what this module claims about Retell's field
- * names, and **every one of them is the simulator plug's**
- * (`egma_simulator.plugs.retell_text_mode`). That plug is the code that
- * actually conducts against Retell, so two modules in this repository
- * describing one third-party API differently would be a defect waiting for a
- * live run to expose: whichever of them the developer's run corrected, the
- * other would stay wrong. The plug names the same guesses in the same words,
- * and a correction is one edit here and one there.
- *
- * Egma's agents test against fakes and never touch the developer's live Retell
- * account, so what is still a guess stays a guess until the live suite of this
- * effort's ticket 03 runs.
+ * Request types come from the pinned Retell SDK. Keep the Python plug aligned.
  */
+
+import type { PlaygroundCompletionParams } from "retell-sdk/resources/playground";
 
 import {
   ask,
@@ -52,37 +26,32 @@ import {
 export const WIRE = {
   /** Where one exchange is asked for. The agent's own id follows it. */
   path: "/agent-playground-completion",
-  agentVersion: "agent_version",
+  agentVersion: "version",
   /** The history going out, and the agent's new messages coming back. */
   messages: "messages",
-  /** Retell's house name for rendered variables, as the call lanes use it. */
-  dynamicVariables: "retell_llm_dynamic_variables",
-  /**
-   * What a reply may call the variables as they now stand. Two names because
-   * the outbound one is well attested and the inbound one is not; the first
-   * present wins.
-   */
+  dynamicVariables: "dynamic_variables",
+  /** Prefer the documented field; accept the legacy response spelling. */
   replyVariables: [
-    "retell_llm_dynamic_variables",
     "dynamic_variables",
+    "retell_llm_dynamic_variables",
   ] as readonly string[],
   /** The answers this exchange carries with it, in place of a draft. */
   mockTools: "tool_mocks",
   mockToolName: "tool_name",
   /** How a native mock is matched: by name, whatever the arguments were. */
   mockToolMatch: "input_match_rule",
-  matchAnything: "any",
+  matchAnything: { type: "any" },
   /** The value the tool is given, JSON-encoded and untagged. */
   mockToolOutput: "output",
   /** Whether the call succeeded — how Retell is told to serve a failure. */
   mockToolResult: "result",
   /** Where a conversation flow is, threaded turn by turn. */
   nodeId: "current_node_id",
-  componentId: "current_component_id",
+  componentId: "component_id",
   /** Where a Retell LLM is, threaded the same way. */
   stateName: "current_state",
   /** The agent saying the exchange is over. */
-  agentEnded: "agent_ended",
+  agentEnded: "call_ended",
 } as const;
 
 /**
@@ -108,21 +77,13 @@ export type TextModeMessage = {
 
 /** One turn of history, as a request carries it. */
 export type TextModeTurn = {
-  readonly role: string;
+  readonly role: "agent" | "user";
   readonly content: string;
 };
 
 /**
- * One answer this exchange carries with it, matched by tool name.
- *
- * The match-anything rule: one answer per tool, and the arguments the agent
- * sent are never read. A tool the run has no answer for is simply absent, and
- * Retell runs the customer's real implementation for it.
- *
- * The answer arrives in **the shape it was authored in** — `{ answer }` or
- * `{ error }` — and is untagged on the way out, because Retell is the one
- * serving it and says which branch happened in its own words. One shape all
- * the way here means nothing in between re-tags it.
+ * One authored answer or error per tool, matched regardless of arguments.
+ * Convert the tag to Retell's result format. Omitted tools use their real implementation.
  */
 export type TextModeMockTool = {
   readonly toolName: string;
@@ -230,7 +191,7 @@ function resumeIn(document: Readonly<Record<string, unknown>>): TextModeResume {
  * One answer as the wire carries it: untagged, JSON-encoded, with a flag for
  * which branch it is.
  */
-function mockOnTheWire(mock: TextModeMockTool): Record<string, unknown> {
+function mockOnTheWire(mock: TextModeMockTool): PlaygroundCompletionParams.ToolMock {
   const fails = "error" in mock.answer;
   const held = fails ? mock.answer.error : mock.answer.answer;
   return {
@@ -248,10 +209,10 @@ function mockOnTheWire(mock: TextModeMockTool): Record<string, unknown> {
 }
 
 /** The body of one exchange, with nothing in it egma was not given. */
-function bodyOf(exchange: TextModeExchange): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    // Always. Never conditional, never omitted, never `latest`.
-    [WIRE.agentVersion]: exchange.agentVersion,
+type PlaygroundBody = Omit<PlaygroundCompletionParams, "version">;
+
+function bodyOf(exchange: TextModeExchange): PlaygroundBody {
+  const body: PlaygroundBody = {
     [WIRE.messages]: exchange.messages.map((turn) => ({
       role: turn.role,
       content: turn.content,
@@ -294,7 +255,7 @@ export async function exchangeInTextMode(
   try {
     answer = await ask(key, reach, {
       method: "POST",
-      path: `${WIRE.path}/${encodeURIComponent(exchange.agentId)}`,
+      path: `${WIRE.path}/${encodeURIComponent(exchange.agentId)}?version=${exchange.agentVersion}`,
       body: bodyOf(exchange),
     });
   } catch (cause) {

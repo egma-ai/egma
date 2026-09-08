@@ -1,9 +1,9 @@
 import { db } from "../client.ts";
-import { organization, organizationSettings } from "../schema/tenancy.ts";
+import { organization } from "../schema/tenancy.ts";
 import type { AuthContext } from "./context.ts";
 import { UnprocessableInputError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
-import { theOrganization, within } from "./within.ts";
+import { theOrganization } from "./within.ts";
 
 /** The customer. The only tenancy boundary there is. */
 export type Organization = {
@@ -19,6 +19,13 @@ export type OrganizationSettings = {
   readonly retentionDays: number | null;
   readonly dataResidency: string | null;
   readonly updatedAt: Date;
+};
+
+const SETTINGS_COLUMNS = {
+  organizationId: organization.id,
+  retentionDays: organization.retentionDays,
+  dataResidency: organization.dataResidency,
+  updatedAt: organization.settingsUpdatedAt,
 };
 
 /**
@@ -44,22 +51,8 @@ export async function readOrganization(
 }
 
 /**
- * The customer's own name, changed.
- *
- * **The name and not the slug.** A name is what the product shows and is
- * nobody's identifier: two organizations on one deployment may both be called
- * Acme, and renaming one breaks no link anybody holds. The slug is unique
- * across the whole deployment, and letting a customer take a word another
- * customer might be using — or lose the one their invitation links were sent
- * under — is a different decision with a different blast radius, so it is not
- * one this door offers.
- *
- * **Only an `admin`**, on the row of the permission table that already covers
- * retention and provider credentials. Renaming the customer is felt by
- * everybody in it at once.
- *
- * It takes no organization id, like every read above it: which organization
- * is a fact about the credential, not a thing a caller gets to ask for.
+ * Allow admins to change the organization name. Scope comes from AuthContext;
+ * the deployment-unique slug remains unchanged.
  */
 export async function updateOrganization(
   auth: AuthContext,
@@ -88,14 +81,15 @@ export async function updateOrganization(
 export async function readOrganizationSettings(
   auth: AuthContext,
 ): Promise<OrganizationSettings | undefined> {
-  authorize(auth, "read", here(auth));
+  authorize(auth, "read_organization", here(auth));
 
   const [row] = await db()
-    .select()
-    .from(organizationSettings)
-    .where(within(auth, organizationSettings))
+    .select(SETTINGS_COLUMNS)
+    .from(organization)
+    .where(theOrganization(auth))
     .limit(1);
-  return row;
+  if (row === undefined || row.updatedAt === null) return undefined;
+  return { ...row, updatedAt: row.updatedAt };
 }
 
 export type OrganizationSettingsChanges = {
@@ -104,15 +98,9 @@ export type OrganizationSettingsChanges = {
 };
 
 /**
- * Settings are one row per customer, so writing them is an upsert keyed on the
- * organization from the context. There is no organization to name and therefore
- * none to name wrongly.
- *
- * **Only an `admin` writes them.** Retention is on this row, and retention
- * decides how long a customer's trace data survives — so this is the one
- * setting in the product that can destroy data without deleting anything. The
- * check is here rather than at a route because there is no route yet, and a row
- * of the permission table with no call site refuses nobody.
+ * Update only supplied settings on the caller's organization, preserving
+ * concurrent changes to other fields. Use a separate settings timestamp.
+ * Require manage_organization here so every caller is subject to the admin rule.
  */
 export async function updateOrganizationSettings(
   auth: AuthContext,
@@ -120,31 +108,22 @@ export async function updateOrganizationSettings(
 ): Promise<OrganizationSettings> {
   authorize(auth, "manage_organization", here(auth));
 
-  const now = new Date();
   const [row] = await db()
-    .insert(organizationSettings)
-    .values({
-      organizationId: auth.organizationId,
-      retentionDays: changes.retentionDays ?? null,
-      dataResidency: changes.dataResidency ?? null,
-      updatedAt: now,
+    .update(organization)
+    .set({
+      ...(changes.retentionDays === undefined
+        ? {}
+        : { retentionDays: changes.retentionDays }),
+      ...(changes.dataResidency === undefined
+        ? {}
+        : { dataResidency: changes.dataResidency }),
+      settingsUpdatedAt: new Date(),
     })
-    .onConflictDoUpdate({
-      target: organizationSettings.organizationId,
-      set: {
-        ...(changes.retentionDays === undefined
-          ? {}
-          : { retentionDays: changes.retentionDays }),
-        ...(changes.dataResidency === undefined
-          ? {}
-          : { dataResidency: changes.dataResidency }),
-        updatedAt: now,
-      },
-    })
-    .returning();
+    .where(theOrganization(auth))
+    .returning(SETTINGS_COLUMNS);
 
-  if (row === undefined) {
+  if (row === undefined || row.updatedAt === null) {
     throw new Error("settings for the caller's organization were not written");
   }
-  return row;
+  return { ...row, updatedAt: row.updatedAt };
 }

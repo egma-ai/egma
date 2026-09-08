@@ -40,17 +40,9 @@ type DraftNavigation = {
 const DraftNavigationContext = createContext<DraftNavigation | null>(null);
 
 /**
- * Product navigation for controls that do not use an anchor.
- *
- * Ordinary Next links need no page code: the provider catches their same-origin
- * click before Next changes the route. Controls such as the project selector
- * call `push`, while an in-page tab can call `request` with its own state
- * change. All three paths use the same dialog and the same draft state.
- *
- * Browser Back is different: `popstate` is not cancellable. The provider does
- * not claim it can stop a full route change after the browser has made it.
- * Address-owned state inside one mounted page may restore its address and ask
- * after the fact, as the People tabs do.
+ * Share the unsaved-draft prompt across anchor clicks, imperative navigation,
+ * and in-page changes. Browser popstate is not cancellable; a mounted page
+ * may restore its own address before asking, but this cannot block every Back action.
  */
 export function useDraftNavigation(): DraftNavigation {
   const router = useRouter();

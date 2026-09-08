@@ -7,17 +7,9 @@ import { describe, expect, it } from "vitest";
 import { MEASURE_CATALOG } from "@egma/metrics";
 
 /**
- * The span fixtures, held to the vocabulary document beside them.
- *
- * These files are the meeting point between the simulator's emitter and the
- * platform's OTLP ingest: they are worked examples of the Egma vocabulary,
- * and the ingest's own suite posts these same files and asserts what lands.
- * What this suite holds is the contract itself — every fixture speaks the one
- * scope, names its simulation on the resource, uses only the span names and
- * attribute keys the document declares, and derives its trace identity from
- * the simulation id the way the document says to. A shape used in a fixture
- * and missing from the document, or the other way round, fails here rather
- * than surfacing as two sides that each believed the other.
+ * Check span fixtures against span-vocabulary.md, including scope, resource
+ * identity, span names, and attribute keys. Ingestion tests post these same
+ * fixtures through the OTLP route.
  */
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -40,6 +32,7 @@ const CONVERSATION_SPAN_NAMES = [
   "human_turn",
   "agent_turn",
   "tool_call",
+  "provider_usage",
 ] as const;
 
 /**
@@ -53,23 +46,22 @@ const MEASURE_SPAN_NAMES = MEASURE_CATALOG.filter(
 
 const SPAN_ATTRIBUTE_KEYS = [
   "egma.turn.text",
+  "egma.usage.provider",
+  "egma.usage.model",
+  "egma.usage.operation",
+  "egma.usage.measurement",
+  "egma.usage.provider_ref",
+  "egma.usage.quantities",
+  "egma.usage.raw",
   "egma.tool.name",
   "egma.tool.arguments",
   "egma.tool.result",
 ] as const;
 
 /**
- * The shapes the mock-tool seam used to author, and no longer may.
- *
- * Where the agent's own process runs the egma SDK, that process reports every
- * call it made and that report is the tool record; the seam serves the answer
- * and writes no row. So the stamp saying who answered, the mock tool's own
- * name, and the late-attached caveat all went with it — whether a mock tool
- * answered is read at display time, by name, from the pinned test version.
- *
- * A `tool_call` span itself is not retired: the lane where a platform serves
- * egma's answers itself reports its calls afterwards, and nothing else records
- * them.
+ * The SDK reports tool calls; the pinned test version identifies mock tools
+ * by name. The mock-tool seam must not duplicate that record. Platforms that
+ * serve mock tools themselves may still report tool_call spans.
  */
 const RETIRED_TOOL_SHAPES = [
   "egma.tool.provenance",
@@ -293,14 +285,8 @@ describe("the golden span fixtures", () => {
   });
 
   /**
-   * The shapes the seam retired, held out of the fixtures for good.
-   *
-   * egma's simulator used to author a `tool_call` span for every call the seam
-   * served or refused, stamped with who answered. It authors none of those
-   * now: the agent's own process reports its calls, and whether a mock tool
-   * answered is read by name from the pinned test version at display time. A
-   * fixture that grew one of these stamps back would be a second copy of a
-   * fact the pinned version already holds, free to disagree with it.
+   * Reject retired mock-tool stamps. Whether a tool call was mocked is read
+   * from the pinned test version, not duplicated in span attributes.
    */
   it("carry none of the stamps the seam used to write", () => {
     for (const fixture of [...valid, ...invalid]) {
@@ -361,6 +347,65 @@ describe("the golden span fixtures", () => {
         instant: true,
       },
     ]);
+  });
+
+  it("say what one provider request measured, in the unit that provider bills", () => {
+    const usage = valid
+      .flatMap((fixture) => spansOf(fixture))
+      .filter((span) => span.name === "provider_usage");
+    expect(usage.length).toBeGreaterThan(0);
+
+    const units = new Set<string>();
+    for (const span of usage) {
+      // The provider, the model and the protocol are all three named: a price
+      // is per model, and the same model can be reached over two protocols.
+      expect(attributeOf(span.attributes, "egma.usage.provider")).toBeTruthy();
+      expect(attributeOf(span.attributes, "egma.usage.model")).toBeTruthy();
+      expect(attributeOf(span.attributes, "egma.usage.operation")).toBeTruthy();
+      // Whether the number is the provider's own or Egma's count of what it
+      // sent. The two are different facts and the record keeps which.
+      expect(
+        ["provider_reported", "client_measured"].includes(
+          attributeOf(span.attributes, "egma.usage.measurement") ?? "",
+        ),
+        `${span.spanId} says how it was measured`,
+      ).toBe(true);
+
+      const quantities = JSON.parse(
+        attributeOf(span.attributes, "egma.usage.quantities") ?? "null",
+      ) as Record<string, number> | null;
+      expect(quantities, `${span.spanId} measured something`).toBeTypeOf(
+        "object",
+      );
+      const measured = Object.entries(quantities ?? {});
+      expect(measured.length).toBeGreaterThan(0);
+      for (const [type, quantity] of measured) {
+        expect(quantity, `${span.spanId} ${type}`).toBeTypeOf("number");
+        units.add(type);
+      }
+
+      // The record's occurrence is the span's own instant, so the span is the
+      // moment the provider answered rather than an interval.
+      expect(span.endTimeUnixNano).toBe(span.startTimeUnixNano);
+
+      // A provider-reported quantity carries the provider's own object; a
+      // client-measured one has none, because the provider said nothing.
+      const raw = attributeOf(span.attributes, "egma.usage.raw");
+      if (
+        attributeOf(span.attributes, "egma.usage.measurement") ===
+        "provider_reported"
+      ) {
+        expect(raw, `${span.spanId} keeps the provider's usage object`).toBeTypeOf(
+          "string",
+        );
+      }
+    }
+
+    // All three legs are shown, so the fixtures cover the three units a
+    // provider bills Egma in rather than only the one that is easiest.
+    expect(units).toContain("input_tokens");
+    expect(units).toContain("audio_seconds");
+    expect(units).toContain("characters");
   });
 
   it("show a voice flush whose turns genuinely overlap, because the shape has to permit it", () => {

@@ -7,19 +7,8 @@ import { notAuthenticated, tooManyRequests } from "./refusals.ts";
 import { toIdentityRequest } from "./web-handler.ts";
 
 /**
- * Everything that has to be true before a route with a customer's data in it
- * runs, as one hook rather than as a line every route remembers to write.
- *
- * Two things happen here and the order between them is the point. A request is
- * turned into a context first, because until then there is no organization —
- * and the rate limit is keyed on the organization, not on the credential, so
- * that rotating a key cannot reset a budget. Then the budget is checked. A
- * route inside this scope can only ever run for somebody, somewhere, within
- * their allowance.
- *
- * It is a hook on an encapsulated scope rather than a wrapper each route calls,
- * for the same reason the tenancy predicates live inside the data-access module:
- * a caller cannot forget what a caller cannot do.
+ * Authenticate before applying the organization-level rate limit.
+ * The encapsulated hook applies both checks to every route in this scope.
  */
 
 declare module "fastify" {

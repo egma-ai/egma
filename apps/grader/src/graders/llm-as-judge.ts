@@ -1,3 +1,4 @@
+import { ProviderKeyUnavailableError } from "@egma/db";
 import { judgeInputOf, type JudgeQuestion } from "../judge/index.ts";
 import { validateJudgeAnswer } from "../judge/response.ts";
 import type { Execution, GraderResult } from "./contract.ts";
@@ -47,6 +48,7 @@ export async function executeLlmAsJudge(execution: Execution): Promise<GraderRes
       assertions,
     } };
   } catch (error) {
+    if (error instanceof ProviderKeyUnavailableError) throw error;
     return { score: null, details: { error: `this grader could not produce a score: ${error instanceof Error ? error.message : String(error)}` } };
   }
 }

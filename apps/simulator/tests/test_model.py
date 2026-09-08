@@ -112,9 +112,7 @@ class ModelStub:
         message: dict = {"role": "assistant", "content": content}
         if tool_calls is not None:
             message["tool_calls"] = tool_calls
-        self.answers.append(
-            web.json_response({"choices": [{"message": message}]})
-        )
+        self.answers.append(web.json_response({"choices": [{"message": message}]}))
 
     async def handle(self, request: web.Request) -> web.Response:
         self.requests.append(await request.json())
@@ -196,9 +194,7 @@ async def test_the_structured_end_call_is_returned_for_pipecat_to_execute(model_
         text="Thank you, that is everything. Goodbye.",
         concluded=False,
         tool_calls=(
-            PersonaToolCall(
-                tool_call_id="call_end", name="end_call", arguments={}
-            ),
+            PersonaToolCall(tool_call_id="call_end", name="end_call", arguments={}),
         ),
     )
 
@@ -403,3 +399,40 @@ async def test_runtime_model_forwards_the_claimed_reasoning_policy(
     else:
         assert model_stub.requests[0]["reasoning_effort"] == reasoning_effort
     assert model_stub.headers[0]["Authorization"] == "Bearer claim-key-under-test"
+
+
+@pytest.mark.parametrize(
+    "status,customer,typed",
+    [
+        (401, True, True),
+        (403, True, True),
+        (429, True, False),
+        (503, True, False),
+        (401, False, False),
+    ],
+)
+async def test_customer_auth_failure_names_the_provider_without_fallback(
+    model_stub, status, customer, typed
+):
+    from egma_simulator.plugs import failed_ending
+    from egma_simulator.provider_keys import ProviderKeyUnavailable
+
+    model_stub.answers.append(
+        web.json_response({"error": "secret-customer-key"}, status=status)
+    )
+    model = OpenAICompatibleModel(
+        base_url=model_stub.base_url,
+        api_key="secret-customer-key",
+        model_name="gpt-4o-mini",
+        customer_funded=customer,
+    )
+    try:
+        with pytest.raises(ProviderKeyUnavailable if typed else ModelFailure) as caught:
+            await model.reply(system_and_history())
+    finally:
+        await model.close()
+    assert len(model_stub.requests) == 1
+    assert "secret-customer-key" not in str(caught.value)
+    assert failed_ending(caught.value) == (
+        "provider_key_unavailable" if typed else "error"
+    )

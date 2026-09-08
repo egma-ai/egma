@@ -1,4 +1,5 @@
 import {
+  authorize,
   cancelRun,
   connectionTypeOf,
   connectionTypeReadsPlatformAtRunStart,
@@ -6,7 +7,6 @@ import {
   getAgent,
   getConnection,
   getRun,
-  IdempotencyConflictError,
   latestRunEventSequence,
   listRunEvents,
   listRuns,
@@ -18,7 +18,6 @@ import {
   readRunGradingProgress,
   readSimulationGradingStates,
   resolveRunStartReach,
-  runAlreadyStartedFor,
   RUN_STATUSES,
   RunWriteRefusedError,
   simulationStatusCountsOfRuns,
@@ -29,9 +28,11 @@ import {
   type ExpectedTestVersion,
   type NewRun,
   type Run,
+  readRunWorkBlock,
   type RunEvent,
   type RunFilter,
   type RunStatus,
+  type SimulationGradeTally,
   type SimulationStatus,
   type TraceGradingState,
 } from "@egma/db";
@@ -104,6 +105,8 @@ export type RunRoutesOptions = {
    * and a phone run reaches no platform here at all.
    */
   readonly retellFetch?: typeof fetch | undefined;
+  /** Wake hosted voice compute after a run has become claimable. */
+  readonly wakeVoiceFleet?: (() => void) | undefined;
 };
 
 type Body = Record<string, unknown>;
@@ -193,14 +196,8 @@ function completeStatusCounts(counts?: StatusCounts): Record<SimulationStatus, n
 }
 
 /**
- * One run's header.
- *
- * `whole` is the single-run read and is the only caller that gets the temporary
- * platform world. That world carries every touched number's inbound routing
- * verbatim — a page of two hundred runs would repeat all of it two hundred
- * times, for a reader who asked for a list of runs and not for anybody's
- * telephone routing. It is a fact about one run, so it is answered when one run
- * is asked for.
+ * Serialize run headers. Detail reads include published mock-draft metadata;
+ * list reads omit it.
  */
 function describedHeader(
   run: Run,
@@ -220,6 +217,7 @@ function describedHeader(
     status: run.status,
     agentId: run.agentId,
     connectionId: run.connectionId,
+    connectionName: run.connectionName,
     agentPlatform: run.connectionSnapshot.agentPlatform,
     connectionType: run.connectionSnapshot.connectionType,
     accessVariant: run.connectionSnapshot.accessVariant,
@@ -312,6 +310,7 @@ function describedSimulation(
   simulation: ConductedSimulation,
   gradingState: TraceGradingState | null,
   combinedScore: number | null,
+  gradeTally: SimulationGradeTally | null,
 ): Record<string, unknown> {
   return {
     id: simulation.id,
@@ -325,6 +324,7 @@ function describedSimulation(
     status: simulation.status,
     gradingState,
     combinedScore,
+    gradeTally,
     reason: simulation.endingReason,
     executionFailure: simulation.executionFailure,
     startedAt: simulation.startedAt?.toISOString() ?? null,
@@ -422,7 +422,6 @@ export async function runRoutes(
           "suiteId",
           "agentId",
           "connectionId",
-          "idempotencyKey",
           "name",
           "expectedTestVersions",
         ],
@@ -450,10 +449,6 @@ export async function runRoutes(
       if (!isId("con", connectionId)) {
         return unprocessable(reply, "connectionId must be one con_ identifier");
       }
-      const idempotencyKey = given(text(body.idempotencyKey));
-      if (idempotencyKey === undefined) {
-        return unprocessable(reply, REFUSALS.idempotencyKeyRequired);
-      }
       if ("name" in body && typeof body.name !== "string") {
         return unprocessable(reply, "name must be text");
       }
@@ -464,7 +459,6 @@ export async function runRoutes(
         suiteId,
         agentId,
         connectionId,
-        idempotencyKey,
         ...(given(text(body.name)) === undefined
           ? {}
           : { name: text(body.name) }),
@@ -472,19 +466,10 @@ export async function runRoutes(
           ? {}
           : { expectedTestVersions: expected }),
       };
-      const replayed = await runAlreadyStartedFor(acting.auth, input);
-      if (replayed !== undefined) {
-        const described = await headerOf(
-          acting.auth,
-          replayed.id,
-          options.baseUrl,
-        );
-        if (described === undefined) {
-          throw new Error(`run ${replayed.id} vanished during replay`);
-        }
-        return reply.code(201).send(described);
-      }
-
+      authorize(acting.auth, "start_and_cancel_runs", {
+        organizationId: acting.auth.organizationId,
+        projectId: acting.auth.projectId,
+      });
       const carrier = phoneReadiness(options.carrierRoute);
       if (carrier.state !== "ready") {
         const kind = await connectionTypeOf(acting.auth, connectionId);
@@ -551,16 +536,9 @@ export async function runRoutes(
             }),
       });
 
-      // **The draft lane builds its mocked world after the run row exists**, on
-      // no other lane. It happens after `startRun` because the temporary
-      // version's tool URLs carry this run's identifier, and nothing races it: a
-      // mocked run's simulations are unclaimable until the record names a
-      // temporary version, from the instant they are written. This is a no-op
-      // for a text-mode run — not a mockable draft lane — and for a web-call run
-      // whose pinned test versions carry no mock tools; only a run whose tests
-      // bring a mocked world reaches Retell here. A world that cannot be built
-      // cancels the run and is answered as itself, never as a run that
-      // started.
+      // Build eligible mock drafts after the run exists so cleanup state can be
+      // recorded. The queue gate blocks claims until a temporary version is ready.
+      // Runs without draft-based mock tools skip this step.
       const world = await buildRunMockedWorld(
         acting.auth,
         started,
@@ -577,6 +555,10 @@ export async function runRoutes(
       if (world.kind === "in-use") {
         return sendRefusal(reply, "mock_tools_agent_in_use", world.reason);
       }
+
+      // The run and any mocked world it needs are ready before compute wakes.
+      // This is only a wake-up; the claim transaction still assigns work.
+      options.wakeVoiceFleet?.();
 
       const described = await headerOf(
         acting.auth,
@@ -663,6 +645,7 @@ export async function runRoutes(
       ]);
       return reply.send({
         ...header,
+        workBlock: await readRunWorkBlock(acting.auth, runId),
         // Captured before this response makes the page visible. A browser
         // keeps it as the boundary between history and live notifications.
         eventThrough: eventThrough ?? 0,
@@ -741,6 +724,7 @@ export async function runRoutes(
             simulation,
             grading?.state ?? null,
             grading?.combinedScore ?? null,
+            grading?.tally ?? null,
           );
         }),
         nextPageToken: found.nextCursor ?? null,
@@ -815,14 +799,14 @@ export async function runRoutes(
 
   app.setErrorHandler(async (error: unknown, _request, reply) => {
     if (error instanceof RunWriteRefusedError) {
+      if (error.reason === "providers_unfunded" || error.reason === "allowance_spent") {
+        return sendRefusal(reply, error.reason, error.message);
+      }
       if (error.reason === "no_adapter") return noAdapter(reply, error.message);
       if (error.reason === "already_finished") {
         return conflict(reply, error.message);
       }
       return unprocessable(reply, error.message);
-    }
-    if (error instanceof IdempotencyConflictError) {
-      return sendRefusal(reply, "idempotency_conflict", error.message);
     }
     if (error instanceof ProjectOutsideOrganizationError) {
       return notPermitted(reply, cannotActIn(error.projectId));

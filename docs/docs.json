@@ -82,6 +82,12 @@
               "tools/livekit-python-sdk",
               "tools/livekit-javascript-sdk"
             ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/provider-api-keys"
+            ]
           }
         ]
       },
@@ -250,6 +256,14 @@
               "api/list-api-keys",
               "api/create-api-key",
               "api/revoke-api-key"
+            ]
+          },
+          {
+            "group": "Provider API keys",
+            "pages": [
+              "api/list-provider-keys",
+              "api/put-provider-key",
+              "api/delete-provider-key"
             ]
           }
         ]

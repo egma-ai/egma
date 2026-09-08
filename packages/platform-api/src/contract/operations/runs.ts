@@ -44,24 +44,14 @@ const endingReasonSchema = {
     "simulator_error",
     "orphaned",
     "dispatch_failed",
+    "provider_key_unavailable",
   ],
 } as const;
 
 /**
- * The note a mocked run leaves behind, as a reader sees it.
- *
- * It is on the run's header because it is a fact about the whole run: one
- * engine, read once, that the temporary copy's tools were built from. Naming it
- * is what lets a reader go and look at the version this run was conducted
- * against.
- *
- * **It once carried a list of touched phone numbers**, because Egma pinned a
- * number that follows Retell's latest pointer for the length of a run and put
- * it back afterwards. Egma writes to no customer's numbers any more (developer
- * ruling, 2026-08-31), so there is nothing of theirs to promise back and
- * nothing to list. The one thing a mocked run makes is its own temporary
- * version, and the two cleanup fields beside this note are what say whether it
- * is still standing.
+ * The serving engine version used to prepare a run's temporary Retell version.
+ * The adjacent cleanup fields state whether the temporary version remains.
+ * Egma does not change phone-number routing.
  */
 export const mockMetadataSchema = {
   type: "object",
@@ -141,6 +131,8 @@ const runHeaderSchema = {
     status: runStatusSchema,
     agentId: stringIdSchema,
     connectionId: stringIdSchema,
+    /** The connection's current name, or null when its row is gone. */
+    connectionName: nullable(stringSchema),
     agentPlatform: nullable(stringSchema),
     connectionType: stringSchema,
     accessVariant: stringSchema,
@@ -186,6 +178,7 @@ const runHeaderSchema = {
     "status",
     "agentId",
     "connectionId",
+    "connectionName",
     "agentPlatform",
     "connectionType",
     "accessVariant",
@@ -218,11 +211,22 @@ const runHeaderSchema = {
  * row of a two-hundred-run page would put somebody's telephone routing in front
  * of a reader who asked for a list of runs.
  */
+export const workBlockSchema = {
+  type: "object",
+  properties: {
+    error: { type: "string", enum: ["allowance_spent", "providers_unfunded"] },
+    message: stringSchema,
+  },
+  required: ["error", "message"],
+  additionalProperties: false,
+} as const;
+
 const runDetailSchema = {
   ...runHeaderSchema,
   properties: {
     ...runHeaderSchema.properties,
     eventThrough: integerSchema,
+    workBlock: nullable(workBlockSchema),
     tempMockAgentVersion: nullable(integerSchema),
     tempMockAgentVersionCleanup: nullable(booleanSchema),
     mockMetadata: nullable(mockMetadataSchema),
@@ -240,6 +244,7 @@ const runDetailSchema = {
   required: [
     ...runHeaderSchema.required,
     "eventThrough",
+    "workBlock",
     "tempMockAgentVersion",
     "tempMockAgentVersionCleanup",
     "mockMetadata",
@@ -247,6 +252,25 @@ const runDetailSchema = {
     "agent",
     "connection",
   ],
+} as const;
+
+/**
+ * How the current grades of one simulation stand against its frozen plan.
+ *
+ * `selected` counts the project graders the plan holds. The three results
+ * count the current grade of each of them, so they sum to `selected` only
+ * once every grader has a result.
+ */
+const gradeTallySchema = {
+  type: "object",
+  properties: {
+    passed: integerSchema,
+    failed: integerSchema,
+    errored: integerSchema,
+    selected: integerSchema,
+  },
+  required: ["passed", "failed", "errored", "selected"],
+  additionalProperties: false,
 } as const;
 
 const runSimulationSchema = {
@@ -263,6 +287,8 @@ const runSimulationSchema = {
     status: simulationStatusSchema,
     gradingState: nullable(gradingStateSchema),
     combinedScore: nullable(normalizedScoreSchema),
+    /** Null when the simulation has no grading state to count. */
+    gradeTally: nullable(gradeTallySchema),
     reason: nullable(endingReasonSchema),
     executionFailure: nullable(stringSchema),
     startedAt: nullable(dateTimeSchema),
@@ -282,6 +308,7 @@ const runSimulationSchema = {
     "status",
     "gradingState",
     "combinedScore",
+    "gradeTally",
     "reason",
     "executionFailure",
     "startedAt",
@@ -406,11 +433,6 @@ export const runOperations = {
             description: "An active connection on that agent in the same project. Its modality determines whether simulations use voice or chat.",
             examples: ["con_01M0E4J0BBE1FVDVTZ1BSS5C97"],
           },
-          idempotencyKey: {
-            ...stringSchema,
-            description: "A non-empty key for this logical run request. Reusing it with the same request returns the existing run; reusing it with different run inputs returns a conflict. Use a new key for a new run.",
-            examples: ["release-check-2026-09-06-001"],
-          },
           name: {
             ...stringSchema,
             description: "Optional display name for the run.",
@@ -421,13 +443,12 @@ export const runOperations = {
             description: "Optional exact list of the suite's test IDs and current version IDs. Each test and version must appear once. The request is refused if the suite membership or any version changed. Omit this field to use the current suite.",
           },
         },
-        required: ["suiteId", "agentId", "connectionId", "idempotencyKey"],
+        required: ["suiteId", "agentId", "connectionId"],
         additionalProperties: false,
         examples: [{
           suiteId: "ste_01M0E4J0BBE1FVDVTZ1BSS5C97",
           agentId: "agt_01M0E4J0BBE1FVDVTZ1BSS5C97",
           connectionId: "con_01M0E4J0BBE1FVDVTZ1BSS5C97",
-          idempotencyKey: "release-check-2026-09-06-001",
           name: "Appointment booking release check",
         }],
       },

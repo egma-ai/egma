@@ -1,20 +1,8 @@
 import type { FastifyReply } from "fastify";
 
 /**
- * The refusal vocabulary of this API, written once.
- *
- * Every refusal is `{ error, message }`: a stable snake_case code a client
- * branches on, and a plain sentence saying what happened and what to do next.
- * The codes are contract and never change; the sentences improve deliberately.
- *
- * These live in one module because a code is a promise. A route group that
- * spelled its own `{ error: "not_permitted" }` would be free to spell it
- * `not-permitted` on a Tuesday, and nothing would notice until a client's
- * branch stopped matching. `CODES` below is the whole vocabulary and the only
- * place a code is spelled beside its status; everything that answers a refusal
- * — the senders here, the door's two in `credentialed.ts`, and the agent
- * group's refusal values — derives from it, so an unlisted code cannot
- * compile, let alone ship.
+ * API refusals pair a stable snake_case error code with an editable message.
+ * CODES centralizes code/status pairs for the typed senders in this module.
  */
 
 export const CODES = {
@@ -65,6 +53,9 @@ export const CODES = {
    */
   persona_name_ambiguous: 422,
   unprocessable: 422,
+  /** Known billing limits have different remedies from an invalid run. */
+  providers_unfunded: 422,
+  allowance_spent: 422,
   credential_required: 422,
   credential_forbidden: 422,
   credential_choice_required: 422,
@@ -77,17 +68,6 @@ export const CODES = {
   invalid_cursor: 422,
   /** A provider needed for setup did not answer. The customer may retry. */
   provider_unavailable: 503,
-  /**
-   * A start action that named no idempotency key. 422 rather than 409: nothing
-   * conflicts, something required is missing, and the fix is to send one.
-   */
-  idempotency_key_required: 422,
-  /**
-   * A key reused over a different request. Answering the original run would
-   * tell somebody their new selection had started when it had not, so the
-   * third answer is the only honest one.
-   */
-  idempotency_conflict: 409,
   /**
    * A Retry that could not be derived, because something the earlier run used
    * is no longer active or no longer applies. Its own code rather than a plain
@@ -102,38 +82,19 @@ export const CODES = {
   no_adapter: 422,
   phone_setup_required: 422,
   /**
-   * A run over a connection with mock tools switched on, whose temporary
-   * mocked version could not be built.
-   *
-   * **Its own code, because the alternative was conducting the run anyway.** The
-   * switch on that one connection promises the run's tool calls reach Egma's
-   * stand-ins and not the customer's backend; a run that quietly fell back to
-   * the real tools would be a green result over production. So the run is
-   * canceled and this is what the caller is told, with the platform's own reason
-   * in the sentence.
+   * A test requires mock tools but its temporary agent version could not be
+   * built. Refuse the run instead of executing those tools against real backends.
    */
   mock_tools_unbuildable: 422,
   /**
-   * A second mocked run asked for while another run of the same agent still
-   * holds its one temporary version.
-   *
-   * **Its own code, and a conflict rather than an unprocessable one**, because
-   * nothing about the request is wrong: the same request will work once the
-   * other run finishes. Two mocked runs of one agent cannot overlap — each puts
-   * the agent's phone routing back as it found it, and the other's temporary
-   * version would be what that routing then points at.
+   * Another run holds this agent's mock-draft claim. Retry after it finishes
+   * and cleanup succeeds; concurrent mock-draft lifecycles are refused.
    */
   mock_tools_agent_in_use: 409,
   too_many_requests: 429,
   /**
-   * A fault, answered without relaying whatever the fault said.
-   *
-   * Every other code here is a sentence somebody wrote to be read. This one is
-   * for what nobody wrote — a driver error, a constraint name, a query layer's
-   * wrapper — on the routes where the query that failed is one that selected a
-   * sealed envelope. Echoing such a message would put ciphertext and SQL into a
-   * browser response, so the caller gets a sentence this module chose and the
-   * detail goes to the log.
+   * Return a fixed internal-error message instead of exposing driver details,
+   * SQL, or credential envelopes in the response.
    */
   unavailable: 500,
   capability_check_failed: 502,
@@ -182,21 +143,9 @@ export function projectOutsideOrganization(projectId: string): string {
 }
 
 /**
- * An edit that named the revision it was written against, refused because the
- * resource has moved since.
- *
- * **The sentence is composed here, by the layer that answers, rather than
- * carried on the error.** More than one route group can answer this refusal,
- * and each names its own resource word — lower case where the API spells the
- * resource that way and capitalised where it does not. An error that baked one
- * sentence in would make the other groups either relay the wrong word or
- * paraphrase, and the wording is contract: a coding agent reads it off a
- * terminal. Personas are deliberately not among the groups that answer it:
- * a persona write names no revision at all.
- *
- * What the error carries is the data — which resource, which one, and the two
- * revisions — which is what a caller needs to read the thing again and send
- * the edit against the revision it names now.
+ * Format stale-revision errors with the route's resource name. The error
+ * provides IDs and revisions; the caller must reread before retrying.
+ * Persona edits do not use revision tokens.
  */
 export function identityConflict(resource: string, resourceId: string): string {
   return (
@@ -266,15 +215,6 @@ export const REFUSALS = {
   projectSlugTaken: (slug: string): string =>
     `Project slug ${slug} is already in use in this organization. Choose a ` +
     "different slug and save the project again.",
-
-  idempotencyKeyRequired:
-    "Starting a run requires an idempotency key. Send one stable key for " +
-    "this start action and try again.",
-
-  idempotencyConflict: (key: string): string =>
-    `Idempotency key ${key} already started a different run. Reuse the ` +
-    "original request, or send a new key for this run.",
-
 } as const;
 
 /** The body could never be written, whatever is there. */
@@ -318,17 +258,8 @@ export function unprocessable(
 }
 
 /**
- * A recording whose reference egma will not sign.
- *
- * **Its own code rather than an `unprocessable`, and the distinction is what a
- * reader does next.** Every other 422 on the recording route is a settled fact
- * about the conversation — *a chat has no audio and never will* — and a surface
- * that asks about every conversation it shows answers those by offering
- * nothing, because there is nothing and there never was. This one is a *defect*:
- * a row is carrying a reference no simulator could have written, and the audio
- * it points at may well exist. Sharing a code with the honest absences would
- * make a corrupt row invisible on exactly the surface that would meet it most —
- * a data fault dressed as a conversation that was never recorded.
+ * A stored recording reference is invalid. Keep this separate from expected
+ * audio absence so the UI can report the defect.
  */
 export function unsignableReference(
   reply: FastifyReply,
@@ -349,23 +280,8 @@ export function noAdapter(reply: FastifyReply, message: string): FastifyReply {
 }
 
 /**
- * A phone run asked of a platform whose phone half has never been set up.
- *
- * **Its own code, and the distinction is the whole reason it exists.**
- * `no_adapter` is about the build — this egma cannot conduct that kind of
- * conversation at all, and no configuration will change it. This one is about
- * *this deployment*: the software dials fine, and the person who runs the
- * platform has not given it a carrier yet. The two have different readers and
- * different next moves — one waits for a release, the other runs one command —
- * and a client that could not tell them apart would tell a developer to wait
- * for something that already shipped.
- *
- * **It is refused before the run row exists, which is the point.** A phone run
- * that were accepted here would be queued, claimed, and only then discovered to
- * have nowhere to dial from — a failed simulation on the record that says
- * nothing about the agent under test, which is exactly the confusion between an
- * operational failure and a low grade that this product exists to keep
- * apart.
+ * Phone execution is supported but this deployment lacks carrier settings.
+ * Reject before creating the run; no_adapter instead means unsupported execution.
  */
 export function phoneSetupRequired(
   reply: FastifyReply,
@@ -424,20 +340,9 @@ export function wrongServiceToken(reply: FastifyReply): FastifyReply {
 }
 
 /**
- * The reader may have this, and this deployment has nowhere to get it from.
- *
- * The only 5xx in this vocabulary, and it earns that: every other refusal here
- * is about the request, and this one is about the installation. A recording
- * exists, the person asking is entitled to it, and the control plane has not
- * been told where a browser reaches the store — so the honest answer is that
- * egma is not able to serve this right now, with the variable to set. Answering
- * 404 would tell a reader their recording is gone, which is the one thing that
- * is not true.
- *
- * It is deliberately the **last** refusal a route makes, after every question
- * about who is asking and what they asked for. A configuration answer that
- * arrived first would let a stranger learn whether a simulation exists by
- * watching which sentence comes back.
+ * Recording playback is not configured on this deployment. Check access and
+ * recording eligibility first, then name the missing configuration.
+ * A configuration error must not appear as a missing recording.
  */
 export function noObjectStore(
   reply: FastifyReply,

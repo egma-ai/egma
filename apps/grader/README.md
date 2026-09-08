@@ -162,11 +162,19 @@ test that calls a real provider.
 | `DATABASE_URL` | required | Postgres control-plane store. |
 | `CLICKHOUSE_URL` | required | Trace and grade store. |
 | `EGMA_GRADER_CLAIMANT` | `grader-<host>-<pid>` | This worker's claim label. |
-| `EGMA_GRADER_CAPACITY` | `4` | Maximum traces graded at once by one worker. |
+| `EGMA_GRADER_CAPACITY` | `4` | Maximum grading jobs at once by one worker. |
+| `EGMA_GRADING_CONCURRENCY_CAP` | unset | Maximum active grading jobs across all workers. Separate from voice and chat simulation caps. |
 | `EGMA_GRADER_HEARTBEAT_SECONDS` | `15` | Claim heartbeat interval. |
 | `EGMA_GRADER_LEASE_SECONDS` | `120` | Time before a silent claim can be recovered. |
 | `EGMA_GRADER_SWEEP_SECONDS` | `30` | Backstop interval for missed notifications. |
 | `EGMA_GRADER_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARN`, or `ERROR`. |
+| `EGMA_GRADER_INGESTION_LOG_DIR` | `/var/lib/egma/grader-ingestion` | Persistent local log for paid judge usage. Mount a separate writable volume here; the grader does not use the API ingestion log directory. |
+
+A grading job includes every attached grader for one simulation or trace.
+Each finished job frees a slot for another queued job, even while other jobs
+are still running. Claims use small transactions to fill the available slots;
+the worker does not wait for a group of jobs to finish. All attached graders
+within a job finish before its grade results are stored together.
 
 Provider credential configuration is shared with the other agent services. A
 missing credential for a selected model fails the whole job before any grader

@@ -32,17 +32,12 @@ import {
 } from "./support/database.ts";
 
 /**
- * What each role may do, asserted a cell at a time and in both directions,
- * because a permission table tested only where it says yes is a table nobody
- * has checked.
- *
- * The table below is written out here rather than imported from the code. A
- * test that reads the map and then asks the map whether the map is right proves
- * nothing; this one states what the product promises, and would still be the
- * question to ask if everything underneath it were rewritten.
+ * Define expected permissions independently of the implementation and test
+ * both allowed and denied operations for each role.
  */
 const THE_TABLE: Readonly<Record<string, readonly Role[]>> = {
   "read": ["viewer", "member", "admin"],
+  "read_organization": ["viewer", "member", "admin"],
   "author_definitions": ["member", "admin"],
   "configure_agents": ["member", "admin"],
   "configure_monitoring": ["member", "admin"],
@@ -357,8 +352,8 @@ describe("the organization an action names", () => {
   });
 });
 
-describe("the project an action names", () => {
-  it("is accepted and changes no answer, because every member holds their role on every project", () => {
+describe("a browser session's selected project", () => {
+  it("does not narrow the person's organization role", () => {
     for (const role of ROLES) {
       for (const action of ACTIONS) {
         const here = permits(at(role), action, {
@@ -375,16 +370,10 @@ describe("the project an action names", () => {
     }
   });
 
-  it("is not consulted at all, which is what a project-level grant will change", () => {
-    // Naming a project of another customer's alongside the caller's own
-    // organization changes nothing, because the project is read by nothing.
-    // Whether that pairing is real is the database's question, answered by the
-    // composite foreign key and by the predicates the data-access module
-    // injects — not by a permission.
-    //
-    // The argument being on the call from the first commit is what keeps
-    // project-level grants a change to one function body rather than an audit
-    // of every call site in the product.
+  it("still leaves project ownership checks to the data-access predicates", () => {
+    // A session's selected project is navigation context. Its role is shared
+    // across the organization; the data layer verifies that a project belongs
+    // to that organization. Project API keys have a separate scope ceiling.
     for (const role of ROLES) {
       for (const action of ACTIONS) {
         expect(
@@ -736,7 +725,12 @@ describe("an organization's settings", () => {
     const written = await updateOrganizationSettings(actingAs(ada, "admin"), {
       retentionDays: 30,
     });
-    expect(written.retentionDays).toBe(30);
+    expect(written).toEqual({
+      organizationId: ada.organizationId,
+      retentionDays: 30,
+      dataResidency: null,
+      updatedAt: expect.any(Date),
+    });
 
     // Reading them is not what the row is about: everybody in the organization
     // reads anything in it, and only an admin changes this.

@@ -1,56 +1,12 @@
-"""One real chat simulation of a real Retell voice agent — opt-in.
+"""Operator-run, opt-in Retell text-mode simulation; excluded from normal CI.
+Use a voice agent with a flow or Retell LLM and a tool the scenario will call.
+Run: uv run pytest tests/test_live_text_mode.py -v -s
+Set TEST_RETELL_API_KEY, TEST_RETELL_AGENT_ID, and TEST_MODEL_API_KEY.
+Standard provider variables are fallbacks; TEST_RETELL_SCENARIO is optional.
+Missing prerequisites produce a skip.
 
-Everything else on this lane converses with a text-mode-shaped stub, which
-proves the plug speaks the documented protocol and nothing at all about the
-platform behind it. This file is the other half, and the founder's one live
-proof: a genuine chat simulation against a real Retell **voice** agent, over
-the agent-playground-completion API, with a mocked tool answer and a node or
-state transition on the record — and no audio anywhere, because text mode
-synthesizes nothing and hears nothing.
-
-It is written here and **run by the developer**, never by an agent and never
-by CI: agents test against fakes only, and the live account is the developer's
-to touch (ruling 2026-08-28). With its environment missing it skips — visibly,
-never failing, never waiting on anybody, and never reaching a network.
-
-## The one command
-
-    TEST_RETELL_API_KEY=key_... \\
-    TEST_RETELL_AGENT_ID=agent_... \\
-    TEST_MODEL_API_KEY=sk-... \\
-    uv run pytest tests/test_live_text_mode.py -v -s
-
-## What it needs, and why each
-
-- **TEST_RETELL_API_KEY** and **TEST_RETELL_AGENT_ID** — a real Retell key and
-  a real **voice** agent on that account, conducted on a conversation flow or a
-  Retell LLM (a custom-LLM agent is refused by construction and is the wrong
-  agent for this proof). The agent should have at least one tool and a prompt
-  that a booking-style scenario leads it to call, so a mocked answer lands.
-- **TEST_MODEL_API_KEY** — a funded model key for the persona's own brain, so
-  the caller reasons for real rather than reading a script. It is the OpenAI
-  key `direct_models` gives the persona; each name also falls back to the
-  provider's own plain variable, so one environment drives the whole thing.
-- **TEST_RETELL_SCENARIO** — optional, the situation the persona calls about;
-  tune it to what exercises your agent's tools. A booking-style default is
-  used when it is unset.
-
-It **banks its proof**: the whole record it read is written to a JSON file
-under `tests/.live-proof/` (git-ignored) and its path is printed, and the
-transcript, every mocked tool call and every transition are printed to
-stdout — which is what the `-s` above is for. Watch it work.
-
-## What only a live run can say
-
-The exchange really was text — the record carries no audio and no provider
-reference, because text mode stores nothing on Retell's side. The version
-egma resolved was named on every request. **The test's own** mock answers
-reached the real agent, marked `mocked` on the record with the tool that
-served them, and **the test's own** dynamic variables were the whole of
-what the request carried: no variable of egma's rides this lane, because
-egma serves nothing on it — Retell matches the answers itself. And the
-platform's own node or state transitions rode back beside the turns, verbatim,
-which is what makes a chat record of a voice agent comparable with a voice one.
+Check transcript, tool answers, transitions, no audio, and no provider reference.
+Print observations and save the full record under tests/.live-proof/.
 """
 
 from __future__ import annotations

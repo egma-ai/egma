@@ -30,40 +30,12 @@ import {
 } from "./support/recordings.ts";
 
 /**
- * Everything a person actually clicks through, once each, in a real browser:
- * logging in from a terminal, adding a colleague, and reading what an agent
- * did.
+ * Browser journeys use Postgres, ClickHouse, the API, Next, and Chrome.
+ * Keep them in one ordered file so flows share an instance and do not race
+ * over apps/web/.next. The API runs in-process without a prior build.
  *
- * **The happy path of each, and resist growing it further.** Every error branch
- * — a mistyped code, a stale one, a denial, a client polling too fast, an
- * expired invitation, a link for somebody else, a window a read endpoint
- * refuses — is proved in `device-flow.test.ts`, `invitations.test.ts` and
- * `trace-reads-contract.test.ts` beside this file, where each costs
- * milliseconds. What a browser proves and nothing else can is that the pages
- * exist, that they are served from this instance's own origin, that this
- * process forwards the API paths they use, and that clicking through them in
- * order gets somebody where they were going.
- *
- * Everything in here is real: a real Postgres, a real ClickHouse, the real API,
- * the real Next process with its real rewrites, and a real Chrome. A stub
- * anywhere in that list would remove the only reason this test exists.
- *
- * **All of it is one file on purpose.** Two development servers compiling into
- * one `apps/web/.next` each serve half of the other's build, so the browser
- * tests run one at a time — and Vitest runs the tests within a file in order,
- * which makes one file the whole of the arrangement. It is also the cheaper
- * one: three flows share a single instance rather than standing up three.
- * `support/instance.ts` records what the alternatives cost.
- *
- * It sits with the API's tests rather than with the web application's because
- * it builds the API in this process, and a test that spawned it instead would
- * depend on the workspace having been compiled first.
- *
- * The narrative is continuous and each part depends on the one above it. Ada
- * signs up on the way to authorizing a terminal; she is already signed in when
- * she adds a colleague; and she is still signed in when she points an agent at
- * egma and goes to read what it did. That is the order somebody meets the
- * product in.
+ * Later flows reuse the signed-in user created by earlier ones. Keep refusal
+ * and permission matrices in the focused API and component tests.
  */
 
 let instance: Instance;
@@ -505,19 +477,8 @@ describe("adding a colleague, with no mail configured", () => {
  * ==================================================================== */
 
 /**
- * What the browser is told the time is, from here on.
- *
- * The capture happened at the instants it really happened at — `18:04:40Z` to
- * `18:05:53Z` on 2 August 2026 — and the bytes are evidence, so they are never
- * restamped. The list page asks about **the last twenty-four hours**, computed
- * from the browser's own clock, and a fixed capture necessarily ages out of any
- * window measured from now.
- *
- * So the clock is pinned instead. The page's default window is then exercised
- * exactly as it is written — no widening, no absolute window typed into a
- * control, no branch in the test — and the assertions below hold in a year as
- * firmly as they do today. Only the browser's clock moves; the API, the store
- * and every timestamp in them are the real ones.
+ * Pin the browser clock so the fixed OTLP capture stays inside the page's
+ * default 24-hour window. Do not alter capture timestamps or the server clock.
  */
 const AT = new Date("2026-08-02T20:00:00.000Z");
 
@@ -582,31 +543,10 @@ async function anotherCustomer(
 }
 
 /**
- * Wait until React has taken the page over, before clicking something only
- * React answers.
- *
- * The markup is served before the script that makes it work, and in between
- * every one of these pages is inert. A `<button type="button">` clicked in that
- * gap does nothing at all, and a form clicked in it does something worse: with
- * no `action` a browser submits it natively, as a GET to the page's own
- * address, which navigates away and puts the password in the URL bar. Both are
- * intermittent — the gap is milliseconds on a warm development server and
- * seconds on a cold one — and the second is what a ~6% failure rate here
- * turned out to be.
- *
- * Most clicks in this file need no gate because they already wait on something
- * only React could have put there: a prefilled field, a table drawn from a
- * fetch, a line of text that arrived with an answer. The two below wait on
- * markup that is in the server's own response, so they wait on this instead.
- *
- * The signal is React's own bookkeeping: hydration attaches the fiber for a DOM
- * node to the node, under a key nothing else writes. Checking for it says
- * exactly the thing worth knowing — this element's handlers are live — rather
- * than approximating it with a timeout.
- *
- * The condition is a string because it is evaluated in the browser and not in
- * this process: these tests are compiled without the DOM library, on purpose,
- * so that Node code cannot reach for `document` by accident.
+ * Wait for React hydration before clicking server-rendered controls. Before
+ * hydration, a button may do nothing and a form may submit as a native GET.
+ * The DOM-node bookkeeping check is a React implementation-dependent signal.
+ * Pass browser code as a string because this test compiles without DOM types.
  */
 async function reactHasTakenOver(page: Page, selector: string): Promise<void> {
   await page.waitForSelector(selector);
@@ -746,21 +686,9 @@ async function send(secret: string, resourceSpans: unknown[]): Promise<void> {
 }
 
 /**
- * The banned list, as a person reading the screen would meet it.
- *
- * Held against **what is actually legible** rather than against the markup.
- * `span` remains a storage word. Trace, Trace ID, Call overview, and Caller are
- * now deliberate Monitoring vocabulary on the approved list and evidence
- * sheet.
- *
- * The pages' own copy is held against the same list from the other side, in
- * `apps/web/test/transcripts.test.ts`, where every string they can render lives
- * in one file. Both are worth having: that one catches a word before it can
- * reach a screen, and this one catches a word that reached one anyway.
- *
- * The developer renamed the surface to Traces on 2026-08-25, and the approved
- * compact index now also names Trace ID and the Trace reading sheet. The full
- * evidence route remains a transcript.
+ * Check visible text for forbidden storage terminology. Traces, Trace ID,
+ * Call overview, and Caller are allowed by the shipped Traces interface.
+ * The full evidence page remains a transcript.
  */
 const SURFACE_NAME = /\bTraces\b/gu;
 const NEVER_SHOWN = [
@@ -784,24 +712,8 @@ function saysNothingBanned(shown: string): void {
 }
 
 /**
- * The whole slice: a real LiveKit agent's telemetry goes in at the door, and
- * the developer who owns it clicks **Monitoring** and reads the exchange.
- *
- * This is the spec's own demo sentence executed rather than described — *run
- * compose, point an agent's export at egma, open Monitoring, read the exchange
- * with its timings*. The fourteen captured bodies are the ones an exporter
- * really sent, replayed byte for byte, and they arrive **through the same
- * origin the pages are served from**, which is the deployment a self-hoster
- * actually gets: one address, and the exporter aimed at it.
- *
- * **The addresses are inside a project now**, which is the change this effort
- * made and the reason every `goto` below goes through `monitoringAt`. The old
- * top-level pages were reachable from nowhere in the product; production
- * traffic is a navigation item, and its list is a project's own.
- *
- * Ada is the same Ada as above: already signed up, already signed in, already
- * holding an organization. Which is exactly the state somebody is in when they
- * first have telemetry to look at.
+ * Replay captured LiveKit OTLP exports through the same origin that serves
+ * the UI, then read the production evidence in the signed-in user's project.
  */
 describe("what a project recorded in production", () => {
   beforeAll(async () => {
@@ -920,20 +832,7 @@ describe("what a project recorded in production", () => {
         ).toBe(1);
       }
 
-      /*
-       * Monitoring is one click, and the click lands on the transcripts.
-       *
-       * This is the whole of what the effort promised a person: production
-       * traffic used to be reachable at no address the product linked to at
-       * all. So the item is asserted by the address it carries rather than by
-       * its presence — an item pointing at the area's own address would cost a
-       * redirect on every visit, and a reserved neighbour under the same area
-       * could become the landing by accident.
-       *
-       * The group says `OBSERVABILITY` and the row says `Traces` (developer
-       * decision, 2026-08-25). Only the words moved: the address it carries is
-       * the one it always was.
-       */
+      /* Check that the Traces sidebar link points directly to the project trace list. */
       expect(
         await sidebar
           .getByRole("link", { name: "Traces", exact: true })
@@ -980,16 +879,8 @@ describe("what a project recorded in production", () => {
       await page.evaluate(() => {
         Reflect.set(globalThis, "__egma_same_document_navigation", true);
       });
-      // Clicked until the address answers. The shell has just re-rendered
-      // around the Settings page, and a click can land on a link node the
-      // re-render is replacing — dispatched at something already detached,
-      // handled by nobody, navigating nowhere; that is how this step once
-      // timed out with the click reported delivered. Each poll turn clicks
-      // again unless the address already moved, so the settled node gets
-      // the next attempt. The marker above still proves what this test
-      // exists to prove: retried clicks never reload the document, and a
-      // product that did reload would wipe the marker and fail below
-      // exactly as before.
+      // Retry until navigation completes because a shell re-render can replace
+      // the clicked link. The document marker still detects an unintended full reload.
       const atTests = new RegExp(`/projects/${project}/tests$`);
       await expect
         .poll(
@@ -1062,17 +953,8 @@ describe("what a project recorded in production", () => {
   );
 
   /**
-   * Two tabs, two projects, and this is the only part of the project-context
-   * change that genuinely needs a browser.
-   *
-   * **Everything else about the selector moved out.** Typing to filter, Enter
-   * to choose, Escape returning focus, `push` rather than `replace` so that
-   * Back means something, and the absence page a foreign project answers with
-   * are all in `apps/web/test/components.test.tsx`, where each costs
-   * milliseconds and none of them needs a database. What no fast test can
-   * reach is two *independent browser contexts*, each holding the same session
-   * and each looking at a different project — because one tab would pass while
-   * a browser-wide choice quietly decided for both.
+   * Use independent browser contexts to check that project selection is local
+   * to each address. Keyboard and selector behavior have component coverage.
    */
   it(
     "keeps two tabs on two projects, each reading its own",
@@ -1121,14 +1003,8 @@ describe("what a project recorded in production", () => {
   );
 
   /**
-   * The window control is dressed as this product's own rather than as
-   * whatever the browser ships.
-   *
-   * Asserted through `getComputedStyle` in a real Chrome, because that is the
-   * only thing that can say whether the rule applied. A regex over
-   * `globals.css` proves a line was typed, not that a browser honoured it —
-   * and `appearance: base-select` is exactly the kind of rule a browser can
-   * decline.
+   * Check computed select styling in Chrome; source CSS alone cannot prove the
+   * browser accepts appearance: base-select.
    */
   it(
     "dresses the window control as this product's own",
@@ -1162,17 +1038,8 @@ describe("what a project recorded in production", () => {
       await page.waitForSelector("table");
       const shown = await page.innerText("main");
 
-      // The heading is this page's own word. **Monitoring is the sidebar
-      // group** — and since the separate monitoring screen retired, this page
-      // is the whole of the area, so the title bar names the page rather than
-      // saying the group's word a second time (board `JGS-0`).
-      //
-      // **And it is the whole of what stands above the list**, beside the
-      // window control and the one action. The boards draw a list screen as a
-      // title bar, one strip of controls and the table (`71V-0`, `71N-0`) — no
-      // label over the title and no purpose sentence under it. The sidebar
-      // already says which section this is and which project it belongs to,
-      // and the table says what it holds.
+      // The list has a title bar, controls, and table without an extra introductory
+      // label or paragraph above it.
       expect(shown).toContain("Traces");
       expect(shown).not.toContain(
         "What your agents did in production, newest first.",
@@ -1244,15 +1111,8 @@ describe("what a project recorded in production", () => {
       expect(shown).toContain("3.45s");
 
       /*
-       * **And no column saying `production`.** Every row on this surface is
-       * production by definition — the request narrows to it at the server and
-       * a simulation is read under the run that produced it — so a column
-       * repeating a constant on every line would be furniture. The word is
-       * still a fact about one exchange, and it is asserted where it is shown:
-       * on the transcript, under *Where this came from*.
-       *
-       * Asked of the table rather than of `main`, because the page's own lead
-       * says the word in a sentence and would answer this question wrongly.
+       * The table contains production traces only, so it needs no repeated source
+       * column. Scope this assertion to the table.
        */
       expect(await page.locator("thead th").allInnerTexts()).not.toContain(
         "Source",
@@ -1500,25 +1360,9 @@ describe("what a project recorded in production", () => {
   );
 
   /**
-   * The one thing that keeps the two kinds of traffic apart, asked on the wire.
-   *
-   * **Monitoring is production and nothing else.** A simulation is read under
-   * the run that produced it — beside the frozen test, the persona, the graders
-   * and the mock-tools record — so drawing it a second time and poorer here
-   * would be a wrong door.
-   *
-   * Asked of the *request* rather than of the rows, and that division is
-   * deliberate. Whether the server honours `source` is the contract's own claim
-   * and is proved exhaustively at the seam in `trace-reads-contract.test.ts`,
-   * including that paging never crosses into a simulation. What no seam test can
-   * reach is whether **this page asks** — a page that narrowed what came back
-   * instead would answer differently depending on what had already been
-   * fetched, and would quietly break paging, while every row on screen still
-   * looked right.
-   *
-   * The project rides along for the same reason: a request that named no
-   * project would let the server pick one, which looks correct in the only
-   * project a new customer has.
+   * Inspect outgoing requests for source=production and the selected project.
+   * Filtering rows after fetching would break pagination even if the screen
+   * looked correct. Server-side filter behavior has contract coverage.
    */
   it(
     "asks the store for production only, and for this project",
@@ -1895,16 +1739,7 @@ describe("an exchange with nothing timed inside its turns", () => {
   );
 });
 
-/**
- * More than one page of them.
- *
- * Paging is by **token**, not by offset: the answer carries where it stopped
- * and asking for more hands that back. An offset would re-sort and re-read the
- * rows already shown, and would skip or repeat one the moment something arrived
- * mid-page — which, on a store being written into by a live agent, is every
- * page. So the assertion that matters is not that a second page exists: it is
- * that the two pages together are every exchange, each exactly once.
- */
+/** Verify that following page tokens returns every fixture trace exactly once. */
 describe("more exchanges than one page holds", () => {
   const HOW_MANY = 51;
 
@@ -2029,32 +1864,10 @@ describe("the saved theme", () => {
 });
 
 /**
- * Hearing a recording from a run's results.
- *
- * **This file resists growing, and this is what had to grow it.** Every refusal,
- * every sentence and the shape of the link are proved at the route seam beside
- * it, where each costs milliseconds. What no route test can reach is whether a
- * *browser* can do anything with what the API mints: whether a real Chrome
- * fetches the signed link, decodes what comes back, seeks inside it, and
- * recovers when a link stops working. Those are the browser's own behaviours and
- * this is the only place they happen.
- *
- * **What this does not prove, said plainly, because a comment that overstates
- * its own proof is how a guarantee rots.** It does *not* prove the address
- * binding on its own. The store here answers on the same address this process
- * would use, so signed host and fetched host are equal by construction and would
- * stay equal if the API started signing for its own endpoint. What proves that
- * is two other things: `recordings-routes.test.ts` asserts the minted host is
- * the configured browser one and carries no internal name, `recording-store.test.ts`
- * makes a real MinIO refuse a link signed for a different host, and — the guard
- * that catches the mistake somebody would actually make — the compose check in
- * `deployment.test.ts` fails if `EGMA_BLOB_PUBLIC_URL` is ever defaulted to
- * `minio:9000`. This file is the other half of that: proof that the whole chain
- * ends in audio a person can hear.
- *
- * Two tests. The first is the story — a player where there is audio, seeking,
- * recovery, and nothing at all where there is no recording. The second is the
- * other way to have nothing to play, which is a modality that can never have any.
+ * Verify recording playback, seeking, recovery, and absence in Chrome.
+ * This setup uses the same storage host for signing and fetching, so it does
+ * not prove public-host binding. That has separate route, MinIO, and deployment
+ * coverage in recordings-routes, recording-store, and deployment tests.
  */
 describe.skipIf(!storage.available)("hearing a recording from a run", () => {
   it(
@@ -2163,17 +1976,8 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
         .toBe(5);
 
       /*
-       * A link that has stopped working is asked for again, and the listener is
-       * put back where they were.
-       *
-       * A results page open for an afternoon outlives the fifteen minutes a
-       * link lives, and what a person then meets is a scrubber that stopped for
-       * no stated reason. Waiting out a real expiry is not a test anybody can
-       * run, so the store is made to refuse **once** — which is byte for byte
-       * what an expired link looks like to this element — and what is asserted
-       * is that the page recovers on its own, rather than that it noticed a
-       * clock. The recovery deliberately does not consult one: a browser a few
-       * minutes slow would decide a dead link was still good and never ask.
+       * Make storage refuse once to exercise signed-link recovery without waiting
+       * for expiry. The player must request a new link and restore playback position.
        */
       let refusals = 0;
       await page.route(`${running.store.publicUrl}/**`, async (route) => {
@@ -2317,19 +2121,8 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
 });
 
 /**
- * Hearing the same recording from the transcript, which is where the doubt is.
- *
- * **The minimum this file can grow by, and it does have to grow.** A transcript
- * resolves its recording from the trace identifier it already holds — the two
- * are the same number in two forms — and every part of that is proved at the
- * route seam beside it, in milliseconds: that the read names the simulation,
- * that the recording route then answers, and that a conversation which recorded
- * nothing is refused. What no route test reaches is whether a *browser* on this
- * page ends up with audio a person can hear, and whether the page that asks
- * about every exchange stays quiet on the ones that have none.
- *
- * One test, two transcripts of one run: the conversation that recorded, and the
- * one whose call never connected.
+ * Verify transcript recording playback and absence for two simulations in
+ * one run. Route tests cover ID mapping; this checks browser media behavior.
  */
 describe.skipIf(!storage.available)("hearing a recording from a transcript", () => {
   it(
@@ -2364,14 +2157,8 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
       );
 
       /*
-       * Opened at the transcript's own address inside this project.
-       *
-       * **A simulation opens here, and that is on purpose.** Monitoring's
-       * *list* is production only; one transcript is not filtered, because the
-       * name already picks out a single row and a filter on a lookup could only
-       * ever turn a transcript somebody was sent into a page saying it is not
-       * there. A run's results link one of its conversations to exactly this
-       * page.
+       * A simulation can open the transcript route even though the Traces list
+       * filters to production. Detail lookup identifies one trace without that filter.
        */
       const openTranscript = async (filed: typeof heard): Promise<void> => {
         const asked = new URLSearchParams({ from: filed.from, to: filed.to });
@@ -2433,15 +2220,8 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
       saysNothingBanned(await page.innerText("main"));
 
       /*
-       * The other conversation of the same run recorded nothing, and its
-       * transcript offers no control at all — not a disabled one, which reads
-       * as a broken feature rather than as an honest absence.
-       *
-       * **Waited for rather than looked at.** A player only appears once the
-       * ask has been answered, so counting the elements the moment the turns
-       * arrive would pass whether or not this page had learned to behave: the
-       * request has barely left. So the refusal itself is what is waited on,
-       * and only then is the page held to showing nothing.
+       * Wait for the recording refusal before checking that no player appears;
+       * the transcript can render while its recording request is still pending.
        */
       const refused = page.waitForResponse(
         (answer) =>
@@ -2579,7 +2359,7 @@ describe("recovering when a page cannot load", () => {
       await page.waitForSelector("text=Egma could not be reached");
       await page.unroute("**/v1/members");
       await page.getByRole("button", { name: "Try again" }).click();
-      await page.waitForSelector("text=Everybody in this organization");
+      await page.getByRole("table", { name: "Members" }).waitFor();
 
       await page.route("**/api/invitations/lookup", (route) =>
         route.fulfill({ status: 503, contentType: "application/json", body: '{"message":"unavailable"}' }),
@@ -2599,48 +2379,15 @@ describe("recovering when a page cannot load", () => {
  * ==================================================================== */
 
 /**
- * One journey rather than a collection of pages.
- *
- * **This is the thing the product UI effort is finally judged by**, and it is
- * ordered on purpose: a person meets egma by making somewhere to work, putting
- * the agent they want to test into it, telling egma how to reach that agent,
- * describing who calls, switching judging on, writing what should happen,
- * running it, and reading what came back. Every step below is the previous
- * step's output, so a break anywhere in the chain shows up as the step that
- * could not start rather than as a page that rendered oddly.
- *
- * **It is in a project that is not the first one, throughout.** The first
- * project is where a fallback would hide: a page that reached for `projects[0]`
- * some other way, or a request that named no project and let the server pick,
- * looks perfectly correct in the default project and wrong nowhere else. So the
- * journey makes a second project through the product's own page, switches into
- * it with the control a person uses, and never leaves it.
- *
- * **Everything under it is real.** The real Next process with its real
- * rewrites, the real API, a real Postgres, a real ClickHouse, a real Chrome —
- * `support/instance.ts` stands all of it up and this file has one instance. The
- * only thing standing in for something is the simulator, which does not exist
- * in this lane: the run is planned and started through the screens, and its
- * conversation is then moved by the same data-access calls a simulator makes.
- * A fake feed would have proved that a page can render invented rows.
- *
- * **And it resists growing, the way the flows above it do.** Permissions,
- * archive matrices, refusals, revisions, Retry, idempotency and
- * repository synchronization are all proved in the fast lane, where each costs
- * milliseconds. If a case here starts being about one of those, it belongs
- * there instead.
+ * Walk project setup through run results in a second project to expose
+ * accidental use of the session's default project. Steps depend on prior output.
+ * The browser, servers, and stores are real; data-access calls simulate worker
+ * progress. This does not run an agent under test or the simulator.
  */
 describe("the complete product, walked in order in a second project", () => {
   /**
-   * Ada's own browser for the walk, and a second page rather than the one
-   * above.
-   *
-   * The page above has a clock pinned to the day the captured telemetry was
-   * recorded, because the transcript list asks about the last twenty-four
-   * hours. Nothing in this journey reads a fixed capture, and a run started
-   * today under a clock set to a fortnight ago would be a run whose own page
-   * says it started in the future. So this walk keeps the real clock and takes
-   * Ada's session across as cookies.
+   * Use a fresh page with the real clock for newly created runs. Copy the
+   * session cookies from the capture-viewing page, whose clock is fixed.
    */
   let walk: Page;
 
@@ -2688,6 +2435,14 @@ describe("the complete product, walked in order in a second project", () => {
     expect(found, `${address} names a run`).toBeDefined();
     return found ?? "";
   }
+
+  /** The run's own row on the runs list, found by the link that opens it. */
+  function runRowOn(which: Page, runAddress: string): Locator {
+    return which
+      .locator("main table tbody tr")
+      .filter({ has: which.locator(`a[href$="/runs/${runIdOf(runAddress)}"]`) });
+  }
+
 
   /** The conversation an address names, the same way. */
   function simulationIdOf(address: string): string {
@@ -2804,24 +2559,18 @@ describe("the complete product, walked in order in a second project", () => {
    * labelled `Status`, taken by its label rather than by a class a build hashes or
    * by a sentence somebody may reword.
    */
-  async function machineryOfTheRun(which: Page): Promise<string> {
-    return which.evaluate(() => {
-      // The DOM library is deliberately not compiled into these tests, so the
-      // shape this needs is named here rather than imported.
-      const document = Reflect.get(globalThis, "document") as {
-        querySelectorAll(selector: string): Iterable<{
-          readonly textContent: string | null;
-          readonly nextElementSibling: {
-            readonly textContent: string | null;
-          } | null;
-        }>;
-      };
-      for (const label of document.querySelectorAll("main dt")) {
-        if ((label.textContent ?? "").trim() !== "Status") continue;
-        return (label.nextElementSibling?.textContent ?? "").trim();
-      }
-      return "";
-    });
+  /**
+   * The run's own status word, read off its row on the runs list. The run
+   * page stopped repeating the run facts on 2026-09-07, so the list is where
+   * the machinery is said.
+   */
+  async function machineryOfTheRun(which: Page, runAddress: string): Promise<string> {
+    const said = await runRowOn(which, runAddress)
+      .locator('[data-slot="run-status"]')
+      .first()
+      .textContent()
+      .catch(() => null);
+    return (said ?? "").trim();
   }
 
   beforeAll(async () => {
@@ -2928,17 +2677,8 @@ describe("the complete product, walked in order in a second project", () => {
       await saysWithin(walk, "No agents in this project yet");
 
       /*
-       * **One panel does both halves, and opening it is not a navigation.**
-       * The agent and its first way in used to be two pages with a forward
-       * between them, and an agent that never reached the second one sat in
-       * the list unreachable. Now the control changes query state on the
-       * address the person is already at (founder ruling, 2026-08-24) — it no
-       * longer sends the browser to `/agents/new`, which is why this used to
-       * wait for that address and time out.
-       *
-       * `/agents/new` is still an address and still opens this panel; the
-       * copied-link table below is where that promise is checked, because that
-       * is what a link in the CLI or the documentation actually does.
+       * Adding an agent opens the setup panel through query state on the list.
+       * The copied-link tests separately cover /agents/new.
        */
       await walk.getByRole("link", { name: "Connect an agent" }).first().click();
       await walk.waitForURL(
@@ -2992,16 +2732,8 @@ describe("the complete product, walked in order in a second project", () => {
       expect(connected.status(), await connected.text()).toBe(201);
 
       /*
-       * **The panel closes onto the list, because the row is the agent.** The
-       * agent page is retired (founder ruling, 2026-08-24): everything it held
-       * is on the row behind the panel, so a save that navigated would be
-       * taking somebody away from what they just made.
-       *
-       * **What is waited for is the outcome, not a navigation.** Closing is a
-       * query-state change on the address the panel was opened over, so there
-       * is no load to wait for: the panel goes, the row arrives, and the
-       * address settles back to the bare list. Waiting on any one of the three
-       * alone would pass while the other two had not happened.
+       * Wait for all save outcomes: the panel closes, the agent row appears, and
+       * the URL returns to the list. Query-state changes do not load a new document.
        */
       await expect
         .poll(() => walk.getByRole("dialog").count(), { timeout: 30_000 })
@@ -3393,10 +3125,9 @@ describe("the complete product, walked in order in a second project", () => {
 
       await walk.getByRole("button", { name: "Save changes" }).click();
 
-      // The new version is current and the one the earlier runs pinned is still
-      // in the list beside it, which is the whole point of versioning her.
+      // The new current version stays in the header after saving.
       await saysWithin(walk, "Custom · v2");
-      await saysWithin(walk, "Current");
+      await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
       await walk.keyboard.press("Escape");
 
       // Fork copies the current version into a persona this project owns, and
@@ -3719,14 +3450,20 @@ describe("the complete product, walked in order in a second project", () => {
       const shown = await walk.innerText("main");
       expect(shown).toContain("Reschedules a booked appointment");
       expect(shown).toContain("Impatient Rita");
-      expect(shown).toContain("Support reception");
-      // What the run was against, as it now stands — the agent, and the
-      // connection exactly as this run went over it.
-      expect(shown).toContain("The Support line");
-      expect(shown).toContain("phone_number-1");
 
       conversation = `${new URL(runAddress).pathname}/simulations/${simulation?.id ?? ""}`;
       expect(conversation).toMatch(/\/simulations\/sim_[0-9A-HJKMNP-TV-Z]{26}$/u);
+
+      // The run facts left this page on 2026-09-07. The runs list says what
+      // the run was against, as it now stands — its suite, the agent, and the
+      // connection exactly as this run went over it.
+      await walk.goto(at("runs"));
+      const runRow = runRowOn(walk, runAddress);
+      await runRow.waitFor({ timeout: 30_000 });
+      const rowSaid = await runRow.innerText();
+      expect(rowSaid).toContain("Support reception");
+      expect(rowSaid).toContain("The Support line");
+      expect(rowSaid).toContain("phone_number-1");
     },
     SETTLE,
   );
@@ -3821,18 +3558,33 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.getByRole("tab", { name: "Results summary" }).click();
       const results = walk.getByRole("tabpanel", { name: "Results summary" });
       const summary = results.getByRole("region", { name: "Simulation summary" });
-      expect(await summary.innerText()).toMatch(/Total avg score\s+0\.86/u);
+      expect(await summary.innerText()).toMatch(/Graders passed\s+1\/1/u);
+      expect(await summary.innerText()).not.toContain("Total avg score");
 
       const grades = results.getByRole("region", { name: "Grader results" });
+      // The Graders line names the sections and counts nothing: the summary
+      // bar above it already says how many passed.
+      expect(await grades.getByRole("heading", { name: "Graders" }).count()).toBe(1);
+      expect(await grades.innerText()).not.toMatch(/Graders\s+1\/1 passed/u);
+      // Regrade is one small square on that line, with its label written out.
+      expect(
+        await results.getByRole("button", { name: "Regrade this simulation" }).count(),
+      ).toBe(1);
       const expected = grades.getByRole("region", {
         name: "Expected behaviors",
       });
-      expect(await expected.innerText()).toContain(
-        "Pass threshold 0.62 · Definition v1",
-      );
-      // The average summary is rounded for scanning. A grader result keeps
-      // the exact stored score.
-      expect(await expected.innerText()).toContain("Total Score 0.857");
+      // A passed grader starts folded: its header says the result, the exact
+      // stored score and the frozen threshold, and nothing else.
+      expect(await expected.innerText()).toContain("Result · Passed");
+      expect(await expected.innerText()).toContain("Score 0.857 · Threshold 0.62");
+      expect(await expected.innerText()).not.toContain("Definition v1");
+      expect(
+        await expected.getByRole("table", { name: "Expected behaviors results" }).count(),
+      ).toBe(0);
+      await expected.getByRole("button", { name: "Expected behaviors" }).click();
+      // An opened section is its evidence and nothing about itself: the table,
+      // with no frozen-version line above it.
+      expect(await expected.innerText()).not.toMatch(/^\s*v1\s*$/mu);
       expect(
         await expected
           .getByRole("table", { name: "Expected behaviors results" })
@@ -3856,21 +3608,12 @@ describe("the complete product, walked in order in a second project", () => {
       }
 
       /*
-       * And the run it belongs to has caught up with it, on the page somebody
-       * would go back to.
-       *
-       * **The run's own word, read off the fact that names it.** A page-wide
-       * search for `/completed/iu` was the first attempt and it proves nothing
-       * here: the simulations table prints each simulation's own machinery
-       * word, and the conversation above was completed a moment ago — so the
-       * word is on this page whatever the *run* holds. A regression that left a
-       * run `running` after its last conversation landed would have kept that
-       * green, and telling a run's machinery apart from a conversation's is
-       * exactly what this area exists to do.
+       * Read the run's own status. Page-wide text matching could find a completed
+       * simulation while the run incorrectly remains running.
        */
-      await walk.goto(runAddress);
+      await walk.goto(at("runs"));
       await expect
-        .poll(() => machineryOfTheRun(walk), { timeout: 30_000 })
+        .poll(() => machineryOfTheRun(walk, runAddress), { timeout: 30_000 })
         .toBe("Completed");
     },
     SETTLE,
@@ -3893,40 +3636,15 @@ describe("the complete product, walked in order in a second project", () => {
     /** A goal-carrying deep link can also promise which choice is selected. */
     readonly selectedRadio?: string;
     /**
-     * Where this address ends up, when that is not itself.
-     *
-     * **Only a retired address carries one.** A page that still exists lands
-     * on its own address, and saying so is half of what this table checks — so
-     * the equality below reads this field rather than being loosened, and a
-     * row that quietly stopped arriving cannot pass by having its expectation
-     * relaxed. A redirect is a promise of its own: the address goes on
-     * working, and it is honest about where it took you.
+     * Expected destination for a redirect; other entries must retain their own address.
      */
     readonly lands?: string;
   };
 
   /**
-   * Every product route this project now has something on, named once.
-   *
-   * Written out rather than derived, because a list a test computes from the
-   * application's own routing would go green about whatever that routing
-   * happens to say — including about a route that stopped existing. Each entry
-   * is a page a person can be sent a link to.
-   *
-   * **Each carries a phrase, and choosing it is the whole value of the list.**
-   * The walks below used to wait for the shell — the organization control in
-   * the sidebar — and then assert the address, a measurement, or the *absence*
-   * of some word. Every one of those is satisfied by a page that is still
-   * loading, and by a page drawing a refusal: the shell stays around a refusal
-   * on purpose, which the absence case in this same file proves. So five
-   * Settings routes could have stopped rendering entirely and all three walks
-   * would have stayed green.
-   *
-   * A phrase is therefore taken from what the settled page says and from
-   * nothing a loading or refused one does. Where a page draws the same header
-   * in every state, the phrase is data that had to be read — this journey's own
-   * agent, connection, persona, test or run — and where a page has one shape,
-   * it is the sentence that shape carries.
+   * Keep expected routes explicit so removed pages fail coverage. Each entry
+   * names content unique to its settled page; the shared shell or a loading
+   * header alone must not satisfy the test.
    */
   function everyProductRoute(): readonly ProductRoute[] {
     return [
@@ -4039,16 +3757,8 @@ describe("the complete product, walked in order in a second project", () => {
         what: "Set up monitoring",
         address: at("monitoring", "start"),
         /*
-         * **The retired Start-monitoring address, now a forwarding deep link.**
-         * The full page is gone: Agents owns one goal-first setup flow, and
-         * this address carries the Monitoring goal into that flow.
-         *
-         * The phrase is the open sheet's own, so the walk cannot pass on the
-         * Agents list behind it. The redirect target is exact because the
-         * query is the durable setup state a copied link must keep.
-         *
-         * The Traces list itself is not here: this walk opens it many times
-         * already, under `monitoringAt`, and against its own states.
+         * The start-monitoring link opens agent setup with its monitoring goal intact.
+         * Match the panel's content and exact query state, not the Agents list behind it.
          */
         lands: `${at("agents")}?sheet=connect&goal=monitoring`,
         dialog: "Set up an agent",
@@ -4058,22 +3768,22 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Settings",
         address: at("settings"),
-        says: "What this product area is called",
+        says: "Save project",
       },
       {
         what: "People",
         address: at("settings", "people"),
-        says: "Everybody in this organization",
+        says: "Standing",
       },
       {
         what: "Keys",
         address: at("settings", "keys"),
-        says: "What a terminal or a script authenticates to Egma with",
+        says: "Create a key",
       },
       {
         what: "Organization",
         address: at("settings", "organization"),
-        says: "The customer every project below belongs to",
+        says: "Save organization",
       },
     ];
   }
@@ -4224,18 +3934,9 @@ describe("the complete product, walked in order in a second project", () => {
 
   describe("a copied link, reload, Back and Forward", () => {
     /**
-     * Every product route, opened directly once.
-     *
-     * A direct open is what a copied link does. Each address is entered without
-     * following an application link, and the settled page must belong to the
-     * Support project. While that page is open, the same case checks its
-     * page-specific exclusions and resizes it to a phone width. That keeps the
-     * real layout proof without loading all 23 pages two more times.
-     *
-     * The shell is shared, so it is checked once. One stateful detail page is
-     * reloaded as the representative proof that the address keeps its state;
-     * focused reload cases elsewhere still prove their own window and theme
-     * state.
+     * Open each listed route directly in the Support project, assert its settled
+     * content, and check phone-width layout. Check the shared shell once and
+     * reload one stateful detail page; focused tests cover other reload state.
      */
     it(
       "opens and checks every product route once, and reloads one",
@@ -4258,18 +3959,8 @@ describe("the complete product, walked in order in a second project", () => {
             if (index === 0) {
               const sidebar = opened.locator("aside");
               /*
-               * Monitoring used to be banned here and is deliberately not:
-               * production traffic is a navigation item now. What stays
-               * excluded is a Simulations *destination* — a simulation is
-               * evidence, reached from the run that produced it, and no row in
-               * this bar may open a list of every one.
-               *
-               * **The word is no longer the test, and it cannot be.**
-               * `Simulations` is a group label now: it names the half of the
-               * product that proves trust before release. A sweep of the bar's
-               * text would fail on that label while the thing it guards is
-               * still absent. A destination is an address, so the addresses are
-               * what is read.
+               * Check sidebar destination URLs for a standalone simulations list. The
+               * Simulations group label itself is allowed.
                */
               const addresses = await sidebar
                 .getByRole("link")
@@ -4372,16 +4063,8 @@ describe("the complete product, walked in order in a second project", () => {
     );
 
     /**
-     * Two tabs, two projects, every area — and this is the half of the
-     * project-context change that genuinely cannot be proved anywhere else.
-     *
-     * There is a smaller version of this above, on the shell alone. What it
-     * cannot say is whether the *pages* keep their tabs apart: the shell reads
-     * the project out of the address, and a page that read it from anywhere
-     * else — a module-level variable, a store, the session's own default —
-     * would pass that test and fail this one. So both tabs walk the same five
-     * areas, and each is held to reading its own project's data, with the reads
-     * interleaved so that one tab's request cannot be what settles the other's.
+     * Interleave two tabs across five product areas to catch pages using shared
+     * project state instead of the project in their own URL.
      */
     it(
       "keeps two tabs on two projects across every area, each reading its own",
@@ -4591,14 +4274,8 @@ describe("the complete product, walked in order in a second project", () => {
           rows.push(Math.round(await heightOf(walk, "table tbody tr")));
           if (address === lists[0]) {
             /*
-             * **The toolbar row carries the gap, and the panel starts on the
-             * pixel it ends on.** `71N-0` is a 52px strip — a 36px control with
-             * 16px under it — and `6ZM-0` begins at 132 from the top of the
-             * page, which is the title bar, the page gutter and that strip and
-             * nothing more. Read as a relationship rather than as 132, because
-             * 132 is three other numbers added up and this is the one of them
-             * that was wrong: the body was adding a second gutter under the
-             * strip and putting the panel at 156.
+             * Measure the panel against the toolbar bottom to catch duplicate vertical
+             * gutters without coupling the assertion to an absolute page offset.
              */
             strip = await walk.evaluate(() => {
               const find = (selector: string) =>
@@ -4647,23 +4324,8 @@ describe("the complete product, walked in order in a second project", () => {
         expect(new Set(cells).size, cells.join(" | ")).toBe(1);
 
         /*
-         * **A row is measured as a floor rather than as an equality**, and the
-         * distinction is the honest one.
-         *
-         * `--row-min-height` is a `height` on a table cell, which a browser
-         * treats as a minimum: a row carrying controls can be taller than a row
-         * carrying a sentence, on the same table, from the same definition. A
-         * test demanding one number would be a test demanding that no list ever
-         * hold a button.
-         *
-         * It is the *body* row's token. `--row-height` is the header's, and
-         * the header is held to an equality above because it holds no
-         * controls. The two parted company on 2026-08-23, when the boards gave
-         * a 40px header row and a 52px body row.
-         *
-         * What a copied implementation would break is the three above — the
-         * shell, the heading row that holds no controls, and the cell's own
-         * padding and type — and the floor here, which no page may sink below.
+         * Table-cell height is a minimum: controls may make body rows taller.
+         * Assert the body-row minimum separately from the fixed header-row height.
          */
         const tokens = await walk.evaluate(() => {
           const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
@@ -4717,47 +4379,36 @@ describe("the complete product, walked in order in a second project", () => {
       SETTLE,
     );
 
-    /** The same text-first run status appears in list and detail forms. */
+    /**
+     * The run's status is said once, on the list, as a filled square before
+     * its word. The run page no longer repeats the run facts (developer
+     * decision, 2026-09-07): its simulations carry their own squares.
+     */
     it(
-      "keeps one status meaning on a list and on the page it links to",
+      "says the run's status on the list as a filled square and not again on the page",
       async () => {
-        const stateOf = async (): Promise<string> =>
-          walk
-            .locator('main [data-slot="run-status"][data-status="completed"]')
-            .first()
-            .evaluate((element) => {
-              if (element.getBoundingClientRect().height === 0) return "";
-              return JSON.stringify({
-                status: element.getAttribute("data-status"),
-                text: element.textContent?.trim().toLowerCase(),
-                loader:
-                  element.querySelector('[data-slot="run-status-loader"]') !== null,
-                marker: element.querySelector('[data-slot="state-mark"]') !== null,
-              });
-            })
-            .catch(() => "");
-
-        const settledState = async (): Promise<string> => {
-          let state = "";
-          await expect
-            .poll(
-              async () => {
-                state = await stateOf();
-                return state;
-              },
-              { timeout: 30_000 },
-            )
-            .not.toBe("");
-          return state;
-        };
-
         await walk.goto(at("runs"));
-        const onTheList = await settledState();
+        const status = walk
+          .locator('main [data-slot="run-status"][data-status="completed"]')
+          .first();
+        await status.waitFor({ timeout: 30_000 });
+        expect((await status.textContent())?.trim()).toBe("Completed");
+        const mark = status.locator('[data-slot="state-mark"]');
+        expect(await mark.getAttribute("data-filled")).toBe("true");
+        expect(await mark.getAttribute("data-state-mark")).toBe("complete");
+        expect(await mark.getAttribute("data-motion")).toBeNull();
+        expect(
+          await status.locator('[data-slot="run-status-loader"]').count(),
+        ).toBe(0);
 
         await walk.goto(runAddress);
-        const onThePage = await settledState();
-
-        expect(onThePage, `${onTheList} on the list`).toBe(onTheList);
+        await walk
+          .getByRole("tab", { name: "Results summary" })
+          .waitFor({ timeout: 30_000 });
+        expect(await walk.locator('main [data-slot="run-status"]').count()).toBe(0);
+        expect(
+          await walk.getByRole("group", { name: "Run summary" }).count(),
+        ).toBe(0);
       },
       SETTLE,
     );
@@ -4839,16 +4490,8 @@ describe("the complete product, walked in order in a second project", () => {
     );
 
     /**
-     * Compact, and measurably so.
-     *
-     * The direction is written down in `apps/web/ui/tailwind-theme.css` — a
-     * sidebar narrow enough
-     * to leave the screen to the data, a row that is one line of reading, a
-     * control that sits in a toolbar rather than becoming it. What is held here
-     * is the direction and not the numbers: the final art direction and the
-     * tuning of every one of these is the developer's own pass, and a test that
-     * pinned one old pixel value would have to be edited by that pass rather
-     * than survive it.
+     * Check compact layout bounds against the shared theme without fixing every
+     * dimension to one design iteration.
      */
     it(
       "uses the settled compact tokens on the shell, a list and a form",
@@ -5009,15 +4652,8 @@ describe("the complete product, walked in order in a second project", () => {
   });
 
   /**
-   * The states a working product does not show you.
-   *
-   * Empty, error and viewer are all met elsewhere in this file — an empty
-   * project at the top of this journey, a refused read and its retry in
-   * "recovering when a page cannot load", and Bob's view-only shell where a
-   * colleague is added. These three are the rest of the list, and each of them
-   * is a state somebody meets on a bad day, so each is made to happen rather
-   * than assumed. Its own section rather than the narrow screen's, because two
-   * of the three are checked at both widths.
+   * Force loading and missing-content states. Empty, error, and viewer states
+   * have separate coverage in this file.
    */
   describe("loading and an absence", () => {
     it(
@@ -5143,21 +4779,8 @@ describe("the complete product, walked in order in a second project", () => {
     );
 
     /**
-     * **A table's rows, reached and followed without a pointer.**
-     *
-     * The case above stops at the sidebar, and stopping there is what left the
-     * word *tables* in this criterion covered by nothing: a list whose rows
-     * could not be reached by Tab would have passed every keyboard case in this
-     * file. The row's agent name is its one keyboard control: Tab gets to it
-     * and Enter opens the same details sheet as a pointer click anywhere on
-     * the row. It has to hold past the page's own controls, one of which is a
-     * radio group whose whole design is that it costs a single Tab stop rather
-     * than one per option.
-     *
-     * The presses are bounded and the trail is reported. "Press Tab until
-     * something happens" with no bound is a test that hangs where it should
-     * fail, and the trail is what turns a failure into a sentence somebody can
-     * read: it names every control the focus visited on the way.
+     * Reach a table row by Tab and open its details with Enter. Bound the number
+     * of key presses and report the focus trail so inaccessible rows fail clearly.
      */
     it(
       "reaches a list's rows by Tab, and follows one with Enter",
@@ -5441,11 +5064,11 @@ describe("the complete product, walked in order in a second project", () => {
 
       // A run reads the suite's current name. Renaming does not create a suite
       // version or change the suite identity recorded on the run.
-      await walk.goto(runAddress);
-      const summary = walk.getByRole("group", { name: "Run summary" });
-      await expect.poll(() => summary.innerText()).toContain("Northside Ford");
-      expect(await summary.innerText()).not.toContain("Support reception");
-      expect(await summary.innerText()).not.toContain("(deleted)");
+      await walk.goto(at("runs"));
+      const runRow = runRowOn(walk, runAddress);
+      await expect.poll(() => runRow.innerText()).toContain("Northside Ford");
+      expect(await runRow.innerText()).not.toContain("Support reception");
+      expect(await runRow.innerText()).not.toContain("(deleted)");
 
       // And deleting is the same row's menu, under the same hairline.
       await walk.goto(at("tests"));
@@ -5482,10 +5105,11 @@ describe("the complete product, walked in order in a second project", () => {
 
       // Deleting authoring data does not delete execution evidence. The same
       // run and simulation remain, and the last suite name is marked clearly.
+      await walk.goto(at("runs"));
+      await expect
+        .poll(() => runRowOn(walk, runAddress).innerText())
+        .toContain("Northside Ford (deleted)");
       await walk.goto(runAddress);
-      await expect.poll(() => summary.innerText()).toContain(
-        "Northside Ford (deleted)",
-      );
       await walk
         .getByRole("button", { name: /Reschedules a booked appointment/u })
         .first()
@@ -5627,7 +5251,7 @@ describe("project grader model settings", () => {
       await proof.goto(`${origin}/projects/${projectId}/runs/${run.runId}`);
       await proof.getByRole("tab", { name: "Results summary" }).click();
       const results = proof.getByRole("region", { name: "Grader results" });
-      await expect.poll(() => results.innerText()).toContain("Total Score 0.667");
+      await expect.poll(() => results.innerText()).toContain("Score 0.667 · Threshold 1");
       expect(await results.innerText()).toContain("The grader could not determine whether the criterion was met.");
       await results.screenshot({ path: "/tmp/egma-grader-fractional-error-results.png" });
     } finally {
@@ -5637,7 +5261,7 @@ describe("project grader model settings", () => {
 });
 
 it(
-  "uses shared persona project settings and keeps core history read-only",
+  "edits shared persona settings inline and keeps the current core version visible",
   async () => {
     const key = await anotherCustomer(
       "settings@personas.example",
@@ -5662,10 +5286,6 @@ it(
       await walk
         .getByRole("button", { name: "Everyday caller", exact: true })
         .click();
-      await walk
-        .getByRole("button", { name: "Actions for Everyday caller" })
-        .click();
-      await walk.getByRole("menuitem", { name: "Use", exact: true }).click();
       await reactHasTakenOver(walk, "form");
       expect(await walk.locator("#persona-personality").count()).toBe(0);
       await walk.selectOption("#persona-llm", "openai::gpt-4o");
@@ -5674,20 +5294,14 @@ it(
       await walk.fill("#persona-tts-speed", "0.85");
       await walk.fill("#persona-tts-voice", "my-custom-voice");
       await walk.getByRole("button", { name: "Use persona" }).click();
-      await walk.getByRole("region", { name: "Project settings" }).waitFor();
-      expect(
-        await walk
-          .getByRole("region", { name: "Project settings" })
-          .innerText(),
-      ).toContain("my-custom-voice");
+      await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
+      await walk.getByRole("region", { name: "Settings" }).waitFor();
+      expect(await walk.inputValue("#persona-tts-voice")).toBe("my-custom-voice");
       await walk.keyboard.press("Escape");
       await walk
         .getByRole("button", { name: "Everyday caller", exact: true })
         .click();
-      await walk
-        .getByRole("button", { name: "Actions for Everyday caller" })
-        .click();
-      await walk.getByRole("menuitem", { name: "Edit settings" }).click();
+      await walk.getByRole("region", { name: "Settings" }).waitFor();
       expect(await walk.inputValue("#persona-llm")).toBe("openai::gpt-4o");
       expect(await walk.inputValue("#persona-stt")).toBe(
         "deepgram::nova-3-general",
@@ -5708,7 +5322,7 @@ it(
       await walk.getByRole("alert").waitFor();
       await walk.fill("#persona-tts-voice", "my-saved-voice");
       await walk.getByRole("button", { name: "Save changes" }).click();
-      await walk.getByRole("region", { name: "Project settings" }).waitFor();
+      await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
       await walk
         .getByRole("button", { name: "Actions for Everyday caller" })
         .click();
@@ -5730,24 +5344,14 @@ it(
       );
       await walk.getByRole("button", { name: "Save changes" }).click();
       await walk.getByText("Custom · v2", { exact: true }).waitFor();
-      await walk.getByRole("button", { name: "Read", exact: true }).click();
-      await walk.getByText("Older version", { exact: true }).waitFor();
-      expect(
-        await walk.getByRole("region", { name: "Project settings" }).count(),
-      ).toBe(0);
-      expect(
-        await walk.getByRole("button", { name: "Use as new version" }).count(),
-      ).toBe(0);
-      expect(
-        await walk
-          .getByRole("button", { name: "Actions for Patient Nora" })
-          .count(),
-      ).toBe(0);
+      await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
+      expect(await walk.getByRole("region", { name: "Versions" }).count()).toBe(0);
+      expect(await walk.getByRole("button", { name: "Read", exact: true }).count()).toBe(0);
+      await walk.getByRole("region", { name: "Settings" }).waitFor();
       await walk.screenshot({
-        path: "/tmp/egma-persona-history-light.png",
+        path: "/tmp/egma-persona-settings-light.png",
         fullPage: true,
       });
-      await walk.getByRole("button", { name: "Back to v2" }).click();
       await walk
         .getByRole("button", { name: "Actions for Patient Nora" })
         .click();

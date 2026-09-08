@@ -8,27 +8,9 @@ import {
 } from "./refusals.ts";
 
 /**
- * Which project a request acts in, resolved from the credential and from what
- * the request named.
- *
- * No resource in this API is rooted at a project and the organization is in no
- * address at all, so every route that writes into one has to resolve it before
- * it can write anything. It is one file rather than one copy per route group
- * because the wording is contract — a client relays these sentences to a
- * terminal a coding agent is reading — and two copies of a contract sentence
- * are two things to keep in step by hand.
- *
- * **The context is narrowed and never widened.** The only project it can come
- * to name is one `listProjects` answered with, and that read is scoped to the
- * caller's organization by the data-access module itself — so a request cannot
- * argue its way into somebody else's project, and a credential minted for one
- * project cannot argue its way out of it. The write verbs check the project
- * against the organization again before they insert anything.
- *
- * A project-scoped credential naming a *sibling* project of its own
- * organization is refused rather than quietly narrowed back. The narrowing
- * would be safe and the silence would not: a caller whose filter was dropped
- * reads the answer as though the filter had applied.
+ * Resolve project scope without changing organization ownership. API keys
+ * stay within their stored project scope; sessions can select another project
+ * in the same organization. Reject an explicit project the credential cannot use.
  */
 
 export function cannotActIn(projectId: string): string {
@@ -40,16 +22,7 @@ export function cannotActIn(projectId: string): string {
   );
 }
 
-/**
- * What a credential for the whole organization is told when the organization
- * turns out to hold more than one project.
- *
- * v1 gives an organization one project, and a credential naming none resolves
- * to it. Picking the oldest of several instead would read as harmless and would
- * be the same silent narrowing this codebase has already had to find once: the
- * request would be answered about one product area, correctly and completely,
- * with nothing in the answer to say which.
- */
+/** Require a project when an organization-wide credential has several choices. */
 export const NAME_THE_PROJECT =
   "this organization holds more than one project and this credential names " +
         "none, so Egma cannot tell which project this is about. Send project with " +
@@ -67,16 +40,7 @@ export type ActingRefusal = {
 
 export type Acting = { readonly auth: AuthContext } | ActingRefusal;
 
-/**
- * The words a refusal uses when a named project cannot be acted in. Two cases,
- * two sentences — or one sentence twice, which is what the tests and runs
- * groups do.
- *
- * The agents group speaks its own pair (below). One situation answered in two
- * wordings is a recorded inconsistency awaiting the dev's word on which
- * sentence wins; housing both HERE is what turns that decision into a
- * one-file edit instead of a hunt.
- */
+/** Route-specific wording for project-scope refusals. */
 export type ProjectWording = {
   actsElsewhere(scoped: string, named: string): string;
   outsideOrganization(named: string): string;
@@ -135,26 +99,10 @@ export async function resolveNamedProject(
 }
 
 /**
- * The project a **browser** request works in: the one its address names,
- * checked against the organization the session resolved to.
- *
- * **A session's project is a default, not a scope**, and that is the whole
- * distinction from a key. Every member of an organization holds their
- * organization role on every project in it, so naming a sibling project is
- * what the selector does on every click — while a key minted for one project
- * is bounded by it, and reaching a sibling with one is the refusal above.
- * Widening a key by reusing this rule is the one thing that must never
- * happen, so the two rules are two functions and the caller cannot pass a flag
- * to swap them.
- *
- * **The project comes off the address on every request, and nothing here
- * remembers one.** Two tabs on two projects are ordinary, and neither can be
- * right if the server keeps a chosen project per session. The organization
- * still comes from the credential and from nowhere else, so naming a project
- * can only ever pick among what this membership already reaches.
- *
- * A project outside the organization is an absence rather than a denial —
- * `projectOutsideOrganization` says why.
+ * Resolve a browser's requested project within its organization. A session
+ * project is a default, while an API key's project is a scope restriction.
+ * Call only for sessions; this function does not check auth.via itself.
+ * Resolve per request so tabs can use different projects.
  */
 export async function browserProject(
   auth: AuthContext,
@@ -194,16 +142,9 @@ export async function resolveAbsentProject(auth: AuthContext): Promise<Acting> {
 }
 
 /**
- * The acting project as a context to hand the data-access module. Absent, it is
- * the project the credential is authorized for, or the organization's single
- * project for a key minted for the whole customer. Named, it has to be one this
- * credential may act in.
- *
- * **Use this where the request has to land in one project**: a create, or a
- * list of a project's things. There the absent case has to *choose*, and
- * `NAME_THE_PROJECT` is the honest answer when there is more than one to choose
- * from. Where the address already carries the id of the one row being asked
- * about, `reachingIn` below is the one to use instead.
+ * Use for operations that require one destination project. An omitted project
+ * uses the credential scope or the organization's sole project; ambiguity
+ * fails. Resource-ID lookups should use reachingIn instead.
  */
 export async function actingIn(
   auth: AuthContext,
@@ -215,42 +156,10 @@ export async function actingIn(
 }
 
 /**
- * The acting context for a route addressed by **one resource's own id**, where
- * the project is a filter rather than a destination.
- *
- * Named, it is exactly `actingIn`'s rule and the same wording: a session may
- * name any project of its organization, a key minted for one project may not
- * name a sibling.
- *
- * **Absent, it is whatever the credential itself reaches, and the two callers
- * that arrive here are told apart by `AuthContext.projectId` alone.**
- *
- * - A **session** always carries a project. `apps/api/src/auth/session.ts`
- *   fills it from the membership and throws rather than leaving it out, so
- *   `{ auth }` here is the session's own project. That is the case ticket 12
- *   asked for: a browser naming no project is still answered from the project
- *   it is standing in, not from the whole organization.
- * - A **key minted for the whole organization** carries none, deliberately —
- *   `AuthContext.projectId` is `string | undefined` so that this absence is a
- *   case every reader has to answer rather than a value that defaults. `{ auth }`
- *   here leaves it absent, `inActingProject` returns no predicate for it, and
- *   the read spans the customer. That is the first-class case for such a key,
- *   in the agents group's own words: *"reading across a whole customer is the
- *   first-class case, because two projects of one customer are always readable
- *   together."*
- *
- * One expression answers both because `projectId` is precisely the fact that
- * separates them, and neither answer is a guess: the session's project was
- * chosen by a person, and the organization-wide one narrows by nothing.
- *
- * **Why not `actingIn`.** It resolves an absent project by *choosing* one, and
- * refuses with `NAME_THE_PROJECT` where an organization holds more than one.
- * On a route addressed by a run id or a simulation id there is nothing to
- * choose: the id is unique inside the organization, and a CLI or API client
- * following a run it already identified has no reason to know which project it
- * belongs to. Sending it there turns an
- * organization-wide read into a 400. This function exists so that the two
- * meanings of "no project named" cannot be swapped by picking the shorter name.
+ * Use for lookups by resource ID where project is an optional filter.
+ * A named project follows actingIn rules. Without one, preserve AuthContext:
+ * sessions retain their default project, while organization-wide keys retain
+ * organization-wide access. Do not choose a project as actingIn does.
  */
 export async function reachingIn(
   auth: AuthContext,

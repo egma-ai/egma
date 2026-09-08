@@ -49,6 +49,7 @@ import {
   gradeSummary,
   type DisplayGradeAssertion,
 } from "./grade.tsx";
+import type { GradeTally } from "../lib/runs.ts";
 import { StateMark } from "./run-status.tsx";
 
 type RecordingStatus = "absent" | "loading" | "ready" | "failed";
@@ -89,17 +90,9 @@ export type RecordingSpeakerTimeline = {
 };
 
 /**
- * The speaker bands drawn over the recording, from the POV that recorded it.
- *
- * The recording is egma's own: the persona's POV heard this conversation,
- * timed it and wrote the audio, so its turn boundaries are measured on the
- * recording's own clock and land where the sound is. The agent's clock is a
- * different clock — near enough to read a transcript by and not near enough to
- * draw on a waveform — so the bands stay the persona's even while the
- * transcript beside them is the agent's. This, and the origin a row seeks
- * against, is the whole of what the persona's POV is still drawn for.
- *
- * A record with no persona turns is drawn with the turns it has.
+ * Prefer persona POV turn timing for recording speaker bands because the
+ * simulator records that POV. Fall back to available turns when persona turns
+ * are absent; agent timings can differ from the recording clock.
  */
 export function recordingSpeakerTimeline(
   transcript: EvidenceTranscript,
@@ -159,14 +152,14 @@ const EMPTY_STATE_LEAD = "m-0 mt-1 max-w-[62ch] text-sm text-muted-foreground";
 const SUMMARY_CELL = "flex min-w-0 items-center justify-between gap-3 px-5 py-3";
 
 /**
- * Metrics and counts read straight in the mono face, on tabular figures.
+ * Summary values read in the product's own sans face, on tabular figures.
  *
- * `WV-0` writes the summary values in mono; `DESIGN.md` asks every
- * metric, date, duration and score for tabular numerals. Both together are
- * what stops "1m 04s" and "11m 40s" sitting at two widths in one strip.
+ * The figures still line up column by column, which is what stops "1m 04s" and
+ * "11m 40s" sitting at two widths in one strip. Mono stays where it names a
+ * thing rather than counts one: tool names and transcript timestamps.
  */
 const SUMMARY_VALUE =
-  "whitespace-nowrap font-mono text-base font-normal text-foreground tabular-nums";
+  "whitespace-nowrap text-base font-normal text-foreground tabular-nums";
 
 /**
  * The name of one fact, quiet, beside its value.
@@ -180,19 +173,8 @@ const SUMMARY_STRIP_CELL = cn(
 const SUMMARY_STRIP_LABEL = cn(SUMMARY_LABEL, "whitespace-nowrap");
 
 /**
- * What this simulation measured — the observed metrics, mean-led, under the
- * summary facts and apart from the verdicts for the transcript page's exact
- * reason: a metric measures and a grader judges, and a number is not good or
- * bad until a grader has been asked.
- *
- * **Every figure came off the platform's one shared measure module through the
- * one shared projection**, and the words come off the one shared formatter —
- * so this strip and the production transcript's can never come to word one
- * conversation's numbers two ways.
- *
- * A simulation whose spans carried no metrics renders nothing here: a measure
- * the conversation did not produce is absent, not zero, and the summary facts
- * above already say what the machinery recorded.
+ * Render observed metrics separately from grades using shared API projections
+ * and formatting. Omit the strip when no metrics are available.
  */
 export function SimulationMetrics({
   metrics,
@@ -237,6 +219,56 @@ function scoreText(score: number | null): string {
   return score === null ? "-" : score.toFixed(2);
 }
 
+/**
+ * How many of this simulation's frozen graders passed, failed or errored,
+ * counted the way the platform counts them: one current grade per project
+ * grader in the frozen plan, measured against the threshold the plan froze.
+ *
+ * Nothing here creates an overall verdict. ADR-0017 stands: the count is the
+ * fact, and each grader keeps its own threshold.
+ */
+export function evidenceGradeTally(evidence: SimulationEvidence): GradeTally {
+  const planned = (evidence.gradingPlan?.items ?? []).map(
+    (item) => item.projectGraderId,
+  );
+  const selected = planned;
+  let passed = 0;
+  let failed = 0;
+  let errored = 0;
+  for (const projectGraderId of selected) {
+    const grade = evidence.grades.find(
+      (one) => one.projectGraderId === projectGraderId,
+    );
+    if (grade === undefined) continue;
+    if (grade.result === "errored") errored += 1;
+    else if (grade.result === "passed") passed += 1;
+    else failed += 1;
+  }
+  return { passed, failed, errored, selected: selected.length };
+}
+
+/**
+ * The count of passed graders, and what else the graders returned.
+ *
+ * Null while grading is in flight or while any selected grader has no
+ * current grade, because a partial count would read as a settled one.
+ */
+function gradersPassedText(evidence: SimulationEvidence): string | null {
+  if (evidence.gradingState === "pending" || evidence.gradingState === "running") {
+    return null;
+  }
+  const tally = evidenceGradeTally(evidence);
+  if (tally.selected === 0) return "-";
+  if (tally.passed + tally.failed + tally.errored < tally.selected) return null;
+  return [
+    `${String(tally.passed)}/${String(tally.selected)}`,
+    tally.failed === 0 ? null : `${String(tally.failed)} failed`,
+    tally.errored === 0 ? null : `${String(tally.errored)} errored`,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+}
+
 function p90TurnLatency(metrics: readonly Measured[]): string {
   const latency = metrics.find(
     (metric) =>
@@ -266,13 +298,20 @@ function summaryValue(value: string) {
   );
 }
 
-/** The four simulation-level facts required before reading grader output. */
+/**
+ * The four simulation-level facts required before reading grader output.
+ *
+ * The first is how many graders passed, not an average of their scores: an
+ * average is one number over graders that each answered their own question,
+ * and it invites the overall verdict this product does not have.
+ */
 export function SimulationEvidenceSummary({
   evidence,
 }: {
   readonly evidence: SimulationEvidence;
 }) {
   const turns = turnsOf(evidence);
+  const gradersPassed = gradersPassedText(evidence);
   return (
     <div className="@container/summary min-w-0">
     <section
@@ -283,9 +322,16 @@ export function SimulationEvidenceSummary({
       aria-label="Simulation summary"
     >
       <div className={SUMMARY_STRIP_CELL}>
-        <span className={SUMMARY_STRIP_LABEL}>Total avg score</span>
+        <span className={SUMMARY_STRIP_LABEL}>Graders passed</span>
         <strong className={SUMMARY_VALUE}>
-          {summaryValue(scoreText(evidence.combinedScore))}
+          {gradersPassed === null ? (
+            <>
+              <span aria-hidden="true">—</span>
+              <span className="sr-only">Grading</span>
+            </>
+          ) : (
+            summaryValue(gradersPassed)
+          )}
         </strong>
       </div>
       <div className={SUMMARY_STRIP_CELL}>
@@ -1368,26 +1414,10 @@ export function RecordingEvidence({
 }
 
 /**
- * **One conversation, told once**: the steps of one POV where the record holds
- * any, and every step where it holds none.
- *
- * A simulation stores both POVs of the same conversation under one trace — the
- * persona's, which is what egma's own simulator said, heard, measured and
- * recorded, and the agent's, which is what the agent's own process reported.
- * They describe the same turns and the same calls, so every reader that shows,
- * counts or judges them chooses one, and they all choose the same way or one
- * surface says a thirteen-turn conversation had twenty-six while another says
- * thirteen.
- *
- * **The same rule as `fromOnePov` in `@egma/db`**, which the trace facts and
- * the graders read by, written again here for one reason: this module is a
- * browser bundle and reaches only `@egma/platform-api`, so it cannot import the
- * package that owns the read. Change one and change the other.
- *
- * Falling back to every step is what makes it safe. A chat simulation, a
- * production transcript and a conversation whose agent never reached egma each
- * hold one POV, and it is the one to show — asking for a POV that is not there
- * must never empty a transcript.
+ * Select the requested POV when present; otherwise retain all supplied steps.
+ * Keep this behavior aligned with @egma/db fromOnePov. The browser cannot
+ * import the database package directly.
+ * Platform simulation transcripts bypass this fallback by requiring their POV.
  */
 function fromOnePov<Step extends { readonly pov: EvidenceStep["pov"] }>(
   steps: readonly Step[],
@@ -1397,16 +1427,19 @@ function fromOnePov<Step extends { readonly pov: EvidenceStep["pov"] }>(
   return own.length === 0 ? steps : own;
 }
 
-/**
- * Every tool call a reader is shown, once, in the order it happened.
- *
- * The agent's own, where the record holds them. egma files a tool row of its
- * own on the lanes where a platform serves egma's answers, and those are shown
- * only where the agent reported none — so a call is on the transcript once,
- * never twice, and never paired or deduplicated by guesswork.
- */
+function transcriptSteps<Step extends { readonly pov: EvidenceStep["pov"] }>(
+  steps: readonly Step[],
+  requiredPov?: EvidenceStep["pov"],
+): readonly Step[] {
+  return requiredPov === undefined
+    ? fromOnePov(steps, "agent")
+    : steps.filter((step) => step.pov === requiredPov);
+}
+
+/** A required source never borrows tools from another account of the call. */
 export function transcriptToolCalls(
   transcript: EvidenceTranscript,
+  requiredPov?: EvidenceStep["pov"],
 ): readonly EvidenceStep[] {
   const found = new Map<string, EvidenceStep>();
   const visit = (step: EvidenceStep): void => {
@@ -1415,9 +1448,34 @@ export function transcriptToolCalls(
   };
   for (const turn of transcript.turns) visit(turn);
   for (const step of transcript.spans) visit(step);
-  return fromOnePov([...found.values()], "agent").toSorted(
+  return transcriptSteps([...found.values()], requiredPov).toSorted(
     (left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt),
   );
+}
+
+/** These lanes receive their transcript separately from simulator evidence. */
+function platformTranscriptSource(
+  evidence: SimulationEvidence,
+): "Retell" | "LiveKit" | null {
+  const lane = evidence.connectionSnapshot.connectionType;
+  if (lane === "retell_web_call") return "Retell";
+  if (lane === "livekit_room") return "LiveKit";
+  return null;
+}
+
+/** Keep reading a pending platform export after execution itself has ended. */
+export function waitingForSimulationTranscript(
+  evidence: SimulationEvidence,
+): boolean {
+  if (
+    platformTranscriptSource(evidence) === null ||
+    evidence.agentPovIncomplete ||
+    evidence.agentPovComplete
+  ) {
+    return false;
+  }
+  return ["queued", "claimed", "running"].includes(evidence.status) ||
+    Boolean(evidence.providerReference);
 }
 
 /** Every recorded tool call in one simulation, using the shared transcript walk. */
@@ -1426,7 +1484,10 @@ export function simulationToolCalls(
 ): readonly EvidenceStep[] {
   return evidence.transcript === null
     ? []
-    : transcriptToolCalls(evidence.transcript);
+    : transcriptToolCalls(
+        evidence.transcript,
+        platformTranscriptSource(evidence) === null ? undefined : "agent",
+      );
 }
 
 type TurnConversationEvent = {
@@ -1751,15 +1812,9 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
             )}
           >
             {/*
-              **Who answered, beside what happened.** A mock tool answered this
-              call, read by name off the test version this simulation pinned, so
-              a reader knows the answer in front of them came from the test
-              rather than from their own backend. The mock tool's own name is
-              not repeated here: it is the tool's name, already on this row in
-              mono one slot away. One muted word at the same size — no chip and
-              no colour of its own, because a real call is the ordinary case and
-              says nothing extra.
-            */}
+             * Show the API's derived mock-coverage mark beside the tool result without
+             * repeating the tool name or presenting it as a quality verdict.
+             */}
             {mocked ? (
               <span className="text-muted-foreground">mocked · </span>
             ) : null}
@@ -1966,6 +2021,7 @@ export function ChatTranscript({
   onSeek,
   speakerLabels = DEFAULT_TRANSCRIPT_SPEAKERS,
   emptyState = DEFAULT_TRANSCRIPT_EMPTY_STATE,
+  requiredPov,
 }: {
   readonly transcript: EvidenceTranscript;
   readonly toolCalls?: readonly EvidenceStep[];
@@ -1974,22 +2030,29 @@ export function ChatTranscript({
   readonly onSeek?: (seconds: number) => void;
   readonly speakerLabels?: TranscriptSpeakerLabels;
   readonly emptyState?: TranscriptEmptyState;
+  readonly requiredPov?: EvidenceStep["pov"];
 }) {
   const timelineStartedAt = recordingStartedAt ?? transcript.startedAt;
-  // The turns the agent's own process reported, where it reported any. The
-  // persona's POV still supplies the recording underneath and the origin these
-  // rows seek against; it is not a second transcript beside this one.
   const shown = useMemo(
-    () => ({ ...transcript, turns: [...fromOnePov(transcript.turns, "agent")] }),
-    [transcript],
+    () => ({
+      ...transcript,
+      turns: [...transcriptSteps(transcript.turns, requiredPov)],
+    }),
+    [transcript, requiredPov],
+  );
+  const shownTools = useMemo(
+    () => requiredPov === undefined
+      ? toolCalls
+      : toolCalls.filter((step) => step.pov === requiredPov),
+    [toolCalls, requiredPov],
   );
   const events = useMemo(
-    () => timedConversationEvents(shown, toolCalls, timelineStartedAt),
-    [timelineStartedAt, toolCalls, shown],
+    () => timedConversationEvents(shown, shownTools, timelineStartedAt),
+    [timelineStartedAt, shownTools, shown],
   );
   const groups = useMemo(
-    () => conversationGroups(shown, toolCalls, events),
-    [events, toolCalls, shown],
+    () => conversationGroups(shown, shownTools, events),
+    [events, shownTools, shown],
   );
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
   const selectAndSeek = useCallback<TranscriptSeek>(
@@ -2104,6 +2167,7 @@ function GraderGroup({
         <div className="flex min-w-0 flex-col gap-4 bg-background p-5 max-[40rem]:p-4">
           <GradeDetails
             grade={grade}
+            projectId={evidence.projectId}
             assertionName={(assertion) => assertionName(assertion, expected)}
             renderCitations={(assertion) => {
               const citedTurns = citedTurnPositions(
@@ -2168,6 +2232,73 @@ const NOTICE_LINE =
 const SHEET_BLOCK = "flex min-w-0 flex-col gap-3";
 const SHEET_BLOCK_TITLE = "m-0 text-base font-medium text-foreground";
 
+/** The same transcript source and availability state on both simulation views. */
+export function SimulationTranscript({
+  evidence,
+  recording,
+}: {
+  readonly evidence: SimulationEvidence;
+  readonly recording: SimulationEvidenceRecording;
+}) {
+  const source = platformTranscriptSource(evidence);
+  const requiredPov = source === null ? undefined : "agent";
+  const transcript = evidence.transcript;
+  const toolCalls = useMemo(() => simulationToolCalls(evidence), [evidence]);
+  const hasConversation = transcript !== null && (
+    transcriptSteps(transcript.turns, requiredPov).length > 0 ||
+    toolCalls.length > 0
+  );
+  if (
+    source !== null &&
+    !hasConversation &&
+    !evidence.agentPovComplete
+  ) {
+    const unavailable = !waitingForSimulationTranscript(evidence);
+    return (
+      <div className="border border-border bg-surface-soft p-5 text-sm" role="status">
+        <p className="m-0 font-medium text-foreground">
+          {unavailable
+            ? `${source} transcript unavailable`
+            : `Waiting for ${source} transcript`}
+        </p>
+        <p className="m-0 mt-1 text-muted-foreground">
+          {unavailable
+            ? `Egma did not receive the ${source} conversation and tool calls for this simulation.`
+            : `Conversation and tool calls will appear when ${source} sends them.`}
+        </p>
+      </div>
+    );
+  }
+  if (transcript === null) return <TranscriptEmpty />;
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      {source !== null && evidence.agentPovIncomplete ? (
+        <p className={NOTICE_LINE} role="status">
+          {`${source} transcript incomplete. Only the conversation and tool calls Egma received are shown.`}
+        </p>
+      ) : source !== null && waitingForSimulationTranscript(evidence) ? (
+        <p className={NOTICE_LINE} role="status">
+          {`Waiting for ${source} transcript. The conversation and tool calls received so far are shown below.`}
+        </p>
+      ) : null}
+      {transcript.spansTruncated ? (
+        <p className={NOTICE_LINE} role="status">
+          {`This simulation filed ${String(transcript.spanCount)} steps. This view shows the first steps in order, so later tool calls or conversation turns may be absent.`}
+        </p>
+      ) : null}
+      <ChatTranscript
+        transcript={transcript}
+        toolCalls={toolCalls}
+        {...(requiredPov === undefined ? {} : { requiredPov })}
+        recordingStartedAt={recordingOriginOf(transcript)}
+        {...(recording.status === "ready"
+          ? { currentTime: recording.currentTime, onSeek: recording.seek }
+          : {})}
+      />
+    </div>
+  );
+}
+
 /** The immutable grader plan captured at run start. */
 export function SimulationGradingPlan({
   evidence,
@@ -2223,7 +2354,6 @@ function SimulationEvidencePanel({
     evidence.status,
   );
   const voice = evidence.modality === "voice";
-  const toolCalls = useMemo(() => simulationToolCalls(evidence), [evidence]);
   const pendingTurn = useRef<number | null>(null);
 
   function revealTurn(turn: number): void {
@@ -2373,36 +2503,7 @@ function SimulationEvidencePanel({
               <h3 className={SHEET_BLOCK_TITLE} id="evidence-transcript">
                 Transcript
               </h3>
-              {evidence.transcript === null ? (
-                <div className={EMPTY_STATE}>
-                  <strong className={EMPTY_STATE_TITLE}>
-                    No transcript was filed
-                  </strong>
-                  <p className={EMPTY_STATE_LEAD}>
-                    Egma has no conversation turns for this simulation. It may not
-                    have started, or it may have stopped before the first turn.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  {evidence.transcript.spansTruncated ? (
-                    <p className={NOTICE_LINE}>
-                      {`This simulation filed ${String(evidence.transcript.spanCount)} steps. This view shows the first steps in order.`}
-                    </p>
-                  ) : null}
-                  <ChatTranscript
-                    transcript={evidence.transcript}
-                    toolCalls={toolCalls}
-                    recordingStartedAt={recordingOriginOf(evidence.transcript)}
-                    {...(recording.status === "ready"
-                      ? {
-                          currentTime: recording.currentTime,
-                          onSeek: recording.seek,
-                        }
-                      : {})}
-                  />
-                </>
-              )}
+              <SimulationTranscript evidence={evidence} recording={recording} />
             </section>
           </div>
         </Dialog>
@@ -2428,32 +2529,9 @@ export function SimulationEvidenceReview({
       className={cn(
         REVIEW,
         /*
-         * **The sheet is docked beside this page, so the page steps aside for
-         * it.** That is what a non-modal reading surface promises — the test
-         * covering this panel says it in as many words: "a panel docked beside
-         * this page rather than a layer over it, so the grader results stay
-         * reachable while the transcript is open". The panel is `position:
-         * fixed` against the viewport's right edge, so nothing under it moves
-         * on its own: at 1440 the transcript covered the grader findings it is
-         * evidence *for*, and a reader had to close the transcript to read the
-         * finding that cited it.
-         *
-         * **The room is reserved here, on the block that holds both halves**,
-         * and not on the review panel alone. The summary strip is that panel's
-         * sibling, so padding the panel left the strip running on under the
-         * sheet — Duration cut in half and Total turns gone — while the panel
-         * beside it sat clear of it. One ancestor pays, and every child is
-         * inside what is left.
-         *
-         * The room is the sheet's own width from the theme plus one gutter,
-         * and only where there is room to give: below 1100px the sheet is
-         * most of the screen and reading it *is* the mode, so the page stays
-         * where it is and the sheet covers it.
-         *
-         * It is not animated. `DESIGN.md` asks motion to run on `transform`
-         * and `opacity`, and this is padding — a layout property, on a block
-         * holding a whole review. The sheet's own entrance already explains
-         * where the room went.
+         * Reserve reading-sheet width plus a gutter on the ancestor of summary and
+         * grades so neither sits behind the sheet. Below 1100px, let the sheet cover
+         * the page. Do not animate layout padding; the sheet has its own entrance motion.
          */
         evidenceOpen &&
           "min-[1100px]:pe-[calc(var(--sheet-width-wide)+var(--page-gutter))]",

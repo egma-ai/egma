@@ -1,20 +1,7 @@
-"""This SDK's half of the mock-tool exchange, held to the contract's bytes.
-
-``seam.py`` says the two halves of this exchange are held together by
-tests against the bytes rather than by an import. This is that test.
-
-The bytes are
-``packages/simulation-contract/fixtures/seam/mock-tool-exchange.v1.json``:
-the protocol version, both method names, the four refusal codes, both
-caps, and a canonical message for every shape either side sends. egma's
-own simulator suite reads the same file and asserts its own constants and
-handlers against it. So a version, a method name, a code, a shape or a
-cap that moves on one side fails a hermetic test on that side — which is
-the only kind of agreement two processes in two repositories, and one day
-two languages, can actually keep.
-
-Nothing here touches LiveKit, a room, or a network. It builds strings and
-reads strings, which is all this half of the seam ever does.
+"""Check the SDK against
+packages/simulation-contract/fixtures/seam/mock-tool-exchange.v1.json.
+The simulator tests the same wire version, methods, refusal codes, limits,
+and messages. No LiveKit server or network is needed.
 """
 
 from __future__ import annotations
@@ -79,6 +66,10 @@ def test_the_refusal_codes_are_the_contracts():
         assert refusal["code"] in seam.EGMA_REFUSALS
     for code in seam.EGMA_NOT_REACHED:
         assert reserved["from"] <= code <= reserved["to"]
+    assert seam.TRANSIENT_HELLO_FAILURES == {1400, 1501, 1502, 1505}
+    assert seam.TRANSIENT_HELLO_FAILURES.isdisjoint(
+        {seam.UNSUPPORTED_PROTOCOL_VERSION, 1401, 1403, 1404, 1503}
+    )
 
 
 def test_both_caps_are_the_contracts():

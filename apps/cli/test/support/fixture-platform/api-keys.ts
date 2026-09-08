@@ -1,16 +1,7 @@
 /**
- * Minting a key, as the fixture platform answers it.
- *
- * The mint route's whole secret is in its answer: it exists exactly once, in
- * the 201 body, and no read ever says it again. List returns only safe key
- * metadata, and revoke proves that a failed local setup can retire the exact
- * key without knowing its secret.
- * A key minted for a project is scoped to that project — the request names the
- * project and the scope is derived, because there is no scope field to send.
- *
- * The key it mints is a real key of this instance: it is added to the list the
- * other groups authorize against, so a check can prove that what the terminal
- * wrote into a `.env` is a credential this platform would actually take.
+ * Return a new key secret once, with safe metadata on later reads.
+ * Derive project scope from project selection and support revoking the exact key.
+ * Register minted keys with fixture authorization so tests can use them in requests.
  */
 
 import { given, newId, NOT_AUTHENTICATED, text } from "./reading.ts";

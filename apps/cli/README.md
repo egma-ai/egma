@@ -439,4 +439,4 @@ next action when work cannot continue.
 
 ## Licence
 
-Apache 2.0.
+MIT.

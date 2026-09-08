@@ -3,27 +3,10 @@ import { describe, expect, it } from "vitest";
 import { measuresFromSpans, type TraceSpan } from "../src/index.ts";
 
 /**
- * A caller's sentence the transcriber delivered in two pieces, and the reply
- * the second piece cut off.
- *
- * **Found on a live LiveKit call, and by no test before this one.** The caller
- * said one sentence and waited once. The framework committed the first half of
- * it as a turn and began answering; then the rest of the same utterance arrived
- * from the transcriber — after the VAD had already closed the caller's speech —
- * as a second `user_turn` carrying no audio of its own, and it interrupted the
- * reply mid-word. What the agent's spans hold afterwards is a forty-millisecond
- * fragment of speech nobody heard and a turn nobody spoke.
- *
- * Read one human turn at a time, that call answered with two waits: 2000 ms to
- * the fragment, and 2840 ms measured from the second turn's commit instant,
- * which nobody waited from. The caller waited once, for 5178 ms — and egma's
- * own recording of the same wait read 5720 ms, the half-second the two clocks
- * are known to differ by, which is what says 5178 is the wait and the other two
- * numbers are the framework's bookkeeping.
- *
- * The tree below is that exchange to the millisecond: the two spoken bursts of
- * the caller's sentence, the false start with its fragment, the continuation
- * with no speech, a silent tool step, and the turn that actually answered.
+ * Regression from captured LiveKit evidence: late transcription splits one
+ * utterance and interrupts a partial reply. The fixture includes that false
+ * start, a speechless continuation, tool work, and the actual answer.
+ * The agent-POV wait is 5178 ms, not separate waits of 2000 and 2840 ms.
  */
 
 /** The call's own beginning, which every offset below is counted from. */

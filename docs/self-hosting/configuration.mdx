@@ -43,6 +43,8 @@ Add the required keys to `.env`, then run `egma self-host up`. These deployment 
   This selects the secret as the provider source instead of the direct environment values. Give the API and grader processes AWS credentials that can read it. The current bundle is fetched for each work item, so a rotated secret applies to subsequent work. Setting only one selector prevents startup.
 </Accordion>
 
+Keys saved in [Settings → Provider API Keys](/configuration/provider-api-keys) take precedence for their organization. Deployment keys or the provider bundle supply providers without an organization key; the bundle is fetched only when a work item needs it.
+
 ## Public URLs and networking
 
 Egma uses two browser-facing URLs:
@@ -168,7 +170,7 @@ Amazon S3 endpoints require the correct region. An absent or mismatched region c
 
 | Variables | Purpose |
 | --- | --- |
-| `EGMA_ENCRYPTION_KEY` | Encrypts stored connection credentials. |
+| `EGMA_ENCRYPTION_KEY` | Encrypts stored connection and organization provider credentials. The API and grader share this key. |
 | `EGMA_AUTH_SECRET` | Signs browser sessions. |
 | `EGMA_SIMULATOR_SERVICE_TOKEN` | Authenticates internal workers to the API. |
 | `EGMA_S3_ACCESS_KEY_ID`, `EGMA_S3_SECRET_ACCESS_KEY` | Bundled MinIO root credentials and default recording uploads. |
@@ -256,3 +258,125 @@ The bundled values are sufficient for a local installation. Change these when yo
     Set `EGMA_TELEMETRY=on` to enable it. `EGMA_TELEMETRY_OTLP_ENDPOINT` selects the API and grader telemetry destination. `EGMA_POSTHOG_KEY` and `EGMA_POSTHOG_HOST` configure browser analytics and crash reporting. Rebuild through `egma self-host up` after changing browser telemetry settings.
   </Accordion>
 </AccordionGroup>
+
+## Optional billing
+
+<ParamField path="EGMA_STRIPE_SECRET_KEY" type="string">
+  The Stripe secret key that selects a billing adapter. Leave it empty unless
+  you charge the people who use your deployment.
+</ParamField>
+
+<ParamField path="EGMA_STRIPE_WEBHOOK_SECRET" type="string">
+  The signing secret of the Stripe webhook endpoint you point at
+  `/api/billing/stripe/webhook`. Paid billing actions become available only
+  after this signing secret is configured.
+</ParamField>
+
+Egma measures every provider request and counts every chat simulation,
+web-call minute and phone minute on every deployment, whoever pays. Charging
+for them is separate, and it is off unless this key is set: with no key, plans
+and limits do not exist, every allowance is unlimited, and the usage page shows
+you your own numbers.
+
+Setting it turns on plans, monthly allowances and a prepaid inference balance
+for every organization on the deployment. Each organization starts on the free
+Hobby plan and receives a one-time welcome credit. When billing is healthy,
+new work pauses if a Hobby allowance is spent or a required provider must use
+the deployment's key and the inference balance is exhausted. A saved organization
+key funds its provider independently. Pro voice usage can continue past its
+included minutes at the overage rate. Already admitted work finishes, and
+billing failures do not stop customer jobs. **Settings → Usage and billing**
+shows usage, the balance and payment actions; refusal messages link to the
+setting that can resolve the block.
+
+Nothing about that is Egma Cloud's alone. The same key gives the same billing
+on any deployment, which is what makes it a hosted service rather than a
+cloud-only feature.
+
+### Setting Stripe up
+
+Two steps, in this order.
+
+First, create the Stripe objects your deployment sells the paid plan through:
+
+```bash
+DATABASE_URL=... EGMA_STRIPE_SECRET_KEY=... \
+  pnpm --filter @egma/ee stripe:setup
+```
+
+It finds every object before it makes one, so it is safe to run again. It
+creates two billing meters, the paid product, its monthly fee price and two
+tiered metered prices whose first tier is the included allowance and whose
+second is the overage price, and it writes their identifiers onto the plan row.
+It refuses a live key unless you set `EGMA_STRIPE_SETUP_ALLOW_LIVE=1`.
+
+Supply your business address and it also sets your Stripe Tax head office,
+which is what activates Stripe Tax. Either the whole address as JSON in
+`EGMA_STRIPE_HEAD_OFFICE`, or the separate variables
+`EGMA_STRIPE_HEAD_OFFICE_LINE1`, `…_LINE2`, `…_CITY`, `…_STATE`,
+`…_POSTAL_CODE` and `…_COUNTRY`. Without an address the command says so and
+does everything else. These are read by the command only and are not
+deployment settings.
+
+Second, add a webhook endpoint in Stripe pointing at
+`https://your-deployment/api/billing/stripe/webhook`, subscribed to
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+`customer.subscription.created`, `customer.subscription.updated` and
+`customer.subscription.deleted`. Put its signing secret in
+`EGMA_STRIPE_WEBHOOK_SECRET` and restart. Until you do, the endpoint answers
+404 and no payment reaches a balance.
+
+### Updating pricing
+
+Edit plan fees, allowances and overage rates in `ee/src/plans.json`, then deploy
+the updated configuration. The API loads plan values at startup and retries a
+failed initialization; it does not rewrite them on each settlement interval.
+Direct database edits are not the pricing workflow.
+
+After changing a Pro fee, included voice allowance or overage rate, rerun
+`pnpm --filter @egma/ee stripe:setup` from that release with the deployment's
+`DATABASE_URL` and `EGMA_STRIPE_SECRET_KEY`. The command creates changed Stripe
+prices, moves their lookup keys and saves the identifiers used by new Pro
+Checkouts. A plan deployment alone does not update those Stripe prices.
+
+The setup command does not update existing subscriptions. Their invoices keep
+the prices they already use, while Egma's plan display reads the deployed plan
+values. Applying a changed plan to existing subscribers therefore needs a
+separate rollout decision; rerunning setup does not complete that change.
+
+Model rates are in `packages/db/src/models/rate-card.json`. Add a new entry with
+a new effective date and deploy it. Keep prior entries: stored usage keeps its
+original price references. Model rate changes do not require Stripe setup.
+
+
+## Worker limits
+
+| Variable | Purpose |
+| --- | --- |
+| `EGMA_SIMULATOR_MODE` | `persistent` by default; `one-shot` claims once, and `standby` waits for one voice simulation before exiting |
+| `EGMA_SIMULATOR_MODALITIES` | Comma-separated `voice,chat`; unset accepts both in persistent mode and voice only in one-shot or standby mode |
+| `EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS` | One-shot and standby process deadline from claim through teardown; default 900; unused in persistent mode |
+| `EGMA_SIMULATOR_STANDBY_SECONDS` | Standby claim wait limit; default 1800; separate from the execution deadline |
+| `EGMA_SIMULATOR_THREAD_POOL_WORKERS` | Native thread pool size; defaults to 1 in one-shot/standby mode and leaves persistent-mode pools unchanged |
+| `EGMA_GRADING_CONCURRENCY_CAP` | Optional deployment-wide cap shared by all grader workers; unset by default. One job grades one simulation or trace with all its attached graders. Separate from simulation caps. |
+| `EGMA_GRADER_INGESTION_LOG_DIR` | Persistent paid-usage log; default `/var/lib/egma/grader-ingestion`. Mount a separate writable volume here. The grader does not use the API ingestion log directory. |
+
+`EGMA_VOICE_SIMULATION_CONCURRENCY_CAP` and `EGMA_CHAT_SIMULATION_CONCURRENCY_CAP` set separate deployment-wide caps on claimed or running simulations. Leave them empty for no cap. `EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS` sets provider caps as JSON, such as `{"cartesia":2,"deepgram":150}`. Work that exceeds a cap stays queued; providers absent from the JSON are uncapped. Grader workers refill each freed slot without waiting for other jobs.
+
+### Egma Cloud voice fleet
+
+These settings select the hosted ECS launcher. They are injected by the cloud
+task definition and do not belong in a self-hosted `.env` or Compose file.
+Without `EGMA_VOICE_FLEET_LAUNCHER`, the API does not load AWS fleet code.
+
+| Variable | Purpose |
+|---|---|
+| `EGMA_VOICE_FLEET_LAUNCHER` | Must be `aws-ecs` to enable hosted voice launches |
+| `EGMA_VOICE_FLEET_CLUSTER` | ECS cluster name or ARN |
+| `EGMA_VOICE_FLEET_TASK_DEFINITION` | Exact voice task-definition ARN; listing uses its family across revisions |
+| `EGMA_VOICE_FLEET_SUBNETS` | Non-empty JSON array of subnet IDs |
+| `EGMA_VOICE_FLEET_SECURITY_GROUPS` | Non-empty JSON array of security-group IDs |
+| `EGMA_RELEASE_SHA` | Lowercase 40-character public commit SHA exposed by `/health` after deployment |
+
+The ECS client reads its region from the standard `AWS_REGION` value supplied
+by AWS. The release workflow checks `releaseSha` before it ships the web app.

@@ -4,6 +4,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type ComponentProps,
@@ -53,59 +54,28 @@ import { DestructiveItem, MenuReason, RowMenu } from "../../../../ui/row-menu.ts
 import { ConfirmDialog } from "./parts.tsx";
 
 /**
- * The suite's tests, as a spreadsheet.
+ * Existing tests save individual fields; new tests require an explicit complete
+ * entry-row submit. Name, scenario, expected behaviors, and personas are required.
  *
- * **The grid has one grammar, and the founder wrote it on 2026-08-24: editing
- * saves itself cell by cell; creating asks once and cannot fire early.** An
- * existing test is four cells that each commit alone, so changing a scenario is
- * one click, one blur and one request carrying one field. A new test is an
- * entry row with a commit bar, because there is no honest way to save a quarter
- * of a test — a test with no persona, or no behavior, is not a test that can
- * run, and a row that saved itself a field at a time would have to invent the
- * rest.
- *
- * All four fields are mandatory: name, scenario, at least one expected
- * behavior, at least one persona. The platform holds the same four; this screen
- * says so before the request rather than after it, and repeats the platform's
- * own sentence when a request is refused anyway.
- *
- * **The save grammar, whole.** Every rule below exists because a version
- * guard makes two saves of one test contend, and because a request is awaited
- * while a person keeps typing. Four rules, and together they close the family:
- *
- * 1. **Different tests save in parallel; one test saves in order.** Separate
- *    rows carry separate guards, so they cannot contend. Two cells of one test
- *    would carry the same version, so they queue, and a queued save reads its
- *    version or revision when it is sent — from the answer the save in front
- *    of it received, never from the render that started it.
- * 2. **A wake seeds from the newest intent.** The stored row, with any
- *    unfinished save of it laid over the top, because the row still shows what
- *    that save is replacing.
- * 3. **An answer closes only its own session, and only over what it sent.**
- *    Leaving a cell and returning is a new session, so a late answer from the
- *    old one neither closes it nor speaks into it; and pressing Enter and
- *    carrying on typing never leaves the session, so the draft itself is what
- *    says the answer has been overtaken.
- * 4. **A commit is dropped only when it is an identical resubmit** — the blur
- *    that follows an Enter. Anything a person actually changed queues.
- *
- * What that buys is one sentence: a version conflict can only be a write this
- * client did not make, so the refusal in the cell means another person moved
- * the test, and it is never about something the person in front of it did.
- *
- * The look is `LNC-0`, `LUT-0` and boards 10–14 of Paper page 04B: a Pure Paper
- * panel inside one hairline, hairlines between every cell, a woken cell inside
- * a 2px ink edge, add-affordances on the woken cell, and a ghost row at the
- * foot that opens the entry row.
- *
- * The two JSON cells are the exception to "only when woken", and the founder
- * made it on 2026-09-04: they are not cells anybody types in, so they never
- * wake, and an empty one that showed nothing was a control with no sign it was
- * one. They carry the same add-affordance at rest.
+ * Serialize saves per test and read the latest version/revision when sending.
+ * Different tests may save concurrently. Reopened cells start from pending
+ * intent, and late answers may affect only their original edit session and
+ * unchanged submitted draft. Drop identical Enter/blur resubmits.
+ * Mock tools and env open JSON dialogs instead of inline text editors.
  */
 
-/** A persona as a cell needs it: an id to send and a name to show. */
-type Named = { readonly id: string; readonly name: string };
+/**
+ * A persona as a cell needs it: an id to send and a name to show.
+ *
+ * `archivedAt` travels with the personas a test names, so the picker can say
+ * that one of them is gone. A persona read from the project's own list is
+ * available by definition and carries nothing here.
+ */
+type Named = {
+  readonly id: string;
+  readonly name: string;
+  readonly archivedAt?: string | null;
+};
 
 /** What a cell is, which is also which field one save carries. */
 type Field =
@@ -117,14 +87,8 @@ type Field =
   | "env";
 
 /**
- * The two fields written as raw JSON, in a dialog rather than in the cell.
- *
- * **They are cells that open something, not cells you type in.** A mock tool's
- * answer is arbitrary JSON and an env is two nested objects, and neither fits
- * on a table row that has to stay scannable beside a scenario. So the cell
- * carries one short summary — or, while it holds nothing, the line that offers
- * to write the first one — and the writing happens in the smallest dialog that
- * holds a monospace editor, a reason when there is one, and Save and Cancel.
+ * Edit mock tools and env as JSON in dialogs; cells show a summary or an
+ * action to add a value.
  */
 type JsonField = "mockTools" | "env";
 
@@ -133,19 +97,8 @@ function isJsonField(field: Field): field is JsonField {
 }
 
 /**
- * What each JSON dialog is called, what its empty cell offers, and what its
- * empty editor shows.
- *
- * **The example is written by the same call the editor is.** A stored value
- * opens as `JSON.stringify(value, null, 2)`, so a one-line example taught the
- * shape in a grammar this field never writes back: somebody copied it, saved,
- * reopened, and read a document that looked nothing like the one they had
- * pasted. Running a real value through the same call is what keeps the empty
- * editor and the full one the same shape — it cannot drift, because there is
- * no second copy of the formatting to drift from (founder, 2026-09-04).
- *
- * `add` is the empty cell's own line, and it is a verb rather than the column
- * heading again: the cell says what pressing it does.
+ * Format examples with the same JSON.stringify indentation as stored values.
+ * Empty-cell labels describe the action that opens the editor.
  */
 const JSON_FIELD: Readonly<
   Record<
@@ -187,14 +140,8 @@ const JSON_FIELD: Readonly<
 type Woken = { readonly testId: string; readonly field: Field };
 
 /**
- * One edit session: a cell, and *which time* it was woken.
- *
- * **The cell is not the identity a late answer needs.** Leaving a cell and
- * coming back to it is a new session over the same two coordinates, so a save
- * still in flight from the first one would match the second on `testId` and
- * `field` and clear a draft somebody is in the middle of typing. `at` is what
- * tells the two apart: a counter that moves on every wake, so a session is
- * only ever itself.
+ * Identify each cell edit session with a new counter value. Reopening the
+ * same cell must not let a previous save clear the new draft.
  */
 type Session = Woken & { readonly at: number };
 
@@ -204,22 +151,8 @@ function isContent(field: Field): boolean {
 }
 
 /**
- * The columns, at the proportions `LNC-0` draws them, rebalanced for two more.
- *
- * **Every column holds its own heading on one line at the grid's floor**, and
- * that is what set these numbers rather than taste. At the 900px floor the
- * headings want, inside `--row-padding-x` either side, about 100px for
- * `Mock tools` and about 90px for `Personas`; `Expected behaviors` is the
- * widest word in the row and wants about 150.
- *
- * **The two JSON lanes are 15% each, and the sentences in them are why**
- * (founder, 2026-09-04). Their cells no longer hold a bare count and a list of
- * key names: an empty one offers `+ Add mock tools` or `+ Add env variables`,
- * and a full Env says `View env variables`. That is about 130px of words in a
- * lane that was 8%, which is 72px at the floor — so Env was the one column in
- * the grid whose content could not be drawn inside it at any width. Scenario
- * and Expected behaviors gave up the five and four points, because they are
- * the two lanes with room to give and their own headings still fit.
+ * Allocate enough width for headings and JSON-cell actions at the grid's
+ * minimum width. Keep the mock tools and env columns wide enough for their labels.
  */
 const COLUMNS: readonly {
   readonly field: Field;
@@ -242,26 +175,8 @@ const COLUMNS: readonly {
 ];
 
 /**
- * The star over a column a test cannot be saved without.
- *
- * **It is the product's own label grammar, moved up to the heading.** The grid
- * has no field labels — a cell is the value and the column heading is its only
- * name — so the four mandatory fields had no way of saying so until the Save
- * button refused. `DESIGN.md` already sets the grammar: a mandatory field's
- * label ends in `*`.
- *
- * **The star wears the heading's own colour, not Ember** (founder,
- * 2026-09-04). A form draws its star in the brand colour, where it is one mark
- * on a quiet column of labels. A heading row is six labels side by side, and
- * four orange marks across it read as a state the table is in rather than a
- * fact about four fields. `ui/form.tsx` keeps the Ember star for forms.
- *
- * **And it is never only a picture**, which is the other half of the same
- * rule. A `<th>` takes no `aria-required`, so the heading says the word
- * instead, and it says it through the cell's own name rather than a hidden
- * span beside the star: the name a `<th>` computes from its contents runs the
- * text nodes together, so a hidden `(required)` was announced as
- * `Name(required)`. `columnHeading` below is the one place that name is built.
+ * Mark required columns with a heading-colored star and include required in
+ * the accessible column name. A th does not support aria-required.
  */
 function RequiredMark() {
   return (
@@ -278,35 +193,14 @@ function columnHeading(header: string, required: boolean): string | undefined {
 
 const CELL = "border-r border-b border-border p-0 align-top last:border-r-0";
 /*
- * **The row's own ⋮ lane, and it is not a fifth column.** The four columns are
- * the test's content; this is the house table's trailing slot, which every row
- * of every list in the product carries so the triggers line up in one lane.
- * The boards are silent on it, so the current screen's verb stays: a test is
- * deleted from its row.
- *
- * **It is the labelled width, because this grid says Actions over it.** The
- * unlabelled `--table-action-width` is sized for a ⋮ and nothing else, so the
- * word ran out through the table's own right hairline. Header and body cells
- * read the one token — and so does the `<col>` this table's fixed layout
- * actually measures — so the lane stays one straight edge from the heading to
- * the last row.
+ * Use the labeled action-width token for the Actions header, cells, and col.
+ * The narrower icon-only action token would clip the heading.
  */
 const ACTION =
   "w-(--table-action-labelled-width) border-b border-border p-0 text-center align-top";
 /**
- * The lane's padding, and it is the house table's rather than this grid's own.
- *
- * This is the one table in the product that is not drawn from
- * `components/ui/table.tsx`, and it had been reading from 10px where every
- * other list reads from `--row-padding-x`. Six pixels is enough to see: a
- * person who walks Agents, Runs, Personas and then a suite watches the first
- * column step left, and 10px is not on `DESIGN.md`'s spacing scale to begin
- * with. Header and cells both read this, so the column keeps one edge from the
- * heading to the last row — which is the same promise the shared table makes.
- *
- * The edge itself is imported rather than copied: this grid is the one table
- * that inherits nothing from `components/ui/table.tsx`, and two files naming
- * the same edge separately is how it drifted off it the first time.
+ * Reuse shared table padding and edge tokens because this grid does not
+ * render through the standard table component.
  */
 const PAD = `${LANE_X} py-(--row-padding-y)`;
 const TEXT = "text-sm leading-(--line-caption) text-foreground";
@@ -502,33 +396,9 @@ function Arriving({
 }
 
 /**
- * The persona picker, and this is its only home.
- *
- * It opens from the woken Personas cell — search, tick boxes, Done — because
- * the cell is where the answer is read.
- *
- * **It is the kit's popover now, and that is what deleted the grid's worst
- * trade.** The panel used to be an absolutely positioned box inside the cell,
- * which any scroll container clips, so the grid switched its own sideways
- * scrolling off for as long as a picker was open — and on a phone that switch
- * threw away the reader's place in the table. `PopoverContent` is drawn in a
- * portal, so nothing clips it and the grid scrolls at all times.
- *
- * **The click-outside rule is Radix's, and it is the same rule spelled once.**
- * The hand-written listener had to measure "elsewhere" against an owner id,
- * because a marker with no owner made *another* row's trigger count as inside
- * this panel: the picking moved to that row, Done never ran, and the personas
- * ticked here went with no save and no word said. A popover only knows itself,
- * so pressing another row's trigger dismisses this one first — which closes it
- * the way Done does, keeping the ticks — and the press then opens that row's.
- * The owner id is gone from this component because Radix is what holds the
- * rule now, and `tests-grid` keeps its own `picking` only to know which cell to
- * commit.
- *
- * The reading lives in `PersonaChoices`, inside the panel, because Radix mounts
- * the panel's children when it opens. A row that is never opened must not send
- * the project's whole persona list over the wire, and there is one of these per
- * row.
+ * Portal the persona picker so the grid can keep horizontal scrolling.
+ * Dismissal commits the selected personas. Mount PersonaChoices only while
+ * open to avoid fetching the persona list for every unopened row.
  */
 function PersonaPicker({
   projectId,
@@ -554,7 +424,13 @@ function PersonaPicker({
           /* The cell owns its own caret; opening must not move it first. */
           onMouseDown={(event) => event.preventDefault()}
         >
-          + Add a persona
+          {/*
+           * A cell that already names somebody opens a panel that both adds and
+           * removes, so the trigger says editing rather than adding. An empty
+           * one — the entry row, before anybody has been named — keeps the
+           * grid's own add line, because adding is all it can do.
+           */}
+          {chosen.length === 0 ? "+ Add a persona" : "Edit personas"}
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -563,16 +439,8 @@ function PersonaPicker({
         className="w-[min(300px,calc(100vw-var(--space-8)))] p-0"
         aria-label="Choose personas"
         /*
-         * **Focus leaving does not shut this panel; a press elsewhere does.**
-         * A popover closes on both by default, and the first one is wrong here:
-         * the cell this hangs off keeps a caret of its own — the entry row puts
-         * one in Name as soon as it wakes — so focus lands back outside the
-         * panel a tick after it opens and Radix reads that as an exit. The
-         * panel shut itself before anybody could tick a name.
-         *
-         * A press outside still closes it, which is the rule that matters: that
-         * is the save, and it is what carries the ticks to the platform. Escape
-         * still closes it too.
+         * Prevent focus-out dismissal because the entry row may restore its own
+         * caret after opening. Pointer dismissal and Escape still close the picker.
          */
         onFocusOutside={(event) => event.preventDefault()}
       >
@@ -588,8 +456,12 @@ function PersonaPicker({
   );
 }
 
+/** Why the only persona a test names cannot be taken off it. */
+const LAST_PERSONA = "A test needs at least one persona";
+
 /**
- * What the open picker holds: the search, the people, and the way out.
+ * What the open picker holds: who is on the test, the search, the people, and
+ * the way out.
  *
  * It is its own component so that the read below runs when a panel opens
  * rather than when the grid draws, which is the difference between one request
@@ -613,6 +485,21 @@ function PersonaChoices({
   const [refused, setRefused] = useState<string | null>(null);
   /** Whether egma holds more than this picker read. Said out loud if so. */
   const [truncated, setTruncated] = useState(false);
+  const panel = useRef<HTMLDivElement>(null);
+  const said = useId();
+
+  /*
+   * **Who the test names now, built from the row rather than from the list
+   * below.** The list holds the project's available personas, and a test can
+   * name one the project has since deleted — which is exactly the test that
+   * cannot be saved again until that persona comes off it. Reading the row
+   * puts the deleted one on screen, with its own way out.
+   */
+  const onTest: readonly Named[] = chosen.map(
+    (id) => known.get(id) ?? { id, name: id },
+  );
+  /** The last persona standing stays: a test says who calls. */
+  const onlyOne = onTest.length === 1;
 
   /*
    * **Every persona the project holds, not the first page of them.**
@@ -683,87 +570,145 @@ function PersonaChoices({
     onChange(next, named);
   }
 
+  /**
+   * Take one persona off the test, and hold the caret inside the open panel.
+   *
+   * The row that was pressed is about to leave. Radix reads focus falling to
+   * the body as focus leaving the panel, so the caret goes to the search
+   * field, which outlives every row here.
+   */
+  function remove(one: Named): void {
+    toggle(one);
+    panel.current
+      ?.querySelector<HTMLInputElement>('[data-slot="command-input"]')
+      ?.focus();
+  }
+
   return (
-    /*
-     * **`label` names the search field, not the list, and that is `cmdk`'s
-     * doing rather than a choice made here.** It renders the prop into a hidden
-     * element and points the field's `aria-labelledby` at it — always, even
-     * with no label given, which is why an `aria-label` on the field is
-     * overridden and silently does nothing. So the words that describe the
-     * typing have to arrive through this prop. The panel around it is a dialog
-     * and carries "Choose personas" of its own, so nothing is left unnamed.
-     */
-    <Command label="Search personas">
-      <CommandInput
-        /*
-         * The caret starts here, and that is load-bearing rather than a
-         * courtesy. Radix puts focus on the panel itself when it opens, and the
-         * panel's own children then re-render as the persona pages arrive —
-         * which drops focus to the body, reads to Radix as focus leaving the
-         * panel, and shuts it. Landing the caret on the field holds it on
-         * something that outlives the list, and it is where somebody opening a
-         * search panel expects to be typing.
-         */
-        autoFocus
-        /* A placeholder is not a name: it leaves with the first keystroke. */
-        placeholder="Search personas"
-        value={search}
-        onValueChange={setSearch}
-      />
-      <CommandList>
-        {refused !== null ? (
-          <p className="m-0 px-2.5 py-2 text-sm text-failure">{refused}</p>
-        ) : people === null ? (
-          <p className="m-0 px-2.5 py-2 text-sm text-muted-foreground">
-            Loading personas…
+    <div className="flex flex-col" ref={panel}>
+      {onTest.length === 0 ? null : (
+        <div className="border-b border-border">
+          <p className="m-0 px-2.5 pt-2 pb-1 text-sm text-faint" id={said}>
+            On this test
           </p>
-        ) : listed.length === 0 ? (
-          <p className="m-0 px-2.5 py-2 text-sm text-muted-foreground">
-            {wanted === ""
-              ? "This project has no personas yet."
-              : `No personas match “${search.trim()}”.`}
-          </p>
-        ) : (
-          <CommandGroup>
-            {listed.map((one) => (
-              <CommandItem
+          {/* Bounded and scrolling, as the list below it is: a test may name
+              more callers than a panel can hold. */}
+          <ul
+            className="m-0 max-h-40 list-none overflow-y-auto p-0"
+            aria-labelledby={said}
+          >
+            {onTest.map((one) => (
+              <li
+                className="flex flex-wrap items-center gap-x-2 px-2.5 pb-1"
                 key={one.id}
-                value={one.id}
-                /*
-                 * The row is the control, so the row says whether it is ticked.
-                 * `cmdk` has already spent `aria-selected` on the arrow keys'
-                 * highlight, and the box below is a picture of this state
-                 * rather than a second control announcing it again.
-                 */
-                aria-checked={chosen.includes(one.id)}
-                onSelect={() => toggle(one)}
               >
-                <Checkbox
-                  checked={chosen.includes(one.id)}
-                  readOnly
-                  tabIndex={-1}
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 truncate">{one.name}</span>
-              </CommandItem>
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                  {one.name}
+                  {one.archivedAt === null || one.archivedAt === undefined ? null : (
+                    // The test still names somebody the project has deleted.
+                    // Saying so is what makes the Remove beside it make sense.
+                    <span className="text-faint"> (deleted)</span>
+                  )}
+                </span>
+                <Button
+                  aria-label={`Remove ${one.name}`}
+                  className="px-0"
+                  disabled={onlyOne}
+                  onClick={() => remove(one)}
+                  size="sm"
+                  type="button"
+                  variant="link"
+                  {...(onlyOne ? { why: LAST_PERSONA } : {})}
+                >
+                  Remove
+                </Button>
+              </li>
             ))}
-          </CommandGroup>
-        )}
-      </CommandList>
-      {truncated ? (
-        // The search above runs in the browser, so it reaches what was read
-        // and nothing beyond it. The sentence says that rather than promising
-        // a search that would quietly come back empty.
-        <p className="m-0 border-t border-border px-2.5 py-1.5 text-sm text-muted-foreground">
-          Egma holds more personas than this list read.
-        </p>
-      ) : null}
-      <div className="flex justify-end border-t border-border px-2.5 py-1.5">
-        <button className={cn(ADD_LINE, "underline")} type="button" onClick={onDone}>
-          Done
-        </button>
-      </div>
-    </Command>
+          </ul>
+        </div>
+      )}
+      {/*
+       * **`label` names the search field, not the list, and that is `cmdk`'s
+       * doing rather than a choice made here.** It renders the prop into a
+       * hidden element and points the field's `aria-labelledby` at it — always,
+       * even with no label given, which is why an `aria-label` on the field is
+       * overridden and silently does nothing. So the words that describe the
+       * typing have to arrive through this prop. The panel around it is a
+       * dialog and carries "Choose personas" of its own, so nothing is left
+       * unnamed.
+       */}
+      <Command label="Search personas">
+        <CommandInput
+          /*
+           * The caret starts here, and that is load-bearing rather than a
+           * courtesy. Radix puts focus on the panel itself when it opens, and the
+           * panel's own children then re-render as the persona pages arrive —
+           * which drops focus to the body, reads to Radix as focus leaving the
+           * panel, and shuts it. Landing the caret on the field holds it on
+           * something that outlives the list, and it is where somebody opening a
+           * search panel expects to be typing.
+           */
+          autoFocus
+          /* A placeholder is not a name: it leaves with the first keystroke. */
+          placeholder="Search personas"
+          value={search}
+          onValueChange={setSearch}
+        />
+        <CommandList>
+          {refused !== null ? (
+            <p className="m-0 px-2.5 py-2 text-sm text-failure">{refused}</p>
+          ) : people === null ? (
+            <p className="m-0 px-2.5 py-2 text-sm text-muted-foreground">
+              Loading personas…
+            </p>
+          ) : listed.length === 0 ? (
+            <p className="m-0 px-2.5 py-2 text-sm text-muted-foreground">
+              {wanted === ""
+                ? "This project has no personas yet."
+                : `No personas match “${search.trim()}”.`}
+            </p>
+          ) : (
+            <CommandGroup>
+              {listed.map((one) => (
+                <CommandItem
+                  key={one.id}
+                  value={one.id}
+                  /*
+                   * The row is the control, so the row says whether it is ticked.
+                   * `cmdk` has already spent `aria-selected` on the arrow keys'
+                   * highlight, and the box below is a picture of this state
+                   * rather than a second control announcing it again.
+                   */
+                  aria-checked={chosen.includes(one.id)}
+                  onSelect={() => toggle(one)}
+                >
+                  <Checkbox
+                    checked={chosen.includes(one.id)}
+                    readOnly
+                    tabIndex={-1}
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 truncate">{one.name}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+        </CommandList>
+        {truncated ? (
+          // The search above runs in the browser, so it reaches what was read
+          // and nothing beyond it. The sentence says that rather than promising
+          // a search that would quietly come back empty.
+          <p className="m-0 border-t border-border px-2.5 py-1.5 text-sm text-muted-foreground">
+            Egma holds more personas than this list read.
+          </p>
+        ) : null}
+        <div className="flex justify-end border-t border-border px-2.5 py-1.5">
+          <button className={cn(ADD_LINE, "underline")} type="button" onClick={onDone}>
+            Done
+          </button>
+        </div>
+      </Command>
+    </div>
   );
 }
 /**
@@ -1066,33 +1011,9 @@ type Offer =
   | "never";
 
 /**
- * What a JSON cell shows at rest: the summary, or the way to write the first one.
- *
- * Muted text rather than a chip (founder, 2026-09-03): a chip in a table lane
- * this narrow is decoration, and what a reader needs is one short fact they can
- * scan past.
- *
- * **An empty cell says how to fill it** (founder, 2026-09-04). It used to be
- * blank, so the only thing that said a mock tool or an env could be written
- * here was the pointer changing shape over it — which a person has to already
- * suspect the cell is a control to find.
- *
- * **But it says it only to the row being reached for** (founder, 2026-09-04,
- * on seeing it built). Two brand lines on every row of a full suite is a column
- * of orange down a table whose job is to be scanned: `ADD_LINE` is an
- * invitation, and an invitation repeated on forty rows stops being one. So a
- * written row rests on `None` — the truthful empty state, in the same faint ink
- * the summary beside it uses — and offers the line when a pointer is over the
- * cell or the keyboard is in it. The entry row keeps the line at all times,
- * because that row *is* the act of authoring.
- *
- * **The swap is CSS, not state.** Two spans and the button's own `group`, so a
- * pointer crossing a suite re-renders nothing; a `useState` per cell would run
- * React on every mouse move across the grid. The pointer half is gated to fine
- * pointers, which is `DESIGN.md`'s rule and the reason `pointer-hover` exists —
- * on a touch screen `:hover` sticks after a tap and would leave the line up on
- * the row somebody just pressed. The focus half is not gated, because a
- * keyboard is a keyboard on every device.
+ * Show empty saved cells as None, with an add action on fine-pointer hover
+ * or keyboard focus. The entry row always shows the action. Use CSS for the
+ * swap so pointer movement does not update React state.
  */
 function JsonSummary({
   field,
@@ -1131,16 +1052,8 @@ function JsonSummary({
 }
 
 /**
- * The smallest dialog that fits one JSON field.
- *
- * The editor, the reason when there is one, Save and Cancel — and nothing
- * else. Centred, focus trapped, Escape closes, the opener restored: all of that
- * is `ui/dialog.tsx`'s, which is why none of it is written here.
- *
- * **The text is this component's, not the grid's.** A keystroke in here would
- * otherwise re-render every row of the table, and the value only matters when
- * Save is pressed. The reason and the busy state come from above, because the
- * platform is what says them.
+ * Keep editor text local so typing does not re-render the grid. Shared dialog
+ * primitives own focus and dismissal; the grid supplies save status and refusals.
  */
 function JsonDialog({
   field,
@@ -1259,16 +1172,8 @@ export function TestsGrid(props: GridProps) {
 
   const [active, setActive] = useState<Woken | null>(null);
   /**
-   * The woken cell as it is *now*, not as it was when a commit was created.
-   *
-   * **The state alone cannot answer this question.** A commit is awaited, and
-   * the function that resumes after the await still closes over the `active`
-   * of the render that started it — which, for a late answer, is the cell that
-   * has since been left. Comparing against that closure would let A's answer
-   * decide it is still A and clear the cell somebody is typing into, which is
-   * the exact bug the guard exists to stop. The ref is written in the same
-   * breath as the state, so it is true at every instant rather than at every
-   * render.
+   * Read the current edit session from a ref after awaits. A render closure
+   * may still refer to a cell the user has already left.
    */
   const wokenNow = useRef<Session | null>(null);
   /** Moves on every wake, so no two edit sessions can be mistaken for one. */
@@ -1284,33 +1189,13 @@ export function TestsGrid(props: GridProps) {
    */
   const draftNow = useRef<Draft | null>(null);
   /**
-   * What each cell's unfinished save is trying to make true.
-   *
-   * **A wake seeds from the newest intent, not from the row.** The row still
-   * shows the value a save is in the middle of replacing, so a cell woken while
-   * its own save is in flight used to start from the value the person had just
-   * typed over. Blurring it without touching anything then committed that older
-   * value back — against the version their own save had just minted, so it
-   * landed, and their edit was undone by a click that changed nothing.
-   *
-   * Seeded from here instead, that blur commits a value equal to what is
-   * stored, and the unchanged path absorbs it without a request.
+   * Seed reopened cells from pending save intent, not the older stored row.
+   * Otherwise an unchanged blur could write the previous value back.
    */
   const intent = useRef<Map<string, string | readonly string[]>>(new Map());
   /**
-   * The tail of each test's queue, so one test's saves happen in order.
-   *
-   * **Two cells of the same test cannot go at once, and the reason is the
-   * version guard.** A content edit carries the version it was read at, so two
-   * content cells committed together would carry the *same* one: the first
-   * mints a new version and the second is refused for holding the version it
-   * has just replaced. That refusal would be about nothing a person did, and if
-   * the caret had already moved it would have nowhere to be shown — an edit
-   * gone with no request left standing and no sentence, which is the one thing
-   * this grid promises never to do.
-   *
-   * Different tests keep no queue between them: their guards are separate rows,
-   * so they are independent by construction and run side by side.
+   * Queue saves per test so each receives the version/revision produced by
+   * the previous save. Different tests keep independent queues.
    */
   const queued = useRef<Map<string, Promise<void>>>(new Map());
   /**
@@ -1467,14 +1352,7 @@ export function TestsGrid(props: GridProps) {
   }
 
   /**
-   * Put the grid back to rest, but only if the cell that asked is still the
-   * woken one.
-   *
-   * **A save that lands late must not reach into a cell somebody has since
-   * clicked into.** A commit is awaited, and in that time the caret can be two
-   * cells away with a sentence half typed into it; un-waking that cell would
-   * throw away what was typed with no refusal and no record — the one thing
-   * this grid promises never to do.
+   * Close only the edit session that requested the save; preserve any newer active cell.
    */
   function rest(mine?: Session): void {
     if (mine !== undefined && wokenNow.current?.at !== mine.at) return;
@@ -1549,15 +1427,8 @@ export function TestsGrid(props: GridProps) {
     setCellRefused(null);
 
     /*
-     * One field, and the guard the platform asks that field for. A content edit
-     * carries the version it was read at, so a save cannot land on top of
-     * somebody else's; a name is identity and carries the revision instead.
-     *
-     * Both are read here rather than closed over, because this runs when the
-     * queue reaches it: the save in front may have minted a version since, and
-     * carrying the older one would be refused for no reason a person could act
-     * on. A genuine refusal now means what it says — somebody else moved this
-     * test — which is exactly what the sentence in the cell is for.
+     * Read guards when the queued save starts. Content uses expectedVersionId;
+     * name edits use expectedRevision. Earlier saves may have advanced either guard.
      */
     const send = async (): Promise<void> => {
       const guard = latest.current.get(test.id) ?? {
@@ -1624,25 +1495,9 @@ export function TestsGrid(props: GridProps) {
   }
 
   /**
-   * A press anywhere else is leaving the cell, and leaving a cell commits it.
-   *
-   * **Blur alone does not close a cell, because most of a page takes no
-   * focus.** The canvas beside the table, the table's own headings, the page
-   * title: pressing any of them moves focus nowhere, so no blur fires and the
-   * woken cell sat there wearing its ink edge over words nobody had saved
-   * (founder, 2026-09-04). A press is what a person means by "I am done with
-   * that cell", whether or not the browser had anywhere to put the caret.
-   *
-   * **It runs the same `commit` a blur runs**, so every rule that governs a
-   * save governs this one: the identical-resubmit guard that makes a press
-   * followed by a blur one request rather than two, the per-test queue, the
-   * version the queue hands it, and the refusal shown in place. Escape is
-   * untouched and still reverts.
-   *
-   * The handler is rebuilt every render and reached through a ref, because it
-   * has to run *this* render's `commit` over *this* render's draft — a
-   * listener captured once would save whatever was in the cell when it was
-   * woken.
+   * Outside pointer presses commit even when focus does not change. Use the
+   * same commit path as blur, including duplicate suppression; Escape reverts.
+   * Read the latest handler through a ref so it submits the current draft.
    */
   const outsidePress = useRef<((event: Event) => void) | null>(null);
   useEffect(() => {
@@ -1712,17 +1567,8 @@ export function TestsGrid(props: GridProps) {
   }
 
   /**
-   * One JSON field of one written test, saved against the version it was read
-   * at.
-   *
-   * **It queues behind whatever else that test is saving**, for the reason the
-   * cell commits do: two content edits carrying the same version would have the
-   * second refused for holding a version the first had just replaced. The guard
-   * is read when the queue reaches this, so the save in front hands this one
-   * the version it minted.
-   *
-   * A refusal stays in the dialog. Nothing is written and nothing is closed, so
-   * the JSON somebody wrote is still on screen to fix.
+   * Queue JSON saves with other edits to the same test and read the latest
+   * version when sending. Keep refused drafts open in the dialog.
    */
   async function saveJson(
     test: ListedTest,
@@ -1875,14 +1721,8 @@ export function TestsGrid(props: GridProps) {
   }
 
   /**
-   * A JSON cell: the summary, and the way into the dialog that writes it.
-   *
-   * It is a button rather than a woken cell because there is nothing to type
-   * here — the value is JSON and it is written in the dialog. A row a reader
-   * cannot author draws the same summary with nothing to press.
-   *
-   * Focus is the product's own two-pixel indicator, drawn on every button by
-   * the unlayered rule in `globals.css`. The cell adds none of its own.
+   * Editable JSON cells open a dialog with a real button. Read-only rows show
+   * the same summary without an interactive control.
    */
   function jsonCell(test: ListedTest, field: JsonField): ReactNode {
     const said = jsonSaid(field, test);
@@ -1945,16 +1785,8 @@ export function TestsGrid(props: GridProps) {
                   return;
                 }
                 /*
-                 * **A cell whose own picker is open has not been left.** The
-                 * panel is drawn in a portal now, so it is not a descendant of
-                 * this cell and the test above reads focus moving into it as
-                 * focus going away — which committed the cell and tore the
-                 * panel down under the person about to tick a name. Asking
-                 * whether this cell is the one picking is the same question
-                 * without depending on where focus landed, which a browser may
-                 * not say: `relatedTarget` is null on plenty of real blurs.
-                 *
-                 * Shutting the picker is what commits, and it commits there.
+                 * An open portaled persona picker still belongs to this cell. Do not commit
+                 * on blur into it; picker dismissal owns that commit.
                  */
                 if (picking === test.id) return;
                 void commit(test, field);
@@ -2161,22 +1993,9 @@ export function TestsGrid(props: GridProps) {
       }}
     >
       {/*
-        The grid scrolls sideways rather than squeezing, the way every other
-        table's `TablePanel` already does. Six percentage columns and a fixed
-        lane share whatever width there is, and this grid has no narrow layout
-        to fall back to, so under `--tests-grid-min-width` the columns stop
-        holding their own headings on one line. Mock tools and Env raised that
-        floor past a tablet, and the token says why.
-
-        **It scrolls at all times now, and it used not to.** The persona picker
-        was an absolutely positioned panel inside the cell it belongs to, and a
-        scroll container clips exactly that — so this wrapper switched between
-        `overflow-x: auto` and `overflow-visible` to keep an open picker whole,
-        and on a phone the switch threw away the reader's place in the table.
-        The picker is the kit's popover now and is drawn in a portal, the way
-        the shared table's ⋮ always was, so nothing here has to move out of its
-        way.
-      */}
+       * Keep horizontal scrolling below the grid minimum width. Portaled pickers
+       * do not require changing overflow or losing the current scroll position.
+       */}
       <div className="overflow-x-auto">
       <table className="w-full min-w-(--tests-grid-min-width) table-fixed border-collapse border border-border bg-surface text-sm">
         <caption className="sr-only">Tests in this suite</caption>
@@ -2221,18 +2040,9 @@ export function TestsGrid(props: GridProps) {
         </thead>
         <tbody>
           {/*
-            An empty suite draws no teaching row. The faint "One situation to
-            put the agent in…" row looked like a row to type in, so the first
-            thing a person did on an empty suite was click it and get nothing:
-            it was a picture of a test, and the way in was the line under it.
-            The way in is now the only thing there (developer decision,
-            2026-08-26).
-
-            The run-flow refinement answered the same complaint the other way,
-            by making that faint first cell open the entry row. The row is
-            gone instead, so there is nothing left to make clickable: a picture
-            of a test that opens a real one is still a picture of a test.
-          */}
+           * An empty suite shows only the actionable entry row, without a sample row
+           * that could be mistaken for an editor.
+           */}
           {tests.map((test) => (
             <Fragment key={test.id}>
               <tr>

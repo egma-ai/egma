@@ -16,6 +16,7 @@ import {
   readOrganizationSettings,
   readProject,
   revokeApiKey,
+  updateOrganization,
   updateOrganizationSettings,
   type AuthContext,
 } from "@egma/db";
@@ -27,20 +28,9 @@ import {
 } from "./support/database.ts";
 
 /**
- * Two organizations exist in every test in this file, because a test with one
- * organization cannot fail the way that matters: a query missing its tenancy
- * predicate returns exactly the right answer when there is only one customer's
- * data to return.
- *
- * These go through the data-access module, which is the seam the isolation
- * guarantee lives at. Raw SQL appears only to check what actually landed in a
- * table, never to set anything up that the module could have set up — asking
- * the module whether the module worked would prove nothing.
- *
- * One thing deliberately not asserted here: that a caller cannot hand in an
- * `AuthContext` naming somebody else's organization. Nothing at this seam could
- * stop that. The context is resolved from the credential rather than from the
- * request, and *that* is what the authentication path has to get right.
+ * Use two organizations so a missing isolation predicate can fail.
+ * These tests assume a trusted AuthContext; credential-to-context resolution
+ * is the authentication layer's responsibility.
  */
 
 let database: MigratedDatabase;
@@ -188,12 +178,62 @@ describe("the customer", () => {
     });
 
     const { rows } = await database.sql<{
-      organization_id: string;
+      id: string;
       retention_days: number;
-    }>("select organization_id, retention_days from organization_settings order by organization_id");
+    }>("select id, retention_days from organization order by id");
     expect(
-      rows.find((row) => row.organization_id === globex.organizationId),
+      rows.find((row) => row.id === globex.organizationId),
     ).toMatchObject({ retention_days: 90 });
+  });
+
+  it("keeps unsaved settings and organization edit times separate", async () => {
+    const customer = await provision("unsaved-settings", "owner@unsaved.example");
+    expect(await readOrganizationSettings(customer.auth)).toBeUndefined();
+    const before = await database.sql<{ updated_at: Date }>(
+      "select updated_at from organization where id = $1",
+      [customer.organizationId],
+    );
+
+    const saved = await updateOrganizationSettings(customer.auth, {});
+    expect(saved).toEqual({
+      organizationId: customer.organizationId,
+      retentionDays: null,
+      dataResidency: null,
+      updatedAt: expect.any(Date),
+    });
+    expect(await readOrganizationSettings(customer.auth)).toEqual(saved);
+    const after = await database.sql<{ updated_at: Date }>(
+      "select updated_at from organization where id = $1",
+      [customer.organizationId],
+    );
+    expect(after.rows).toEqual(before.rows);
+
+    await updateOrganization(customer.auth, { name: "Renamed customer" });
+    expect(await readOrganizationSettings(customer.auth)).toEqual(saved);
+  });
+
+  it("preserves concurrent partial settings edits and explicit null values", async () => {
+    const customer = await provision("partial-settings", "owner@partial.example");
+
+    await Promise.all([
+      updateOrganizationSettings(customer.auth, { retentionDays: 30 }),
+      updateOrganizationSettings(customer.auth, { dataResidency: "eu" }),
+    ]);
+    expect(await readOrganizationSettings(customer.auth)).toMatchObject({
+      retentionDays: 30,
+      dataResidency: "eu",
+    });
+
+    await updateOrganizationSettings(customer.auth, { retentionDays: null });
+    expect(await readOrganizationSettings(customer.auth)).toMatchObject({
+      retentionDays: null,
+      dataResidency: "eu",
+    });
+    await updateOrganizationSettings(customer.auth, { dataResidency: null });
+    expect(await readOrganizationSettings(customer.auth)).toMatchObject({
+      retentionDays: null,
+      dataResidency: null,
+    });
   });
 });
 

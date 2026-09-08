@@ -25,6 +25,8 @@ Copy the key when the command prints it. Egma shows the secret once. Store it in
 
 Browser requests can use the signed-in Egma session cookie. Use API keys for your scripts, CI jobs, and services.
 
+Project keys cannot read organization-wide members, provider-key metadata, usage, or billing, or manage organizations, members, or projects. They can create, list, and revoke keys only within their own project and the creator's current role. When creating a key with a project key, explicitly supply that same `projectId`. Use a browser session or organization key for organization-wide operations.
+
 ## Make a request
 
 Examples use hosted Egma at `https://app.egma.ai`. If you self-host Egma, use your instance's public URL.
@@ -68,16 +70,14 @@ Egma returns errors as JSON. Read `error` for the error code and `message` for w
 | `401` | Check your API key or sign in again. |
 | `403` | Use a credential with access to the requested action and project. |
 | `404` | Check the resource ID and project. |
-| `409` | Read the error code. A name, version, or idempotency key may conflict. |
+| `409` | Read the error code. A name, version, or resource state may conflict. |
 | `422` | Fix the values or resource state described in the response. |
 | `429` | Wait for the number of seconds in `Retry-After`, then retry. |
 | `503` | Read the message. A provider or a service the request needs may be unavailable. |
 
 For temporary network or service failures, wait before you retry. Increase the delay between attempts and set a retry limit.
 
-When creating a run, choose one `idempotencyKey` for that request. If you lose the response, send the same request with the same key. Use a new key when you want a new run. Changing the request while reusing a key can return `idempotency_conflict`.
-
-Other write endpoints do not all support idempotency. After an uncertain response, read the resource state before repeating a write.
+Each accepted run creation request creates a new run, even when its input matches an earlier request. After a lost response, check the run list before submitting again. Other writes also need a state check before retrying an uncertain request.
 
 ## Send traces
 

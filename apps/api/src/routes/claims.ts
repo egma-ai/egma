@@ -2,10 +2,15 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import {
   claimSimulations,
+  resolveProviderKeysForWork,
+  createProviderFundingReceipt,
+  ProviderKeyUnavailableError,
   catalogEntry,
+  isModelProvider,
   connectionTypeBranchesMockDraft,
   connectionTypeUsesPlatformCarrier,
   failSimulationDispatch,
+  failSimulation,
   getPersonaVersion,
   personaModelsOfParameters,
   validatePersonaParameterValues,
@@ -13,12 +18,16 @@ import {
   getSimulationExecutionEvidence,
   LANES_SERVING_MOCK_TOOLS,
   markSimulationCanceled,
+  providersNeededBy,
   releaseSimulationClaim,
   resolveSimulationConnection,
+  type EntitlementSource,
   type PersonaModels,
+  type PersonaVersion,
   type ProviderCatalogEntry,
   type Run,
   type SimulationClaim,
+  type SimulationConcurrencyCaps,
   type TestEnv,
   type TestMockTool,
   type MockToolVariable,
@@ -33,6 +42,7 @@ import { specComplaints } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 
 import { acceptsServiceToken } from "../auth/service-token.ts";
+import { claimsWithheldByEntitlement } from "../claim-entitlement.ts";
 import type { CarrierRoute } from "../config.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
 import { mockToolBase } from "./mock-endpoint.ts";
@@ -43,48 +53,14 @@ import {
 } from "../providers/retell.ts";
 
 /**
- * The claim door: `POST /v1/claims`, where the simulator asks for work.
+ * Internal simulation claims require the deployment service token and bypass
+ * per-organization rate limits. Stored work supplies each claim's scope.
+ * Long-poll within client/server bounds, rechecking the queue for work.
  *
- * This group is deliberately unlike every other on the API, in three ways
- * that are each contract rather than convenience.
- *
- * **The service token is the whole gate, and it resolves to nothing.** These
- * routes never accept a customer key or a session — the deployment's own
- * `EGMA_SIMULATOR_SERVICE_TOKEN`, compared in constant time, opens the door
- * and becomes no context at all. Every claimed simulation instead arrives
- * from the module with a context narrowed to that row's own organization and
- * project, so the credential a simulator holds cannot widen into anybody's
- * data even in principle: there is no context to widen.
- *
- * **The group sits outside the per-organization rate limit.** The budget
- * exists so one customer's runaway loop is not everybody's problem, and it
- * is keyed on the organization a credential resolves to; the simulator is
- * egma's own service standing behind every organization at once, so a busy
- * run must never eat any customer's budget from the inside — and there is no
- * organization to key its own on. The token is the gate here, not a budget.
- *
- * **The claim is held open rather than answered empty.** Dispatch is pull,
- * and the promise a developer actually feels is "a queued simulation is
- * claimed within about a second". So an empty queue holds the request and
- * re-asks every second until work arrives or the hold runs out — the long
- * poll every pull-dispatch product ships. The client says how long it is
- * willing to hang (`wait_seconds`), the server holds at most `min` of that
- * and its own cap, and a client that said nothing gets a middling default —
- * so a short-waiting client can never see its own request time out. A
- * notification may one day replace the re-ask behind this same route;
- * nothing the simulator sees would change.
- *
- * What goes back is the whole work order: for each claimed simulation, a
- * fully assembled spec — the pinned persona whole and their model choices,
- * current keys for only those model providers, the pinned test scenario, connection
- * config and credentials, mock answers, the current carrier route, and limits
- * — validated against the contract before a byte is sent. This is the only
- * place runtime credential material travels; reports have no field for it.
- *
- * Model choices have one source: the simulation settings saved at run creation. Provider keys
- * have one source: this deployment's credential source. The carrier route comes
- * straight from this process's deployment environment. These boundaries prevent
- * a model from one provider being combined with another adapter or credential.
+ * Assemble and validate each spec from pinned test/persona content and run
+ * settings, current connection and model-provider credentials, mock tools,
+ * carrier configuration when needed, and execution limits. Return only specs
+ * that satisfy the simulation contract.
  */
 
 export type ClaimRoutesOptions = {
@@ -103,6 +79,13 @@ export type ClaimRoutesOptions = {
   readonly providerCredentials: ProviderCredentialSource;
   /** Complete phone route, or absent when phone simulations are unavailable. */
   readonly carrierRoute: CarrierRoute | undefined;
+  /**
+   * Whether the deployment lets a customer's work begin, asked once per
+   * organization for each claim batch. The open adapter always says yes.
+   */
+  readonly entitlements: EntitlementSource;
+  /** Optional deployment caps enforced in the claim transaction. */
+  readonly caps?: SimulationConcurrencyCaps | undefined;
   /** Test seam for Retell's read-only dispatch preflight. */
   readonly retellFetch?: typeof fetch | undefined;
 };
@@ -134,29 +117,9 @@ const CLAIM_RESPONSE_MILLISECONDS = 28_000;
 const LARGEST_CLAIM_CAPACITY = 50;
 
 /**
- * The walls around one simulation, by modality — named constants matching
- * the contract's golden fixtures, so what the platform hands out and what
- * the fixtures teach cannot drift apart. A limit tripping ends a simulation
- * deliberately (`limit_reached`), which is never the agent failing; the
- * numbers bound egma's spend on a conversation going nowhere. Per-test
- * limits are a future column on the test; these are the platform's own.
- *
- * **Ten minutes on both, as of 2026-08-28.** Voice used to stop at five,
- * on the reasoning that a voice minute costs real speech synthesis and
- * transcription while a chat minute does not. The reasoning is sound and
- * the number was wrong for what people actually test: a screening
- * interview, a support call that escalates, an onboarding walk-through —
- * conversations that are fifteen minutes in production and had every
- * simulation of them cut at five, which grades an agent on an exchange
- * that never finished. Ten is the developer's call and is a ceiling
- * rather than a target; almost every simulation ends on the persona
- * concluding, long before it.
- *
- * **The turn count is where voice still costs more, and it binds first.**
- * Forty turns at a typical voice pace is roughly six to eight minutes, so
- * a talkative agent meets `max_turns` before it meets the ten minutes.
- * Raising that number is a separate decision with a separate bill, and it
- * was not taken here.
+ * Platform execution limits by modality, pinned by contract fixtures.
+ * Reaching a limit ends the simulation with limit_reached; it is not itself
+ * a failing grade.
  */
 const SIMULATION_LIMITS = {
   chat: { max_duration_seconds: 600, max_turns: 60 },
@@ -198,6 +161,7 @@ async function modelsBlock(
   modality: SimulationClaim["modality"],
   models: PersonaModels,
   source: ProviderCredentialSource,
+  claim: SimulationClaim,
 ): Promise<Record<string, unknown>> {
   const entryFor = <Job extends "llm" | "stt" | "tts">(
     job: Job,
@@ -217,14 +181,45 @@ async function modelsBlock(
     stt: entryFor("stt", models.stt),
     tts: entryFor("tts", models.tts),
   };
-  const credentials = await source.load();
-  const keyFor = (
-    provider: PersonaModels["llm"]["provider"],
-  ): string => credentialFor(credentials, provider);
+  const needed = providersNeededBy(models, modality).map((provider) => {
+    if (!isModelProvider(provider))
+      throw new Error("The selected model provider is not supported.");
+    return provider;
+  });
+  const customer = await resolveProviderKeysForWork(claim.auth, needed);
+  const deployment = needed.some((provider) => customer[provider] === undefined)
+    ? await source.load()
+    : {};
+  const credentials = {
+    ...deployment,
+    ...Object.fromEntries(
+      Object.entries(customer).map(([provider, value]) => [
+        provider,
+        value.key,
+      ]),
+    ),
+  };
+  const receiptFor = (provider: PersonaModels["llm"]["provider"]) => {
+    const held = customer[provider];
+    return held === undefined
+      ? {}
+      : {
+          funding_receipt: createProviderFundingReceipt(claim.auth, {
+            simulationId: claim.id,
+            claimedAt: claim.claimedAt,
+            provider,
+            credentialRef: held.credentialRef,
+          }),
+        };
+  };
+  const keyFor = (provider: PersonaModels["llm"]["provider"]): string =>
+    credentialFor(credentials, provider);
   const speechKey = (
     provider: PersonaModels["llm"]["provider"],
   ): Record<string, string> =>
-    modality === "voice" ? { key: keyFor(provider) } : {};
+    modality === "voice"
+      ? { key: keyFor(provider), ...receiptFor(provider) }
+      : {};
 
   return {
     llm: {
@@ -235,6 +230,7 @@ async function modelsBlock(
         ? {}
         : { reasoning_effort: entries.llm.reasoningEffort }),
       key: keyFor(models.llm.provider),
+      ...receiptFor(models.llm.provider),
     },
     stt: {
       provider: models.stt.provider,
@@ -254,42 +250,11 @@ async function modelsBlock(
 }
 
 /**
- * The version this simulation is placed against and the variables it carries —
- * one code path for both lanes that name a version, or nothing at all.
- *
- * **The version** is named explicitly, because the platform's own default is
- * "the newest version" — which a concurrent edit or a branch can move between
- * one simulation and the next. Where it comes from is decided per simulation
- * rather than per run:
- *
- * - a **web-call simulation whose own test mocks at least one tool** is placed
- *   against the run's temporary version, which is where the routing variables
- *   live;
- * - **every other simulation** is placed against the serving version the run
- *   resolved once at start — the version a real caller reaches. That includes
- *   a test that mocks nothing inside a run that did branch a copy: it has
- *   nothing to route, so it is conducted against the customer's own version.
- *
- * **The variables** are what the platform renders per call, and there are two
- * sources. The test's own `retell_dynamic_variables` are the caller context it
- * carries with it. Egma's own are the routing variables the mocked web-call
- * lane needs: one per custom tool the run's temporary version declares, filled
- * with Egma's address for the tools this simulation's test names and with the
- * empty string for every other, which renders to nothing and leaves the
- * customer's own URL exactly as they wrote it.
- *
- * The two travel differently, because they are for different things. The
- * test's own variables go wherever the platform renders variables at all,
- * named version or not: the test asked for them. Egma's routing variables go
- * only on the call that is placed against the temporary version, because that
- * is the only version their names exist on. A simulation conducted against the
- * serving version carries the test's own variables and nothing else — passing
- * the routing names there would put a row of empty egma variables on the
- * customer's own call record, naming variables that version never declared.
- *
- * **Egma's are written last**, so no authored name can take a routing
- * variable's place; the save door refuses an `egma_` name anyway, and the two
- * guards are one rule said at both ends.
+ * Select the run's temporary version when this test mocks tools and routing
+ * variables exist; otherwise use its serving-version pin. Pass authored
+ * Retell variables for either version. Add routing variables only for the
+ * temporary version, after authored values so they cannot be overridden.
+ * Covered tools receive Egma URLs; uncovered tools receive empty prefixes.
  */
 function runVersionSpecOf(
   run: Run,
@@ -330,19 +295,9 @@ function runVersionSpecOf(
 }
 
 /**
- * Every routing variable this run's temporary version declares, with the value
- * this simulation is conducted with.
- *
- * **Every one of them, on every call.** The platform distinguishes a variable
- * it was never given — whose placeholder stays literal, braces and all — from
- * one passed explicitly as the empty string, which renders to nothing. So a
- * value is passed for each of them and rendering never depends on the
- * single-space default the version carries; that default is the proven
- * fallback for a variable Egma somehow failed to pass.
- *
- * Empty for every lane but a mocked web call, and empty on a run that branched
- * no copy — there is nothing on those versions for a routing variable to
- * render into.
+ * Provide every declared routing variable on mocked web calls: Egma URL for
+ * covered tools, empty prefix for others. Do not rely on the draft's single-space
+ * fallback. Return no routing variables without a supported temporary version.
  */
 function urlVariablesFor(
   run: Run,
@@ -390,6 +345,7 @@ type ClaimAsk = {
   readonly capacity: number;
   /** Seconds this request may be held; already bounded by the cap. */
   readonly holdSeconds: number;
+  readonly modalities?: readonly ("voice" | "chat")[] | undefined;
 };
 
 /**
@@ -460,6 +416,24 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
     };
   }
 
+  const offeredModalities = body.modalities;
+  let modalities: readonly ("voice" | "chat")[] | undefined;
+  if (offeredModalities !== undefined) {
+    if (
+      !Array.isArray(offeredModalities) ||
+      offeredModalities.length === 0 ||
+      !offeredModalities.every(
+        (modality) => modality === "voice" || modality === "chat",
+      )
+    ) {
+      return {
+        refusal:
+          "modalities must be a non-empty list containing voice, chat, or both; leave it out to claim either",
+      };
+    }
+    modalities = [...new Set(offeredModalities)];
+  }
+
   return {
     claimant: claimant.trim(),
     capacity: Math.min(capacity, LARGEST_CLAIM_CAPACITY),
@@ -467,37 +441,27 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
       wait === undefined ? DEFAULT_HOLD_SECONDS : wait,
       LONGEST_HOLD_SECONDS,
     ),
+    ...(modalities === undefined ? {} : { modalities }),
   };
 }
 
 /**
- * One claimed simulation as the wire carries it — the flattened work order
- * the contract's spec schema describes — or the reason it could not become
- * one.
- *
- * Everything is read through the claim's own narrowed context, so the
- * assembly of one customer's spec happens inside that customer exactly as a
- * person's read would. The reads can each come back empty — a connection
- * deleted mid-flight, a row from before tests were pinned — and the schema
- * check at the end holds whatever was assembled to the same standard the
- * simulator's own check will apply on receipt.
+ * Assemble a claimed simulation using its stored organization/project context.
+ * Missing execution inputs produce a dispatch refusal. Validate the completed
+ * spec against the same contract used by the simulator.
  */
 async function assembledSpec(
   claim: SimulationClaim,
   /**
-   * The runs already read while answering this one claim request, by id.
-   *
-   * A claim takes up to fifty conversations at once and they are usually a
-   * run's — that is what a run *is* — so the run header would otherwise be
-   * read fifty times for fifty specs that all want the same frozen world. The
-   * cache lives for one request and no longer: the header is frozen from the
-   * moment the run was created, so re-reading it inside one response could
-   * only ever return the same rows, and a cache that outlived the request
-   * would be a second copy of a record somebody may since have deleted.
-   *
-   * Keyed by run id alone, which is safe because every claim in one batch was
-   * read through its own row's tenancy and a run id is unique across the
-   * deployment — two claims naming one run are two conversations of it.
+   * The pinned persona version, already read once for this claim batch when
+   * the deployment was asked whether the work may go on. Handed in rather than
+   * read again: the row is frozen, so a second read returns the same thing.
+   */
+  personaVersion: PersonaVersion | undefined,
+  /**
+   * Cache run reads within this claim request to avoid rereading a shared run
+   * for each simulation. Run IDs are deployment-unique; each initial read uses
+   * the claim's stored scope. Do not retain the cache across requests.
    */
   runs: Map<string, Run | undefined>,
   retellTargets: Map<string, Promise<RetellDirectTargetCheck>>,
@@ -509,13 +473,9 @@ async function assembledSpec(
   responseDeadline = Date.now() + CLAIM_RESPONSE_MILLISECONDS,
 ): Promise<
   | Record<string, unknown>
-  | { readonly unbuildable: string }
+  | { readonly unbuildable: string; readonly providerKeyUnavailable?: boolean }
   | { readonly retryable: string }
 > {
-  const personaVersion = await getPersonaVersion(
-    claim.auth,
-    claim.personaVersionId,
-  );
   if (personaVersion === undefined) {
     return { unbuildable: "its pinned persona version could not be read" };
   }
@@ -599,8 +559,11 @@ async function assembledSpec(
       claim.modality,
       personaModelsOfParameters(validatePersonaParameterValues(personaVersion.parameterContract, claim.personaParameterValues)),
       providerCredentials,
+      claim,
     );
   } catch (fault) {
+    if (fault instanceof ProviderKeyUnavailableError)
+      return { unbuildable: fault.message, providerKeyUnavailable: true };
     if (fault instanceof ProviderCredentialSourceUnavailableError) {
       return {
         retryable:
@@ -712,8 +675,8 @@ export async function claimRoutes(
 
   /**
    * Claim up to `capacity` queued simulations, held open while the queue is
-   * empty, answering `{ specs: [...] }` — possibly empty, which is what a
-   * quiet queue looks like and what the client asks again after.
+   * empty, answering specs plus their server claim instants. Both may be
+   * empty, which is what a quiet queue looks like and what the client asks again after.
    */
   app.post(CLAIMS_PATH, async (request, reply) => {
     const ask = claimAsk((request.body ?? {}) as Body);
@@ -741,6 +704,8 @@ export async function claimRoutes(
       let claims = await claimSimulations({
         claimant: ask.claimant,
         capacity: ask.capacity,
+        modalities: ask.modalities,
+        caps: options.caps,
       });
       while (claims.length === 0 && !gone && Date.now() < holdDeadline) {
         await sleep(
@@ -750,10 +715,80 @@ export async function claimRoutes(
         claims = await claimSimulations({
           claimant: ask.claimant,
           capacity: ask.capacity,
+          modalities: ask.modalities,
+          caps: options.caps,
         });
       }
 
+      // **The deployment is asked whether this work may go on — once per
+      // organization, for the whole batch.** It happens here rather than
+      // inside the claim because the claim is one transaction across every
+      // customer's queue and this is a question about one customer at a time;
+      // and it happens after that transaction has committed, so nothing here
+      // holds a lock, waits on another claimant, or changes how many
+      // conversations run at once. A deployment with no billing withholds
+      // nothing and this is one resolved promise per customer in the batch.
+      // The persona version each conversation is pinned to, read once for the
+      // batch and used twice: to say which providers this customer's work
+      // needs before the deployment is asked whether Egma's key may fund
+      // them, and again by the assembly below. Keyed by the version rather
+      // than by the conversation, because a run of fifty conversations
+      // usually shares two or three — so this is fewer reads than the
+      // assembly alone used to make, not more.
+      const personaVersions = new Map<
+        string,
+        Promise<PersonaVersion | undefined>
+      >();
+      const pinnedPersona = (
+        claim: SimulationClaim,
+      ): Promise<PersonaVersion | undefined> => {
+        const key = `${claim.organizationId}:${claim.personaVersionId}`;
+        let reading = personaVersions.get(key);
+        if (reading === undefined) {
+          reading = getPersonaVersion(claim.auth, claim.personaVersionId);
+          personaVersions.set(key, reading);
+        }
+        return reading;
+      };
+      const pinned = new Map(
+        await Promise.all(
+          claims.map(
+            async (claim) =>
+              [claim.id, await pinnedPersona(claim)] as const,
+          ),
+        ),
+      );
+
+      const withheld = await claimsWithheldByEntitlement(
+        options.entitlements,
+        claims,
+        (claim) => {
+          const version = pinned.get(claim.id);
+          // A conversation whose pinned version cannot be read is not
+          // withheld here: it is unbuildable, and the assembly below says so
+          // in the sentence a person reads. Naming no provider leaves this
+          // question about the ones that can be read.
+          if (version === undefined) return [];
+          try {
+            return providersNeededBy(
+              personaModelsOfParameters(
+                validatePersonaParameterValues(
+                  version.parameterContract,
+                  claim.personaParameterValues,
+                ),
+              ),
+              claim.modality,
+            );
+          } catch {
+            // Assembly below owns this row's failure. A malformed frozen
+            // persona must not prevent valid claims beside it from dispatching.
+            return [];
+          }
+        },
+      );
+
       const specs: Record<string, unknown>[] = [];
+      const claimedAt: Record<string, string> = {};
       // One read of each run, however many of its conversations this batch
       // took. Lives exactly as long as this response.
       const runs = new Map<string, Run | undefined>();
@@ -766,25 +801,30 @@ export async function claimRoutes(
       // times or break the route's sub-30-second response promise.
       const assembled = await Promise.all(
         claims.map((claim) =>
-          assembledSpec(
-            claim,
-            runs,
-            retellTargets,
-            options.providerCredentials,
-            options.carrierRoute,
-            options.baseUrl,
-            options.retellFetch,
-            responseDeadline,
-          ).catch(
-            (
-              _fault: unknown,
-            ): { readonly unbuildable: string } => ({
-              // This broad catch can hold dependency or credential errors.
-              // Unlike a simulator report, it has no secret-redaction seam,
-              // so the retained customer-facing sentence stays generic.
-              unbuildable: "an internal error prevented Egma from building its simulation spec",
-            }),
-          ),
+          // A withheld conversation is never assembled: it is going back on
+          // the queue, and building a work order for it would read a
+          // customer's credentials to make a document nobody will receive.
+          withheld.has(claim.id)
+            ? Promise.resolve({ withheld: true } as const)
+            : assembledSpec(
+                claim,
+                pinned.get(claim.id),
+                runs,
+                retellTargets,
+                options.providerCredentials,
+                options.carrierRoute,
+                options.baseUrl,
+                options.retellFetch,
+                responseDeadline,
+              ).catch(
+                (_fault: unknown): { readonly unbuildable: string } => ({
+                  // This broad catch can hold dependency or credential errors.
+                  // Unlike a simulator report, it has no secret-redaction seam,
+                  // so the retained customer-facing sentence stays generic.
+                  unbuildable:
+                    "an internal error prevented Egma from building its simulation spec",
+                }),
+              ),
         ),
       );
       for (const [index, claim] of claims.entries()) {
@@ -796,6 +836,58 @@ export async function claimRoutes(
         // claim beside it from a simulator standing ready to conduct them.
         const spec = assembled[index];
         if (spec === undefined) continue;
+        if ("withheld" in spec) {
+          // **Back on the queue, and never failed.** Nothing is wrong with
+          // this conversation: the customer's allowance for its kind of work
+          // is spent, or Egma's key has no balance left to fund the providers
+          // it needs. It runs when the month resets, the plan changes, credit
+          // arrives or a key is added. The lease goes back the same way a provider
+          // outage's does — and, exactly as there, a cancel that landed while
+          // the question was in flight is honored here rather than left for
+          // the orphan sweep to misname.
+          const kept = withheld.get(claim.id);
+          request.log.info(
+            platformEvent(
+              "egma.simulation.dispatch.withheld",
+              "simulation dispatch was withheld by the entitlement source",
+              {
+                "egma.simulation_id": claim.id,
+                "egma.run_id": claim.runId,
+                "egma.withheld_by": kept?.held ?? "",
+                "egma.allowance":
+                  kept?.held === "allowance" ? kept.allowance : "",
+                "egma.providers":
+                  kept?.held === "funding" ? kept.providers.join(",") : "",
+              },
+            ),
+          );
+          const released = await releaseSimulationClaim(
+            claim.auth,
+            claim.id,
+            claim.claimedBy,
+          );
+          if (!released) {
+            const canceled = await markSimulationCanceled(
+              claim.auth,
+              claim.id,
+              claim.claimedBy,
+            );
+            if (canceled === undefined) {
+              request.log.error(
+                platformEvent(
+                  "egma.simulation.claim.release_failed",
+                  "simulation claim could not be released or canceled",
+                  {
+                    "egma.simulation_id": claim.id,
+                    "egma.run_id": claim.runId,
+                    "error.type": "simulation_claim_release_failed",
+                  },
+                ),
+              );
+            }
+          }
+          continue;
+        }
         if ("retryable" in spec) {
           // A provider outage says nothing about the customer or their agent.
           // Give this lease back instead of minting a terminal error; a later
@@ -846,16 +938,8 @@ export async function claimRoutes(
           continue;
         }
         if ("unbuildable" in spec) {
-          // Fail loudly on this side and keep dispatching the rest: one
-          // corrupt row must not hold up the batch, and the simulator is
-          // never handed a document it would have to refuse. The row lands
-          // its honest terminal state here and now — `failed`, with the
-          // platform's own `dispatch_failed` — because a spec that was never
-          // handed over is never the simulator's error, must not wait to be
-          // misnamed orphaned, and must never loop back through the queue to
-          // fail the same way again. The landing is terminal like any other,
-          // and a run waiting only on this row settles with truthful counts.
-          // No grading job is created because no completed trace exists.
+          // Land the preflight failure now and continue the batch. No grading
+          // is requested for a simulation that could not start.
           request.log.error(
             platformEvent(
               "egma.simulation.dispatch.failed",
@@ -867,11 +951,19 @@ export async function claimRoutes(
               },
             ),
           );
-          await failSimulationDispatch(
-            claim.auth,
-            claim.id,
-            claim.claimedBy,
-            `Egma could not dispatch this simulation: ${spec.unbuildable}`,
+          await (
+            "providerKeyUnavailable" in spec &&
+            spec.providerKeyUnavailable === true
+              ? failSimulation(claim.auth, claim.id, claim.claimedBy, {
+                  reason: "provider_key_unavailable",
+                  message: String(spec.unbuildable),
+                })
+              : failSimulationDispatch(
+                  claim.auth,
+                  claim.id,
+                  claim.claimedBy,
+                  `Egma could not dispatch this simulation: ${spec.unbuildable}`,
+                )
           ).catch((fault: unknown) => {
             // The one place left where the sweep is the backstop: a row so
             // broken even its landing throws stays claimed until swept, and
@@ -893,6 +985,7 @@ export async function claimRoutes(
           continue;
         }
         specs.push(spec);
+        claimedAt[claim.id] = claim.claimedAt.toISOString();
         request.log.info(
           platformEvent(
             "egma.simulation.dispatched",
@@ -905,7 +998,7 @@ export async function claimRoutes(
         );
       }
 
-      return await reply.send({ specs });
+      return await reply.send({ specs, claimed_at: claimedAt });
     } finally {
       // Taken back off rather than left behind: a keep-alive socket outlives
       // this request, and a listener per claim would pile up for as long as

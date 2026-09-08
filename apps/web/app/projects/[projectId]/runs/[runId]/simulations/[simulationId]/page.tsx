@@ -27,6 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Actions } from "../../../../../../../ui/section.tsx";
 import { Problem, Refused } from "../../../../../../../ui/form.tsx";
+import { WorkRefusalActions } from "../../../../../../../ui/work-refusal-actions.tsx";
 import { Dialog } from "../../../../../../../ui/dialog.tsx";
 import {
   Failure,
@@ -41,6 +42,7 @@ import {
 import {
   SimulationEvidenceReview,
   useSimulationEvidenceRecording,
+  waitingForSimulationTranscript,
 } from "../../../../../../../ui/simulation-evidence.tsx";
 import {
   AppShell,
@@ -51,25 +53,10 @@ import {
 } from "../../../../../../../ui/shell.tsx";
 
 /**
- * One simulation's evidence: what happened, how it happened, and the grades
- * produced from it.
- *
- * **The page is reached from its run and is not in the navigation.** A
- * simulation is a thing inside a run, not a product area, and a sidebar entry
- * for it would invite somebody to go looking for a simulation without knowing
- * which run they wanted. The address is project-scoped and stable, so it can be
- * pasted into a ticket and open the same simulation next month.
- *
- * **One read supplies the whole page.** `GET /v1/simulations/{id}` answers the
- * pins, the identities, the frozen plan, the measures, the grades and the
- * transcript together, with the transcript's window worked out on the server
- * from the simulation's own stamps. The only second request this page ever
- * makes is the recording's, and only when there is one to hear — a signed link
- * is short-lived, so carrying one in the page answer would make the address
- * stale a quarter of an hour after it loaded.
- *
- * **The facts stay apart.** Simulation execution, grading progress, individual
- * grade results and the display-only combined score answer different questions.
+ * Open simulation evidence from its run using a project-scoped URL. The
+ * simulation read supplies pins, execution facts, grading, measures, and
+ * transcript; recording links are resolved separately because they expire.
+ * Keep execution, grading progress, individual grades, and combined score distinct.
  */
 export default function SimulationEvidencePage() {
   const { projectId, runId, simulationId } = useParams<{
@@ -144,12 +131,13 @@ function EvidenceView({
     evidence !== null &&
     (evidence.gradingState === "pending" ||
       evidence.gradingState === "running");
+  const transcriptPending = evidence !== null && waitingForSimulationTranscript(evidence);
 
   useEffect(() => {
-    if (!stillGrading) return undefined;
+    if (!stillGrading && !transcriptPending) return undefined;
     const timer = setTimeout(() => reload(), AGAIN_MS);
     return () => clearTimeout(timer);
-  }, [stillGrading, reload, evidence]);
+  }, [stillGrading, transcriptPending, reload, evidence]);
 
   async function regrade(): Promise<void> {
     if (!mayRevisit || working) return;
@@ -305,7 +293,10 @@ function EvidenceView({
       />
       <PageBody>
         {refused === null ? null : (
-          <Refused message={regradeRefusalMessage(refused)} />
+          <Refused
+            message={regradeRefusalMessage(refused)}
+            action={<WorkRefusalActions code={refused.error} projectId={projectId} />}
+          />
         )}
 
         {asked === null ? null : (
@@ -322,7 +313,19 @@ function EvidenceView({
           </Problem>
         )}
 
-        {read.status !== "failed" ? null : (
+        {read.workBlock === null ? null : (
+          <Refused
+            message={`This simulation is waiting. ${read.workBlock.message}`}
+            action={<WorkRefusalActions code={read.workBlock.error} projectId={projectId} />}
+          />
+        )}
+
+        {read.status === "failed" && read.reason === "provider_key_unavailable" ? (
+          <Refused
+            message={executionFailureMessage(read.reason, read.executionFailure)}
+            action={<WorkRefusalActions code={read.reason} projectId={projectId} />}
+          />
+        ) : read.status !== "failed" ? null : (
           <Problem>
             <span className="block">
               {executionFailureMessage(read.reason, read.executionFailure)}
@@ -338,6 +341,7 @@ function EvidenceView({
           evidence={read}
           recording={recording}
         />
+
 
       </PageBody>
 

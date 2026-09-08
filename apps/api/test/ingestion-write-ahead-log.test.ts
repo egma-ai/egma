@@ -14,22 +14,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   IngestionBackpressureError,
   openWriteAheadLog,
-} from "../src/ingestion/write-ahead-log.ts";
+} from "@egma/ingestion";
 
 /**
- * The staging log, put through the two things that happen to it: an unclean
- * stop, and more evidence than it was told it may hold.
- *
- * Both are proved against a real directory rather than an in-memory stand-in.
- * Everything interesting here is a property of bytes on a disk — a length that
- * was written when the payload was not, a file that ends in the middle of a
- * frame, a checksum that no longer matches what follows it — and a fake would
- * agree with whatever this code believed about all three.
- *
- * The tear is made the way a power cut makes one: the file is written and then
- * cut short, or a byte in it is changed. Nothing here asks the log to tell it
- * where the damage is; it is opened again and asked what it has, which is
- * exactly what a restart does.
+ * Use real files to test log capacity and recovery from truncated frames or
+ * corrupt bytes. Reopen the log after damage to exercise the restart path.
  */
 
 const BOUNDS = {

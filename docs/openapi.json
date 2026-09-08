@@ -12,6 +12,536 @@
     }
   ],
   "paths": {
+    "/v1/provider-keys": {
+      "get": {
+        "operationId": "listProviderKeys",
+        "summary": "List organization provider API keys",
+        "tags": [
+          "Provider API keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Supported providers and masked credential metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "providers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "openai",
+                              "deepgram",
+                              "cartesia"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "credential": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "hint": {
+                                    "type": "string"
+                                  },
+                                  "revision": {
+                                    "type": "string"
+                                  },
+                                  "updatedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "hint",
+                                  "revision",
+                                  "updatedAt"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "label",
+                          "credential"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "mayManageProviderKeys": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "providers",
+                    "mayManageProviderKeys"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/provider-keys/{provider}": {
+      "put": {
+        "operationId": "putProviderKey",
+        "summary": "Add or replace an organization provider API key",
+        "tags": [
+          "Provider API keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "openai",
+                "deepgram",
+                "cartesia"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 4096
+                  },
+                  "expectedRevision": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "key",
+                  "expectedRevision"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved credential metadata. Secret values are never returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "openai",
+                        "deepgram",
+                        "cartesia"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "credential": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "hint": {
+                              "type": "string"
+                            },
+                            "revision": {
+                              "type": "string"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "required": [
+                            "hint",
+                            "revision",
+                            "updatedAt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "label",
+                    "credential"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteProviderKey",
+        "summary": "Remove an organization provider API key",
+        "tags": [
+          "Provider API keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "openai",
+                "deepgram",
+                "cartesia"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expectedRevision": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "expectedRevision"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The provider with no saved credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "openai",
+                        "deepgram",
+                        "cartesia"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "credential": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "hint": {
+                              "type": "string"
+                            },
+                            "revision": {
+                              "type": "string"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "required": [
+                            "hint",
+                            "revision",
+                            "updatedAt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "label",
+                    "credential"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/agents:discover": {
       "post": {
         "operationId": "discoverAgents",
@@ -15830,13 +16360,6 @@
                       "con_01M0E4J0BBE1FVDVTZ1BSS5C97"
                     ]
                   },
-                  "idempotencyKey": {
-                    "type": "string",
-                    "description": "A non-empty key for this logical run request. Reusing it with the same request returns the existing run; reusing it with different run inputs returns a conflict. Use a new key for a new run.",
-                    "examples": [
-                      "release-check-2026-09-06-001"
-                    ]
-                  },
                   "name": {
                     "type": "string",
                     "description": "Optional display name for the run.",
@@ -15872,8 +16395,7 @@
                 "required": [
                   "suiteId",
                   "agentId",
-                  "connectionId",
-                  "idempotencyKey"
+                  "connectionId"
                 ],
                 "additionalProperties": false,
                 "examples": [
@@ -15881,7 +16403,6 @@
                     "suiteId": "ste_01M0E4J0BBE1FVDVTZ1BSS5C97",
                     "agentId": "agt_01M0E4J0BBE1FVDVTZ1BSS5C97",
                     "connectionId": "con_01M0E4J0BBE1FVDVTZ1BSS5C97",
-                    "idempotencyKey": "release-check-2026-09-06-001",
                     "name": "Appointment booking release check"
                   }
                 ]
@@ -15942,6 +16463,16 @@
                     "connectionId": {
                       "type": "string",
                       "minLength": 1
+                    },
+                    "connectionName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "agentPlatform": {
                       "anyOf": [
@@ -16108,6 +16639,7 @@
                     "status",
                     "agentId",
                     "connectionId",
+                    "connectionName",
                     "agentPlatform",
                     "connectionType",
                     "accessVariant",
@@ -16396,6 +16928,16 @@
                             "type": "string",
                             "minLength": 1
                           },
+                          "connectionName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "agentPlatform": {
                             "anyOf": [
                               {
@@ -16561,6 +17103,7 @@
                           "status",
                           "agentId",
                           "connectionId",
+                          "connectionName",
                           "agentPlatform",
                           "connectionType",
                           "accessVariant",
@@ -16771,6 +17314,16 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "connectionName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "agentPlatform": {
                       "anyOf": [
                         {
@@ -16927,6 +17480,33 @@
                     },
                     "eventThrough": {
                       "type": "integer"
+                    },
+                    "workBlock": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "error": {
+                              "type": "string",
+                              "enum": [
+                                "allowance_spent",
+                                "providers_unfunded"
+                              ]
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "error",
+                            "message"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "tempMockAgentVersion": {
                       "anyOf": [
@@ -17114,6 +17694,7 @@
                     "status",
                     "agentId",
                     "connectionId",
+                    "connectionName",
                     "agentPlatform",
                     "connectionType",
                     "accessVariant",
@@ -17134,6 +17715,7 @@
                     "startedAt",
                     "finishedAt",
                     "eventThrough",
+                    "workBlock",
                     "tempMockAgentVersion",
                     "tempMockAgentVersionCleanup",
                     "mockMetadata",
@@ -17358,6 +17940,37 @@
                               }
                             ]
                           },
+                          "gradeTally": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "passed": {
+                                    "type": "integer"
+                                  },
+                                  "failed": {
+                                    "type": "integer"
+                                  },
+                                  "errored": {
+                                    "type": "integer"
+                                  },
+                                  "selected": {
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "passed",
+                                  "failed",
+                                  "errored",
+                                  "selected"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "reason": {
                             "anyOf": [
                               {
@@ -17371,7 +17984,8 @@
                                   "capacity",
                                   "simulator_error",
                                   "orphaned",
-                                  "dispatch_failed"
+                                  "dispatch_failed",
+                                  "provider_key_unavailable"
                                 ]
                               },
                               {
@@ -17434,6 +18048,7 @@
                           "status",
                           "gradingState",
                           "combinedScore",
+                          "gradeTally",
                           "reason",
                           "executionFailure",
                           "startedAt",
@@ -17701,7 +18316,8 @@
                                       "capacity",
                                       "simulator_error",
                                       "orphaned",
-                                      "dispatch_failed"
+                                      "dispatch_failed",
+                                      "provider_key_unavailable"
                                     ]
                                   },
                                   {
@@ -17934,6 +18550,16 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "connectionName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "agentPlatform": {
                       "anyOf": [
                         {
@@ -18099,6 +18725,7 @@
                     "status",
                     "agentId",
                     "connectionId",
+                    "connectionName",
                     "agentPlatform",
                     "connectionType",
                     "accessVariant",
@@ -18290,6 +18917,33 @@
                         "canceled"
                       ]
                     },
+                    "workBlock": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "error": {
+                              "type": "string",
+                              "enum": [
+                                "allowance_spent",
+                                "providers_unfunded"
+                              ]
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "error",
+                            "message"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "gradingState": {
                       "anyOf": [
                         {
@@ -18305,8 +18959,7 @@
                         {
                           "type": "null"
                         }
-                      ],
-                      "description": "Grading progress, separate from simulation execution status. Read grades for each grader's result."
+                      ]
                     },
                     "grades": {
                       "type": "array",
@@ -18647,9 +19300,11 @@
                     "hasRecording": {
                       "type": "boolean"
                     },
+                    "agentPovComplete": {
+                      "type": "boolean"
+                    },
                     "agentPovIncomplete": {
-                      "type": "boolean",
-                      "description": "True when the bounded wait ended and agent evidence is still missing. False does not guarantee a complete export or that existing grades used late evidence. Regrade after late evidence arrives."
+                      "type": "boolean"
                     },
                     "measures": {
                       "type": "object",
@@ -19177,12 +19832,14 @@
                     "combinedScore",
                     "reason",
                     "executionFailure",
+                    "workBlock",
                     "modality",
                     "createdAt",
                     "startedAt",
                     "endedAt",
                     "providerReference",
                     "hasRecording",
+                    "agentPovComplete",
                     "agentPovIncomplete",
                     "measures",
                     "metrics",
@@ -23162,6 +23819,33 @@
                         "error"
                       ]
                     },
+                    "workBlock": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "error": {
+                              "type": "string",
+                              "enum": [
+                                "allowance_spent",
+                                "providers_unfunded"
+                              ]
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "error",
+                            "message"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "grades": {
                       "type": "array",
                       "items": {
@@ -23444,6 +24128,7 @@
                     "metrics",
                     "simulationId",
                     "gradingState",
+                    "workBlock",
                     "grades",
                     "gradeHistory",
                     "combinedScore"

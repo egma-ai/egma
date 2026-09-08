@@ -36,6 +36,177 @@ export type TraceSpan = {
     spans: Array<TraceSpan>;
 };
 
+export type ListProviderKeysData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/provider-keys';
+};
+
+export type ListProviderKeysErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type ListProviderKeysError = ListProviderKeysErrors[keyof ListProviderKeysErrors];
+
+export type ListProviderKeysResponses = {
+    /**
+     * Supported providers and masked credential metadata.
+     */
+    200: {
+        providers: Array<{
+            provider: 'openai' | 'deepgram' | 'cartesia';
+            label: string;
+            credential: {
+                hint: string;
+                revision: string;
+                updatedAt: string;
+            } | null;
+        }>;
+        mayManageProviderKeys: boolean;
+    };
+};
+
+export type ListProviderKeysResponse = ListProviderKeysResponses[keyof ListProviderKeysResponses];
+
+export type DeleteProviderKeyData = {
+    body: {
+        expectedRevision: string;
+    };
+    path: {
+        provider: 'openai' | 'deepgram' | 'cartesia';
+    };
+    query?: never;
+    url: '/v1/provider-keys/{provider}';
+};
+
+export type DeleteProviderKeyErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type DeleteProviderKeyError = DeleteProviderKeyErrors[keyof DeleteProviderKeyErrors];
+
+export type DeleteProviderKeyResponses = {
+    /**
+     * The provider with no saved credential.
+     */
+    200: {
+        provider: 'openai' | 'deepgram' | 'cartesia';
+        label: string;
+        credential: {
+            hint: string;
+            revision: string;
+            updatedAt: string;
+        } | null;
+    };
+};
+
+export type DeleteProviderKeyResponse = DeleteProviderKeyResponses[keyof DeleteProviderKeyResponses];
+
+export type PutProviderKeyData = {
+    body: {
+        key: string;
+        expectedRevision: string | null;
+    };
+    path: {
+        provider: 'openai' | 'deepgram' | 'cartesia';
+    };
+    query?: never;
+    url: '/v1/provider-keys/{provider}';
+};
+
+export type PutProviderKeyErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type PutProviderKeyError = PutProviderKeyErrors[keyof PutProviderKeyErrors];
+
+export type PutProviderKeyResponses = {
+    /**
+     * The saved credential metadata. Secret values are never returned.
+     */
+    200: {
+        provider: 'openai' | 'deepgram' | 'cartesia';
+        label: string;
+        credential: {
+            hint: string;
+            revision: string;
+            updatedAt: string;
+        } | null;
+    };
+};
+
+export type PutProviderKeyResponse = PutProviderKeyResponses[keyof PutProviderKeyResponses];
+
 export type DiscoverAgentsData = {
     body: {
         /**
@@ -4578,6 +4749,7 @@ export type ListRunsResponses = {
             status: 'pending' | 'running' | 'completed' | 'canceled';
             agentId: string;
             connectionId: string;
+            connectionName: string | null;
             agentPlatform: string | null;
             connectionType: string;
             accessVariant: string;
@@ -4640,10 +4812,6 @@ export type CreateRunData = {
          * An active connection on that agent in the same project. Its modality determines whether simulations use voice or chat.
          */
         connectionId: string;
-        /**
-         * A non-empty key for this logical run request. Reusing it with the same request returns the existing run; reusing it with different run inputs returns a conflict. Use a new key for a new run.
-         */
-        idempotencyKey: string;
         /**
          * Optional display name for the run.
          */
@@ -4726,6 +4894,7 @@ export type CreateRunResponses = {
         status: 'pending' | 'running' | 'completed' | 'canceled';
         agentId: string;
         connectionId: string;
+        connectionName: string | null;
         agentPlatform: string | null;
         connectionType: string;
         accessVariant: string;
@@ -4835,6 +5004,7 @@ export type GetRunResponses = {
         status: 'pending' | 'running' | 'completed' | 'canceled';
         agentId: string;
         connectionId: string;
+        connectionName: string | null;
         agentPlatform: string | null;
         connectionType: string;
         accessVariant: string;
@@ -4877,6 +5047,10 @@ export type GetRunResponses = {
         startedAt: string | null;
         finishedAt: string | null;
         eventThrough: number;
+        workBlock: {
+            error: 'allowance_spent' | 'providers_unfunded';
+            message: string;
+        } | null;
         tempMockAgentVersion: number | null;
         tempMockAgentVersionCleanup: boolean | null;
         mockMetadata: {
@@ -4973,7 +5147,13 @@ export type ListRunSimulationsResponses = {
             status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
             gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error' | null;
             combinedScore: number | null;
-            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
+            gradeTally: {
+                passed: number;
+                failed: number;
+                errored: number;
+                selected: number;
+            } | null;
+            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | 'provider_key_unavailable' | null;
             executionFailure: string | null;
             startedAt: string | null;
             endedAt: string | null;
@@ -5057,7 +5237,7 @@ export type ListRunEventsResponses = {
             testName: string | null;
             personaName: string | null;
             status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
-            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
+            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | 'provider_key_unavailable' | null;
             executionFailure: string | null;
         }>;
         /**
@@ -5144,6 +5324,7 @@ export type CancelRunResponses = {
         status: 'pending' | 'running' | 'completed' | 'canceled';
         agentId: string;
         connectionId: string;
+        connectionName: string | null;
         agentPlatform: string | null;
         connectionType: string;
         accessVariant: string;
@@ -5240,9 +5421,10 @@ export type GetSimulationResponses = {
         runName: string | null;
         position: number;
         status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
-        /**
-         * Grading progress, separate from simulation execution status. Read grades for each grader's result.
-         */
+        workBlock: {
+            error: 'allowance_spent' | 'providers_unfunded';
+            message: string;
+        } | null;
         gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error' | null;
         /**
          * The current result for each selected grader. Each grade has its own score, frozen threshold, result, and supporting details.
@@ -5322,9 +5504,7 @@ export type GetSimulationResponses = {
         endedAt: string | null;
         providerReference: string | null;
         hasRecording: boolean;
-        /**
-         * True when the bounded wait ended and agent evidence is still missing. False does not guarantee a complete export or that existing grades used late evidence. Regrade after late evidence arrives.
-         */
+        agentPovComplete: boolean;
         agentPovIncomplete: boolean;
         measures: {
             durationMs?: number;
@@ -6727,6 +6907,10 @@ export type GetTraceResponses = {
         }>;
         simulationId: string | null;
         gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error';
+        workBlock: {
+            error: 'allowance_spent' | 'providers_unfunded';
+            message: string;
+        } | null;
         /**
          * The current result for each selected grader. Each grade has its own score, frozen threshold, result, and supporting details.
          */

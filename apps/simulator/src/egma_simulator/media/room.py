@@ -14,6 +14,7 @@ from typing import Any
 
 from ..contract import ERROR
 from ..mock_tools import MockToolRefusal
+from ..platform_logging import log_event
 from . import (
     MediaBackendError,
     PlayoutStamp,
@@ -25,39 +26,33 @@ from . import (
 logger = logging.getLogger(__name__)
 
 RpcMethod = Callable[[str], Awaitable[str]]
+RpcNotice = Callable[[Any], None]
+RpcRefusalNotice = Callable[[Any, MockToolRefusal], None]
+
+
+def disconnect_reason_name(reason: object) -> str:
+    """Keep the documented RTC reason, never arbitrary provider payloads."""
+    from livekit import rtc
+
+    try:
+        return (
+            rtc.DisconnectReason.Name(reason) if isinstance(reason, int) else "UNKNOWN"
+        )
+    except ValueError:
+        return "UNKNOWN"
+
+
+def room_was_deleted(reason: object) -> bool:
+    from livekit import rtc
+
+    return reason == rtc.DisconnectReason.ROOM_DELETED
+
 
 ROOM_PREFIX = "egma-sim"
-"""The stem of the name every room egma conducts a simulation in.
-
-**The published contract is the hyphenated ``egma-sim-``** — this stem
-and the separator that :func:`fresh_room_name` and :func:`room_name_for`
-below put after it. That hyphenated form is what a customer's own token
-endpoint allowlists, what the hardening recipe names its empty timeout
-against, and what the egma SDK inside the customer's worker reads to
-answer "am I in a simulation?"
-before it connects to anything — the one question that decides whether
-mock tools are served and whether the agent's spans go out the
-production door. Every room name built below begins with it on all three
-ways into a room, which is what makes that answer the same answer
-everywhere.
-
-Move the value and every installed SDK goes inert inside a real
-simulation: real tools run, and the simulation's spans arrive in
-Monitoring as a production conversation. One test in this package holds
-the line — ``apps/simulator/tests/test_plug_phone.py`` asserts a
-conducted room name begins ``egma-sim-``, written out by hand rather than
-built from this constant, so a rename here goes red rather than quiet.
-Read that red as the contract refusing to move, not as a fixture to
-update.
-
-Nothing links this constant to the far side of the contract, and nothing
-can: the SDK holds its own copy in
-``sdks/python/src/egma/simulation_room.py``, pinned again by
-``sdks/python/tests/room_stub.py`` and
-``fixtures/livekit-dumb-agent/tests/conftest.py``, and a customer runs
-whichever release of it they installed. A version already deployed cannot
-be edited to follow a rename. That is what makes the value frozen rather
-than merely stable.
+"""Frozen room-name stem; builders append the hyphen in the published egma-sim- prefix.
+Installed SDKs use it for simulation detection, and token endpoints can allowlist it.
+Renaming it breaks deployed integrations. Tests pin the literal independently
+of this constant so a change cannot silently update both implementation and check.
 """
 
 PERSONA_IDENTITY = "egma-persona"
@@ -82,31 +77,13 @@ QUOTED_REFUSAL_CHARS = 200
 # docstring under them describes both.
 MIX_SAMPLE_RATE = 48000
 MIX_CHANNELS = 1
-"""The one format every remote audio track is read and mixed at.
-
-LiveKit's own numbers, asked for by name rather than inherited:
-``rtc.AudioStream`` already normalises whatever a publisher sent to
-exactly these, on its native side, before a frame ever reaches Python.
-Naming them here is what makes the mix below arithmetic instead of a
-guess — every track arrives at the same rate and channel count, so adding
-two of them together is adding two lists of numbers, with no resampler in
-the path and no question about which of two rates the sum is in.
-
-They are also a pin. A LiveKit release that moved either default would
-otherwise move the mix under it silently; asked for by name, the room
-keeps reading what it reads today.
+"""Explicit sample rate and channel count for every remote AudioStream.
+Normalize before mixing so all tracks use one format regardless of SDK defaults.
 """
 
 LARGEST_MIX_BACKLOG_SECONDS = 1.0
-"""How far behind the room's clock a second track may fall before its
-oldest audio is dropped.
-
-The tracks of one participant arrive together in real time, so the
-backlog is normally one frame or none. This is the bound on the
-pathological case — a track that produces faster than the one the room is
-clocked by — and it is a *drop* rather than growth without end, because
-audio a second old is no longer part of the conversation the persona is
-having.
+"""Maximum backing-track backlog before dropping its oldest audio.
+Bound delayed audio so memory cannot grow without limit behind the lead track.
 """
 
 INT16_CEILING = 32767
@@ -125,31 +102,9 @@ def fresh_room_name() -> str:
 
 
 def fresh_chat_room_name() -> str:
-    """A chat simulation's room: the modality mark is the room's own name.
-
-    ``egma-sim-chat-`` is part of the published contract exactly as the
-    hyphenated ``egma-sim-`` above is, and for the same reason: it is what
-    the customer's own worker reads. The chat setup in Egma's LiveKit
-    integration instructions keys its one decision off this segment,
-    before the worker connects to anything — the room's name is the only
-    channel egma owns on every dispatch path, it is readable from the job
-    with no network and no parsing, and no key of the customer's can ever
-    collide with it. Everything that recognises ``egma-sim-`` — the SDK's
-    simulation detection, a token endpoint's allowlist, the hardening
-    recipe's empty timeout — still matches, because the prefix is
-    unchanged.
-
-    A voice room's name stays bare on purpose. Speech is what a LiveKit
-    agent already is; the marked case is the one asking it to be
-    something else. A hex suffix cannot begin ``chat-``, so the two forms
-    cannot be mistaken for each other.
-
-    Move the segment and every worker carrying the chat setup answers a
-    chat simulation aloud — the fail-fast then stops each of those
-    simulations at the agent's first utterance. The pin in
-    ``apps/simulator/tests/test_plug_livekit_chat.py`` writes the segment
-    out by hand so a rename here goes red rather than quiet; read that
-    red as the contract refusing to move.
+    """Build an egma-sim-chat- room name. The published prefix tells integrated workers
+    to disable speech and still matches general egma-sim- detection.
+    Keep it stable for deployed workers; the voice hex suffix cannot collide with chat-.
     """
     return f"{ROOM_PREFIX}-chat-{uuid.uuid4().hex}"
 
@@ -174,16 +129,29 @@ def persona_name_for(simulation_id: str) -> str:
     return f"{PERSONA_IDENTITY}-{simulation_id}"
 
 
-def answering(handler: RpcMethod) -> Callable[[Any], Awaitable[str]]:
+def answering(
+    handler: RpcMethod,
+    *,
+    on_attempt: RpcNotice | None = None,
+    on_accepted: RpcNotice | None = None,
+    on_refused: RpcRefusalNotice | None = None,
+) -> Callable[[Any], Awaitable[str]]:
     """Turn an Egma mock-tool refusal into LiveKit's typed RPC refusal."""
 
     async def answer(invocation: Any) -> str:
         from livekit import rtc
 
+        if on_attempt is not None:
+            on_attempt(invocation)
         try:
-            return await handler(invocation.payload)
+            response = await handler(invocation.payload)
         except MockToolRefusal as refused:
+            if on_refused is not None:
+                on_refused(invocation, refused)
             raise rtc.RpcError(refused.code, refused.message) from refused
+        if on_accepted is not None:
+            on_accepted(invocation)
+        return response
 
     return answer
 
@@ -224,58 +192,16 @@ class _JoinAfterPipecatConversion(asyncio.Queue[Any]):
 
 
 class _RoomAudioMix:
-    """Every remote audio track in the room, as one stream for the persona.
+    """Mix remote audio tracks into one stream at the lead track's cadence.
+    The earliest active, unmuted track leads; others buffer for its frames.
+    A single track returns its original frame without copying.
 
-    The agent under test may publish more than one audio track at once —
-    its voice and an ambient background sound is the case this exists for,
-    and it is what a real caller's ear gets. The persona has one ear, so
-    the tracks are **added together**, not chosen between: distinguishing
-    them would encode a guess about which track is the voice that no
-    document backs, and the customer's production experience includes the
-    background.
+    Transfer the clock when the lead ends or mutes. Preserve buffered tails for
+    the next lead to consume. Mixed output carries the lead participant's label,
+    even when other participants contribute audio.
 
-    **One track clocks the room.** The earliest track that is live — being
-    read, and not muted — is the *lead*: its frames are what the persona's
-    pipeline is handed, one for one, at their own cadence. Every other
-    track buffers, and each of the lead's frames takes as much of each
-    backlog as it is long. That is what keeps a room with two tracks worth
-    exactly as much media time as a room with one — the conductor reads
-    every position out of the input frames it is given, so a second track
-    carried beside the first rather than into it would make the whole
-    conversation run at double speed.
-
-    **One track is a pass-through.** With nothing else in the room the
-    lead's frame is returned as it arrived: the same object, and no copy
-    of its audio is taken at all. A phone call and an ordinary LiveKit
-    agent publish one track, so the lanes that already worked are
-    untouched by this, byte for byte.
-
-    **The clock is handed on, never held.** A track that turns up mid-call
-    joins as a backing track from its first frame. A lead that goes quiet
-    for good — its stream ended, its publisher unsubscribed it, or its
-    publisher *muted* it — stops leading at once, and the earliest
-    remaining live track takes over. A lead that kept the clock while
-    muted would be a room the persona hears nothing in while another
-    track is publishing, which is this lane's own defect by a second
-    door.
-
-    **Nothing buffered is thrown away.** A track that stops leading keeps
-    whatever it had already buffered, and the new lead's frames carry it
-    out. Only an empty backlog is forgotten.
-
-    **The mix is one participant's.** Where two participants publish at
-    once their audio folds into the lead's frame and reaches the pipeline
-    under the *lead's* participant. That is the accepted cost of one
-    stream at one cadence, and it is a decision rather than an oversight:
-    egma conducts one agent under test, the persona has one ear, and
-    nothing downstream of here reads the participant for anything but a
-    label.
-
-    One reader task per track calls in here, and nothing in it awaits.
-    That is deliberate and it is what makes a lock unnecessary: a call
-    runs from start to finish inside one turn of the event loop, so two
-    tracks can never be halfway through the same backlog at once. Keep it
-    that way — an ``await`` added below is a data race, not a slow path.
+    Calls must stay synchronous: reader tasks share these buffers, and adding
+    an await would permit concurrent partial updates.
     """
 
     def __init__(self) -> None:
@@ -350,9 +276,7 @@ class _RoomAudioMix:
             return None
         waiting = self._backlog[key]
         under = [
-            other
-            for other in self._backlog
-            if other != key and self._backlog[other]
+            other for other in self._backlog if other != key and self._backlog[other]
         ]
         if not under and not waiting:
             # Read before anything is copied: the single-track lanes must
@@ -409,20 +333,9 @@ def _require_the_mix_format(frame: Any) -> None:
 
 
 def _added(said: bytes, under: list[bytes]) -> bytes:
-    """Two or more tracks of the room, added sample by sample.
-
-    Clipped rather than scaled, because scaling would quieten the agent's
-    voice by however much background it happens to be playing — and the
-    persona's transcriber then hears a different agent depending on the
-    ambience. Two ordinary speech tracks do not reach the ends of the
-    range together often enough to matter; a mix that moved the voice's
-    level would matter on every frame.
-
-    The whole sum is taken first and held to the range once, at the end.
-    Clipping each track in turn would make the answer depend on the order
-    the tracks happen to be added in: three tracks at 20000, 20000 and
-    -20000 are 20000 however they are grouped, but clipped as they go they
-    come out 12767.
+    """Sum tracks before clipping once to the sample range.
+    Scaling would change voice volume with background tracks; clipping each addition
+    would make the result depend on track order.
     """
     totals = list(_samples(said))
     for beneath in under:
@@ -476,59 +389,28 @@ def _one_frame(said: bytes, like: Any) -> Any:
 
 
 def track_key(participant_id: str, published: Any) -> str:
-    """One subscribed audio track's name, inside the room.
-
-    The participant and the track, in that order, so the participant can
-    be read straight back off it — see
-    :meth:`_Pipecat17InputDrain._stream_keys_of`. That saves a second
-    registry to keep true, and it makes a key say what it is wherever one
-    is read. Participant and track identifiers are LiveKit's own
-    ``PA_``/``TR_`` sids, which carry no colon, so the split is
-    unambiguous.
-
-    ``published`` is either the track or its publication: LiveKit gives
-    both the same ``sid``, and the two events this key is built from hand
-    over one each — ``track_subscribed`` a track, ``track_muted`` a
-    publication.
+    """Key a track as participant SID:track SID. LiveKit SIDs contain no colon,
+    so _stream_keys_of() can recover the participant without another registry.
+    A track and its publication expose the same SID on different events.
     """
     return f"{participant_id}:{getattr(published, 'sid', None) or id(published)}"
 
 
 class _Pipecat17InputDrain:
-    """Own Pipecat 1.7.0's inbound room audio: keyed by track, and ordered.
-
-    Two duties, both of them things the pinned release cannot do and
-    exposes no public seam for.
-
-    **Every track, mixed.** Pipecat 1.7.0 keys a subscribed audio stream by
-    *participant*: a second audio track from the same participant closes
-    the first and takes its place. An agent publishing its voice and an
-    ambient background therefore reached the persona as whichever track
-    was subscribed last, and a whole simulation could be conducted against
-    background noise. This shim registers each track under its own key and
-    feeds them all through :class:`_RoomAudioMix`, so the persona hears the
-    room the way a caller does. One track stays a pass-through, so the
-    phone and LiveKit lanes go through the same path unchanged.
-
-    **Mute, which nothing else watches.** LiveKit publishes ``track_muted``
-    and ``track_unmuted``, and Pipecat 1.7.0 registers no handler for
-    either. Without them a track that its publisher muted — the ordinary
-    publish-on-speech pattern — goes quiet without ending, and if it was
-    the one clocking the room the persona hears nothing for as long as the
-    mute lasts. The shim registers those two on the room itself and hands
-    the mix's clock on and back.
-
-    **Departure after audio.** LiveKit 1.1.14's iterator stops as soon as
-    its native task ends, before it reads buffered frames that precede the
-    queue's explicit end marker. The shim replaces the stream reader and
-    close coordinator, makes the existing client iterator joinable, then
-    joins BaseInput before one ordinary control frame enters the pipeline.
-
-    Pipecat's conversion and push path remain unchanged in all three. What
-    the version guard below pins is the whole of what is reached into.
+    """Pipecat 1.7.0 inbound audio shim, covered by the version guard.
+    Key readers by track so voice and background audio from one participant mix.
+    Handle mute events so a silent lead transfers the clock without losing its reader.
+    Drain LiveKit 1.1.14 through its explicit end marker, then join BaseInput before
+    sending the terminal control frame. Keep Pipecat conversion and push behavior.
     """
 
-    def __init__(self, input_transport: object, failed: asyncio.Event) -> None:
+    def __init__(
+        self,
+        input_transport: object,
+        failed: asyncio.Event,
+        *,
+        on_disconnected: Callable[[object], None] | None = None,
+    ) -> None:
         try:
             from livekit import rtc
             from livekit.rtc._utils import RingQueue
@@ -599,6 +481,7 @@ class _Pipecat17InputDrain:
         self._joined_a_track = joined_a_track
         self._left_a_track = left_a_track
         self._canceling = False
+        self._on_disconnected = on_disconnected
         self._audio_queue = _JoinAfterPipecatConversion()
         client._audio_queue = self._audio_queue
         self._ring_queue_type = RingQueue
@@ -613,7 +496,7 @@ class _Pipecat17InputDrain:
                 asyncio.Task[None],
             ],
         ] = {}
-        self._departures: dict[str, asyncio.Task[None]] = {}
+        self._departures: dict[str | None, asyncio.Task[None]] = {}
         self._watching = False
         client._process_audio_stream = self._read_audio_stream
         client._close_audio_stream = self.finish_stream
@@ -651,19 +534,15 @@ class _Pipecat17InputDrain:
             return
         room.on("track_muted")(self._track_muted)
         room.on("track_unmuted")(self._track_unmuted)
+        if self._on_disconnected is not None:
+            # Pipecat schedules its async callback but drops this reason.
+            # RTC runs this listener before that scheduled callback executes.
+            room.on("disconnected")(self._on_disconnected)
         self._watching = True
 
     def _track_muted(self, participant: Any, publication: Any) -> None:
-        """A publisher stopped sending on one track. Hand the clock on.
-
-        The reader stays: a mute is not the end of a track, and the same
-        publisher usually unmutes it a moment later. What changes is that
-        the track stops leading, so the room is clocked by something that
-        is actually producing audio.
-
-        Note the argument order — LiveKit puts the participant first on
-        these two events and last on the subscribe events. Reversing them
-        here would silently key every mute to nothing.
+        """Transfer the clock on mute but keep the reader for a later unmute.
+        These events pass participant first; subscribe events pass it last.
         """
         key = track_key(participant.sid, publication)
         if key in self._streams:
@@ -723,7 +602,7 @@ class _Pipecat17InputDrain:
         await self.finish_stream(track_key(participant.sid, track))
         await self._left_a_track(participant.sid)
 
-    def _stream_keys_of(self, participant_id: str) -> list[str]:
+    def _stream_keys_of(self, participant_id: str | None) -> list[str]:
         """The keys of every audio stream one participant reached here on.
 
         Both the streams still registered and the ones already being
@@ -732,33 +611,24 @@ class _Pipecat17InputDrain:
         miss a track whose unsubscribe was still in flight — and then
         announce the departure over audio still on its way in.
         """
-        keys = [key for key in self._streams if key.split(":", 1)[0] == participant_id]
+        keys = [
+            key
+            for key in self._streams
+            if participant_id is None or key.split(":", 1)[0] == participant_id
+        ]
         keys.extend(
             key
             for key in self._finishes
-            if key not in keys and key.split(":", 1)[0] == participant_id
+            if key not in keys
+            and (participant_id is None or key.split(":", 1)[0] == participant_id)
         )
         return keys
 
     async def _read_audio_stream(self, stream: object, key: str) -> None:
-        """Read LiveKit 1.1.14 through its explicit end marker.
-
-        ``key`` is the track's, and the participant is read back off it,
-        so what the pipeline is handed still says which participant spoke
-        and never which of their tracks — the mix has already made that
-        question meaningless.
-
-        The reader takes its track out of the mix on the way out, and
-        never puts it in — that is the subscribe handler's job, and the
-        mute handler's. A reader that registered its own track would put a
-        muted one back the moment it next ran, which is a mute undone by a
-        race.
-
-        Taking it out here rather than at the unsubscribe event is the
-        earliest honest moment: the frames are read here, so a reader that
-        has stopped is a track with no more audio and no tail left to
-        carry. A track that ran out but still held the room's clock would
-        leave the persona hearing nothing while the others buffered.
+        """Read through LiveKit's explicit end marker, preserving buffered tail audio.
+        Output keeps the participant label recovered from the track key.
+        Only subscribe and mute handlers add tracks; adding here could undo a mute.
+        Remove the track when its reader finishes, after its audio has drained.
         """
         participant_id = key.split(":", 1)[0]
         try:
@@ -861,9 +731,11 @@ class _Pipecat17InputDrain:
             self._mix.gone(key)
 
     async def participant_left(
-        self, participant_id: str, completed: asyncio.Event
+        self, participant_id: str | None, completed: asyncio.Event
     ) -> None:
-        departure = self._departures.get(participant_id)
+        # None is a confirmed whole-room ending and drains every publisher.
+        # A later participant event joins it instead of emitting another marker.
+        departure = self._departures.get(None) or self._departures.get(participant_id)
         if departure is None:
             departure = asyncio.create_task(
                 self._finish_departure(participant_id, completed),
@@ -872,12 +744,20 @@ class _Pipecat17InputDrain:
             self._departures[participant_id] = departure
         await asyncio.shield(departure)
 
+    @property
+    def departure_started(self) -> bool:
+        return bool(self._departures)
+
+    async def finish_departures(self) -> None:
+        """A room closing must not cancel a departure already draining audio."""
+        await asyncio.shield(asyncio.gather(*self._departures.values()))
+
     def _require_working_media(self) -> None:
         if self._failed.is_set():
             raise RuntimeError("the livekit input failed before participant departure")
 
     async def _finish_departure(
-        self, participant_id: str, completed: asyncio.Event
+        self, participant_id: str | None, completed: asyncio.Event
     ) -> None:
         # Every track the participant was publishing, because a departure
         # is the participant's and the tracks are only the ways it reached
@@ -947,11 +827,15 @@ class JoinedRoom:
         token: str,
         room_name: str,
         quotable: Callable[[str], str] = lambda told: told,
+        confirm_remote_end: Callable[[], Awaitable[bool]] | None = None,
     ) -> None:
         self._url = url
         self._token = token
         self._room_name = room_name
         self._quotable = quotable
+        self._confirm_remote_end = confirm_remote_end
+        self._disconnect_reason: object = None
+        self._remote_close: asyncio.Task[None] | None = None
         self._transport: object | None = None
         self._input_drain: _Pipecat17InputDrain | None = None
         self._connected = asyncio.Event()
@@ -961,25 +845,24 @@ class JoinedRoom:
         self.failed = asyncio.Event()
         self._leaving = False
         self._offer: Callable[[], None] | None = None
+        self._startup: Any = None
+        self._startup_room: Any = None
+        self._startup_handlers: list[tuple[str, Callable[..., None]]] = []
+        self._startup_identities: dict[str, str] = {}
 
     @property
     def joined(self) -> bool:
         return self._transport is not None
 
     def answer_when_joined(self, offer: Callable[[], None]) -> None:
-        """Run ``offer`` the instant this room is entered, before anything
-        else learns the room is up.
-
-        The agent can already be in the room when egma arrives — on two
-        of the three ways in nothing egma does puts it there, so it joins
-        whenever its own dispatcher says. Whatever offers to answer for
-        the agent's tools therefore has to be live at the earliest moment
-        it *can* be live, which is the connect itself: a method registered
-        one step later is a race against the first thing the agent's
-        session says, and losing that race reads on the far side as "no
-        egma here" and runs every real tool inside a live simulation.
+        """Offer mock-tool RPC immediately on connect, before announcing room readiness.
+        An agent already in the room may send hello as soon as Egma joins.
         """
         self._offer = offer
+
+    def watch_startup(self, startup: Any) -> None:
+        """Attach the startup latch before the transport connects."""
+        self._startup = startup
 
     def create_transport(self) -> VoiceMedia:
         """Create stock LiveKit input and output processors without rates."""
@@ -996,7 +879,9 @@ class JoinedRoom:
         self._transport = transport
         input_transport = transport.input()
         try:
-            input_drain = _Pipecat17InputDrain(input_transport, self.failed)
+            input_drain = _Pipecat17InputDrain(
+                input_transport, self.failed, on_disconnected=self._room_disconnected
+            )
         except Exception:
             self.failed.set()
             raise
@@ -1007,6 +892,10 @@ class JoinedRoom:
             offer = self._offer
             if offer is not None:
                 offer()
+            startup = self._startup
+            raw_room = self._raw_room()
+            if startup is not None and raw_room is not None:
+                self._watch_startup_states(raw_room)
             self._connected.set()
 
         @transport.event_handler("on_before_disconnect")
@@ -1014,38 +903,40 @@ class JoinedRoom:
             # Pipecat fires this awaited event before its own stop/cancel path
             # closes streams. Take down an in-flight remote departure first.
             self._leaving = True
+            await self._cancel_remote_close()
             await input_drain.cancel()
 
         @transport.event_handler("on_disconnected")
         async def _disconnected(_transport: object) -> None:
             if not self._leaving:
-                self.failed.set()
-                await input_drain.cancel()
+                if self._remote_close is None:
+                    self._remote_close = asyncio.create_task(
+                        self._finish_remote_close(input_drain),
+                        name="livekit-room-completion",
+                    )
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.shield(self._remote_close)
 
         @transport.event_handler("on_participant_connected")
-        async def _arrived(_transport: object, _participant: str) -> None:
+        async def _arrived(_transport: object, participant: str) -> None:
             self.arrivals.set()
 
         @transport.event_handler("on_first_participant_joined")
-        async def _already_here(_transport: object, _participant: str) -> None:
-            # The other half of "somebody is in the room". The transport
-            # raises this for the first participant it ever sees, by
-            # either of the two routes it can see one: a participant that
-            # connects while egma is watching raises the arrival above
-            # *and* this one, while a participant already in the room when
-            # egma walked in raises only this one. So the two handlers
-            # overlap rather than divide, and the overlap is free — both
-            # set the same event, which is set once and read as a state.
-            # This handler earns its place on the second route alone: an
-            # agent that got into the room first would otherwise be waited
-            # out and reported as a worker that never came, while it sat
-            # there publishing audio.
+        async def _already_here(_transport: object, participant: str) -> None:
+            # Also handle participants already present when Egma joins. This event can
+            # overlap
+            # the arrival callback; both set the same event safely.
             self.arrivals.set()
 
         @transport.event_handler("on_participant_disconnected")
         async def _left(_transport: object, participant: str) -> None:
             if self._leaving:
                 return
+            startup = self._startup
+            if startup is not None:
+                identity = self._startup_identities.get(participant)
+                if identity is not None and not startup.is_relevant(identity):
+                    return
             try:
                 await input_drain.participant_left(participant, self.ended)
             except Exception:
@@ -1073,6 +964,7 @@ class JoinedRoom:
                 if isinstance(frame, InputAudioRawFrame):
                     arrived_now(frame)
                     room.carrying_audio.set()
+                    room._note_startup_audio(getattr(frame, "user_id", ""))
                 await self.push_frame(frame, direction)
 
         return VoiceMedia(
@@ -1082,6 +974,127 @@ class JoinedRoom:
             failed=self.failed,
             transport_name=f"livekit server at {self._quotable(self._url)}",
         )
+
+    def _raw_room(self) -> Any:
+        transport = self._transport
+        if transport is None:
+            return None
+        try:
+            return transport._client.room
+        except Exception:
+            return None
+
+    def _watch_startup_states(self, raw_room: Any) -> None:
+        if self._startup_room is raw_room:
+            return
+        self._startup_room = raw_room
+
+        def _remember(participant: Any) -> None:
+            identity = getattr(participant, "identity", "")
+            sid = getattr(participant, "sid", "")
+            if isinstance(sid, str) and isinstance(identity, str) and identity:
+                self._startup_identities[sid] = identity
+            startup = self._startup
+            if startup is not None:
+                startup.participant_seen(
+                    identity,
+                    getattr(participant, "attributes", None),
+                )
+
+        def _forget(participant: Any) -> None:
+            startup = self._startup
+            if startup is not None:
+                startup.participant_left(getattr(participant, "identity", ""))
+
+        def _startup_state(changed: dict[str, str], participant: Any) -> None:
+            startup = self._startup
+            if startup is not None:
+                startup.participant_state(
+                    getattr(participant, "identity", ""),
+                    changed.get("lk.agent.state"),
+                )
+
+        handlers = [
+            ("participant_connected", _remember),
+            ("participant_disconnected", _forget),
+            ("participant_attributes_changed", _startup_state),
+        ]
+        for event, handler in handlers:
+            raw_room.on(event)(handler)
+        self._startup_handlers = handlers
+        for participant in raw_room.remote_participants.values():
+            _remember(participant)
+
+    def _note_startup_audio(self, participant_sid: str) -> None:
+        startup = self._startup
+        identity = self._startup_identities.get(participant_sid)
+        if startup is not None and identity is not None:
+            startup.participant_audio(identity)
+
+    def _detach_startup_states(self) -> None:
+        room, self._startup_room = self._startup_room, None
+        if room is not None:
+            for event, handler in self._startup_handlers:
+                room.off(event, handler)
+        self._startup_handlers.clear()
+        self._startup_identities.clear()
+
+    def _room_disconnected(self, reason: object = None) -> None:
+        self._disconnect_reason = reason
+        log_event(
+            logger,
+            logging.INFO,
+            "egma.media.disconnected",
+            "livekit room disconnected",
+            attributes={"livekit.disconnect_reason": disconnect_reason_name(reason)},
+        )
+
+    async def _finish_remote_close(self, drain: _Pipecat17InputDrain) -> None:
+        try:
+            if self.failed.is_set():
+                return
+            if self.ended.is_set():
+                return
+            if drain.departure_started:
+                await drain.finish_departures()
+                return
+            established = self._connected.is_set() and self.carrying_audio.is_set()
+            confirmed = False
+            if established:
+                if self._confirm_remote_end is not None:
+                    confirmed = await self._confirm_remote_end()
+                else:
+                    confirmed = room_was_deleted(self._disconnect_reason)
+            if self._leaving:
+                return
+            # Participant events can arrive while the provider request is in
+            # flight. Keep their completed/pending drain instead of starting a
+            # second marker or replacing that ending with an unconfirmed drop.
+            if self.failed.is_set() or self.ended.is_set():
+                return
+            if drain.departure_started:
+                await drain.finish_departures()
+                return
+            if confirmed:
+                # This check and every drain check preserve independent media
+                # failures. A provider ending never clears a failure event.
+                drain._require_working_media()
+                await drain.participant_left(None, self.ended)
+            else:
+                self.failed.set()
+        except Exception:
+            if not self._leaving:
+                self.failed.set()
+                logger.warning("the livekit input drain failed before room completion")
+        finally:
+            if self.failed.is_set():
+                await drain.cancel()
+
+    async def _cancel_remote_close(self) -> None:
+        task = self._remote_close
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     async def wait_connected(self) -> None:
         """Wait for the running Pipecat transport to enter the room."""
@@ -1101,23 +1114,10 @@ class JoinedRoom:
             )
 
     def note_anybody_already_here(self) -> None:
-        """Count whoever was in the room before egma got into it.
-
-        The events above are the room telling egma who arrives. This is
-        egma asking, once, immediately after the join — because the two
-        can disagree by exactly one participant: the transport announces
-        an already-present participant as the first joiner while the
-        connect is still returning, and nothing guarantees that handler
-        has run by the time the join is awaited here. Asking costs one
-        local read and closes that gap, so an agent that was quicker into
-        the room than egma is somebody who came rather than nobody.
-
-        The read is of the room's *remote* participants, so egma cannot
-        count itself and turn an empty room into somebody who came.
-
-        It never raises. A transport that stops offering this read leaves
-        the wait exactly where the events put it, which is the behaviour
-        without it, rather than failing a simulation over a check.
+        """Read existing remote participants after join to cover delayed arrival
+        callbacks.
+        Do not count Egma itself. If the transport cannot expose the table, retain
+        the state supplied by events without raising.
         """
         if self.arrivals.is_set() or self._transport is None:
             return
@@ -1128,7 +1128,15 @@ class JoinedRoom:
         if present:
             self.arrivals.set()
 
-    def register_rpc(self, method: str, handler: RpcMethod) -> None:
+    def register_rpc(
+        self,
+        method: str,
+        handler: RpcMethod,
+        *,
+        on_attempt: RpcNotice | None = None,
+        on_accepted: RpcNotice | None = None,
+        on_refused: RpcRefusalNotice | None = None,
+    ) -> None:
         if self._transport is None:
             raise MediaBackendError(
                 f"{method} was offered before the room transport existed",
@@ -1138,7 +1146,13 @@ class JoinedRoom:
         # local participant. This one access is pinned in uv.lock and covered
         # by the room mock-tool tests.
         self._transport._client.room.local_participant.register_rpc_method(
-            method, answering(handler)
+            method,
+            answering(
+                handler,
+                on_attempt=on_attempt,
+                on_accepted=on_accepted,
+                on_refused=on_refused,
+            ),
         )
 
     async def leave(self) -> None:
@@ -1147,6 +1161,8 @@ class JoinedRoom:
         input_drain, self._input_drain = self._input_drain, None
         self._leaving = True
         self.ended.set()
+        await self._cancel_remote_close()
+        self._detach_startup_states()
         if input_drain is not None:
             await input_drain.cancel()
         if transport is not None:

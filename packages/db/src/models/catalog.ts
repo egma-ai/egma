@@ -173,6 +173,15 @@ export const PROVIDER_CATALOG = [
     label: "Deepgram",
   },
   {
+    provider: "openai",
+    job: "tts",
+    model: "gpt-4o-mini-tts-2025-12-15",
+    adapter: "openai",
+    label: "OpenAI",
+    recommendedVoiceId: "alloy",
+    recommendedSpeed: 1,
+  },
+  {
     provider: "cartesia",
     job: "stt",
     model: "ink-2",

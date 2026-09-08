@@ -1,30 +1,6 @@
-"""A customer's own token endpoint, on this machine.
-
-The other half of the room-shaped LiveKit in :mod:`room_stub`. Where that
-one stands in for the calls the driver makes *of a LiveKit*, this one does
-not stand in for anything: it is a real HTTP server on loopback, and the
-driver really posts to it over a socket. So what CI proves about the
-request egma sends and the answers it will take is proved about the
-driver's own HTTP code, not about a mock of it — and the contract this
-serves is the same one the public docs publish, which is what makes the
-docs a thing that is tested rather than a thing that was written.
-
-What it can be told to do:
-
-- ``token`` — what it mints, and ``alias`` is which of the names the
-  contract accepts it comes back under. LiveKit's own ``participant_token``
-  unless a test says otherwise.
-- ``server_url`` — the server the answer names, under ``server_url_key``:
-  LiveKit's own ``server_url`` unless a test says otherwise. ``None`` is an
-  answer that names no server, which the contract refuses.
-- ``status`` — anything outside 2xx is an endpoint saying no.
-- ``body`` — a whole JSON body of its own, for the answers that are
-  well-formed JSON and still outside the contract.
-- ``raw`` — bytes that are not JSON at all: the framework error page an
-  endpoint really returns when the handler behind it threw.
-
-Everything it was asked is kept on :attr:`asked`, so a test can look at
-the request the driver built rather than at a description of it.
+"""Local HTTP token endpoint used by the real driver request code.
+Configure token and server field aliases, status, custom JSON, or raw invalid bytes.
+Retain complete requests in asked so tests can inspect the serialized contract.
 """
 
 from __future__ import annotations

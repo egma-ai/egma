@@ -1,13 +1,7 @@
-"""Minimal OTLP/HTTP sink that writes every export request body to disk verbatim.
-
-Listens on http://127.0.0.1:4318/v1/traces (the OTLP/HTTP default). Each POST is
-written unchanged as request-NNN.bin, and its headers are appended to
-manifest.json. Nothing is decoded, re-encoded or reordered: the files on disk are
-the bytes an OpenTelemetry exporter put on the wire.
-
+"""Capture OTLP HTTP bodies verbatim at 127.0.0.1:4318/v1/traces.
+Write request-NNN.bin and append request headers to manifest.json.
 Usage: python capture-server.py <output-dir>
-
-See README.md in this directory for the whole procedure.
+See README.md for the capture procedure.
 """
 
 from __future__ import annotations

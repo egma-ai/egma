@@ -12,7 +12,7 @@ Use `simulation` for every LiveKit simulation, including tests without mocks. Us
 
 ## Install
 
-Use Python 3.11 or newer and `livekit-agents>=1.6.7,<1.7`.
+Use Python 3.11 or newer and `livekit-agents>=1.6.6,<1.9`.
 
 <CodeGroup>
 
@@ -48,7 +48,7 @@ Call `monitor(ctx)` at the start of your job entrypoint, before connecting or st
 The following worker uses OpenAI for speech and responses. Install its model plugins alongside the SDK:
 
 ```bash
-uv add 'livekit-agents[openai,silero]>=1.6.7,<1.7'
+uv add 'livekit-agents[openai,silero]>=1.6.6,<1.9'
 ```
 
 Set your usual `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and `OPENAI_API_KEY` in the worker environment. Set the [Egma variables](#configure-egma), then save this as `agent.py`:
@@ -161,7 +161,7 @@ Simulation spans are batched every second and flushed when the session closes an
 | Production room | The function returns without connecting, exporting, sending messages, or wrapping tools. |
 | A simulation tool named in the test | Egma supplies the authored response. |
 | A tool with no matching mock | The real tool runs. |
-| Egma does not answer the initial tool report | `simulation` raises `egma.NotReported`; the session does not start. |
+| The room ends before Egma accepts the initial tool report | `simulation` raises `egma.NotReported`; the session does not start. |
 | Egma cannot be reached during a mocked tool call | The call raises `ToolError`; the real tool does not run. |
 | Egma receives a tool call and refuses it | The call raises `ToolError`; the real tool does not run. |
 
@@ -169,9 +169,11 @@ Simulation spans are batched every second and flushed when the session closes an
   Tools without a matching mock still run their real implementations. Use a test account or sandbox for tools that can make real changes, and confirm the mock names match your registered tools.
 </Warning>
 
-The helper can wait up to 45 seconds for Egma's participant during simulation startup. Do not catch `NotReported` and start the session anyway. Check the room connection, Egma's participant, and the SDK version when this error occurs. Missing settings or an incompatible tracing setup raise `ValueError` instead.
+The helper has no total startup deadline. It waits while the simulation room is active; individual token requests and hello attempts keep their transport timeouts. A permanent refusal, room disconnect, Egma participant departure, or cancellation ends startup. Do not catch `NotReported` and start the session anyway. Check the room connection, Egma's participant, and the SDK version when this error occurs. Missing settings or an incompatible tracing setup raise `ValueError` instead.
 
 Without the SDK report, Egma fails the LiveKit simulation. Check the simulation's tool calls to confirm the response used. See [Mock tool responses](/guides/mock-tool-responses).
+
+After your normal `session.start` returns, LiveKit publishes its native agent state. Egma waits for an initialized state before sending the first simulated input. This wait uses the simulation's configured duration. You do not need another readiness callback.
 
 ## Test in chat mode
 

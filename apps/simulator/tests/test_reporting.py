@@ -56,6 +56,7 @@ async def test_events_arrive_in_order_with_the_wal_written_first(tmp_path):
     # What the lifecycle keeps about the conversation: the count, tallied by
     # whoever watched it happen. The turns themselves are spans.
     reporter.turn_count = 2
+    reporter.execution_ended()
     reporter.completed("persona_concluded")
     await reporter.close()
 
@@ -96,6 +97,7 @@ async def test_a_transient_failure_resends_the_same_bytes(tmp_path):
 async def test_a_terminal_report_before_running_is_a_loud_bug(tmp_path):
     reporter = Reporter(FakeClient(), "sim-rep-3", tmp_path)
     with pytest.raises(ContractViolation):
+        reporter.execution_ended()
         reporter.completed("persona_concluded")
     assert not (tmp_path / wal_filename("sim-rep-3")).exists()
 
@@ -105,6 +107,7 @@ async def test_a_report_that_violates_the_contract_never_leaves(tmp_path):
     reporter = Reporter(client, "sim-rep-4", tmp_path)
     reporter.running()
     with pytest.raises(ContractViolation):
+        reporter.execution_ended()
         reporter.completed("hung_up_on")
     await reporter.close()
 
@@ -177,6 +180,7 @@ async def test_an_unreachable_control_plane_is_given_up_on_without_hanging(
     spans.opened()
     spans.turn("human", "Hello.")
     spans.flush()
+    reporter.execution_ended()
     reporter.completed("persona_concluded")
 
     # close() returns rather than waiting out an outage of unknown length.
@@ -215,6 +219,7 @@ async def test_spans_and_lifecycle_share_one_log_in_the_order_they_happened(
     spans.turn("human", "Could we move my cleaning?")
     spans.flush()
     spans.sealed()
+    reporter.execution_ended()
     reporter.completed("persona_concluded")
     await reporter.close()
 
@@ -246,6 +251,7 @@ async def test_the_terminal_report_leaves_after_every_span_batch(tmp_path):
         spans.turn("agent", f"Answer {turn}.")
         spans.flush()
     spans.sealed()
+    reporter.execution_ended()
     reporter.completed("persona_concluded")
     await reporter.close()
 
@@ -312,6 +318,7 @@ async def test_a_refused_span_batch_blocks_the_terminal_report(tmp_path):
     spans.opened()
     spans.turn("agent", "Lakeside Dental.")
     spans.flush()
+    reporter.execution_ended()
     reporter.completed("persona_concluded")
     await reporter.close()
 
@@ -322,3 +329,14 @@ async def test_a_refused_span_batch_blocks_the_terminal_report(tmp_path):
         "spans" if "resourceSpans" in json.loads(line) else "report"
         for line in wal_lines
     ] == ["report", "spans", "report"]
+
+
+async def test_terminal_delivery_requires_an_observed_execution_end(tmp_path):
+    client = FakeClient()
+    reporter = Reporter(client, "sim-no-execution-end", tmp_path)
+    reporter.running()
+    with pytest.raises(ContractViolation):
+        reporter.completed("persona_concluded")
+    await reporter.close()
+    assert len(client.delivered) == 1
+    assert json.loads(client.delivered[0])["events"][0]["status"] == "running"

@@ -1,16 +1,7 @@
 /**
- * The API has one application-log path: Pino writes JSON to container
- * standard output, and the deployment collector reads it with filelog.
- *
- * Pino's OpenTelemetry instrumentation has two independent features. Log
- * correlation adds trace and span ids to that JSON line. Log sending adds a
- * second destination that sends the same line through the OpenTelemetry Logs
- * SDK. The second feature would duplicate the filelog path.
- *
- * This test loads the real preload module and records the configuration it
- * gives the instrumentation. The OpenTelemetry and PostHog implementations
- * are replaced because the interface under test is startup configuration,
- * not a live request to an observability backend.
+ * Load the telemetry preload module with SDK stubs to inspect its configuration.
+ * Pino should add trace correlation to stdout JSON without also sending the
+ * same logs through the OpenTelemetry Logs SDK.
  */
 
 import { describe, expect, it, vi } from "vitest";

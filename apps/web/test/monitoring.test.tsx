@@ -18,21 +18,8 @@ import type { Facts, Grade, Listed } from "../lib/transcripts.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
- * **Monitoring**, rendered and driven the way somebody with a keyboard drives
- * it.
- *
- * Two claims this file exists to defend, and neither can be made by reading a
- * source file:
- *
- * 1. **The project in the address is the project asked about, and the traffic
- *    asked for is production.** Both ride in the request, so the first thing
- *    asked of the read is what it named. A page that resolved either for itself
- *    would show one project's traffic under another's address, or a simulation
- *    on the surface that exists to keep the two apart.
- * 2. **A quiet page shows one guidance and only one.** The three answer
- *    different questions and point in different directions, so each is asserted
- *    present *and* the other two absent — showing two at once is the failure,
- *    and only a rendered page can be asked about it.
+ * Drive the Traces page with stubbed reads. Check project and source request
+ * parameters, and require each guidance state to exclude the others.
  */
 
 const routed = vi.hoisted(() => ({
@@ -142,6 +129,7 @@ const TRACE_DETAIL = {
   ],
   simulationId: null,
   gradingState: "not_requested",
+  workBlock: null,
   grades: [],
   gradeHistory: [],
   combinedScore: null,
@@ -270,16 +258,9 @@ function page(rows: readonly Listed[]): Stubbed {
 }
 
 /**
- * One page, with every read answered.
- *
- * `rows`, `everRecorded`, `graders` and `keys` are the four inputs the quiet
- * states are decided from, so a case says only which of them it is about.
- *
- * `everRecorded` is the widest-window probe — *has this project ever recorded
- * anything* — and it defaults to whatever `rows` says, which is the ordinary
- * case of a project that is empty everywhere or busy everywhere. A case about
- * the window sets the two apart. Any read can be refused instead, which is a
- * case of its own: a refusal is not a zero.
+ * Stub rows, wider recent history, graders, and keys independently.
+ * everRecorded is the widest-window probe, not all-time history. Refused
+ * reads remain unknown instead of becoming zero.
  */
 function stub(options: {
   readonly rows?: readonly Listed[];
@@ -556,6 +537,21 @@ describe("what the Monitoring list shows", () => {
    * exchange happened in — which is what makes one transcript a link somebody
   * can send.
   */
+  it("shows the funding action in a pending production trace sheet", async () => {
+    stub({ rows: [ONE_ROW], detail: { ...TRACE_DETAIL, gradingState: "pending",
+      workBlock: { error: "providers_unfunded", message: "The inference balance is $0.00." },
+    } });
+    render(<MonitoringTranscriptsPage />);
+    const table = await screen.findByRole("table", { name: LIST.tableLabel });
+    fireEvent.click(within(table).getByRole("button", { name: FACTS.traceId }));
+    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
+    expect(await within(sheet).findByText("Grading is waiting. The inference balance is $0.00.")).toBeTruthy();
+    expect(within(sheet).getByRole("link", { name: "Add credits" }).getAttribute("href"))
+      .toBe("/projects/prj_2/settings/billing");
+    expect(within(sheet).getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_2/settings/provider-api-keys");
+  });
+
   it("opens one continuous trace sheet from the row", async () => {
     const startedAt = new Date(Date.now() - 5 * 60_000).toISOString();
     const { asked } = stub({
@@ -1124,14 +1120,8 @@ describe("what a quiet Monitoring page says", () => {
 });
 
 /**
- * **Monitoring is one verb on this screen, and v0 shows nothing else about
- * it.**
- *
- * The separate monitoring screen is retired, so the action now enters the
- * shared setup flow on Agents. And the management half — stop
- * pulling, turn it on again, when something last arrived — has no interface at
- * launch: the API keeps `stopMonitoring`, and surfacing it is its own effort.
- * A screen that grew a stop button would be that decision made by drift.
+ * Monitoring setup enters the shared Agents flow. This surface has no stop,
+ * restart, or last-received controls.
  */
 describe("the one monitoring action this screen carries", () => {
   it("heads the page with it, and states the Monitoring goal in the address", async () => {

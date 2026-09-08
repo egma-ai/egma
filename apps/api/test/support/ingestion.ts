@@ -4,24 +4,17 @@ import { startDrainer } from "../../src/ingestion/drainer.ts";
 import {
   pendingObjectStore,
   type IngestionStore,
-} from "../../src/ingestion/object-store.ts";
+} from "@egma/ingestion";
 import {
   RECORD_FORMAT_VERSION,
   recordFrom,
   type IngestionRecord,
-} from "../../src/ingestion/record.ts";
-import type { SegmentHeader } from "../../src/ingestion/segment.ts";
+} from "@egma/ingestion";
+import type { SegmentHeader } from "@egma/ingestion";
 
 /**
- * One normalized record, with evidence in it that a careless implementation
- * would damage.
- *
- * The default transcript carries the three words a credential scanner reaches
- * for and the tool evidence carries a fourth, because the product's promise is
- * that a transcript does not change because of what it contains. A record built
- * here is what the segment and object-store suites seal, so anything that
- * rewrote, truncated or dropped one of these values would fail where the object
- * is inspected rather than in a unit test of the thing that did it.
+ * Include secret-like words in transcript and tool evidence to detect
+ * content-based redaction during segment and object-store processing.
  */
 export function aRecord(
   overrides: Partial<IngestionRecord> = {},
@@ -90,18 +83,8 @@ export async function pendingSegments(
 }
 
 /**
- * Every pending object drained, the way the deployment drains one.
- *
- * The real drainer, driven for exactly one pass and then stopped — not a
- * stand-in that repeats its steps. A suite whose claim is about what a reader
- * sees has to carry evidence past the acceptance boundary somehow, and every
- * one of them must do it the same way or they would be proving different
- * things; doing it through the module the deployment runs is what stops this
- * helper from quietly becoming a second implementation of the order that
- * matters.
- *
- * A scan interval far beyond any suite's life, because the one pass is asked
- * for here rather than waited for.
+ * Run one pass of the production drainer before query assertions. Set a long
+ * scan interval so the test controls when that pass occurs, then stop it.
  */
 export async function drainPendingEvidence(
   store: IngestionStore,

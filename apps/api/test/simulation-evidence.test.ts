@@ -197,14 +197,9 @@ describe("one simulation's grades", () => {
     expect(snapshot).not.toHaveProperty("connectionKind");
 
     /*
-     * **Who the agent actually heard, off the version this simulation
-     * pinned.** `name` is the team's label for the library row and reads live;
-     * the three beside it are the authored person and never move.
-     *
-     * Asserted here because the response is serialized against a schema that
-     * *omits* what it cannot match rather than refusing it — so a block that
-     * regressed to nulls, or back to the retired `traits` wrapper, would leave
-     * this read looking perfectly healthy and say nothing at all.
+     * Persona labels are live metadata; identityName, personality, and language
+     * come from the pinned version. Assert the serialized fields because schema
+     * serialization can omit unsupported fields without failing the response.
      */
     expect(first.body.persona).toMatchObject({
       name: expect.stringContaining("Impatient Rita") as unknown as string,
@@ -324,5 +319,14 @@ describe("one simulation's grades", () => {
         { score: 0.75, result: "failed" },
       ],
     });
+  });
+});
+
+describe("billing stays on organization settings", () => {
+  it("has no simulation cost or run hold endpoint", async () => {
+    const { standing, run } = await aCustomerWhoRan("no_simulation_billing");
+    for (const path of [`/api/simulations/${run.heard}/usage`, `/api/runs/${run.heard}/billing-hold`]) {
+      expect((await request(api.app, "GET", path, standing.key)).statusCode).toBe(404);
+    }
   });
 });
