@@ -166,12 +166,14 @@ describe("configuration", () => {
     expect(loadConfig({
       ...enough,
       EGMA_VOICE_SIMULATION_CONCURRENCY_CAP: "24",
+      EGMA_CHAT_SIMULATION_CONCURRENCY_CAP: "20",
       EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS: JSON.stringify({
         openai: 12,
         cartesia: 8,
       }),
     }).simulationConcurrencyCaps).toEqual({
       voice: 24,
+      chat: 20,
       speechProviders: { openai: 12, cartesia: 8 },
     });
   });
@@ -181,6 +183,10 @@ describe("configuration", () => {
       ...enough,
       EGMA_VOICE_SIMULATION_CONCURRENCY_CAP: "0",
     })).toThrow(/EGMA_VOICE_SIMULATION_CONCURRENCY_CAP/);
+    expect(() => loadConfig({
+      ...enough,
+      EGMA_CHAT_SIMULATION_CONCURRENCY_CAP: "0",
+    })).toThrow(/EGMA_CHAT_SIMULATION_CONCURRENCY_CAP/);
     expect(() => loadConfig({
       ...enough,
       EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS: '{"unknown":2}',

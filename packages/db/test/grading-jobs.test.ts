@@ -391,6 +391,7 @@ describe("one frozen production job", () => {
       claimant: "grader-after-final-expiry",
       capacity: 50,
       leaseSeconds: 1,
+      concurrencyCap: 1,
     });
 
     await expect(getGradingJob(auth, final.id)).resolves.toMatchObject({
@@ -602,6 +603,7 @@ describe("expired grading leases", () => {
       claimant: "grader-after-expiry",
       capacity: 50,
       leaseSeconds: 1,
+      concurrencyCap: 1,
     })).find((claim) => claim.traceId === traceId);
     if (reclaimed === undefined) throw new Error("the expired job was not reclaimed");
 
@@ -627,6 +629,49 @@ describe("expired grading leases", () => {
 });
 
 describe("queue load", () => {
+  it("holds a platform cap across workers and refills ten freed slots", async () => {
+    const tracePrefix = "ca90";
+    const traceIds = Array.from(
+      { length: 110 },
+      (_, index) => `${tracePrefix}${index.toString(16).padStart(28, "0")}`,
+    );
+    await Promise.all(traceIds.map((traceId) => request(traceId)));
+
+    const firstWave = await Promise.all([
+      claimGradingJobs({
+        claimant: "capped-grader-a",
+        capacity: 50,
+        concurrencyCap: 100,
+      }),
+      claimGradingJobs({
+        claimant: "capped-grader-b",
+        capacity: 50,
+        concurrencyCap: 100,
+      }),
+    ]);
+    const firstHundred = firstWave.flat();
+    expect(firstHundred).toHaveLength(100);
+    await expect(claimGradingJobs({
+      claimant: "capped-grader-c",
+      capacity: 50,
+      concurrencyCap: 100,
+    })).resolves.toEqual([]);
+
+    await Promise.all(firstHundred.slice(0, 10).map((claim) =>
+      finishGradingJob(claim.auth, claim.id, claim.claimedBy)
+    ));
+    const refill = await claimGradingJobs({
+      claimant: "capped-grader-c",
+      capacity: 50,
+      concurrencyCap: 100,
+    });
+    expect(refill).toHaveLength(10);
+
+    await Promise.all([...firstHundred.slice(10), ...refill].map((claim) =>
+      finishGradingJob(claim.auth, claim.id, claim.claimedBy)
+    ));
+  });
+
   it("keeps Postgres job rows equal to live backlog while durable history grows", async () => {
     const tracePrefix = "f004";
     const traceCount = 64;

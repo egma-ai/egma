@@ -130,7 +130,7 @@ export type Config = {
    * Postgres, and neither keeps a cross-work key cache.
    */
   readonly providerCredentials: ProviderCredentialSource;
-  /** Optional deployment-wide voice and speech-provider concurrency caps. */
+  /** Optional deployment-wide simulation and speech-provider concurrency caps. */
   readonly simulationConcurrencyCaps: SimulationConcurrencyCaps;
   /** Hosted voice compute. Unset self-hosts never import the AWS adapter. */
   readonly voiceFleet: AwsVoiceFleetSettings | undefined;
@@ -238,9 +238,16 @@ function simulationConcurrencyCaps(
     environment,
     "EGMA_VOICE_SIMULATION_CONCURRENCY_CAP",
   );
+  const chat = positiveWhole(
+    environment,
+    "EGMA_CHAT_SIMULATION_CONCURRENCY_CAP",
+  );
   const raw = environment.EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS?.trim();
   if (raw === undefined || raw === "") {
-    return voice === undefined ? {} : { voice };
+    return {
+      ...(voice === undefined ? {} : { voice }),
+      ...(chat === undefined ? {} : { chat }),
+    };
   }
   let parsed: unknown;
   try {
@@ -276,6 +283,7 @@ function simulationConcurrencyCaps(
   }
   return {
     ...(voice === undefined ? {} : { voice }),
+    ...(chat === undefined ? {} : { chat }),
     speechProviders: caps,
   };
 }

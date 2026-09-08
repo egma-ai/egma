@@ -469,6 +469,7 @@ export {
 export {
   AGENT_POV_BOUND_SECONDS,
   GRADING_WORK_CHANNEL,
+  MAX_GRADING_CLAIM_CAPACITY,
   claimGradingJobs,
   finishGradingJob,
   getGradingJob,

@@ -1733,6 +1733,7 @@ export type SimulationClaimRequest = {
 
 export type SimulationConcurrencyCaps = {
   readonly voice?: number | undefined;
+  readonly chat?: number | undefined;
   readonly speechProviders?:
     | Readonly<Partial<Record<ModelProvider, number>>>
     | undefined;
@@ -1761,6 +1762,7 @@ function checkedCaps(
     }
   };
   check("the voice concurrency cap", offered.voice);
+  check("the chat concurrency cap", offered.chat);
   for (const [provider, cap] of Object.entries(
     offered.speechProviders ?? {},
   )) {
@@ -1792,6 +1794,7 @@ type CapCandidate = {
 
 type CapUsage = {
   voice: number;
+  chat: number;
   readonly speechProviders: Map<string, number>;
 };
 
@@ -1803,8 +1806,10 @@ function speechProvidersOf(candidate: CapCandidate): readonly ModelProvider[] {
 }
 
 function usageOf(active: readonly CapCandidate[]): CapUsage {
-  const usage: CapUsage = { voice: active.length, speechProviders: new Map() };
+  const usage: CapUsage = { voice: 0, chat: 0, speechProviders: new Map() };
   for (const candidate of active) {
+    usage[candidate.modality] += 1;
+    if (candidate.modality === "chat") continue;
     let providers: readonly ModelProvider[];
     try {
       providers = speechProvidersOf(candidate);
@@ -1828,7 +1833,11 @@ function admitWithinCaps(
   caps: SimulationConcurrencyCaps,
   usage: CapUsage,
 ): boolean {
-  if (candidate.modality === "chat") return true;
+  if (candidate.modality === "chat") {
+    if (caps.chat !== undefined && usage.chat >= caps.chat) return false;
+    usage.chat += 1;
+    return true;
+  }
   if (caps.voice !== undefined && usage.voice >= caps.voice) return false;
   const providerCaps = caps.speechProviders ?? {};
   if (Object.keys(providerCaps).length === 0) {
@@ -1869,7 +1878,10 @@ async function lockCapAdmission(tx: Transaction): Promise<void> {
   );
 }
 
-async function activeVoiceCandidates(on: Queryable): Promise<readonly CapCandidate[]> {
+async function activeSimulationCandidates(
+  on: Queryable,
+  modalities: readonly Modality[],
+): Promise<readonly CapCandidate[]> {
   return (await on
     .select({
       id: simulation.id,
@@ -1881,7 +1893,7 @@ async function activeVoiceCandidates(on: Queryable): Promise<readonly CapCandida
     .innerJoin(personaVersion, eq(personaVersion.id, simulation.personaVersionId))
     .where(
       and(
-        eq(simulation.modality, "voice"),
+        inArray(simulation.modality, modalities),
         inArray(simulation.status, ["claimed", "running"]),
       ),
     )) as readonly CapCandidate[];
@@ -1894,7 +1906,7 @@ export async function estimateVoiceSimulationDemand(
   const caps = checkedCaps(request.caps);
   return db().transaction(async (tx) => {
     await lockCapAdmission(tx);
-    const active = await activeVoiceCandidates(tx);
+    const active = await activeSimulationCandidates(tx, ["voice"]);
     const usage = usageOf(active);
     let admissibleQueued = 0;
     let after: string | undefined;
@@ -1955,12 +1967,21 @@ export async function claimSimulations(
   const now = new Date();
 
   const claimed = await db().transaction(async (tx) => {
-    const capsApply =
-      caps.voice !== undefined || Object.keys(caps.speechProviders ?? {}).length > 0;
+    const capsApply = caps.voice !== undefined || caps.chat !== undefined ||
+      Object.keys(caps.speechProviders ?? {}).length > 0;
     const canClaimVoice = modalities === undefined || modalities.includes("voice");
-    const active = capsApply && canClaimVoice ? await (async () => {
+    const voiceCapsApply = caps.voice !== undefined ||
+      Object.keys(caps.speechProviders ?? {}).length > 0;
+    const cappedModalities: readonly Modality[] = [
+      ...(voiceCapsApply && canClaimVoice ? ["voice" as const] : []),
+      ...(caps.chat !== undefined &&
+          (modalities === undefined || modalities.includes("chat"))
+        ? ["chat" as const]
+        : []),
+    ];
+    const active = capsApply && cappedModalities.length > 0 ? await (async () => {
       await lockCapAdmission(tx);
-      return activeVoiceCandidates(tx);
+      return activeSimulationCandidates(tx, cappedModalities);
     })() : [];
     const usage = usageOf(active);
     const admitted: CapCandidate[] = [];
@@ -1992,7 +2013,7 @@ export async function claimSimulations(
         )
         .orderBy(asc(simulation.id))
         .limit(
-          capsApply && canClaimVoice
+          capsApply && cappedModalities.length > 0
             ? SIMULATION_CLAIM_SCAN_WINDOW
             : capacity - admitted.length,
         )
@@ -2004,7 +2025,7 @@ export async function claimSimulations(
       if (
         admitted.length >= capacity ||
         candidates.length <
-          (capsApply && canClaimVoice
+          (capsApply && cappedModalities.length > 0
             ? SIMULATION_CLAIM_SCAN_WINDOW
             : capacity - admitted.length)
       ) {

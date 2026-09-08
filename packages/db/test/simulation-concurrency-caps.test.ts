@@ -1,6 +1,7 @@
 import { newId } from "@egma/ids";
 import {
   claimSimulations,
+  completeSimulation,
   createAgent,
   createPersona,
   createTest,
@@ -10,6 +11,7 @@ import {
   getSimulation,
   listSimulations,
   startRun,
+  startSimulation,
   type AuthContext,
   type PersonaModels,
 } from "@egma/db";
@@ -139,6 +141,49 @@ afterAll(async () => {
 });
 
 describe("fleet claim selection", () => {
+  it("holds independent voice and chat pools at one hundred and refills ten", async () => {
+    const expand = async (sourceId: string): Promise<void> => {
+      const ids = Array.from({ length: 109 }, () => newId("sim")).sort();
+      await database.sql(
+        `insert into simulation
+         select populated.*
+           from simulation source
+           cross join unnest($2::text[], $3::integer[]) as clone(id, position)
+           cross join lateral jsonb_populate_record(
+             null::simulation,
+             to_jsonb(source) || jsonb_build_object('id', clone.id, 'position', clone.position)
+           ) as populated
+          where source.id = $1`,
+        [sourceId, ids, ids.map((_, index) => index + 2)],
+      );
+    };
+    await expand(await queued("voice"));
+    await expand(await queued("chat"));
+    const caps = { voice: 100, chat: 100 } as const;
+
+    const filled = await Promise.all([
+      claimSimulations({ claimant: "voice-1", capacity: 50, modalities: ["voice"], caps }),
+      claimSimulations({ claimant: "voice-2", capacity: 50, modalities: ["voice"], caps }),
+      claimSimulations({ claimant: "chat-1", capacity: 50, modalities: ["chat"], caps }),
+      claimSimulations({ claimant: "chat-2", capacity: 50, modalities: ["chat"], caps }),
+    ]);
+    const voice = filled.flat().filter((claim) => claim.modality === "voice");
+    const chat = filled.flat().filter((claim) => claim.modality === "chat");
+    expect({ voice: voice.length, chat: chat.length }).toEqual({ voice: 100, chat: 100 });
+
+    await Promise.all([...voice.slice(0, 10), ...chat.slice(0, 10)].map(async (claim) => {
+      await startSimulation(claim.auth, claim.id, claim.claimedBy);
+      await completeSimulation(claim.auth, claim.id, claim.claimedBy, {
+        endingReason: "persona_concluded",
+      });
+    }));
+    const refill = await Promise.all([
+      claimSimulations({ claimant: "voice-refill", capacity: 50, modalities: ["voice"], caps }),
+      claimSimulations({ claimant: "chat-refill", capacity: 50, modalities: ["chat"], caps }),
+    ]);
+    expect(refill.map((claims) => claims.length)).toEqual([10, 10]);
+  });
+
   it("claims only requested modalities without changing omission behavior", async () => {
     const chat = await queued("chat");
     const voice = await queued("voice");
@@ -249,6 +294,28 @@ describe("fleet claim selection", () => {
         capacity: 1,
         modalities: ["voice"],
         caps: { voice: 1 },
+      }),
+    ]);
+
+    expect(fleet.flat()).toHaveLength(1);
+  });
+
+  it("enforces the chat cap across concurrent claimants", async () => {
+    await queued("chat");
+    await queued("chat");
+
+    const fleet = await Promise.all([
+      claimSimulations({
+        claimant: "chat-a",
+        capacity: 1,
+        modalities: ["chat"],
+        caps: { chat: 1 },
+      }),
+      claimSimulations({
+        claimant: "chat-b",
+        capacity: 1,
+        modalities: ["chat"],
+        caps: { chat: 1 },
       }),
     ]);
 
