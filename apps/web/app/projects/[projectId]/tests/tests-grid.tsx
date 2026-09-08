@@ -4,6 +4,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type ComponentProps,
@@ -63,8 +64,18 @@ import { ConfirmDialog } from "./parts.tsx";
  * Mock tools and env open JSON dialogs instead of inline text editors.
  */
 
-/** A persona as a cell needs it: an id to send and a name to show. */
-type Named = { readonly id: string; readonly name: string };
+/**
+ * A persona as a cell needs it: an id to send and a name to show.
+ *
+ * `archivedAt` travels with the personas a test names, so the picker can say
+ * that one of them is gone. A persona read from the project's own list is
+ * available by definition and carries nothing here.
+ */
+type Named = {
+  readonly id: string;
+  readonly name: string;
+  readonly archivedAt?: string | null;
+};
 
 /** What a cell is, which is also which field one save carries. */
 type Field =
@@ -413,7 +424,13 @@ function PersonaPicker({
           /* The cell owns its own caret; opening must not move it first. */
           onMouseDown={(event) => event.preventDefault()}
         >
-          + Add a persona
+          {/*
+           * A cell that already names somebody opens a panel that both adds and
+           * removes, so the trigger says editing rather than adding. An empty
+           * one — the entry row, before anybody has been named — keeps the
+           * grid's own add line, because adding is all it can do.
+           */}
+          {chosen.length === 0 ? "+ Add a persona" : "Edit personas"}
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -439,8 +456,12 @@ function PersonaPicker({
   );
 }
 
+/** Why the only persona a test names cannot be taken off it. */
+const LAST_PERSONA = "A test needs at least one persona";
+
 /**
- * What the open picker holds: the search, the people, and the way out.
+ * What the open picker holds: who is on the test, the search, the people, and
+ * the way out.
  *
  * It is its own component so that the read below runs when a panel opens
  * rather than when the grid draws, which is the difference between one request
@@ -464,6 +485,21 @@ function PersonaChoices({
   const [refused, setRefused] = useState<string | null>(null);
   /** Whether egma holds more than this picker read. Said out loud if so. */
   const [truncated, setTruncated] = useState(false);
+  const panel = useRef<HTMLDivElement>(null);
+  const said = useId();
+
+  /*
+   * **Who the test names now, built from the row rather than from the list
+   * below.** The list holds the project's available personas, and a test can
+   * name one the project has since deleted — which is exactly the test that
+   * cannot be saved again until that persona comes off it. Reading the row
+   * puts the deleted one on screen, with its own way out.
+   */
+  const onTest: readonly Named[] = chosen.map(
+    (id) => known.get(id) ?? { id, name: id },
+  );
+  /** The last persona standing stays: a test says who calls. */
+  const onlyOne = onTest.length === 1;
 
   /*
    * **Every persona the project holds, not the first page of them.**
@@ -534,87 +570,145 @@ function PersonaChoices({
     onChange(next, named);
   }
 
+  /**
+   * Take one persona off the test, and hold the caret inside the open panel.
+   *
+   * The row that was pressed is about to leave. Radix reads focus falling to
+   * the body as focus leaving the panel, so the caret goes to the search
+   * field, which outlives every row here.
+   */
+  function remove(one: Named): void {
+    toggle(one);
+    panel.current
+      ?.querySelector<HTMLInputElement>('[data-slot="command-input"]')
+      ?.focus();
+  }
+
   return (
-    /*
-     * **`label` names the search field, not the list, and that is `cmdk`'s
-     * doing rather than a choice made here.** It renders the prop into a hidden
-     * element and points the field's `aria-labelledby` at it — always, even
-     * with no label given, which is why an `aria-label` on the field is
-     * overridden and silently does nothing. So the words that describe the
-     * typing have to arrive through this prop. The panel around it is a dialog
-     * and carries "Choose personas" of its own, so nothing is left unnamed.
-     */
-    <Command label="Search personas">
-      <CommandInput
-        /*
-         * The caret starts here, and that is load-bearing rather than a
-         * courtesy. Radix puts focus on the panel itself when it opens, and the
-         * panel's own children then re-render as the persona pages arrive —
-         * which drops focus to the body, reads to Radix as focus leaving the
-         * panel, and shuts it. Landing the caret on the field holds it on
-         * something that outlives the list, and it is where somebody opening a
-         * search panel expects to be typing.
-         */
-        autoFocus
-        /* A placeholder is not a name: it leaves with the first keystroke. */
-        placeholder="Search personas"
-        value={search}
-        onValueChange={setSearch}
-      />
-      <CommandList>
-        {refused !== null ? (
-          <p className="m-0 px-2.5 py-2 text-sm text-failure">{refused}</p>
-        ) : people === null ? (
-          <p className="m-0 px-2.5 py-2 text-sm text-muted-foreground">
-            Loading personas…
+    <div className="flex flex-col" ref={panel}>
+      {onTest.length === 0 ? null : (
+        <div className="border-b border-border">
+          <p className="m-0 px-2.5 pt-2 pb-1 text-sm text-faint" id={said}>
+            On this test
           </p>
-        ) : listed.length === 0 ? (
-          <p className="m-0 px-2.5 py-2 text-sm text-muted-foreground">
-            {wanted === ""
-              ? "This project has no personas yet."
-              : `No personas match “${search.trim()}”.`}
-          </p>
-        ) : (
-          <CommandGroup>
-            {listed.map((one) => (
-              <CommandItem
+          {/* Bounded and scrolling, as the list below it is: a test may name
+              more callers than a panel can hold. */}
+          <ul
+            className="m-0 max-h-40 list-none overflow-y-auto p-0"
+            aria-labelledby={said}
+          >
+            {onTest.map((one) => (
+              <li
+                className="flex flex-wrap items-center gap-x-2 px-2.5 pb-1"
                 key={one.id}
-                value={one.id}
-                /*
-                 * The row is the control, so the row says whether it is ticked.
-                 * `cmdk` has already spent `aria-selected` on the arrow keys'
-                 * highlight, and the box below is a picture of this state
-                 * rather than a second control announcing it again.
-                 */
-                aria-checked={chosen.includes(one.id)}
-                onSelect={() => toggle(one)}
               >
-                <Checkbox
-                  checked={chosen.includes(one.id)}
-                  readOnly
-                  tabIndex={-1}
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 truncate">{one.name}</span>
-              </CommandItem>
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                  {one.name}
+                  {one.archivedAt === null || one.archivedAt === undefined ? null : (
+                    // The test still names somebody the project has deleted.
+                    // Saying so is what makes the Remove beside it make sense.
+                    <span className="text-faint"> (deleted)</span>
+                  )}
+                </span>
+                <Button
+                  aria-label={`Remove ${one.name}`}
+                  className="px-0"
+                  disabled={onlyOne}
+                  onClick={() => remove(one)}
+                  size="sm"
+                  type="button"
+                  variant="link"
+                  {...(onlyOne ? { why: LAST_PERSONA } : {})}
+                >
+                  Remove
+                </Button>
+              </li>
             ))}
-          </CommandGroup>
-        )}
-      </CommandList>
-      {truncated ? (
-        // The search above runs in the browser, so it reaches what was read
-        // and nothing beyond it. The sentence says that rather than promising
-        // a search that would quietly come back empty.
-        <p className="m-0 border-t border-border px-2.5 py-1.5 text-sm text-muted-foreground">
-          Egma holds more personas than this list read.
-        </p>
-      ) : null}
-      <div className="flex justify-end border-t border-border px-2.5 py-1.5">
-        <button className={cn(ADD_LINE, "underline")} type="button" onClick={onDone}>
-          Done
-        </button>
-      </div>
-    </Command>
+          </ul>
+        </div>
+      )}
+      {/*
+       * **`label` names the search field, not the list, and that is `cmdk`'s
+       * doing rather than a choice made here.** It renders the prop into a
+       * hidden element and points the field's `aria-labelledby` at it — always,
+       * even with no label given, which is why an `aria-label` on the field is
+       * overridden and silently does nothing. So the words that describe the
+       * typing have to arrive through this prop. The panel around it is a
+       * dialog and carries "Choose personas" of its own, so nothing is left
+       * unnamed.
+       */}
+      <Command label="Search personas">
+        <CommandInput
+          /*
+           * The caret starts here, and that is load-bearing rather than a
+           * courtesy. Radix puts focus on the panel itself when it opens, and the
+           * panel's own children then re-render as the persona pages arrive —
+           * which drops focus to the body, reads to Radix as focus leaving the
+           * panel, and shuts it. Landing the caret on the field holds it on
+           * something that outlives the list, and it is where somebody opening a
+           * search panel expects to be typing.
+           */
+          autoFocus
+          /* A placeholder is not a name: it leaves with the first keystroke. */
+          placeholder="Search personas"
+          value={search}
+          onValueChange={setSearch}
+        />
+        <CommandList>
+          {refused !== null ? (
+            <p className="m-0 px-2.5 py-2 text-sm text-failure">{refused}</p>
+          ) : people === null ? (
+            <p className="m-0 px-2.5 py-2 text-sm text-muted-foreground">
+              Loading personas…
+            </p>
+          ) : listed.length === 0 ? (
+            <p className="m-0 px-2.5 py-2 text-sm text-muted-foreground">
+              {wanted === ""
+                ? "This project has no personas yet."
+                : `No personas match “${search.trim()}”.`}
+            </p>
+          ) : (
+            <CommandGroup>
+              {listed.map((one) => (
+                <CommandItem
+                  key={one.id}
+                  value={one.id}
+                  /*
+                   * The row is the control, so the row says whether it is ticked.
+                   * `cmdk` has already spent `aria-selected` on the arrow keys'
+                   * highlight, and the box below is a picture of this state
+                   * rather than a second control announcing it again.
+                   */
+                  aria-checked={chosen.includes(one.id)}
+                  onSelect={() => toggle(one)}
+                >
+                  <Checkbox
+                    checked={chosen.includes(one.id)}
+                    readOnly
+                    tabIndex={-1}
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 truncate">{one.name}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+        </CommandList>
+        {truncated ? (
+          // The search above runs in the browser, so it reaches what was read
+          // and nothing beyond it. The sentence says that rather than promising
+          // a search that would quietly come back empty.
+          <p className="m-0 border-t border-border px-2.5 py-1.5 text-sm text-muted-foreground">
+            Egma holds more personas than this list read.
+          </p>
+        ) : null}
+        <div className="flex justify-end border-t border-border px-2.5 py-1.5">
+          <button className={cn(ADD_LINE, "underline")} type="button" onClick={onDone}>
+            Done
+          </button>
+        </div>
+      </Command>
+    </div>
   );
 }
 /**
