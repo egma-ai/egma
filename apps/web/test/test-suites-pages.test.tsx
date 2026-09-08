@@ -1884,7 +1884,7 @@ describe("the suite-first Tests route", () => {
     const written = screen.getByText("Books service").closest("tr");
     if (written === null) throw new Error("the test's row is not on screen");
     fireEvent.click(within(written).getByText("Impatient Rita"));
-    fireEvent.click(within(written).getByRole("button", { name: "+ Add a persona" }));
+    fireEvent.click(within(written).getByRole("button", { name: "Edit personas" }));
 
     await waitFor(() => {
       expect(screen.getAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);
@@ -1926,7 +1926,7 @@ describe("the suite-first Tests route", () => {
     const written = screen.getByText("Books service").closest("tr");
     if (written === null) throw new Error("the test's row is not on screen");
     fireEvent.click(within(written).getByText("Impatient Rita"));
-    fireEvent.click(within(written).getByRole("button", { name: "+ Add a persona" }));
+    fireEvent.click(within(written).getByRole("button", { name: "Edit personas" }));
     fireEvent.click(await screen.findByRole("option", { name: "Calm Ben" }));
     expect(sent.some((request) => request.method === "PATCH")).toBe(false);
 
@@ -1975,6 +1975,143 @@ describe("the suite-first Tests route", () => {
     fireEvent.click(entryTrigger);
     expect(screen.getAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);
     expect(entryTrigger.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("takes a persona off a woken cell and commits the rest in their order", async () => {
+    const BEN = { id: "prs_2", name: "Calm Ben", archivedAt: null };
+    const CHRIS = { id: "prs_3", name: "Careful Chris", archivedAt: null };
+    gridAnswers({
+      tests: [testBody({ personas: [PERSONA, BEN, CHRIS] })],
+      saved: {
+        status: 200,
+        body: testBody({
+          personas: [PERSONA, CHRIS],
+          version: 2,
+          versionId: "tstv_2",
+        }),
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    const written = screen.getByText("Books service").closest("tr");
+    if (written === null) throw new Error("the test's row is not on screen");
+    fireEvent.click(
+      within(written).getByText("Impatient Rita, Calm Ben, Careful Chris"),
+    );
+
+    // The way in says what the panel does. A cell that already names somebody
+    // is edited, not only added to.
+    expect(
+      within(written).queryByRole("button", { name: "+ Add a persona" }),
+    ).toBeNull();
+    fireEvent.click(within(written).getByRole("button", { name: "Edit personas" }));
+
+    // The panel opens on who is on the test, in the order the test names them.
+    const panel = await screen.findByRole("dialog", { name: "Choose personas" });
+    expect(
+      within(panel)
+        .getAllByRole("listitem")
+        .map((row) => row.textContent),
+    ).toEqual(["Impatient RitaRemove", "Calm BenRemove", "Careful ChrisRemove"]);
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Remove Calm Ben" }));
+
+    // Taking somebody off a test is an edit, not a destruction: nothing is
+    // asked, and nothing is sent until the panel shuts, exactly as unticking.
+    expect(screen.queryAllByRole("dialog")).toHaveLength(1);
+    expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
+
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toEqual([
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          body: { personas: ["prs_1", "prs_3"], expectedVersionId: "tstv_1" },
+        },
+      ]);
+    });
+  });
+
+  it("keeps the one persona a test has left, and says why on the row", async () => {
+    gridAnswers();
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    const written = screen.getByText("Books service").closest("tr");
+    if (written === null) throw new Error("the test's row is not on screen");
+    fireEvent.click(within(written).getByText("Impatient Rita"));
+    fireEvent.click(within(written).getByRole("button", { name: "Edit personas" }));
+
+    const panel = await screen.findByRole("dialog", { name: "Choose personas" });
+    const remove = within(panel).getByRole("button", {
+      name: "Remove Impatient Rita",
+    }) as HTMLButtonElement;
+    expect(remove.disabled).toBe(true);
+
+    // The reason is drawn on the row and named by the button, so a keyboard
+    // and a screen reader reach it rather than only a resting pointer.
+    const why = within(panel).getByText("A test needs at least one persona");
+    expect(remove.getAttribute("aria-describedby")).toBe(why.id);
+
+    fireEvent.click(remove);
+    fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
+
+    await waitFor(() => {
+      expect(screen.queryAllByRole("dialog", { name: "Choose personas" })).toHaveLength(0);
+    });
+    expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+  });
+
+  it("shows a deleted persona a test still names, and takes it off", async () => {
+    const GONE = {
+      id: "prs_9",
+      name: "Retired Rae",
+      archivedAt: "2026-09-01T10:00:00.000Z",
+    };
+    gridAnswers({
+      tests: [testBody({ personas: [PERSONA, GONE] })],
+      saved: {
+        status: 200,
+        body: testBody({ personas: [PERSONA], version: 2, versionId: "tstv_2" }),
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    const written = screen.getByText("Books service").closest("tr");
+    if (written === null) throw new Error("the test's row is not on screen");
+    fireEvent.click(within(written).getByText("Impatient Rita, Retired Rae"));
+    fireEvent.click(within(written).getByRole("button", { name: "Edit personas" }));
+
+    const panel = await screen.findByRole("dialog", { name: "Choose personas" });
+
+    // The add list holds the project's available personas and nothing else, so
+    // this one is reachable nowhere but the section that names the test's own.
+    expect(await within(panel).findByRole("option", { name: "Impatient Rita" }))
+      .toBeTruthy();
+    expect(within(panel).queryByRole("option", { name: "Retired Rae" })).toBeNull();
+    expect(within(panel).getByText("(deleted)")).toBeTruthy();
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Remove Retired Rae" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
+
+    // The deleted persona is what refuses every later edit of this test, and
+    // this is the one way it comes off.
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toEqual([
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          body: { personas: ["prs_1"], expectedVersionId: "tstv_1" },
+        },
+      ]);
+    });
   });
 
   it("saves a name against the revision it read, not the version", async () => {
