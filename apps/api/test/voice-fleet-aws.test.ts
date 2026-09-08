@@ -6,8 +6,10 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { awsVoiceFleet } from "../src/voice-fleet-aws.ts";
+import type { AwsVoiceFleetSettings } from "../src/voice-fleet.ts";
 
-const settings = {
+const settings: AwsVoiceFleetSettings = {
+  kind: "aws-ecs",
   cluster: "egma",
   taskDefinition: "egma-voice-simulator",
   containerName: "simulator",
