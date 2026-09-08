@@ -145,25 +145,32 @@ describe("the standing sweep", () => {
     });
     api = made.api;
 
-    expect(wakes).toBe(1);
+    expect(wakes).toBe(2);
   });
 
-  it("wakes the voice fleet on each completed sweep tick", async () => {
+  it("wakes the voice fleet at startup and on cadence while a sweep is held", async () => {
+    vi.useFakeTimers();
     let wakes = 0;
+    let release: (() => void) | undefined;
     const sweep = startOrphanSweep({
       log: capturingLog(),
       intervalMilliseconds: 20,
-      sweep: async () => [],
+      sweep: () => new Promise((resolve) => {
+        release = () => resolve([]);
+      }),
       settleAgentPovBound: async () => [],
       wakeVoiceFleet: () => { wakes += 1; },
     });
     try {
-      await vi.waitFor(() => expect(wakes).toBeGreaterThan(1), {
-        timeout: 1_000,
-        interval: 10,
-      });
+      expect(wakes).toBe(1);
+      await vi.advanceTimersByTimeAsync(20);
+      expect(wakes).toBe(2);
+      await vi.advanceTimersByTimeAsync(60);
+      expect(wakes).toBe(5);
     } finally {
+      release?.();
       await sweep.stop();
+      vi.useRealTimers();
     }
   });
 
