@@ -1,6 +1,5 @@
 ---
 title: "Configure graders"
-description: "Choose which conversations a grader checks and what score it must reach."
 ---
 
 Open **Graders**, select **Active graders**, and open the grader's menu. Select
@@ -15,9 +14,8 @@ For a grader with editable scope, enable either or both sources:
 - **Grades production**: set **Production sample** from `1` through `100`
   percent. Use `100` to select every eligible production conversation.
 
-Production sampling selects a stable percentage of eligible traces. It is not
-a promise that each small group of conversations contains exactly that
-percentage.
+Production sampling selects a stable percentage of eligible traces. Small
+groups of conversations can have a different percentage.
 
 Overlapping simulation selections do not run the same project grader twice.
 A grader also needs to support the conversation's modality. A trace outside
@@ -45,7 +43,7 @@ Egma saves defaults when you first use a grader. Compatible updates to an
 Egma-provided definition apply to future work and preserve your saved model,
 settings, scope, and threshold. A custom clone is independent of its source.
 
-Save the policy, then start a new run. A simulation keeps the grader selection,
+Save your settings, then start a new run. A simulation keeps the grader selection,
 definition versions, settings, and pass thresholds captured for its run.
 Changes apply to future work.
 

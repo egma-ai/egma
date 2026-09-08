@@ -1,6 +1,5 @@
 ---
 title: "Scores and thresholds"
-description: "Read individual grader results, combined scores, and grading progress."
 ---
 
 Each grader returns a score from `0` to `1`, or no score when it cannot grade
@@ -49,7 +48,7 @@ Grading state describes whether work has finished:
 | `error` | A grader or the grading work ended with an error. |
 
 `complete` does not guarantee that all agent evidence arrived. Grading can
-proceed after its bounded wait with the evidence available at that time.
+proceed with the available evidence when the wait for agent evidence ends.
 Check the simulation's `agentPovIncomplete` field and
 [review the evidence source](/guides/start-and-follow-a-run#check-which-evidence-arrived)
 when a result appears to omit something the agent did.

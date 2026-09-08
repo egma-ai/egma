@@ -1,7 +1,6 @@
 ---
 title: "Connect a Retell agent"
 sidebarTitle: "Retell"
-description: "Add text and web-call testing to a Retell agent, then enable production monitoring."
 ---
 
 You need a Retell agent, a Retell API key that can access it, and an initialized
@@ -126,7 +125,7 @@ Egma SDK in your backend for this.
 Only the tools named in the test are mocked. Other tools still run against
 their real backend. Retell's built-in actions, such as call transfer, SMS,
 digit pressing, and built-in booking, are not replaced by custom-tool mocks.
-MCP tools are also outside that mock path.
+These mocks do not replace MCP tools either.
 
 <Warning>
   Web-call runs with mock tools create a temporary Retell agent version.

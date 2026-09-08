@@ -1,6 +1,5 @@
 ---
 title: "Get started"
-description: "Run Egma on your own machine with Docker Compose."
 ---
 
 Use `egma self-host up` to build and start the Egma platform from its source repository. This guide sets up a local instance. For a server used by other people or a remote agent, also configure its [public URL and storage URL](/self-hosting/configuration#public-urls-and-networking).
@@ -14,7 +13,7 @@ Install:
 - Docker Desktop, or Docker Engine with the Docker Compose plugin. Start the Docker daemon.
 - OpenAI and Cartesia API keys for the model choices used by the built-in persona. Add a Deepgram key if you select Deepgram speech-to-text.
 
-You supply model access for your instance. Egma stores agent provider credentials separately when you connect a Retell agent or LiveKit project.
+You supply model access for your instance. Egma stores agent provider credentials separately when you connect a LiveKit project or Retell agent.
 
 ## Download Egma
 
@@ -68,7 +67,7 @@ egma login --url http://localhost:3101
 egma init --url http://localhost:3101
 ```
 
-Approve the login in your browser. Then follow the [CLI guide](/tools/cli) to connect Retell or LiveKit, write a test, and run it.
+Approve the login in your browser. Then follow the [CLI guide](/tools/cli) to connect LiveKit or Retell, write a test, and run it.
 
 For LiveKit, install the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk) in the worker. Call `await simulation(agent, ctx, session)` before the session starts for every simulation. Set `EGMA_URL` to an address the worker can reach and `EGMA_API_KEY` to a key for the simulation's project. Both simulation traces and production monitoring need these settings. A worker deployed elsewhere cannot reach this machine through `localhost`.
 

@@ -1,6 +1,5 @@
 ---
 title: "LiveKit JavaScript SDK"
-description: "Connect your LiveKit Agents JS worker to simulation testing and production monitoring."
 ---
 
 The `@egma/livekit` package works with JavaScript and TypeScript workers. `simulation` reports the agent's tools, installs test mocks, and sends the agent's trace to its simulation record. `monitor` sends production traces to **Monitoring**.
@@ -112,7 +111,7 @@ OpenTelemetry JS 2.x cannot add a processor directly to an already-created provi
 
 ### If no conversation appears
 
-Check the worker's deployment and OpenTelemetry logs. Confirm that its key is scoped to the correct project, has write access, and can reach `EGMA_URL`. An organization-wide key cannot ingest traces.
+Check the worker's deployment and OpenTelemetry logs. Confirm that the key is scoped to the correct project and has write access. Check that the worker can reach `EGMA_URL`. An organization-wide key cannot ingest traces.
 
 Missing settings, invalid settings, an unsupported LiveKit version, or a conflicting tracer provider cause a direct setup error. Network failures happen in the worker; Egma can show a conversation only after its trace arrives. Restart the worker after changing the Egma settings or tracing setup.
 

@@ -1,10 +1,9 @@
 ---
 title: "Set up monitoring"
-description: "Capture real conversations from Retell or LiveKit and inspect them in Egma."
 ---
 
-Retell monitoring imports completed calls with the Retell API. LiveKit
-monitoring sends conversation evidence from your worker through the Egma SDK.
+LiveKit monitoring sends conversation evidence from your worker through the
+Egma SDK. Retell monitoring imports completed calls with the Retell API.
 You do not need a test suite or a simulation run for either setup.
 
 ## Retell
@@ -164,8 +163,9 @@ Complete one normal conversation with the updated worker, then open
 check its transcript and timing.
 
 There is no LiveKit monitoring switch to enable in Egma. The first received
-trace confirms the export path. If no conversation appears, check the worker's
-OpenTelemetry logs, the project key, and network access to `EGMA_URL`.
+trace confirms that the worker can send evidence to Egma. If no conversation
+appears, check the worker's OpenTelemetry logs, the project key, and network
+access to `EGMA_URL`.
 
 To stop this worker from sending new production evidence, remove its `monitor`
 call and restart the worker. Existing conversations stay in Egma. Keep

@@ -1,6 +1,5 @@
 ---
 title: "Custom graders"
-description: "Create a reusable check for behavior that matters to your product."
 ---
 
 A custom grader uses an LLM to check conversation evidence against your
@@ -9,7 +8,7 @@ threshold.
 
 The grader receives the transcript, ending outcome, tool names and arguments,
 observed metrics, and any expected behaviors from the test. Tool return
-payloads are not sent to the LLM. Use rules that this evidence can answer.
+payloads are not sent to the LLM. Use rules you can check with this evidence.
 The transcript and tool calls prefer the agent's evidence when available.
 See [Check which evidence arrived](/guides/start-and-follow-a-run#check-which-evidence-arrived).
 
@@ -40,10 +39,10 @@ State what to inspect and what each result means. Include the case where the
 conversation never reaches the behavior being checked.
 
 For example, a rule about an appointment recap should say what happens when
-the caller asks only about opening hours. Without that boundary, two reasonable
-readings can produce different results.
+the caller asks only about opening hours. Without that detail, the grader can
+interpret the rule in different ways and return different results.
 
-Avoid instructions such as “be helpful” without a concrete test. Split
+Avoid instructions such as "be helpful" without a concrete test. Split
 independent concerns into separate graders so the result tells you what failed.
 
 ## Check the grader
@@ -54,7 +53,7 @@ independent concerns into separate graders so the result tells you what failed.
 3. Check cases where the relevant action does not occur, the caller declines, or
    evidence is missing.
 4. Set the [scope and pass threshold](/guides/configure-graders) for future
-   conversations once the boundary is useful.
+   conversations once the grader gives useful results.
 
 ## Read the score
 

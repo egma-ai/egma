@@ -1,7 +1,6 @@
 ---
 title: "Connect a LiveKit agent"
 sidebarTitle: "LiveKit"
-description: "Run voice and text simulations against your LiveKit agent worker."
 ---
 
 Start with project credentials. Egma creates a room, dispatches your named
@@ -18,7 +17,7 @@ first.
 Use the worker and LiveKit project you already run. Set an explicit dispatch
 name in its startup configuration: `agent_name` in Python or `agentName` in
 JavaScript. The name must exactly match the `--livekit-agent-name` value you
-give Egma. An unnamed worker does not satisfy a named dispatch.
+give Egma. A named dispatch cannot reach an unnamed worker.
 
 For example, use `front-desk` as the name in both places. Keep the worker
 running while the tests execute. A local worker can join simulations if it

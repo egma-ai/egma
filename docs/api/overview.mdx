@@ -1,6 +1,5 @@
 ---
 title: "API overview"
-description: "Create tests, run a suite, and read the results from your own code."
 ---
 
 Choose a resource in the sidebar to see its endpoints. Each page shows the request, the response, and the errors that endpoint can return.
@@ -56,7 +55,7 @@ Use [List projects](/api/list-projects) to find project IDs. Sending a different
 
 Endpoints that return pages accept `pageSize` and `pageToken`. Read `nextPageToken` from the response and pass it as `pageToken` on the next request. Keep the other filters the same. Stop when `nextPageToken` is `null`.
 
-Page size limits and required filters are shown on each endpoint. For example, [List tests](/api/list-tests) requires `suiteId`.
+Each endpoint page lists its page size limits and required filters. For example, [List tests](/api/list-tests) requires `suiteId`.
 
 [Run events](/api/list-run-events) use a different cursor. Pass the returned `next` value as `after`. A response with `caughtUp: true` means you have read the events available so far. Keep polling until `done: true`; execution and grading may still be in progress.
 

@@ -1,13 +1,12 @@
 ---
 title: "Automate tests in CI"
-description: "Start a run, wait for execution and grading, and apply your own release policy."
 ---
 
 Use the CLI to push test files and the API to start and inspect a run.
 `egma run create` returns after starting the run; its exit code is not a
 test result.
 
-This recipe uses one explicit policy: **every simulation must complete, and
+This example uses one policy: **every simulation must complete, and
 every grader selected for it must pass**. Flagged missing agent evidence,
 missing grades, grading errors, cancellation, execution failures, and timeouts
 fail the CI job. This is the policy in the example, not an overall verdict

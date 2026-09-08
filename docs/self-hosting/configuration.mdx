@@ -1,9 +1,8 @@
 ---
 title: "Configuration"
-description: "Configure model access, authentication, storage, and networking for your Egma instance."
 ---
 
-Set operator values in `.env` at the root of your Egma platform checkout. Apply changes with:
+Set deployment settings in `.env` at the root of your Egma platform checkout. Apply changes with:
 
 ```bash
 egma self-host up
@@ -21,7 +20,7 @@ Docker Compose resolves `.env` values and any environment variables exported by 
 | Agent repository `egma/config.yaml` | The Egma instance URL, project, agent, and connection IDs. No credentials. |
 | Your LiveKit worker's environment | `EGMA_URL` and the project-scoped `EGMA_API_KEY` used to send simulation and production traces. |
 
-Retell and LiveKit connection credentials are supplied when you connect an agent. They are stored encrypted in Egma. They are separate from the model credentials that let your instance run personas and graders.
+Supply LiveKit and Retell connection credentials when you connect an agent. Egma stores them encrypted. They are separate from the model credentials that let your instance run personas and graders.
 
 ## Model providers
 
@@ -195,7 +194,7 @@ Retell chat and API-based voice connections do not need a carrier route. To call
 
 For Twilio, use the termination trunk hostname and the credential-list username and password. These are different from an Account SID and Auth Token. A partial bundle is refused during startup.
 
-The bundled SIP gateway defaults to port `5060` over TCP and UDP, and RTP ports `10000`–`10020` over UDP. Set `EGMA_LIVEKIT_SIP_PORT`, `EGMA_LIVEKIT_SIP_RTP_PORT_START`, and `EGMA_LIVEKIT_SIP_RTP_PORT_END` if your route needs different ports. The gateway must be reachable by the carrier on its signaling and media ports.
+The bundled SIP gateway defaults to port `5060` over TCP and UDP, and RTP ports `10000` through `10020` over UDP. Set `EGMA_LIVEKIT_SIP_PORT`, `EGMA_LIVEKIT_SIP_RTP_PORT_START`, and `EGMA_LIVEKIT_SIP_RTP_PORT_END` if your route needs different ports. The gateway must be reachable by the carrier on its signaling and media ports.
 
 `EGMA_LIVEKIT_SIP_USE_EXTERNAL_IP` defaults to `true`. For a fixed public IP or one-to-one NAT, set `EGMA_LIVEKIT_SIP_EXTERNAL_IP` to the public address and configure matching port forwarding. An HTTP reverse proxy does not carry SIP or RTP traffic. Use the [Retell guide](/guides/retell) to add the phone-number connection after the route is configured.
 
@@ -272,59 +271,57 @@ The bundled values are sufficient for a local installation. Change these when yo
   after this signing secret is configured.
 </ParamField>
 
-Egma measures every provider request and counts every chat simulation,
-web-call minute and phone minute on every deployment, whoever pays. Charging
-for them is separate, and it is off unless this key is set: with no key, plans
-and limits do not exist, every allowance is unlimited, and the usage page shows
-you your own numbers.
+Egma records every provider request, chat simulation, web-call minute, and
+phone minute on every deployment, regardless of who pays. Without a Stripe
+secret key, charging is off. There are no plans or billing limits, allowances
+are unlimited, and the usage page shows your usage.
 
-Setting it turns on plans, monthly allowances and a prepaid inference balance
-for every organization on the deployment. Each organization starts on the free
-Hobby plan and receives a one-time welcome credit. When billing is healthy,
-new work pauses if a Hobby allowance is spent or a required provider must use
-the deployment's key and the inference balance is exhausted. A saved organization
-key funds its provider independently. Pro voice usage can continue past its
-included minutes at the overage rate. Already admitted work finishes, and
-billing failures do not stop customer jobs. **Settings → Usage and billing**
-shows usage, the balance and payment actions; refusal messages link to the
-setting that can resolve the block.
+Setting the key enables plans, monthly allowances, and a prepaid inference
+balance for every organization on the deployment. Each organization starts
+on the free Hobby plan with a one-time welcome credit.
 
-Nothing about that is Egma Cloud's alone. The same key gives the same billing
-on any deployment, which is what makes it a hosted service rather than a
-cloud-only feature.
+When billing is healthy, new work pauses if a Hobby allowance is spent. It
+also pauses if a required provider must use the deployment's key and the
+inference balance is exhausted. A saved organization key pays for its provider
+independently. Pro voice usage can continue past its included minutes at the
+overage rate. Work already admitted finishes, and billing failures do not stop
+customer jobs.
+
+Open **Settings → Usage and billing** to see usage, the balance, and payment
+actions. Refusal messages link to the setting that can resolve the block.
+This billing setup works the same way on Egma Cloud and self-hosted deployments.
 
 ### Setting Stripe up
 
-Two steps, in this order.
-
-First, create the Stripe objects your deployment sells the paid plan through:
+First, create the Stripe objects needed to sell your deployment's paid plan:
 
 ```bash
 DATABASE_URL=... EGMA_STRIPE_SECRET_KEY=... \
   pnpm --filter @egma/ee stripe:setup
 ```
 
-It finds every object before it makes one, so it is safe to run again. It
-creates two billing meters, the paid product, its monthly fee price and two
-tiered metered prices whose first tier is the included allowance and whose
-second is the overage price, and it writes their identifiers onto the plan row.
+The command checks for existing objects before creating them, so you can run
+it again. It creates two billing meters, the paid product, its monthly fee
+price, and two tiered metered prices. The first tier covers the included
+allowance; the second sets the overage price. The command saves their
+identifiers in the plan row.
 It refuses a live key unless you set `EGMA_STRIPE_SETUP_ALLOW_LIVE=1`.
 
-Supply your business address and it also sets your Stripe Tax head office,
-which is what activates Stripe Tax. Either the whole address as JSON in
+Supply your business address to set your Stripe Tax head office and activate
+Stripe Tax. Provide the whole address as JSON in
 `EGMA_STRIPE_HEAD_OFFICE`, or the separate variables
 `EGMA_STRIPE_HEAD_OFFICE_LINE1`, `…_LINE2`, `…_CITY`, `…_STATE`,
-`…_POSTAL_CODE` and `…_COUNTRY`. Without an address the command says so and
-does everything else. These are read by the command only and are not
-deployment settings.
+`…_POSTAL_CODE` and `…_COUNTRY`. If you omit the address, the command reports
+that it is missing and completes the other steps. Only the setup command reads
+these variables; they are not deployment settings.
 
 Second, add a webhook endpoint in Stripe pointing at
 `https://your-deployment/api/billing/stripe/webhook`, subscribed to
 `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
 `customer.subscription.created`, `customer.subscription.updated` and
 `customer.subscription.deleted`. Put its signing secret in
-`EGMA_STRIPE_WEBHOOK_SECRET` and restart. Until you do, the endpoint answers
-404 and no payment reaches a balance.
+`EGMA_STRIPE_WEBHOOK_SECRET` and restart. Until you do, the endpoint returns
+404 and payments do not credit an inference balance.
 
 ### Updating pricing
 
