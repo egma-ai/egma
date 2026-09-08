@@ -3,9 +3,10 @@
  * Require an explicit agent version and carry mock answers in the request;
  * this module creates no temporary agent version.
  *
- * Keep WIRE aligned with egma_simulator.plugs.retell_text_mode. Its documented
- * wire assumptions need live validation; local stubs cannot establish API behavior.
+ * Request types come from the pinned Retell SDK. Keep the Python plug aligned.
  */
+
+import type { PlaygroundCompletionParams } from "retell-sdk/resources/playground";
 
 import {
   ask,
@@ -25,19 +26,14 @@ import {
 export const WIRE = {
   /** Where one exchange is asked for. The agent's own id follows it. */
   path: "/agent-playground-completion",
-  agentVersion: "agent_version",
+  agentVersion: "version",
   /** The history going out, and the agent's new messages coming back. */
   messages: "messages",
-  /** Retell's house name for rendered variables, as the call lanes use it. */
-  dynamicVariables: "retell_llm_dynamic_variables",
-  /**
-   * What a reply may call the variables as they now stand. Two names because
-   * the outbound one is well attested and the inbound one is not; the first
-   * present wins.
-   */
+  dynamicVariables: "dynamic_variables",
+  /** Prefer the documented field; accept the legacy response spelling. */
   replyVariables: [
-    "retell_llm_dynamic_variables",
     "dynamic_variables",
+    "retell_llm_dynamic_variables",
   ] as readonly string[],
   /** The answers this exchange carries with it, in place of a draft. */
   mockTools: "tool_mocks",
@@ -51,11 +47,11 @@ export const WIRE = {
   mockToolResult: "result",
   /** Where a conversation flow is, threaded turn by turn. */
   nodeId: "current_node_id",
-  componentId: "current_component_id",
+  componentId: "component_id",
   /** Where a Retell LLM is, threaded the same way. */
   stateName: "current_state",
   /** The agent saying the exchange is over. */
-  agentEnded: "agent_ended",
+  agentEnded: "call_ended",
 } as const;
 
 /**
@@ -81,7 +77,7 @@ export type TextModeMessage = {
 
 /** One turn of history, as a request carries it. */
 export type TextModeTurn = {
-  readonly role: string;
+  readonly role: "agent" | "user";
   readonly content: string;
 };
 
@@ -195,7 +191,7 @@ function resumeIn(document: Readonly<Record<string, unknown>>): TextModeResume {
  * One answer as the wire carries it: untagged, JSON-encoded, with a flag for
  * which branch it is.
  */
-function mockOnTheWire(mock: TextModeMockTool): Record<string, unknown> {
+function mockOnTheWire(mock: TextModeMockTool): PlaygroundCompletionParams.ToolMock {
   const fails = "error" in mock.answer;
   const held = fails ? mock.answer.error : mock.answer.answer;
   return {
@@ -213,10 +209,10 @@ function mockOnTheWire(mock: TextModeMockTool): Record<string, unknown> {
 }
 
 /** The body of one exchange, with nothing in it egma was not given. */
-function bodyOf(exchange: TextModeExchange): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    // Always. Never conditional, never omitted, never `latest`.
-    [WIRE.agentVersion]: exchange.agentVersion,
+type PlaygroundBody = Omit<PlaygroundCompletionParams, "version">;
+
+function bodyOf(exchange: TextModeExchange): PlaygroundBody {
+  const body: PlaygroundBody = {
     [WIRE.messages]: exchange.messages.map((turn) => ({
       role: turn.role,
       content: turn.content,
@@ -259,7 +255,7 @@ export async function exchangeInTextMode(
   try {
     answer = await ask(key, reach, {
       method: "POST",
-      path: `${WIRE.path}/${encodeURIComponent(exchange.agentId)}`,
+      path: `${WIRE.path}/${encodeURIComponent(exchange.agentId)}?version=${exchange.agentVersion}`,
       body: bodyOf(exchange),
     });
   } catch (cause) {

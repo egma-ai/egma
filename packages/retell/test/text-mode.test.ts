@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   exchangeInTextMode,
   NO_RESUME,
-  WIRE,
   type RetellCredential,
+  type TextModeTurn,
 } from "../src/index.ts";
 
 /**
@@ -67,7 +67,7 @@ describe("one text-mode exchange", () => {
     const { fetchImpl, seen } = retell([
       () =>
         json({
-          [WIRE.messages]: [
+          ["messages"]: [
             { role: "agent", content: "Acme Dental, how can I help?" },
             {
               role: "tool_call_invocation",
@@ -77,7 +77,7 @@ describe("one text-mode exchange", () => {
             { role: "tool_call_result", name: "check_availability", content: '{"slots":2}' },
             { role: "agent", content: "Thursday at two is free." },
           ],
-          [WIRE.agentEnded]: false,
+          ["call_ended"]: false,
         }),
     ]);
 
@@ -109,9 +109,9 @@ describe("one text-mode exchange", () => {
     const sent = seen[0];
     expect(sent?.method).toBe("POST");
     // The agent is named in the path, exactly as the plug names it.
-    expect(sent?.url).toBe(`https://retell.invalid${WIRE.path}/${AGENT}`);
+    expect(sent?.url).toBe(`https://retell.invalid/agent-playground-completion/${AGENT}?version=106`);
     expect(sent?.authorization).toBe(`Bearer ${KEY}`);
-    expect(sent?.body[WIRE.messages]).toEqual([
+    expect(sent?.body["messages"]).toEqual([
       { role: "user", content: "I need to move my appointment." },
     ]);
   });
@@ -122,9 +122,9 @@ describe("one text-mode exchange", () => {
     // just created — so an exchange that said nothing could land somewhere
     // else between one persona turn and the next.
     const { fetchImpl, seen } = retell([
-      () => json({ [WIRE.messages]: [] }),
-      () => json({ [WIRE.messages]: [] }),
-      () => json({ [WIRE.messages]: [] }),
+      () => json({ ["messages"]: [] }),
+      () => json({ ["messages"]: [] }),
+      () => json({ ["messages"]: [] }),
     ]);
 
     for (const messages of [
@@ -135,7 +135,7 @@ describe("one text-mode exchange", () => {
         { role: "agent", content: "hi" },
         { role: "user", content: "Thursday please" },
       ],
-    ]) {
+    ] satisfies TextModeTurn[][]) {
       await exchangeInTextMode(
         key,
         { agentId: AGENT, agentVersion: 106, messages },
@@ -145,7 +145,8 @@ describe("one text-mode exchange", () => {
 
     expect(seen).toHaveLength(3);
     for (const sent of seen) {
-      expect(sent.body[WIRE.agentVersion]).toBe(106);
+      expect(new URL(sent.url).searchParams.get("version")).toBe("106");
+      expect(sent.body).not.toHaveProperty("agent_version");
     }
     // Never the word, on any request: a name is what a concurrent branch moves.
     expect(JSON.stringify(seen)).not.toContain("latest");
@@ -155,8 +156,8 @@ describe("one text-mode exchange", () => {
     const { fetchImpl, seen } = retell([
       () =>
         json({
-          [WIRE.messages]: [{ role: "agent", content: "Acme Dental." }],
-          [WIRE.nodeId]: "node_greeting",
+          ["messages"]: [{ role: "agent", content: "Acme Dental." }],
+          ["current_node_id"]: "node_greeting",
         }),
     ]);
 
@@ -172,27 +173,27 @@ describe("one text-mode exchange", () => {
     expect(opened.reply.resume.nodeId).toBe("node_greeting");
 
     const sent = seen[0];
-    expect(sent?.body[WIRE.messages]).toEqual([]);
+    expect(sent?.body["messages"]).toEqual([]);
     // A resume state naming nothing is absent rather than sent empty: an empty
     // node id is not the same as no node id.
-    expect(Object.keys(sent?.body ?? {})).not.toContain(WIRE.nodeId);
-    expect(Object.keys(sent?.body ?? {})).not.toContain(WIRE.stateName);
+    expect(Object.keys(sent?.body ?? {})).not.toContain("current_node_id");
+    expect(Object.keys(sent?.body ?? {})).not.toContain("current_state");
   });
 
   it("threads variables and resume state from one turn into the next", async () => {
     const { fetchImpl, seen } = retell([
       () =>
         json({
-          [WIRE.messages]: [{ role: "agent", content: "Which day?" }],
-          [WIRE.dynamicVariables]: {
+          ["messages"]: [{ role: "agent", content: "Which day?" }],
+          ["dynamic_variables"]: {
             caller_name: "Margaret",
             booked_day: "Thursday",
           },
-          [WIRE.nodeId]: "node_booking",
-          [WIRE.componentId]: "component_day",
-          [WIRE.stateName]: "collecting",
+          ["current_node_id"]: "node_booking",
+          ["component_id"]: "component_day",
+          ["current_state"]: "collecting",
         }),
-      () => json({ [WIRE.messages]: [], [WIRE.agentEnded]: true }),
+      () => json({ ["messages"]: [], ["call_ended"]: true }),
     ]);
 
     const first = await exchangeInTextMode(
@@ -237,20 +238,20 @@ describe("one text-mode exchange", () => {
     expect(second.reply.agentEnded).toBe(true);
 
     const sent = seen[1];
-    expect(sent?.body[WIRE.dynamicVariables]).toEqual({
+    expect(sent?.body["dynamic_variables"]).toEqual({
       caller_name: "Margaret",
       booked_day: "Thursday",
     });
-    expect(sent?.body[WIRE.nodeId]).toBe("node_booking");
-    expect(sent?.body[WIRE.componentId]).toBe("component_day");
-    expect(sent?.body[WIRE.stateName]).toBe("collecting");
+    expect(sent?.body["current_node_id"]).toBe("node_booking");
+    expect(sent?.body["component_id"]).toBe("component_day");
+    expect(sent?.body["current_state"]).toBe("collecting");
   });
 
   it("carries its mocked answers on the request and writes nothing", async () => {
     const { fetchImpl, seen } = retell([
       () =>
         json({
-          [WIRE.messages]: [
+          ["messages"]: [
             {
               role: "tool_call_invocation",
               name: "check_availability",
@@ -285,24 +286,24 @@ describe("one text-mode exchange", () => {
     // Untagged and JSON-encoded, with a flag for which branch it is: Retell
     // serves the answer either way and says which one happened in its own
     // words, so egma's own tag never travels.
-    expect(seen[0]?.body[WIRE.mockTools]).toEqual([
+    expect(seen[0]?.body["tool_mocks"]).toEqual([
       {
-        [WIRE.mockToolName]: "check_availability",
+        ["tool_name"]: "check_availability",
         input_match_rule: { type: "any" },
-        [WIRE.mockToolOutput]: JSON.stringify({ slots: ["14:00"] }),
-        [WIRE.mockToolResult]: true,
+        ["output"]: JSON.stringify({ slots: ["14:00"] }),
+        ["result"]: true,
       },
       {
-        [WIRE.mockToolName]: "charge_card",
+        ["tool_name"]: "charge_card",
         input_match_rule: { type: "any" },
-        [WIRE.mockToolOutput]: JSON.stringify("card declined"),
-        [WIRE.mockToolResult]: false,
+        ["output"]: JSON.stringify("card declined"),
+        ["result"]: false,
       },
     ]);
   });
 
   it("says nothing about mocks or variables when it has none", async () => {
-    const { fetchImpl, seen } = retell([() => json({ [WIRE.messages]: [] })]);
+    const { fetchImpl, seen } = retell([() => json({ ["messages"]: [] })]);
 
     await exchangeInTextMode(
       key,
@@ -317,8 +318,8 @@ describe("one text-mode exchange", () => {
     );
 
     const keys = Object.keys(seen[0]?.body ?? {});
-    expect(keys).not.toContain(WIRE.mockTools);
-    expect(keys).not.toContain(WIRE.dynamicVariables);
+    expect(keys).not.toContain("tool_mocks");
+    expect(keys).not.toContain("dynamic_variables");
   });
 
   it("lays a reply's variables over what it sent, losing none to a delta", async () => {
@@ -329,12 +330,12 @@ describe("one text-mode exchange", () => {
     const { fetchImpl } = retell([
       () =>
         json({
-          [WIRE.messages]: [],
-          [WIRE.dynamicVariables]: { booked_day: "Thursday" },
+          ["messages"]: [],
+          ["dynamic_variables"]: { booked_day: "Thursday" },
         }),
       () =>
         json({
-          [WIRE.messages]: [],
+          ["messages"]: [],
           // The other spelling, which is the one that is only a guess.
           dynamic_variables: { booked_day: "Friday" },
         }),
@@ -368,7 +369,7 @@ describe("one text-mode exchange", () => {
     const { fetchImpl } = retell([
       () =>
         json({
-          [WIRE.messages]: [
+          ["messages"]: [
             { role: "sms_sent", content: "Booking confirmed", to: "+15551234567" },
           ],
         }),

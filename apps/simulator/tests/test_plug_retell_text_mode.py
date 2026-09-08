@@ -281,7 +281,7 @@ async def test_every_request_names_the_version_the_spec_named(
     await plug.deliver("Hello?")
     await plug.close()
 
-    wanted = version.strip() if isinstance(version, str) else version
+    wanted = str(version).strip()
     assert [request["agent_version"] for request in running.stub.requests] == [
         wanted,
         wanted,
@@ -333,7 +333,7 @@ async def test_a_reply_updates_this_simulations_variables_without_dropping_them(
     await plug.close()
 
     carried = [
-        request["body"].get("retell_llm_dynamic_variables")
+        request["body"].get("dynamic_variables")
         for request in running.stub.requests
     ]
     assert carried[0] == {"account_id": "sim_01", "caller_name": ""}
@@ -387,9 +387,9 @@ async def test_the_resume_state_is_threaded_across_turns(start_text_mode_stub):
     bodies = [request["body"] for request in running.stub.requests]
     assert "current_node_id" not in bodies[0], "nothing is resumed before anything ran"
     assert bodies[1]["current_node_id"] == "greet"
-    assert "current_component_id" not in bodies[1]
+    assert "component_id" not in bodies[1]
     assert bodies[2]["current_node_id"] == "lookup"
-    assert bodies[2]["current_component_id"] == "verify_caller"
+    assert bodies[2]["component_id"] == "verify_caller"
 
 
 async def test_a_retell_llm_threads_its_state_the_same_way(start_text_mode_stub):
