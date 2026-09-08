@@ -76,6 +76,7 @@ function run(overrides: Record<string, unknown> = {}) {
     name: "Release check",
     agentId: "agt_1",
     connectionId: "con_1",
+    connectionName: "Staging chat key",
     agentPlatform: "retell",
     connectionType: "retell_chat_api",
     accessVariant: "retell_chat_api.api_key",
@@ -216,7 +217,7 @@ describe("runs list presentation", () => {
     expect(screen.queryByRole("dialog", { name: "Create a run" })).toBeNull();
   });
 
-  it("shows only the five requested facts and resolves the agent identity", async () => {
+  it("shows only the six requested facts and resolves the agent identity", async () => {
     answers(shellStubs([run()]));
     render(<RunsPage />);
 
@@ -226,21 +227,40 @@ describe("runs list presentation", () => {
       .map((header) => header.textContent ?? "")
       .filter((header) => header !== "");
 
-    expect(headers).toEqual(["Run", "Test suite", "Agent", "Started", "Status"]);
+    expect(headers).toEqual([
+      "Run",
+      "Test suite",
+      "Agent",
+      "Connection",
+      "Started",
+      "Status",
+    ]);
     expect(within(table).queryByText("Execution")).toBeNull();
     expect(within(table).queryByText("Total avg score")).toBeNull();
     expect(within(table).queryByText("Combined score")).toBeNull();
     expect(within(table).getByText("Front desk")).toBeTruthy();
     expect(within(table).getByText("Chat")).toBeTruthy();
-    const started = within(table).getByText("Aug 25, 2026");
+    expect(within(table).getByText("Staging chat key")).toBeTruthy();
+    expect(within(table).getByText("Retell chat")).toBeTruthy();
+    /*
+     * Started names a moment, not a day, so the clock is part of the column.
+     * The zone is the viewer's, so the shape is pinned and the exact instant
+     * stays on the element: the title keeps seconds, the text stops at the
+     * minute.
+     */
+    const started = within(table).getByText(/^Aug 25, 2026, \d{2}:\d{2}$/u);
     expect(started.getAttribute("datetime")).toBe("2026-08-25T18:00:01.000Z");
+    expect(started.getAttribute("title")).toMatch(
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /u,
+    );
     const headerCells = within(table).getAllByRole("columnheader");
-    expect(headerCells.slice(0, 5).map((header) => header.style.width)).toEqual([
-      "24%",
-      "20%",
+    expect(headerCells.slice(0, 6).map((header) => header.style.width)).toEqual([
       "22%",
-      "17%",
-      "17%",
+      "16%",
+      "18%",
+      "18%",
+      "14%",
+      "12%",
     ]);
     expect(table.parentElement?.parentElement?.parentElement?.className).toContain(
       "[--row-min-height:56px]",
@@ -258,37 +278,49 @@ describe("runs list presentation", () => {
     expect(runLink.className).toContain("pointer-hover:underline");
     const completed = within(table).getByText("Completed");
     expect(completed.closest('[data-slot="badge"]')).toBeNull();
-    expect(completed.closest('[data-slot="run-status"]')).toBeTruthy();
-    expect(completed.closest('[data-slot="run-status"]')?.children).toHaveLength(0);
+    const status = completed.closest('[data-slot="run-status"]');
+    expect(status).toBeTruthy();
+    expect(status?.children).toHaveLength(1);
+    expect(status?.firstElementChild?.getAttribute("data-slot")).toBe("state-mark");
   });
 
-  it("uses a loader only for a running run status", async () => {
+  it("gives every run status a filled square and moves only the unsettled ones", async () => {
     answers(
       shellStubs([
+        run({
+          id: "run_pending",
+          name: "Waiting run",
+          status: "pending",
+          startedAt: null,
+        }),
         run({ id: "run_running", name: "Live run", status: "running" }),
+        run({ id: "run_done", name: "Finished run", status: "completed" }),
         run({ id: "run_canceled", name: "Stopped run", status: "canceled" }),
       ]),
     );
     render(<RunsPage />);
 
     const table = await screen.findByRole("table", { name: "Runs in this project" });
-    const liveRow = within(table)
-      .getByRole("link", { name: "Live run" })
-      .closest("tr");
-    const stoppedRow = within(table)
-      .getByRole("link", { name: "Stopped run" })
-      .closest("tr");
+    const squareOf = (word: string): Element | null =>
+      within(table)
+        .getByText(word)
+        .closest('[data-slot="run-status"]')
+        ?.querySelector('[data-slot="state-mark"]') ?? null;
 
-    expect(liveRow).not.toBeNull();
-    expect(stoppedRow).not.toBeNull();
-    expect(
-      within(liveRow!).getByText("Running").closest('[data-slot="run-status"]')
-        ?.querySelector('[data-slot="run-status-loader"]'),
-    ).toBeTruthy();
-    expect(
-      within(stoppedRow!).getByText("Canceled").closest('[data-slot="run-status"]')
-        ?.children,
-    ).toHaveLength(0);
+    const squares: readonly (readonly [string, string, string | null])[] = [
+      ["Pending", "waiting", "pulse"],
+      ["Running", "active", "pulse"],
+      ["Completed", "complete", null],
+      ["Canceled", "stopped", null],
+    ];
+    for (const [word, kind, motion] of squares) {
+      const square = squareOf(word);
+      expect(square?.getAttribute("data-state-mark")).toBe(kind);
+      expect(square?.getAttribute("data-filled")).toBe("true");
+      expect(square?.getAttribute("data-motion")).toBe(motion);
+    }
+
+    expect(table.querySelector('[data-slot="run-status-loader"]')).toBeNull();
   });
 
   it("uses an honest fallback and a local date-time for an older run", async () => {
@@ -296,6 +328,7 @@ describe("runs list presentation", () => {
       shellStubs([
         run({
           agentId: "agt_archived",
+          connectionName: null,
           createdAt: "2026-07-01T18:00:00.000Z",
         }),
       ]),
@@ -304,6 +337,7 @@ describe("runs list presentation", () => {
 
     const table = await screen.findByRole("table", { name: "Runs in this project" });
     expect(within(table).getByText("Unavailable agent")).toBeTruthy();
+    expect(within(table).getByText("Unavailable connection")).toBeTruthy();
     const instant = within(table).getByText(/2026/).textContent ?? "";
     expect(instant).not.toMatch(/\b(?:UTC|GMT|PDT|PST)\b/u);
   });
@@ -314,7 +348,7 @@ describe("runs list presentation", () => {
 
     const table = await screen.findByRole("table", { name: "Runs in this project" });
     expect(within(table).getByText("Not started")).toBeTruthy();
-    expect(within(table).queryByText("Aug 25, 2026")).toBeNull();
+    expect(within(table).queryByText(/^Aug 25, 2026/u)).toBeNull();
   });
 
   it("keeps a row action interactive above the stretched run link", async () => {
