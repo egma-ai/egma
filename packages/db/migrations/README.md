@@ -1,94 +1,45 @@
-# The migration rule
+# Database migrations
 
-## Current baseline
+PostgreSQL and ClickHouse each have one `0000_baseline.sql` that creates the
+complete current schema in an empty database. They use different SQL dialects,
+so each store has its own file. PostgreSQL's Drizzle snapshot and journal describe
+that same baseline. New migrations start at `0001`.
 
-PostgreSQL and ClickHouse each start from one `0000_baseline.sql` file. New
-migrations start at `0001`.
+Egma is pre-launch. The baseline defines the final schema directly, without
+historical backfills, temporary columns or old-schema conversion paths. Rebuild
+disposable development databases when their baseline changes. The application
+does not convert or erase an existing database.
 
-Each baseline creates the complete current schema in an empty database. The
-stores use different SQL dialects, so each has its own file. PostgreSQL's
-Drizzle snapshot and journal describe that same baseline.
+## Startup and history
 
-During this pre-launch baseline reset, rebuild disposable development databases
-that used a different baseline. The application does not convert or erase an
-existing database, and its migration checksum checks remain enabled.
+The API applies Postgres migrations before it serves requests. An advisory lock
+allows one instance to apply a migration; each file and its ledger entry commit
+in one transaction. A failed file can be retried after the failure is corrected.
 
-Every migration ledger starts at this exact baseline. A build refuses changed
-checksums and any recorded migration it does not contain. Run a build that
-contains the database's complete migration history.
+Both stores refuse changed checksums and any recorded migration missing from the
+build. Run a build that contains the database's complete migration history. An
+older image does not restore an older schema.
 
-One rule keeps every deploy and every rollback safe, and it binds both
-stores — the Postgres files here and the ClickHouse files in
-`../clickhouse-migrations/`:
+After launch, preserve shipped migration files and append changes. Keep schema
+changes compatible with code still running during deployment. Destructive
+changes then require a coordinated release plan.
 
-**By default, a migration may never break the code that is currently running.**
+## ClickHouse
 
-That default is suspended before launch, which is where Egma is today. Read
-**Before launch** at the end of this file before applying the rest.
+ClickHouse has no transaction around a migration file. Every schema statement
+must support replay after partial or concurrent startup: use `IF EXISTS`,
+`IF NOT EXISTS` or `CREATE OR REPLACE`. Separate statements with
+`--> statement-breakpoint`; record the file only after all statements finish.
+Tests must prove replay from every interruption point preserves existing rows.
 
-The platform deploys on every green merge, and the API applies these files
-on boot, before the new code serves — so for a moment the *old* code runs
-against the *new* schema. A rollback is the same moment held open: it
-redeploys old code against a schema that stays, because applied migrations
-are immutable and are never undone. Both are survivable only while every
-migration is additive from the running code's point of view.
+Pack compatible changes to one table into one `ALTER`. If statements must be
+separate, keep them ordered; the runner retries only the specific replica
+metadata conflict and cloud wake timeout it recognizes.
 
-In practice:
+## Verification
 
-- **Test on the hosted compatibility floor.** Local development and CI use the
-  oldest Postgres and ClickHouse feature versions the hosted platform still
-  runs. Never move a test image ahead of its hosted vendor. The exact public
-  images are pinned in the root `docker-compose.yml`; the real database-backed
-  product tests run on those images.
-- **Add freely.** New tables, new nullable columns, new indexes — code that
-  does not know them never sees them.
-- **Remove in two releases, not one.** Stop reading the thing first and ship
-  that; drop it in a later release than the one that stopped using it. A
-  rename is an add and a remove, in that order, never one statement.
-- **Freeze shipped history, not local state.** Before merge, a migration may be
-  rewritten or squashed even if a local development database applied it;
-  repair that local ledger. After merge or use outside local development, add
-  a new file instead; the runner refuses a changed recorded file.
-- **ClickHouse migrations must resume safely.** There is no transaction around
-  a file, so every schema statement uses `IF EXISTS`, `IF NOT EXISTS` or
-  `CREATE OR REPLACE`, and survives a second run after a partial failure. An
-  approved data mutation must be idempotent and may name only a table
-  guaranteed by an earlier immutable migration, or one an idempotent `CREATE`
-  earlier in the same file guarantees. Pre-merge verification re-runs that
-  file safely from every point inside it, because the ledger records a file and
-  never a statement; ClickHouse has no `IF EXISTS` form for `ALTER TABLE ...
-  DELETE`.
-- **A rebuild is applied by one instance.** There is no advisory lock on this
-  side either, so several instances normally boot together and arrive at the
-  same schema because every statement is idempotent. A file that replaces a
-  table and refills it cannot reach that: two instances doing it together can
-  have one empty what the other has just put back. Such a file says so in its
-  header and ships in a release applied by a single instance.
-- **Pack compatible ClickHouse changes to one table into one `ALTER`.** If they
-  must be separate, keep them ordered and let the runner retry only
-  `517 CANNOT_ASSIGN_ALTER` while table metadata catches up.
-
-A change that cannot follow the rule in one step — a type change, a backfill
-that must rewrite — ships as expand, migrate, contract across releases, and
-the contract step waits until nothing supported still reads the old shape.
-
-## Before launch
-
-Egma has not launched. There is no deployed build to keep working and no
-rollback to keep bootable, so until it launches:
-
-- **A migration may be destructive.** Dropping a column, a table, a trigger, a
-  function or a constraint in one step is allowed.
-- **A migration may break the commit before it.** The code that reads the new
-  shape ships in the same change, so the two are never apart.
-- **Prefer the clean cut.** Nothing is deprecated in place, no column is kept
-  "just in case", and no contract accepts two shapes at once. Expand, migrate,
-  contract is what a launched product needs and is more machinery than this one
-  is paying for.
-
-Keep the baseline as a direct definition of the current schema. Historical
-backfills and temporary compatibility columns do not belong in it. Tests must
-cover fresh creation, the current constraints, concurrent startup and replay.
-
-A destructive migration says so in its own header and points at this section.
-When Egma launches, this section goes and the rule above stands on its own.
+Run fresh-database schema and product-contract tests, repeated and concurrent
+startup checks, checksum refusal checks and transaction/replay checks. Use the
+Postgres and ClickHouse versions pinned in the root `docker-compose.yml`, which
+are the hosted compatibility floor. Keep named constraints, functions, triggers,
+indexes and Drizzle metadata consistent with the application schema.
