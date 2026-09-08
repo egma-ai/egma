@@ -5,6 +5,8 @@ import {
   appendGrades,
   appendSpans,
   claimGradingJobs,
+  installBillingPlugIn,
+  openBillingPlugIn,
   connectClickHouse,
   disconnectClickHouse,
   finishGradingJob,
@@ -189,6 +191,36 @@ afterAll(async () => {
 });
 
 describe("one frozen production job", () => {
+  it("runs and regrades code-only work without asking for model funding", async () => {
+    const questions: unknown[] = [];
+    const restore = installBillingPlugIn({
+      ...openBillingPlugIn(),
+      entitlements: {
+        mayStart: async () => ({ allowed: true }),
+        mayPlatformKeyFund: async (asked) => {
+          questions.push(asked);
+          return { funded: false, providers: asked.providers, message: "Add credits." };
+        },
+      },
+    });
+    try {
+      const traceId = "aaaaaaaaaaaaaaaaaaaaaaaaaa110011";
+      await request(traceId);
+      expect(await readTraceGrading(auth, { source: "production", traceId }))
+        .toMatchObject({ state: "pending", workBlock: null });
+      const claim = await claimTrace(traceId, "code-without-funding");
+      await appendOne(claim, 1, 1_777_000_001_000_000n);
+      await finishGradingJob(claim.auth, claim.id, claim.claimedBy);
+      expect(await regradeTrace(auth, { source: "production", traceId })).toMatchObject({ kind: "queued" });
+      const regrade = await claimTrace(traceId, "code-regrade-without-funding");
+      await appendOne(regrade, 1, 1_777_000_002_000_000n);
+      await finishGradingJob(regrade.auth, regrade.id, regrade.claimedBy);
+      expect(questions).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
   it("creates no receipt or job until the explicit end arrives", async () => {
     const traceId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaddd";
 
@@ -837,6 +869,7 @@ describe("regrading uses frozen history", () => {
     await expect(readTraceGrading(auth, { source: "production", traceId }))
       .resolves.toEqual({
         state: "not_requested",
+        workBlock: null,
         history: [],
         current: [],
         combinedScore: null,

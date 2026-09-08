@@ -117,6 +117,7 @@ describe("the provider's footprint on the schema", () => {
     "project",
     "project_grader",
     "project_persona",
+    "provider_key",
     "rate_card",
     "retell_call_retry",
     "run",

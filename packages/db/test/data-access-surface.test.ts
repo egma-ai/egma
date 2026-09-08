@@ -116,6 +116,12 @@ const WORK_DISPATCHING = [
  * append-only; regrading retains their history.
  */
 const CONTEXT_REQUIRING = [
+  "readProviderKeys",
+  "putProviderKey",
+  "deleteProviderKey",
+  "resolveProviderKeysForWork",
+  "createProviderFundingReceipt",
+  "readProviderFundingReceipt",
   "cloneGraderInProject",
   "editGraderDefinition",
   "usePersona",
@@ -282,6 +288,7 @@ const CONTEXT_REQUIRING = [
   "releaseMonitoringLease",
   "releaseGradingJob",
   "readQueuedWorkProviders",
+  "readRunWorkBlock",
   "releaseSimulationClaim",
   "removeMember",
   // Archive's other half, for an agent and for one way of reaching it. They
@@ -506,7 +513,6 @@ const THE_MODELS = [
   "RECOMMENDED_GRADER_MODEL",
   "RECOMMENDED_PERSONA_MODELS",
   "SPEED_RANGE",
-  "graderJudgeProviders",
   "graderModelFromRow",
   "catalogEntry",
   "isModelProvider",
@@ -573,6 +579,7 @@ const VALUES = [
   // travels as a value rather than being read back out of the prose.
   "RunWriteRefusedError",
   "FundingRefusedError",
+  "ProviderKeyUnavailableError",
   // An edit refused because somebody moved the test since it was written. It
   // carries both versions and the test's identity, because the caller's next
   // move is to go and read the test as it now stands.
@@ -720,6 +727,7 @@ describe("the data-access module's surface", () => {
         ...THE_EVIDENCE_RULES,
         // Deployment settlement reads an explicitly named account, outside user API scope.
         "readPlatformUsageTotal",
+        "listCustomerFundedProviders",
         ...CONNECTION,
         ...MIGRATIONS,
         ...IDENTITY,

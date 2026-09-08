@@ -415,7 +415,9 @@ export class NotPermittedError extends Error {
   constructor(auth: AuthContext, action: Action, scope: ActionScope) {
     super(
       scope.organizationId === auth.organizationId
-        ? `a ${auth.role} may not ${action}`
+        ? auth.via === "api_key" && auth.projectId !== undefined
+          ? `This API key is limited to project ${auth.projectId} and its creator's current permissions. Use a permitted browser session or an API key for the required project or organization.`
+          : `a ${auth.role} may not ${action}`
         : `${action} named organization ${scope.organizationId}, and the credential is for ${auth.organizationId}`,
     );
     this.name = "NotPermittedError";

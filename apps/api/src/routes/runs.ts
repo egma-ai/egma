@@ -28,6 +28,7 @@ import {
   type ExpectedTestVersion,
   type NewRun,
   type Run,
+  readRunWorkBlock,
   type RunEvent,
   type RunFilter,
   type RunStatus,
@@ -634,6 +635,7 @@ export async function runRoutes(
       ]);
       return reply.send({
         ...header,
+        workBlock: await readRunWorkBlock(acting.auth, runId),
         // Captured before this response makes the page visible. A browser
         // keeps it as the boundary between history and live notifications.
         eventThrough: eventThrough ?? 0,
@@ -786,6 +788,9 @@ export async function runRoutes(
 
   app.setErrorHandler(async (error: unknown, _request, reply) => {
     if (error instanceof RunWriteRefusedError) {
+      if (error.reason === "providers_unfunded" || error.reason === "allowance_spent") {
+        return sendRefusal(reply, error.reason, error.message);
+      }
       if (error.reason === "no_adapter") return noAdapter(reply, error.message);
       if (error.reason === "already_finished") {
         return conflict(reply, error.message);

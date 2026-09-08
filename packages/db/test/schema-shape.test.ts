@@ -71,7 +71,7 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
 };
 
 /** Meter progress is identified by its organization, subscription, period and channel. */
-const TABLES_WITH_COMPOSITE_IDENTITY = ["cloud_meter_period"];
+const TABLES_WITH_COMPOSITE_IDENTITY = ["cloud_meter_period", "provider_key"];
 
 const declaredTables = (Object.values(schema) as unknown[])
   .filter((value): value is PgTable => is(value, PgTable))
@@ -251,6 +251,7 @@ describe("every table", () => {
     // live policy without creating a grader-definition version.
     project: 1,
     test: 1,
+    provider_key: 1,
   };
 
   it("pins a prefix that is one of the ones egma mints", () => {

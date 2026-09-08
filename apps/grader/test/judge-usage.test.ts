@@ -1,8 +1,16 @@
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { newId } from "@egma/ids";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   appendSpans,
+  putProviderKey,
+  deleteProviderKey,
+  readPlatformUsageTotal,
   claimGradingJobs,
   connect,
   connectClickHouse,
@@ -395,3 +403,181 @@ describe("a graded trace", () => {
     }
   });
 });
+
+it("uses the organization judge key and records customer-paid usage without a platform charge", async () => {
+  const traceId = "aaaa5555555555555555555555550901";
+  const owner = { ...actingAsAcme(), role: "admin" as const };
+  const saved = await putProviderKey(
+    owner,
+    "openai",
+    "test-own-grader-key-WXYZ",
+    null,
+  );
+  await appendSpans(owner, [conversation(traceId), agentTurn(traceId)]);
+  const claim = await claimFor(owner, traceId);
+  const platform = await readPlatformUsageTotal({
+    organizationId: owner.organizationId,
+    occurredAtOrAfter: new Date(0),
+  });
+  vi.stubGlobal("fetch", async (_input: unknown, init: RequestInit) => {
+    expect(new Headers(init.headers).get("authorization")).toBe(
+      "Bearer test-own-grader-key-WXYZ",
+    );
+    return answered(ORDINARY_USAGE, "chatcmpl-customer-key");
+  });
+  await expect(
+    gradeClaim(claim, {
+      providerCredentials: {
+        load: async () => {
+          throw new Error("Deployment keys must not be needed.");
+        },
+      },
+    }),
+  ).resolves.toMatchObject({ graders: 1, grades: 1 });
+  const rows = await store.rows<{
+    usage_payment_source: string;
+    usage_credential_ref: string;
+  }>(
+    `SELECT usage_payment_source,usage_credential_ref FROM spans WHERE trace_id='${traceId}' AND kind='provider_usage'`,
+  );
+  expect(rows).toEqual([
+    {
+      usage_payment_source: "customer",
+      usage_credential_ref: saved.credential!.revision,
+    },
+  ]);
+  expect(
+    await readPlatformUsageTotal({
+      organizationId: owner.organizationId,
+      occurredAtOrAfter: new Date(0),
+    }),
+  ).toEqual(platform);
+  await deleteProviderKey(owner, "openai", saved.credential!.revision);
+});
+
+it("reports a rejected customer judge key with a repair code and never falls back to Egma", async () => {
+  const traceId = "aaaa5555555555555555555555550902";
+  const owner = { ...actingAsAcme(), role: "admin" as const };
+  const saved = await putProviderKey(
+    owner,
+    "openai",
+    "test-rejected-customer-key-ABCD",
+    null,
+  );
+  await appendSpans(owner, [conversation(traceId), agentTurn(traceId)]);
+  const claim = await claimFor(owner, traceId);
+  const requests: string[] = [];
+  vi.stubGlobal("fetch", async (_input: unknown, init: RequestInit) => {
+    requests.push(new Headers(init.headers).get("authorization")!);
+    return new Response("test-rejected-customer-key-ABCD is invalid", {
+      status: 401,
+    });
+  });
+  await gradeClaim(claim, { providerCredentials: CREDENTIALS });
+  expect(requests).toEqual(["Bearer test-rejected-customer-key-ABCD"]);
+  const grades = await readTraceGrades(owner, {
+    source: "production",
+    traceId,
+  });
+  expect(grades.current[0]).toMatchObject({
+    score: null,
+    details: { errorCode: "provider_key_unavailable", provider: "openai" },
+  });
+  expect(JSON.stringify(grades.current[0]?.details)).not.toContain(
+    "test-rejected-customer-key",
+  );
+  await deleteProviderKey(owner, "openai", saved.credential!.revision);
+});
+
+it("opens the saved customer key in a standalone grader process using the deployment encryption key", async () => {
+  const traceId = "aaaa5555555555555555555555550903";
+  const owner = { ...actingAsAcme(), role: "admin" as const };
+  const saved = await putProviderKey(
+    owner,
+    "openai",
+    "test-process-customer-key-ABCD",
+    null,
+  );
+  await appendSpans(owner, [conversation(traceId), agentTurn(traceId)]);
+  await requestGrading(owner, {
+    source: "production",
+    traceId,
+    traceStartedAt: STARTED_AT,
+    endsTrace: true,
+    evidenceReady: true,
+    modality: "voice",
+  });
+  let usedCustomerKey = false;
+  const provider = createServer(async (request, response) => {
+    usedCustomerKey =
+      request.headers.authorization === "Bearer test-process-customer-key-ABCD";
+    for await (const _chunk of request) {
+      /* Read the full provider request. */
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(await answered(ORDINARY_USAGE, "chatcmpl-process").text());
+  });
+  provider.listen(0, "127.0.0.1");
+  await once(provider, "listening");
+  const address = provider.address();
+  if (!address || typeof address === "string")
+    throw new Error("provider has no port");
+  const preload = `const original=globalThis.fetch;globalThis.fetch=(input,init)=>original(String(input).startsWith('https://api.openai.com/')?'http://127.0.0.1:${address.port}/chat/completions':input,init);`;
+  const child = spawn(
+    process.execPath,
+    [
+      "--import",
+      `data:text/javascript,${encodeURIComponent(preload)}`,
+      fileURLToPath(new URL("../dist/index.js", import.meta.url)),
+    ],
+    {
+      env: {
+        PATH: process.env["PATH"] ?? "",
+        DATABASE_URL: database.url,
+        CLICKHOUSE_URL: store.url,
+        EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
+        EGMA_GRADER_CLAIMANT: "customer-key-process",
+        EGMA_GRADER_SWEEP_SECONDS: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let logs = "";
+  child.stdout.on("data", (chunk) => {
+    logs += String(chunk);
+  });
+  child.stderr.on("data", (chunk) => {
+    logs += String(chunk);
+  });
+  const exited = once(child, "exit");
+  try {
+    let grades = await readTraceGrades(owner, {
+      source: "production",
+      traceId,
+    });
+    for (
+      let attempt = 0;
+      attempt < 80 && grades.current.length === 0;
+      attempt++
+    ) {
+      await delay(100);
+      grades = await readTraceGrades(owner, { source: "production", traceId });
+    }
+    expect(grades.current, logs).toHaveLength(1);
+    expect(grades.current[0]?.score, logs).not.toBeNull();
+    expect(usedCustomerKey).toBe(true);
+    expect(logs).not.toContain("test-process-customer-key-ABCD");
+    const rows = await store.rows<{ usage_payment_source: string }>(
+      `SELECT usage_payment_source FROM spans WHERE trace_id='${traceId}' AND kind='provider_usage'`,
+    );
+    expect(rows).toEqual([{ usage_payment_source: "customer" }]);
+  } finally {
+    child.kill("SIGTERM");
+    await exited;
+    provider.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      provider.close((error) => (error ? reject(error) : resolve())),
+    );
+    await deleteProviderKey(owner, "openai", saved.credential!.revision);
+  }
+}, 15_000);

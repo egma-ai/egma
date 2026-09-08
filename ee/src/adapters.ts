@@ -44,16 +44,9 @@ import {
 /**
  * Where a provider's work is paid from, per provider, for one organization.
  *
- * **The seam Naman's provider-keys effort plugs into.** Today no organization
- * holds a key of its own, so the default answers "none" and every provider is
- * funded from the balance — which is the behaviour of the product as it
- * stands. When organization-scoped customer keys arrive, the deployment hands
- * one function in here and nothing else in this package moves.
- *
- * It answers the providers this organization holds its **own working key**
- * for. A key that fails is not this seam's business: a failing customer key
- * fails the work by name and never falls back to Egma's key, which is decided
- * where the key is used, not here.
+ * The composition supplies the providers with saved organization keys.
+ * Authentication is checked when the key is used. A failing customer key
+ * fails the work by name and never falls back to Egma's key.
  */
 export type CustomerFundedProviders = (
   organizationId: string,
@@ -149,8 +142,8 @@ function unfundedMessage(
   return (
     `Egma's provider keys cannot fund ${named}: this organization's ` +
     `inference balance is ${moneyLabel(balanceMicros)}. Add inference credit ` +
-    "under Settings → Usage and billing, or use your own provider keys, and this " +
-    "work runs on its own."
+    "under Settings → Usage and billing, or add keys under Settings → " +
+    "Provider API Keys."
   );
 }
 

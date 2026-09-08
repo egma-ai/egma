@@ -1004,3 +1004,29 @@ describe("what the report door never touches", () => {
     expect(answered.statusCode).toBe(404);
   });
 });
+
+it("keeps a confirmed customer provider-key failure through the simulator report", async () => {
+  const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+    "reports_customer_key",
+  );
+  const { simulationId } = await aRunningSimulation(
+    key,
+    connectionId,
+    versionId,
+  );
+  const response = await report(simulationId, [
+    {
+      ...terminalEvent("failed", "provider_key_unavailable"),
+      reason:
+        "The organization's OpenAI API key could not be used. Ask an admin to replace it under Settings → Provider API keys.",
+    },
+  ]);
+  expect(response.statusCode, JSON.stringify(response.body)).toBe(200);
+  const row = await getSimulation(contextFor(ada, "member"), simulationId);
+  expect(row).toMatchObject({
+    status: "failed",
+    endingReason: "provider_key_unavailable",
+  });
+  expect(row?.executionFailure).toContain("OpenAI API key");
+  expect(await gradingJobsFor(simulationId)).toBe(0);
+});

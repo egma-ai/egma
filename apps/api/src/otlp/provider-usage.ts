@@ -1,5 +1,7 @@
 import {
   MODEL_ADAPTERS,
+  readProviderFundingReceipt,
+  type AuthContext,
   MODEL_PROVIDERS,
   isUsageType,
   type ModelAdapter,
@@ -59,6 +61,7 @@ const USAGE = {
   providerRef: "egma.usage.provider_ref",
   quantities: "egma.usage.quantities",
   raw: "egma.usage.raw",
+  fundingReceipt: "egma.usage.funding_receipt",
 } as const;
 
 const MEASUREMENTS: readonly UsageMeasurement[] = [
@@ -68,6 +71,8 @@ const MEASUREMENTS: readonly UsageMeasurement[] = [
 
 /** What one simulation's row already told the door about this conversation. */
 export type UsageAttribution = {
+  readonly auth: AuthContext;
+  readonly claimedAt: Date | null;
   readonly simulationId: string;
   readonly runId: string;
 };
@@ -169,6 +174,26 @@ function oneRecord(
 
   const providerRef = attribute(span.attributes, USAGE.providerRef);
   const traceId = (span.traceId ?? "").toLowerCase();
+  let funding: {
+    paymentSource: "platform" | "customer";
+    credentialRef?: string;
+  } = { paymentSource: "platform" };
+  const receipt = attribute(span.attributes, USAGE.fundingReceipt);
+  if (receipt !== "") {
+    try {
+      funding = readProviderFundingReceipt(
+        attribution.auth,
+        {
+          simulationId: attribution.simulationId,
+          claimedAt: attribution.claimedAt,
+          provider,
+        },
+        receipt,
+      );
+    } catch {
+      return `${named} has an invalid provider funding receipt; keep the evidence for repair`;
+    }
+  }
 
   return {
     identity: {
@@ -185,10 +210,7 @@ function oneRecord(
     quantities: quantities as UsageQuantities,
     measurement: measurement as UsageMeasurement,
     ...(providerRef === "" ? {} : { providerRef }),
-    // Always the platform's own key today: a self-hoster's operator key and
-    // Egma Cloud's key are both the platform's, and an organization's own key
-    // is a later effort this field is already shaped for.
-    paymentSource: "platform",
+    ...funding,
     rawUsage: objectFrom(attribute(span.attributes, USAGE.raw)) ?? {},
   };
 }

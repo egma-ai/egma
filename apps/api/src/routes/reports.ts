@@ -111,6 +111,7 @@ const FAILED_ENDING_OF: Record<
   agent_never_joined: "agent_never_joined",
   not_answered: "not_answered",
   error: "simulator_error",
+  provider_key_unavailable: "provider_key_unavailable",
 };
 
 /**

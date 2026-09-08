@@ -14,8 +14,11 @@ import { NotPermittedError } from "./errors.ts";
  * the left of a row is every role that may not.
  */
 const PERMISSIONS = {
-  /** Read anything in the organization. */
+  /** Read project data and the caller's basic organization identity. */
   read:                   ["viewer", "member", "admin"],
+
+  /** Read organization settings, members, provider keys and billing. */
+  read_organization:      ["viewer", "member", "admin"],
 
   /** Create, edit, delete tests, personas, graders and test suites. */
   author_definitions:     [          "member", "admin"],
@@ -76,10 +79,19 @@ export type Action = keyof typeof PERMISSIONS;
 
 export const ACTIONS = Object.keys(PERMISSIONS) as readonly Action[];
 
+/** These actions affect or expose the whole organization, even from a project page. */
+const ORGANIZATION_ACTIONS: ReadonlySet<Action> = new Set([
+  "read_organization",
+  "manage_members",
+  "manage_organization",
+  "manage_projects",
+  "delete_organization",
+]);
+
 /**
- * Organization and optional project where an action occurs. permits checks the
- * organization and organization role; it does not enforce project scope.
- * Data access predicates must apply the context's project restriction.
+ * Organization and optional project the action targets. A project API key may
+ * target only its project. A session's active project is navigation context;
+ * it does not reduce the person's organization role.
  */
 export type ActionScope = {
   readonly organizationId: string;
@@ -90,13 +102,23 @@ export type ActionScope = {
  * Where the caller already is: their own organization, and the project they are
  * acting in if they are acting in one.
  *
- * Internal to this module, and it is what every check inside it names, because
- * nothing here can act anywhere else — an exported function reaches only the
- * rows the context already names. A route may legitimately name somewhere else
- * and writes the scope out in full; a data-access function never can.
+ * Use this for operations on the caller's current scope. An operation that
+ * accepts a different target, such as minting a key, must name that target
+ * explicitly so the credential ceiling can check it.
  */
 export function here(auth: AuthContext): ActionScope {
   return { organizationId: auth.organizationId, projectId: auth.projectId };
+}
+
+function scopeWithinCredential(auth: AuthContext, scope: ActionScope): boolean {
+  return (
+    scope.organizationId === auth.organizationId &&
+    (
+      auth.via !== "api_key" ||
+      auth.projectId === undefined ||
+      scope.projectId === auth.projectId
+    )
+  );
 }
 
 /**
@@ -113,9 +135,14 @@ export function permits(
 ): boolean {
   // The credential names the customer. A caller acting for one organization has
   // no role at all in another, so this is refused before the role is consulted.
-  if (scope.organizationId !== auth.organizationId) return false;
-
-  // scope.projectId is read by nothing, on purpose. See ActionScope.
+  if (!scopeWithinCredential(auth, scope)) return false;
+  if (
+    auth.via === "api_key" &&
+    auth.projectId !== undefined &&
+    ORGANIZATION_ACTIONS.has(action)
+  ) {
+    return false;
+  }
 
   const permitted: readonly Role[] = PERMISSIONS[action];
   return permitted.includes(auth.role);
@@ -136,15 +163,15 @@ export function authorize(
 }
 
 /**
- * All roles may see and revoke their own organization API keys.
- * manage_any_api_key also permits access to other members' keys.
+ * All roles may see and revoke their own keys within the credential's scope.
+ * Admins may also manage other members' keys within that same scope.
  */
 export function permitsApiKeyMintedBy(
   auth: AuthContext,
   userId: string,
   scope: ActionScope,
 ): boolean {
-  if (scope.organizationId !== auth.organizationId) return false;
+  if (!scopeWithinCredential(auth, scope)) return false;
   if (userId === auth.userId) return true;
   return permits(auth, "manage_any_api_key", scope);
 }

@@ -268,7 +268,7 @@ export async function readOrganizationUsage(
   auth: AuthContext,
   period: { from: Date; to: Date },
 ): Promise<OrganizationUsage> {
-  authorize(auth, "read", {
+  authorize(auth, "read_organization", {
     organizationId: auth.organizationId,
     projectId: undefined,
   });
@@ -312,7 +312,7 @@ export async function readUsageThisPeriod(
   at: Date = new Date(),
   anchor?: Date,
 ): Promise<PeriodUsage> {
-  authorize(auth, "read", {
+  authorize(auth, "read_organization", {
     organizationId: auth.organizationId,
     projectId: auth.projectId,
   });

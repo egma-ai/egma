@@ -225,9 +225,7 @@ async def test_the_listening_leg_reports_the_seconds_egma_sent_it():
 @pytest.mark.asyncio
 async def test_the_speaking_leg_reports_the_characters_it_was_handed():
     spent = await collected(
-        TTSUsageMetricsData(
-            processor="CartesiaTTSService", model="sonic-3.5", value=64
-        )
+        TTSUsageMetricsData(processor="CartesiaTTSService", model="sonic-3.5", value=64)
     )
 
     assert len(spent) == 1
@@ -259,9 +257,7 @@ async def test_a_leg_holding_the_providers_own_numbers_is_passed_through_whole()
 @pytest.mark.asyncio
 async def test_a_timing_metric_is_not_a_bill():
     """Time to first byte is a measurement. The measure catalog owns those."""
-    spent = await collected(
-        TTFBMetricsData(processor="CartesiaTTSService", value=0.21)
-    )
+    spent = await collected(TTFBMetricsData(processor="CartesiaTTSService", value=0.21))
 
     assert spent == []
 
@@ -445,3 +441,38 @@ async def test_a_chat_simulation_bills_its_persona_turns_and_nothing_else():
     assert {usage.operation for usage in spent} == {"openai_chat_completions"}
     assert [usage.provider_ref for usage in spent] == ["chatcmpl-1", "chatcmpl-2"]
     assert all(usage.quantities["output_tokens"] == 20 for usage in spent)
+
+
+def test_customer_funding_receipt_is_forwarded_unchanged_without_a_key():
+    sink = Sink()
+    spans = SpanEmitter(WORKED_EXAMPLE_ID, flush=sink)
+    spans.opened()
+    try:
+        spans.provider_usage(
+            ProviderUsage(
+                provider="openai",
+                model="gpt-4o-mini",
+                operation="openai_chat_completions",
+                measurement=PROVIDER_REPORTED,
+                quantities={"input_tokens": 10},
+                provider_ref="chatcmpl-customer",
+                raw={"prompt_tokens": 10},
+            ),
+            funding_receipt="opaque-server-sealed-receipt",
+        )
+        spans.flush()
+    finally:
+        spans.abort()
+    bills = [
+        span
+        for document in sink.documents
+        for span in spans_of(document)
+        if span["name"] == PROVIDER_USAGE_SPAN
+    ]
+    assert len(bills) == 1
+    assert (
+        attribute(bills[0], "egma.usage.funding_receipt")
+        == "opaque-server-sealed-receipt"
+    )
+    assert attribute(bills[0], "egma.usage.payment_source") is None
+    assert attribute(bills[0], "egma.usage.api_key") is None

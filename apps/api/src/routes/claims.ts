@@ -2,10 +2,15 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import {
   claimSimulations,
+  resolveProviderKeysForWork,
+  createProviderFundingReceipt,
+  ProviderKeyUnavailableError,
   catalogEntry,
+  isModelProvider,
   connectionTypeBranchesMockDraft,
   connectionTypeUsesPlatformCarrier,
   failSimulationDispatch,
+  failSimulation,
   getPersonaVersion,
   personaModelsOfParameters,
   validatePersonaParameterValues,
@@ -153,6 +158,7 @@ async function modelsBlock(
   modality: SimulationClaim["modality"],
   models: PersonaModels,
   source: ProviderCredentialSource,
+  claim: SimulationClaim,
 ): Promise<Record<string, unknown>> {
   const entryFor = <Job extends "llm" | "stt" | "tts">(
     job: Job,
@@ -172,14 +178,45 @@ async function modelsBlock(
     stt: entryFor("stt", models.stt),
     tts: entryFor("tts", models.tts),
   };
-  const credentials = await source.load();
-  const keyFor = (
-    provider: PersonaModels["llm"]["provider"],
-  ): string => credentialFor(credentials, provider);
+  const needed = providersNeededBy(models, modality).map((provider) => {
+    if (!isModelProvider(provider))
+      throw new Error("The selected model provider is not supported.");
+    return provider;
+  });
+  const customer = await resolveProviderKeysForWork(claim.auth, needed);
+  const deployment = needed.some((provider) => customer[provider] === undefined)
+    ? await source.load()
+    : {};
+  const credentials = {
+    ...deployment,
+    ...Object.fromEntries(
+      Object.entries(customer).map(([provider, value]) => [
+        provider,
+        value.key,
+      ]),
+    ),
+  };
+  const receiptFor = (provider: PersonaModels["llm"]["provider"]) => {
+    const held = customer[provider];
+    return held === undefined
+      ? {}
+      : {
+          funding_receipt: createProviderFundingReceipt(claim.auth, {
+            simulationId: claim.id,
+            claimedAt: claim.claimedAt,
+            provider,
+            credentialRef: held.credentialRef,
+          }),
+        };
+  };
+  const keyFor = (provider: PersonaModels["llm"]["provider"]): string =>
+    credentialFor(credentials, provider);
   const speechKey = (
     provider: PersonaModels["llm"]["provider"],
   ): Record<string, string> =>
-    modality === "voice" ? { key: keyFor(provider) } : {};
+    modality === "voice"
+      ? { key: keyFor(provider), ...receiptFor(provider) }
+      : {};
 
   return {
     llm: {
@@ -190,6 +227,7 @@ async function modelsBlock(
         ? {}
         : { reasoning_effort: entries.llm.reasoningEffort }),
       key: keyFor(models.llm.provider),
+      ...receiptFor(models.llm.provider),
     },
     stt: {
       provider: models.stt.provider,
@@ -412,7 +450,7 @@ async function assembledSpec(
   responseDeadline = Date.now() + CLAIM_RESPONSE_MILLISECONDS,
 ): Promise<
   | Record<string, unknown>
-  | { readonly unbuildable: string }
+  | { readonly unbuildable: string; readonly providerKeyUnavailable?: boolean }
   | { readonly retryable: string }
 > {
   if (personaVersion === undefined) {
@@ -498,8 +536,11 @@ async function assembledSpec(
       claim.modality,
       personaModelsOfParameters(validatePersonaParameterValues(personaVersion.parameterContract, claim.personaParameterValues)),
       providerCredentials,
+      claim,
     );
   } catch (fault) {
+    if (fault instanceof ProviderKeyUnavailableError)
+      return { unbuildable: fault.message, providerKeyUnavailable: true };
     if (fault instanceof ProviderCredentialSourceUnavailableError) {
       return {
         retryable:
@@ -856,9 +897,8 @@ export async function claimRoutes(
           continue;
         }
         if ("unbuildable" in spec) {
-          // Mark an unbuildable claim failed with dispatch_failed and continue the
-          // batch. Do not send an invalid spec or wait for orphan cleanup. No grading
-          // is requested for this execution failure.
+          // Land the preflight failure now and continue the batch. No grading
+          // is requested for a simulation that could not start.
           request.log.error(
             platformEvent(
               "egma.simulation.dispatch.failed",
@@ -870,11 +910,19 @@ export async function claimRoutes(
               },
             ),
           );
-          await failSimulationDispatch(
-            claim.auth,
-            claim.id,
-            claim.claimedBy,
-            `Egma could not dispatch this simulation: ${spec.unbuildable}`,
+          await (
+            "providerKeyUnavailable" in spec &&
+            spec.providerKeyUnavailable === true
+              ? failSimulation(claim.auth, claim.id, claim.claimedBy, {
+                  reason: "provider_key_unavailable",
+                  message: String(spec.unbuildable),
+                })
+              : failSimulationDispatch(
+                  claim.auth,
+                  claim.id,
+                  claim.claimedBy,
+                  `Egma could not dispatch this simulation: ${spec.unbuildable}`,
+                )
           ).catch((fault: unknown) => {
             // The one place left where the sweep is the backstop: a row so
             // broken even its landing throws stays claimed until swept, and

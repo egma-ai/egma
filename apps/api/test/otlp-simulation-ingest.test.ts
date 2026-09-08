@@ -4,6 +4,11 @@ import { fileURLToPath } from "node:url";
 
 import {
   claimSimulations,
+  createProviderFundingReceipt,
+  resolveSimulationStanding,
+  putProviderKey,
+  deleteProviderKey,
+  readPlatformUsageTotal,
   completeSimulation,
   connectClickHouse,
   createAgent,
@@ -1052,15 +1057,34 @@ describe.skipIf(!storage.available)("the simulation grading handoff", () => {
  */
 describe.skipIf(!storage.available)("a provider_usage span", () => {
   it("does not let customer OTLP attributes create platform-funded usage", async () => {
-    const before = await countOf("SELECT count() AS n FROM spans WHERE usage_identity_hash != ''");
-    const key = await mintKey(api.app, globex.cookie, "Customer provider-usage forgery", globex.projectId);
-    const body = (await fixture("valid", "voice-provider-usage.json")).replaceAll("cc1000000000001", "fa1000000000001");
+    const before = await countOf(
+      "SELECT count() AS n FROM spans WHERE usage_identity_hash != ''",
+    );
+    const key = await mintKey(
+      api.app,
+      globex.cookie,
+      "Customer provider-usage forgery",
+      globex.projectId,
+    );
+    const body = (
+      await fixture("valid", "voice-provider-usage.json")
+    ).replaceAll("cc1000000000001", "fa1000000000001");
     const response = await post(body, key);
     expect(response.statusCode, response.body).toBe(200);
-    expect(await countOf("SELECT count() AS n FROM spans WHERE usage_identity_hash != ''")).toBe(before);
-    const rows = await store().rows<{ emitter: string; usage_payment_source: string }>("SELECT emitter, usage_payment_source FROM spans WHERE span_id LIKE 'fa1000000000001%'");
+    expect(
+      await countOf(
+        "SELECT count() AS n FROM spans WHERE usage_identity_hash != ''",
+      ),
+    ).toBe(before);
+    const rows = await store().rows<{
+      emitter: string;
+      usage_payment_source: string;
+    }>(
+      "SELECT emitter, usage_payment_source FROM spans WHERE span_id LIKE 'fa1000000000001%'",
+    );
     expect(rows).toHaveLength(3);
-    for (const row of rows) expect(row).toEqual({ emitter: "agent", usage_payment_source: "" });
+    for (const row of rows)
+      expect(row).toEqual({ emitter: "agent", usage_payment_source: "" });
   });
 
   type UsageRow = {
@@ -1084,20 +1108,45 @@ describe.skipIf(!storage.available)("a provider_usage span", () => {
   };
 
   async function usageOf(simulationId: string): Promise<UsageRow[]> {
-    const rows = await store().rows<{ organization_id: string; project_id: string; run_id: string; span_id: string; usage_evidence: string }>(`SELECT organization_id, project_id, any(run_id) AS run_id, span_id, any(usage_evidence) AS usage_evidence FROM spans WHERE usage_identity_hash != '' GROUP BY organization_id, project_id, trace_id, span_id ORDER BY span_id`);
-    return rows.map((row) => {
-      const usage = JSON.parse(row.usage_evidence);
-      return { organization_id: row.organization_id, project_id: row.project_id, run_id: row.run_id, span_id: row.span_id,
-        work_kind: usage.identity.work, simulation_id: usage.identity.simulationId,
-        provider: usage.provider, model: usage.model, operation: usage.operation, unit: usage.price.unit,
-        quantities: usage.quantities, measurement: usage.measurement, provider_ref: usage.providerRef,
-        payment_source: usage.paymentSource, raw_usage: usage.rawUsage,
-        amount_micros: String(usage.price.amountMicros), priced_by: usage.price.pricedBy };
-    }).filter((row) => row.simulation_id === simulationId);
+    const rows = await store().rows<{
+      organization_id: string;
+      project_id: string;
+      run_id: string;
+      span_id: string;
+      usage_evidence: string;
+    }>(
+      `SELECT organization_id, project_id, any(run_id) AS run_id, span_id, any(usage_evidence) AS usage_evidence FROM spans WHERE usage_identity_hash != '' GROUP BY organization_id, project_id, trace_id, span_id ORDER BY span_id`,
+    );
+    return rows
+      .map((row) => {
+        const usage = JSON.parse(row.usage_evidence);
+        return {
+          organization_id: row.organization_id,
+          project_id: row.project_id,
+          run_id: row.run_id,
+          span_id: row.span_id,
+          work_kind: usage.identity.work,
+          simulation_id: usage.identity.simulationId,
+          provider: usage.provider,
+          model: usage.model,
+          operation: usage.operation,
+          unit: usage.price.unit,
+          quantities: usage.quantities,
+          measurement: usage.measurement,
+          provider_ref: usage.providerRef,
+          payment_source: usage.paymentSource,
+          raw_usage: usage.rawUsage,
+          amount_micros: String(usage.price.amountMicros),
+          priced_by: usage.price.pricedBy,
+        };
+      })
+      .filter((row) => row.simulation_id === simulationId);
   }
 
   it("becomes one priced record per request, under the simulation's own customer and run", async () => {
-    const flush = await post(await fixture("valid", "voice-provider-usage.json"));
+    const flush = await post(
+      await fixture("valid", "voice-provider-usage.json"),
+    );
     expect(flush.statusCode, flush.body).toBe(200);
     expect(flush.json()).toEqual({});
 
@@ -1110,8 +1159,7 @@ describe.skipIf(!storage.available)("a provider_usage span", () => {
       expect(row.project_id).toBe(globex.projectId);
       expect(row.run_id).toBe(usageRunId);
       expect(row.work_kind).toBe("simulation");
-      // Nothing on the wire decides who paid. Every request Egma makes today is
-      // made with the deployment's own key.
+      // This fixture has no server-issued customer funding receipt.
       expect(row.payment_source).toBe("platform");
     }
 
@@ -1147,7 +1195,9 @@ describe.skipIf(!storage.available)("a provider_usage span", () => {
   });
 
   it("is stored once however many times the flush is sent", async () => {
-    const again = await post(await fixture("valid", "voice-provider-usage.json"));
+    const again = await post(
+      await fixture("valid", "voice-provider-usage.json"),
+    );
     expect(again.statusCode, again.body).toBe(200);
 
     // The write-ahead log replays the same bytes, span ids included, so the
@@ -1156,19 +1206,32 @@ describe.skipIf(!storage.available)("a provider_usage span", () => {
   });
 
   it("bounds inference independently while retaining the usual allowance period", async () => {
-    const read = (query = "") => api.app.inject({
-      method: "GET", url: `/api/organization/usage${query}`,
-      headers: { cookie: globex.cookie },
-    });
+    const read = (query = "") =>
+      api.app.inject({
+        method: "GET",
+        url: `/api/organization/usage${query}`,
+        headers: { cookie: globex.cookie },
+      });
     const defaultPeriod = await read();
-    const included = await read("?from=2026-01-01T00:00:00Z&to=2027-01-01T00:00:00Z");
-    const excluded = await read("?from=2027-01-01T00:00:00Z&to=2028-01-01T00:00:00Z");
+    const included = await read(
+      "?from=2026-01-01T00:00:00Z&to=2027-01-01T00:00:00Z",
+    );
+    const excluded = await read(
+      "?from=2027-01-01T00:00:00Z&to=2028-01-01T00:00:00Z",
+    );
     expect(included.statusCode, included.body).toBe(200);
-    expect(included.json().inference).toMatchObject({ amountMicros: 4408, requests: 3 });
-    expect(excluded.json().inference).toMatchObject({ amountMicros: 0, requests: 0 });
+    expect(included.json().inference).toMatchObject({
+      amountMicros: 4408,
+      requests: 3,
+    });
+    expect(excluded.json().inference).toMatchObject({
+      amountMicros: 0,
+      requests: 0,
+    });
     for (const response of [included, excluded]) {
       const { inference: _inference, ...period } = response.json();
-      const { inference: _defaultInference, ...expected } = defaultPeriod.json();
+      const { inference: _defaultInference, ...expected } =
+        defaultPeriod.json();
       expect(period).toEqual(expected);
     }
     for (const query of [
@@ -1176,7 +1239,8 @@ describe.skipIf(!storage.available)("a provider_usage span", () => {
       "?from=bad&to=2027-01-01T00:00:00Z",
       "?from=2027-01-01T00:00:00Z&to=2026-01-01T00:00:00Z",
       "?from=2027-01-01T00:00:00Z&to=2027-01-01T00:00:00Z",
-    ]) expect((await read(query)).statusCode).toBe(400);
+    ])
+      expect((await read(query)).statusCode).toBe(400);
   });
 
   it("files the span itself under its own kind, like every other span", async () => {
@@ -1379,5 +1443,94 @@ describe.skipIf(!storage.available)("a provider_usage span", () => {
     expect(
       Number(now.find((row) => row.model === "gpt-4o-mini")?.amount_micros),
     ).toBe(1_500 + 30 + 60);
+  });
+
+  it("keeps customer-funded usage after key removal and charges only the remaining platform provider", async () => {
+    const owner = contextFor(globex, "admin");
+    const saved = await putProviderKey(
+      owner,
+      "openai",
+      "test-delayed-customer-key-ABCD",
+      null,
+    );
+    await claimSimulations({ claimant: "provider-receipt-test", capacity: 50 });
+    const standing = await resolveSimulationStanding(USAGE_SIMULATION);
+    if (!standing?.claimedAt)
+      throw new Error("the usage simulation has no claim");
+    const receipt = createProviderFundingReceipt(standing.auth, {
+      simulationId: USAGE_SIMULATION,
+      claimedAt: standing.claimedAt,
+      provider: "openai",
+      credentialRef: saved.credential!.revision,
+    });
+    const body = JSON.parse(
+      (await fixture("valid", "voice-provider-usage.json")).replaceAll(
+        "cc1000000000001",
+        "bb1000000000001",
+      ),
+    ) as {
+      resourceSpans: {
+        scopeSpans: {
+          spans: {
+            attributes: { key: string; value: { stringValue: string } }[];
+          }[];
+        }[];
+      }[];
+    };
+    for (const resource of body.resourceSpans)
+      for (const scope of resource.scopeSpans)
+        for (const span of scope.spans) {
+          if (
+            span.attributes.some(
+              (attribute) =>
+                attribute.key === "egma.usage.provider" &&
+                attribute.value.stringValue === "openai",
+            )
+          ) {
+            span.attributes.push({
+              key: "egma.usage.funding_receipt",
+              value: { stringValue: receipt },
+            });
+          }
+        }
+    await deleteProviderKey(owner, "openai", saved.credential!.revision);
+    const scope = {
+      organizationId: globex.organizationId,
+      occurredAtOrAfter: new Date("2020-01-01"),
+    };
+    const before = await readPlatformUsageTotal(scope);
+    const response = await post(JSON.stringify(body));
+    expect(response.statusCode, response.body).toBe(200);
+    const rows = (await usageOf(USAGE_SIMULATION)).filter((row) =>
+      row.span_id.startsWith("bb1000000000001"),
+    );
+    expect(rows).toHaveLength(3);
+    expect(
+      rows
+        .filter((row) => row.provider === "openai")
+        .every((row) => row.payment_source === "customer"),
+    ).toBe(true);
+    const platform = rows.find((row) => row.provider === "cartesia")!;
+    expect(platform.payment_source).toBe("platform");
+    const after = await readPlatformUsageTotal(scope);
+    expect(after.amountMicros - before.amountMicros).toBe(
+      BigInt(platform.amount_micros),
+    );
+    expect(after.requests - before.requests).toBe(1n);
+    await post(JSON.stringify(body));
+    expect(await readPlatformUsageTotal(scope)).toEqual(after);
+    const forged = JSON.stringify(body)
+      .replaceAll("bb1000000000001", "bc1000000000001")
+      .replaceAll(receipt, receipt.slice(0, -5) + "WRONG");
+    expect((await post(forged)).statusCode).toBe(200);
+    const forgedRows = (await usageOf(USAGE_SIMULATION)).filter((row) =>
+      row.span_id.startsWith("bc1000000000001"),
+    );
+    expect(forgedRows.map((row) => row.provider)).toEqual(["cartesia"]);
+    expect(
+      await countOf(
+        "SELECT count() AS n FROM spans FINAL WHERE span_id LIKE 'bc1000000000001%' AND kind='usage'",
+      ),
+    ).toBe(2);
   });
 });

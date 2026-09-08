@@ -1504,6 +1504,111 @@ async def test_a_wall_clock_gap_inside_one_utterance_loses_no_audio(
         held = float(resampler._soxr_stream.delay())
 
         fed = 2 * 320
-        assert emitted + held == pytest.approx(
-            fed * 24_000 / 16_000, abs=1.0
-        ), channel
+        assert emitted + held == pytest.approx(fed * 24_000 / 16_000, abs=1.0), channel
+
+
+@pytest.mark.parametrize(
+    "status,customer,typed",
+    [
+        (401, True, True),
+        (403, True, True),
+        (429, True, False),
+        (503, True, False),
+        (401, False, False),
+    ],
+)
+async def test_customer_speech_auth_failure_keeps_provider_identity(
+    tmp_path, monkeypatch, status, customer, typed
+):
+    import httpx
+
+    from egma_simulator.provider_keys import ProviderKeyUnavailable
+
+    class RefusingMouth(FrameProcessor):
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if isinstance(frame, TextFrame):
+                try:
+                    httpx.Response(
+                        status, request=httpx.Request("POST", "https://provider.test/")
+                    ).raise_for_status()
+                except httpx.HTTPStatusError as fault:
+                    await self.push_error("provider refused", exception=fault)
+                return
+            await self.push_frame(frame, direction)
+
+    def refusing_legs(providers, *, voice):
+        return SpeechLegs(stt=ScriptedSTT(), tts=RefusingMouth(), voice=voice)
+
+    monkeypatch.setattr(conductor_module, "build_legs", refusing_legs)
+    speech = SpeechProviders(tts_provider="cartesia", tts_customer_funded=customer)
+    with pytest.raises(ProviderKeyUnavailable if typed else SpeechFault) as caught:
+        await voice_simulation(
+            tmp_path, speech=speech, scenario="One point.", replies=["Noted."]
+        )
+    if typed:
+        assert caught.value.provider == "cartesia"
+        assert failed_ending(caught.value) == "provider_key_unavailable"
+
+
+@pytest.mark.timeout(12)
+@pytest.mark.parametrize("status", [401, 403])
+async def test_openai_tts_auth_failure_survives_the_real_pipeline(
+    tmp_path, monkeypatch, status
+):
+    from aiohttp import web
+    from conftest import direct_models
+
+    from egma_simulator.provider_keys import ProviderKeyUnavailable
+
+    requests = []
+
+    async def reject(request):
+        requests.append((request.headers["Authorization"], await request.json()))
+        return web.json_response(
+            {
+                "error": {
+                    "message": "This key cannot synthesize speech.",
+                    "type": "invalid_request_error",
+                    "code": "invalid_api_key",
+                }
+            },
+            status=status,
+        )
+
+    provider = web.Application()
+    provider.router.add_post("/v1/audio/speech", reject)
+    runner = web.AppRunner(provider)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = runner.addresses[0][1]
+    monkeypatch.setenv("OPENAI_BASE_URL", f"http://127.0.0.1:{port}/v1")
+    speech = SpeechProviders(
+        tts="openai",
+        tts_key="test-customer-speech-key",
+        tts_model="tts-1",
+        tts_provider="openai",
+        tts_customer_funded=True,
+    )
+    models = direct_models(
+        modality="voice", voice={"provider": "openai", "voiceId": "alloy", "speed": 1}
+    )
+    try:
+        with pytest.raises(ProviderKeyUnavailable) as caught:
+            await voice_simulation(
+                tmp_path,
+                speech=speech,
+                models=models,
+                scenario="One point.",
+                replies=["Noted."],
+            )
+        assert caught.value.provider == "openai"
+        assert failed_ending(caught.value) == "provider_key_unavailable"
+        assert "test-customer-speech-key" not in str(caught.value)
+        assert len(requests) == 1
+        assert requests[0][0] == "Bearer test-customer-speech-key"
+        assert requests[0][1]["model"] == "tts-1"
+        assert requests[0][1]["voice"] == "alloy"
+    finally:
+        await runner.cleanup()

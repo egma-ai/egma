@@ -22,7 +22,12 @@ import { startService } from "./service.ts";
 const config = loadConfig();
 const log = makeLog(config.logLevel, config.claimant);
 
-connect({ databaseUrl: config.databaseUrl });
+connect({
+  databaseUrl: config.databaseUrl,
+  ...(config.encryptionKey === undefined
+    ? {}
+    : { encryptionKey: config.encryptionKey }),
+});
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
 
 if (config.ingestion.store !== undefined) {

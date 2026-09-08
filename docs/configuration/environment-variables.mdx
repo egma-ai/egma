@@ -40,8 +40,9 @@ internal values to `.env`. A new encryption key cannot open credentials sealed
 by the old key.
 
 <ParamField path="EGMA_ENCRYPTION_KEY" type="string" required>
-  A generated 32-byte hex key. It seals connection credentials stored in
-  Postgres. Back up the generated platform file with the database. The sealed
+  A generated 32-byte hex key. It seals connection and organization provider
+  credentials stored in Postgres. The API and grader use the same key. Back up
+  the generated platform file with the database. The sealed
   values cannot be recovered without this key.
 </ParamField>
 
@@ -418,6 +419,10 @@ Project persona settings choose the LLM, speech-to-text, text-to-speech, and voi
 Project grader settings choose the LLM used for grading. The variables below
 supply only the credentials needed to call those providers.
 
+Keys saved under [Settings → Provider API Keys](/configuration/provider-api-keys)
+take precedence for their organization. The deployment credentials below supply
+providers without an organization key.
+
 Put one current key per selected provider in `.env`, then run
 `egma self-host up` so the containers receive the changed environment.
 
@@ -444,7 +449,7 @@ Set both or neither:
 <ParamField path="EGMA_PROVIDER_CREDENTIALS_SECRET_ID" type="string">
   The secret ID or ARN. The secret JSON uses `openai_api_key`,
   `deepgram_api_key`, and `cartesia_api_key`. The API and grader fetch its
-  current value for each work item.
+  current value when a work item needs a provider without an organization key.
 </ParamField>
 
 <ParamField path="EGMA_PROVIDER_CREDENTIALS_REGION" type="string">

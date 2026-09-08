@@ -45,6 +45,7 @@ import {
 } from "../../../../lib/test-suites.ts";
 import type { TestPage } from "../../../../lib/tests.ts";
 import { Field, Refused } from "../../../../ui/form.tsx";
+import { WorkRefusalActions } from "../../../../ui/work-refusal-actions.tsx";
 import { RunNote, type RunNoteTest } from "../../../../ui/run-note.tsx";
 import { Empty, Failure, Loading } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
@@ -569,7 +570,12 @@ export function CreateRunSheet({
         {moreRefused === null ? null : (
           <Refused message={moreRefused.message} />
         )}
-        {refused === null ? null : <Refused message={refused.message} />}
+        {refused === null ? null : (
+          <Refused
+            message={refused.message}
+            action={<WorkRefusalActions code={refused.error} projectId={projectId} />}
+          />
+        )}
       </>
     );
   }

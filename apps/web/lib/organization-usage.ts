@@ -46,8 +46,11 @@ export function allowanceLabel(kind: AllowanceKind): string {
 }
 export function usedLabel(usage: AllowanceUsage): string {
   const whole = usage.unit !== "minutes";
+  const unit = usage.used === 1 && (usage.unit === "minutes" || usage.unit === "simulations")
+    ? usage.unit.slice(0, -1)
+    : usage.unit;
   return `${usage.used.toLocaleString("en-US", {
     minimumFractionDigits: whole ? 0 : 1,
     maximumFractionDigits: whole ? 0 : 1,
-  })} ${usage.unit}`;
+  })} ${unit}`;
 }

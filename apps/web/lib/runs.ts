@@ -47,6 +47,8 @@ export function executionFailureMessage(
       return "The simulator stopped reporting before this simulation finished.";
     case "dispatch_failed":
       return "Egma could not dispatch this simulation to a simulator.";
+    case "provider_key_unavailable":
+      return "A saved provider API key could not be used. Check it in Settings → Provider API Keys.";
     default:
       return "Egma could not conduct this simulation.";
   }

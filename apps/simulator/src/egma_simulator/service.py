@@ -298,13 +298,9 @@ class RunningSimulation:
                 # Conducting closed the pipeline on its way out, whatever
                 # happened, so whatever was recorded is measured by now.
                 recording = assembled.recording
-                reporter.audio = (
-                    None if recording is None else recording.as_report()
-                )
+                reporter.audio = None if recording is None else recording.as_report()
                 if recording is not None:
-                    self._spans.recording(
-                        started_unix_nano=recording.started_unix_nano
-                    )
+                    self._spans.recording(started_unix_nano=recording.started_unix_nano)
                 # The same moment for the same reason: the conversation is
                 # over, so every call a platform has reported is settled.
                 # Drained before anything is sealed, so a call reported in
@@ -455,7 +451,16 @@ class RunningSimulation:
         the wire before the terminal report, and what makes a resend of this
         flush collapse rather than charge twice.
         """
-        self._spans.provider_usage(usage)
+        selected = (self._spec.models.llm, self._spec.models.stt, self._spec.models.tts)
+        funding_receipt = next(
+            (
+                model.funding_receipt
+                for model in selected
+                if model.provider == usage.provider
+            ),
+            None,
+        )
+        self._spans.provider_usage(usage, funding_receipt)
 
     async def _on_timing(self, measure: str, milliseconds: float) -> None:
         self._spans.measure(measure, milliseconds)

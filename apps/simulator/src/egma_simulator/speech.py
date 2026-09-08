@@ -39,6 +39,7 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 from .config import STT_PROVIDERS, TTS_PROVIDERS, VAD_PROVIDERS
+from .provider_keys import ProviderKeyUnavailable, authentication_rejected
 from .spec import SelectedModels
 from .usage import ProviderUsage, realtime_transcription_usage
 
@@ -363,6 +364,9 @@ class SpeechProviders:
     tts_model: str | None = None
     """The exact pinned models. Runtime code supplies no default."""
 
+    stt_customer_funded: bool = False
+    tts_customer_funded: bool = False
+
     stt_provider: str | None = None
     tts_provider: str | None = None
     """Who bills for each leg.
@@ -389,6 +393,8 @@ class SpeechProviders:
             stt_model=models.stt.model,
             tts_model=models.tts.model,
             stt_provider=models.stt.provider,
+            stt_customer_funded=models.stt.funding_receipt is not None,
+            tts_customer_funded=models.tts.funding_receipt is not None,
             tts_provider=models.tts.provider,
         )
 
@@ -680,7 +686,23 @@ def _openai_mouth(
     providers: SpeechProviders, voice: PersonaVoice
 ) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
     """The persona's voice through Pipecat's stock OpenAI service."""
-    from pipecat.services.openai.tts import OpenAITTSService
+    from pipecat.services.openai.tts import OpenAITTSService as StockOpenAITTSService
+
+    class OpenAITTSService(StockOpenAITTSService):
+        async def run_tts(
+            self, text: str, context_id: str
+        ) -> AsyncGenerator[Frame, None]:
+            try:
+                async for frame in super().run_tts(text, context_id):
+                    yield frame
+            except Exception as fault:
+                if providers.tts_customer_funded and authentication_rejected(fault):
+                    from pipecat.frames.frames import ErrorFrame
+
+                    failure = ProviderKeyUnavailable("openai")
+                    yield ErrorFrame(error=str(failure), exception=fault)
+                else:
+                    raise
 
     if not providers.tts_key:
         raise SpeechFault("the openai speaking leg was chosen without a key")
@@ -736,11 +758,15 @@ def _openai_realtime_ears(
             )
             if usage is not None:
                 await self.push_frame(
-                    MetricsFrame(data=[ProviderUsageMetricsData(
-                        processor=self.name,
-                        model=self._settings.model,
-                        usage=usage,
-                    )])
+                    MetricsFrame(
+                        data=[
+                            ProviderUsageMetricsData(
+                                processor=self.name,
+                                model=self._settings.model,
+                                usage=usage,
+                            )
+                        ]
+                    )
                 )
             await super()._handle_transcription_completed(evt)
 

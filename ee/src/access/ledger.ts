@@ -173,7 +173,7 @@ export async function settleInference(at = new Date()): Promise<SettledUsage> {
 }
 
 export async function readLedgerBalance(auth: AuthContext): Promise<number> {
-  authorize(auth, "read", {
+  authorize(auth, "read_organization", {
     organizationId: auth.organizationId,
     projectId: auth.projectId,
   });
@@ -204,7 +204,7 @@ export async function readBillingLedger(
   auth: AuthContext,
   cursor?: string,
 ): Promise<BillingLedgerPage> {
-  authorize(auth, "read", {
+  authorize(auth, "read_organization", {
     organizationId: auth.organizationId,
     projectId: auth.projectId,
   });

@@ -120,6 +120,7 @@ class ModelSelection:
     """The selected LLM reasoning primitive, absent where it does not apply."""
 
     key: str | None = field(default=None, repr=False)
+    funding_receipt: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,7 @@ class SelectedModels:
                 model=tts["model"],
                 adapter=tts["adapter"],
                 key=tts.get("key"),
+                funding_receipt=tts.get("funding_receipt"),
                 voice_id=tts["voice_id"],
                 speed=float(tts["speed"]),
             ),
@@ -168,6 +170,7 @@ def _selection(written: Any) -> ModelSelection:
         adapter=written["adapter"],
         reasoning_effort=written.get("reasoning_effort"),
         key=written.get("key"),
+        funding_receipt=written.get("funding_receipt"),
     )
 
 

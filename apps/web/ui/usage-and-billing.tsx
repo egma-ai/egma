@@ -158,7 +158,7 @@ export function ProviderUsage({
   return (
     <Section
       title="Provider and model costs"
-      lead="Model usage during this period, at provider rates."
+      lead="All model usage at provider rates, including calls paid with your provider keys."
     >
       {usage === null ? (
         <Loading what="provider costs" />

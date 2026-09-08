@@ -152,6 +152,12 @@ export async function billingRoutes(
 ): Promise<void> {
   const now = options.now ?? (() => new Date());
   const stripe = options.stripe;
+  app.setErrorHandler(async (error, _request, reply) => {
+    if (error instanceof NotPermittedError) {
+      return refuse(reply, 403, "not_permitted", error.message);
+    }
+    throw error;
+  });
 
   app.get(BILLING_PATH, async (request, reply) => {
     const auth = options.contextOf(request);

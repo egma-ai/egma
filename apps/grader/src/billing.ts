@@ -1,5 +1,6 @@
 import {
   billingIsConfigured,
+  listCustomerFundedProviders,
   type BillingPlugIn,
   type BillingSettings,
 } from "@egma/db";
@@ -12,7 +13,9 @@ export type GraderBilling = {
 };
 
 type BillingModule = {
-  loadCloudBilling(): Promise<GraderBilling>;
+  loadCloudBilling(options: {
+    readonly customerFundedProviders: typeof listCustomerFundedProviders;
+  }): Promise<GraderBilling>;
 };
 
 export async function loadCloudBilling(
@@ -24,7 +27,9 @@ export async function loadCloudBilling(
   try {
     const packageName: string = "@egma/ee";
     const billing: BillingModule = await import(packageName);
-    return await billing.loadCloudBilling();
+    return await billing.loadCloudBilling({
+      customerFundedProviders: listCustomerFundedProviders,
+    });
   } catch (fault) {
     console.error("Billing could not load; customer work continues", fault);
     return undefined;

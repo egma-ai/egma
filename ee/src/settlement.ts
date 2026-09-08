@@ -17,11 +17,18 @@ export function startInferenceSettlementJob(log: SettlementLog): {
 } {
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
+  let plansInitialized = false;
+  let intervalMs = 300_000;
   const tick = async (): Promise<void> => {
-    let intervalMs = 300_000;
     try {
-      intervalMs = (await readPlanCatalog()).chargingIntervalSeconds * 1000;
-      await seedCloudPlans();
+      // The shipped file configures this process once. Retry failed startup
+      // writes, but do not rewrite plan rows during every settlement interval.
+      if (!plansInitialized) {
+        const catalog = await readPlanCatalog();
+        await seedCloudPlans(catalog);
+        intervalMs = catalog.chargingIntervalSeconds * 1000;
+        plansInitialized = true;
+      }
       await activateBilling();
       const settled = await settleInference();
       if (settled.charged > 0)

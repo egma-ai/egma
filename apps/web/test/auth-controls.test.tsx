@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import ApproveDevicePage from "../app/device/approve/page.tsx";
@@ -94,6 +95,14 @@ describe("the screen egma shows while the session is unresolved", () => {
 });
 
 describe("the shared controls on access pages", () => {
+  it("keeps credentials out of the URL before the sign-in page hydrates", () => {
+    const page = document.createElement("div");
+    page.innerHTML = renderToStaticMarkup(<SignInPage />);
+
+    const password = page.querySelector<HTMLInputElement>('input[name="password"]');
+    expect(password?.form?.method).toBe("post");
+  });
+
   it("keeps sign-in labels, browser validation, and password-manager meaning", () => {
     render(<SignInPage />);
 

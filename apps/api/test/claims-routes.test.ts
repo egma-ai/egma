@@ -1,5 +1,7 @@
 import {
   createPersona,
+  resolveSimulationStanding,
+  readProviderFundingReceipt,
   editPersona,
   getSimulation,
   listRunEvents,
@@ -1581,4 +1583,119 @@ describe("persona settings frozen before dispatch", () => {
     expect(next?.models).toMatchObject({ llm: editedModels.llm, stt: editedModels.stt, tts: { provider: "openai", model: "tts-1", voice_id: "custom-voice-id", speed: 1.3 } });
     expect(specComplaints(next)).toEqual([]);
   });
+});
+
+it("uses the organization provider key at claim time and keeps its receipt after rotation", async () => {
+  const load = vi.fn(async () => {
+    throw new ProviderCredentialSourceUnavailableError();
+  });
+  const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+    "claims_organization_provider",
+    { providerCredentials: { load } },
+  );
+  const request = async (method: "GET" | "PUT" | "DELETE", payload?: unknown) =>
+    api.app.inject({
+      method,
+      url: "/v1/provider-keys" + (method === "GET" ? "" : "/openai"),
+      headers: { cookie: ada.cookie },
+      ...(payload ? { payload } : {}),
+    });
+  const saved = await request("PUT", {
+    key: "test-customer-openai-key-ABCD",
+    expectedRevision: null,
+  });
+  expect(saved.statusCode, saved.body).toBe(200);
+  expect(saved.body).not.toContain("test-customer-openai-key");
+  const revision = saved.json().credential.revision;
+  const queued = await aQueuedRun(key, connectionId, versionId);
+  const response = await claim(api.config.simulatorServiceToken, {
+    claimant: "customer-key-worker",
+    capacity: 1,
+    wait_seconds: 0,
+  });
+  expect(response.statusCode).toBe(200);
+  const spec = (
+    response.body.specs as Array<{
+      models: { llm: { key: string; funding_receipt: string } };
+    }>
+  )[0]!;
+  expect(spec.models.llm.key).toBe("test-customer-openai-key-ABCD");
+  expect(specComplaints(spec)).toEqual([]);
+  expect(load).not.toHaveBeenCalled();
+  const rotated = await request("PUT", {
+    key: "test-customer-openai-new-WXYZ",
+    expectedRevision: revision,
+  });
+  expect(rotated.statusCode).toBe(200);
+  expect(
+    (await request("DELETE", { expectedRevision: revision })).statusCode,
+  ).toBe(409);
+  expect(
+    (
+      await request("DELETE", {
+        expectedRevision: rotated.json().credential.revision,
+      })
+    ).statusCode,
+  ).toBe(200);
+  const standing = await resolveSimulationStanding(queued.simulationId);
+  if (!standing) throw new Error("no simulation standing");
+  expect(
+    readProviderFundingReceipt(
+      standing.auth,
+      {
+        simulationId: standing.id,
+        claimedAt: standing.claimedAt,
+        provider: "openai",
+      },
+      spec.models.llm.funding_receipt,
+    ),
+  ).toEqual({ paymentSource: "customer", credentialRef: revision });
+  expect(
+    (await request("GET"))
+      .json()
+      .providers.find((row: { provider: string }) => row.provider === "openai")
+      .credential,
+  ).toBeNull();
+});
+
+it("names an unreadable customer key at dispatch and does not fall back to the deployment key", async () => {
+  const load = vi.fn(async () => {
+    throw new ProviderCredentialSourceUnavailableError();
+  });
+  const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+    "claims_unreadable_customer_key",
+    { providerCredentials: { load } },
+  );
+  const saved = await api.app.inject({
+    method: "PUT",
+    url: "/v1/provider-keys/openai",
+    headers: { cookie: ada.cookie },
+    payload: {
+      key: "test-unreadable-customer-key-ABCD",
+      expectedRevision: null,
+    },
+  });
+  expect(saved.statusCode).toBe(200);
+  await api.database.sql(
+    "UPDATE provider_key SET credentials='not-a-sealed-credential' WHERE organization_id=$1",
+    [ada.organizationId],
+  );
+  const queued = await aQueuedRun(key, connectionId, versionId);
+  const response = await claim(api.config.simulatorServiceToken, {
+    claimant: "unreadable-customer-key",
+    capacity: 1,
+    wait_seconds: 0,
+  });
+  expect(response.body.specs).toEqual([]);
+  const row = await getSimulation(
+    contextFor(ada, "member"),
+    queued.simulationId,
+  );
+  expect(row).toMatchObject({
+    status: "failed",
+    endingReason: "provider_key_unavailable",
+  });
+  expect(row?.executionFailure).toContain("OpenAI API key");
+  expect(row?.executionFailure).not.toContain("not-a-sealed-credential");
+  expect(load).not.toHaveBeenCalled();
 });

@@ -19,7 +19,7 @@ import {
 import { FundingRefusedError } from "./errors.ts";
 import { billing } from "../billing/ports.ts";
 import { traceStore } from "../clickhouse/client.ts";
-import { graderJudgeProviders } from "../models/selections.ts";
+import { graderModelOfParameters } from "../grader-library/parameters.ts";
 import { db, listen, type Listening, type Queryable } from "../client.ts";
 import { combinedGradeScore } from "../grading/results.ts";
 import type { PlanGroup } from "../grading/plan.ts";
@@ -1018,26 +1018,35 @@ export async function recordProductionTraces(
  * On a deployment with no billing this is one resolved promise per customer
  * and every one of them is funded.
  */
+function providersForGrading(entries: readonly FrozenGradingEntry[]): readonly string[] {
+  return [...new Set(entries.filter((entry) => entry.definition.type === "llm_as_judge")
+    .map((entry) => graderModelOfParameters(entry.parameterValues).provider))];
+}
+
 async function gradingHeldForFunding(
-  organizationIds: readonly string[],
+  jobs: readonly Pick<GradingJob, "id" | "organizationId" | "entries">[],
 ): Promise<ReadonlySet<string>> {
-  const asked = [...new Set(organizationIds.filter((id) => id !== ""))];
-  if (asked.length === 0) return new Set();
-  const providers = graderJudgeProviders();
-  const answers = await Promise.all(
-    asked.map(async (organizationId) => ({
+  const funded = new Set<string>();
+  const grouped = new Map<string, { id: string; providers: readonly string[] }[]>();
+  for (const job of jobs) {
+    const providers = providersForGrading(job.entries);
+    if (providers.length === 0) { funded.add(job.id); continue; }
+    const group = grouped.get(job.organizationId) ?? [];
+    group.push({ id: job.id, providers });
+    grouped.set(job.organizationId, group);
+  }
+  await Promise.all([...grouped].map(async ([organizationId, group]) => {
+    const decision = await billing().entitlements.mayPlatformKeyFund({
       organizationId,
-      decision: await billing().entitlements.mayPlatformKeyFund({
-        organizationId,
-        providers,
-      }),
-    })),
-  );
-  return new Set(
-    answers
-      .filter((answer) => answer.decision.funded)
-      .map((answer) => answer.organizationId),
-  );
+      providers: [...new Set(group.flatMap((job) => job.providers))],
+    });
+    for (const job of group) {
+      if (decision.funded || !job.providers.some((provider) => decision.providers.includes(provider))) {
+        funded.add(job.id);
+      }
+    }
+  }));
+  return funded;
 }
 
 export async function claimGradingJobs(
@@ -1109,9 +1118,9 @@ export async function claimGradingJobs(
   });
 
   const funded = await gradingHeldForFunding(
-    rows.filter((row) => row.source === "production").map((row) => String(row.organizationId)),
+    rows.filter((row) => row.source === "production"),
   );
-  const isFunded = (row: (typeof rows)[number]) => row.source === "simulation" || funded.has(String(row.organizationId));
+  const isFunded = (row: (typeof rows)[number]) => row.source === "simulation" || funded.has(row.id);
   const unfunded = rows.filter((row) => !isFunded(row));
   if (unfunded.length > 0) {
     // **Left unclaimed rather than failed.** Nothing is wrong with this work:
@@ -1296,6 +1305,7 @@ export type TraceGrading = {
   readonly history: readonly NamedRecordedGrade[];
   readonly current: readonly NamedCurrentGrade[];
   readonly combinedScore: number | null;
+  readonly workBlock: { readonly error: "providers_unfunded"; readonly message: string } | null;
 };
 
 export type TraceGradingRef = {
@@ -1352,11 +1362,24 @@ export async function readTraceGrading(
   const grades = await readTraceGrades(auth, ref);
   const job = await jobForTrace(db(), auth, ref.traceId);
 
+  let workBlock: TraceGrading["workBlock"] = null;
+  if (ref.source === "production" && entries !== undefined && entries.length > 0 && job?.status === "pending") {
+    try {
+      const providers = providersForGrading(job.entries);
+      if (providers.length > 0) {
+        const funding = await billing().entitlements.mayPlatformKeyFund({ organizationId: auth.organizationId, providers });
+        if (!funding.funded) workBlock = { error: "providers_unfunded", message: funding.message };
+      }
+    } catch (fault) {
+      console.error("Billing status could not be read; customer work continues", fault);
+    }
+  }
+
   // A production trace can be visible before its explicit end/evidence-ready
   // handshake freezes selection. That is pending, not an empty decision.
   if (entries === undefined) {
     if (ref.source === "simulation") return undefined;
-    return { state: "pending", history: [], current: [], combinedScore: null };
+    return { workBlock, state: "pending", history: [], current: [], combinedScore: null };
   }
 
   const names = await namesFor(
@@ -1376,17 +1399,18 @@ export async function readTraceGrading(
   const current = grades.current.map(named);
 
   if (entries.length === 0) {
-    return { state: "not_requested", history, current, combinedScore: null };
+    return { workBlock, state: "not_requested", history, current, combinedScore: null };
   }
   if (job?.status === "claimed") {
-    return { state: "running", history, current, combinedScore: null };
+    return { workBlock, state: "running", history, current, combinedScore: null };
   }
   if (job?.status === "pending") {
-    return { state: "pending", history, current, combinedScore: null };
+    return { workBlock, state: "pending", history, current, combinedScore: null };
   }
   const terminal = allEntriesHaveResults(entries, grades.current);
   if (!terminal.complete) {
     return {
+      workBlock,
       state: job?.status === "abandoned" ? "error" : "pending",
       history,
       current,
@@ -1394,9 +1418,10 @@ export async function readTraceGrading(
     };
   }
   if (terminal.errored) {
-    return { state: "error", history, current, combinedScore: null };
+    return { workBlock, state: "error", history, current, combinedScore: null };
   }
   return {
+    workBlock,
     state: "complete",
     history,
     current,
@@ -1665,11 +1690,6 @@ export async function regradeTrace(
   ref: TraceGradingRef,
 ): Promise<RegradeTraceResult> {
   authorize(auth, "regrade", here(auth));
-  const funding = await billing().entitlements.mayPlatformKeyFund({
-    organizationId: auth.organizationId,
-    providers: graderJudgeProviders(),
-  });
-  if (!funding.funded) throw new FundingRefusedError(funding.message);
   return db().transaction(async (tx) => {
     await lockTrace(tx, auth, ref.traceId);
     const entries = await selectedEntries(tx, auth, ref);
@@ -1721,6 +1741,11 @@ export async function regradeTrace(
         });
         if (!readiness.ready) return { kind: "waiting", for: "evidence" };
       }
+    }
+    const providers = providersForGrading(entries);
+    if (providers.length > 0) {
+      const funding = await billing().entitlements.mayPlatformKeyFund({ organizationId: auth.organizationId, providers });
+      if (!funding.funded) throw new FundingRefusedError(funding.message);
     }
     if (existing !== undefined) {
       const prior = await readTraceGrades(auth, ref);

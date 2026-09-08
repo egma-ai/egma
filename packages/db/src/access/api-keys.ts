@@ -13,7 +13,7 @@ import {
 import { membershipsOf } from "./memberships.ts";
 import { authorize, here, permitsApiKeyMintedBy } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
-import { within } from "./within.ts";
+import { inCredentialProject, within } from "./within.ts";
 
 /**
  * An API key as anyone is ever allowed to see it again. The hash never leaves
@@ -53,8 +53,8 @@ const COLUMNS = {
 } as const;
 
 /**
- * List organization keys permitted by permitsApiKeyMintedBy: admins see all,
- * other roles see their own. Include organization-scoped keys without a project.
+ * List keys within the credential's scope: admins see all permitted keys,
+ * other roles see their own. Browser sessions retain organization-wide access.
  */
 export async function listApiKeys(
   auth: AuthContext,
@@ -68,11 +68,14 @@ export async function listApiKeys(
     })
     .from(apiKey)
     .innerJoin(user, eq(apiKey.createdByUserId, user.id))
-    .where(within(auth, apiKey))
+    .where(within(auth, apiKey, inCredentialProject(auth, apiKey.projectId)))
     .orderBy(apiKey.id);
 
   return rows.filter((row) =>
-    permitsApiKeyMintedBy(auth, row.createdByUserId, here(auth)),
+    permitsApiKeyMintedBy(auth, row.createdByUserId, {
+      organizationId: row.organizationId,
+      projectId: row.projectId ?? undefined,
+    }),
   );
 }
 
@@ -140,6 +143,11 @@ export async function createApiKey(
 ): Promise<ApiKey> {
   const projectId = input.projectId ?? null;
 
+  authorize(auth, "mint_own_api_key", {
+    organizationId: auth.organizationId,
+    projectId: projectId ?? undefined,
+  });
+
   if (projectId !== null && !(await isProjectOfOrganization(auth, projectId))) {
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
   }
@@ -194,14 +202,20 @@ export async function revokeApiKey(
   apiKeyId: string,
 ): Promise<ApiKey | undefined> {
   const [existing] = await db()
-    .select({ createdByUserId: apiKey.createdByUserId })
+    .select({ createdByUserId: apiKey.createdByUserId, projectId: apiKey.projectId })
     .from(apiKey)
-    .where(within(auth, apiKey, eq(apiKey.id, apiKeyId)))
+    .where(within(auth, apiKey, and(
+      eq(apiKey.id, apiKeyId),
+      inCredentialProject(auth, apiKey.projectId),
+    )))
     .limit(1);
 
   if (
     existing === undefined ||
-    !permitsApiKeyMintedBy(auth, existing.createdByUserId, here(auth))
+    !permitsApiKeyMintedBy(auth, existing.createdByUserId, {
+      organizationId: auth.organizationId,
+      projectId: existing.projectId ?? undefined,
+    })
   ) {
     return undefined;
   }
@@ -210,7 +224,11 @@ export async function revokeApiKey(
     .update(apiKey)
     .set({ revokedAt: new Date(), updatedAt: new Date() })
     .where(
-      within(auth, apiKey, and(eq(apiKey.id, apiKeyId), isNull(apiKey.revokedAt))),
+      within(auth, apiKey, and(
+        eq(apiKey.id, apiKeyId),
+        isNull(apiKey.revokedAt),
+        inCredentialProject(auth, apiKey.projectId),
+      )),
     )
     .returning(COLUMNS);
   return row;

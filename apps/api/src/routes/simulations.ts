@@ -13,6 +13,7 @@ import {
   NotPermittedError,
   FundingRefusedError,
   readTrace,
+  readRunWorkBlock,
   readTraceGrading,
   regradeTrace,
   type GradingPlan,
@@ -33,7 +34,7 @@ import { describedTraceGrading } from "../http/grades.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
-import { notFound, notPermitted, unprocessable } from "../http/refusals.ts";
+import { notFound, notPermitted, sendRefusal, unprocessable } from "../http/refusals.ts";
 
 export type SimulationRoutesOptions = {
   readonly provider: SessionIdentityProvider;
@@ -290,6 +291,9 @@ export async function simulationRoutes(
         runName: run.name,
         position: simulation.position,
         status: simulation.status,
+        workBlock: simulation.status === "queued"
+          ? await readRunWorkBlock(acting.auth, simulation.runId, simulation.id)
+          : null,
         ...describedTraceGrading(grading),
         reason: simulation.endingReason,
         executionFailure: simulation.executionFailure,
@@ -439,7 +443,7 @@ export async function simulationRoutes(
   );
 
   app.setErrorHandler(async (error, _request, reply) => {
-    if (error instanceof FundingRefusedError) return unprocessable(reply, error.message);
+    if (error instanceof FundingRefusedError) return sendRefusal(reply, "providers_unfunded", error.message);
     if (error instanceof NotPermittedError) {
       return notPermitted(reply, error.message);
     }

@@ -380,6 +380,7 @@ export {
   listSimulations,
   markSimulationCanceled,
   readQueuedWorkProviders,
+  readRunWorkBlock,
   recordSimulationHeartbeat,
   releaseSimulationClaim,
   resolveRunStartReach,
@@ -401,6 +402,7 @@ export {
   sweepOrphanedSimulations,
   type CompletedEndingReason,
   type ConductedSimulation,
+  type RunWorkBlock,
   type ConnectionSnapshot,
   type FailedEndingReason,
   type ExpectedTestVersion,
@@ -540,3 +542,5 @@ export type {
   UsagePaymentSource,
   UsageWorkKind,
 } from "../schema/billing.ts";
+
+export {createProviderFundingReceipt, readProviderFundingReceipt, readProviderKeys, putProviderKey, deleteProviderKey, resolveProviderKeysForWork, ProviderKeyUnavailableError, type ProviderKeyEntry} from './provider-keys.ts';

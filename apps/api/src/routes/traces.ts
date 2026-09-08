@@ -426,7 +426,7 @@ async function simulatorExport(
   const unreadableBills: string[] = [];
   const usageBySimulation = new Map<string, ReadonlyMap<string, ReturnType<typeof providerUsageSpan>>>();
   for (const one of gathered) {
-    const usage = providerUsageIn(one.resources, () => ({ simulationId: one.standing.id, runId: one.standing.runId }));
+    const usage = providerUsageIn(one.resources, () => ({ simulationId: one.standing.id, runId: one.standing.runId,auth:one.standing.auth,claimedAt:one.standing.claimedAt }));
     unreadableBills.push(...usage.skipped);
     usageBySimulation.set(one.standing.id, new Map(usage.records.map((record) => {
       const span = providerUsageSpan(record);

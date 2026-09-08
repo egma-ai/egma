@@ -1,6 +1,5 @@
 import { UnprocessableInputError } from "../access/errors.ts";
 import {
-  PROVIDER_CATALOG,
   PROVIDERS_BY_JOB,
   RECOMMENDED_ENTRY,
   catalogEntry,
@@ -245,30 +244,4 @@ export function providersNeededBy(
       ? [models.llm.provider]
       : [models.llm.provider, models.stt.provider, models.tts.provider];
   return [...new Set(needed)];
-}
-
-/**
- * The providers a judge can run on in this release.
- *
- * **Read off the catalog rather than listed, so it cannot go stale.** A grader
- * runs on an LLM the catalog marks grader-eligible, and the judge adapter
- * refuses anything else out loud; the grading claim asks whether Egma's key
- * may fund those providers before it hands a job out, and asking with a
- * hand-written list would be a second answer to which providers a judge can
- * even use.
- *
- * It is the release's answer and not one customer's: which of these a
- * particular job will actually reach depends on its frozen graders, and a
- * balance at zero funds none of them either way.
- */
-export function graderJudgeProviders(): readonly string[] {
-  return [
-    ...new Set(
-      PROVIDER_CATALOG.filter(
-        (entry) =>
-          entry.job === "llm" &&
-          (entry as { readonly graderEligible?: boolean }).graderEligible === true,
-      ).map((entry) => entry.provider),
-    ),
-  ];
 }

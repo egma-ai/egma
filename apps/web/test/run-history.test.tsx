@@ -126,6 +126,7 @@ function runHeader(overrides: Record<string, unknown> = {}) {
 
 function runDetail(overrides: Record<string, unknown> = {}) {
   return {
+    workBlock: null,
     ...runHeader(),
     eventThrough: 0,
     connectionSnapshot: {
@@ -632,6 +633,74 @@ describe("one run after suites", () => {
         /later tool calls or conversation turns may be absent/iu,
       ),
     ).toBeTruthy();
+  });
+
+  it("clears a queued work block after funding recovers without a run event", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const waiting = runDetail({
+      status: "running", gradableCount: 0, gradedCount: 0,
+      workBlock: { error: "providers_unfunded", message: "The inference balance is $0.00." },
+    });
+    answers({
+      ...detailStubs(waiting),
+      "/v1/runs/run_1": [
+        { status: 200, body: waiting },
+        { status: 200, body: { ...waiting, workBlock: null } },
+      ],
+    });
+    render(<RunDetailPage />);
+    expect(await screen.findByText("Queued simulations are waiting. The inference balance is $0.00.")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByText("Queued simulations are waiting. The inference balance is $0.00.")).toBeNull();
+    }, { timeout: 3500 });
+  });
+
+  it("explains why queued simulations are waiting and links to the plan", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(detailStubs(runDetail({
+      status: "running",
+      workBlock: { error: "allowance_spent", message: "The Hobby phone allowance is used." },
+    })));
+    render(<RunDetailPage />);
+    const refusal = await screen.findByText("Queued simulations are waiting. The Hobby phone allowance is used.");
+    const alert = within(refusal.closest('[role="alert"]') as HTMLElement);
+    expect(alert.getByRole("link", { name: "Usage and billing" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/billing");
+    expect(alert.queryByRole("link", { name: "Add credits" })).toBeNull();
+  });
+
+  it("links a failed simulation in the run to provider key repair", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const failure = { status: "failed", reason: "provider_key_unavailable",
+      executionFailure: "The saved OpenAI key cannot be used." };
+    answers(detailStubs(runDetail(), undefined, [{ status: 200, body: simulationEvidence(failure) }]));
+    render(<RunDetailPage />);
+    expect(await screen.findByText(/The saved OpenAI key cannot be used./u)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/provider-api-keys");
+    expect(screen.queryByRole("link", { name: "Add credits" })).toBeNull();
+  });
+
+  it("offers funding actions when a regrade from the run is refused", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers({
+      ...detailStubs(runDetail(), undefined, [{ status: 200, body: simulationEvidence() }]),
+      "/v1/simulations/sim_1/regrade": {
+        status: 422,
+        body: { error: "providers_unfunded", message: "The inference balance is $0.00." },
+      },
+    });
+    render(<RunDetailPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Regrade" }));
+    const dialog = screen.getByRole("dialog", { name: "Regrade “Books service”?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Regrade simulation" }));
+    const refusal = await screen.findByText("The inference balance is $0.00.");
+    const alert = within(refusal.closest('[role="alert"]') as HTMLElement);
+    expect(alert.getByRole("link", { name: "Add credits" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/billing");
+    expect(alert.getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
+      .toBe("/projects/prj_1/settings/provider-api-keys");
+    expect(screen.queryByText(/queued for a whole-simulation regrade/iu)).toBeNull();
   });
 
   it("keeps the compact p90 summary, grade history, and regrade in the run", async () => {

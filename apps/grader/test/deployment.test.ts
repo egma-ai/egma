@@ -131,11 +131,8 @@ describe("the grader's place in the deployment", () => {
     expect(block).toContain("CLICKHOUSE_URL:");
   });
 
-  /** The grader reads the shared provider bundle. It no longer opens model
-   * credentials stored in Postgres, so the connection encryption key must not
-   * cross this container boundary.
-   */
-  it("is handed the provider credential inputs, and no encryption key", async () => {
+  /** The grader opens organization keys and also uses deployment provider keys. */
+  it("is handed provider inputs and the same key used to seal organization credentials", async () => {
     const block = serviceBlock(await read("docker-compose.yml"), "grader");
     expect(block).toBeDefined();
     expect(block).toContain("EGMA_OPENAI_API_KEY:");
@@ -143,7 +140,7 @@ describe("the grader's place in the deployment", () => {
     expect(block).toContain("EGMA_CARTESIA_API_KEY:");
     expect(block).toContain("EGMA_PROVIDER_CREDENTIALS_SECRET_ID:");
     expect(block).toContain("EGMA_PROVIDER_CREDENTIALS_REGION:");
-    expect(block).not.toContain("EGMA_ENCRYPTION_KEY:");
+    expect(block).toContain("EGMA_ENCRYPTION_KEY:");
   });
 
   it("has no healthcheck, because nothing listens for one to reach", async () => {

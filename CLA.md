@@ -3,7 +3,8 @@
 Thank you for your interest in contributing to Egma.
 
 This Contributor License Agreement ("Agreement") records the terms under which
-You contribute to any project owned by Egma AI, Inc. ("Egma"). It protects You
+You contribute to any project owned by Outlier Humans Inc, operating as Egma AI
+("Egma"). It protects You
 as a contributor and it keeps Egma free to license the project as it does
 today — Apache 2.0 for the product, and the Egma Enterprise license for the
 `ee/` directory. Read it before You contribute.

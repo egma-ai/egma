@@ -1,6 +1,9 @@
+import { JudgeRefused } from "./judge/openai.ts";
 import { persistProviderUsage } from "@egma/ingestion";
 import {
   appendGrades,
+  resolveProviderKeysForWork,
+  ProviderKeyUnavailableError,
   catalogEntry,
   graderModelOfParameters,
   getRun,
@@ -71,25 +74,74 @@ export async function gradeClaim(
   options: GradeOptions,
 ): Promise<Graded> {
   const resolved = await resolveConversation(claim);
-  const credentials = claim.entries.some(
-    (entry) => entry.definition.type === "llm_as_judge",
-  )
-    ? await options.providerCredentials.load()
-    : {};
-  const judges = judgesFor(
-    claim.entries,
-    credentials,
-    options.makers ?? JUDGE_MAKERS,
-    async (entry, usage) => {
-      await persistProviderUsage(claim.auth, usageRow(claim, entry, resolved.simulationId, usage));
-    },
-  );
+  const providers = [
+    ...new Set(
+      claim.entries
+        .filter((entry) => entry.definition.type === "llm_as_judge")
+        .map(
+          (entry) => graderModelOfParameters(entry.parameterValues).provider,
+        ),
+    ),
+  ];
+  let customer: Awaited<ReturnType<typeof resolveProviderKeysForWork>> = {};
+  let keyFailure: ProviderKeyUnavailableError | undefined;
+  try {
+    customer = providers.length
+      ? await resolveProviderKeysForWork(claim.auth, providers)
+      : {};
+  } catch (error) {
+    if (!(error instanceof ProviderKeyUnavailableError)) throw error;
+    keyFailure = error;
+  }
+  const deployment =
+    !keyFailure &&
+    providers.some((provider) => customer[provider] === undefined)
+      ? await options.providerCredentials.load()
+      : {};
+  const credentials = {
+    ...deployment,
+    ...Object.fromEntries(
+      Object.entries(customer).map(([provider, value]) => [
+        provider,
+        value.key,
+      ]),
+    ),
+  };
+  const judges = keyFailure
+    ? new Map<string, AskableJudge>()
+    : judgesFor(
+        claim.entries,
+        credentials,
+        options.makers ?? JUDGE_MAKERS,
+        new Set(Object.keys(customer)),
+        async (entry, usage) => {
+          const model = graderModelOfParameters(entry.parameterValues);
+          const payer = customer[model.provider];
+          await persistProviderUsage(claim.auth, {
+            ...usageRow(claim, entry, resolved.simulationId, usage),
+            paymentSource: payer ? "customer" : "platform",
+            ...(payer ? { credentialRef: payer.credentialRef } : {}),
+          });
+        },
+      );
   const reading = readingFor(claim, resolved.simulationId);
 
-  const rows = await Promise.all(claim.entries.map(async (entry) => {
-    const result = await resultOf(entry, resolved.conversation, reading, judges);
-    return gradeRow(claim, entry, result);
-  }));
+  const rows = await Promise.all(
+    claim.entries.map(async (entry) => {
+      const result =
+        keyFailure && entry.definition.type === "llm_as_judge"
+          ? {
+              score: null,
+              details: {
+                error: keyFailure.message,
+                errorCode: keyFailure.code,
+                provider: keyFailure.provider,
+              },
+            }
+          : await resultOf(entry, resolved.conversation, reading, judges);
+      return gradeRow(claim, entry, result);
+    }),
+  );
 
   // One append after every grader has answered. A store failure therefore
   // retries the whole frozen plan, while ClickHouse keeps every completed retry
@@ -103,13 +155,19 @@ export async function gradeClaim(
   };
 }
 
-function readingFor(claim: GradingClaim, simulationId: string | undefined): Reading {
+function readingFor(
+  claim: GradingClaim,
+  simulationId: string | undefined,
+): Reading {
   let held: Promise<readonly string[]> | undefined;
   return {
     expectedBehaviors(): Promise<readonly string[]> {
       if (simulationId === undefined) return Promise.resolve([]);
       held ??= (async () => {
-        const version = await getSimulationTestVersion(claim.auth, simulationId);
+        const version = await getSimulationTestVersion(
+          claim.auth,
+          simulationId,
+        );
         if (version === undefined) {
           throw new Error(
             `simulation ${simulationId} has no readable frozen test version`,
@@ -137,12 +195,19 @@ async function resultOf(
       reading,
     });
     if (result.score === null) {
-      if (typeof result.details.error !== "string" || result.details.error.trim() === "") {
+      if (
+        typeof result.details.error !== "string" ||
+        result.details.error.trim() === ""
+      ) {
         throw new Error("returned a null score without an error explanation");
       }
       return result;
     }
-    if (!Number.isFinite(result.score) || result.score < 0 || result.score > 1) {
+    if (
+      !Number.isFinite(result.score) ||
+      result.score < 0 ||
+      result.score > 1
+    ) {
       throw new Error(`returned score ${result.score}, outside 0 through 1`);
     }
     return result;
@@ -150,6 +215,9 @@ async function resultOf(
     return {
       score: null,
       details: {
+        ...(error instanceof ProviderKeyUnavailableError
+          ? { errorCode: error.code, provider: error.provider }
+          : {}),
         error: `this grader could not produce a score: ${
           error instanceof Error ? error.message : String(error)
         }`,
@@ -163,15 +231,31 @@ function judgesFor(
   entries: readonly FrozenGradingEntry[],
   credentials: ProviderCredentialBundle,
   makers: JudgeMakers,
+  customerProviders: ReadonlySet<string>,
   spent: (entry: FrozenGradingEntry, usage: JudgeUsage) => Promise<void>,
 ): ReadonlyMap<string, AskableJudge> {
   const judges = new Map<string, AskableJudge>();
   for (const entry of entries) {
     if (entry.definition.type === "code") continue;
-    judges.set(
-      entry.projectGraderId,
-      judgeFor(graderModelOfParameters(entry.parameterValues), credentials, makers, (usage) => spent(entry, usage)),
+    const model = graderModelOfParameters(entry.parameterValues);
+    const judge = judgeFor(model, credentials, makers, (usage) =>
+      spent(entry, usage),
     );
+    judges.set(entry.projectGraderId, {
+      ask: async (question) => {
+        try {
+          return await judge.ask(question);
+        } catch (error) {
+          if (
+            customerProviders.has(model.provider) &&
+            error instanceof JudgeRefused &&
+            (error.status === 401 || error.status === 403)
+          )
+            throw new ProviderKeyUnavailableError(model.provider);
+          throw error;
+        }
+      },
+    });
   }
   return judges;
 }
@@ -257,10 +341,15 @@ async function resolveConversation(claim: GradingClaim): Promise<Resolved> {
         `production trace ${claim.traceId} is no longer readable in its frozen window`,
       );
     }
-    return { conversation: conversationOfTrace(trace), simulationId: undefined };
+    return {
+      conversation: conversationOfTrace(trace),
+      simulationId: undefined,
+    };
   }
   if (claim.simulationId === null) {
-    throw new NotGradable(`simulation grading job ${claim.id} names no simulation`);
+    throw new NotGradable(
+      `simulation grading job ${claim.id} names no simulation`,
+    );
   }
   const simulation = await getSimulation(claim.auth, claim.simulationId);
   if (simulation === undefined || simulation.status !== "completed") {
@@ -278,7 +367,9 @@ async function resolveConversation(claim: GradingClaim): Promise<Resolved> {
   // which platform must supply the transcript, regardless of which span lands first.
   const run = await getRun(claim.auth, claim.runId);
   if (run === undefined) {
-    throw new NotGradable(`simulation ${simulation.id}'s frozen run is not readable`);
+    throw new NotGradable(
+      `simulation ${simulation.id}'s frozen run is not readable`,
+    );
   }
   const connectionType = run.connectionSnapshot.connectionType;
 
@@ -310,9 +401,7 @@ async function resolveConversation(claim: GradingClaim): Promise<Resolved> {
   };
 }
 
-async function traceFor(
-  claim: GradingClaim,
-): Promise<TraceDetail | undefined> {
+async function traceFor(claim: GradingClaim): Promise<TraceDetail | undefined> {
   const cushion = 1_000_000n;
   const from = BigInt(claim.traceStartedAt.getTime()) * 1_000n - cushion;
   const to = from + BigInt(MAXIMUM_WINDOW_MILLISECONDS) * 1_000n;

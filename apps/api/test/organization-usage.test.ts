@@ -147,6 +147,7 @@ async function aCustomerWhoRan(
 ): Promise<{
   customer: Customer;
   key: string;
+  organizationKey: string;
   runId: string;
   agentId: string;
   connectionId: string;
@@ -220,6 +221,7 @@ async function aCustomerWhoRan(
   return {
     customer,
     key,
+    organizationKey: await mintKey(api.app, customer.cookie, "Usage settings"),
     runId: String(started.body.id),
     agentId,
     connectionId,
@@ -274,7 +276,7 @@ describe("the organization's usage this period", () => {
       api.app,
       "GET",
       "/api/organization/usage",
-      acme.key,
+      acme.organizationKey,
     );
     expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
     const usage = answer.body as unknown as UsageAnswer;
@@ -302,7 +304,7 @@ describe("the organization's usage this period", () => {
       api.app,
       "GET",
       "/api/organization/usage",
-      acme.key,
+      acme.organizationKey,
     );
     expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
     const usage = answer.body as unknown as UsageAnswer;
@@ -327,13 +329,13 @@ describe("the organization's usage this period", () => {
       api.app,
       "GET",
       "/api/organization/usage",
-      globex.key,
+      globex.organizationKey,
     );
     const ours = await ask(
       api.app,
       "GET",
       "/api/organization/usage",
-      acme.key,
+      acme.organizationKey,
     );
     expect((theirs.body as unknown as UsageAnswer).allowances[2]?.used).toBe(2);
     expect((ours.body as unknown as UsageAnswer).allowances[2]?.used).toBe(0);

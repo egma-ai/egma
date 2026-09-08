@@ -1,3 +1,4 @@
+import { listCustomerFundedProviders } from "@egma/db";
 import { setStripePaymentsReady } from "./access/index.ts";
 import { startInferenceSettlementJob } from "./settlement.ts";
 import type { FastifyInstance } from "fastify";
@@ -15,7 +16,9 @@ export type ApiBillingSettings = {
 
 /** Bind the billing routes and jobs to this API's Stripe connection. */
 export async function loadApiBilling(settings: ApiBillingSettings) {
-  const loaded = await loadCloudBilling();
+  const loaded = await loadCloudBilling({
+    customerFundedProviders: listCustomerFundedProviders,
+  });
   await setStripePaymentsReady(false).catch((fault: unknown) => {
     console.error(
       "Stripe readiness could not be persisted; customer work continues",

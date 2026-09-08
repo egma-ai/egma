@@ -157,7 +157,6 @@ export {
   RECOMMENDED_GRADER_MODEL,
   RECOMMENDED_PERSONA_MODELS,
   SPEED_RANGE,
-  graderJudgeProviders,
   graderModelFromRow,
   personaModelsFromRow,
   providersNeededBy,
@@ -277,3 +276,5 @@ export type { ProjectPersonaSettings } from "./access/project-personas.ts";
 
 export { readPlatformUsageTotal } from "./billing/usage.ts";
 export { providerUsageSpan } from "./models/provider-usage.ts";
+
+export {listCustomerFundedProviders} from './billing/provider-keys.ts';

@@ -510,6 +510,7 @@ services:
       EGMA_INGEST_REGION: ${EGMA_INGEST_REGION:-${EGMA_S3_REGION:-}}
       EGMA_INGEST_ACCESS_KEY_ID: ${EGMA_INGEST_ACCESS_KEY_ID:-${EGMA_S3_INGEST_ACCESS_KEY_ID:-}}
       EGMA_INGEST_SECRET_ACCESS_KEY: ${EGMA_INGEST_SECRET_ACCESS_KEY:-${EGMA_S3_INGEST_SECRET_ACCESS_KEY:-}}
+      EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:?set the same encryption key used by the API}
       EGMA_GRADER_INGESTION_LOG_DIR: /var/lib/egma/grader-ingestion
       EGMA_GRADER_CLAIMANT: ${EGMA_GRADER_CLAIMANT:-}
       # How many conversations one copy judges at once. It claims only what it

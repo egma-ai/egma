@@ -87,6 +87,7 @@ async function aBillingDeployment(label: string): Promise<void> {
 type Seeded = {
   readonly customer: Customer;
   readonly key: string;
+  readonly organizationKey: string;
   readonly runId: string;
   readonly agentId: string;
   readonly connectionId: string;
@@ -168,6 +169,7 @@ async function aCustomerWithARun(
   return {
     customer,
     key,
+    organizationKey: await mintKey(api.app, customer.cookie, "Organization billing"),
     runId: String(started.body.id),
     agentId,
     connectionId,
@@ -195,12 +197,12 @@ async function chatConversations(
         position, modality, connection_type, status, ending_reason,
         started_at, ended_at)
      select
-       'sim_' || upper(substr(md5(random()::text || n::text || clock_timestamp()::text), 1, 26)),
+       ids.id,
        $1, $2, $3, $4, $5, $6, $7,
        (select persona_parameter_values from simulation where run_id = $1 order by position limit 1),
-       $8, $9, n, 'chat', 'retell_chat_api', 'completed', 'persona_concluded',
+       $8, $9, $11::int + ids.n - 1, 'chat', 'retell_chat_api', 'completed', 'persona_concluded',
        $10::timestamptz, $10::timestamptz + interval '30 seconds'
-     from generate_series($11::int, $11::int + $12::int - 1) as n`,
+     from unnest($12::text[]) with ordinality as ids(id, n)`,
     [
       seeded.runId,
       seeded.customer.organizationId,
@@ -213,7 +215,7 @@ async function chatConversations(
       seeded.testVersionId,
       INSIDE,
       from,
-      count,
+      Array.from({ length: count }, () => newId("sim")),
     ],
   );
 }
@@ -241,7 +243,7 @@ describe("what the Billing section reads", () => {
       api.app,
       "GET",
       "/api/organization/billing",
-      acme.key,
+      acme.organizationKey,
     );
     expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
     const read = answer.body as unknown as BillingAnswer;
@@ -282,13 +284,13 @@ describe("what the Billing section reads", () => {
       api.app,
       "GET",
       "/api/organization/billing",
-      acme.key,
+      acme.organizationKey,
     );
     const ours = await ask(
       api.app,
       "GET",
       "/api/organization/billing",
-      globex.key,
+      globex.organizationKey,
     );
     expect((theirs.body as unknown as BillingAnswer).plan.code).toBe("hobby");
     expect((ours.body as unknown as BillingAnswer).plan.code).toBe("pro");
@@ -297,6 +299,17 @@ describe("what the Billing section reads", () => {
     expect(
       (ours.body as unknown as BillingAnswer).plan.allowances[0]?.allowed,
     ).toBeNull();
+  });
+
+  it("refuses organization billing reads from a project API key even when its owner is an admin", async () => {
+    await aBillingDeployment("cloud_billing_project_scope");
+    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+    for (const route of ["/api/organization/billing", "/api/organization/billing/ledger"]) {
+      const refused = await ask(api.app, "GET", route, acme.key);
+      expect(refused.statusCode, JSON.stringify(refused.body)).toBe(403);
+      const allowed = await ask(api.app, "GET", route, acme.organizationKey);
+      expect(allowed.statusCode, JSON.stringify(allowed.body)).toBe(200);
+    }
   });
 
   it("gives a member the plan, balance and ledger", async () => {
@@ -353,6 +366,7 @@ describe("starting a run an organization cannot pay for", () => {
       connectionId: acme.connectionId,
     });
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+    expect(refused.body).toMatchObject({ error: "allowance_spent" });
     const message = String(
       (refused.body as { message?: unknown }).message ?? "",
     );
@@ -382,6 +396,7 @@ describe("starting a run an organization cannot pay for", () => {
       connectionId: acme.connectionId,
     });
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+    expect(refused.body).toMatchObject({ error: "providers_unfunded" });
     const message = String(
       (refused.body as { message?: unknown }).message ?? "",
     );
@@ -488,6 +503,10 @@ describe("what the claim door does when a customer's month is spent", () => {
       [running],
     );
     expect(live[0]?.status).toBe("running");
+    const pendingRun = await ask(api.app, "GET", `/v1/runs/${acme.runId}`, acme.key);
+    expect(pendingRun.body).toMatchObject({ workBlock: { error: "allowance_spent" } });
+    const activeSimulation = await ask(api.app, "GET", `/v1/simulations/${running}`, acme.key);
+    expect(activeSimulation.body).toMatchObject({ workBlock: null });
   });
 
   it("leaves it queued when Egma's key cannot pay for its providers", async () => {
@@ -518,8 +537,21 @@ describe("what the claim door does when a customer's month is spent", () => {
       [acme.runId],
     );
     expect(rows.map((row) => row.status)).toEqual(["queued"]);
-
-
+    const pending = await ask(api.app, "GET", `/v1/runs/${acme.runId}`, acme.key);
+    expect(pending.body).toMatchObject({ workBlock: { error: "providers_unfunded" } });
+    const restore = installBillingPlugIn({
+      ...openBillingPlugIn(),
+      entitlements: {
+        mayStart: async () => ({ allowed: true }),
+        mayPlatformKeyFund: async () => { throw new Error("Billing is unavailable"); },
+      },
+    });
+    try {
+      const outage = await ask(api.app, "GET", `/v1/runs/${acme.runId}`, acme.key);
+      expect(outage.body).toMatchObject({ workBlock: null });
+    } finally {
+      restore();
+    }
   });
 });
 
@@ -540,9 +572,12 @@ it("refuses unfunded regrades for both session and API key before queueing", asy
   const id = await completedSimulation(acme);
   await spendTheBalance(acme);
   const path = `/v1/simulations/${id}/regrade?project=${acme.customer.projectId}`;
-  expect((await ask(api.app, "POST", path, acme.key)).statusCode).toBe(422);
+  const keyRefusal = await ask(api.app, "POST", path, acme.key);
+  expect(keyRefusal.statusCode).toBe(422);
+  expect(keyRefusal.body).toMatchObject({ error: "providers_unfunded" });
   const session = await api.app.inject({ method: "POST", url: path, headers: { cookie: acme.customer.cookie, origin: api.config.baseUrl } });
   expect(session.statusCode, session.body).toBe(422);
+  expect(session.json()).toMatchObject({ error: "providers_unfunded" });
   expect(await claimGradingJobs({ claimant: "grader", capacity: 10 })).toEqual([]);
 });
 

@@ -51,6 +51,8 @@ import {
   StateMark,
 } from "../../../../../../ui/run-status.tsx";
 import { GradeCard } from "../../../../../grade-card.tsx";
+import { Refused } from "../../../../../../ui/form.tsx";
+import { WorkRefusalActions } from "../../../../../../ui/work-refusal-actions.tsx";
 import { RecordingPlayer } from "../../../../../recording-player.tsx";
 import { Loading } from "../../../../../../ui/page-state.tsx";
 import {
@@ -396,6 +398,8 @@ export default function TranscriptPage({
         <Summary facts={detail.trace} />
         <Measures measured={detail.metrics ?? []} />
         <GradeSummary
+          projectId={projectId}
+          workBlock={detail.workBlock}
           state={detail.gradingState}
           combinedScore={detail.combinedScore}
           grades={detail.grades}
@@ -628,11 +632,15 @@ function gradingStateLabel(state: Detail["gradingState"]): string {
 
 /** Trace-level grading progress, the display-only mean, and individual grades. */
 function GradeSummary({
+  projectId,
+  workBlock,
   state,
   combinedScore,
   grades,
   history,
 }: {
+  readonly projectId: string;
+  readonly workBlock: Detail["workBlock"];
   readonly state: Detail["gradingState"];
   readonly combinedScore: number | null;
   readonly grades: readonly Grade[];
@@ -666,6 +674,12 @@ function GradeSummary({
         Total avg score is the arithmetic mean of all selected grader scores.
         It is not a pass or fail result.
       </p>
+      {workBlock === null ? null : (
+        <Refused
+          message={`Grading is waiting. ${workBlock.message}`}
+          action={<WorkRefusalActions code={workBlock.error} projectId={projectId} />}
+        />
+      )}
       {grades.length === 0 ? (
         <Notice>
           {state === "not_requested"
@@ -678,6 +692,7 @@ function GradeSummary({
         <div className="mt-4 grid gap-3">
           {grades.map((grade) => (
             <GradeCard
+              projectId={projectId}
               key={`${grade.projectGraderId}:${grade.gradedAt}`}
               grade={grade}
             />
@@ -692,6 +707,7 @@ function GradeSummary({
           <div className="mt-4 grid gap-3">
             {earlier.map((grade) => (
               <GradeCard
+                projectId={projectId}
                 key={`${grade.projectGraderId}:${grade.gradedAt}`}
                 grade={grade}
                 historical

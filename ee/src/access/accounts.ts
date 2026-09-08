@@ -258,7 +258,7 @@ export async function readBillingOverview(
   auth: AuthContext,
   at = new Date(),
 ): Promise<BillingOverview> {
-  authorize(auth, "read", {
+  authorize(auth, "read_organization", {
     organizationId: auth.organizationId,
     projectId: auth.projectId,
   });

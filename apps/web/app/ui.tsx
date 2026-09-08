@@ -135,6 +135,7 @@ export function AuthForm({
   return (
     <form
       className="flex flex-col gap-5 [&>[data-slot=notice]]:mb-0"
+      method="post"
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit?.();

@@ -37,6 +37,7 @@ from typing import Protocol, runtime_checkable
 
 from ..contract import ERROR
 from ..media import VoiceMedia
+from ..provider_keys import ProviderKeyUnavailable
 from ..redaction import REDACTED
 
 QUOTED_REFUSAL_CHARS = 200
@@ -166,6 +167,8 @@ def failed_ending(fault: BaseException) -> str:
     The one place the question is answered, so that a plug naming an
     honest ending and a fault nobody named go through the same door.
     """
+    if isinstance(fault, ProviderKeyUnavailable):
+        return "provider_key_unavailable"
     return fault.ending if isinstance(fault, PlugError) else ERROR
 
 

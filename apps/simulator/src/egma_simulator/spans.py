@@ -270,7 +270,9 @@ class SpanEmitter:
             attributes=attributes,
         )
 
-    def provider_usage(self, usage: ProviderUsage) -> None:
+    def provider_usage(
+        self, usage: ProviderUsage, funding_receipt: str | None = None
+    ) -> None:
         """One provider request's bill, as the instant the provider answered.
 
         Zero duration, deliberately. How long a request took is a timing fact
@@ -291,6 +293,8 @@ class SpanEmitter:
             USAGE_MEASUREMENT_ATTRIBUTE: usage.measurement,
             USAGE_QUANTITIES_ATTRIBUTE: as_json(usage.quantities),
         }
+        if funding_receipt:
+            attributes["egma.usage.funding_receipt"] = funding_receipt
         if usage.provider_ref:
             attributes[USAGE_PROVIDER_REF_ATTRIBUTE] = usage.provider_ref
         if usage.raw:
@@ -316,8 +320,7 @@ class SpanEmitter:
         ended = self._clock()
         self._author(
             measure,
-            started_unix_nano=ended
-            - int(milliseconds * _NANOSECONDS_PER_MILLISECOND),
+            started_unix_nano=ended - int(milliseconds * _NANOSECONDS_PER_MILLISECOND),
             ended_unix_nano=ended,
         )
 

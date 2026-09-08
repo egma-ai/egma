@@ -86,8 +86,9 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       if (!response.ok) {
         // Include up to 200 characters of the provider's error response.
         throw new JudgeRefused(
-          `the judge model answered ${response.status}: ${(await response.text()).slice(0, 200)}`,
+          `the judge model answered ${response.status}: ${(await response.text()).replaceAll(judge.key, "[redacted]").slice(0, 200)}`,
           retryable(response.status),
+          response.status,
         );
       }
 
@@ -113,10 +114,12 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
 /** A judge call that did not produce an answer, and whether asking again helps. */
 export class JudgeRefused extends Error {
   readonly retryable: boolean;
+  readonly status: number | undefined;
 
-  constructor(message: string, retryable: boolean) {
+  constructor(message: string, retryable: boolean, status?: number) {
     super(message);
     this.retryable = retryable;
+    this.status = status;
   }
 }
 

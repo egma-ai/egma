@@ -7,10 +7,13 @@ import {
   createTestSuite,
   entitlementSourceContract,
   installBillingPlugIn,
+  defaultGraderParameterValues,
+  LLM_GRADER_PARAMETER_CONTRACT,
   startRun,
   upsertRateCard,
   usageSinkContract,
   type AuthContext,
+  type GradingJob,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -674,13 +677,28 @@ describe("the grading claim, when Egma's key pays for the judge", () => {
   /** One pending production grading job, written where the claim will find it. */
   async function pendingGradingJob(who: typeof acme): Promise<string> {
     const id = newId("gjb");
+    const entry: GradingJob["entries"][number] = {
+      projectGraderId: "grd_x",
+      graderDefinitionId: "gdf_funding",
+      graderDefinitionVersion: 1,
+      graderPassThreshold: 0.7,
+      parameterValues: defaultGraderParameterValues(LLM_GRADER_PARAMETER_CONTRACT),
+      definition: {
+        definitionId: "gdf_funding",
+        definitionVersion: 1,
+        type: "llm_as_judge",
+        prompt: "Assess whether the agent answered the question.",
+        parameterContract: LLM_GRADER_PARAMETER_CONTRACT,
+        modalities: ["chat", "voice"],
+      },
+    };
     await database.sql(
       `insert into grading_job
          (id, organization_id, project_id, source, simulation_id, trace_id,
           trace_started_at, run_id, entries, status)
        values ($1, $2, $3, 'production', null, $4, $5, null,
-               '[{"projectGraderId": "grd_x"}]'::jsonb, 'pending')`,
-      [id, who.organizationId, who.projectId, `trace-${id}`, NOW],
+               $6::jsonb, 'pending')`,
+      [id, who.organizationId, who.projectId, `trace-${id}`, NOW, JSON.stringify([entry])],
     );
     return id;
   }

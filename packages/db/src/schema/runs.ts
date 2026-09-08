@@ -85,6 +85,7 @@ export const FAILED_ENDING_REASONS = [
   "simulator_error",
   "orphaned",
   "dispatch_failed",
+  "provider_key_unavailable",
 ] as const;
 
 export const SIMULATION_ENDING_REASONS = [

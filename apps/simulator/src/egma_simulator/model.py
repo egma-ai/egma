@@ -18,6 +18,7 @@ from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, is_given
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 from .client import UNREACHABLE
+from .provider_keys import ProviderKeyUnavailable
 from .redaction import REDACTED
 from .usage import ProviderUsage, llm_usage
 
@@ -160,9 +161,11 @@ class OpenAICompatibleModel:
         model_name: str,
         reasoning_effort: str | None = None,
         timeout_seconds: float = MODEL_TIMEOUT_SECONDS,
+        customer_funded: bool = False,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
+        self._customer_funded = customer_funded
         self._model_name = model_name
         self._reasoning_effort = reasoning_effort
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
@@ -230,6 +233,8 @@ class OpenAICompatibleModel:
                 timeout=self._timeout,
             ) as response:
                 if response.status != 200:
+                    if self._customer_funded and response.status in (401, 403):
+                        raise ProviderKeyUnavailable("openai")
                     raise ModelFailure(
                         f"the model answered {response.status}: "
                         f"{self._provider_detail(await response.text())}"
@@ -360,4 +365,5 @@ def build_model_client(
         api_key=selected.key,
         model_name=selected.model,
         reasoning_effort=selected.reasoning_effort,
+        customer_funded=selected.funding_receipt is not None,
     )

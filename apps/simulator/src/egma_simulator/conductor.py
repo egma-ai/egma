@@ -74,6 +74,7 @@ from .model import END_CALL_TOOL_NAME, ModelFailure, PersonaReply
 from .persona import SILENCE_FOLLOW_UP_LIMIT, SILENCE_WAIT_SECONDS, Persona, Turn
 from .platform_logging import log_event
 from .plugs import PlugError, VoiceConnection
+from .provider_keys import ProviderKeyUnavailable, authentication_rejected
 from .recording import AudioFacts, dual_channel_wav
 from .speech import (
     SCRIPTED_PAIR,
@@ -252,7 +253,6 @@ Small delivery jitter stays contiguous. Larger gaps follow transport time.
 When delayed audio catches up, remove only silence inserted by the recorder;
 never overwrite real audio to force agreement with the clock.
 """
-
 
 
 class _EvidenceRecorder(AudioBufferProcessor):
@@ -1289,6 +1289,25 @@ class VoiceConductor:
 
         @worker.event_handler("on_pipeline_error")
         async def _remember_fault(_worker: object, error: object) -> None:
+            exception = getattr(error, "exception", None)
+            processor = getattr(error, "processor", None)
+            if isinstance(exception, ProviderKeyUnavailable):
+                self._brain_fault = exception
+            elif authentication_rejected(exception):
+                for leg, provider, customer_funded in (
+                    (
+                        self._legs.stt,
+                        self._speech.stt_provider,
+                        self._speech.stt_customer_funded,
+                    ),
+                    (
+                        self._legs.tts,
+                        self._speech.tts_provider,
+                        self._speech.tts_customer_funded,
+                    ),
+                ):
+                    if processor is leg and customer_funded and provider is not None:
+                        self._brain_fault = ProviderKeyUnavailable(provider)
             self._fault = str(getattr(error, "error", error))
             self._faulted.set()
             self.media_advanced()

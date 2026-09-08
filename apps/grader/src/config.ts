@@ -7,6 +7,7 @@ import { hostname } from "node:os";
  */
 export type Config = {
   readonly databaseUrl: string;
+  readonly encryptionKey?: string | undefined;
   readonly ingestion: IngestionSettings;
   readonly clickhouseUrl: string;
   /** This copy's own name for itself, in claims and in the log. */
@@ -97,6 +98,7 @@ export function loadConfig(): Config {
 
   const config: Config = {
     databaseUrl: required("DATABASE_URL"),
+    encryptionKey: process.env["EGMA_ENCRYPTION_KEY"]?.trim() || undefined,
     ingestion: loadIngestionSettings(
       {
         ...process.env,

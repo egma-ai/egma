@@ -1832,6 +1832,7 @@ export async function resolveSimulationStanding(
       endingReason: simulation.endingReason,
       executionFailure: simulation.executionFailure,
       claimedBy: simulation.claimedBy,
+      claimedAt: simulation.claimedAt,
       cancelRequestedAt: simulation.cancelRequestedAt,
     })
     .from(simulation)
@@ -1851,6 +1852,7 @@ export async function resolveSimulationStanding(
     endingReason: row.endingReason as SimulationEndingReason | null,
     executionFailure: row.executionFailure,
     claimedBy: row.claimedBy,
+    claimedAt: row.claimedAt,
     cancelRequestedAt: row.cancelRequestedAt,
     auth: conductingContext(row.organizationId, row.projectId),
   };
@@ -1920,6 +1922,7 @@ export async function resolveSimulationByProviderReference(
       endingReason: simulation.endingReason,
       executionFailure: simulation.executionFailure,
       claimedBy: simulation.claimedBy,
+      claimedAt: simulation.claimedAt,
       cancelRequestedAt: simulation.cancelRequestedAt,
     })
     .from(simulation)
@@ -1949,6 +1952,7 @@ export async function resolveSimulationByProviderReference(
     endingReason: row.endingReason as SimulationEndingReason | null,
     executionFailure: row.executionFailure,
     claimedBy: row.claimedBy,
+    claimedAt: row.claimedAt,
     cancelRequestedAt: row.cancelRequestedAt,
     auth: conductingContext(row.organizationId, row.projectId),
   };
@@ -2199,6 +2203,7 @@ export type SimulationStanding = {
   readonly executionFailure: string | null;
   /** The row's conductor — the claimant whose word the row takes. */
   readonly claimedBy: string | null;
+  readonly claimedAt: Date | null;
   readonly cancelRequestedAt: Date | null;
   /**
    * Narrowed to this simulation's own organization and project, built here
@@ -2974,19 +2979,57 @@ async function queuedWorkProvidersOn(
   auth: AuthContext,
   runId: string,
 ): Promise<readonly string[]> {
+  return (await queuedWorkRequirementsOn(on, auth, runId)).providers;
+}
+
+async function queuedWorkRequirementsOn(on: Queryable, auth: AuthContext, runId: string, simulationId?: string) {
   const rows = await on.selectDistinct({
     modality: simulation.modality,
+    connectionType: simulation.connectionType,
     parameterValues: simulation.personaParameterValues,
   }).from(simulation).where(within(auth, simulation, and(
     eq(simulation.runId, runId), eq(simulation.status, "queued"),
+    simulationId === undefined ? undefined : eq(simulation.id, simulationId),
     inActingProject(auth, simulation),
   )));
   const needed = new Set<string>();
+  const allowances = new Set<ReturnType<typeof allowanceKindOf>>();
   for (const row of rows) {
+    allowances.add(allowanceKindOf({
+      modality: row.modality as Modality,
+      connectionType: row.connectionType as ConnectionType,
+    }));
     for (const provider of providersNeededBy(
       personaModelsOfParameters(row.parameterValues),
       row.modality === "chat" ? "chat" : "voice",
     )) needed.add(provider);
   }
-  return [...needed];
+  return { providers: [...needed], allowances: [...allowances] };
+}
+
+export type RunWorkBlock = {
+  readonly error: "allowance_spent" | "providers_unfunded";
+  readonly message: string;
+};
+
+/** Current admission refusal for queued simulations; active work is never checked. */
+export async function readRunWorkBlock(auth: AuthContext, runId: string, simulationId?: string): Promise<RunWorkBlock | null> {
+  authorize(auth, "read", here(auth));
+  try {
+    const wanted = await queuedWorkRequirementsOn(db(), auth, runId, simulationId);
+    if (wanted.allowances.length === 0) return null;
+    const source = billing().entitlements;
+    const [start, funding] = await Promise.all([
+      source.mayStart({ organizationId: auth.organizationId, allowances: wanted.allowances }),
+      source.mayPlatformKeyFund({ organizationId: auth.organizationId, providers: wanted.providers }),
+    ]);
+    if (!start.allowed) {
+      return { error: "allowance_spent", message: start.refusals.map((refusal) => refusal.message).join(" ") };
+    }
+    if (!funding.funded) return { error: "providers_unfunded", message: funding.message };
+    return null;
+  } catch (fault) {
+    console.error("Billing status could not be read; customer work continues", fault);
+    return null;
+  }
 }
