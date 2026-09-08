@@ -2436,6 +2436,14 @@ describe("the complete product, walked in order in a second project", () => {
     return found ?? "";
   }
 
+  /** The run's own row on the runs list, found by the link that opens it. */
+  function runRowOn(which: Page, runAddress: string): Locator {
+    return which
+      .locator("main table tbody tr")
+      .filter({ has: which.locator(`a[href$="/runs/${runIdOf(runAddress)}"]`) });
+  }
+
+
   /** The conversation an address names, the same way. */
   function simulationIdOf(address: string): string {
     const found = /\/simulations\/(sim_[0-9A-HJKMNP-TV-Z]{26})/u.exec(
@@ -2557,11 +2565,7 @@ describe("the complete product, walked in order in a second project", () => {
    * the machinery is said.
    */
   async function machineryOfTheRun(which: Page, runAddress: string): Promise<string> {
-    const runId = runAddress.slice(runAddress.lastIndexOf("/") + 1);
-    const row = which
-      .locator("main table tbody tr")
-      .filter({ has: which.locator(`a[href$="/runs/${runId}"]`) });
-    const said = await row
+    const said = await runRowOn(which, runAddress)
       .locator('[data-slot="run-status"]')
       .first()
       .textContent()
@@ -3446,14 +3450,20 @@ describe("the complete product, walked in order in a second project", () => {
       const shown = await walk.innerText("main");
       expect(shown).toContain("Reschedules a booked appointment");
       expect(shown).toContain("Impatient Rita");
-      expect(shown).toContain("Support reception");
-      // What the run was against, as it now stands — the agent, and the
-      // connection exactly as this run went over it.
-      expect(shown).toContain("The Support line");
-      expect(shown).toContain("phone_number-1");
 
       conversation = `${new URL(runAddress).pathname}/simulations/${simulation?.id ?? ""}`;
       expect(conversation).toMatch(/\/simulations\/sim_[0-9A-HJKMNP-TV-Z]{26}$/u);
+
+      // The run facts left this page on 2026-09-07. The runs list says what
+      // the run was against, as it now stands — its suite, the agent, and the
+      // connection exactly as this run went over it.
+      await walk.goto(at("runs"));
+      const runRow = runRowOn(walk, runAddress);
+      await runRow.waitFor({ timeout: 30_000 });
+      const rowSaid = await runRow.innerText();
+      expect(rowSaid).toContain("Support reception");
+      expect(rowSaid).toContain("The Support line");
+      expect(rowSaid).toContain("phone_number-1");
     },
     SETTLE,
   );
@@ -5045,11 +5055,11 @@ describe("the complete product, walked in order in a second project", () => {
 
       // A run reads the suite's current name. Renaming does not create a suite
       // version or change the suite identity recorded on the run.
-      await walk.goto(runAddress);
-      const heading = walk.getByRole("heading", { level: 1 });
-      await expect.poll(() => heading.innerText()).toContain("Northside Ford");
-      expect(await heading.innerText()).not.toContain("Support reception");
-      expect(await heading.innerText()).not.toContain("(deleted)");
+      await walk.goto(at("runs"));
+      const runRow = runRowOn(walk, runAddress);
+      await expect.poll(() => runRow.innerText()).toContain("Northside Ford");
+      expect(await runRow.innerText()).not.toContain("Support reception");
+      expect(await runRow.innerText()).not.toContain("(deleted)");
 
       // And deleting is the same row's menu, under the same hairline.
       await walk.goto(at("tests"));
@@ -5086,10 +5096,11 @@ describe("the complete product, walked in order in a second project", () => {
 
       // Deleting authoring data does not delete execution evidence. The same
       // run and simulation remain, and the last suite name is marked clearly.
-      await walk.goto(runAddress);
+      await walk.goto(at("runs"));
       await expect
-        .poll(() => walk.getByRole("heading", { level: 1 }).innerText())
+        .poll(() => runRowOn(walk, runAddress).innerText())
         .toContain("Northside Ford (deleted)");
+      await walk.goto(runAddress);
       await walk
         .getByRole("button", { name: /Reschedules a booked appointment/u })
         .first()
@@ -5231,7 +5242,7 @@ describe("project grader model settings", () => {
       await proof.goto(`${origin}/projects/${projectId}/runs/${run.runId}`);
       await proof.getByRole("tab", { name: "Results summary" }).click();
       const results = proof.getByRole("region", { name: "Grader results" });
-      await expect.poll(() => results.innerText()).toContain("Total Score 0.667");
+      await expect.poll(() => results.innerText()).toContain("Score 0.667 · Threshold 1");
       expect(await results.innerText()).toContain("The grader could not determine whether the criterion was met.");
       await results.screenshot({ path: "/tmp/egma-grader-fractional-error-results.png" });
     } finally {
