@@ -11,11 +11,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
+import threading
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Protocol
 
 from .blob import BlobStore, FilesystemBlobStore, S3BlobStore
-from .client import ClaimFailure, ControlPlaneClient, HeartbeatFailure
+from .client import ClaimedSpec, ClaimFailure, ControlPlaneClient, HeartbeatFailure
 from .config import MediaSettings, SimulatorConfig
 from .contract import ContractViolation
 from .conversation import Conducted, ConversationControls, conduct
@@ -538,6 +541,8 @@ class SimulatorService:
         self._claim_failure_said_at = 0.0
         self._claim_failure_count = 0
         self._stop = asyncio.Event()
+        self._claimed_at: dict[str, datetime] = {}
+        self._hard_stop: threading.Timer | None = None
 
     def request_stop(self) -> None:
         """Ask for the drain: claim nothing new, finish the work in flight.
@@ -580,7 +585,7 @@ class SimulatorService:
                 "simulator started",
                 attributes={"egma.capacity": config.capacity},
             )
-            claiming = asyncio.ensure_future(self._claim_forever(client, executor))
+            claiming = asyncio.ensure_future(self._claim_for_mode(client, executor))
             stop = asyncio.ensure_future(self._stop.wait())
             try:
                 await asyncio.wait(
@@ -614,6 +619,9 @@ class SimulatorService:
             "egma.service.stopped",
             "simulator stopped",
         )
+        if self._hard_stop is not None:
+            self._hard_stop.cancel()
+            self._hard_stop = None
 
     async def _claim_forever(
         self, client: ControlPlaneClient, executor: Executor
@@ -625,7 +633,9 @@ class SimulatorService:
 
             try:
                 specs = await client.claim(
-                    self._config.claimant, executor.free_capacity
+                    self._config.claimant,
+                    executor.free_capacity,
+                    self._config.modalities,
                 )
             except ClaimFailure as failure:
                 self._note_claim_failure(str(failure))
@@ -645,6 +655,46 @@ class SimulatorService:
             # again, even if it is the same sentence as before.
             self._last_claim_failure = None
             self._accept(specs, executor)
+
+    async def _claim_for_mode(
+        self, client: ControlPlaneClient, executor: Executor
+    ) -> None:
+        if self._config.mode == "persistent":
+            await self._claim_forever(client, executor)
+            return
+
+        async def claim_until_work() -> None:
+            while executor.free_capacity > 0:
+                try:
+                    specs = await client.claim(
+                        self._config.claimant,
+                        1,
+                        self._config.modalities,
+                    )
+                except ClaimFailure as failure:
+                    self._note_claim_failure(str(failure))
+                    if self._config.mode == "one-shot":
+                        return
+                    await asyncio.sleep(CLAIM_RETRY_SECONDS)
+                    continue
+                self._last_claim_failure = None
+                self._accept(specs, executor)
+                if specs or self._config.mode == "one-shot":
+                    return
+
+        if self._config.mode == "standby":
+            try:
+                async with asyncio.timeout(self._config.standby_seconds):
+                    await claim_until_work()
+            except TimeoutError:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "egma.service.standby_expired",
+                    "standby simulator idle limit expired",
+                )
+        else:
+            await claim_until_work()
 
     def _note_claim_failure(self, failure: str) -> None:
         """Say a claim failure when it is new, and once a minute after that.
@@ -707,7 +757,13 @@ class SimulatorService:
         control-plane
         sweep rather than overloading the simulator or inventing terminal reports.
         """
-        for position, document in enumerate(documents):
+        for position, offered in enumerate(documents):
+            if isinstance(offered, ClaimedSpec):
+                document = offered.document
+                claimed_at = offered.claimed_at
+            else:
+                document = offered
+                claimed_at = datetime.now(UTC)
             if executor.free_capacity < 1:
                 log_event(
                     logger,
@@ -782,6 +838,9 @@ class SimulatorService:
             self._secrets.register(spec.credentials)
             self._secrets.register(list(spec.platform.secrets))
             self._secrets.register(list(spec.models.secrets))
+            if self._config.mode != "persistent":
+                self._claimed_at[spec.simulation_id] = claimed_at
+                self._arm_hard_stop(claimed_at)
             executor.submit(spec)
             log_event(
                 logger,
@@ -802,4 +861,38 @@ class SimulatorService:
                 secrets=self._secrets,
                 blobs=self._blobs,
             )
-            await simulation.run()
+            if self._config.mode == "persistent":
+                await simulation.run()
+                return
+            claimed_at = self._claimed_at.pop(spec.simulation_id, datetime.now(UTC))
+            elapsed = max(0.0, (datetime.now(UTC) - claimed_at).total_seconds())
+            remaining = max(0.0, self._config.execution_deadline_seconds - elapsed)
+            try:
+                async with asyncio.timeout(remaining):
+                    await simulation.run()
+            except TimeoutError:
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "egma.simulation.execution_deadline_expired",
+                    "simulation execution deadline expired",
+                    attributes={
+                        "egma.execution_deadline_seconds": (
+                            self._config.execution_deadline_seconds
+                        ),
+                        "error.type": "execution_deadline_expired",
+                    },
+                )
+
+    def _arm_hard_stop(self, claimed_at: datetime) -> None:
+        """Bound the whole one-simulation process, including final teardown."""
+        elapsed = max(0.0, (datetime.now(UTC) - claimed_at).total_seconds())
+        remaining = max(0.0, self._config.execution_deadline_seconds - elapsed)
+        if self._hard_stop is not None:
+            self._hard_stop.cancel()
+        # Async cancellation cannot stop a native audio call or a blocked
+        # thread. The process backstop stays armed until client and executor
+        # teardown have both completed.
+        self._hard_stop = threading.Timer(remaining, lambda: os._exit(124))
+        self._hard_stop.daemon = True
+        self._hard_stop.start()

@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import aiohttp
 
@@ -55,6 +57,14 @@ class DocumentRejected(Exception):
 
 class TransientDeliveryFailure(Exception):
     """A document did not get through this time; the same bytes may next time."""
+
+
+@dataclass(frozen=True)
+class ClaimedSpec:
+    """One spec and the control plane instant its lease began."""
+
+    document: dict
+    claimed_at: datetime
 
 
 # The OTLP/HTTP path, which is the specification's and not egma's: an
@@ -108,7 +118,12 @@ class ControlPlaneClient:
             raise RuntimeError("ControlPlaneClient used outside its context")
         return self._session
 
-    async def claim(self, claimant: str, capacity: int) -> list[dict]:
+    async def claim(
+        self,
+        claimant: str,
+        capacity: int,
+        modalities: tuple[str, ...] | None = None,
+    ) -> list[ClaimedSpec]:
         """Ask for compatible specs; an empty list is a quiet queue."""
         try:
             async with self._live_session().post(
@@ -118,6 +133,7 @@ class ControlPlaneClient:
                     "capacity": capacity,
                     "wait_seconds": self._claim_wait_seconds,
                     "contract_versions": [spec_contract_version()],
+                    **({} if modalities is None else {"modalities": list(modalities)}),
                 },
                 timeout=self._claim_timeout,
             ) as response:
@@ -132,7 +148,24 @@ class ControlPlaneClient:
         specs = body.get("specs") if isinstance(body, dict) else None
         if not isinstance(specs, list):
             raise ClaimFailure(f"claim answer has no specs list: {body!r}")
-        return specs
+        claimed_at = body.get("claimed_at", {}) if isinstance(body, dict) else {}
+        if not isinstance(claimed_at, dict):
+            claimed_at = {}
+        received_at = datetime.now(UTC)
+        answer: list[ClaimedSpec] = []
+        for document in specs:
+            if not isinstance(document, dict):
+                answer.append(ClaimedSpec(document=document, claimed_at=received_at))
+                continue
+            raw = claimed_at.get(document.get("simulation_id"))
+            try:
+                granted = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                if granted.tzinfo is None:
+                    raise ValueError("claim time has no timezone")
+            except (TypeError, ValueError):
+                granted = received_at
+            answer.append(ClaimedSpec(document=document, claimed_at=granted))
+        return answer
 
     async def register_provider_reference(
         self, simulation_id: str, claimant: str, provider_reference: str

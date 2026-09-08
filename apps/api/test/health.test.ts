@@ -161,6 +161,36 @@ describe("configuration", () => {
     expect(loadConfig(enough).port).toBe(3100);
   });
 
+  it("reads optional platform and speech-provider concurrency caps", () => {
+    expect(loadConfig(enough).simulationConcurrencyCaps).toEqual({});
+    expect(loadConfig({
+      ...enough,
+      EGMA_VOICE_SIMULATION_CONCURRENCY_CAP: "24",
+      EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS: JSON.stringify({
+        openai: 12,
+        cartesia: 8,
+      }),
+    }).simulationConcurrencyCaps).toEqual({
+      voice: 24,
+      speechProviders: { openai: 12, cartesia: 8 },
+    });
+  });
+
+  it("refuses unusable concurrency caps by variable name", () => {
+    expect(() => loadConfig({
+      ...enough,
+      EGMA_VOICE_SIMULATION_CONCURRENCY_CAP: "0",
+    })).toThrow(/EGMA_VOICE_SIMULATION_CONCURRENCY_CAP/);
+    expect(() => loadConfig({
+      ...enough,
+      EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS: '{"unknown":2}',
+    })).toThrow(/unsupported speech provider unknown/);
+    expect(() => loadConfig({
+      ...enough,
+      EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS: '{"openai":0}',
+    })).toThrow(/EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS/);
+  });
+
   it("serves the pages from the instance's own origin, and no egma-run one", () => {
     expect(loadConfig(enough).baseUrl).toBe("http://localhost:3101");
     expect(

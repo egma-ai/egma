@@ -24,6 +24,11 @@ def test_one_variable_is_enough(env, tmp_path):
 
     assert config.control_plane_url == A_URL
     assert config.capacity == 2
+    assert config.mode == "persistent"
+    assert config.modalities is None
+    assert config.execution_deadline_seconds == 900.0
+    assert config.standby_seconds == 1800.0
+    assert config.thread_pool_workers is None
     assert config.vad_provider == "scripted"
     assert config.service_token is None
     assert config.claimant.startswith("egma-simulator-")
@@ -45,6 +50,9 @@ def test_empty_means_unset(env):
         "EGMA_SIMULATOR_HEARTBEAT_SECONDS",
         "EGMA_SIMULATOR_LOG_LEVEL",
         "EGMA_SIMULATOR_SERVICE_TOKEN",
+        "EGMA_SIMULATOR_MODE",
+        "EGMA_SIMULATOR_MODALITIES",
+        "EGMA_SIMULATOR_THREAD_POOL_WORKERS",
     ):
         env.setenv(name, "")
 
@@ -108,6 +116,8 @@ DURATION_VARIABLES = [
     "EGMA_SIMULATOR_HEARTBEAT_SECONDS",
     "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS",
     "EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS",
+    "EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS",
+    "EGMA_SIMULATOR_STANDBY_SECONDS",
 ]
 """Every variable read as a duration — all of them through one helper."""
 
@@ -141,6 +151,40 @@ def test_an_unknown_log_level_is_refused_by_name(env):
     env.setenv("EGMA_SIMULATOR_LOG_LEVEL", "CHATTY")
 
     with pytest.raises(ValueError, match="EGMA_SIMULATOR_LOG_LEVEL"):
+        SimulatorConfig.from_env()
+
+
+@pytest.mark.parametrize("mode", ["one-shot", "standby"])
+def test_a_bounded_voice_mode_has_one_slot_and_its_own_lifetime(env, mode):
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_MODE", mode)
+    env.setenv("EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS", "12")
+    env.setenv("EGMA_SIMULATOR_STANDBY_SECONDS", "34")
+    env.setenv("EGMA_SIMULATOR_THREAD_POOL_WORKERS", "1")
+
+    config = SimulatorConfig.from_env()
+
+    assert config.mode == mode
+    assert config.capacity == 1
+    assert config.modalities == ("voice",)
+    assert config.execution_deadline_seconds == 12
+    assert config.standby_seconds == 34
+    assert config.thread_pool_workers == 1
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("EGMA_SIMULATOR_CAPACITY", "2"),
+        ("EGMA_SIMULATOR_MODALITIES", "chat"),
+    ],
+)
+def test_a_bounded_mode_refuses_non_voice_fleet_shape(env, variable, value):
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_MODE", "one-shot")
+    env.setenv(variable, value)
+
+    with pytest.raises(ValueError, match=variable):
         SimulatorConfig.from_env()
 
 

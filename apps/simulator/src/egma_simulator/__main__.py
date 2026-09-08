@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 from .config import SimulatorConfig
 from .platform_logging import json_log_formatter
@@ -69,6 +71,22 @@ def secrets_of(config: SimulatorConfig) -> SecretRegistry:
 async def _run(config: SimulatorConfig) -> None:
     registry = secrets_of(config)
     _configure_logging(config.log_level, registry)
+    if config.thread_pool_workers is not None:
+        workers = str(config.thread_pool_workers)
+        for variable in (
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+        ):
+            os.environ[variable] = workers
+        asyncio.get_running_loop().set_default_executor(
+            ThreadPoolExecutor(
+                max_workers=config.thread_pool_workers,
+                thread_name_prefix="egma-simulator",
+            )
+        )
 
     # Pipecat writes a Loguru banner while the service module is imported.
     # Import only after Loguru is gathered so that record uses the same JSON

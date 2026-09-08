@@ -268,6 +268,7 @@ export {
   personaParameterContract,
   personaParametersOfModels,
   personaModelsOfParameters,
+  speechProvidersOfParameters,
   validatePersonaParameterContract,
   validatePersonaParameterValues,
   type PersonaParameterValues,

@@ -84,6 +84,7 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
 const WORK_DISPATCHING = [
   "claimGradingJobs",
   "claimSimulations",
+  "estimateVoiceSimulationDemand",
   "recordSimulationHeartbeat",
   "recordOrphanedSimulationExecution",
   "resolveSimulationStanding",
@@ -497,6 +498,7 @@ const THE_PERSONA_LIBRARY = [
   "personaModelsOfParameters",
   "personaParameterContract",
   "personaParametersOfModels",
+  "speechProvidersOfParameters",
   "validatePersonaParameterContract",
   "validatePersonaParameterValues",
   "PERSONA_LIBRARY_CATALOG",
