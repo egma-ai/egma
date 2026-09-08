@@ -645,6 +645,16 @@
 }
 
 /*
+ * The filled status square breathing while a run or simulation is not
+ * settled. Opacity only, so it is composited, and it never moves: the square
+ * stays where the eye found it and only says "still going".
+ */
+@keyframes egma-state-mark-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+/*
  * The segment crossing the track on the screen that stands in for a session
  * nobody has answered for yet.
  *
@@ -739,8 +749,19 @@
       infinite;
   }
 
+  /*
+   * Pulse the filled status square while its run or simulation is pending,
+   * running or grading. Four drawer-enter durations is a slow breath rather
+   * than a blink. The word carries the state, so reduced motion holds it solid.
+   */
+  [data-slot="state-mark"][data-motion="pulse"] {
+    animation: egma-state-mark-pulse calc(var(--duration-drawer-in) * 4)
+      var(--ease-in-out) infinite;
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    [data-slot="state-mark"][data-motion="active"] {
+    [data-slot="state-mark"][data-motion="active"],
+    [data-slot="state-mark"][data-motion="pulse"] {
       animation: none;
     }
   }

@@ -29,6 +29,7 @@ import {
   RunWriteRefusedError,
   startRun,
   TestMovedOnError,
+  updateConnection,
   type NewRun,
   type Test,
 } from "@egma/db";
@@ -529,6 +530,38 @@ describe("complete-suite runs", () => {
       suiteName: "After rename",
       suiteDeleted: true,
     });
+  });
+
+  it("reads the connection's current name on every run header", async () => {
+    const suite = await createTestSuite(actingAsAcme(), {
+      name: "Connection named on the run",
+    });
+    await testIn(suite.id, "Connection name test");
+    const started = await startRun(actingAsAcme(), runInput(suite.id));
+    expect(started.connectionName).toBe("Suite test chat");
+
+    try {
+      await updateConnection(actingAsAcme(), world.frontDesk, connectionId, {
+        name: "Renamed after the run",
+      });
+      // The name is read live, so an old run answers with the name the
+      // connection carries now.
+      expect(await getRun(actingAsAcme(), started.id)).toMatchObject({
+        connectionName: "Renamed after the run",
+      });
+      const listed = await listRuns(actingAsAcme(), { limit: 1 });
+      expect(listed.items[0]).toMatchObject({
+        id: started.id,
+        connectionName: "Renamed after the run",
+      });
+      expect(await cancelRun(actingAsAcme(), started.id)).toMatchObject({
+        connectionName: "Renamed after the run",
+      });
+    } finally {
+      await updateConnection(actingAsAcme(), world.frontDesk, connectionId, {
+        name: "Suite test chat",
+      });
+    }
   });
 });
 

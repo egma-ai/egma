@@ -32,6 +32,7 @@ import {
   type RunEvent,
   type RunFilter,
   type RunStatus,
+  type SimulationGradeTally,
   type SimulationStatus,
   type TraceGradingState,
 } from "@egma/db";
@@ -214,6 +215,7 @@ function describedHeader(
     status: run.status,
     agentId: run.agentId,
     connectionId: run.connectionId,
+    connectionName: run.connectionName,
     agentPlatform: run.connectionSnapshot.agentPlatform,
     connectionType: run.connectionSnapshot.connectionType,
     accessVariant: run.connectionSnapshot.accessVariant,
@@ -306,6 +308,7 @@ function describedSimulation(
   simulation: ConductedSimulation,
   gradingState: TraceGradingState | null,
   combinedScore: number | null,
+  gradeTally: SimulationGradeTally | null,
 ): Record<string, unknown> {
   return {
     id: simulation.id,
@@ -319,6 +322,7 @@ function describedSimulation(
     status: simulation.status,
     gradingState,
     combinedScore,
+    gradeTally,
     reason: simulation.endingReason,
     executionFailure: simulation.executionFailure,
     startedAt: simulation.startedAt?.toISOString() ?? null,
@@ -714,6 +718,7 @@ export async function runRoutes(
             simulation,
             grading?.state ?? null,
             grading?.combinedScore ?? null,
+            grading?.tally ?? null,
           );
         }),
         nextPageToken: found.nextCursor ?? null,

@@ -4341,6 +4341,7 @@ export type ListRunsResponses = {
             status: 'pending' | 'running' | 'completed' | 'canceled';
             agentId: string;
             connectionId: string;
+            connectionName: string | null;
             agentPlatform: string | null;
             connectionType: string;
             accessVariant: string;
@@ -4443,6 +4444,7 @@ export type CreateRunResponses = {
         status: 'pending' | 'running' | 'completed' | 'canceled';
         agentId: string;
         connectionId: string;
+        connectionName: string | null;
         agentPlatform: string | null;
         connectionType: string;
         accessVariant: string;
@@ -4528,6 +4530,7 @@ export type GetRunResponses = {
         status: 'pending' | 'running' | 'completed' | 'canceled';
         agentId: string;
         connectionId: string;
+        connectionName: string | null;
         agentPlatform: string | null;
         connectionType: string;
         accessVariant: string;
@@ -4652,6 +4655,12 @@ export type ListRunSimulationsResponses = {
             status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
             gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error' | null;
             combinedScore: number | null;
+            gradeTally: {
+                passed: number;
+                failed: number;
+                errored: number;
+                selected: number;
+            } | null;
             reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | 'provider_key_unavailable' | null;
             executionFailure: string | null;
             startedAt: string | null;
@@ -4793,6 +4802,7 @@ export type CancelRunResponses = {
         status: 'pending' | 'running' | 'completed' | 'canceled';
         agentId: string;
         connectionId: string;
+        connectionName: string | null;
         agentPlatform: string | null;
         connectionType: string;
         accessVariant: string;

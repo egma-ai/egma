@@ -490,6 +490,7 @@ export {
   type GradingRequest,
   type GradingRequestResult,
   type RegradeTraceResult,
+  type SimulationGradeTally,
   type NamedCurrentGrade,
   type NamedRecordedGrade,
   type TraceGrading,

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -12,7 +11,6 @@ import {
 } from "@egma/platform-api/client";
 
 import type { Refusal } from "../../../../../lib/api.ts";
-import { modalityLabel } from "../../../../../lib/agents.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
   platformAnswer,
@@ -28,7 +26,6 @@ import {
   executionFailureMessage,
 } from "../../../../../lib/runs.ts";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { Actions } from "../../../../../ui/section.tsx";
 import { Refused } from "../../../../../ui/form.tsx";
 import { WorkRefusalActions } from "../../../../../ui/work-refusal-actions.tsx";
@@ -40,13 +37,6 @@ import {
   NotFound,
 } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
-import {
-  RelativeInstant,
-  useMinuteClock,
-} from "../../../../../ui/relative-time.tsx";
-import {
-  RunStatus,
-} from "../../../../../ui/run-status.tsx";
 import {
   AppShell,
   PageBody,
@@ -75,15 +65,6 @@ export default function RunDetailPage() {
 
 /** How often the feed is asked for more while anything is still moving. */
 const AGAIN_MS = 2000;
-
-/** A name and, where it applies, the note saying it has been archived. */
-const IDENTITY = "inline-flex flex-wrap items-center gap-2";
-
-/** A record value that is also a way into that record. */
-const SUMMARY_LINK = cn(
-  "text-foreground no-underline underline-offset-4",
-  "pointer-hover:underline pointer-hover:decoration-brand focus-visible:underline",
-);
 
 /** What one conversation's row shows after the feed has moved it. */
 type Moved = {
@@ -136,7 +117,6 @@ function RunDetailView({
   // viewer Cancel, which the server refuses, on every load.
   const role = me === null ? null : roleOf(me);
   const mayControl = role !== null && canAuthor(role);
-  const now = useMinuteClock();
 
   const { answer, reload, refresh: refreshRun } = useProjectRead<RunDetail>(
     (projectId) =>
@@ -669,97 +649,8 @@ function RunDetailView({
             />
           )}
 
-          <dl
-            className="m-0 grid flex-none grid-cols-5 gap-px border border-border bg-border max-[1000px]:grid-cols-2 max-[40rem]:grid-cols-1"
-            role="group"
-            aria-label="Run summary"
-          >
-            <div className="min-w-0 bg-surface px-5 py-3 max-[40rem]:px-4">
-              <dt className="text-sm text-faint">Status</dt>
-              <dd className="m-0 mt-1 min-w-0">
-                <RunStatus status={status} />
-              </dd>
-            </div>
-            <div className="min-w-0 bg-surface px-5 py-3 max-[40rem]:px-4">
-              <dt className="text-sm text-faint">Started</dt>
-              <dd className="m-0 mt-1 min-w-0 text-sm tabular-nums text-foreground">
-                {read.startedAt === null ? (
-                  <span className="text-faint">Not started</span>
-                ) : (
-                  <RelativeInstant instant={read.startedAt} now={now} />
-                )}
-              </dd>
-            </div>
-            <div className="min-w-0 bg-surface px-5 py-3 max-[40rem]:px-4">
-              <dt className="text-sm text-faint">Test suite</dt>
-              <dd className="m-0 mt-1 min-w-0 text-sm wrap-anywhere text-foreground">
-                {read.suiteDeleted ? (
-                  suiteDisplay
-                ) : (
-                  <Link
-                    className={SUMMARY_LINK}
-                    href={projectPath(projectId, "tests", "suites", read.suiteId)}
-                  >
-                    {suiteDisplay}
-                  </Link>
-                )}
-              </dd>
-            </div>
-            <div className="min-w-0 bg-surface px-5 py-3 max-[40rem]:px-4">
-              <dt className="text-sm text-faint">Agent</dt>
-              <dd className="m-0 mt-1 min-w-0 text-sm wrap-anywhere text-foreground">
-                {read.agent === null ? (
-                  "Unavailable"
-                ) : (
-                  <span className={IDENTITY}>
-                    <Link
-                      className={SUMMARY_LINK}
-                      href={projectPath(projectId, "agents", read.agent.id)}
-                    >
-                      {read.agent.name}
-                    </Link>
-                    {read.agent.archived ? (
-                      <span className="text-sm text-warning">Archived</span>
-                    ) : null}
-                  </span>
-                )}
-              </dd>
-            </div>
-            <div className="min-w-0 bg-surface px-5 py-3 max-[40rem]:px-4">
-              <dt className="text-sm text-faint">Connection</dt>
-              <dd className="m-0 mt-1 min-w-0 text-sm wrap-anywhere text-foreground">
-                <span className={IDENTITY}>
-                  {read.connection === null ? (
-                    "Unavailable"
-                  ) : (
-                    <>
-                      <Link
-                        className={SUMMARY_LINK}
-                        href={projectPath(
-                          projectId,
-                          "agents",
-                          read.agentId,
-                          "connections",
-                          read.connection.id,
-                        )}
-                      >
-                        {read.connection.name}
-                      </Link>
-                      <span className="text-faint">
-                        {modalityLabel(read.modality)}
-                      </span>
-                    </>
-                  )}
-                  {read.connection?.archived === true ? (
-                    <span className="text-sm text-warning">Archived</span>
-                  ) : null}
-                </span>
-              </dd>
-            </div>
-          </dl>
-
           <section
-            className="mt-6 min-w-0 min-[901px]:flex min-[901px]:min-h-0 min-[901px]:flex-1 min-[901px]:flex-col"
+            className="min-w-0 min-[901px]:flex min-[901px]:min-h-0 min-[901px]:flex-1 min-[901px]:flex-col"
             data-slot="section"
           >
           {simulationPage === null || simulationPage.status === "signed-out" ? (

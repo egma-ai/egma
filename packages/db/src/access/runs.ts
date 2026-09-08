@@ -139,6 +139,8 @@ export type Run = {
   readonly suiteDeleted: boolean;
   readonly agentId: string;
   readonly connectionId: string;
+  /** The connection's current name, or null when no connection row answers. */
+  readonly connectionName: string | null;
   readonly name: string | null;
   readonly status: RunStatus;
   readonly triggeredVia: RunTrigger;
@@ -293,6 +295,12 @@ type RunRow = {
   readonly createdAt: Date;
 };
 
+type RunReadRow = RunRow & {
+  readonly suiteName: string;
+  readonly suiteDeletedAt: Date | null;
+  readonly connectionName: string | null;
+};
+
 type SimulationRow = Omit<Simulation, "status" | "endingReason" | "modality"> & {
   readonly status: string;
   readonly endingReason: string | null;
@@ -366,6 +374,7 @@ function runFromRow(
   row: RunRow,
   suiteName: string,
   suiteDeleted: boolean,
+  connectionName: string | null,
 ): Run {
   const { status, triggeredVia, connectionSnapshot, mockMetadata, ...rest } =
     row;
@@ -373,6 +382,7 @@ function runFromRow(
     ...rest,
     suiteName,
     suiteDeleted,
+    connectionName,
     status: status as RunStatus,
     triggeredVia: triggeredVia as RunTrigger,
     connectionSnapshot: connectionSnapshotFromRow(connectionSnapshot, row.id),
@@ -385,6 +395,15 @@ function runFromRow(
       ),
     ),
   };
+}
+
+/**
+ * One run as `RUN_READ_COLUMNS` reads it: the header, plus the suite and
+ * connection each read joins to it.
+ */
+function runFromReadRow(row: RunReadRow): Run {
+  const { suiteName, suiteDeletedAt, connectionName, ...header } = row;
+  return runFromRow(header, suiteName, suiteDeletedAt !== null, connectionName);
 }
 
 function simulationFromRow(row: SimulationRow): Simulation {
@@ -529,6 +548,7 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
     const [reached] = await tx
       .select({
         agentId: connection.agentId,
+        name: connection.name,
         // The connection holds no platform of its own: the type answers
         // where it pins one, else the agent's own binding does.
         agentPlatform: agent.agentPlatform,
@@ -764,7 +784,7 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           `Egma's provider keys cannot fund ${funding.providers.join(", ")} for this organization. Add inference credit under Settings, or use your own provider keys.`);
       }
     }
-    return runFromRow(header, suite.name, false);
+    return runFromRow(header, suite.name, false, reached.name);
   });
 }
 
@@ -864,6 +884,7 @@ const RUN_READ_COLUMNS = {
   ...RUN_COLUMNS,
   suiteName: testSuite.name,
   suiteDeletedAt: testSuite.deletedAt,
+  connectionName: connection.name,
 } as const;
 
 export async function getRun(auth: AuthContext, id: string): Promise<Run | undefined> {
@@ -872,11 +893,11 @@ export async function getRun(auth: AuthContext, id: string): Promise<Run | undef
     .select(RUN_READ_COLUMNS)
     .from(run)
     .innerJoin(testSuite, eq(run.suiteId, testSuite.id))
+    .leftJoin(connection, eq(run.connectionId, connection.id))
     .where(theRun(auth, id))
     .limit(1);
   if (row === undefined) return undefined;
-  const { suiteName, suiteDeletedAt, ...header } = row;
-  return runFromRow(header, suiteName, suiteDeletedAt !== null);
+  return runFromReadRow(row);
 }
 
 /**
@@ -1295,6 +1316,7 @@ export async function listRuns(
     .select(RUN_READ_COLUMNS)
     .from(run)
     .innerJoin(testSuite, eq(run.suiteId, testSuite.id))
+    .leftJoin(connection, eq(run.connectionId, connection.id))
     .where(within(auth, run, and(
       inActingProject(auth, run),
       cursor === undefined ? undefined : lt(run.id, cursor),
@@ -1310,8 +1332,7 @@ export async function listRuns(
     .limit(limit + 1);
   const { items, nextCursor } = pageOf(rows, limit);
   return {
-    items: items.map(({ suiteName, suiteDeletedAt, ...row }) =>
-      runFromRow(row, suiteName, suiteDeletedAt !== null)),
+    items: items.map(runFromReadRow),
     nextCursor,
   };
 }
@@ -1459,15 +1480,15 @@ export async function cancelRun(
       .select(RUN_READ_COLUMNS)
       .from(run)
       .innerJoin(testSuite, eq(run.suiteId, testSuite.id))
+      .leftJoin(connection, eq(run.connectionId, connection.id))
       .where(theRun(auth, id))
       .limit(1);
 
     if (selected === undefined) return undefined;
-    const { suiteName, suiteDeletedAt, ...current } = selected;
-    if (current.status === "canceled") {
-      return runFromRow(current, suiteName, suiteDeletedAt !== null);
+    if (selected.status === "canceled") {
+      return runFromReadRow(selected);
     }
-    if (current.status === "completed") {
+    if (selected.status === "completed") {
       throw new RunWriteRefusedError(
         "already_finished",
         nothingLeftToCancel(id),
@@ -1547,14 +1568,12 @@ export async function cancelRun(
         .select(RUN_READ_COLUMNS)
         .from(run)
         .innerJoin(testSuite, eq(run.suiteId, testSuite.id))
+        .leftJoin(connection, eq(run.connectionId, connection.id))
         .where(theRun(auth, id))
         .limit(1);
       const moved = selectedMoved === undefined
         ? undefined
-        : (() => {
-            const { suiteName: movedSuiteName, suiteDeletedAt: movedDeletedAt, ...row } = selectedMoved;
-            return runFromRow(row, movedSuiteName, movedDeletedAt !== null);
-          })();
+        : runFromReadRow(selectedMoved);
       if (moved !== undefined && moved.status === "canceled") {
         return moved;
       }
@@ -1605,11 +1624,11 @@ export async function cancelRun(
       .select(RUN_READ_COLUMNS)
       .from(run)
       .innerJoin(testSuite, eq(run.suiteId, testSuite.id))
+      .leftJoin(connection, eq(run.connectionId, connection.id))
       .where(theRun(auth, id))
       .limit(1);
     if (selectedSettled === undefined) return undefined;
-    const { suiteName: settledSuiteName, suiteDeletedAt: settledDeletedAt, ...settled } = selectedSettled;
-    return runFromRow(settled, settledSuiteName, settledDeletedAt !== null);
+    return runFromReadRow(selectedSettled);
   });
 }
 
