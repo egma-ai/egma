@@ -18,6 +18,7 @@ import { platformEvent } from "./platform-log.ts";
 import { buildApi } from "./server.ts";
 import { startRateCardInitialization } from "./rate-card.ts";
 import {
+  createVoiceFleetWake,
   createVoiceFleetReconciler,
   type VoiceFleetReconcileResult,
 } from "./voice-fleet.ts";
@@ -104,27 +105,17 @@ const voiceFleetReadiness =
 let reconcileVoiceFleet:
   | (() => Promise<VoiceFleetReconcileResult>)
   | undefined;
-let voiceWakeRunning = false;
-let voiceWakeRequested = false;
 const wakeVoiceFleet = config.voiceFleet === undefined
   ? undefined
-  : () => {
-      voiceWakeRequested = true;
-      if (voiceWakeRunning) return;
-      voiceWakeRunning = true;
-      void (async () => {
-        try {
-          do {
-            voiceWakeRequested = false;
-            await reconcileVoiceFleet?.();
-          } while (voiceWakeRequested);
-        } catch (err) {
-          app.log.error({ err }, "voice fleet reconciliation failed; the sweep will retry");
-        } finally {
-          voiceWakeRunning = false;
-        }
-      })();
-    };
+  : createVoiceFleetWake({
+      reconcile: () => reconcileVoiceFleet?.(),
+      failed: (err) => {
+        app.log.error(
+          { err },
+          "voice fleet reconciliation failed; the sweep will retry",
+        );
+      },
+    });
 
 const { app } = buildApi({
   config: running,

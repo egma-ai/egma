@@ -66,6 +66,34 @@ export type VoiceFleetReconcileResult = {
   readonly skipped: "overlap" | "backoff" | undefined;
 };
 
+/** Coalesce wake-ups while preserving one that arrives during a failed pass. */
+export function createVoiceFleetWake(options: {
+  readonly reconcile: () => Promise<unknown> | undefined;
+  readonly failed: (error: unknown) => void;
+}): () => void {
+  let running = false;
+  let requested = false;
+  return () => {
+    requested = true;
+    if (running) return;
+    running = true;
+    void (async () => {
+      try {
+        do {
+          requested = false;
+          try {
+            await options.reconcile();
+          } catch (error) {
+            options.failed(error);
+          }
+        } while (requested);
+      } finally {
+        running = false;
+      }
+    })();
+  };
+}
+
 type RecentLaunch = VoiceFleetTask & { readonly launchedAt: number };
 
 const DEFAULT_STANDBY_TARGET = 2;
