@@ -91,7 +91,7 @@ def verify_child(
     expected_size: int,
     expected_config: str,
     index_digest: str | None,
-) -> None:
+) -> dict:
     if len(raw.encode()) != expected_size:
         fail(f"manifest size mismatch for {digest}")
     child = parse_manifest(raw, digest)
@@ -105,6 +105,30 @@ def verify_child(
         fail("child annotations are not an object")
     if index_digest is not None and annotations.get(INDEX_DIGEST) != index_digest:
         fail("native child does not point to its SOCI index")
+    return child
+
+
+def verify_soci_layers(image: dict, soci: dict) -> None:
+    image_layers = image.get("layers")
+    soci_layers = soci.get("layers")
+    if not isinstance(image_layers, list) or not isinstance(soci_layers, list):
+        fail("image or SOCI child has no layer list")
+    image_digests = {descriptor_digest(layer) for layer in image_layers}
+    indexed: list[str] = []
+    for layer in soci_layers:
+        annotations = layer.get("annotations") if isinstance(layer, dict) else None
+        digest = (
+            annotations.get("com.amazon.soci.image-layer-digest")
+            if isinstance(annotations, dict)
+            else None
+        )
+        if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
+            fail("SOCI layer has no valid image-layer digest")
+        indexed.append(digest)
+    if not indexed or len(indexed) != len(set(indexed)):
+        fail("SOCI layer links must be present and unique")
+    if not set(indexed).issubset(image_digests):
+        fail("SOCI index refers to a layer outside its paired image")
 
 
 def verify_simulator_index(index: dict, fetch_child) -> None:
@@ -155,20 +179,21 @@ def verify_simulator_index(index: dict, fetch_child) -> None:
             fail(f"image-to-SOCI cross-link is wrong for {name}")
         if soci[name]["annotations"][IMAGE_DIGEST] != image_digest:
             fail(f"SOCI-to-image cross-link is wrong for {name}")
-        verify_child(
+        image_child = verify_child(
             fetch_child(image_digest),
             image_digest,
             images[name].get("size"),
             OCI_CONFIG,
             soci_digest,
         )
-        verify_child(
+        soci_child = verify_child(
             fetch_child(soci_digest),
             soci_digest,
             soci[name].get("size"),
             SOCI_V2,
             None,
         )
+        verify_soci_layers(image_child, soci_child)
 
 
 def ecr_manifest(repository: str, image_id: str) -> tuple[str, str]:

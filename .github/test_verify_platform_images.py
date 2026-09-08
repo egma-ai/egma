@@ -74,6 +74,17 @@ class PlatformImageVerifierTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "manifest size mismatch"):
             self.verify(wrong_size)
 
+    def test_rejects_soci_links_to_unrelated_image_layers(self) -> None:
+        soci_digest = self.index["manifests"][2]["digest"]
+        image_digest = self.index["manifests"][0]["digest"]
+        soci = json.loads(self.children[soci_digest])
+        image = json.loads(self.children[image_digest])
+        soci["layers"][0]["annotations"]["com.amazon.soci.image-layer-digest"] = (
+            "sha256:" + "0" * 64
+        )
+        with self.assertRaisesRegex(ValueError, "outside its paired image"):
+            VERIFY.verify_soci_layers(image, soci)
+
     def test_plain_images_require_exact_native_platforms(self) -> None:
         plain = {
             "schemaVersion": 2,
