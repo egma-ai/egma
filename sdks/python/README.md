@@ -114,4 +114,4 @@ If no worker joins, check the worker process and agent name. If the handshake fa
 
 ## License
 
-Apache-2.0. See [LICENSE](https://github.com/egma-ai/egma/blob/main/sdks/python/LICENSE).
+MIT. See [LICENSE](https://github.com/egma-ai/egma/blob/main/sdks/python/LICENSE).
