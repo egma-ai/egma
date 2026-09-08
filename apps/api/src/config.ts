@@ -1,4 +1,9 @@
-import { openBillingPlugIn, type BillingPlugIn } from "@egma/db";
+import {
+  openBillingPlugIn,
+  PROVIDERS_BY_JOB,
+  type BillingPlugIn,
+  type SimulationConcurrencyCaps,
+} from "@egma/db";
 import {
   providerCredentialSource,
   type ProviderCredentialSource,
@@ -124,6 +129,8 @@ export type Config = {
    * Postgres, and neither keeps a cross-work key cache.
    */
   readonly providerCredentials: ProviderCredentialSource;
+  /** Optional deployment-wide voice and speech-provider concurrency caps. */
+  readonly simulationConcurrencyCaps: SimulationConcurrencyCaps;
   /**
    * The billing plug-in this deployment runs on: an entitlement source and a
    * usage sink, chosen once from the settings below.
@@ -204,6 +211,68 @@ function flag(
   if (["1", "true", "yes", "on"].includes(raw)) return true;
   if (["0", "false", "no", "off"].includes(raw)) return false;
   throw new Error(`${name} is not a yes or a no: ${environment[name]}`);
+}
+
+function positiveWhole(
+  environment: NodeJS.ProcessEnv,
+  name: string,
+): number | undefined {
+  const raw = environment[name]?.trim();
+  if (raw === undefined || raw === "") return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${name} must be a whole number of at least 1: ${raw}`);
+  }
+  return value;
+}
+
+function simulationConcurrencyCaps(
+  environment: NodeJS.ProcessEnv,
+): SimulationConcurrencyCaps {
+  const voice = positiveWhole(
+    environment,
+    "EGMA_VOICE_SIMULATION_CONCURRENCY_CAP",
+  );
+  const raw = environment.EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS?.trim();
+  if (raw === undefined || raw === "") {
+    return voice === undefined ? {} : { voice };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(
+      "EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS must be a JSON object of provider names to positive whole numbers",
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(
+      "EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS must be a JSON object of provider names to positive whole numbers",
+    );
+  }
+  const speechProviders = new Set<string>(
+    [...PROVIDERS_BY_JOB.stt, ...PROVIDERS_BY_JOB.tts].map(
+      (entry) => entry.provider,
+    ),
+  );
+  const caps: Record<string, number> = {};
+  for (const [provider, offered] of Object.entries(parsed)) {
+    if (!speechProviders.has(provider)) {
+      throw new Error(
+        `EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS names unsupported speech provider ${provider}`,
+      );
+    }
+    if (!Number.isInteger(offered) || Number(offered) < 1) {
+      throw new Error(
+        `EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS must give ${provider} a whole number of at least 1`,
+      );
+    }
+    caps[provider] = Number(offered);
+  }
+  return {
+    ...(voice === undefined ? {} : { voice }),
+    speechProviders: caps,
+  };
 }
 
 /**
@@ -391,6 +460,7 @@ export function loadConfig(
     rateLimitPerMinute,
     simulatorServiceToken,
     providerCredentials: providerCredentialSource(environment),
+    simulationConcurrencyCaps: simulationConcurrencyCaps(environment),
     // The open plug-in, always, and the one setting that can replace it. A
     // deployment that named a Stripe secret has the cloud adapter installed
     // over this at boot; see `billing.ts` and `index.ts`.
@@ -604,4 +674,3 @@ const DEFAULT_BLOB_BUCKET = "egma-recordings";
 
 /** What a store that ignores regions is signed for. See `blobRegion`. */
 const DEFAULT_BLOB_REGION = "us-east-1";
-

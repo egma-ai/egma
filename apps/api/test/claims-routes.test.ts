@@ -418,11 +418,15 @@ describe("claiming work", () => {
       claimant: "sim-under-test",
       capacity: 4,
       wait_seconds: 0,
+      modalities: ["chat"],
     });
     expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
 
     const specs = answered.body.specs as Record<string, unknown>[];
     expect(specs).toHaveLength(1);
+    expect(answered.body.claimed_at).toEqual({
+      [simulationId]: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    });
     const spec = specs[0];
     if (spec === undefined) throw new Error("no spec came back");
 
@@ -471,10 +475,10 @@ describe("claiming work", () => {
         adapter: "openai_realtime",
       },
       tts: {
-        provider: "cartesia",
-        model: "sonic-3.5",
-        adapter: "cartesia",
-        voice_id: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+        provider: "openai",
+        model: "gpt-4o-mini-tts-2025-12-15",
+        adapter: "openai",
+        voice_id: "alloy",
         speed: 1,
       },
     });
@@ -828,6 +832,15 @@ describe("claiming work", () => {
     });
     expect(badCapacity.statusCode).toBe(400);
     expect(String(badCapacity.body.message)).toContain("capacity");
+
+    const badModalities = await claim(token, {
+      claimant: "sim-1",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["video"],
+    });
+    expect(badModalities.statusCode).toBe(400);
+    expect(String(badModalities.body.message)).toContain("modalities");
 
     const badWait = await claim(token, {
       claimant: "sim-1",

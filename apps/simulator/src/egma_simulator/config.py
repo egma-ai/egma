@@ -26,6 +26,9 @@ bare simulator and a container use the same limit unless an operator supplies
 ``EGMA_SIMULATOR_CAPACITY`` explicitly.
 """
 
+SIMULATOR_MODES = ("persistent", "one-shot", "standby")
+SIMULATION_MODALITIES = ("voice", "chat")
+
 STT_PROVIDERS = ("scripted", "deepgram", "openai_realtime", "cartesia_manual")
 """What the persona hears with. ``scripted`` needs no account and no network.
 
@@ -429,6 +432,21 @@ class SimulatorConfig:
 
     log_level: str
 
+    mode: str = "persistent"
+    """Process lifetime: standing loop, one claim, or bounded standby."""
+
+    modalities: tuple[str, ...] | None = None
+    """Claim filter. None preserves the mixed self-hosted queue."""
+
+    execution_deadline_seconds: float = 900.0
+    """Whole claim-to-report allowance for one-shot and standby modes."""
+
+    standby_seconds: float = 1800.0
+    """How long a standby waits without a claim before it exits."""
+
+    thread_pool_workers: int | None = None
+    """Optional size for the process default executor."""
+
     service_token: str | None = field(default=None, repr=False)
     """What the simulator shows the control plane to be allowed to claim.
 
@@ -463,6 +481,25 @@ class SimulatorConfig:
                 "EGMA_SIMULATOR_S3_ENDPOINT, or a directory in "
                 "EGMA_SIMULATOR_BLOB_DIR — never both and never neither"
             )
+        if self.mode not in SIMULATOR_MODES:
+            raise ValueError(
+                "EGMA_SIMULATOR_MODE must be one of "
+                f"{', '.join(SIMULATOR_MODES)}, got {self.mode!r}"
+            )
+        if self.modalities is not None and (
+            not self.modalities
+            or any(item not in SIMULATION_MODALITIES for item in self.modalities)
+        ):
+            raise ValueError("EGMA_SIMULATOR_MODALITIES must name voice, chat, or both")
+        if self.mode in ("one-shot", "standby"):
+            if self.capacity != 1:
+                raise ValueError(
+                    f"EGMA_SIMULATOR_CAPACITY must be 1 in {self.mode} mode"
+                )
+            if self.modalities != ("voice",):
+                raise ValueError(
+                    f"EGMA_SIMULATOR_MODALITIES must be voice in {self.mode} mode"
+                )
 
     @property
     def media_secrets(self) -> tuple[str, ...]:
@@ -494,13 +531,43 @@ class SimulatorConfig:
                 f"https://, got {url!r}"
             )
 
-        capacity = _whole("EGMA_SIMULATOR_CAPACITY", DEFAULT_CAPACITY)
+        mode = _one_of("EGMA_SIMULATOR_MODE", SIMULATOR_MODES, "persistent")
+        capacity = _whole(
+            "EGMA_SIMULATOR_CAPACITY",
+            1 if mode in ("one-shot", "standby") else DEFAULT_CAPACITY,
+        )
         if capacity < 1:
             raise ValueError(
                 f"EGMA_SIMULATOR_CAPACITY must be at least 1, got {capacity}"
             )
 
         vad_provider = _one_of("EGMA_SIMULATOR_VAD_PROVIDER", VAD_PROVIDERS, "scripted")
+        offered_modalities = _text("EGMA_SIMULATOR_MODALITIES")
+        modalities = (
+            ("voice",)
+            if offered_modalities is None and mode in ("one-shot", "standby")
+            else (
+                None
+                if offered_modalities is None
+                else tuple(
+                    dict.fromkeys(
+                        part.strip().lower()
+                        for part in offered_modalities.split(",")
+                        if part.strip()
+                    )
+                )
+            )
+        )
+        thread_pool_workers = (
+            None
+            if _text("EGMA_SIMULATOR_THREAD_POOL_WORKERS") is None
+            else _whole("EGMA_SIMULATOR_THREAD_POOL_WORKERS", 1)
+        )
+        if thread_pool_workers is not None and thread_pool_workers < 1:
+            raise ValueError(
+                "EGMA_SIMULATOR_THREAD_POOL_WORKERS must be at least 1, "
+                f"got {thread_pool_workers}"
+            )
 
         # Read before the directories below, because it decides whether one
         # of them is a directory at all.
@@ -531,6 +598,13 @@ class SimulatorConfig:
                 )
             ),
             log_level=_level("EGMA_SIMULATOR_LOG_LEVEL", "INFO"),
+            mode=mode,
+            modalities=modalities,
+            execution_deadline_seconds=_seconds(
+                "EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS", 900.0
+            ),
+            standby_seconds=_seconds("EGMA_SIMULATOR_STANDBY_SECONDS", 1800.0),
+            thread_pool_workers=thread_pool_workers,
             service_token=_text("EGMA_SIMULATOR_SERVICE_TOKEN"),
             vad_provider=vad_provider,
             media=MediaSettings.from_env(),

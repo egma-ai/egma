@@ -32,9 +32,18 @@ class RefusedSpans(Exception):
 class WorkbenchState:
     """The queue of specs, the cancel flags, and the record of everything."""
 
-    def __init__(self, *, hold_seconds: float, over_grant: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        hold_seconds: float,
+        over_grant: int = 0,
+        block_reports: bool = False,
+    ) -> None:
         self._hold_seconds = hold_seconds
         self._over_grant = over_grant
+        self._report_gate = asyncio.Event()
+        if not block_reports:
+            self._report_gate.set()
         """How many specs past the declared capacity a claim answers with.
 
         Zero is a well-behaved control plane. Anything else is the
@@ -67,16 +76,24 @@ class WorkbenchState:
             self._record("queued", simulation_id=simulation_id)
             self._arrival.notify_all()
 
-    async def claim(self, claimant: str, capacity: int) -> list[dict]:
+    async def claim(
+        self,
+        claimant: str,
+        capacity: int,
+        modalities: tuple[str, ...] | None = None,
+    ) -> list[dict]:
         """Up to ``capacity`` specs, holding the request open while the queue is dry."""
         deadline = asyncio.get_running_loop().time() + self._hold_seconds
         async with self._arrival:
             while True:
+                compatible = [
+                    simulation_id
+                    for simulation_id, spec in self._queued.items()
+                    if modalities is None or spec.get("modality") in modalities
+                ]
                 granted = [
                     self._queued.pop(simulation_id)
-                    for simulation_id in list(self._queued)[
-                        : capacity + self._over_grant
-                    ]
+                    for simulation_id in compatible[: capacity + self._over_grant]
                 ]
                 if granted:
                     for spec in granted:
@@ -85,13 +102,18 @@ class WorkbenchState:
                         "claim",
                         claimant=claimant,
                         capacity=capacity,
+                        modalities=modalities,
                         granted=[spec["simulation_id"] for spec in granted],
                     )
                     return granted
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
                     self._record(
-                        "claim", claimant=claimant, capacity=capacity, granted=[]
+                        "claim",
+                        claimant=claimant,
+                        capacity=capacity,
+                        modalities=modalities,
+                        granted=[],
                     )
                     return []
                 try:
@@ -200,6 +222,10 @@ class WorkbenchState:
         self._cancel_flags.add(simulation_id)
         self._record("cancel_directive", simulation_id=simulation_id)
 
+    def release_reports(self) -> None:
+        """Release a deliberate report block during fixture teardown."""
+        self._report_gate.set()
+
 
 def build_app(state: WorkbenchState) -> web.Application:
     """The workbench's HTTP face: the contract seam plus its own controls."""
@@ -212,8 +238,26 @@ def build_app(state: WorkbenchState) -> web.Application:
             raise web.HTTPBadRequest(text="claimant must be a non-empty string")
         if not isinstance(capacity, int) or capacity < 1:
             raise web.HTTPBadRequest(text="capacity must be a positive integer")
-        specs = await state.claim(claimant, capacity)
-        return web.json_response({"specs": specs})
+        offered_modalities = body.get("modalities")
+        modalities = (
+            None
+            if offered_modalities is None
+            else tuple(offered_modalities)
+            if isinstance(offered_modalities, list)
+            and offered_modalities
+            and all(item in ("voice", "chat") for item in offered_modalities)
+            else None
+        )
+        if offered_modalities is not None and modalities is None:
+            raise web.HTTPBadRequest(text="modalities must name voice, chat, or both")
+        specs = await state.claim(claimant, capacity, modalities)
+        granted_at = moment()
+        return web.json_response(
+            {
+                "specs": specs,
+                "claimed_at": {spec["simulation_id"]: granted_at for spec in specs},
+            }
+        )
 
     async def heartbeat(request: web.Request) -> web.Response:
         simulation_id = request.match_info["simulation_id"]
@@ -230,6 +274,7 @@ def build_app(state: WorkbenchState) -> web.Application:
         simulation_id = request.match_info["simulation_id"]
         if not state.known(simulation_id):
             raise web.HTTPNotFound(text=f"unknown simulation {simulation_id}")
+        await state._report_gate.wait()
         try:
             state.report(simulation_id, await request.read())
         except RefusedReport as refusal:
