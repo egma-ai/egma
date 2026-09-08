@@ -9,9 +9,9 @@ as a contributor and it keeps Egma free to license the project as it does
 today — Apache 2.0 for the product, and the Egma Enterprise license for the
 `ee/` directory. Read it before You contribute.
 
-You accept this Agreement by commenting on Your pull request with the sentence
-the CLA bot asks for. Your signature is recorded in this repository, on the
-`cla-signatures` branch, beside the pull request it was given for.
+You accept this Agreement through [CLA Assistant](https://cla-assistant.io/egma-ai/egma).
+Sign in with Your GitHub account, read the Agreement, and select the button to
+accept it. CLA Assistant records Your signature for this version of the Agreement.
 
 ## 1. Definitions
 
