@@ -1,9 +1,10 @@
 # Connecting to a livekit agent
 
-We need to do two things to setup a livekit agent for simulation testing.
+We need to do three things to setup a livekit agent for simulation testing.
 
 1. Register the agent in the egma platform if it is not already registered.
 2. Add the connection(s) through which a simulated persona can reach the agent and test it.
+3. Setup the egma SDK in the agent code to be able to inject mock tools/ send traces of the agent to egma platform.
 
 ## 1. Register the agent if it is not already available
 
@@ -33,3 +34,7 @@ Now that you have the concepts clear - here's how to add the connection.
 3. Identify and set the right agent name.
 4. Identify and set the right job dispatch metadata defaults. 
 5. Once you have all the above details, look at `egma agent connection add --help` and supply everything to add a connection. If there's any confusion, you can also use `egma agent connection options --help` to list available connection options for livekit and what all needs to be supplied to set up a successful connection. This should conclude step 2.
+
+## 3. Setup the egma SDK in the worker
+
+For livekit, the egma SDK integration is required for simulations. This is so that egma can observe agent traces during simulations and inject mock tools. Follow the integration instructions on [PyPI](https://pypi.org/project/egma/) for Python or [npm](https://www.npmjs.com/package/@egma/livekit) for JS. Install the latest compatible release using the repo’s package manager and setup testing, monitoring, or both as requested.

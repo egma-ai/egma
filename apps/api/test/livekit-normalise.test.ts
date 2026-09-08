@@ -31,13 +31,14 @@ function span(
 function normalise(
   resourceValues: Readonly<Record<string, string>>,
   spans: OtlpSpan[],
+  version = "1.7.1",
 ) {
   return normaliseOtlpExport({
     resourceSpans: [
       {
         resource: { attributes: attributes(resourceValues) },
         scopeSpans: [
-          { scope: { name: "livekit-agents", version: "1.7.1" }, spans },
+          { scope: { name: "livekit-agents", version }, spans },
         ],
       },
     ],
@@ -134,5 +135,43 @@ describe("LiveKit Agents 1.7 trace attributes", () => {
       toolArguments: "legacy arguments",
       toolResult: "legacy output",
     });
+  });
+});
+
+describe("LiveKit Agents 1.8 trace attributes", () => {
+  it("keeps realtime inference separate from the agent turn", () => {
+    const messages = JSON.stringify([
+      { role: "assistant", parts: [{ type: "text", content: "Tuesday is free." }] },
+    ]);
+    const result = normalise(
+      { "lk.pii.room_name": "realtime-room" },
+      [
+        span("0011223344556621", "agent_turn", {
+          "lk.pii.response.text": "Tuesday is free.",
+          "gen_ai.operation.name": "invoke_agent",
+        }),
+        {
+          ...span("0011223344556622", "realtime_inference", {
+            "gen_ai.operation.name": "generate_content",
+            "gen_ai.output.messages": messages,
+          }),
+          parentSpanId: "0011223344556621",
+        },
+      ],
+      "1.8.0",
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.spans[0]).toMatchObject({
+      kind: "turn:agent",
+      text: "Tuesday is free.",
+    });
+    expect(result.spans[1]).toMatchObject({
+      kind: "model",
+      text: "",
+      parentSpanId: "0011223344556621",
+      providerCallId: "realtime-room",
+    });
+    expect(result.spans[1]?.payload).toContain("gen_ai.output.messages");
   });
 });

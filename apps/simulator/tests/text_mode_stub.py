@@ -187,6 +187,20 @@ class TextModeStub:
         if body.get("messages") is None:
             raise web.HTTPUnprocessableEntity(text="messages is required")
 
+        for index, mock in enumerate(body.get("tool_mocks") or []):
+            if not isinstance(mock.get("input_match_rule"), dict):
+                raise web.HTTPBadRequest(
+                    text=json.dumps(
+                        {
+                            "error_message": (
+                                f"request/body/tool_mocks/{index}/input_match_rule "
+                                "must be object"
+                            )
+                        }
+                    ),
+                    content_type="application/json",
+                )
+
         # The script is walked by the exchanges really conducted, not by the
         # requests made: a refused request is one the agent never saw, so a
         # throttle that lets up resumes the conversation rather than skipping

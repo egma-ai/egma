@@ -13,7 +13,6 @@ from egma_simulator.mock_tools import MockToolSeam
 from egma_simulator.plugs import AgentReply, PlugError, plug_for
 from egma_simulator.plugs.retell import DEFAULT_BASE_URL
 from egma_simulator.plugs.retell_text_mode import (
-    MATCH_ANYTHING,
     RATE_LIMIT_RETRIES,
     RetellTextMode,
 )
@@ -540,22 +539,24 @@ async def test_egmas_answers_ride_every_request_as_native_mocks(
     )
 
     await plug.open()
+    await plug.deliver("What times are available?")
     await plug.close()
 
-    assert running.stub.mocks()[0] == [
+    expected_mocks = [
         {
             "tool_name": "check_calendar",
-            "input_match_rule": MATCH_ANYTHING,
+            "input_match_rule": {"type": "any"},
             "output": '{"slots":[]}',
             "result": True,
         },
         {
             "tool_name": "book_appointment",
-            "input_match_rule": MATCH_ANYTHING,
+            "input_match_rule": {"type": "any"},
             "output": '"the booking service is down"',
             "result": False,
         },
     ]
+    assert running.stub.mocks() == [expected_mocks, expected_mocks]
 
 
 async def test_a_run_that_mocks_nothing_sends_no_mocks(start_text_mode_stub):

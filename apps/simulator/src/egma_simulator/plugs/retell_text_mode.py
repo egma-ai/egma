@@ -193,7 +193,7 @@ class RetellTextMode:
         self._mocks = [
             {
                 "tool_name": answer.tool_name,
-                "input_match_rule": MATCH_ANYTHING,
+                "input_match_rule": {"type": MATCH_ANYTHING},
                 "output": answer.served,
                 # Retell serves the answer either way; this is how it is
                 # told to hand the agent a failure rather than a value.

@@ -31,13 +31,13 @@ Or with uv:
 uv add 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
 ```
 
-Requires Python 3.11 or newer and `livekit-agents>=1.6.7,<1.7`.
+Requires Python 3.11 or newer and `livekit-agents>=1.6.6,<1.9`, including LiveKit 1.8.
 
 Do not add an SDK version, tag, or commit. Let the repository's package manager
 resolve and lock the latest compatible SDK.
 
 <Note>
-  The `livekit-agents` version is pinned to one minor version intentionally. Mock tools use LiveKit's testing API. Both verbs also read LiveKit's current tracer provider because its public telemetry API has a setter but no getter. The fixture and live tests verify both seams before the supported range changes. See [Version pinning](#version-pinning) below.
+  Mock tools use LiveKit's testing API. Both verbs also read LiveKit's current tracer provider because its public telemetry API has a setter but no getter. Compatibility checks cover the minimum version, intermediate releases, and the locked version before the supported range changes. See [Version pinning](#version-pinning) below.
 </Note>
 
 ## Monitor production LiveKit agents
@@ -293,7 +293,7 @@ At `INFO` level, the SDK names how many tools it found on the agent and how many
 
 ## Version pinning
 
-The `livekit-agents` dependency is pinned to `>=1.6.7,<1.7`. This is deliberate, not an oversight.
+The `livekit-agents` dependency is pinned to `>=1.6.6,<1.9`. Version 1.6.6 uses session-scoped mocks during tool execution. LiveKit 1.7 and 1.8 are supported; versions below 1.6.6 are not.
 
 The package also keeps the OpenAI Python package on major version 2 because LiveKit Agents 1.6 does not support OpenAI 3.
 
