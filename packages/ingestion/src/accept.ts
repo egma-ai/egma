@@ -164,6 +164,8 @@ type Standing = {
   readonly groups: Map<string, Group>;
   readonly logger: IngestionLogger;
   readonly onSegmentDurable: (segment: SealedSegment) => void;
+  /** Aborts an object-store request if the planned-shutdown deadline expires. */
+  readonly uploads: AbortController;
   timer: NodeJS.Timeout | undefined;
   running: Promise<void> | undefined;
   closing: boolean;
@@ -174,6 +176,8 @@ type Standing = {
  * and object-store connection.
  */
 let standing: Standing | undefined;
+/** One planned close shared by every caller until the log handle is closed. */
+let closingAcceptance: Promise<void> | undefined;
 
 // The local log's live volume as a level, for the scrape that used to read it
 // off the unauthenticated health body: bytes spoken for and frames staged, both
@@ -334,7 +338,7 @@ async function upload(held: Standing, group: Group): Promise<void> {
   held.log.sync();
 
   try {
-    await held.store.create(attempt.segment);
+    await held.store.create(attempt.segment, { signal: held.uploads.signal });
   } catch (cause) {
     if (cause instanceof SegmentIdentityConflictError) {
       // One identity holding two different sets of bytes, which is this side's
@@ -416,8 +420,8 @@ async function flush(held: Standing): Promise<void> {
   for (const group of [...held.groups.values()]) {
     // A stop that arrived mid-pass takes effect at the next group rather than
     // after all of them, so what a shutdown can wait on is one upload's request
-    // bound and never the whole backlog's. Nothing is lost by stopping here:
-    // every record is framed on the disk and the next start recovers it.
+    // bound and never the whole backlog's. Every unfinished caller still waits
+    // for S3 durability or receives a retryable refusal.
     if (held.closing) return;
     if (
       group.sealed.length === 0 &&
@@ -471,8 +475,8 @@ function schedule(held: Standing): void {
     held.timer = undefined;
     void tick(held);
   }, soonest);
-  // A shutdown never waits on a flush that has not happened; what is staged is
-  // on the disk and the next start picks it up.
+  // A planned shutdown cancels this timer and performs its own immediate,
+  // bounded upload pass over everything still staged.
   held.timer.unref();
 }
 
@@ -505,6 +509,9 @@ export function openAcceptance(options: AcceptanceOptions): void {
   if (standing !== undefined) {
     throw new Error("this process already has a standing acceptance loop");
   }
+  if (closingAcceptance !== undefined) {
+    throw new Error("this process is still closing its acceptance loop");
+  }
   const { store } = settings;
   if (store === undefined) return;
 
@@ -528,6 +535,7 @@ export function openAcceptance(options: AcceptanceOptions): void {
     groups: new Map(),
     logger: options.log,
     onSegmentDurable: options.onSegmentDurable ?? (() => undefined),
+    uploads: new AbortController(),
     timer: undefined,
     running: undefined,
     closing: false,
@@ -620,39 +628,138 @@ function recover(held: Standing): void {
   }
 }
 
-/** Stop the standing loop. Nothing staged is deleted and nothing is uploaded. */
-export async function closeAcceptance(): Promise<void> {
+/** The full planned-shutdown window reserved for pending evidence uploads. */
+export const ACCEPTANCE_SHUTDOWN_TIMEOUT_MILLISECONDS = 120_000;
+
+function hasPendingEvidence(held: Standing): boolean {
+  for (const group of held.groups.values()) {
+    if (group.waiting.length > 0 || group.sealed.length > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Finish one shutdown pass. Unlike the standing pass, this seals immediately
+ * and keeps trying failed uploads because the local disk ends with this task.
+ */
+async function flushForShutdown(held: Standing): Promise<number | undefined> {
+  let nextAttemptAtMilliseconds: number | undefined;
+
+  for (const group of [...held.groups.values()]) {
+    if (group.sealed.length === 0 && group.waiting.length > 0) seal(held, group);
+    if (
+      group.sealed.length > 0 &&
+      Date.now() >= group.nextAttemptAtMilliseconds
+    ) {
+      await upload(held, group);
+    }
+    if (group.waiting.length === 0 && group.sealed.length === 0) {
+      held.groups.delete(keyFor(group.scope));
+      continue;
+    }
+    const due = group.nextAttemptAtMilliseconds;
+    nextAttemptAtMilliseconds =
+      nextAttemptAtMilliseconds === undefined
+        ? due
+        : Math.min(nextAttemptAtMilliseconds, due);
+  }
+
+  return nextAttemptAtMilliseconds;
+}
+
+/** Wait for the next retry or the one deadline, whichever comes first. */
+async function waitDuringShutdown(
+  held: Standing,
+  untilMilliseconds: number,
+): Promise<void> {
+  const wait = Math.max(0, untilMilliseconds - Date.now());
+  if (wait === 0 || held.uploads.signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(done, wait);
+    const signal = held.uploads.signal;
+
+    function done(): void {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
+
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+
+/**
+ * Stop accepting, then spend one bounded window making staged evidence durable.
+ * Local records still present when the deadline expires are not recoverable by
+ * a replacement Fargate task; their senders receive a retryable refusal.
+ */
+async function closeHeldAcceptance(
+  held: Standing,
+  options: { readonly timeoutMilliseconds?: number } = {},
+): Promise<void> {
+  const timeoutMilliseconds =
+    options.timeoutMilliseconds ?? ACCEPTANCE_SHUTDOWN_TIMEOUT_MILLISECONDS;
+  const deadlineMilliseconds = Date.now() + timeoutMilliseconds;
+  const deadline = setTimeout(() => held.uploads.abort(), timeoutMilliseconds);
+
+  try {
+    await held.running;
+    while (!held.uploads.signal.aborted && hasPendingEvidence(held)) {
+      const nextAttemptAtMilliseconds = await flushForShutdown(held);
+      if (!hasPendingEvidence(held)) break;
+      await waitDuringShutdown(
+        held,
+        Math.min(
+          deadlineMilliseconds,
+          nextAttemptAtMilliseconds ?? deadlineMilliseconds,
+        ),
+      );
+    }
+  } catch (cause) {
+    held.logger.error(
+      { err: cause },
+      "pending evidence could not finish during planned shutdown",
+    );
+  } finally {
+    clearTimeout(deadline);
+    // A caller still awaiting durability is settled now rather than left behind
+    // with the task. The sender retry is the recovery path after this point.
+    const refusal = new IngestionUnavailableError(
+      "this Egma stopped before the ingestion object store confirmed this " +
+        "evidence as durable. Send it again.",
+    );
+    for (const group of held.groups.values()) {
+      for (const staged of [
+        ...group.sealed.flatMap((sealed) => sealed.staged),
+        ...group.waiting,
+      ]) {
+        staged.settled(refusal);
+      }
+    }
+    held.log.close();
+  }
+}
+
+export function closeAcceptance(
+  options: { readonly timeoutMilliseconds?: number } = {},
+): Promise<void> {
+  if (closingAcceptance !== undefined) return closingAcceptance;
+
   const held = standing;
   standing = undefined;
-  if (held === undefined) return;
+  if (held === undefined) return Promise.resolve();
 
   held.closing = true;
   if (held.timer !== undefined) {
     clearTimeout(held.timer);
     held.timer = undefined;
   }
-  await held.running;
 
-  // A caller still awaiting durability is settled with the retryable refusal
-  // now, rather than left to time out on its own request bound while the
-  // process shuts down. It says the same true thing the store-timeout refusal
-  // does — the records are framed on disk and recovered on the next start — so
-  // the wait ends at once instead of ten seconds later.
-  const refusal = new IngestionUnavailableError(
-    "this Egma is stopping, so this evidence could not be made durable before " +
-      "it did. Nothing has been discarded — it is on disk and recovered on the " +
-      "next start; send it again.",
-  );
-  for (const group of held.groups.values()) {
-    for (const staged of [
-      ...group.sealed.flatMap((sealed) => sealed.staged),
-      ...group.waiting,
-    ]) {
-      staged.settled(refusal);
-    }
-  }
-
-  held.log.close();
+  const closing = closeHeldAcceptance(held, options).finally(() => {
+    if (closingAcceptance === closing) closingAcceptance = undefined;
+  });
+  closingAcceptance = closing;
+  return closing;
 }
 
 /** What a call was told when this process accepts nothing. */

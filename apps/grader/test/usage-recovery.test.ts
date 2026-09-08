@@ -107,7 +107,9 @@ it("replays the grader's own WAL to the shared object store after restart withou
   openAcceptance({ settings: settings("http://127.0.0.1:1"), log });
   const usage = paid("paid-http-attempt-before-restart");
   await persistProviderUsage(auth, usage);
-  await closeAcceptance();
+  // This stop represents the lost grader process. Do not spend the planned
+  // shutdown window retrying an endpoint the test deliberately made dead.
+  await closeAcceptance({ timeoutMilliseconds: 0 });
   // The same directory is the restarted grader process's recovery authority.
   openAcceptance({ settings: settings(), log });
   await expect

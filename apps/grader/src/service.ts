@@ -1,6 +1,7 @@
 import {
   claimGradingJobs,
   finishGradingJob,
+  MAX_GRADING_CLAIM_CAPACITY,
   recordGradingHeartbeat,
   releaseGradingJob,
   watchGradingWork,
@@ -82,6 +83,7 @@ export function startService(options: ServiceOptions): Service {
   let woken = false;
   let wake: (() => void) | undefined;
   let watching: Listening | undefined;
+  const inFlight = new Set<Promise<void>>();
   /** Cancels for the holds in flight, so `stop` can end every one at once. */
   const activeHolds = new Set<() => void>();
 
@@ -153,9 +155,18 @@ export function startService(options: ServiceOptions): Service {
     while (running) {
       let claimed: readonly GradingClaim[] = [];
       try {
+        const available = config.capacity - inFlight.size;
+        if (available < 1) {
+          await waitForWork();
+          continue;
+        }
+        // The claim sees every notification committed before it starts.
+        // Preserve only notifications that arrive while the query is running.
+        woken = false;
         claimed = await claimGradingJobs({
           claimant: config.claimant,
-          capacity: config.capacity,
+          capacity: Math.min(available, MAX_GRADING_CLAIM_CAPACITY),
+          concurrencyCap: config.concurrencyCap,
           leaseSeconds: config.leaseSeconds,
         });
       } catch (error) {
@@ -171,17 +182,49 @@ export function startService(options: ServiceOptions): Service {
       }
 
       if (claimed.length > 0) {
-        await Promise.all(
-          claimed.map((claim) => holdAndGrade(claim, options, pacing)),
-        );
-        // A full claim may leave more queued work; claim again without waiting.
-        if (claimed.length === config.capacity) woken = true;
+        for (const claim of claimed) {
+          const grading = holdAndGrade(claim, options, pacing)
+            .catch(async (error: unknown) => {
+              // Release failures outside gradeHeldClaim before freeing the slot.
+              try {
+                await releaseGradingJob(
+                  claim.auth,
+                  claim.id,
+                  config.claimant,
+                  saying(error),
+                );
+              } catch {
+                // Lease expiry recovers a claim when the database is unreachable.
+              }
+              try {
+                log.error(
+                  platformEvent("egma.grading_job.process_failed", {
+                    ...claimAttributes(claim),
+                    "error.type": "grading_job_process_failed",
+                    "exception.type": safeExceptionType(error),
+                  }),
+                  "grader job process failed unexpectedly",
+                );
+              } catch {
+                // A logger failure must not stop claims or reject shutdown.
+              }
+            })
+            .finally(() => {
+              inFlight.delete(grading);
+              nudge();
+            });
+          inFlight.add(grading);
+        }
+        // Keep filling this copy's free slots without waiting for this group.
+        continue;
       }
 
       options.onIdle?.();
       if (!running) break;
       await waitForWork();
     }
+
+    await Promise.all(inFlight);
   })().finally(async () => {
     await watching?.close();
   });

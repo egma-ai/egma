@@ -84,6 +84,7 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
 const WORK_DISPATCHING = [
   "claimGradingJobs",
   "claimSimulations",
+  "estimateVoiceSimulationDemand",
   "recordSimulationHeartbeat",
   "recordOrphanedSimulationExecution",
   "resolveSimulationStanding",
@@ -497,6 +498,7 @@ const THE_PERSONA_LIBRARY = [
   "personaModelsOfParameters",
   "personaParameterContract",
   "personaParametersOfModels",
+  "speechProvidersOfParameters",
   "validatePersonaParameterContract",
   "validatePersonaParameterValues",
   "PERSONA_LIBRARY_CATALOG",
@@ -665,7 +667,7 @@ const THE_POV_WORDS = [
   "fromOnePov",
   "laneProducesAnAgentPov",
 ];
-const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS"];
+const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS", "MAX_GRADING_CLAIM_CAPACITY"];
 
 /**
  * How long grading waits for a simulation's agent POV before it stops waiting.

@@ -450,6 +450,28 @@ describe("an exported call that could reach the database without a customer", ()
     expect(violations[0]?.detail).toContain("wearing an exemption");
   });
 
+  it("allows fleet counts under deployment caps", async () => {
+    await withSurface(
+      'export { estimateVoiceSimulationDemand } from "./things.ts";\n',
+      "export async function estimateVoiceSimulationDemand(request: { caps?: { voice?: number } } = {}): Promise<{ active: number; admissibleQueued: number }> {\n  return { active: 0, admissibleQueued: request.caps?.voice ?? 0 };\n}\n",
+    );
+
+    expect(await check(root)).toEqual([]);
+  });
+
+  it("refuses a fleet demand request that can select a customer", async () => {
+    await withSurface(
+      'export { estimateVoiceSimulationDemand } from "./things.ts";\n',
+      "export async function estimateVoiceSimulationDemand(request: { caps?: { voice?: number }; projectId: string }): Promise<number> {\n  return request.projectId.length;\n}\n",
+    );
+
+    const violations = await check(root);
+    expect(rules(violations)).toEqual([
+      "every-exported-call-carries-an-auth-context",
+    ]);
+    expect(violations[0]?.detail).toContain("wearing an exemption");
+  });
+
   it("sees a customer named inside the shape a parameter points at", async () => {
     await withSurface(
       'export { claimGradingJobs } from "./things.ts";\n',

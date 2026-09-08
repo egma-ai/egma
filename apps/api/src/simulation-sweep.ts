@@ -56,6 +56,8 @@ export type OrphanSweepOptions = {
   readonly settleAgentPovBound?: () => Promise<
     readonly SimulationPastTheAgentPovBound[]
   >;
+  /** Reconcile hosted voice compute on the same cadence. */
+  readonly wakeVoiceFleet?: (() => void) | undefined;
 };
 
 export type OrphanSweep = {
@@ -144,7 +146,11 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
   // throwing — every fault is caught and logged inside it — so holding the
   // latest promise is holding a completion, never an error to re-raise.
   let inFlight: Promise<void> = Promise.resolve();
+  options.wakeVoiceFleet?.();
   const timer = setInterval(() => {
+    // Fleet demand changes independently of orphan cleanup. Keep its cadence
+    // even while a database sweep is still waiting on the store.
+    options.wakeVoiceFleet?.();
     // A sweep that outlives the cadence — a stalled store, mostly — is
     // skipped over, not piled on: the next tick after it returns will see
     // everything this one would have. The skip has to happen *here*, before

@@ -103,6 +103,7 @@ async def _serve_workbench(state: WorkbenchState) -> AsyncIterator[Workbench]:
                 base_url=f"http://127.0.0.1:{port}", state=state, session=session
             )
     finally:
+        state.release_reports()
         await runner.cleanup()
 
 
@@ -130,6 +131,15 @@ async def over_granting_workbench() -> AsyncIterator[Workbench]:
     """A control plane that hands out more than the simulator asked for."""
     async for running in _serve_workbench(
         WorkbenchState(hold_seconds=CLAIM_HOLD_SECONDS, over_grant=3)
+    ):
+        yield running
+
+
+@pytest.fixture
+async def blocked_reporting_workbench() -> AsyncIterator[Workbench]:
+    """A control plane whose report upload never returns."""
+    async for running in _serve_workbench(
+        WorkbenchState(hold_seconds=CLAIM_HOLD_SECONDS, block_reports=True)
     ):
         yield running
 

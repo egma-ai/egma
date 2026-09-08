@@ -11,6 +11,7 @@ import {
   validPersonaModels,
   type PersonaModels,
 } from "../models/selections.ts";
+import type { ModelProvider } from "../models/catalog.ts";
 
 export type PersonaParameterValues = GraderParameterValues;
 
@@ -44,6 +45,17 @@ export function personaModelsOfParameters(
       speed: values.tts_speed,
     },
   });
+}
+
+/** Speech providers selected by one frozen set of applied persona settings. */
+export function speechProvidersOfParameters(
+  contract: unknown,
+  values: unknown,
+): readonly ModelProvider[] {
+  const models = personaModelsOfParameters(
+    validatePersonaParameterValues(contract, values),
+  );
+  return [...new Set([models.stt.provider, models.tts.provider])];
 }
 
 export function personaParameterContract(

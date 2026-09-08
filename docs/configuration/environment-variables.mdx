@@ -289,6 +289,23 @@ Past 128 concurrent senders this machine buys almost no additional throughput an
   The maximum number of authenticated requests one organization may make per minute. The budget belongs to the organization, not to a key, so rotating a key does not reset it.
 </ParamField>
 
+<ParamField path="EGMA_VOICE_SIMULATION_CONCURRENCY_CAP" type="number">
+  Optional maximum number of claimed or running voice simulations. Excess
+  simulations stay queued. Empty means no deployment-wide cap.
+</ParamField>
+
+<ParamField path="EGMA_CHAT_SIMULATION_CONCURRENCY_CAP" type="number">
+  Optional maximum number of claimed or running chat simulations across all
+  workers. This pool is separate from voice. Excess simulations stay queued.
+  Empty means no deployment-wide cap.
+</ParamField>
+
+<ParamField path="EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS" type="JSON object">
+  Optional speech-provider session caps, such as
+  `{"cartesia":2,"deepgram":150}`. A simulation that would exceed a named
+  provider cap stays queued. Providers absent from the object are uncapped.
+</ParamField>
+
 ### Email (optional)
 
 Email is entirely optional. Without it, invitation links are returned directly to the admin who created them, signup requires no verification, and password-reset links are written to the platform log.
@@ -345,6 +362,11 @@ configuration error.
 |---|---|
 | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | Compose uses `http://api:3100` |
 | `EGMA_SIMULATOR_CAPACITY` | Concurrent simulations; the process default is 2 |
+| `EGMA_SIMULATOR_MODE` | `persistent` by default; `one-shot` claims once, and `standby` waits for one voice simulation before exiting |
+| `EGMA_SIMULATOR_MODALITIES` | Comma-separated `voice,chat`; unset accepts both in persistent mode and voice only in one-shot or standby mode |
+| `EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS` | One-shot and standby process deadline from claim through teardown; default 900; unused in persistent mode |
+| `EGMA_SIMULATOR_STANDBY_SECONDS` | Standby claim wait limit; default 1800; separate from the execution deadline |
+| `EGMA_SIMULATOR_THREAD_POOL_WORKERS` | Native thread pool size; defaults to 1 in one-shot/standby mode and leaves persistent-mode pools unchanged |
 | `EGMA_SIMULATOR_CLAIMANT` | Worker name; defaults from the host and process |
 | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | Heartbeat interval; default 5 |
 | `EGMA_SIMULATOR_CLAIM_WAIT_SECONDS` | Long-poll wait; default 30 |
@@ -382,7 +404,8 @@ The bundled stack uses MinIO and does not need them in `.env`.
 | Variable | Default or purpose |
 |---|---|
 | `EGMA_GRADER_CLAIMANT` | Worker name; defaults from the host and process |
-| `EGMA_GRADER_CAPACITY` | Concurrent grading jobs; default 4 |
+| `EGMA_GRADER_CAPACITY` | Concurrent grading jobs per worker; default 4. Each freed slot can take another job without waiting for the other jobs. |
+| `EGMA_GRADING_CONCURRENCY_CAP` | Optional deployment-wide cap shared by all grader workers; unset by default. One job grades one simulation or trace with all its attached graders. Separate from simulation caps. |
 | `EGMA_GRADER_HEARTBEAT_SECONDS` | Heartbeat interval; default 15 |
 | `EGMA_GRADER_LEASE_SECONDS` | Claim lease; default 120 |
 | `EGMA_GRADER_SWEEP_SECONDS` | Backstop queue scan; default 30 |
@@ -460,6 +483,24 @@ Set both or neither:
   These are deployment credentials and are not stored in Postgres. A simulator
   receives only the keys required by its claimed work order.
 </Note>
+
+### Egma Cloud voice fleet
+
+These settings select the hosted ECS launcher. They are injected by the cloud
+task definition and do not belong in a self-hosted `.env` or Compose file.
+Without `EGMA_VOICE_FLEET_LAUNCHER`, the API does not load AWS fleet code.
+
+| Variable | Purpose |
+|---|---|
+| `EGMA_VOICE_FLEET_LAUNCHER` | Must be `aws-ecs` to enable hosted voice launches |
+| `EGMA_VOICE_FLEET_CLUSTER` | ECS cluster name or ARN |
+| `EGMA_VOICE_FLEET_TASK_DEFINITION` | Exact voice task-definition ARN; listing uses its family across revisions |
+| `EGMA_VOICE_FLEET_SUBNETS` | Non-empty JSON array of subnet IDs |
+| `EGMA_VOICE_FLEET_SECURITY_GROUPS` | Non-empty JSON array of security-group IDs |
+| `EGMA_RELEASE_SHA` | Lowercase 40-character public commit SHA exposed by `/health` after deployment |
+
+The ECS client reads its region from the standard `AWS_REGION` value supplied
+by AWS. The release workflow checks `releaseSha` before it ships the web app.
 
 ---
 

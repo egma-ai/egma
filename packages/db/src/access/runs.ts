@@ -30,8 +30,12 @@ import {
 } from "../client.ts";
 import { allowanceKindOf } from "../billing/allowance.ts";
 import { billing } from "../billing/ports.ts";
-import { personaModelsOfParameters } from "../persona-library/parameters.ts";
+import {
+  personaModelsOfParameters,
+  speechProvidersOfParameters,
+} from "../persona-library/parameters.ts";
 import { providersNeededBy } from "../models/selections.ts";
+import type { ModelProvider } from "../models/catalog.ts";
 import { planGroupsFor } from "../grading/plan.ts";
 import {
   agent,
@@ -43,7 +47,7 @@ import {
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
-import { persona } from "../schema/personas.ts";
+import { persona, personaVersion } from "../schema/personas.ts";
 import {
   COMPLETED_ENDING_REASONS,
   FAILED_ENDING_REASONS,
@@ -1721,7 +1725,221 @@ export type SimulationClaimRequest = {
   readonly claimant: string;
   /** How many conversations it has room to conduct at once. */
   readonly capacity: number;
+  /** Omission keeps the standing self-hosted simulator's current mixed queue. */
+  readonly modalities?: readonly Modality[] | undefined;
+  /** Deployment caps. Omission means every tier is unlimited. */
+  readonly caps?: SimulationConcurrencyCaps | undefined;
 };
+
+export type SimulationConcurrencyCaps = {
+  readonly voice?: number | undefined;
+  readonly chat?: number | undefined;
+  readonly speechProviders?:
+    | Readonly<Partial<Record<ModelProvider, number>>>
+    | undefined;
+};
+
+export type VoiceSimulationDemand = {
+  /** Voice simulations already claimed or running. */
+  readonly active: number;
+  /** Queued voice simulations which fit after the active work consumes caps. */
+  readonly admissibleQueued: number;
+};
+
+const SIMULATION_CLAIM_SCAN_WINDOW = 500;
+const SIMULATION_CAP_LOCK = "egma:simulation-concurrency-caps";
+
+function checkedCaps(
+  offered: SimulationConcurrencyCaps | undefined,
+): SimulationConcurrencyCaps {
+  if (offered === undefined) return {};
+  const check = (name: string, value: number | undefined): void => {
+    if (
+      value !== undefined &&
+      (!Number.isInteger(value) || value < 1)
+    ) {
+      throw new Error(`${name} must be a whole number of at least 1`);
+    }
+  };
+  check("the voice concurrency cap", offered.voice);
+  check("the chat concurrency cap", offered.chat);
+  for (const [provider, cap] of Object.entries(
+    offered.speechProviders ?? {},
+  )) {
+    check(`${provider}'s speech-provider concurrency cap`, cap);
+  }
+  return offered;
+}
+
+function checkedModalities(
+  offered: readonly Modality[] | undefined,
+): readonly Modality[] | undefined {
+  if (offered === undefined) return undefined;
+  const modalities = [...new Set(offered)];
+  if (
+    modalities.length === 0 ||
+    modalities.some((modality) => modality !== "voice" && modality !== "chat")
+  ) {
+    throw new Error("claim modalities must name voice, chat, or both");
+  }
+  return modalities;
+}
+
+type CapCandidate = {
+  readonly id: string;
+  readonly modality: Modality;
+  readonly parameterValues: PersonaParameterValues;
+  readonly parameterContract: unknown;
+};
+
+type CapUsage = {
+  voice: number;
+  chat: number;
+  readonly speechProviders: Map<string, number>;
+};
+
+function speechProvidersOf(candidate: CapCandidate): readonly ModelProvider[] {
+  return speechProvidersOfParameters(
+    candidate.parameterContract,
+    candidate.parameterValues,
+  );
+}
+
+function usageOf(active: readonly CapCandidate[]): CapUsage {
+  const usage: CapUsage = { voice: 0, chat: 0, speechProviders: new Map() };
+  for (const candidate of active) {
+    usage[candidate.modality] += 1;
+    if (candidate.modality === "chat") continue;
+    let providers: readonly ModelProvider[];
+    try {
+      providers = speechProvidersOf(candidate);
+    } catch {
+      // A corrupt active row still consumes the platform tier. It cannot be
+      // assigned a provider honestly, and the lifecycle/sweep owns landing it.
+      continue;
+    }
+    for (const provider of providers) {
+      usage.speechProviders.set(
+        provider,
+        (usage.speechProviders.get(provider) ?? 0) + 1,
+      );
+    }
+  }
+  return usage;
+}
+
+function admitWithinCaps(
+  candidate: CapCandidate,
+  caps: SimulationConcurrencyCaps,
+  usage: CapUsage,
+): boolean {
+  if (candidate.modality === "chat") {
+    if (caps.chat !== undefined && usage.chat >= caps.chat) return false;
+    usage.chat += 1;
+    return true;
+  }
+  if (caps.voice !== undefined && usage.voice >= caps.voice) return false;
+  const providerCaps = caps.speechProviders ?? {};
+  if (Object.keys(providerCaps).length === 0) {
+    usage.voice += 1;
+    return true;
+  }
+  let providers: readonly ModelProvider[];
+  try {
+    providers = speechProvidersOf(candidate);
+  } catch {
+    // Claim the unusable row so normal spec assembly can record its failure.
+    // It never opens a provider session, so it consumes only this brief
+    // platform admission slot.
+    usage.voice += 1;
+    return true;
+  }
+  if (
+    providers.some((provider) => {
+      const cap = providerCaps[provider];
+      return cap !== undefined && (usage.speechProviders.get(provider) ?? 0) >= cap;
+    })
+  ) {
+    return false;
+  }
+  usage.voice += 1;
+  for (const provider of providers) {
+    usage.speechProviders.set(
+      provider,
+      (usage.speechProviders.get(provider) ?? 0) + 1,
+    );
+  }
+  return true;
+}
+
+async function lockCapAdmission(tx: Transaction): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${SIMULATION_CAP_LOCK}::text, 0))`,
+  );
+}
+
+async function activeSimulationCandidates(
+  on: Queryable,
+  modalities: readonly Modality[],
+): Promise<readonly CapCandidate[]> {
+  return (await on
+    .select({
+      id: simulation.id,
+      modality: simulation.modality,
+      parameterValues: simulation.personaParameterValues,
+      parameterContract: personaVersion.parameterContract,
+    })
+    .from(simulation)
+    .innerJoin(personaVersion, eq(personaVersion.id, simulation.personaVersionId))
+    .where(
+      and(
+        inArray(simulation.modality, modalities),
+        inArray(simulation.status, ["claimed", "running"]),
+      ),
+    )) as readonly CapCandidate[];
+}
+
+/** Read-only fleet input. The claim remains the only reservation and assignment. */
+export async function estimateVoiceSimulationDemand(
+  request: { readonly caps?: SimulationConcurrencyCaps | undefined } = {},
+): Promise<VoiceSimulationDemand> {
+  const caps = checkedCaps(request.caps);
+  return db().transaction(async (tx) => {
+    await lockCapAdmission(tx);
+    const active = await activeSimulationCandidates(tx, ["voice"]);
+    const usage = usageOf(active);
+    let admissibleQueued = 0;
+    let after: string | undefined;
+    while (true) {
+      const queued = (await tx
+        .select({
+          id: simulation.id,
+          modality: simulation.modality,
+          parameterValues: simulation.personaParameterValues,
+          parameterContract: personaVersion.parameterContract,
+        })
+        .from(simulation)
+        .innerJoin(personaVersion, eq(personaVersion.id, simulation.personaVersionId))
+        .where(
+          and(
+            eq(simulation.status, "queued"),
+            eq(simulation.modality, "voice"),
+            runIsReadyToConduct(simulation.runId),
+            after === undefined ? undefined : gt(simulation.id, after),
+          ),
+        )
+        .orderBy(asc(simulation.id))
+        .limit(SIMULATION_CLAIM_SCAN_WINDOW)) as readonly CapCandidate[];
+      for (const candidate of queued) {
+        if (admitWithinCaps(candidate, caps, usage)) admissibleQueued += 1;
+      }
+      if (queued.length < SIMULATION_CLAIM_SCAN_WINDOW) break;
+      after = queued.at(-1)?.id;
+      if (after === undefined) break;
+    }
+    return { active: active.length, admissibleQueued };
+  });
+}
 
 /**
  * Claim up to capacity eligible queued simulations across organizations with
@@ -1733,6 +1951,8 @@ export async function claimSimulations(
   request: SimulationClaimRequest,
 ): Promise<readonly SimulationClaim[]> {
   const claimant = validClaimant(request.claimant);
+  const modalities = checkedModalities(request.modalities);
+  const caps = checkedCaps(request.caps);
   const { capacity } = request;
   if (
     !Number.isInteger(capacity) ||
@@ -1747,22 +1967,75 @@ export async function claimSimulations(
   const now = new Date();
 
   const claimed = await db().transaction(async (tx) => {
-    const candidates = await tx
-      .select({ id: simulation.id })
-      .from(simulation)
-      // Queued, **and** its run is ready to be conducted. For every run that
-      // mocks nothing the second condition is true by construction; for a run
-      // that owes itself a mocked world it stays false until the temporary
-      // version exists, so a run that cannot build its world never has a
-      // simulation conducted against the real tools. See `mock-tools/lanes.ts`.
-      .where(
-        and(eq(simulation.status, "queued"), runIsReadyToConduct(simulation.runId)),
-      )
-      .orderBy(asc(simulation.id))
-      .limit(capacity)
-      .for("update", { skipLocked: true });
+    const capsApply = caps.voice !== undefined || caps.chat !== undefined ||
+      Object.keys(caps.speechProviders ?? {}).length > 0;
+    const canClaimVoice = modalities === undefined || modalities.includes("voice");
+    const voiceCapsApply = caps.voice !== undefined ||
+      Object.keys(caps.speechProviders ?? {}).length > 0;
+    const cappedModalities: readonly Modality[] = [
+      ...(voiceCapsApply && canClaimVoice ? ["voice" as const] : []),
+      ...(caps.chat !== undefined &&
+          (modalities === undefined || modalities.includes("chat"))
+        ? ["chat" as const]
+        : []),
+    ];
+    const active = capsApply && cappedModalities.length > 0 ? await (async () => {
+      await lockCapAdmission(tx);
+      return activeSimulationCandidates(tx, cappedModalities);
+    })() : [];
+    const usage = usageOf(active);
+    const admitted: CapCandidate[] = [];
+    let after: string | undefined;
+    while (admitted.length < capacity) {
+      const candidates = (await tx
+        .select({
+          id: simulation.id,
+          modality: simulation.modality,
+          parameterValues: simulation.personaParameterValues,
+          parameterContract: personaVersion.parameterContract,
+        })
+        .from(simulation)
+        .innerJoin(personaVersion, eq(personaVersion.id, simulation.personaVersionId))
+        // Queued, **and** its run is ready to be conducted. For every run that
+        // mocks nothing the second condition is true by construction; for a run
+        // that owes itself a mocked world it stays false until the temporary
+        // version exists, so a run that cannot build its world never has a
+        // simulation conducted against the real tools. See `mock-tools/lanes.ts`.
+        .where(
+          and(
+            eq(simulation.status, "queued"),
+            runIsReadyToConduct(simulation.runId),
+            modalities === undefined
+              ? undefined
+              : inArray(simulation.modality, modalities),
+            after === undefined ? undefined : gt(simulation.id, after),
+          ),
+        )
+        .orderBy(asc(simulation.id))
+        .limit(
+          capsApply && cappedModalities.length > 0
+            ? SIMULATION_CLAIM_SCAN_WINDOW
+            : capacity - admitted.length,
+        )
+        .for("update", { of: simulation, skipLocked: true })) as readonly CapCandidate[];
+      for (const candidate of candidates) {
+        if (admitWithinCaps(candidate, caps, usage)) admitted.push(candidate);
+        if (admitted.length >= capacity) break;
+      }
+      if (
+        admitted.length >= capacity ||
+        candidates.length <
+          (capsApply && cappedModalities.length > 0
+            ? SIMULATION_CLAIM_SCAN_WINDOW
+            : capacity - admitted.length)
+      ) {
+        break;
+      }
+      after = candidates.at(-1)?.id;
+      if (after === undefined) break;
+    }
 
-    if (candidates.length === 0) return [];
+    if (admitted.length === 0) return [];
 
     // Bare `eq`s and `inArray`s from here down: every id came off the rows
     // locked just above, in this same transaction, so nothing below reaches
@@ -1778,7 +2051,7 @@ export async function claimSimulations(
       .where(
         inArray(
           simulation.id,
-          candidates.map((candidate) => candidate.id),
+          admitted.map((candidate) => candidate.id),
         ),
       )
       .returning(SIMULATION_CLAIM_COLUMNS);

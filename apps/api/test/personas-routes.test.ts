@@ -146,6 +146,7 @@ describe("creating and reading a persona", () => {
       "stt:openai:gpt-4o-transcribe",
       "stt:openai:gpt-4o-mini-transcribe",
       "stt:deepgram:nova-3-general",
+      "tts:openai:gpt-4o-mini-tts-2025-12-15",
       "stt:cartesia:ink-2",
       "tts:cartesia:sonic-3.5",
       "tts:cartesia:sonic-preview",
@@ -427,7 +428,7 @@ describe("creating and reading a persona", () => {
     expect(found).toMatchObject({
       name: "Everyday caller",
       description: "Regular conversationalist persona",
-      version: 1,
+      version: 2,
       owner: "egma",
       // Catalog content, and the whole point of it: nobody ever hears
       // "Hi, I'm Everyday caller."

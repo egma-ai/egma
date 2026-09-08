@@ -223,6 +223,18 @@
     },
     {
       "provider": "openai",
+      "model": "gpt-4o-mini-tts-2025-12-15",
+      "effectiveFrom": "2026-09-08",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "readAt": "2026-09-08",
+      "approximate": true,
+      "note": "The dated snapshot uses the same published price and character approximation as its gpt-4o-mini-tts alias.",
+      "prices": {
+        "characters": { "unit": "character", "usdPerMillion": "38.40" }
+      }
+    },
+    {
+      "provider": "openai",
       "model": "gpt-4o-mini-tts",
       "effectiveFrom": "2026-09-07",
       "source": "https://developers.openai.com/api/docs/pricing",

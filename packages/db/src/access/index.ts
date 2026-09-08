@@ -367,6 +367,7 @@ export {
 export {
   cancelRun,
   claimSimulations,
+  estimateVoiceSimulationDemand,
   completeSimulation,
   failSimulation,
   failSimulationDispatch,
@@ -422,6 +423,8 @@ export {
   type Simulation,
   type SimulationClaim,
   type SimulationClaimRequest,
+  type SimulationConcurrencyCaps,
+  type VoiceSimulationDemand,
   type SimulationConnection,
   type SimulationExecutionEvidence,
   type SimulationFailure,
@@ -466,6 +469,7 @@ export {
 export {
   AGENT_POV_BOUND_SECONDS,
   GRADING_WORK_CHANNEL,
+  MAX_GRADING_CLAIM_CAPACITY,
   claimGradingJobs,
   finishGradingJob,
   getGradingJob,

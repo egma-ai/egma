@@ -221,6 +221,11 @@ services:
       # The budget belongs to the organization rather than to a key, so
       # rotating a key does not reset it.
       EGMA_RATE_LIMIT_PER_MINUTE: ${EGMA_RATE_LIMIT_PER_MINUTE:-600}
+      # Optional deployment caps. Empty keeps the self-hosted pull loop
+      # unchanged; operators can bound each modality or one speech provider.
+      EGMA_VOICE_SIMULATION_CONCURRENCY_CAP: ${EGMA_VOICE_SIMULATION_CONCURRENCY_CAP:-}
+      EGMA_CHAT_SIMULATION_CONCURRENCY_CAP: ${EGMA_CHAT_SIMULATION_CONCURRENCY_CAP:-}
+      EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS: ${EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS:-}
       # Mail is optional and unset by default. With none, invitations hand
       # their link back to whoever sent them and signup asks for no
       # verification; setting this turns both around at once. It is never a
@@ -415,6 +420,11 @@ services:
       # More replicas increase total capacity. Phone simulations also consume
       # carrier channels, whose capacity must cover the combined workload.
       EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-}
+      EGMA_SIMULATOR_MODE: ${EGMA_SIMULATOR_MODE:-}
+      EGMA_SIMULATOR_MODALITIES: ${EGMA_SIMULATOR_MODALITIES:-}
+      EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS: ${EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS:-}
+      EGMA_SIMULATOR_STANDBY_SECONDS: ${EGMA_SIMULATOR_STANDBY_SECONDS:-}
+      EGMA_SIMULATOR_THREAD_POOL_WORKERS: ${EGMA_SIMULATOR_THREAD_POOL_WORKERS:-}
       # No model, voice or provider key is container configuration. The pinned
       # persona version supplies one complete selection, and the claim adds only
       # the current keys for its selected providers. Missing data is refused;
@@ -517,6 +527,7 @@ services:
       # has room for, so a burst of finished simulations degrades to a queue
       # rather than to overload — raise this, or start a second copy.
       EGMA_GRADER_CAPACITY: ${EGMA_GRADER_CAPACITY:-4}
+      EGMA_GRADING_CONCURRENCY_CAP: ${EGMA_GRADING_CONCURRENCY_CAP:-}
       # How the claim behaves. A copy says it is still alive every heartbeat
       # while it holds a conversation, and a copy silent for longer than the
       # lease loses it to whichever copy asks next — which is how a container

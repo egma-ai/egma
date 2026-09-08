@@ -6,6 +6,7 @@ import {
 import {
   and,
   asc,
+  count,
   eq,
   gt,
   inArray,
@@ -64,8 +65,9 @@ import { within } from "./within.ts";
 /** A notification is a wake-up hint. The Postgres row remains the queue. */
 export const GRADING_WORK_CHANNEL = "egma_grading_work";
 
-const LARGEST_CLAIM_CAPACITY = 50;
+export const MAX_GRADING_CLAIM_CAPACITY = 50;
 const DEFAULT_LEASE_SECONDS = 120;
+const GRADING_CAP_LOCK = "egma:grading-concurrency-cap";
 /** The last failed attempt is retained as an abandoned job, never a grade. */
 export const MOST_GRADING_ATTEMPTS = 3;
 const THE_ENGINE = "engine";
@@ -137,6 +139,8 @@ export type GradingClaimRequest = {
   readonly claimant: string;
   readonly capacity: number;
   readonly leaseSeconds?: number | undefined;
+  /** Omission preserves the uncapped self-hosted queue. */
+  readonly concurrencyCap?: number | undefined;
 };
 
 const JOB_COLUMNS = {
@@ -1056,30 +1060,76 @@ export async function claimGradingJobs(
   if (
     !Number.isInteger(request.capacity) ||
     request.capacity < 1 ||
-    request.capacity > LARGEST_CLAIM_CAPACITY
+    request.capacity > MAX_GRADING_CLAIM_CAPACITY
   ) {
     throw new RangeError(
-      `a claim takes between 1 and ${LARGEST_CLAIM_CAPACITY} grading jobs`,
+      `a claim takes between 1 and ${MAX_GRADING_CLAIM_CAPACITY} grading jobs`,
     );
   }
   const leaseSeconds = request.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
   if (!Number.isInteger(leaseSeconds) || leaseSeconds < 1) {
     throw new RangeError("a lease is a positive whole number of seconds");
   }
+  if (
+    request.concurrencyCap !== undefined &&
+    (!Number.isInteger(request.concurrencyCap) || request.concurrencyCap < 1)
+  ) {
+    throw new RangeError("the grading concurrency cap is a positive whole number");
+  }
 
   const now = new Date();
   const silentSince = new Date(now.getTime() - leaseSeconds * 1_000);
   const rows = await db().transaction(async (tx) => {
-    const candidates = await tx
-      .select({ id: gradingJob.id, attempts: gradingJob.attempts })
-      .from(gradingJob)
-      .where(or(
-        eq(gradingJob.status, "pending"),
-        and(eq(gradingJob.status, "claimed"), lt(gradingJob.heartbeatAt, silentSince)),
-      ))
-      .orderBy(asc(gradingJob.id))
-      .limit(request.capacity)
-      .for("update", { skipLocked: true });
+    let candidates: readonly { readonly id: string; readonly attempts: number }[];
+    if (request.concurrencyCap === undefined) {
+      candidates = await tx
+        .select({ id: gradingJob.id, attempts: gradingJob.attempts })
+        .from(gradingJob)
+        .where(or(
+          eq(gradingJob.status, "pending"),
+          and(eq(gradingJob.status, "claimed"), lt(gradingJob.heartbeatAt, silentSince)),
+        ))
+        .orderBy(asc(gradingJob.id))
+        .limit(request.capacity)
+        .for("update", { skipLocked: true });
+    } else {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${GRADING_CAP_LOCK}::text, 0))`,
+      );
+      const [active] = await tx
+        .select({ count: count() })
+        .from(gradingJob)
+        .where(eq(gradingJob.status, "claimed"));
+      const available = request.concurrencyCap - Number(active?.count ?? 0);
+      const expired = await tx
+        .select({ id: gradingJob.id, attempts: gradingJob.attempts })
+        .from(gradingJob)
+        .where(and(
+          eq(gradingJob.status, "claimed"),
+          lt(gradingJob.heartbeatAt, silentSince),
+        ))
+        .orderBy(asc(gradingJob.id))
+        .limit(request.capacity)
+        .for("update", { skipLocked: true });
+      const reclaimable = expired.filter(
+        (candidate) => candidate.attempts < MOST_GRADING_ATTEMPTS,
+      ).length;
+      const abandoned = expired.length - reclaimable;
+      const pendingCapacity = Math.min(
+        request.capacity - reclaimable,
+        Math.max(available + abandoned, 0),
+      );
+      const pending = pendingCapacity === 0
+        ? []
+        : await tx
+          .select({ id: gradingJob.id, attempts: gradingJob.attempts })
+          .from(gradingJob)
+          .where(eq(gradingJob.status, "pending"))
+          .orderBy(asc(gradingJob.id))
+          .limit(pendingCapacity)
+          .for("update", { skipLocked: true });
+      candidates = [...expired, ...pending];
+    }
     if (candidates.length === 0) return [];
 
     const exhausted = candidates
@@ -1205,15 +1255,18 @@ export async function finishGradingJob(
   id: string,
   claimant: string,
 ): Promise<{ readonly id: string } | undefined> {
-  const [row] = await db()
-    .delete(gradingJob)
-    .where(and(
-      theJob(auth, id),
-      eq(gradingJob.status, "claimed"),
-      eq(gradingJob.claimedBy, validClaimant(claimant)),
-    ))
-    .returning({ id: gradingJob.id });
-  return row;
+  return db().transaction(async (tx) => {
+    const [row] = await tx
+      .delete(gradingJob)
+      .where(and(
+        theJob(auth, id),
+        eq(gradingJob.status, "claimed"),
+        eq(gradingJob.claimedBy, validClaimant(claimant)),
+      ))
+      .returning({ id: gradingJob.id });
+    if (row !== undefined) await notify(tx, row.id);
+    return row;
+  });
 }
 
 export async function releaseGradingJob(
@@ -1251,7 +1304,7 @@ export async function releaseGradingJob(
       .where(eq(gradingJob.id, id))
       .returning(JOB_COLUMNS);
     if (row === undefined) return undefined;
-    if (!abandoned) await notify(tx, row.id);
+    await notify(tx, row.id);
     return jobFromRow(row);
   });
 }

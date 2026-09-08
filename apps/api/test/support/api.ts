@@ -104,6 +104,7 @@ export type TestApiOptions = {
   readonly rateLimit?: RateLimit;
   /** A sweep cadence short enough to observe, for the tests about the sweep. */
   readonly orphanSweepIntervalMilliseconds?: number;
+  readonly wakeVoiceFleet?: ServerOptions["wakeVoiceFleet"];
   /** Where Retell answers. A test stands a Retell-shaped server on loopback. */
   readonly retellReach?: ServerOptions["retellReach"];
   /**
@@ -140,6 +141,8 @@ export type TestApiOptions = {
    * proving it costs a second rather than the deployment's ten.
    */
   readonly ingestionRequestTimeoutMilliseconds?: number;
+  /** Shortens the planned-shutdown upload window in focused ingestion tests. */
+  readonly ingestionShutdownTimeoutMilliseconds?: number;
   /**
    * What the local log will hold before it refuses. Tiny here for the one suite
    * whose claim is the refusal, so that reaching a bound costs one request
@@ -338,6 +341,12 @@ export async function createApi(
   const { app, identity, drainer } = buildApi({
     config,
     drainsPendingEvidence: options.drainsPendingEvidence ?? false,
+    ...(options.ingestionShutdownTimeoutMilliseconds === undefined
+      ? {}
+      : {
+          ingestionShutdownTimeoutMilliseconds:
+            options.ingestionShutdownTimeoutMilliseconds,
+        }),
     ...(options.defaultEmailSender === true ? {} : { emailSender }),
     ...(options.rateLimit === undefined ? {} : { rateLimit: options.rateLimit }),
     ...(options.logTo === undefined ? {} : { logTo: options.logTo }),
@@ -347,6 +356,9 @@ export async function createApi(
           orphanSweepIntervalMilliseconds:
             options.orphanSweepIntervalMilliseconds,
         }),
+    ...(options.wakeVoiceFleet === undefined
+      ? {}
+      : { wakeVoiceFleet: options.wakeVoiceFleet }),
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),
