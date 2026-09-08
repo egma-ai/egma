@@ -1,6 +1,6 @@
 [project]
 name = "egma"
-version = "0.3.0"
+version = "0.3.1"
 description = "Test and monitor LiveKit agents with Egma."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,14 +19,10 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 
-# Pinned to one minor on purpose. Mock-tool substitution uses LiveKit's
-# testing namespace. Monitoring also reads LiveKit's current dynamic tracer
-# provider because the public telemetry API has a setter but no getter. An
-# unread minor must not change either seam by itself. The floor is where the
-# session-scoped form of `mock_tools` exists; the ceiling is the next minor.
-# Raising either is a deliberate act backed by the fixture and live tests.
+# LiveKit 1.6.6 uses session-scoped mocks during tool execution. Validate its testing API
+# and private tracer provider access before adding another minor release.
 dependencies = [
-    "livekit-agents>=1.6.7,<1.7",
+    "livekit-agents>=1.6.6,<1.9",
     # LiveKit Agents 1.6 passes an httpx client into OpenAI. OpenAI 3 moved
     # to httpx2, so this range follows LiveKit's own compatibility bound.
     "openai>=2,<3",
@@ -41,7 +37,7 @@ Documentation = "https://github.com/egma-ai/egma/tree/main/sdks/python#readme"
 
 [dependency-groups]
 dev = [
-    "livekit-plugins-openai>=1.6.7,<1.7",
+    "livekit-plugins-openai>=1.6.6,<1.9",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
     "pytest-timeout>=2.4.0",

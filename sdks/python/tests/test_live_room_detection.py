@@ -1,7 +1,7 @@
 """Verify room-name detection, participant addressing, and arrival waits on real
 LiveKit.
 The live_livekit fixture uses a configured server or a local Docker dev server.
-These tests do not start audio or a model.
+These tests use no audio or external model provider.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from conftest import ReceptionAgent, called, couriers_on
 from livekit import rtc
+from livekit.agents import AgentSession, llm, room_io
 
 from egma import seam, simulation
 
@@ -108,10 +109,79 @@ class _EgmaInTheRoom:
         return None
 
 
+class _CalendarStream(llm.LLMStream):
+    async def _run(self) -> None:
+        if any(item.type == "function_call_output" for item in self.chat_ctx.items):
+            self._event_ch.send_nowait(
+                llm.ChatChunk(
+                    id="calendar-followup",
+                    delta=llm.ChoiceDelta(
+                        role="assistant", content="I checked Tuesday."
+                    ),
+                )
+            )
+            return
+        self._event_ch.send_nowait(
+            llm.ChatChunk(
+                id="calendar-response",
+                delta=llm.ChoiceDelta(
+                    role="assistant",
+                    tool_calls=[
+                        llm.FunctionToolCall(
+                            name="check_calendar",
+                            arguments='{"day":"Tuesday"}',
+                            call_id="calendar-call",
+                        )
+                    ],
+                ),
+            )
+        )
+
+
+class _CalendarLLM(llm.LLM):
+    def chat(self, *, chat_ctx: Any, tools: Any, conn_options: Any, **_: Any):
+        return _CalendarStream(
+            self, chat_ctx=chat_ctx, tools=tools, conn_options=conn_options
+        )
+
+
 async def _agent_joins(live: Any, room_name: str, identity: str = "the-agent"):
     room = rtc.Room()
     await room.connect(live.url, live.token(room_name, identity))
     return room
+
+
+async def test_agent_session_dispatches_a_mock_over_the_room(
+    live_livekit: Any, egma_export: Any
+) -> None:
+    """Use a scripted model to verify real tool dispatch without a provider key."""
+    room_name = "egma-sim-live-tool-dispatch"
+    egma = await _EgmaInTheRoom().join(live_livekit, room_name, ("check_calendar",))
+    room = await _agent_joins(live_livekit, room_name)
+    session = AgentSession(llm=_CalendarLLM(), max_tool_steps=1)
+    try:
+        agent = ReceptionAgent()
+        await simulation(agent, _LiveContext(room_name, room), session)
+        await session.start(
+            agent=agent,
+            room=room,
+            room_options=room_io.RoomOptions(audio_input=False, audio_output=False),
+        )
+        result = await session.run(user_input="Is Tuesday free?")
+        calls = [body for method, body in egma.asked if method == seam.TOOL_METHOD]
+        assert calls == [
+            {"name": "check_calendar", "arguments": {"day": "Tuesday", "party_size": 1}}
+        ]
+        outputs = [
+            event.item.output
+            for event in result.events
+            if event.type == "function_call_output"
+        ]
+        assert outputs == ["egma answered this one"]
+    finally:
+        await session.aclose()
+        await room.disconnect()
+        await egma.leave()
 
 
 async def test_egma_already_in_the_room_is_found_and_answers(

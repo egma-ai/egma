@@ -232,7 +232,7 @@ jobs:
   livekit-python-compatibility:
     name: LiveKit Python compatibility
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
-    # Two isolated Python environments run their core suites concurrently.
+    # Isolated Python environments run their core suites concurrently.
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
@@ -259,7 +259,7 @@ jobs:
           test -n "$wheel"
           echo "wheel=$wheel" >> "$GITHUB_OUTPUT"
 
-      - name: Verify the minimum and locked LiveKit versions in parallel
+      - name: Verify the supported LiveKit versions in parallel
         run: python3 .github/livekit_compatibility.py python "${{ steps.pack.outputs.wheel }}"
 
   livekit-js-compatibility:

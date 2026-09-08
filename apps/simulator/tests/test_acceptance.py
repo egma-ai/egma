@@ -854,9 +854,10 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     # version the spec resolved — never Retell's own moving default — and
     # carried Egma's answers for it to serve.
     stub = running.stub
-    assert [request["agent_version"] for request in stub.requests] == [106, 106]
+    assert [request["agent_version"] for request in stub.requests] == ["106", "106"]
+    assert all("agent_version" not in request["body"] for request in stub.requests)
     assert [mock["tool_name"] for mock in stub.mocks()[0]] == ["get_availability"]
-    assert stub.mocks()[0][0]["input_match_rule"] == "any"
+    assert stub.mocks()[0][0]["input_match_rule"] == {"type": "any"}
     assert stub.delivered() == ["I need to move my Tuesday cleaning to Thursday."]
 
     simulator.stop()

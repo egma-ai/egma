@@ -106,7 +106,7 @@ jobs:
         working-directory: sdks/python
         run: uv build --out-dir dist
 
-      - name: Verify the wheel against both LiveKit versions in parallel
+      - name: Verify the wheel against supported LiveKit versions in parallel
         run: |
           wheel="$(find sdks/python/dist -maxdepth 1 -name '*.whl' -print -quit)"
           test -n "$wheel"
@@ -120,7 +120,7 @@ jobs:
           clean="$(mktemp -d)"
           uv venv --python 3.11 "$clean/venv"
           uv pip install --python "$clean/venv/bin/python" \
-            "$wheel" "livekit-agents[openai]==1.6.7"
+            "$wheel" "livekit-agents[openai]==1.6.6"
           "$clean/venv/bin/python" - <<'PY'
           import asyncio
           import os

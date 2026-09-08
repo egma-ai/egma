@@ -176,7 +176,7 @@ class TextModeStub:
         self.requests.append(
             {
                 "agent_id": agent_id,
-                "agent_version": body.get("agent_version"),
+                "agent_version": request.query.get("version"),
                 "body": body,
             }
         )
@@ -186,6 +186,27 @@ class TextModeStub:
 
         if body.get("messages") is None:
             raise web.HTTPUnprocessableEntity(text="messages is required")
+
+        allowed = {
+            "messages", "dynamic_variables", "tool_mocks", "current_node_id",
+            "component_id", "current_state",
+        }
+        if set(body) - allowed:
+            raise web.HTTPBadRequest(text="unknown playground request fields")
+
+        for index, mock in enumerate(body.get("tool_mocks") or []):
+            if not isinstance(mock.get("input_match_rule"), dict):
+                raise web.HTTPBadRequest(
+                    text=json.dumps(
+                        {
+                            "error_message": (
+                                f"request/body/tool_mocks/{index}/input_match_rule "
+                                "must be object"
+                            )
+                        }
+                    ),
+                    content_type="application/json",
+                )
 
         # The script is walked by the exchanges really conducted, not by the
         # requests made: a refused request is one the agent never saw, so a
@@ -201,7 +222,7 @@ class TextModeStub:
         if reply.seconds:
             await asyncio.sleep(reply.seconds)
         if self.answers_without_messages:
-            return web.json_response({"agent_ended": False}, status=201)
+            return web.json_response({"call_ended": False}, status=201)
 
         offered = (
             {}
@@ -259,11 +280,11 @@ class TextModeStub:
                 for index, bubble in enumerate(bubbles)
             )
 
-        answered: dict = {"messages": messages, "agent_ended": reply.ends}
+        answered: dict = {"messages": messages, "call_ended": reply.ends}
         if reply.node is not None:
             answered["current_node_id"] = reply.node
         if reply.component is not None:
-            answered["current_component_id"] = reply.component
+            answered["component_id"] = reply.component
         if reply.state is not None:
             answered["current_state"] = reply.state
         if reply.variables is not None:
