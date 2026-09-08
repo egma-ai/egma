@@ -310,7 +310,7 @@ describe("one simulation's grades", () => {
     expect(screen.queryByText("simulator_error")).toBeNull();
   });
 
-  it("shows the total average score without creating an overall pass or fail", async () => {
+  it("counts the graders that passed without creating an overall pass or fail", async () => {
     page();
     render(<SimulationEvidencePage />);
 
@@ -335,12 +335,20 @@ describe("one simulation's grades", () => {
     const summary = await screen.findByRole("region", {
       name: "Simulation summary",
     });
-    expect(within(summary).getByText("Total avg score")).toBeTruthy();
-    expect(within(summary).getByText("0.50")).toBeTruthy();
+    expect(within(summary).getByText("Graders passed")).toBeTruthy();
+    expect(within(summary).getByText("0/1 · 1 failed")).toBeTruthy();
     expect(within(summary).getByText("Duration")).toBeTruthy();
     expect(within(summary).getByText("40s")).toBeTruthy();
     expect(within(summary).getByText("Total turns")).toBeTruthy();
+    /*
+     * The average of every grader's score has left the bar. One number over
+     * graders that each answered their own question reads as an overall
+     * verdict, and there is none: ADR-0017 stands.
+     */
+    expect(within(summary).queryByText("Total avg score")).toBeNull();
+    expect(within(summary).queryByText("0.50")).toBeNull();
     expect(within(summary).queryByText(/overall|verdict/iu)).toBeNull();
+    expect(within(summary).queryByText(/^(Passed|Failed|Error)$/u)).toBeNull();
   });
 
   it("presents chat as chat and leaves every audio control out", async () => {
@@ -390,6 +398,10 @@ describe("one simulation's grades", () => {
   it("shows a dash for every summary value that was not recorded", async () => {
     page({
       read: evidence({
+        gradingState: "not_requested",
+        grades: [],
+        gradeHistory: [],
+        gradingPlan: null,
         combinedScore: null,
         measures: { durationMs: null, turnCount: null, toolCallCount: null },
         metrics: [],
@@ -435,7 +447,7 @@ describe("one simulation's grades", () => {
     const summary = await screen.findByRole("region", {
       name: "Simulation summary",
     });
-    expect(within(summary).getByText("0.00")).toBeTruthy();
+    expect(within(summary).getByText("0/1 · 1 failed")).toBeTruthy();
     expect(within(summary).getByText("0s")).toBeTruthy();
     expect(within(summary).getByText("0")).toBeTruthy();
     expect(within(summary).getByText("0 ms")).toBeTruthy();
@@ -533,7 +545,9 @@ describe("one simulation's grades", () => {
     expect(screen.getByText("Waiting for this grader to return a grade."))
       .toBeTruthy();
     const summary = screen.getByRole("region", { name: "Simulation summary" });
-    expect(within(summary).getByText("-")).toBeTruthy();
+    expect(within(summary).getByText("Graders passed")).toBeTruthy();
+    /* A partial count while grading would read as a settled one. */
+    expect(within(summary).getByText("—")).toBeTruthy();
     expect(within(summary).queryByText("Not available")).toBeNull();
     expect(document.body.textContent).not.toContain("gradingJobs");
   });
@@ -560,7 +574,7 @@ describe("one simulation's grades", () => {
       .toBeTruthy();
     expect(screen.getAllByText("errored").length).toBeGreaterThan(0);
     const summary = screen.getByRole("region", { name: "Simulation summary" });
-    expect(within(summary).getByText("-")).toBeTruthy();
+    expect(within(summary).getByText("0/1 · 1 errored")).toBeTruthy();
     expect(within(summary).queryByText("Not available")).toBeNull();
   });
 

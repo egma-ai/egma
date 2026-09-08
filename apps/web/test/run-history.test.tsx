@@ -161,6 +161,7 @@ function simulation(overrides: Record<string, unknown> = {}) {
     status: "completed",
     gradingState: "complete",
     combinedScore: 1,
+    gradeTally: { passed: 1, failed: 0, errored: 0, selected: 1 },
     reason: null,
     executionFailure: null,
     startedAt: "2026-08-21T10:00:01.000Z",
@@ -455,37 +456,33 @@ describe("one run after suites", () => {
       within(navigation).getByRole("link", { name: "Runs" }).getAttribute("href"),
     ).toBe("/projects/prj_1/runs");
     expect(navigation.textContent).toBe("Runs/Release check");
-    const suite = screen.getByRole("link", { name: "Northside Ford" });
-    expect(suite.getAttribute("href")).toBe("/projects/prj_1/tests/suites/ste_1");
-    for (const link of [
-      suite,
-      screen.getByRole("link", { name: "Front desk" }),
-      screen.getByRole("link", { name: "retell-staging" }),
-    ]) {
-      expect(link.className).toContain("no-underline");
-      expect(link.className).toContain("pointer-hover:underline");
+    /*
+     * The run summary strip is gone. Status, Started, Test suite, Agent and
+     * Connection are facts about the run, and the runs table carries them; the
+     * page they were on is about the simulations under it.
+     */
+    expect(screen.queryByRole("group", { name: "Run summary" })).toBeNull();
+    for (const label of ["Status", "Started", "Test suite", "Connection"]) {
+      expect(screen.queryByText(label)).toBeNull();
     }
+    expect(screen.queryByRole("link", { name: "Northside Ford" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "retell-staging" })).toBeNull();
+    expect(document.querySelector('[data-slot="run-status"]')).toBeNull();
+    expect(document.querySelector('[data-slot="run-status-loader"]')).toBeNull();
     const first = await screen.findByRole("button", { name: /Books service,/u });
     expect(first.getAttribute("aria-label")).toBe(
-      "Books service, Patient caller, Completed",
+      "Books service, Patient caller, 1/1 passed",
     );
     expect(within(first).queryByText(/Score|59s/u)).toBeNull();
     expect(first.getAttribute("aria-pressed")).toBe("true");
     expect(first.className).toContain("bg-selected");
     expect(first.className).toContain("before:bg-brand");
-    expect(first.querySelector('[data-slot="state-mark"]')).toBeNull();
+    const firstSquare = first.querySelector('[data-slot="state-mark"]');
+    expect(firstSquare?.getAttribute("data-state-mark")).toBe("passed");
+    expect(firstSquare?.getAttribute("data-filled")).toBe("true");
+    expect(firstSquare?.getAttribute("data-motion")).toBeNull();
+    expect(within(first).getByText("Patient caller · 1/1 passed")).toBeTruthy();
     expect(screen.getByText("1 simulation")).toBeTruthy();
-    const summary = screen.getByRole("group", { name: "Run summary" });
-    for (const label of ["Status", "Started", "Test suite", "Agent", "Connection"]) {
-      expect(within(summary).getByText(label)).toBeTruthy();
-    }
-    expect(within(summary).getByText("Chat")).toBeTruthy();
-    const completedStatus = within(summary)
-      .getByText("Completed")
-      .closest('[data-slot="run-status"]');
-    expect(completedStatus).not.toBeNull();
-    expect(completedStatus?.querySelector('[data-slot="state-mark"]')).toBeNull();
-    expect(completedStatus?.querySelector('[data-slot="run-status-loader"]')).toBeNull();
     const resultsTab = screen.getByRole("tab", { name: "Results summary" });
     expect(resultsTab.getAttribute("data-state")).toBe("active");
     expect(resultsTab.className).toContain(
@@ -504,13 +501,26 @@ describe("one run after suites", () => {
     );
     expect(graderLink.className).toContain("pointer-hover:underline");
     const graderHeading = within(expected).getByRole("heading", {
-      name: "Grader Expected behaviors",
+      name: "Expected behaviors",
     });
-    expect(graderHeading.textContent).toBe("Grader · Expected behaviors");
+    expect(graderHeading.textContent).toBe("Expected behaviors");
     const passed = within(expected).getByText("Passed");
     expect(passed.className).toContain("text-success");
     expect(passed.parentElement?.textContent).toBe("Result · Passed");
-    expect(within(expected).getByText("Total Score 1")).toBeTruthy();
+    expect(within(expected).getByText("Score 1 · Threshold 0.8")).toBeTruthy();
+    /*
+     * This grader passed, so its section is closed and the finding is not in
+     * the tree. Opening it shows the frozen definition version and the table.
+     */
+    expect(within(expected).queryByRole("table")).toBeNull();
+    const graderTrigger = within(expected).getByRole("button", {
+      name: "Expected behaviors",
+    });
+    expect(graderTrigger.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(graderTrigger);
+    expect(graderTrigger.getAttribute("aria-expanded")).toBe("true");
+    expect(within(expected).getByText("v2")).toBeTruthy();
+    expect(within(expected).queryByText("Definition v2")).toBeNull();
     const behaviorTable = within(expected).getByRole("table", {
       name: "Expected behaviors results",
     });
@@ -534,13 +544,15 @@ describe("one run after suites", () => {
       name: "Simulation summary",
     });
     for (const label of [
-      "Total avg score",
+      "Graders passed",
       "Duration",
       "Total turns",
       "P90 turn latency",
     ]) {
       expect(within(simulationSummary).getByText(label)).toBeTruthy();
     }
+    expect(within(simulationSummary).queryByText("Total avg score")).toBeNull();
+    expect(within(simulationSummary).getByText("1/1")).toBeTruthy();
     expect(within(simulationSummary).getByText("-")).toBeTruthy();
     expect(within(simulationSummary).queryByText("Not available")).toBeNull();
     expect(within(simulationSummary).getByText("Not recorded").className).toContain(
@@ -555,12 +567,28 @@ describe("one run after suites", () => {
     const resultsPanel = screen.getByRole("tabpanel", { name: "Results summary" });
     expect(resultsPanel.className).toContain("overflow-y-auto");
     expect(resultsPanel.parentElement?.className).toContain("overflow-hidden");
-    expect(screen.getByRole("button", { name: "Regrade" })).toBeTruthy();
+    /* The Graders line stands over the sections and counts them. */
+    expect(within(graderResults).getByRole("heading", { name: "Graders" }))
+      .toBeTruthy();
+    expect(within(graderResults).getByText("1/1 passed")).toBeTruthy();
+    /*
+     * Regrade acts on the selected simulation, so it stands in the tab rail's
+     * own row rather than inside either tab panel.
+     */
+    const regrade = screen.getByRole("button", { name: "Regrade" });
+    const rail = resultsTab.closest('[data-slot="tabs-list"]')?.parentElement;
+    expect(rail?.contains(regrade)).toBe(true);
+    expect(resultsPanel.contains(regrade)).toBe(false);
     expect(screen.queryByRole("link", { name: "Open full simulation" })).toBeNull();
     const selectedHeader = document.querySelector(
       '[data-slot="selected-simulation-header"]',
     );
-    expect(selectedHeader?.textContent).toBe("Books service");
+    expect(selectedHeader?.textContent).toBe("Books service1/1 passed");
+    expect(
+      selectedHeader
+        ?.querySelector('[data-slot="state-mark"]')
+        ?.getAttribute("data-state-mark"),
+    ).toBe("passed");
     expect(selectedHeader?.textContent).not.toContain("completed");
     expect(selectedHeader?.textContent).not.toContain("Graded");
     expect(screen.queryByRole("button", { name: /run again|retry/i })).toBeNull();
@@ -599,8 +627,18 @@ describe("one run after suites", () => {
     expect(within(table).getByText("Waiting for the grader.")).toBeTruthy();
     expect(within(table).getByRole("columnheader", { name: "Total Score" })).toBeTruthy();
     expect(within(table).getByText("-")).toBeTruthy();
-    expect(within(expected).getByText("Total Score -")).toBeTruthy();
+    expect(within(expected).getByText("Score - · Threshold 0.8")).toBeTruthy();
     expect(within(expected).queryAllByText(/—/u)).toHaveLength(0);
+    /* A grader with no result yet opens itself: the wait is the finding. */
+    expect(
+      within(expected)
+        .getByRole("button", { name: "Expected behaviors" })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+    /* No count is claimed while the graders are still working. */
+    const grading = screen.getByRole("region", { name: "Simulation summary" });
+    expect(within(grading).getByText("Graders passed")).toBeTruthy();
+    expect(within(grading).getAllByText("—").length).toBeGreaterThan(0);
   });
 
   it("shows partial-transcript disclosure before the recorded conversation", async () => {
@@ -683,6 +721,13 @@ describe("one run after suites", () => {
     expect(within(summary).queryByText("420")).toBeNull();
     expect(screen.queryByRole("region", { name: "What was measured" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Frozen grading plan" })).toBeNull();
+    /* Earlier grades live inside the grader's own section, which passed. */
+    fireEvent.click(
+      within(screen.getByRole("region", { name: "Expected behaviors" })).getByRole(
+        "button",
+        { name: "Expected behaviors" },
+      ),
+    );
     const history = screen.getByText("1 earlier grade");
     fireEvent.click(history);
     const historyDetails = within(history.closest("details")!);
@@ -712,7 +757,12 @@ describe("one run after suites", () => {
     expect(await screen.findByRole("heading", { name: "Northside Ford" })).toBeTruthy();
   });
 
-  it("does not claim that a pending run has started", async () => {
+  /*
+   * A run that has not started says so in the runs table's Started column now.
+   * The detail page carries no run facts of its own, so a pending run simply
+   * has no simulations to show yet.
+   */
+  it("shows no run facts and no simulations before a run starts", async () => {
     routed.pathname = "/projects/prj_1/runs/run_1";
     answers(
       detailStubs(
@@ -727,8 +777,11 @@ describe("one run after suites", () => {
     );
     render(<RunDetailPage />);
 
-    const summary = await screen.findByRole("group", { name: "Run summary" });
-    expect(within(summary).getByText("Not started")).toBeTruthy();
+    expect(
+      await screen.findByText("No simulation has been written yet"),
+    ).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Run summary" })).toBeNull();
+    expect(screen.queryByText("Not started")).toBeNull();
   });
 
   it("shows a deleted suite as history, not as a live link", async () => {
@@ -736,9 +789,11 @@ describe("one run after suites", () => {
     answers(detailStubs(runDetail({ suiteDeleted: true, name: null })));
     render(<RunDetailPage />);
 
-    const summary = await screen.findByRole("group", { name: "Run summary" });
-    expect(within(summary).getByText("Northside Ford (deleted)")).toBeTruthy();
-    expect(within(summary).queryByRole("link", { name: /Northside Ford/u })).toBeNull();
+    /* The unnamed run falls back to its suite's name, which is history now. */
+    expect(
+      await screen.findByRole("heading", { name: "Northside Ford (deleted)" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Northside Ford/u })).toBeNull();
   });
 
   it("loads more simulations with the cursor and keeps the first page", async () => {
@@ -819,9 +874,16 @@ describe("one run after suites", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "Retell did not answer the test call. This is an execution problem, not a failed grade.",
     );
+    /* The heading carries the same square and word as the row in the list. */
+    const failedHeader = document.querySelector(
+      '[data-slot="selected-simulation-header"]',
+    );
+    expect(failedHeader?.textContent).toBe("Books serviceExecution failed");
     expect(
-      document.querySelector('[data-slot="selected-simulation-header"]')?.textContent,
-    ).not.toContain("Execution failed");
+      failedHeader
+        ?.querySelector('[data-slot="state-mark"]')
+        ?.getAttribute("data-state-mark"),
+    ).toBe("failed");
     expect(await screen.findByText("No grading was requested")).toBeTruthy();
     expect(screen.queryByText("No score")).toBeNull();
     expect(screen.queryByText(/capabilit/u)).toBeNull();
@@ -906,6 +968,7 @@ describe("one run after suites", () => {
     const first = simulation({
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -916,6 +979,7 @@ describe("one run after suites", () => {
       testName: "Reschedules service",
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -1048,6 +1112,7 @@ describe("one run after suites", () => {
     const first = simulation({
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -1058,6 +1123,7 @@ describe("one run after suites", () => {
       testName: "Reschedules service",
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -1123,6 +1189,7 @@ describe("one run after suites", () => {
     const first = simulation({
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -1133,6 +1200,7 @@ describe("one run after suites", () => {
       testName: "Reschedules service",
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -1235,6 +1303,7 @@ describe("one run after suites", () => {
     const first = simulation({
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -1245,6 +1314,7 @@ describe("one run after suites", () => {
       testName: "Reschedules service",
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -1463,6 +1533,7 @@ describe("one run after suites", () => {
     const first = simulation({
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -1574,6 +1645,7 @@ describe("one run after suites", () => {
     const running = simulation({
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -1717,6 +1789,7 @@ describe("one run after suites", () => {
               simulation({
                 status: "running",
                 gradingState: null,
+                gradeTally: null,
                 combinedScore: null,
                 endedAt: null,
               }),
@@ -1727,6 +1800,7 @@ describe("one run after suites", () => {
                 testName: "Reschedules service",
                 status: "running",
                 gradingState: null,
+                gradeTally: null,
                 combinedScore: null,
                 endedAt: null,
               }),
@@ -1885,8 +1959,12 @@ describe("one run after suites", () => {
     });
     render(<RunDetailPage />);
 
+    const graders = await screen.findByRole("region", { name: "Grader results" });
+    fireEvent.click(
+      within(graders).getByRole("button", { name: "Expected behaviors" }),
+    );
     expect(
-      await screen.findAllByText("The agent found and confirmed the appointment."),
+      screen.getAllByText("The agent found and confirmed the appointment."),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Reschedules service,/u }));
 
@@ -1944,6 +2022,7 @@ describe("one run after suites", () => {
     const first = simulation({
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -1954,6 +2033,7 @@ describe("one run after suites", () => {
       testName: "Reschedules service",
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -1975,6 +2055,7 @@ describe("one run after suites", () => {
                   status: "completed",
                   gradingState: "complete",
                   combinedScore: 0.7,
+                  gradeTally: { passed: 2, failed: 1, errored: 0, selected: 3 },
                   endedAt: "2026-08-21T10:01:00.000Z",
                 },
               ],
@@ -2011,7 +2092,7 @@ describe("one run after suites", () => {
     render(<RunDetailPage />);
 
     const refreshed = await screen.findByRole("button", {
-      name: "Reschedules service, Patient caller, Completed",
+      name: "Reschedules service, Patient caller, 2/3 passed",
     });
     expect(refreshed.getAttribute("aria-pressed")).toBe("false");
   });
@@ -2061,12 +2142,28 @@ describe("one run after suites", () => {
       name: "Expected behaviors",
     });
     const policy = within(results).getByRole("region", { name: "Policy grader" });
-    expect(within(expected).getByText("Total Score 1")).toBeTruthy();
-    expect(within(policy).getByText("Total Score 0.65")).toBeTruthy();
+    expect(within(expected).getByText("Score 1 · Threshold 0.8")).toBeTruthy();
+    expect(within(policy).getByText("Score 0.65 · Threshold 0.8")).toBeTruthy();
     const failed = within(policy).getByText("Failed");
     expect(failed.className).toContain("text-failure");
     expect(failed.parentElement?.textContent).toBe("Result · Failed");
+    /*
+     * The failed grader opens itself and the passed one stays closed, so the
+     * finding somebody came for is the thing already on screen.
+     */
+    expect(
+      within(policy)
+        .getByRole("button", { name: "Policy grader" })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(
+      within(expected)
+        .getByRole("button", { name: "Expected behaviors" })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
     expect(within(policy).getByText("The agent did not confirm consent.")).toBeTruthy();
+    expect(within(policy).getByText("v2")).toBeTruthy();
+    expect(within(results).getByText("1/2 passed")).toBeTruthy();
   });
 
   it("keeps a chat transcript and its tool calls in one ordered detail tab", async () => {
@@ -2213,6 +2310,7 @@ describe("one run after suites", () => {
     const first = simulation({
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -2223,6 +2321,7 @@ describe("one run after suites", () => {
       testName: "Reschedules service",
       status: "running",
       gradingState: null,
+      gradeTally: null,
       combinedScore: null,
       endedAt: null,
     });
@@ -2231,6 +2330,7 @@ describe("one run after suites", () => {
       status: "completed",
       gradingState: "complete",
       combinedScore: 0.7,
+      gradeTally: { passed: 2, failed: 1, errored: 0, selected: 3 },
       endedAt: "2026-08-21T10:01:00.000Z",
     };
     answers({
@@ -2302,7 +2402,7 @@ describe("one run after suites", () => {
     await waitFor(
       () => {
         const refreshed = screen.getByRole("button", {
-          name: "Reschedules service, Patient caller, Completed",
+          name: "Reschedules service, Patient caller, 2/3 passed",
         });
         expect(refreshed.getAttribute("aria-pressed")).toBe("true");
         expect(screen.getByRole("heading", { name: "Reschedules service" })).toBeTruthy();
@@ -2321,28 +2421,39 @@ describe("one run after suites", () => {
       simulationCounts: { ...NO_SIMULATIONS, running: 1 },
     });
     answers({
-      ...detailStubs(active, {
-        status: 200,
-        body: {
-          simulations: [
-            simulation({ status: "running", gradingState: null }),
-          ],
-          nextPageToken: null,
+      ...detailStubs(
+        active,
+        {
+          status: 200,
+          body: {
+            simulations: [
+              simulation({
+                status: "running",
+                gradingState: null,
+                gradeTally: null,
+              }),
+            ],
+            nextPageToken: null,
+          },
         },
-      }),
+        /* Evidence for a running simulation has not landed yet. */
+        "never",
+      ),
       "/v1/runs/run_1/events": "never",
     });
     render(<RunDetailPage />);
 
-    const summary = await screen.findByRole("group", { name: "Run summary" });
-    const runningStatus = within(summary)
-      .getByText("Running")
-      .closest('[data-slot="run-status"]');
-    expect(runningStatus).not.toBeNull();
-    expect(runningStatus?.querySelector('[data-slot="state-mark"]')).toBeNull();
-    expect(
-      runningStatus?.querySelector('[data-slot="run-status-loader"]'),
-    ).not.toBeNull();
+    /*
+     * The run's own status left this page with the strip. What is still here
+     * is each simulation's square, and a running one pulses.
+     */
+    const runningRow = await screen.findByRole("button", {
+      name: "Books service, Patient caller, Running",
+    });
+    const runningSquare = runningRow.querySelector('[data-slot="state-mark"]');
+    expect(runningSquare?.getAttribute("data-state-mark")).toBe("active");
+    expect(runningSquare?.getAttribute("data-motion")).toBe("pulse");
+    expect(document.querySelector('[data-slot="run-status"]')).toBeNull();
 
     fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
     const dialog = await screen.findByRole("dialog", { name: "Cancel run “Release check”?" });
