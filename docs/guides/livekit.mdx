@@ -10,7 +10,7 @@ The [token endpoint option](#use-a-token-endpoint) below lets you keep the
 LiveKit key pair on your own server.
 
 You need a working LiveKit agent, access to its LiveKit project, and an
-initialized Egma project. Complete [CLI sign-in](/guides/quickstart#1-install-and-sign-in)
+initialized Egma project. Complete [CLI sign-in](/tools/cli#sign-in-and-initialize)
 first.
 
 ## 1. Prepare the worker
@@ -99,7 +99,7 @@ send a JSON object with `apiKey` and `apiSecret` fields through standard input.
 Do not put the secret in command-line arguments.
 
 Keep the connection ID as `EGMA_CONNECTION_ID`, then follow the
-[quickstart](/guides/quickstart#3-create-a-suite-and-test) to write a test and
+[CLI guide](/tools/cli#create-a-suite-and-a-test) to write a test and
 start a run. A voice simulation waits for your worker to join and publish audio.
 
 ## Add a text connection
@@ -281,7 +281,7 @@ python3 -c 'import json, os; print(json.dumps({"headers": {"Authorization": "Bea
 For a text connection, use `--modality chat` after adding the worker's text
 configuration described above.
 
-Use the returned connection ID to run the [quickstart test](/guides/quickstart#4-start-the-run).
+Use the returned connection ID to [start a run with the CLI](/tools/cli#start-a-run).
 Check that the worker joins the `egma-sim-` room and receives any test metadata.
 
 Egma makes one token request per simulation. It allows 20 seconds for the

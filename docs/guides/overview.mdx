@@ -1,53 +1,67 @@
 ---
-title: "Build trust in your voice agent"
+title: "Egma overview"
 sidebarTitle: "Overview"
-description: "Test conversations before release. Review what happens in production."
+description: "Test voice agents, monitor production conversations, and run your first simulation."
 ---
 
-Egma is an open-source platform for testing and monitoring voice agents. Write
-tests beside your agent code, run simulated conversations, and check the results
-against the behavior you expect.
+Egma is an open-source platform for testing voice agents and monitoring them in production. Check how your agent behaves before release and investigate problems in real conversations.
 
-<CardGroup cols={2}>
-  <Card title="Run your first test" icon="play" href="/guides/quickstart">
-    Connect an agent, run a scenario, and inspect the result.
-  </Card>
-  <Card title="Set up monitoring" icon="chart-line" href="/guides/set-up-monitoring">
-    Capture conversations and review their transcripts, metrics, and grades.
-  </Card>
-</CardGroup>
+Use [Egma Cloud](https://app.egma.ai) or [self-host Egma](/self-hosting/get-started) on your own infrastructure.
 
-## Connect your agent
+## Quickstart
 
-<CardGroup cols={2}>
-  <Card title="Retell" icon="phone" href="/guides/retell">
-    Connect a Retell agent for testing and monitoring.
-  </Card>
-  <Card title="LiveKit" icon="tower-broadcast" href="/guides/livekit">
-    Connect your LiveKit worker and add the SDK for your language.
-  </Card>
-</CardGroup>
+Run your first voice simulation in as little as five minutes with Egma’s skills and your coding agent. Open your voice agent’s repository and give your coding agent this prompt:
 
-## From a test to a result
+```text
+Set up Egma simulation testing in this repo. Install the skills with:
+npx skills add egma-ai/egma --skill integrate-egma write-egma-tests
 
-1. **Write a test.** Describe one situation, choose a persona, and list the
-   behaviors the agent must show. Keep related tests in a test suite.
-2. **Start a run.** Select a suite, an agent, and one of its connections. Egma
-   runs a simulation for each test and persona pair.
-3. **Read the evidence.** Inspect the agent's conversation, tool calls, and
-   grades. For voice tests, listen to what the simulated caller heard. Change
-   your agent or test, then run the suite again.
+Use integrate-egma to connect my voice agent and write-egma-tests to
+create one test with one persona. Run it over voice, share the results
+link, and wait for the run to finish.
+```
 
-Use [built-in graders](/guides/built-in-graders) to check expected behaviors and
-other supported criteria. Add [custom graders](/guides/custom-graders) for
-requirements specific to your product.
+The skill uses [Egma Cloud](https://app.egma.ai), our hosted version, by default for a quick start. For self-hosting, [set up your instance first](/self-hosting/get-started), then add “Use my Egma instance at `<your-instance-url>`” to the prompt above.
 
-## Work from your repository
+Follow the prompts to install the skills for your coding agent and authorize Egma login. Review the proposed test and mock any tools that could change your data. Open the results link to review the conversation and grading results once they are ready.
 
-Start with [Skills](/tools/skills) to let your coding agent set up integrations
-and write tests. Use the [CLI](/tools/cli) to manage test files and start runs
-directly. The [LiveKit Python SDK](/tools/livekit-python-sdk) and
-[LiveKit JavaScript SDK](/tools/livekit-javascript-sdk) connect your worker to
-simulation testing and production monitoring.
+For LiveKit, the skill may use a local worker for your first run. Deploy any SDK changes before starting later runs.
 
-To run Egma on your own infrastructure, follow [Self-hosting](/self-hosting/get-started).
+Prefer to use the terminal yourself? [Get started with the CLI](/tools/cli).
+
+## Testing voice agents
+
+Run simulated voice and text conversations against your agent. Save tests in your agent’s repository and run them again when you change its prompts, models, or tools.
+
+- Build regression suites around the tasks your agent needs to handle.
+- Mock selected tool responses to test failures and other situations that are hard to reproduce.
+- Review transcripts, voice simulation recordings, and grading results.
+
+[Write a test →](/guides/write-a-test)
+
+## Monitoring voice agents
+
+Real conversations can expose behavior you didn’t see in testing. Collect production traces to review transcripts, inspect tool calls, and check available performance metrics. Apply graders to check conversations against your agent’s requirements.
+
+Egma supports monitoring for LiveKit agents through its Python and JavaScript SDKs, and for Retell agents through a direct integration.
+
+[Set up monitoring →](/guides/set-up-monitoring)
+
+## Why Egma?
+
+When we were building voice products, we spent hours making test calls and investigating problems in production. Every change meant checking the agent’s behavior again. Even after all that testing, real conversations exposed behavior we hadn’t anticipated.
+
+We built Egma to make those checks repeatable and help us understand failures in production. We wanted to ship voice agents with more confidence and keep checking how they behaved once real people were using them.
+
+- **Open source.** Inspect the code, adapt it to your workflow, and self-host the platform.
+- **Bring your own keys.** Use your provider keys in Cloud or a self-hosted deployment and pay providers directly for those model calls. Cloud plan and applicable voice usage charges still apply.
+- **Choose your models.** Select from supported language and speech models to suit your tests.
+- **Customize personas.** Set the simulated caller’s behavior, language, and voice to reflect the people your agent serves.
+- **Customize graders.** Write your own grading instructions and set models, pass thresholds, and which conversations to grade.
+- **Keep tests with your code.** Review test changes alongside agent changes and run them from the CLI or your coding agent.
+
+## Community & contact
+
+Found a bug or have a feature request? [Open a GitHub issue](https://github.com/egma-ai/egma/issues).
+
+[Discord (invite coming soon)](https://example.com/egma-discord-placeholder)

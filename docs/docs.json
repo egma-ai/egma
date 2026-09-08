@@ -28,8 +28,7 @@
           {
             "group": "Get started",
             "pages": [
-              "guides/overview",
-              "guides/quickstart"
+              "guides/overview"
             ]
           },
           {
@@ -302,7 +301,7 @@
     },
     {
       "source": "/quickstart",
-      "destination": "/guides/quickstart"
+      "destination": "/guides/overview#quickstart"
     },
     {
       "source": "/self-hosting",
@@ -310,7 +309,7 @@
     },
     {
       "source": "/concepts/agents-and-connections",
-      "destination": "/guides/quickstart"
+      "destination": "/tools/cli#connect-an-agent"
     },
     {
       "source": "/concepts/tests-and-runs",
@@ -466,7 +465,7 @@
     },
     {
       "source": "/docs/quickstart",
-      "destination": "/guides/quickstart"
+      "destination": "/guides/overview#quickstart"
     },
     {
       "source": "/docs/retell",
@@ -527,6 +526,10 @@
     {
       "source": "/concepts/personas",
       "destination": "/guides/personas"
+    },
+    {
+      "source": "/guides/quickstart",
+      "destination": "/guides/overview#quickstart"
     }
   ]
 }
