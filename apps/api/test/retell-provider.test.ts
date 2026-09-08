@@ -215,6 +215,35 @@ describe("Retell production call reads", () => {
     });
   });
 
+  it("rejects a still-running record even when it has transcript turns", async () => {
+    const answer = await getRetellCall("retell-api-key", "call_ongoing", {
+      fetchImpl: (async () => new Response(JSON.stringify({
+        call_id: "call_ongoing",
+        call_status: "ongoing",
+        start_timestamp: 1_786_000_000_000,
+        transcript_object: [{ role: "agent", content: "Hello." }],
+      }))) as typeof fetch,
+    });
+
+    expect(answer).toEqual({ kind: "refused", reason: "invalid-response" });
+  });
+
+  it("keeps transcript-free terminal production calls readable", async () => {
+    for (const status of ["ended", "error", "not_connected"]) {
+      const call = {
+        call_id: `call_${status}`,
+        call_status: status,
+        start_timestamp: 1_786_000_000_000,
+        end_timestamp: 1_786_000_001_000,
+      };
+      const answer = await getRetellCall("retell-api-key", call.call_id, {
+        fetchImpl: (async () => new Response(JSON.stringify(call))) as typeof fetch,
+      });
+
+      expect(answer).toEqual({ kind: "call", call });
+    }
+  });
+
   it("returns a safe rate-limit fact without Retell's raw error body", async () => {
     const providerSecret = "SENTINEL-provider-error-access-token";
     const fetchImpl = (async () =>

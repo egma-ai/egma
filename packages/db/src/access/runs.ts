@@ -1965,6 +1965,8 @@ export type RetellSimulationPull = {
   readonly standing: SimulationStanding;
   /** Retell's own id for the conversation, off the simulation's own row. */
   readonly providerReference: string;
+  /** The completion receipt that starts grading's wait for final evidence. */
+  readonly completionReceivedAt: Date;
   /** The connection's Retell key, unsealed. */
   readonly apiKey: string;
   /** Where Retell answers for this connection, when the config names one. */
@@ -1986,6 +1988,8 @@ export async function resolveRetellSimulationPull(
   const [row] = await db()
     .select({
       providerReference: simulation.providerReference,
+      heartbeatAt: simulation.heartbeatAt,
+      endedAt: simulation.endedAt,
       runId: run.id,
       connectionSnapshot: run.connectionSnapshot,
       credentials: connection.credentials,
@@ -2045,6 +2049,7 @@ export async function resolveRetellSimulationPull(
   return {
     standing,
     providerReference,
+    completionReceivedAt: row.heartbeatAt ?? row.endedAt ?? new Date(0),
     apiKey,
     baseUrl: baseUrl === "" ? null : baseUrl,
   };

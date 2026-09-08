@@ -131,7 +131,7 @@ function extent(call: RetellCall, now: number): {
   return {
     startedAt: started,
     endedAt: end.at,
-    whole: true,
+    whole: end.reported,
     reported: end.reported,
   };
 }
@@ -430,12 +430,22 @@ function turnsIn(call: RetellCall): Transcript {
   return { turns, toolCalls, whole };
 }
 
-/** Whether a full Get Call document can be normalized without inventing facts. */
+/** Whether Retell reported a terminal record that can be read without fallbacks. */
 export function retellCallDocumentIsComplete(call: RetellCall): boolean {
+  const status = call["call_status"];
   return (
-    text(call["call_id"]) !== "" &&
+    text(call["call_id"]).trim() !== "" &&
+    (status === "ended" || status === "error" || status === "not_connected") &&
     extent(call, 0).whole &&
     turnsIn(call).whole
+  );
+}
+
+/** Simulation grading needs spoken evidence in addition to a finished record. */
+export function retellCallHasFinalTranscript(call: RetellCall): boolean {
+  return (
+    retellCallDocumentIsComplete(call) &&
+    turnsIn(call).turns.some((turn) => turn.text.trim() !== "")
   );
 }
 
