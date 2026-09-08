@@ -129,17 +129,9 @@ function ProviderApiKeys({ projectId }: { readonly projectId: string }) {
 
   return (
     <ProductPage viewport>
-      <PageHeader
-        title="Provider API Keys"
-        lead="Use your own provider accounts for personas and model graders across this organization."
-      />
+      <PageHeader title="Provider API Keys" />
       <PageBody>
         <SettingsLayout projectId={projectId} current="provider-api-keys">
-          <p className="m-0 text-sm text-muted-foreground">
-            On Egma Cloud, usage paid through your provider key does not use
-            your inference balance. Your plan allowances and voice overages
-            still apply.
-          </p>
           {saved === null ? null : (
             <p className="m-0 text-sm" role="status">
               {saved}
@@ -164,11 +156,6 @@ function ProviderApiKeys({ projectId }: { readonly projectId: string }) {
                 rows={answer.value.providers}
                 keyOf={(entry) => entry.provider}
               />
-              <Help>
-                Providers without an organization key use the default keys. If
-                your saved key fails, the work fails for that provider; Egma
-                does not switch to its own key.
-              </Help>
               {answer.value.mayManageProviderKeys ? null : (
                 <Help>
                   Ask an organization admin to add, replace, or remove provider

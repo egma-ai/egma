@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import type { Answer } from "../lib/api.ts";
 import {
@@ -15,8 +16,9 @@ import {
 } from "../lib/billing.ts";
 import { asListInstant } from "../lib/instants.ts";
 import { Dialog } from "./dialog.tsx";
+import { Facts, Section } from "./section.tsx";
 
-export function BillingActionsRow({
+export function BillingAccountSections({
   account,
   onRefresh,
   onBusyChange,
@@ -26,7 +28,10 @@ export function BillingActionsRow({
   readonly onBusyChange: (busy: boolean) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
-  const [said, setSaid] = useState<string | null>(null);
+  const [said, setSaid] = useState<{
+    readonly section: "plan" | "credit";
+    readonly message: string;
+  } | null>(null);
   const [picking, setPicking] = useState(false);
   const [stopping, setStopping] = useState(false);
   const actions = account.actions;
@@ -42,14 +47,6 @@ export function BillingActionsRow({
     window.addEventListener("pageshow", returned);
     return () => window.removeEventListener("pageshow", returned);
   }, [onRefresh]);
-  if (!actions.available)
-    return (
-      <p className="m-0 text-sm text-muted-foreground">
-        Payment actions are unavailable. Ask your administrator to check billing
-        setup.
-      </p>
-    );
-
   const onPro = account.plan.code === "pro";
   const downgradeScheduled = account.scheduledDowngradeAt !== null;
 
@@ -73,16 +70,21 @@ export function BillingActionsRow({
         return;
       } catch {
         setBusy(null);
-        setSaid("The payment page could not open. Try again.");
+        setSaid({
+          section: what === "credit" ? "credit" : "plan",
+          message: "The payment page could not open. Try again.",
+        });
         return;
       }
     }
     setBusy(null);
-    setSaid(
-      answer.status === "signed-out"
-        ? "Sign in again to change this organization's billing."
-        : answer.refusal.message,
-    );
+    setSaid({
+      section: what === "credit" ? "credit" : "plan",
+      message:
+        answer.status === "signed-out"
+          ? "Sign in again to change this organization's billing."
+          : answer.refusal.message,
+    });
   };
 
   const stopAtPeriodEnd = async (): Promise<void> => {
@@ -94,84 +96,139 @@ export function BillingActionsRow({
       onRefresh();
       return;
     }
-    setSaid(
-      answer.status === "signed-out"
-        ? "Sign in again to change this organization's billing."
-        : answer.refusal.message,
-    );
+    setSaid({
+      section: "plan",
+      message:
+        answer.status === "signed-out"
+          ? "Sign in again to change this organization's billing."
+          : answer.refusal.message,
+    });
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          disabled={busy !== null}
-          onClick={() => {
-            setSaid(null);
-            setPicking(true);
-          }}
-        >
-          Buy credit
-        </Button>
-        {onPro ? null : (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={busy !== null}
-            onClick={() => void follow("upgrade", upgradeToPro)}
-          >
-            {busy === "upgrade" ? "Opening Stripe…" : "Upgrade to Pro"}
-          </Button>
+    <>
+      <Section title="Plan">
+        <Card>
+          <Facts facts={[{ label: "Plan", value: account.plan.name }]} />
+        </Card>
+        {account.scheduledDowngradeAt === null ? null : (
+          <p className="m-0 text-sm text-muted-foreground" role="status">
+            Pro stops on{" "}
+            <time
+              className="tabular-nums"
+              dateTime={account.scheduledDowngradeAt}
+            >
+              {asListInstant(account.scheduledDowngradeAt)}
+            </time>
+            . Everything it includes stays available until then.
+          </p>
         )}
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={busy !== null}
-          onClick={() => void follow("portal", openPaymentPortal)}
-        >
-          {busy === "portal"
-            ? "Opening Stripe…"
-            : "Manage payment and invoices"}
-        </Button>
-        {onPro && downgradeScheduled ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="ml-auto"
-            disabled={busy !== null}
-            onClick={() => void follow("portal", openPaymentPortal)}
-          >
-            Keep Pro in Stripe
-          </Button>
-        ) : onPro ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="ml-auto text-destructive"
-            disabled={busy !== null}
-            onClick={() => {
-              setSaid(null);
-              setStopping(true);
-            }}
-          >
-            {busy === "downgrade"
-              ? "Asking Stripe…"
-              : "Downgrade at period end"}
-          </Button>
+        {!account.mayManageBilling ? (
+          <p className="m-0 text-sm text-muted-foreground">
+            An organization admin can manage the plan and payments.
+          </p>
+        ) : !actions.available ? (
+          <p className="m-0 text-sm text-muted-foreground">
+            Payment actions are unavailable. Ask your administrator to check
+            billing setup.
+          </p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            {onPro ? null : (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={busy !== null}
+                onClick={() => void follow("upgrade", upgradeToPro)}
+              >
+                {busy === "upgrade" ? "Opening Stripe…" : "Upgrade to Pro"}
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={busy !== null}
+              onClick={() => void follow("portal", openPaymentPortal)}
+            >
+              {busy === "portal"
+                ? "Opening Stripe…"
+                : "Manage payment and invoices"}
+            </Button>
+            {onPro && downgradeScheduled ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="ml-auto"
+                disabled={busy !== null}
+                onClick={() => void follow("portal", openPaymentPortal)}
+              >
+                Keep Pro in Stripe
+              </Button>
+            ) : onPro ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="ml-auto text-destructive"
+                disabled={busy !== null}
+                onClick={() => {
+                  setSaid(null);
+                  setStopping(true);
+                }}
+              >
+                {busy === "downgrade"
+                  ? "Asking Stripe…"
+                  : "Downgrade at period end"}
+              </Button>
+            ) : null}
+          </div>
+        )}
+        {said?.section === "plan" ? (
+          <p className="m-0 text-sm text-muted-foreground" role="status">
+            {said.message}
+          </p>
         ) : null}
-      </div>
+      </Section>
 
-      {said === null ? null : (
-        <p className="m-0 text-sm text-muted-foreground" role="status">
-          {said}
-        </p>
-      )}
+      <Section title="Inference balance">
+        <Card>
+          <Facts
+            facts={[
+              {
+                label: "Balance",
+                value: (
+                  <span className="tabular-nums">
+                    {moneyLabel(account.balanceMicros)}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </Card>
+        {account.mayManageBilling && actions.available ? (
+          <div>
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy !== null}
+              onClick={() => {
+                setSaid(null);
+                setPicking(true);
+              }}
+            >
+              Buy credit
+            </Button>
+          </div>
+        ) : null}
+        {said?.section === "credit" ? (
+          <p className="m-0 text-sm text-muted-foreground" role="status">
+            {said.message}
+          </p>
+        ) : null}
+      </Section>
 
       {picking ? (
         <BuyCreditDialog
@@ -195,7 +252,7 @@ export function BillingActionsRow({
           }}
         />
       ) : null}
-    </div>
+    </>
   );
 }
 

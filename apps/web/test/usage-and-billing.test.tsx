@@ -120,6 +120,31 @@ it("puts all billing facts on the named settings page and uses the activation bo
       .getAttribute("aria-current"),
   ).toBe("page");
 });
+it("groups plan controls separately from the inference balance and credit purchase", async () => {
+  open();
+  await screen.findByText("$4.25");
+  const plan = screen
+    .getByRole("heading", { name: "Plan", level: 2 })
+    .closest("section")!;
+  const balance = screen
+    .getByRole("heading", { name: "Inference balance", level: 2 })
+    .closest("section")!;
+  expect(within(plan).getByText("Hobby")).toBeTruthy();
+  expect(within(plan).getByRole("button", { name: "Upgrade to Pro" })).toBeTruthy();
+  expect(
+    within(plan).getByRole("button", { name: "Manage payment and invoices" }),
+  ).toBeTruthy();
+  expect(within(plan).queryByRole("button", { name: "Buy credit" })).toBeNull();
+  expect(within(plan).queryByText("$4.25")).toBeNull();
+  expect(within(balance).getByText("$4.25")).toBeTruthy();
+  expect(within(balance).getByRole("button", { name: "Buy credit" })).toBeTruthy();
+  expect(
+    within(balance).queryByRole("button", { name: "Manage payment and invoices" }),
+  ).toBeNull();
+  expect(
+    within(balance).queryByRole("button", { name: "Upgrade to Pro" }),
+  ).toBeNull();
+});
 it("lets members read provider costs and all history without payment actions", async () => {
   open({ ...HOBBY, mayManageBilling: false }, "member");
   expect(await screen.findByText("openai/gpt-4o-mini")).toBeTruthy();
@@ -309,6 +334,12 @@ it("buys a preset and preserves an action failure", async () => {
   expect(
     await screen.findByText("Checkout could not open. Try again."),
   ).toBeTruthy();
+  const balance = screen
+    .getByRole("heading", { name: "Inference balance", level: 2 })
+    .closest("section")!;
+  expect(within(balance).getByRole("status").textContent).toBe(
+    "Checkout could not open. Try again.",
+  );
   expect(
     requests.find((request) => request.path === "/api/billing/credit")?.body,
   ).toEqual({ amountMicros: 25_000_000 });
@@ -363,6 +394,12 @@ it("blocks duplicate upgrade actions and refresh while their result is pending",
   expect(
     await screen.findByText("Upgrade could not open. Try again."),
   ).toBeTruthy();
+  const plan = screen
+    .getByRole("heading", { name: "Plan", level: 2 })
+    .closest("section")!;
+  expect(within(plan).getByRole("status").textContent).toBe(
+    "Upgrade could not open. Try again.",
+  );
 });
 it("confirms a downgrade and reports its actual scheduled date", async () => {
   open(PRO);
@@ -388,6 +425,13 @@ it("confirms a downgrade and reports its actual scheduled date", async () => {
     "Pro stops on Oct 15, 2026. Everything it includes stays available until then.",
   );
   expect(screen.queryByRole("button", { name: "Downgrade at period end" })).toBeNull();
+  const plan = screen
+    .getByRole("heading", { name: "Plan", level: 2 })
+    .closest("section")!;
+  expect(within(plan).getByText(/Pro stops on/)).toBeTruthy();
+  expect(
+    within(plan).getByRole("button", { name: "Keep Pro in Stripe" }),
+  ).toBeTruthy();
 });
 it("reads a scheduled downgrade after reload and clears it after Portal undo", async () => {
   open({ ...PRO, scheduledDowngradeAt: PRO.resetsAt });

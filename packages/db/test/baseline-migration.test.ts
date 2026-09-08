@@ -18,7 +18,7 @@ import {
 } from "./support/database.ts";
 
 const BASELINE = "0000_baseline.sql";
-const CURRENT_MIGRATIONS = [BASELINE, "0001_provider_keys.sql", "0002_scheduled_cancellation.sql"];
+const CURRENT_MIGRATIONS = [BASELINE];
 let database: EmptyDatabase;
 let store: SingleConnection;
 let directory: string;
@@ -35,7 +35,7 @@ afterEach(async () => {
 });
 
 describe("the fresh Postgres baseline", () => {
-  it("installs the current migrations and keeps organization data on repeated boot", async () => {
+  it("installs one baseline and keeps organization data on repeated boot", async () => {
     expect((await readMigrations()).map((migration) => migration.name)).toEqual(
       CURRENT_MIGRATIONS,
     );
@@ -60,47 +60,50 @@ describe("the fresh Postgres baseline", () => {
     ).toEqual(CURRENT_MIGRATIONS.map((name) => ({ name })));
   });
 
-  it("adds provider keys to an installed baseline without changing existing organizations", async () => {
-    await writeFile(
-      path.join(directory, BASELINE),
-      await readFile(path.join(MIGRATIONS_DIRECTORY, BASELINE), "utf8"),
-    );
-    await runMigrations(database.url, directory);
-    const id = newId("org");
+  it("preserves provider keys and scheduled cancellation on repeated boot", async () => {
+    await runMigrations(database.url);
+    const organizationId = newId("org");
+    const revision = newId("rev");
+    const cancelAt = new Date("2026-10-07T12:34:56.000Z");
     await store.sql(
-      "insert into organization (id,name,slug) values ($1,'Before keys','before-keys')",
-      [id],
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organizationId],
     );
+    await store.sql(
+      `insert into cloud_plan
+        (id, code, name, fee_micros, web_call_overage_micros_per_minute, phone_overage_micros_per_minute)
+        values ($1, 'pro', 'Pro', 10000000, 10000, 20000)`,
+      [newId("cpl")],
+    );
+    await store.sql(
+      `insert into cloud_billing_account
+        (id, organization_id, plan_code, period_anchor, activated_at, stripe_cancel_at)
+        values ($1, $2, 'pro', now(), now(), $3)`,
+      [newId("cba"), organizationId, cancelAt],
+    );
+    await store.sql(
+      `insert into provider_key
+        (organization_id, provider, credentials, hint, revision)
+        values ($1, 'openai', 'sealed-test-envelope', '••••abcd', $2)`,
+      [organizationId, revision],
+    );
+
     expect(await runMigrations(database.url)).toEqual({
-      applied: ["0001_provider_keys.sql", "0002_scheduled_cancellation.sql"],
+      applied: [],
       alreadyApplied: [BASELINE],
     });
-    expect((await store.sql("select id,name from organization")).rows).toEqual([
-      { id, name: "Before keys" },
-    ]);
-    expect((await store.sql("select * from provider_key")).rows).toEqual([]);
-  });
-
-  it("adds the scheduled end after provider keys without rewriting applied history", async () => {
-    for (const name of [BASELINE, "0001_provider_keys.sql"]) {
-      await writeFile(
-        path.join(directory, name),
-        await readFile(path.join(MIGRATIONS_DIRECTORY, name), "utf8"),
-      );
-    }
-    await runMigrations(database.url, directory);
-    const id = newId("org");
-    await store.sql(
-      "insert into organization (id,name,slug) values ($1,'Preserved candidate','preserved-candidate')",
-      [id],
-    );
-    expect(await runMigrations(database.url)).toEqual({
-      applied: ["0002_scheduled_cancellation.sql"],
-      alreadyApplied: [BASELINE, "0001_provider_keys.sql"],
-    });
-    expect((await store.sql("select id,name from organization")).rows).toEqual([
-      { id, name: "Preserved candidate" },
-    ]);
+    expect((await store.sql(
+      "select organization_id, provider, credentials, hint, revision from provider_key",
+    )).rows).toEqual([{
+      organization_id: organizationId,
+      provider: "openai",
+      credentials: "sealed-test-envelope",
+      hint: "••••abcd",
+      revision,
+    }]);
+    expect((await store.sql(
+      "select stripe_cancel_at from cloud_billing_account",
+    )).rows).toEqual([{ stripe_cancel_at: cancelAt }]);
     expect((await store.sql(
       "select is_nullable from information_schema.columns where table_name = 'cloud_billing_account' and column_name = 'stripe_cancel_at'",
     )).rows).toEqual([{ is_nullable: "YES" }]);
@@ -157,13 +160,6 @@ describe("the fresh Postgres baseline", () => {
     await writeFile(
       path.join(directory, BASELINE),
       `${sql}\n-- changed checksum\n`,
-    );
-    await writeFile(
-      path.join(directory, CURRENT_MIGRATIONS[1]!),
-      await readFile(
-        path.join(MIGRATIONS_DIRECTORY, CURRENT_MIGRATIONS[1]!),
-        "utf8",
-      ),
     );
     await expect(runMigrations(database.url, directory)).rejects.toThrow(
       "changed since it was applied",

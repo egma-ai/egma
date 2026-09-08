@@ -594,6 +594,7 @@ CREATE TABLE public.cloud_billing_account (
     balance_micros bigint DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    stripe_cancel_at timestamp with time zone,
     CONSTRAINT cloud_billing_account_id_prefix CHECK ((id ~ '^cba_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
     CONSTRAINT cloud_billing_account_plan_code_allowed CHECK ((plan_code = ANY (ARRAY['hobby'::text, 'pro'::text]))),
     CONSTRAINT cloud_billing_account_stripe_failure_version_is_exact CHECK (((stripe_failure_version >= 0) AND (stripe_failure_version <= '9007199254740991'::bigint))),
@@ -1064,6 +1065,23 @@ CREATE TABLE public.project_persona (
 
 
 --
+-- Name: provider_key; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.provider_key (
+    organization_id text NOT NULL COLLATE pg_catalog."C",
+    provider text NOT NULL,
+    credentials text NOT NULL,
+    hint text NOT NULL,
+    revision text NOT NULL COLLATE pg_catalog."C",
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT provider_key_hint_shape CHECK ((char_length(hint) = 8)),
+    CONSTRAINT provider_key_provider_allowed CHECK ((provider = ANY (ARRAY['openai'::text, 'deepgram'::text, 'cartesia'::text]))),
+    CONSTRAINT provider_key_revision_prefix CHECK ((revision ~ '^rev_[0-9A-HJKMNP-TV-Z]{26}$'::text))
+);
+
+
+--
 -- Name: rate_card; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1172,7 +1190,7 @@ CREATE TABLE public.run_event (
     reason text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT run_event_kind_allowed CHECK ((kind = ANY (ARRAY['run'::text, 'simulation'::text]))),
-    CONSTRAINT run_event_reason_agrees CHECK (((reason IS NULL) OR ((status = 'completed'::text) AND (reason = ANY (ARRAY['persona_concluded'::text, 'agent_ended'::text, 'limit_reached'::text]))) OR ((status = 'failed'::text) AND (reason = ANY (ARRAY['agent_never_joined'::text, 'not_answered'::text, 'capacity'::text, 'simulator_error'::text, 'orphaned'::text, 'dispatch_failed'::text]))))),
+    CONSTRAINT run_event_reason_agrees CHECK (((reason IS NULL) OR ((status = 'completed'::text) AND (reason = ANY (ARRAY['persona_concluded'::text, 'agent_ended'::text, 'limit_reached'::text]))) OR ((status = 'failed'::text) AND (reason = ANY (ARRAY['agent_never_joined'::text, 'not_answered'::text, 'capacity'::text, 'simulator_error'::text, 'orphaned'::text, 'dispatch_failed'::text, 'provider_key_unavailable'::text]))))),
     CONSTRAINT run_event_run_id_prefix CHECK ((run_id ~ '^run_[0-9A-HJKMNP-TV-Z]{26}$'::text)),
     CONSTRAINT run_event_run_shape CHECK (((kind <> 'run'::text) OR ((simulation_id IS NULL) AND (reason IS NULL) AND (status = ANY (ARRAY['pending'::text, 'running'::text, 'completed'::text, 'canceled'::text]))))),
     CONSTRAINT run_event_seq_counts_from_one CHECK ((seq >= 1)),
@@ -1238,10 +1256,10 @@ CREATE TABLE public.simulation (
     CONSTRAINT simulation_ending_reason_agrees CHECK (
 CASE status
     WHEN 'completed'::text THEN (ending_reason = ANY (ARRAY['persona_concluded'::text, 'agent_ended'::text, 'limit_reached'::text]))
-    WHEN 'failed'::text THEN (ending_reason = ANY (ARRAY['agent_never_joined'::text, 'not_answered'::text, 'capacity'::text, 'simulator_error'::text, 'orphaned'::text, 'dispatch_failed'::text]))
+    WHEN 'failed'::text THEN (ending_reason = ANY (ARRAY['agent_never_joined'::text, 'not_answered'::text, 'capacity'::text, 'simulator_error'::text, 'orphaned'::text, 'dispatch_failed'::text, 'provider_key_unavailable'::text]))
     ELSE (ending_reason IS NULL)
 END),
-    CONSTRAINT simulation_ending_reason_allowed CHECK (((ending_reason IS NULL) OR (ending_reason = ANY (ARRAY['persona_concluded'::text, 'agent_ended'::text, 'limit_reached'::text, 'agent_never_joined'::text, 'not_answered'::text, 'capacity'::text, 'simulator_error'::text, 'orphaned'::text, 'dispatch_failed'::text])))),
+    CONSTRAINT simulation_ending_reason_allowed CHECK (((ending_reason IS NULL) OR (ending_reason = ANY (ARRAY['persona_concluded'::text, 'agent_ended'::text, 'limit_reached'::text, 'agent_never_joined'::text, 'not_answered'::text, 'capacity'::text, 'simulator_error'::text, 'orphaned'::text, 'dispatch_failed'::text, 'provider_key_unavailable'::text])))),
     CONSTRAINT simulation_execution_failure_agrees CHECK (((execution_failure IS NULL) OR (status = 'failed'::text))),
     CONSTRAINT simulation_execution_failure_not_blank CHECK (((execution_failure IS NULL) OR (btrim(execution_failure) <> ''::text))),
     CONSTRAINT simulation_failed_shape CHECK (((status <> 'failed'::text) OR (ended_at IS NOT NULL))),
@@ -1719,6 +1737,14 @@ ALTER TABLE ONLY public.project_persona
 
 ALTER TABLE ONLY public.project
     ADD CONSTRAINT project_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: provider_key provider_key_organization_id_provider_pk; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.provider_key
+    ADD CONSTRAINT provider_key_organization_id_provider_pk PRIMARY KEY (organization_id, provider);
 
 
 --
@@ -2766,6 +2792,14 @@ ALTER TABLE ONLY public.project_persona
 
 ALTER TABLE ONLY public.project_persona
     ADD CONSTRAINT project_persona_project_organization_fk FOREIGN KEY (project_id, organization_id) REFERENCES public.project(id, organization_id) ON DELETE CASCADE;
+
+
+--
+-- Name: provider_key provider_key_organization_id_organization_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.provider_key
+    ADD CONSTRAINT provider_key_organization_id_organization_id_fk FOREIGN KEY (organization_id) REFERENCES public.organization(id) ON DELETE CASCADE;
 
 
 --

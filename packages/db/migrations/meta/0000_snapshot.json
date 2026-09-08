@@ -1,5 +1,5 @@
 {
-  "id": "15932549-f894-47e0-99e7-07209d3d0221",
+  "id": "1f21e52b-661d-4d1e-902a-59b57716f30e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -4218,7 +4218,7 @@
         },
         "run_event_reason_agrees": {
           "name": "run_event_reason_agrees",
-          "value": "\"run_event\".\"reason\" is null\n        or (\"run_event\".\"status\" = 'completed' and \"run_event\".\"reason\" in ('persona_concluded', 'agent_ended', 'limit_reached'))\n        or (\"run_event\".\"status\" = 'failed' and \"run_event\".\"reason\" in ('agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed'))"
+          "value": "\"run_event\".\"reason\" is null\n        or (\"run_event\".\"status\" = 'completed' and \"run_event\".\"reason\" in ('persona_concluded', 'agent_ended', 'limit_reached'))\n        or (\"run_event\".\"status\" = 'failed' and \"run_event\".\"reason\" in ('agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed', 'provider_key_unavailable'))"
         }
       },
       "isRLSEnabled": false
@@ -4704,11 +4704,11 @@
         },
         "simulation_ending_reason_allowed": {
           "name": "simulation_ending_reason_allowed",
-          "value": "\"simulation\".\"ending_reason\" is null or \"simulation\".\"ending_reason\" in ('persona_concluded', 'agent_ended', 'limit_reached', 'agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed')"
+          "value": "\"simulation\".\"ending_reason\" is null or \"simulation\".\"ending_reason\" in ('persona_concluded', 'agent_ended', 'limit_reached', 'agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed', 'provider_key_unavailable')"
         },
         "simulation_ending_reason_agrees": {
           "name": "simulation_ending_reason_agrees",
-          "value": "case \"simulation\".\"status\"\n        when 'completed' then \"simulation\".\"ending_reason\" in ('persona_concluded', 'agent_ended', 'limit_reached')\n        when 'failed' then \"simulation\".\"ending_reason\" in ('agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed')\n        else \"simulation\".\"ending_reason\" is null\n      end"
+          "value": "case \"simulation\".\"status\"\n        when 'completed' then \"simulation\".\"ending_reason\" in ('persona_concluded', 'agent_ended', 'limit_reached')\n        when 'failed' then \"simulation\".\"ending_reason\" in ('agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed', 'provider_key_unavailable')\n        else \"simulation\".\"ending_reason\" is null\n      end"
         },
         "simulation_execution_failure_agrees": {
           "name": "simulation_execution_failure_agrees",
@@ -5232,6 +5232,12 @@
         },
         "stripe_period_ends_at": {
           "name": "stripe_period_ends_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_cancel_at": {
+          "name": "stripe_cancel_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -6001,6 +6007,91 @@
         "cloud_meter_period_pending_valid": {
           "name": "cloud_meter_period_pending_valid",
           "value": "\"cloud_meter_period\".\"pending_identifier\" is null or (\n      btrim(\"cloud_meter_period\".\"pending_identifier\") <> ''\n      and \"cloud_meter_period\".\"pending_seconds\" between 1 and 9007199254740991\n      and \"cloud_meter_period\".\"pending_value\" > 0\n      and \"cloud_meter_period\".\"pending_timestamp\" >= \"cloud_meter_period\".\"period_started_at\"\n      and \"cloud_meter_period\".\"pending_timestamp\" < \"cloud_meter_period\".\"period_ends_at\"\n    )"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.provider_key": {
+      "name": "provider_key",
+      "schema": "",
+      "columns": {
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "credentials": {
+          "name": "credentials",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hint": {
+          "name": "hint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "provider_key_organization_id_organization_id_fk": {
+          "name": "provider_key_organization_id_organization_id_fk",
+          "tableFrom": "provider_key",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "provider_key_organization_id_provider_pk": {
+          "name": "provider_key_organization_id_provider_pk",
+          "columns": [
+            "organization_id",
+            "provider"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "provider_key_provider_allowed": {
+          "name": "provider_key_provider_allowed",
+          "value": "\"provider_key\".\"provider\" in ('openai', 'deepgram', 'cartesia')"
+        },
+        "provider_key_revision_prefix": {
+          "name": "provider_key_revision_prefix",
+          "value": "\"provider_key\".\"revision\" ~ '^rev_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "provider_key_hint_shape": {
+          "name": "provider_key_hint_shape",
+          "value": "char_length(\"provider_key\".\"hint\") = 8"
         }
       },
       "isRLSEnabled": false

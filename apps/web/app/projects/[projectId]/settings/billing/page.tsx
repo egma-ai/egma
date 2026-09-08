@@ -5,21 +5,15 @@ import { useParams, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { Answer } from "@/lib/api";
-import {
-  readBillingAccount,
-  moneyLabel,
-  type BillingAccount,
-} from "@/lib/billing";
+import { readBillingAccount, type BillingAccount } from "@/lib/billing";
 import { readPeriodUsage, type PeriodUsage } from "@/lib/organization-usage";
-import { asListInstant } from "@/lib/instants";
-import { BillingActionsRow } from "@/ui/billing";
+import { BillingAccountSections } from "@/ui/billing";
 import {
   BillingHistory,
   ProviderUsage,
   UsageAllowances,
 } from "@/ui/usage-and-billing";
 import { Failure, Loading } from "@/ui/page-state";
-import { Facts, Section } from "@/ui/section";
 import { SettingsLayout } from "@/ui/settings-nav";
 import { AppShell, PageBody, PageHeader, ProductPage } from "@/ui/shell";
 
@@ -91,16 +85,10 @@ function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
 
   return (
     <ProductPage viewport>
-      <PageHeader
-        title="Usage and billing"
-        lead="Your organization’s usage, plan, and payments."
-      />
+      <PageHeader title="Usage and billing" />
       <PageBody>
         <SettingsLayout projectId={projectId} current="billing">
-          <div className="flex items-center justify-between gap-4">
-            <p className="m-0 text-sm text-muted-foreground">
-              Usage across all projects in this organization.
-            </p>
+          <div className="flex justify-end">
             <Button
               type="button"
               variant="secondary"
@@ -142,43 +130,11 @@ function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
                   </p>
                 </Card>
               ) : (
-                <Section title="Plan and balance">
-                  <Card>
-                    <Facts
-                      facts={[
-                        { label: "Plan", value: account.plan.name },
-                        {
-                          label: "Inference balance",
-                          value: (
-                            <span className="tabular-nums">
-                              {moneyLabel(account.balanceMicros)}
-                            </span>
-                          ),
-                        },
-                      ]}
-                    />
-                  </Card>
-                  {account.scheduledDowngradeAt === null ? null : (
-                    <p className="m-0 text-sm text-muted-foreground" role="status">
-                      Pro stops on{" "}
-                      <time className="tabular-nums" dateTime={account.scheduledDowngradeAt}>
-                        {asListInstant(account.scheduledDowngradeAt)}
-                      </time>
-                      . Everything it includes stays available until then.
-                    </p>
-                  )}
-                  {account.mayManageBilling ? (
-                    <BillingActionsRow
-                      account={account}
-                      onRefresh={refresh}
-                      onBusyChange={setActionBusy}
-                    />
-                  ) : (
-                    <p className="m-0 text-sm text-muted-foreground">
-                      An organization admin can manage the plan and payments.
-                    </p>
-                  )}
-                </Section>
+                <BillingAccountSections
+                  account={account}
+                  onRefresh={refresh}
+                  onBusyChange={setActionBusy}
+                />
               )}
               <UsageAllowances
                 account={account}
