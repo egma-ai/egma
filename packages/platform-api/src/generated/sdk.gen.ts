@@ -1837,6 +1837,7 @@ export const createRun = <ThrowOnError extends boolean = false>(parameters: {
          */
         versionId: string;
     }>;
+    concurrency?: number;
 }, options?: Options<never, ThrowOnError>): RequestResult<CreateRunResponses, CreateRunErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
@@ -1844,7 +1845,8 @@ export const createRun = <ThrowOnError extends boolean = false>(parameters: {
                 { in: 'body', key: 'agentId' },
                 { in: 'body', key: 'connectionId' },
                 { in: 'body', key: 'name' },
-                { in: 'body', key: 'expectedTestVersions' }
+                { in: 'body', key: 'expectedTestVersions' },
+                { in: 'body', key: 'concurrency' }
             ] }]);
     return (options?.client ?? client).post<CreateRunResponses, CreateRunErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {

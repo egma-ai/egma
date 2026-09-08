@@ -1,14 +1,9 @@
 # Database migrations
 
-PostgreSQL and ClickHouse each have one `0000_baseline.sql` that creates the
-complete current schema in an empty database. They use different SQL dialects,
-so each store has its own file. PostgreSQL's Drizzle snapshot and journal describe
-that same baseline. New migrations start at `0001`.
-
-Egma is pre-launch. The baseline defines the final schema directly, without
-historical backfills, temporary columns or old-schema conversion paths. Rebuild
-disposable development databases when their baseline changes. The application
-does not convert or erase an existing database.
+PostgreSQL and ClickHouse each have one `0000_baseline.sql`. They use different
+SQL dialects, so each store has its own file. The PostgreSQL baseline is applied
+to production and is immutable. New migrations start at `0001`, and empty
+databases apply all files in order.
 
 ## Startup and history
 

@@ -1,4 +1,4 @@
-/** `egma run create | cancel`: explicit Run resource commands. */
+/** `egma run create | get | cancel`: explicit Run resource commands. */
 
 import {
   RepositoryValidationError,
@@ -9,7 +9,7 @@ import {
 import { selectTarget, type RefusedTarget } from "../folder/target-selection.ts";
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
-import { cancelRun, startRun } from "../platform/runs.ts";
+import { cancelRun, fetchRunDetails, startRun } from "../platform/runs.ts";
 import { notSignedInRefusal, signedInAt } from "../platform/signed-in.ts";
 import {
   RunSelectionError,
@@ -35,6 +35,7 @@ export type RunCreateCommandOptions = FolderCommandOptions & {
   readonly suiteDirectory: string;
   readonly agent: string;
   readonly connection: string;
+  readonly concurrency?: number;
   readonly name?: string;
   readonly signal: AbortSignal;
 };
@@ -183,12 +184,17 @@ async function pushBeforeRun(
 
 /**
  * Push the complete repository, create one Run, print its durable handles, and
- * return. Run progress belongs in the web product, not in this command.
+ * return. Use run get to read progress and evidence.
  */
 export async function runCreateCommand(
   options: RunCreateCommandOptions,
 ): Promise<number> {
   if (options.signal.aborted) return interrupted(options);
+  if (options.concurrency !== undefined &&
+      (!Number.isInteger(options.concurrency) || options.concurrency < 1 || options.concurrency > 2147483647)) {
+    options.fail("Concurrency must be a whole number between 1 and 2147483647.");
+    return RUN_EXIT.nothing;
+  }
 
   const paths = folderPathsIn(options.cwd);
   let config: FolderConfig;
@@ -266,6 +272,7 @@ export async function runCreateCommand(
           versionId: one.versionId,
         })),
         ...(options.name === undefined ? {} : { name: options.name }),
+        ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
       },
       options.fetchImpl,
       options.signal,
@@ -376,4 +383,55 @@ function unreachable(
     return RUN_EXIT.unreachable;
   }
   throw cause;
+}
+
+/** Print all public run details as one JSON document for tools and coding agents. */
+export async function runGetCommand(options: RunCancelCommandOptions): Promise<number> {
+  if (wasInterrupted(options.signal)) return RUN_EXIT.interrupted;
+  const runId = options.runId.trim();
+  if (runId === "") {
+    options.fail("Name one Run ID.");
+    return RUN_EXIT.nothing;
+  }
+  let config: FolderConfig;
+  try {
+    config = await readConfig(folderPathsIn(options.cwd).config);
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {
+      options.fail(
+        `There is no egma/config.yaml in ${oneLineFactText(options.cwd, "this directory")}. Run egma init here first.`,
+      );
+    } else {
+      options.fail(
+        cause instanceof Error
+          ? cause.message
+          : "Egma could not read egma/config.yaml. Fix the file and run this again.",
+      );
+    }
+    return RUN_EXIT.nothing;
+  }
+  if (config.project === null) {
+    options.fail("egma/config.yaml does not name an Egma Project. Run egma init here first.");
+    return RUN_EXIT.nothing;
+  }
+
+  const signedIn = await signedInAt(options.access);
+  if (signedIn === null) {
+    options.fail(notSignedInRefusal(options.access.url));
+    return RUN_EXIT.notSignedIn;
+  }
+
+
+  try {
+    const details = await fetchRunDetails(signedIn, { runId, projectId: config.project.id }, options.fetchImpl, options.signal);
+    if (wasInterrupted(options.signal)) return RUN_EXIT.interrupted;
+    options.out(JSON.stringify(details, null, 2));
+    return RUN_EXIT.done;
+  } catch (cause) {
+    if (wasInterrupted(options.signal)) {
+      options.fail("Run detail retrieval was interrupted. Run egma run get again to fetch a fresh result.");
+      return RUN_EXIT.interrupted;
+    }
+    return unreachable(options, cause);
+  }
 }

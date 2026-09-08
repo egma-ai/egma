@@ -4758,6 +4758,10 @@ export type ListRunsResponses = {
             environment: string | null;
             agentVersion: number | null;
             /**
+             * Maximum active simulations in this run, fixed when the run starts.
+             */
+            concurrency: number;
+            /**
              * Number of test-and-persona combinations captured when the run started.
              */
             expectedSimulationCount: number;
@@ -4829,6 +4833,10 @@ export type CreateRunData = {
              */
             versionId: string;
         }>;
+        /**
+         * Maximum active simulations in this run. Defaults to 4 for voice and 10 for chat. Worker and provider limits still apply.
+         */
+        concurrency?: number;
     };
     path?: never;
     query?: {
@@ -4902,6 +4910,10 @@ export type CreateRunResponses = {
         productLabel: string;
         environment: string | null;
         agentVersion: number | null;
+        /**
+         * Maximum active simulations in this run, fixed when the run starts.
+         */
+        concurrency: number;
         /**
          * Number of test-and-persona combinations captured when the run started.
          */
@@ -5012,6 +5024,10 @@ export type GetRunResponses = {
         productLabel: string;
         environment: string | null;
         agentVersion: number | null;
+        /**
+         * Maximum active simulations in this run, fixed when the run starts.
+         */
+        concurrency: number;
         /**
          * Number of test-and-persona combinations captured when the run started.
          */
@@ -5332,6 +5348,10 @@ export type CancelRunResponses = {
         productLabel: string;
         environment: string | null;
         agentVersion: number | null;
+        /**
+         * Maximum active simulations in this run, fixed when the run starts.
+         */
+        concurrency: number;
         /**
          * Number of test-and-persona combinations captured when the run started.
          */

@@ -21,7 +21,7 @@ import { runPersonasCommand } from "./commands/personas.ts";
 import { runProjectApiKeyCreateCommand } from "./commands/project-api-key.ts";
 import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
-import { runCancelCommand, runCreateCommand } from "./commands/run.ts";
+import { runCancelCommand, runCreateCommand, runGetCommand } from "./commands/run.ts";
 import { runSelfHostCommand } from "./commands/self-host.ts";
 import { runSuiteCreateCommand, runSuiteDeleteCommand } from "./commands/suite.ts";
 import { runTestDeleteCommand } from "./commands/test.ts";
@@ -72,6 +72,7 @@ export const COMMANDS = [
   "suite delete",
   "test delete",
   "run create",
+  "run get",
   "run cancel",
   "self-host up",
 ] as const;
@@ -179,9 +180,10 @@ const SCHEMAS: Readonly<Record<Command, OptionSchema>> = {
   "suite delete": { values: [REPOSITORY_OPTION], positionals: 1 },
   "test delete": { values: [REPOSITORY_OPTION], positionals: 1 },
   "run create": {
-    values: ["--agent", "--connection", "--name", REPOSITORY_OPTION],
+    values: ["--agent", "--connection", "--name", "--concurrency", REPOSITORY_OPTION],
     positionals: 1,
   },
+  "run get": { values: [REPOSITORY_OPTION], positionals: 1 },
   "run cancel": { values: [REPOSITORY_OPTION], positionals: 1 },
   "self-host up": { values: [REPOSITORY_OPTION], positionals: 0 },
 };
@@ -414,6 +416,7 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
   run: [
     "Usage:",
     "  egma run create <suite-directory> --agent <Agent ID> --connection <Connection ID> [options]",
+    "  egma run get <Run ID> [--cwd <path>]",
     "  egma run cancel <Run ID> [--cwd <path>]",
     "",
     "create pushes the complete repository first, starts the Run, prints its results URL, and returns.",
@@ -558,12 +561,14 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
   ],
   "run create": [
     "Usage:",
-    "  egma run create <suite-directory> --agent <Agent ID> --connection <Connection ID> [--name <name>] [--cwd <path>]",
+    "  egma run create <suite-directory> --agent <Agent ID> --connection <Connection ID> [--name <name>] [--concurrency <number>] [--cwd <path>]",
     "",
+    "Concurrency limits active simulations in this Run; the defaults are 4 for voice and 10 for chat.",
     "The suite directory is the direct child under egma/tests, not a Suite ID.",
     "Egma pushes first. It creates no Run if the push fails.",
     "On success it prints the Run ID and results URL, then returns.",
   ],
+  "run get": ["Usage:", "  egma run get <Run ID> [--cwd <path>]", "", "Prints JSON with run status, all simulation details, grades, transcripts, and events."],
   "run cancel": ["Usage:", "  egma run cancel <Run ID> [--cwd <path>]"],
   "self-host up": ["Usage:", "  egma self-host up [--cwd <platform-workspace>]"],
 };
@@ -743,10 +748,12 @@ async function dispatch(
         }),
       );
     case "run create": {
+      const concurrency = value(args, "--concurrency");
       const name = value(args, "--name");
       return withCommandSignal(async (signal) =>
         runCreateCommand({
           ...options,
+          ...(concurrency === null ? {} : { concurrency: /^\d+$/u.test(concurrency) ? Number(concurrency) : NaN }),
           suiteDirectory: args.positionals[0] as string,
           agent: value(args, "--agent") as string,
           connection: value(args, "--connection") as string,
@@ -755,6 +762,10 @@ async function dispatch(
         }),
       );
     }
+    case "run get":
+      return withCommandSignal(async (signal) =>
+        runGetCommand({ ...options, runId: args.positionals[0] as string, signal }),
+      );
     case "run cancel":
       return withCommandSignal(async (signal) =>
         runCancelCommand({

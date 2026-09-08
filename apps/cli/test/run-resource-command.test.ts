@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  runGetCommand,
   runCancelCommand,
   runCreateCommand,
 } from "../src/commands/run.ts";
@@ -184,6 +185,7 @@ describe("Run resource commands", () => {
     const code = await runCreateCommand({
       access: { url: URL, credentialsFile: workspace.credentialsFile },
       cwd: workspace.dir,
+      concurrency: 100,
       suiteDirectory: "release",
       agent: "agt_one",
       connection: "con_one",
@@ -202,6 +204,7 @@ describe("Run resource commands", () => {
     ]);
     expect(runInputs).toHaveLength(1);
     expect(runInputs[0]).toMatchObject({
+      concurrency: 100,
       suiteId: SUITE_ID,
       agentId: "agt_one",
       connectionId: "con_one",
@@ -299,5 +302,92 @@ describe("Run resource commands", () => {
       "no run of yours has that id",
       `Egma has no Run ${RUN_ID} in this Project. Nothing was changed.`,
     ]);
+  });
+});
+
+describe("run get", () => {
+  it("collects every simulation and event page and preserves full evidence as JSON", async () => {
+    const out: string[] = [];
+    const failed: string[] = [];
+    const calls: string[] = [];
+    const code = await runGetCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile },
+      cwd: workspace.dir, runId: RUN_ID,
+      out: (line) => out.push(line), fail: (line) => failed.push(line),
+      fetchImpl: async (input, init) => {
+        const url = new globalThis.URL(String(input));
+        calls.push(url.pathname);
+        expect(init?.method ?? "GET").toBe("GET");
+        expect(url.searchParams.get("projectId")).toBe(PROJECT_ID);
+        let body: unknown;
+        if (url.pathname.endsWith("/simulations")) {
+          const second = url.searchParams.has("pageToken");
+          body = { simulations: [{ id: second ? "sim_second" : "sim_first" }], nextPageToken: second ? null : "sim_first" };
+        } else if (url.pathname.startsWith("/v1/simulations/")) {
+          body = {
+            id: url.pathname.split("/").at(-1), status: "completed",
+            test: { scenario: "Preserve\nall text" },
+            grades: [{ score: 0.5, details: { rationale: "Full rationale", assertions: [{ citedSpanIds: ["span1"] }] } }],
+            transcript: { spansTruncated: url.pathname.endsWith("sim_second"), spans: [{ toolArguments: { name: "Alex" }, toolResult: "Booked" }] },
+            metrics: [{ key: "duration", value: 30 }],
+          };
+        } else if (url.pathname.endsWith("/events")) {
+          const second = url.searchParams.get("after") === "1";
+          body = { events: [{ seq: second ? 2 : 1 }], next: second ? 2 : 1, caughtUp: second, done: false };
+        } else {
+          body = runHeader("pending");
+        }
+        return new JsonResponse(JSON.stringify(body));
+      },
+    });
+    expect(code).toBe(0);
+    expect(failed).toEqual([]);
+    expect(out).toHaveLength(1);
+    const result = JSON.parse(out[0]!);
+    expect(result.simulations.map((simulation: { id: string }) => simulation.id)).toEqual(["sim_first", "sim_second"]);
+    expect(result.simulations[0].test.scenario).toBe("Preserve\nall text");
+    expect(result.simulations[0].grades[0].details.rationale).toBe("Full rationale");
+    expect(result.simulations[0].transcript.spans[0].toolResult).toBe("Booked");
+    expect(result.events).toEqual([{ seq: 1 }, { seq: 2 }]);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain("sim_second");
+    expect(Date.parse(result.fetchedAt)).toBeGreaterThanOrEqual(Date.parse(result.readStartedAt));
+    expect(calls.filter((call) => call.endsWith("/simulations"))).toHaveLength(2);
+  });
+
+  it("fails without partial JSON when a child resource cannot be read", async () => {
+    const out: string[] = [];
+    const failed: string[] = [];
+    const code = await runGetCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile },
+      cwd: workspace.dir, runId: RUN_ID,
+      out: (line) => out.push(line), fail: (line) => failed.push(line),
+      fetchImpl: async (input) => {
+        if (String(input).includes("/simulations")) {
+          return new JsonResponse(JSON.stringify({ message: "Read refused" }), { status: 403 });
+        }
+        return new JsonResponse(JSON.stringify(runHeader("pending")));
+      },
+    });
+    expect(code).toBe(1);
+    expect(out).toEqual([]);
+    expect(failed).toEqual(["Read refused"]);
+  });
+});
+
+describe("run concurrency validation", () => {
+  it.each([0, -1, 1.5, NaN, Infinity, 2147483648])("rejects %s before pushing or starting a run", async (concurrency) => {
+    const failed: string[] = [];
+    let calls = 0;
+    const code = await runCreateCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile },
+      cwd: workspace.dir, suiteDirectory: "release", agent: "agt_one", connection: "con_one",
+      concurrency, signal: new AbortController().signal,
+      out: () => {}, fail: (line) => failed.push(line),
+      fetchImpl: async () => { calls += 1; return new JsonResponse("{}"); },
+    });
+    expect(code).toBe(1);
+    expect(calls).toBe(0);
+    expect(failed[0]).toContain("Concurrency must be a whole number");
   });
 });

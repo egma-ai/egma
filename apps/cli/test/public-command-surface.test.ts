@@ -97,8 +97,9 @@ const APPROVED_FLAGS = [
   { words: ["test", "delete"], flags: ["--cwd"] },
   {
     words: ["run", "create"],
-    flags: ["--agent", "--connection", "--cwd", "--name"],
+    flags: ["--agent", "--concurrency", "--connection", "--cwd", "--name"],
   },
+  { words: ["run", "get"], flags: ["--cwd"] },
   { words: ["run", "cancel"], flags: ["--cwd"] },
   { words: ["self-host", "up"], flags: ["--cwd"] },
 ] as const;
