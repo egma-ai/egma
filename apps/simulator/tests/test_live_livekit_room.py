@@ -36,7 +36,6 @@ from conftest import (
 )
 
 from egma_simulator.media.room import ROOM_PREFIX
-from egma_simulator.plugs.livekit import AGENT_JOIN_SECONDS
 from egma_simulator.recording import channels_of
 
 AGENT_NAME = credential("TEST_LIVEKIT_AGENT_NAME", "EGMA_DUMB_AGENT_NAME")
@@ -131,10 +130,9 @@ MAX_TURNS = 8
 MAX_DURATION_SECONDS = 90
 
 # The wall this test waits behind, added up rather than picked: a claim,
-# then the worker being woken and heard (bounded by the driver's own
-# AGENT_JOIN_SECONDS), then the conversation up to its duration limit,
+# then the worker being woken and heard within the simulation duration,
 # then the room being deleted and the last report delivered.
-WITHIN_SECONDS = AGENT_JOIN_SECONDS + MAX_DURATION_SECONDS + 60
+WITHIN_SECONDS = MAX_DURATION_SECONDS + 60
 
 
 def room_spec(live) -> dict:

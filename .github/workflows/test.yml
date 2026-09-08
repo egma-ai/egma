@@ -338,9 +338,65 @@ jobs:
       - name: Run the fixture agent tests
         run: pnpm test:fixture
 
+  livekit-e2e:
+    name: LiveKit packaged end-to-end
+    if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          version: "0.11.33"
+
+      - name: Make the native build toolchain available
+        run: ./.github/native-toolchain.sh
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Sync the shipped simulator
+        working-directory: apps/simulator
+        run: uv sync --frozen
+
+      - name: Require the trusted model credential
+        env:
+          LIVEKIT_E2E_OPENAI_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
+        run: |
+          if [ -z "$LIVEKIT_E2E_OPENAI_API_KEY" ]; then
+            echo "LIVEKIT_E2E_OPENAI_API_KEY is unavailable. A maintainer must run reviewed code in a trusted repository context before merge." >&2
+            exit 1
+          fi
+
+      - name: Run packaged SDKs through LiveKit and the simulator
+        env:
+          LIVEKIT_E2E_OPENAI_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
+        run: pnpm test:livekit-e2e
+
+      - name: Upload redacted proof records
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: livekit-e2e-${{ github.sha }}
+          path: .proofs/livekit-e2e/**/upload/**
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
   deploy:
     name: Deploy
-    needs: [checks, fast, browser, simulator, livekit-python-compatibility, livekit-js-compatibility, fixture]
+    needs: [checks, fast, browser, simulator, livekit-python-compatibility, livekit-js-compatibility, fixture, livekit-e2e]
     if: >-
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')

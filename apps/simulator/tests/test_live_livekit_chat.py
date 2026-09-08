@@ -26,10 +26,7 @@ from conftest import (
 )
 
 from egma_simulator.media.room import ROOM_PREFIX
-from egma_simulator.plugs.livekit_chat import (
-    AGENT_JOIN_SECONDS,
-    TURN_QUIET_SECONDS,
-)
+from egma_simulator.plugs.livekit_chat import TURN_QUIET_SECONDS
 
 LIVEKIT_URL = credential("TEST_LIVEKIT_URL", "LIVEKIT_URL")
 LIVEKIT_API_KEY = credential("TEST_LIVEKIT_API_KEY", "LIVEKIT_API_KEY")
@@ -74,7 +71,7 @@ SIMULATION = "sim-livekit-chat-live-001"
 MAX_TURNS = 8
 MAX_DURATION_SECONDS = 90
 
-WITHIN_SECONDS = AGENT_JOIN_SECONDS + MAX_DURATION_SECONDS + 60
+WITHIN_SECONDS = MAX_DURATION_SECONDS + 60
 
 SPEECH_WORDS_PER_SECOND = 2.9
 """How fast a synthesised reply arrives, measured rather than guessed.

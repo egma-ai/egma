@@ -17,24 +17,33 @@ from conftest import (
     a_spec,
     load_fixture_spec,
 )
-from room_stub import AGENT_IDENTITY, ChatStub, ClosesLate
+from room_stub import (
+    AGENT_IDENTITY,
+    ChatStub,
+    ClosesLate,
+    RpcAsk,
+    StubParticipant,
+)
 from token_endpoint_stub import serving
 
 from egma_simulator import service as service_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.config import SimulatorConfig
-from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR
+from egma_simulator.contract import ERROR
 from egma_simulator.conversation import Conducted, ConversationControls, conduct
 from egma_simulator.media.livekit_room import (
+    AGENT_STATE_ATTRIBUTE,
     CHAT_TOPIC,
     SPOKEN_TRACK_ATTRIBUTE,
     TRANSCRIPTION_TOPIC,
     LiveKitChatRoomBackend,
+    LiveKitStartup,
     RoomSettings,
+    TextRoom,
     Utterance,
 )
 from egma_simulator.media.room import PERSONA_IDENTITY, ROOM_PREFIX
-from egma_simulator.mock_tools import PROTOCOL_VERSION
+from egma_simulator.mock_tools import PROTOCOL_VERSION, TOOL_METHOD, MockToolSeam
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.pipeline import assemble
@@ -227,7 +236,9 @@ def chat_endpoint_spec(
     )
 
 
-def chat_room(stub: ChatStub, **config: object) -> LiveKitChat:
+def chat_room(
+    stub: ChatStub, *, mock_tools: MockToolSeam | None = None, **config: object
+) -> LiveKitChat:
     """One livekit chat plug against a room-shaped LiveKit."""
     return LiveKitChat(
         modality="chat",
@@ -235,6 +246,7 @@ def chat_room(stub: ChatStub, **config: object) -> LiveKitChat:
         config={"url": A_URL, "agentName": AN_AGENT} | config,
         credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
         simulation_id=A_SIMULATION,
+        mock_tools=mock_tools,
         driver=stub.driver,
     )
 
@@ -250,7 +262,6 @@ def hurry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(chat_plug, "GREETING_SECONDS", QUIET_SECONDS)
     monkeypatch.setattr(chat_plug, "REPLY_SECONDS", QUIET_SECONDS)
     monkeypatch.setattr(chat_plug, "TURN_DRAIN_SECONDS", DRAIN_SECONDS)
-    monkeypatch.setattr(chat_plug, "AGENT_JOIN_SECONDS", 1.0)
 
 
 async def chat_walk(
@@ -1379,23 +1390,16 @@ async def test_the_agent_leaving_mid_exchange_is_the_agent_ending_it(
     assert stub.deleted == [stub.rooms[0].name]
 
 
-def test_the_waits_are_bounded_and_shorter_than_a_simulation():
-    """The four budgets, pinned where the tests above shorten them.
-
-    A wait that outran a simulation's duration limit would put
-    ``limit_reached`` on a record whose real story is that the agent was
-    still thinking, or never turned up at all.
-    """
-    assert 0 < chat_plug.AGENT_JOIN_SECONDS <= 60
+def test_turn_waits_are_bounded():
+    """Output and stream waits stay bounded after startup finishes."""
     assert 0 < chat_plug.GREETING_SECONDS <= 30
     assert 0 < chat_plug.TURN_QUIET_SECONDS <= 15
-    assert 0 < chat_plug.TURN_DRAIN_SECONDS <= chat_plug.AGENT_JOIN_SECONDS
+    assert 0 < chat_plug.TURN_DRAIN_SECONDS
     # The quiet period is the one paid on every turn an agent does not end
     # itself, so it is the one that has to stay smallest: a whole test
     # suite of chat simulations finishing in seconds is what this number
     # is spent against.
     assert chat_plug.TURN_QUIET_SECONDS < chat_plug.GREETING_SECONDS
-    assert chat_plug.GREETING_SECONDS < chat_plug.AGENT_JOIN_SECONDS
     # And the drain has to be the larger of the pair, because it is paid
     # after the quiet period has already expired with a stream still open.
     # A drain shorter than the quiet period would mean a turn gave a
@@ -1620,16 +1624,21 @@ async def test_a_worker_that_never_comes_is_never_the_agent_failing(
     Nothing was tested, so nothing is graded, and the reason is worded for
     whoever has to go and look at their worker.
     """
-    monkeypatch.setattr(chat_plug, "AGENT_JOIN_SECONDS", 0.05)
     stub = ChatStub(agent_joins=False)
 
     with pytest.raises(PlugError) as never_came:
-        await chat_walk(tmp_path, stub, monkeypatch, scenario="One point.")
+        await chat_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=1,
+        )
 
-    assert failed_ending(never_came.value) == AGENT_NEVER_JOINED
+    assert failed_ending(never_came.value) == ERROR
     told = str(never_came.value)
-    assert AN_AGENT in told, "the name nobody registered has to be on the record"
-    assert "worker" in told
+    assert "no agent named" in told
+    assert "configured 1s duration expired" in told
     assert len(stub.dispatches) == 1
     assert stub.deleted == [stub.rooms[0].name]
 
@@ -1647,12 +1656,302 @@ async def test_a_chat_worker_that_never_reports_to_egma_fails_the_simulation(
     stub = ChatStub(greeting="Front desk.", replies=["Noted."], agent_reports=False)
 
     with pytest.raises(PlugError) as unreported:
-        await chat_walk(tmp_path, stub, monkeypatch, scenario="One point.")
+        await chat_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=1,
+        )
 
-    assert failed_ending(unreported.value) == AGENT_NEVER_JOINED
+    assert failed_ending(unreported.value) == ERROR
     told = str(unreported.value)
     assert "did not report to Egma" in told
     assert "egma.hello" in told
+    assert stub.deleted == [stub.rooms[0].name]
+
+
+@pytest.mark.parametrize("initialized_state", ["listening", "thinking", "speaking"])
+async def test_a_worker_may_finish_sdk_setup_after_its_participant_arrives(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    initialized_state: str,
+):
+    """Participant arrival is not session readiness.
+
+    A valid worker can join first and complete the SDK configuration exchange a
+    moment later. The simulation waits for that exchange and the native session
+    state before it sends the first persona turn.
+    """
+    stub = ChatStub(
+        replies=["Certainly."],
+        report_delay_seconds=0.01,
+        agent_state_at_start=initialized_state,
+    )
+
+    conducted, turns, _assembled = await chat_walk(
+        tmp_path,
+        stub,
+        monkeypatch,
+        scenario="Ask one question.",
+        max_duration_seconds=1,
+    )
+
+    assert conducted.status == "completed"
+    assert turns[:2] == [("human", "Ask one question."), ("agent", "Certainly.")]
+
+
+async def test_the_first_persona_turn_waits_for_native_session_readiness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """An accepted hello precedes mock installation and ``session.start``.
+
+    The persona must not type while the worker has accepted configuration but its
+    native LiveKit session is still starting.
+    """
+    release_session = asyncio.Event()
+    stub = ChatStub(
+        replies=["Certainly."],
+        agent_state_at_start="listening",
+        release_initial_state=release_session,
+    )
+    walking = asyncio.create_task(
+        chat_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="Ask one question.",
+            max_duration_seconds=2,
+        )
+    )
+
+    await asyncio.wait_for(stub.report_complete.wait(), timeout=1)
+    assert stub.typed == []
+    release_session.set()
+
+    conducted, turns, _assembled = await walking
+    assert conducted.status == "completed"
+    assert turns[:2] == [("human", "Ask one question."), ("agent", "Certainly.")]
+
+
+async def test_another_participants_state_cannot_start_the_simulation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Only the participant whose hello was accepted can become ready."""
+    release_session = asyncio.Event()
+    stub = ChatStub(
+        replies=["Certainly."],
+        release_initial_state=release_session,
+    )
+    walking = asyncio.create_task(
+        chat_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="Ask one question.",
+            max_duration_seconds=2,
+        )
+    )
+    await asyncio.wait_for(stub.report_complete.wait(), timeout=1)
+
+    bystander = StubParticipant("room-observer", {"lk.agent.state": "listening"})
+    stub.room._room.handlers["participant_connected"](bystander)
+    stub.room._room.handlers["participant_attributes_changed"](
+        {"lk.agent.state": "listening"}, bystander
+    )
+    assert stub.typed == []
+
+    release_session.set()
+    conducted, turns, _assembled = await walking
+    assert conducted.status == "completed"
+    assert turns[:2] == [("human", "Ask one question."), ("agent", "Certainly.")]
+
+
+async def test_text_join_reads_initialized_state_from_the_existing_roster(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A worker already present emits no arrival or attribute-change event."""
+    from livekit import rtc
+
+    class ExistingRoster:
+        def __init__(self) -> None:
+            participant = StubParticipant(
+                AGENT_IDENTITY,
+                {AGENT_STATE_ATTRIBUTE: "speaking"},
+            )
+            self.remote_participants = {AGENT_IDENTITY: participant}
+            self.handlers: dict[str, object] = {}
+            self.text_streams: dict[str, object] = {}
+
+        def on(self, event: str):
+            def keep(handler: object) -> object:
+                self.handlers[event] = handler
+                return handler
+
+            return keep
+
+        def off(self, event: str, handler: object) -> None:
+            if self.handlers.get(event) is handler:
+                self.handlers.pop(event)
+
+        def register_text_stream_handler(self, topic: str, handler: object) -> None:
+            self.text_streams[topic] = handler
+
+        def unregister_text_stream_handler(self, topic: str) -> None:
+            self.text_streams.pop(topic, None)
+
+        async def connect(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def disconnect(self) -> None:
+            pass
+
+    wire = ExistingRoster()
+    monkeypatch.setattr(rtc, "Room", lambda: wire)
+    startup = LiveKitStartup(MockToolSeam())
+    room = TextRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
+    room.watch_startup(startup)
+
+    await room.join()
+    startup.report_accepted(RpcAsk(payload="{}"))
+    await asyncio.wait_for(startup.wait(room), timeout=1)
+    await room.leave()
+
+    assert wire.handlers == {}
+    assert wire.text_streams == {}
+
+
+async def test_overall_duration_fails_an_initializing_livekit_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A session that never becomes ready is a startup failure, not a zero-turn run."""
+    stub = ChatStub(
+        release_initial_state=asyncio.Event(),
+        agent_state_at_start="listening",
+    )
+
+    with pytest.raises(PlugError) as unfinished:
+        await chat_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=1,
+        )
+
+    assert failed_ending(unfinished.value) == ERROR
+    told = str(unfinished.value)
+    assert "reported to Egma" in told
+    assert "did not publish an initialized state" in told
+    assert "configured 1s duration expired" in told
+    assert stub.typed == []
+
+
+async def test_a_departed_worker_cannot_reuse_its_old_state_after_rejoining():
+    """A disconnect is terminal even if the same identity appears again."""
+    release_session = asyncio.Event()
+    stub = ChatStub(
+        agent_state_at_start="listening",
+        release_initial_state=release_session,
+    )
+    plug = chat_room(stub, mock_tools=MockToolSeam())
+    opening = asyncio.create_task(plug.open())
+    await asyncio.wait_for(stub.report_complete.wait(), timeout=1)
+
+    wire = stub.room._room
+    participant = StubParticipant(AGENT_IDENTITY)
+    wire.handlers["participant_disconnected"](participant)
+    wire.handlers["participant_connected"](
+        StubParticipant(
+            AGENT_IDENTITY,
+            {"lk.agent.state": "listening"},
+        )
+    )
+    wire.handlers["participant_attributes_changed"](
+        {"lk.agent.state": "listening"}, participant
+    )
+
+    with pytest.raises(PlugError) as disconnected:
+        await opening
+    assert "disconnected" in str(disconnected.value)
+    await plug.close()
+
+
+async def test_a_refused_configuration_fails_startup_immediately():
+    """A permanent protocol refusal does not wait for the overall duration."""
+    from livekit import rtc
+
+    stub = ChatStub(agent_reports=False, agent_state_at_start="listening")
+    plug = chat_room(stub, mock_tools=MockToolSeam())
+    opening = asyncio.create_task(plug.open())
+    await asyncio.wait_for(stub.standing_ready.wait(), timeout=1)
+
+    with pytest.raises(rtc.RpcError):
+        await stub.says_hello(protocol_version=PROTOCOL_VERSION + 1)
+    with pytest.raises(PlugError) as refused:
+        await asyncio.wait_for(opening, timeout=1)
+
+    assert failed_ending(refused.value) == ERROR
+    assert "refused" in str(refused.value)
+    await plug.close()
+
+
+async def test_partial_rpc_registration_fails_before_the_simulation_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Hello alone is unsafe when the worker cannot call the mock-tool method."""
+    stub = ChatStub(refuses_rpc_method=TOOL_METHOD)
+
+    with pytest.raises(PlugError) as unavailable:
+        await asyncio.wait_for(
+            chat_walk(tmp_path, stub, monkeypatch, scenario="One point."),
+            timeout=1,
+        )
+
+    assert failed_ending(unavailable.value) == ERROR
+    told = str(unavailable.value)
+    assert "could not offer its configuration and mock-tool exchange" in told
+    assert TOOL_METHOD in told
+    assert stub.typed == []
+
+
+@pytest.mark.parametrize("stage", ["no-worker", "no-hello", "initializing"])
+async def test_cancellation_stops_each_livekit_startup_stage_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+):
+    """Cancellation stays a canceled simulation while startup is pending."""
+    release_session = asyncio.Event() if stage == "initializing" else None
+    stub = ChatStub(
+        agent_joins=stage != "no-worker",
+        agent_reports=stage != "no-hello",
+        agent_state_at_start="listening",
+        release_initial_state=release_session,
+    )
+    controls = ConversationControls()
+    walking = asyncio.create_task(
+        chat_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=2,
+            controls=controls,
+        )
+    )
+
+    await asyncio.wait_for(stub.standing_ready.wait(), timeout=1)
+    if stage == "no-hello":
+        await asyncio.wait_for(stub.room.arrivals.wait(), timeout=1)
+    if stage == "initializing":
+        await asyncio.wait_for(stub.report_complete.wait(), timeout=1)
+    controls.request_cancel()
+
+    conducted, turns, _assembled = await asyncio.wait_for(walking, timeout=1)
+    assert conducted.status == "canceled"
+    assert turns == []
+    assert not stub.room._stating
+    if stub.reporting is not None:
+        assert stub.reporting.done()
     assert stub.deleted == [stub.rooms[0].name]
 
 
@@ -1881,7 +2180,11 @@ async def test_nothing_a_chat_simulation_produces_carries_the_api_secret(
     produced: list[str] = []
     try:
         _conducted, turns, _assembled = await chat_walk(
-            tmp_path, stub, monkeypatch, scenario="One point."
+            tmp_path,
+            stub,
+            monkeypatch,
+            scenario="One point.",
+            max_duration_seconds=1,
         )
         produced += [text for _speaker, text in turns]
     except PlugError as refused:

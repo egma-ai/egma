@@ -32,7 +32,6 @@ from conftest import (
 )
 
 from egma_simulator.media.room import ROOM_PREFIX
-from egma_simulator.plugs.livekit import AGENT_JOIN_SECONDS
 
 LIVEKIT_URL = credential("TEST_LIVEKIT_URL", "LIVEKIT_URL")
 LIVEKIT_API_KEY = credential("TEST_LIVEKIT_API_KEY", "LIVEKIT_API_KEY")
@@ -227,7 +226,7 @@ MAX_DURATION_SECONDS = 120
 # The wall this test waits behind, added up rather than picked: a claim,
 # the worker being woken and heard, the conversation up to its own
 # duration limit, then the room deleted and the last report delivered.
-WITHIN_SECONDS = AGENT_JOIN_SECONDS + MAX_DURATION_SECONDS + 60
+WITHIN_SECONDS = MAX_DURATION_SECONDS + 60
 
 
 def mocked_spec() -> dict:

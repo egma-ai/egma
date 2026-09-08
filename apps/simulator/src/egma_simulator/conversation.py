@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .persona import Persona, Turn
-from .plugs import AgentReply, ConnectionPlug
+from .plugs import AgentReply, ConnectionPlug, PlugError
 from .usage import ProviderUsage
 
 logger = logging.getLogger(__name__)
@@ -220,8 +220,10 @@ async def conduct(
         _duration_watchdog(max_duration_seconds, controls),
         name=f"{name}:watchdog",
     )
+    startup_finished = False
     try:
         opened = await controls.guard(plug.open())
+        startup_finished = True
         # Two shapes, because most platforms open with words and nothing
         # else, and one that says more about its opening should not have to
         # hold it back until the second turn to say it.
@@ -297,6 +299,10 @@ async def conduct(
                 reason=None,
                 provider_reference=plug.provider_reference,
             )
+        if not startup_finished:
+            explain = getattr(plug, "startup_duration_failure", None)
+            if callable(explain):
+                raise PlugError(explain(max_duration_seconds)) from None
         return ended(duration_limit_reached(max_duration_seconds))
     finally:
         if on_execution_ended is not None:

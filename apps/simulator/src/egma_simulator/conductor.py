@@ -1177,8 +1177,10 @@ class VoiceConductor:
             _duration_watchdog(max_duration_seconds, controls),
             name=f"{name}:watchdog",
         )
+        startup_finished = False
         try:
             await self._open(name)
+            startup_finished = True
             await self._run()
         except _Stopped:
             pass
@@ -1199,6 +1201,10 @@ class VoiceConductor:
                 reason=None,
                 provider_reference=self.provider_reference,
             )
+        if controls.cause is not None and not startup_finished:
+            explain = getattr(self._connection, "startup_duration_failure", None)
+            if callable(explain):
+                raise PlugError(explain(max_duration_seconds))
         if controls.cause is not None:
             return self._ended(duration_limit_reached(max_duration_seconds))
         return self._ended(self._ending or turn_limit_reached(max_turns))

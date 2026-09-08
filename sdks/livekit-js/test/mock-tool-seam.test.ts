@@ -22,6 +22,7 @@ import {
   isEgmaNotListeningYet,
   isEgmaNotReached,
   isEgmaRefusal,
+  isTransientHelloFailure,
   mockedToolsIn,
   servedIn,
   toolRequest,
@@ -104,6 +105,12 @@ describe("mock-tool exchange", () => {
     expect(isEgmaNotReached(1402)).toBe(false);
     expect(isEgmaNotListeningYet(1400)).toBe(true);
     expect(isEgmaNotListeningYet(1401)).toBe(false);
+    for (const code of [1400, 1501, 1502, 1505]) {
+      expect(isTransientHelloFailure(code)).toBe(true);
+    }
+    for (const code of [1401, 1403, 1404, 1503, 904]) {
+      expect(isTransientHelloFailure(code)).toBe(false);
+    }
   });
 
   it("builds the golden hello and reads the covered tool names", () => {

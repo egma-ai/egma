@@ -11,9 +11,9 @@ import {
   SeamError,
   fitsOnTheWire,
   helloRequest,
-  isEgmaNotListeningYet,
   isEgmaNotReached,
   isEgmaRefusal,
+  isTransientHelloFailure,
   mockedToolsIn,
   servedIn,
   toolRequest,
@@ -22,9 +22,10 @@ import { SIMULATION_ROOM_PREFIX } from "./room.ts";
 
 export const SIMULATION_VERB = "egma.simulation";
 const EGMA_PERSONA = "egma-persona";
-const STARTUP_SECONDS = 45;
-const POLL_MILLISECONDS = 250;
+const HELLO_RETRY_MILLISECONDS = 250;
 const PARTICIPANT_CONNECTED = "participantConnected";
+const PARTICIPANT_DISCONNECTED = "participantDisconnected";
+const ROOM_DISCONNECTED = "disconnected";
 
 type MockTool = Parameters<typeof voice.testing.withMockTools>[1][string];
 type AgentConstructor = Parameters<
@@ -98,8 +99,6 @@ export async function simulation(
         error,
       );
     }
-    const deadline = Date.now() + STARTUP_SECONDS * 1_000;
-
     if (!ctx.room.isConnected) {
       try {
         await ctx.connect();
@@ -108,15 +107,21 @@ export async function simulation(
       }
     }
 
-    const identity = await findEgmaPersona(ctx, deadline, roomName);
-
-    const seat: Seat = { ctx, identity };
+    const startup = new Startup(ctx, roomName);
+    let identity = "";
+    let seat: Seat;
     let mockedTools: string[];
     try {
-      const reply = await helloWhenListening(seat, census, deadline);
+      identity = await findEgmaPersona(startup, roomName);
+      startup.expect(identity);
+      seat = { ctx, identity };
+      const reply = await helloWhenListening(seat, census, startup);
       mockedTools = mockedToolsIn(reply);
     } catch (error) {
+      if (error instanceof NotReported) throw error;
       throw notReported(roomName, whyTheHelloWasRefused(error, identity), error);
+    } finally {
+      startup.close();
     }
 
     installLifecycle({ agent, ctx, mockedTools, roomName, seat, session });
@@ -237,58 +242,217 @@ function schemaOf(
   }
 }
 
+class Startup {
+  readonly ctx: JobContext;
+  readonly roomName: string;
+  revision = 0;
+
+  private active = true;
+  private identity: string | undefined;
+  private ended: NotReported | undefined;
+  private readonly changed = new Set<() => void>();
+  private readonly endings = new Set<(error: NotReported) => void>();
+  private readonly listeners: Array<[
+    string,
+    (...arguments_: never[]) => void,
+  ]> = [];
+
+  private readonly participantConnected = (participant: {
+    identity: string;
+  }): void => {
+    if (
+      this.identity !== undefined &&
+      answersToEgma(participant.identity) &&
+      participant.identity !== this.identity
+    ) {
+      this.end("another participant answering to Egma's name joined");
+    }
+    this.signalChange();
+  };
+
+  private readonly participantDisconnected = (participant: {
+    identity: string;
+  }): void => {
+    if (participant.identity === this.identity) {
+      this.end(`Egma's participant ${JSON.stringify(this.identity)} disconnected`);
+    }
+    this.signalChange();
+  };
+
+  private readonly roomDisconnected = (): void => {
+    this.end("the LiveKit room disconnected during startup");
+  };
+
+  constructor(ctx: JobContext, roomName: string) {
+    this.ctx = ctx;
+    this.roomName = roomName;
+
+    try {
+      this.listen(PARTICIPANT_CONNECTED, this.participantConnected);
+      this.listen(PARTICIPANT_DISCONNECTED, this.participantDisconnected);
+      this.listen(ROOM_DISCONNECTED, this.roomDisconnected);
+    } catch (error) {
+      this.active = false;
+      this.removeListeners();
+      throw notReported(
+        roomName,
+        "this LiveKit room could not expose its startup lifecycle",
+        error,
+      );
+    }
+
+    if (!ctx.room.isConnected) {
+      this.roomDisconnected();
+    }
+  }
+
+  candidates(): string[] {
+    return [...this.ctx.room.remoteParticipants.values()]
+      .map(({ identity }) => identity)
+      .filter(answersToEgma)
+      .sort();
+  }
+
+  expect(identity: string): void {
+    this.identity = identity;
+    const candidates = this.candidates();
+    if (candidates.length > 1 && candidates.includes(identity)) {
+      this.end("another participant answering to Egma's name joined");
+    } else if (candidates.length !== 1 || candidates[0] !== identity) {
+      this.end(`Egma's participant ${JSON.stringify(identity)} disconnected`);
+    }
+    this.raiseIfEnded();
+  }
+
+  raiseIfEnded(): void {
+    if (this.ended !== undefined) throw this.ended;
+  }
+
+  async waitForChange(revision: number): Promise<void> {
+    this.raiseIfEnded();
+    if (this.revision !== revision) return;
+
+    let wake!: () => void;
+    const change = new Promise<void>((resolve) => {
+      wake = resolve;
+      this.changed.add(wake);
+    });
+    try {
+      const ending = this.ending<void>();
+      try {
+        await Promise.race([change, ending.promise]);
+      } finally {
+        ending.stop();
+      }
+      this.raiseIfEnded();
+    } finally {
+      this.changed.delete(wake);
+    }
+  }
+
+  async run<T>(operation: () => Promise<T>): Promise<T> {
+    this.raiseIfEnded();
+    const ending = this.ending<T>();
+    try {
+      const value = await Promise.race([operation(), ending.promise]);
+      this.raiseIfEnded();
+      return value;
+    } finally {
+      ending.stop();
+    }
+  }
+
+  async pause(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await this.run(
+        () => new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, HELLO_RETRY_MILLISECONDS);
+        }),
+      );
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  close(): void {
+    this.active = false;
+    this.removeListeners();
+    this.changed.clear();
+  }
+
+  private signalChange(): void {
+    if (!this.active) return;
+    this.revision += 1;
+    for (const wake of this.changed) wake();
+    this.changed.clear();
+  }
+
+  private end(why: string): void {
+    if (!this.active || this.ended !== undefined) return;
+    this.ended = notReported(this.roomName, why, new Error(why));
+    for (const reject of this.endings) reject(this.ended);
+    this.endings.clear();
+    this.signalChange();
+  }
+
+  private ending<T>(): { promise: Promise<T>; stop: () => void } {
+    this.raiseIfEnded();
+    let reject!: (error: NotReported) => void;
+    const promise = new Promise<T>((_resolve, rejectPromise) => {
+      reject = rejectPromise;
+      this.endings.add(reject);
+    });
+    return { promise, stop: () => this.endings.delete(reject) };
+  }
+
+  private listen(
+    event: string,
+    callback: (...arguments_: never[]) => void,
+  ): void {
+    const room = this.ctx.room as unknown as {
+      on(name: string, listener: (...arguments_: never[]) => void): void;
+    };
+    room.on(event, callback);
+    this.listeners.push([event, callback]);
+  }
+
+  private removeListeners(): void {
+    for (const [event, callback] of this.listeners.splice(0).reverse()) {
+      try {
+        const room = this.ctx.room as unknown as {
+          off(name: string, listener: (...arguments_: never[]) => void): void;
+        };
+        room.off(event, callback);
+      } catch {
+        // Cleanup must not replace the startup result.
+      }
+    }
+  }
+}
+
 async function findEgmaPersona(
-  ctx: JobContext,
-  deadline: number,
+  startup: Startup,
   roomName: string,
 ): Promise<string> {
-  let wake: (() => void) | undefined;
-  const participantConnected = () => wake?.();
-  ctx.room.on(PARTICIPANT_CONNECTED, participantConnected);
-  try {
-    while (true) {
-      const found = [...ctx.room.remoteParticipants.values()]
-        .map(({ identity }) => identity)
-        .filter(answersToEgma)
-        .sort();
+  while (true) {
+    startup.raiseIfEnded();
+    const revision = startup.revision;
+    const found = startup.candidates();
 
-      const only = found[0];
-      if (found.length === 1 && only !== undefined) {
-        return only;
-      }
-      if (found.length > 1) {
-        // Refused rather than resolved. Whichever this side picked would
-        // receive every tool name and schema this agent has.
-        throw notReported(
-          roomName,
-          `${found.length} participants in this room answer to Egma's name (${found.join(", ")}), so which one is Egma is not knowable`,
-          new Error("and this SDK will hand a tool inventory to neither"),
-        );
-      }
-
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        throw notReported(
-          roomName,
-          `no Egma participant joined this room within ${STARTUP_SECONDS} seconds`,
-          new Error(
-            `Egma joins as ${EGMA_PERSONA}, or as that name with the simulation after it`,
-          ),
-        );
-      }
-
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, Math.min(remaining, POLL_MILLISECONDS));
-        wake = () => {
-          clearTimeout(timer);
-          resolve();
-        };
-      });
-      wake = undefined;
+    const only = found[0];
+    if (found.length === 1 && only !== undefined) {
+      return only;
     }
-  } finally {
-    wake = undefined;
-    ctx.room.off(PARTICIPANT_CONNECTED, participantConnected);
+    if (found.length > 1) {
+      throw notReported(
+        roomName,
+        `${found.length} participants in this room answer to Egma's name (${found.join(", ")}), so which one is Egma is not knowable`,
+        new Error("and this SDK will hand a tool inventory to neither"),
+      );
+    }
+
+    await startup.waitForChange(revision);
   }
 }
 
@@ -309,26 +473,19 @@ export function answersToEgma(identity: string): boolean {
 async function helloWhenListening(
   seat: Seat,
   census: string,
-  deadline: number,
+  startup: Startup,
 ): Promise<string> {
   while (true) {
     try {
-      return await ask(
-        seat,
-        HELLO_METHOD,
-        census,
-        HELLO_TIMEOUT_SECONDS,
+      return await startup.run(
+        () => ask(seat, HELLO_METHOD, census, HELLO_TIMEOUT_SECONDS),
       );
     } catch (error) {
       const code = rpcCode(error);
-      if (
-        code === undefined ||
-        !isEgmaNotListeningYet(code) ||
-        Date.now() + POLL_MILLISECONDS >= deadline
-      ) {
+      if (code === undefined || !isTransientHelloFailure(code)) {
         throw error;
       }
-      await delay(POLL_MILLISECONDS);
+      await startup.pause();
     }
   }
 }
@@ -570,8 +727,4 @@ function rpcCode(error: unknown): number | undefined {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

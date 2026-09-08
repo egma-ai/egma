@@ -110,6 +110,21 @@ leaves no trace: the courier waits under a name the model never calls, and the
 record shows no call and no warning. Spell each tool exactly as your agent
 registers it.
 
+`simulation` has no total startup deadline. It waits while the simulation room
+is active, so a slow token endpoint, cold worker, or late Egma participant does
+not fail only because it crossed a fixed allowance. A token request and each
+hello RPC attempt retain their own transport timeout. The SDK retries delayed method registration,
+connection and response timeouts, and send failures with the same idempotent
+tool report. A permanent refusal, room disconnect, or Egma participant
+departure ends startup. The session does not start until Egma accepts the tool
+list and the SDK installs every selected courier.
+
+After your normal `session.start` returns, LiveKit publishes the worker's native
+agent state, such as `listening`, `thinking`, or `speaking`. Egma waits for that
+initialized state before it sends the first simulated input. This simulator-side
+wait is governed by the simulation's configured duration. You do not add another
+callback or readiness signal.
+
 The worker reads the running test's `job_dispatch_metadata` at
 `ctx.job.metadata`, as one compact JSON string. With Project credentials, Egma
 writes it directly to the dispatch. With a token endpoint, Egma sends it in
@@ -160,7 +175,7 @@ starts
 | Simulation tool the test does not name | The real tool runs, and the call is on the transcript |
 | Egma cannot be reached during a call | The call throws `ToolError`; the real tool does not run |
 | Egma receives the call and refuses it | The tool throws `ToolError` |
-| Egma never answers the report | `simulation` throws `NotReported`; the session does not start |
+| The room ends before Egma accepts the report | `simulation` throws `NotReported`; the session does not start |
 
 ### Production safety and process isolation
 

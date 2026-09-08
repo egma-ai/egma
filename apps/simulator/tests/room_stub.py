@@ -52,6 +52,7 @@ class RpcAsk:
     """
 
     payload: str
+    caller_identity: str = AGENT_IDENTITY
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ class StubRoom:
         self._backend = backend
         self._transport: ScriptedTransport | None = None
         self._activation: asyncio.Task[None] | None = None
+        self._state_task: asyncio.Task[None] | None = None
         self._joined = False
         self._methods: dict[str, object] = {}
         self._offer: object = None
@@ -97,11 +99,16 @@ class StubRoom:
         self.arrivals = asyncio.Event()
         self.carrying_audio = asyncio.Event()
         self.ended = asyncio.Event()
+        self.failed = asyncio.Event()
         self.who_arrived: list[str] = []
+        self._startup: Any = None
 
     def answer_when_joined(self, offer: object) -> None:
         """Take the driver's offer to answer for the agent's tools."""
         self._offer = offer
+
+    def watch_startup(self, startup: Any) -> None:
+        self._startup = startup
 
     def note_anybody_already_here(self) -> None:
         """Answer the driver's one question: is somebody in here already?
@@ -133,6 +140,7 @@ class StubRoom:
             answer_delay_seconds=stub.answer_delay_seconds,
             ends_after_replies=stub.hangs_up_after_replies,
         )
+        self.failed = self._transport.media.failed
         stub.transports.append(self._transport)
         # Entering the room is the moment the driver offers to answer for
         # the agent's tools, and it is offered here rather than later for
@@ -177,6 +185,15 @@ class StubRoom:
     async def leave(self) -> None:
         if self._transport is not None:
             self._transport.stop()
+        reporting = self._backend.stub.reporting
+        if reporting is not None and not reporting.done():
+            reporting.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reporting
+        if self._state_task is not None and not self._state_task.done():
+            self._state_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._state_task
         if self._activation is not None and not self._activation.done():
             self._activation.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -187,7 +204,15 @@ class StubRoom:
 
     # -- The room's other channel: what can be called in it -------------------
 
-    def register_rpc(self, method: str, handler: object) -> None:
+    def register_rpc(
+        self,
+        method: str,
+        handler: object,
+        *,
+        on_attempt: Any = None,
+        on_accepted: Any = None,
+        on_refused: Any = None,
+    ) -> None:
         """Offer one method on egma's participant, the driver's own way.
 
         The handler is wrapped by :func:`egma_simulator.media.room.answering`
@@ -197,11 +222,18 @@ class StubRoom:
         it.
         """
         refusal = self._backend.stub.refuses_rpc
+        if method == self._backend.stub.refuses_rpc_method:
+            refusal = f"{method} registration failed"
         if refusal is None and self._offering_at_the_join:
             refusal = self._backend.stub.refuses_the_offer_at_the_join
         if refusal is not None:
             raise RuntimeError(refusal)
-        self._methods[method] = answering(handler)
+        self._methods[method] = answering(
+            handler,
+            on_attempt=on_attempt,
+            on_accepted=on_accepted,
+            on_refused=on_refused,
+        )
         self._backend.stub.standing_ready.set()
 
     async def perform_rpc(self, method: str, payload: str) -> str:
@@ -213,11 +245,14 @@ class StubRoom:
         Tests of tool discovery send their own census, which replaces this one.
         """
         await self._backend.stub.standing_ready.wait()
+        if self._backend.stub.report_delay_seconds:
+            await asyncio.sleep(self._backend.stub.report_delay_seconds)
         with contextlib.suppress(Exception):
             await self.perform_rpc(
                 HELLO_METHOD,
                 json.dumps({"protocol_version": PROTOCOL_VERSION, "tools": []}),
             )
+            self._backend.stub.report_complete.set()
 
     def agent_arrives(self, *, announced: bool = True) -> None:
         """Add the worker and optional audio. With announced=False, omit the arrival
@@ -230,6 +265,18 @@ class StubRoom:
             self.arrivals.set()
         transport = self._transport
         stub = self._backend.stub
+        if self._startup is not None:
+            self._startup.participant_seen(AGENT_IDENTITY)
+            if stub.agent_state_at_start is not None:
+                if stub.release_initial_state is None:
+                    self._startup.participant_state(
+                        AGENT_IDENTITY, stub.agent_state_at_start
+                    )
+                else:
+                    self._state_task = asyncio.create_task(
+                        self._publishes_initial_state(),
+                        name="room-stub-initial-state",
+                    )
         if stub.agent_reports:
             # The Egma SDK sends its hello as the session starts, which is
             # before the first word anybody hears. A worker in the room
@@ -243,9 +290,19 @@ class StubRoom:
         if transport is None or not stub.agent_publishes_audio:
             return
         self.carrying_audio.set()
+        if self._startup is not None:
+            self._startup.participant_audio(AGENT_IDENTITY)
         self._activation = asyncio.create_task(
             transport.activate(), name="room-stub-transport"
         )
+
+    async def _publishes_initial_state(self) -> None:
+        release = self._backend.stub.release_initial_state
+        if release is not None:
+            await release.wait()
+        state = self._backend.stub.agent_state_at_start
+        if self._startup is not None and state is not None:
+            self._startup.participant_state(AGENT_IDENTITY, state)
 
 
 async def performed(methods: dict[str, Any], method: str, payload: str) -> str:
@@ -441,8 +498,16 @@ class RoomStub:
     False for the worker that joins, talks and never says ``egma.hello``:
     a simulation that isolated nothing and would otherwise look like one
     that did. The ordinary worker reports, so the ordinary stub does."""
+    report_delay_seconds: float = 0.0
+    """How long SDK setup takes before its configuration exchange reaches Egma."""
+    agent_state_at_start: str | None = "listening"
+    """Native LiveKit session state published once session startup completes."""
+    release_initial_state: asyncio.Event | None = None
+    """Optional gate that holds native session readiness after hello."""
     reporting: asyncio.Task | None = None
     """The hello in flight, held so a test can wait for it."""
+    report_complete: asyncio.Event = field(default_factory=asyncio.Event)
+    """Set after the ordinary SDK hello is accepted."""
     agent_was_already_in_the_room: bool = False
     """True for the worker that got in before egma did.
 
@@ -469,6 +534,8 @@ class RoomStub:
     is the room where the first of those two does not take: the second is
     the only offer left, so what it costs to spend it on nothing is every
     mocked tool in the simulation running its own implementation."""
+    refuses_rpc_method: str | None = None
+    """One method that the participant refuses while accepting the other."""
 
     rooms: list[CreatedRoom] = field(default_factory=list)
     """Every room this LiveKit was asked to make, in order."""
@@ -580,6 +647,8 @@ class StubLocalParticipant:
 
     def register_rpc_method(self, method: str, handler: Any) -> None:
         refusal = self._room.stub.refuses_rpc
+        if method == self._room.stub.refuses_rpc_method:
+            refusal = f"{method} registration failed"
         if refusal is not None:
             raise RuntimeError(refusal)
         self.methods[method] = handler
@@ -619,6 +688,13 @@ class StubLocalRoom:
     def register_text_stream_handler(self, topic: str, handler: Any) -> None:
         self.text_streams[topic] = handler
 
+    def unregister_text_stream_handler(self, topic: str) -> None:
+        self.text_streams.pop(topic, None)
+
+    def off(self, event: str, handler: Any) -> None:
+        if self.handlers.get(event) is handler:
+            self.handlers.pop(event)
+
     async def disconnect(self) -> None:
         self.left = True
 
@@ -631,8 +707,13 @@ class StubParticipant:
     would be doing the driver's work and proving its own.
     """
 
-    def __init__(self, identity: str) -> None:
+    def __init__(
+        self, identity: str, attributes: dict[str, str] | None = None
+    ) -> None:
         self.identity = identity
+        self.sid = f"PA_{identity}"
+        self.attributes = attributes or {}
+        self.track_publications: dict[str, object] = {}
 
 
 @dataclass(frozen=True)
@@ -734,7 +815,7 @@ class StubTextRoom(TextRoom):
         """Stop the agent mid-sentence, then leave the driver's own way."""
         speaking, self._speaking = self._speaking, None
         stating, self._stating = self._stating, set()
-        for running in (speaking, *stating):
+        for running in (speaking, *stating, self.stub.reporting):
             if running is not None and not running.done():
                 running.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -753,11 +834,14 @@ class StubTextRoom(TextRoom):
         were reported sends its own.
         """
         await self.stub.standing_ready.wait()
+        if self.stub.report_delay_seconds:
+            await asyncio.sleep(self.stub.report_delay_seconds)
         with contextlib.suppress(Exception):
             await self.perform_rpc(
                 HELLO_METHOD,
                 json.dumps({"protocol_version": PROTOCOL_VERSION, "tools": []}),
             )
+            self.stub.report_complete.set()
 
     # -- The agent's side of the exchange -------------------------------------
 
@@ -767,6 +851,8 @@ class StubTextRoom(TextRoom):
             return
         self.who_arrived.append(AGENT_IDENTITY)
         self.arrivals.set()
+        if self._startup is not None:
+            self._startup.participant_seen(AGENT_IDENTITY)
         if self.stub.agent_reports:
             # The same hello an ordinary worker's SDK sends in a voice
             # room. A chat room is a LiveKit simulation too — same verb,
@@ -783,9 +869,28 @@ class StubTextRoom(TextRoom):
         # arrives here means ready, and a rule that read it as finished
         # would end the greeting before the agent said a word.
         if self.stub.agent_state_at_start is not None:
-            self.agent_publishes_state(self.stub.agent_state_at_start)
+            if self.stub.release_initial_state is None:
+                if self._startup is not None:
+                    self._startup.participant_state(
+                        AGENT_IDENTITY, self.stub.agent_state_at_start
+                    )
+            else:
+                stating = asyncio.create_task(
+                    self._publishes_initial_state(),
+                    name="chat-room-stub-initial-state",
+                )
+                self._stating.add(stating)
+                stating.add_done_callback(self._stating.discard)
         if self.stub.greeting is not None:
             self._agent_says(self.stub.greeting)
+
+    async def _publishes_initial_state(self) -> None:
+        release = self.stub.release_initial_state
+        if release is not None:
+            await release.wait()
+        state = self.stub.agent_state_at_start
+        if self._startup is not None and state is not None:
+            self._startup.participant_state(AGENT_IDENTITY, state)
 
     def agent_publishes_state(self, state: str) -> None:
         """Emit only changed state through participant_attributes_changed.
@@ -1008,8 +1113,13 @@ class ChatStub:
     a chat simulation that isolated nothing and would otherwise look like
     one that did."""
 
+    report_delay_seconds: float = 0.0
+    """How long SDK setup takes before its configuration exchange reaches Egma."""
+
     reporting: asyncio.Task | None = None
     """The hello in flight, held so a test can wait for it."""
+    report_complete: asyncio.Event = field(default_factory=asyncio.Event)
+    """Set after the ordinary SDK hello is accepted."""
 
     agent_publishes_audio_track: bool = False
     """True for the agent that never took the chat setup and is speaking.
@@ -1027,15 +1137,19 @@ class ChatStub:
     covers coalesced transitions without thinking or speaking events.
     """
 
-    agent_state_at_start: str | None = None
+    agent_state_at_start: str | None = "listening"
     """A state published the moment the worker arrives, before any
     greeting. ``listening`` here is what a real session announces when it
     starts, and it means ready rather than finished — the one state a
     turn-end rule must not act on."""
 
+    release_initial_state: asyncio.Event | None = None
+    """Optional gate that holds native session readiness after hello."""
+
     refuses_room: str | None = None
     refuses_dispatch: str | None = None
     refuses_rpc: str | None = None
+    refuses_rpc_method: str | None = None
 
     rooms: list[CreatedRoom] = field(default_factory=list)
     dispatches: list[Dispatch] = field(default_factory=list)

@@ -7,11 +7,12 @@ event so tests can cover an agent that joins before the Egma participant.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from livekit.rtc import RpcError
+from livekit.rtc import ConnectionState, RpcError
 
 from egma import seam
 
@@ -100,6 +101,8 @@ class StubRoom:
     refuses_with: RpcError | None = None
     refuses_tool_with: RpcError | None = None
     refuses_hello_until: int = 0
+    hello_failures: list[RpcError] = field(default_factory=list)
+    hello_waiter: asyncio.Event | None = None
     hello_reply: str | None = None
     asked: list[Asked] = field(default_factory=list)
     connected: bool = True
@@ -112,6 +115,9 @@ class StubRoom:
         }
         self._listeners: dict[str, list[Any]] = {}
         self._helloes = 0
+        self.pending_hellos = 0
+        self.hello_started = asyncio.Event()
+        self.second_hello_started = asyncio.Event()
 
     # -- who is in it ---------------------------------------------------------
 
@@ -129,6 +135,18 @@ class StubRoom:
         participant = StubRemoteParticipant(identity)
         self.remote_participants[identity] = participant
         for callback in list(self._listeners.get("participant_connected", [])):
+            callback(participant)
+
+    def disconnect(self) -> None:
+        """End the room the way LiveKit announces a lost connection."""
+        self.connected = False
+        for callback in list(self._listeners.get("connection_state_changed", [])):
+            callback(ConnectionState.CONN_DISCONNECTED)
+
+    def depart(self, identity: str) -> None:
+        """Remove a participant the way LiveKit announces its departure."""
+        participant = self.remote_participants.pop(identity)
+        for callback in list(self._listeners.get("participant_disconnected", [])):
             callback(participant)
 
     @property
@@ -153,6 +171,17 @@ class StubRoom:
             raise self.refuses_with
         if asked.method == seam.HELLO_METHOD:
             self._helloes += 1
+            self.hello_started.set()
+            if self._helloes >= 2:
+                self.second_hello_started.set()
+            if self.hello_waiter is not None:
+                self.pending_hellos += 1
+                try:
+                    await self.hello_waiter.wait()
+                finally:
+                    self.pending_hellos -= 1
+            if self.hello_failures:
+                raise self.hello_failures.pop(0)
             if self._helloes <= self.refuses_hello_until:
                 # What the transport says while egma is in the room and has
                 # not registered the exchange yet.
