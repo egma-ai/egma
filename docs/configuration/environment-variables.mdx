@@ -294,6 +294,12 @@ Past 128 concurrent senders this machine buys almost no additional throughput an
   simulations stay queued. Empty means no deployment-wide cap.
 </ParamField>
 
+<ParamField path="EGMA_CHAT_SIMULATION_CONCURRENCY_CAP" type="number">
+  Optional maximum number of claimed or running chat simulations across all
+  workers. This pool is separate from voice. Excess simulations stay queued.
+  Empty means no deployment-wide cap.
+</ParamField>
+
 <ParamField path="EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS" type="JSON object">
   Optional speech-provider session caps, such as
   `{"cartesia":2,"deepgram":150}`. A simulation that would exceed a named
@@ -398,7 +404,8 @@ The bundled stack uses MinIO and does not need them in `.env`.
 | Variable | Default or purpose |
 |---|---|
 | `EGMA_GRADER_CLAIMANT` | Worker name; defaults from the host and process |
-| `EGMA_GRADER_CAPACITY` | Concurrent grading jobs; default 4 |
+| `EGMA_GRADER_CAPACITY` | Concurrent grading jobs per worker; default 4. Each freed slot can take another job without waiting for the other jobs. |
+| `EGMA_GRADING_CONCURRENCY_CAP` | Optional deployment-wide cap shared by all grader workers; unset by default. One job grades one simulation or trace with all its attached graders. Separate from simulation caps. |
 | `EGMA_GRADER_HEARTBEAT_SECONDS` | Heartbeat interval; default 15 |
 | `EGMA_GRADER_LEASE_SECONDS` | Claim lease; default 120 |
 | `EGMA_GRADER_SWEEP_SECONDS` | Backstop queue scan; default 30 |
