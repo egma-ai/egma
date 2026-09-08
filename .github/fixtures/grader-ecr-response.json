@@ -1,0 +1,15 @@
+{
+    "images": [
+        {
+            "registryId": "599151709955",
+            "repositoryName": "egma/grader",
+            "imageId": {
+                "imageDigest": "sha256:34e31ac2b70460d00c1bfea4cbc91c8b30af864c92499603e59014674ff06aa5",
+                "imageTag": "29f06a444d3e6fe89c371977cfa15c719025816c"
+            },
+            "imageManifest": "{\n  \"schemaVersion\": 2,\n  \"mediaType\": \"application/vnd.docker.distribution.manifest.list.v2+json\",\n  \"manifests\": [\n    {\n      \"mediaType\": \"application/vnd.docker.distribution.manifest.v2+json\",\n      \"digest\": \"sha256:58ffea7fcca61dcbf28cc4a3d5a273f0505ce43348cf5c7831a47b78136d6f75\",\n      \"size\": 5949,\n      \"platform\": {\n        \"architecture\": \"amd64\",\n        \"os\": \"linux\"\n      }\n    },\n    {\n      \"mediaType\": \"application/vnd.docker.distribution.manifest.v2+json\",\n      \"digest\": \"sha256:ddb6ca07ee9887dd81db16d5bee0113f9e628b6f6ce1d50a9a7c9030110a5519\",\n      \"size\": 5949,\n      \"platform\": {\n        \"architecture\": \"arm64\",\n        \"os\": \"linux\"\n      }\n    }\n  ]\n}",
+            "imageManifestMediaType": "application/vnd.docker.distribution.manifest.list.v2+json"
+        }
+    ],
+    "failures": []
+}

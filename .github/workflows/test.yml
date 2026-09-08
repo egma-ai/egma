@@ -404,7 +404,7 @@ jobs:
               apps/api/*|apps/grader/*|apps/simulator/*|packages/*|ee/*) platform=true ;;
               docker-compose.yml|docker-compose.managed.yml|.env.example) platform=true ;;
               pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) platform=true ;;
-              certificates/*|.github/ecr-image-exists.sh|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) platform=true ;;
+              certificates/*|.github/ecr-image-exists.sh|.github/verify-platform-images.py|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) platform=true ;;
               apps/web/*|tools/*) web=true ;;
             esac
           done <<< "$changed"
@@ -545,7 +545,7 @@ jobs:
               apps/api/*|apps/grader/*|apps/simulator/*|packages/*|ee/*) deployable=true ;;
               docker-compose.yml|docker-compose.managed.yml|.env.example) deployable=true ;;
               pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) deployable=true ;;
-              certificates/*|.github/ecr-image-exists.sh|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) deployable=true ;;
+              certificates/*|.github/ecr-image-exists.sh|.github/verify-platform-images.py|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) deployable=true ;;
               apps/web/*|tools/*) deployable=true ;;
             esac
           done <<< "$(git diff --name-only "${{ github.sha }}" "$head")"

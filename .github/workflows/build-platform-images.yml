@@ -9,6 +9,11 @@ on:
     paths:
       - .github/workflows/build-platform-images.yml
       - .github/ecr-image-exists.sh
+      - .github/verify-platform-images.py
+      - .github/test_verify_platform_images.py
+      - .github/fixtures/simulator-*-response.json
+      - .github/fixtures/simulator-soci-manifest.json
+      - .github/fixtures/*-ecr-response.json
       - apps/api/**
       - apps/grader/**
       - apps/simulator/**
@@ -37,6 +42,14 @@ permissions:
   contents: read
 
 jobs:
+  verify-publisher:
+    name: Verify publication manifest checks
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 -B .github/test_verify_platform_images.py
+
   validate:
     name: Build ${{ matrix.app }} (${{ matrix.arch }})
     if: github.event_name == 'pull_request'
@@ -262,27 +275,4 @@ jobs:
           done
 
       - name: Verify platforms and simulator SOCI v2 manifests
-        run: |
-          set -euo pipefail
-          for app in api grader simulator; do
-            response="$(aws ecr batch-get-image \
-              --repository-name "egma/$app" \
-              --image-ids "imageTag=$RELEASE_SHA" \
-              --output json)"
-            manifest="$(jq -r '.images[0].imageManifest' <<<"$response")"
-            digest="$(jq -r '.images[0].imageId.imageDigest' <<<"$response")"
-            jq -e '
-              [.manifests[] | select(
-                .artifactType == null and .platform.os == "linux") |
-                (.platform.os + "/" + .platform.architecture)] | sort ==
-              ["linux/amd64", "linux/arm64"]' <<<"$manifest" >/dev/null
-            if [ "$app" = simulator ]; then
-              jq -e '
-                [.manifests[] | select(.artifactType ==
-                  "application/vnd.amazon.soci.index.v2+json") |
-                  (.platform.os + "/" + .platform.architecture)] | sort ==
-                ["linux/amd64", "linux/arm64"]' <<<"$manifest" >/dev/null
-            fi
-            echo "$app:$RELEASE_SHA digest $digest contains native linux/amd64 and linux/arm64 images."
-          done
-          echo "simulator:$RELEASE_SHA contains both SOCI index manifest v2 artifacts."
+        run: python3 .github/verify-platform-images.py "$RELEASE_SHA"
