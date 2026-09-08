@@ -12,7 +12,7 @@ import { loadConfig } from "../src/config.ts";
  */
 
 const ROOT = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
-const VARIABLE = /EGMA_GRADER_[A-Z0-9_]+/g;
+const VARIABLE = /EGMA_(?:GRADER|GRADING)_[A-Z0-9_]+/g;
 
 async function read(...parts: string[]): Promise<string> {
   return readFile(path.join(ROOT, ...parts), "utf8");
