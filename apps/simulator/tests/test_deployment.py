@@ -338,6 +338,8 @@ MAY_BE_ABSENT = {
     "EGMA_SIMULATOR_STANDBY_SECONDS": "standby mode owns its idle deadline",
     "EGMA_SIMULATOR_THREAD_POOL_WORKERS": "mode-specific native pool default",
     "EGMA_VOICE_SIMULATION_CONCURRENCY_CAP": "absent means no deployment voice cap",
+    "EGMA_CHAT_SIMULATION_CONCURRENCY_CAP": "absent means no deployment chat cap",
+    "EGMA_GRADING_CONCURRENCY_CAP": "absent means no deployment grading cap",
     "EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS": "absent means no speech-provider caps",
     "EGMA_SIMULATOR_CLAIMANT": "per-container tuning",
     "EGMA_SIMULATOR_HEARTBEAT_SECONDS": "per-container tuning",

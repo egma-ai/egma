@@ -667,7 +667,7 @@ const THE_POV_WORDS = [
   "fromOnePov",
   "laneProducesAnAgentPov",
 ];
-const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS"];
+const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS", "MAX_GRADING_CLAIM_CAPACITY"];
 
 /**
  * How long grading waits for a simulation's agent POV before it stops waiting.
