@@ -356,6 +356,11 @@ configuration error.
 |---|---|
 | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | Compose uses `http://api:3100` |
 | `EGMA_SIMULATOR_CAPACITY` | Concurrent simulations; the process default is 2 |
+| `EGMA_SIMULATOR_MODE` | `persistent` by default; `one-shot` claims once, and `standby` waits for one voice simulation before exiting |
+| `EGMA_SIMULATOR_MODALITIES` | Comma-separated `voice,chat`; unset accepts both in persistent mode and voice only in one-shot or standby mode |
+| `EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS` | One-shot and standby process deadline from claim through teardown; default 900; unused in persistent mode |
+| `EGMA_SIMULATOR_STANDBY_SECONDS` | Standby claim wait limit; default 1800; separate from the execution deadline |
+| `EGMA_SIMULATOR_THREAD_POOL_WORKERS` | Native thread pool size; defaults to 1 in one-shot/standby mode and leaves persistent-mode pools unchanged |
 | `EGMA_SIMULATOR_CLAIMANT` | Worker name; defaults from the host and process |
 | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | Heartbeat interval; default 5 |
 | `EGMA_SIMULATOR_CLAIM_WAIT_SECONDS` | Long-poll wait; default 30 |

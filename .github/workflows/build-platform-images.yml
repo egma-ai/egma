@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/build-platform-images.yml
+      - .github/ecr-image-exists.sh
       - apps/api/**
       - apps/grader/**
       - apps/simulator/**
@@ -171,6 +172,13 @@ jobs:
         run: |
           set -euo pipefail
           image="$REGISTRY/egma/$APP:$RELEASE_SHA-$ARCH"
+          if bash .github/ecr-image-exists.sh "egma/$APP" "$RELEASE_SHA-$ARCH"; then
+            echo "$image is already published; keeping its immutable bytes."
+            exit 0
+          else
+            status=$?
+            [ "$status" -eq 1 ] || exit "$status"
+          fi
           docker build --pull -f "apps/$APP/Dockerfile" -t "$image" .
           docker push "$image"
 
@@ -189,6 +197,10 @@ jobs:
       SOCI_VERSION: 0.15.0
       RELEASE_SHA: ${{ needs.authorize-publish.outputs.release_sha }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.0
         with:
           role-to-assume: ${{ env.DEPLOY_ROLE }}
@@ -222,10 +234,23 @@ jobs:
           work="$(mktemp -d)"
           for app in api grader simulator; do
             repo="$REGISTRY/egma/$app"
-            docker buildx imagetools create \
-              --tag "$repo:raw-$RELEASE_SHA" \
-              "$repo:$RELEASE_SHA-amd64" \
-              "$repo:$RELEASE_SHA-arm64"
+            if bash .github/ecr-image-exists.sh "egma/$app" "$RELEASE_SHA"; then
+              echo "$repo:$RELEASE_SHA is already published; verifying it below."
+              continue
+            else
+              status=$?
+              [ "$status" -eq 1 ] || exit "$status"
+            fi
+            if bash .github/ecr-image-exists.sh "egma/$app" "raw-$RELEASE_SHA"; then
+              echo "Reusing the immutable native manifest list."
+            else
+              status=$?
+              [ "$status" -eq 1 ] || exit "$status"
+              docker buildx imagetools create \
+                --tag "$repo:raw-$RELEASE_SHA" \
+                "$repo:$RELEASE_SHA-amd64" \
+                "$repo:$RELEASE_SHA-arm64"
+            fi
 
             if [ "$app" = simulator ]; then
               skopeo copy --all "docker://$repo:raw-$RELEASE_SHA" "oci-archive:$work/simulator.tar"

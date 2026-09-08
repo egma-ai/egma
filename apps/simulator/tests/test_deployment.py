@@ -332,6 +332,13 @@ MAY_BE_ABSENT = {
     # simulations one simulator takes at once and how often the grader sweeps
     # are properties of the host, not of the deployment.
     "EGMA_SIMULATOR_CAPACITY": "empty means the simulator's own default",
+    "EGMA_SIMULATOR_MODE": "empty keeps the persistent pull loop",
+    "EGMA_SIMULATOR_MODALITIES": "empty uses the mode's modality default",
+    "EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS": "mode-specific process default",
+    "EGMA_SIMULATOR_STANDBY_SECONDS": "standby mode owns its idle deadline",
+    "EGMA_SIMULATOR_THREAD_POOL_WORKERS": "mode-specific native pool default",
+    "EGMA_VOICE_SIMULATION_CONCURRENCY_CAP": "absent means no deployment voice cap",
+    "EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS": "absent means no speech-provider caps",
     "EGMA_SIMULATOR_CLAIMANT": "per-container tuning",
     "EGMA_SIMULATOR_HEARTBEAT_SECONDS": "per-container tuning",
     "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS": "per-container tuning",

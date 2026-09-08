@@ -2,10 +2,11 @@ import pathlib
 import subprocess
 import unittest
 
-
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CERTIFICATE = ROOT / "certificates" / "supabase-root-2021-ca.crt"
-EXPECTED_CERT_SHA256 = "700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7"
+EXPECTED_CERT_SHA256 = (
+    "700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7"
+)
 
 
 class PlatformImageContract(unittest.TestCase):

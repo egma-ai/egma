@@ -1488,7 +1488,7 @@ describe("one source of execution truth", () => {
     expect(second).toMatchObject({ llm: { key: "openai-rotated" } });
     expect(first).toMatchObject({
       stt: { provider: "openai", model: "gpt-live-transcribe" },
-      tts: { provider: "cartesia", model: "sonic-3.5" },
+      tts: { provider: "openai", model: "gpt-4o-mini-tts-2025-12-15" },
     });
     expect((first.stt as Record<string, unknown>).key).toBeUndefined();
     expect((first.tts as Record<string, unknown>).key).toBeUndefined();

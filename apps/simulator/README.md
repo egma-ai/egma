@@ -295,6 +295,11 @@ transport and process settings only.
 | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | (required) | Where to claim, heartbeat, and report. |
 | `EGMA_SIMULATOR_SERVICE_TOKEN` | (none) | Sent as `Authorization: Bearer` on every outbound call. The real control plane requires it and checks it against its own `EGMA_SIMULATOR_SERVICE_TOKEN`. `egma self-host up` generates one private workspace value and gives the same value to both containers; an advanced deployment must supply the matching value to both processes. The claim answers carry live provider credentials. The workbench asks for none. |
 | `EGMA_SIMULATOR_CAPACITY` | `2` | Most simulations conducted at once. Compose passes an unset value through, so this process owns the default in every deployment. A voice simulation costs a channel on the deployment's carrier trunk, so raise it only as far as the trunk allows. |
+| `EGMA_SIMULATOR_MODE` | `persistent` | Keep the pull loop, claim once with `one-shot`, or wait for one voice simulation with `standby`. One-shot and standby modes default to capacity one and voice only. |
+| `EGMA_SIMULATOR_MODALITIES` | mode-dependent | Comma-separated `voice,chat`. Unset accepts both in persistent mode and voice only in one-shot or standby mode. |
+| `EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS` | `900` | One-shot and standby deadline from claim through setup, call, upload, report retries, and teardown. Persistent mode does not use this deadline. |
+| `EGMA_SIMULATOR_STANDBY_SECONDS` | `1800` | Maximum idle claim wait in standby mode. A claim starts the separate execution deadline. |
+| `EGMA_SIMULATOR_THREAD_POOL_WORKERS` | mode-dependent | Native thread pool size. Defaults to one in one-shot/standby mode; persistent mode retains its existing pool settings. |
 | `EGMA_SIMULATOR_CLAIMANT` | `egma-simulator-<host>-<pid>` | The name stamped on claims. |
 | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | `5` | Beat interval per running simulation. |
 | `EGMA_SIMULATOR_CLAIM_WAIT_SECONDS` | `30` | How long one claim request is willing to hang, sent as the claim's `wait_seconds` so the control plane holds no longer than the client will wait. The control plane caps its own hold below this default. |

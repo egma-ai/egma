@@ -419,6 +419,11 @@ services:
       # More replicas increase total capacity. Phone simulations also consume
       # carrier channels, whose capacity must cover the combined workload.
       EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-}
+      EGMA_SIMULATOR_MODE: ${EGMA_SIMULATOR_MODE:-}
+      EGMA_SIMULATOR_MODALITIES: ${EGMA_SIMULATOR_MODALITIES:-}
+      EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS: ${EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS:-}
+      EGMA_SIMULATOR_STANDBY_SECONDS: ${EGMA_SIMULATOR_STANDBY_SECONDS:-}
+      EGMA_SIMULATOR_THREAD_POOL_WORKERS: ${EGMA_SIMULATOR_THREAD_POOL_WORKERS:-}
       # No model, voice or provider key is container configuration. The pinned
       # persona version supplies one complete selection, and the claim adds only
       # the current keys for its selected providers. Missing data is refused;
